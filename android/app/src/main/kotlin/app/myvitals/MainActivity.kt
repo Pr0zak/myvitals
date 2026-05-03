@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import app.myvitals.data.SettingsRepository
+import app.myvitals.debug.LogUploadWorker
 import app.myvitals.debug.LogViewerActivity
 import app.myvitals.health.HealthConnectGateway
 import app.myvitals.sync.SyncWorker
@@ -61,6 +62,11 @@ class MainActivity : ComponentActivity() {
                         Timber.i("Manual sync triggered")
                         WorkManager.getInstance(applicationContext)
                             .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
+                    },
+                    onSyncLogs = {
+                        Timber.i("Manual log upload triggered")
+                        WorkManager.getInstance(applicationContext)
+                            .enqueue(OneTimeWorkRequestBuilder<LogUploadWorker>().build())
                     },
                     onOpenLogs = { LogViewerActivity.start(this) },
                 )

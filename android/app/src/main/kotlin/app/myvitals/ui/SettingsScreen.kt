@@ -44,6 +44,7 @@ fun SettingsScreen(
     hasPermissions: () -> Boolean,
     onRequestPermissions: () -> Unit,
     onSyncNow: () -> Unit,
+    onSyncLogs: () -> Unit,
     onOpenLogs: () -> Unit,
 ) {
     var url by remember { mutableStateOf(settings.backendUrl) }
@@ -119,6 +120,13 @@ fun SettingsScreen(
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onOpenLogs) { Text("View logs") }
+                OutlinedButton(
+                    onClick = {
+                        onSyncLogs()
+                        Toast.makeText(context, "Log upload queued", Toast.LENGTH_SHORT).show()
+                    },
+                    enabled = settings.isConfigured(),
+                ) { Text("Sync logs now") }
                 OutlinedButton(onClick = {
                     updateStatus = "Checking…"
                     pendingRelease = null

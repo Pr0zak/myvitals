@@ -7,7 +7,7 @@ from fastapi import FastAPI
 
 from . import version as version_mod
 from .analytics.jobs import compute_daily_summary
-from .api import annotations, ingest, query, summary
+from .api import annotations, debug, ingest, query, summary
 from .config import settings
 from .integrations.home_assistant import pull_states as ha_pull_states
 
@@ -58,6 +58,7 @@ app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
 app.include_router(query.router, prefix="/query", tags=["query"])
 app.include_router(summary.router, prefix="/summary", tags=["summary"])
 app.include_router(annotations.router, tags=["log"])
+app.include_router(debug.router, tags=["debug"])
 
 
 @app.get("/health")

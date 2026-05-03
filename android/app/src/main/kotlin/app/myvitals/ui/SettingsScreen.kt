@@ -1,7 +1,9 @@
 package app.myvitals.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,24 +12,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.myvitals.BuildConfig
 import app.myvitals.data.SettingsRepository
 import app.myvitals.update.Notifier
 import app.myvitals.update.UpdateChecker
-import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
@@ -41,12 +43,24 @@ fun SettingsScreen(
     hasPermissions: () -> Boolean,
     onRequestPermissions: () -> Unit,
     onSyncNow: () -> Unit,
+    onOpenLogs: () -> Unit,
 ) {
     var url by remember { mutableStateOf(settings.backendUrl) }
     var token by remember { mutableStateOf(settings.bearerToken) }
     var updateStatus by remember { mutableStateOf("") }
+    var lastSavedAt by remember { mutableStateOf(settings.lastSyncEpochSeconds) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    fun saveAndToast() {
+        settings.backendUrl = url.trim()
+        settings.bearerToken = token.trim()
+        Toast.makeText(
+            context,
+            if (settings.isConfigured()) "Saved — backend configured" else "Saved (URL and/or token blank)",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
 
     Scaffold(topBar = { TopAppBar(title = { Text("myvitals") }) }) { padding ->
         Column(
@@ -59,7 +73,7 @@ fun SettingsScreen(
             OutlinedTextField(
                 value = url,
                 onValueChange = { url = it },
-                label = { Text("Backend URL  (e.g. https://myvitals.example.com)") },
+                label = { Text("Backend URL  (e.g. http://your-server:8000)") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
@@ -72,10 +86,7 @@ fun SettingsScreen(
                 singleLine = true,
             )
 
-            Button(onClick = {
-                settings.backendUrl = url
-                settings.bearerToken = token
-            }) { Text("Save") }
+            Button(onClick = ::saveAndToast) { Text("Save") }
 
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
@@ -88,10 +99,15 @@ fun SettingsScreen(
             Button(
                 onClick = onRequestPermissions,
                 enabled = isHealthConnectAvailable,
-            ) { Text(if (hasPermissions()) "Re-request permissions" else "Grant Health Connect permissions") }
+            ) {
+                Text(if (hasPermissions()) "Re-request permissions" else "Grant Health Connect permissions")
+            }
 
             Button(
-                onClick = onSyncNow,
+                onClick = {
+                    onSyncNow()
+                    Toast.makeText(context, "Sync queued — see Logs for outcome", Toast.LENGTH_SHORT).show()
+                },
                 enabled = settings.isConfigured() && hasPermissions(),
             ) { Text("Sync now") }
 
@@ -100,29 +116,34 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
 
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onOpenLogs) { Text("View logs") }
+                OutlinedButton(onClick = {
+                    updateStatus = "Checking…"
+                    scope.launch {
+                        val release = UpdateChecker.checkForUpdate()
+                        updateStatus = if (release == null) {
+                            "Up to date."
+                        } else {
+                            Notifier.postUpdateAvailable(context, release)
+                            "Update ${release.tagName} available — see notification."
+                        }
+                    }
+                }) { Text("Check for updates") }
+            }
+
             Text(
                 "Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
                 style = MaterialTheme.typography.bodySmall,
             )
-
-            Button(onClick = {
-                updateStatus = "Checking…"
-                scope.launch {
-                    val release = UpdateChecker.checkForUpdate()
-                    updateStatus = if (release == null) {
-                        "Up to date."
-                    } else {
-                        Notifier.postUpdateAvailable(context, release)
-                        "Update ${release.tagName} available — see notification."
-                    }
-                }
-            }) { Text("Check for updates") }
 
             if (updateStatus.isNotBlank()) {
                 Text(updateStatus, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
+    // Quiet a "lastSavedAt unused" warning without removing the recomposition trigger.
+    @Suppress("UNUSED_EXPRESSION") lastSavedAt
 }
 
 private val formatter: DateTimeFormatter =

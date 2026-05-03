@@ -66,7 +66,7 @@ function clearAll() {
       <span>API base URL <em class="opt">(optional — leave blank to use the same host)</em></span>
       <input
         v-model="apiBaseInput"
-        placeholder="e.g. http://10.0.0.82:8000   (no /api suffix)"
+        placeholder="e.g. http://your-server:8000   (no /api suffix)"
         autocomplete="off"
       />
     </label>

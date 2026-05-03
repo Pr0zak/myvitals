@@ -58,3 +58,13 @@ export interface AnnotationCreate {
   payload?: Record<string, unknown>;
   note?: string;
 }
+
+export interface AppLog {
+  id: number;
+  ts: string;
+  source: "phone" | "server" | string;
+  level: "VERBOSE" | "DEBUG" | "INFO" | "WARN" | "ERROR" | string;
+  tag: string | null;
+  message: string;
+  stack: string | null;
+}

@@ -105,6 +105,9 @@ dependencies {
 
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.compose.runtime:runtime-livedata")
+
+    implementation("com.jakewharton.timber:timber:5.0.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

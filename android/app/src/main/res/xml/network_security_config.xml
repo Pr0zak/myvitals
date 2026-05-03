@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Permit cleartext HTTP across the board. The user's backend is self-hosted
+  on an RFC1918 LAN address; HTTPS would require setting
+  up a real cert. Android's NSC <domain> element doesn't support CIDR ranges,
+  so subnet-scoping isn't possible without listing every IP — easier to allow
+  globally and accept the trade-off for a single-user self-hosted app.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

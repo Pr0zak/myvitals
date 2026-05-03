@@ -94,4 +94,14 @@ export const api = {
     const { data } = await http.get<{ status: string }>("/health");
     return data;
   },
+
+  async logs(opts: { since?: Date | string; source?: string; level?: string; limit?: number } = {}): Promise<import("./types").AppLog[]> {
+    const params: Record<string, string | number> = {};
+    if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;
+    if (opts.source) params.source = opts.source;
+    if (opts.level) params.level = opts.level;
+    if (opts.limit) params.limit = opts.limit;
+    const { data } = await http.get<import("./types").AppLog[]>("/debug/logs", { params });
+    return data;
+  },
 };

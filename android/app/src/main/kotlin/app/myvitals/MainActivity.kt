@@ -7,9 +7,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import app.myvitals.data.SettingsRepository
+import app.myvitals.debug.LogViewerActivity
 import app.myvitals.health.HealthConnectGateway
 import app.myvitals.sync.SyncWorker
 import app.myvitals.ui.SettingsScreen
+import timber.log.Timber
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -20,7 +22,9 @@ class MainActivity : ComponentActivity() {
 
         val permissionLauncher = registerForActivityResult(
             gateway.permissionContract()
-        ) { /* HC delivers granted set; UI re-checks via gateway.hasAllPermissions() */ }
+        ) { granted ->
+            Timber.i("HC permissions returned; granted=%d/%d", granted.size, gateway.requiredPermissions.size)
+        }
 
         setContent {
             MaterialTheme {
@@ -29,13 +33,15 @@ class MainActivity : ComponentActivity() {
                     isHealthConnectAvailable = gateway.isAvailable(),
                     hasPermissions = { gateway.hasAllPermissions() },
                     onRequestPermissions = {
-                        // Health Connect's contract takes the Set<String> directly.
+                        Timber.d("Requesting HC permissions: %s", gateway.requiredPermissions)
                         permissionLauncher.launch(gateway.requiredPermissions)
                     },
                     onSyncNow = {
+                        Timber.i("Manual sync triggered")
                         WorkManager.getInstance(applicationContext)
                             .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
                     },
+                    onOpenLogs = { LogViewerActivity.start(this) },
                 )
             }
         }

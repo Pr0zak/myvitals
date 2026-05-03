@@ -9,6 +9,7 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "buffered_batches")
 data class BufferedBatch(
@@ -36,9 +37,46 @@ interface BufferedBatchDao {
     suspend fun count(): Int
 }
 
-@Database(entities = [BufferedBatch::class], version = 1, exportSchema = false)
+@Entity(tableName = "logs")
+data class LogEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val tsEpochMs: Long,
+    val level: Int,                 // android.util.Log priority (2..7)
+    val tag: String?,
+    val message: String,
+    val stack: String? = null,
+    val uploadedAt: Long? = null,
+)
+
+@Dao
+interface LogDao {
+    @Insert
+    suspend fun insert(entry: LogEntry): Long
+
+    @Query("SELECT * FROM logs ORDER BY tsEpochMs DESC LIMIT :limit")
+    fun recentFlow(limit: Int = 500): Flow<List<LogEntry>>
+
+    @Query("SELECT * FROM logs WHERE uploadedAt IS NULL ORDER BY tsEpochMs ASC LIMIT :limit")
+    suspend fun unsent(limit: Int = 200): List<LogEntry>
+
+    @Query("UPDATE logs SET uploadedAt = :now WHERE id IN (:ids)")
+    suspend fun markSent(ids: List<Long>, now: Long)
+
+    @Query("DELETE FROM logs WHERE tsEpochMs < :before")
+    suspend fun deleteOlderThan(before: Long)
+
+    @Query("DELETE FROM logs")
+    suspend fun clear()
+}
+
+@Database(
+    entities = [BufferedBatch::class, LogEntry::class],
+    version = 2,
+    exportSchema = false,
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun buffered(): BufferedBatchDao
+    abstract fun logs(): LogDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -48,7 +86,11 @@ abstract class AppDatabase : RoomDatabase() {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "myvitals.db",
-            ).build().also { instance = it }
+            )
+                // Pre-1.0 schema; cheaper to drop than to maintain migrations.
+                .fallbackToDestructiveMigration()
+                .build()
+                .also { instance = it }
         }
     }
 }

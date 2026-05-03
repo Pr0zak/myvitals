@@ -101,3 +101,16 @@ class Alert(Base):
     kind: Mapped[str] = mapped_column(String(64))
     payload: Mapped[dict] = mapped_column(JSON)
     acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class AppLog(Base):
+    """Log entries shipped from the phone (and from the backend itself)."""
+    __tablename__ = "app_logs"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    source: Mapped[str] = mapped_column(String(16), index=True)  # "phone" | "server"
+    level: Mapped[str] = mapped_column(String(8), index=True)
+    tag: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    message: Mapped[str] = mapped_column(Text)
+    stack: Mapped[str | None] = mapped_column(Text, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

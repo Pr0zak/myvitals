@@ -45,6 +45,7 @@ fun SettingsScreen(
     onRequestPermissions: () -> Unit,
     onSyncNow: () -> Unit,
     onSyncLogs: () -> Unit,
+    onBackfill: (days: Int) -> Unit,
     onOpenLogs: () -> Unit,
 ) {
     var url by remember { mutableStateOf(settings.backendUrl) }
@@ -105,13 +106,22 @@ fun SettingsScreen(
                 Text(if (hasPermissions()) "Re-request permissions" else "Grant Health Connect permissions")
             }
 
-            Button(
-                onClick = {
-                    onSyncNow()
-                    Toast.makeText(context, "Sync queued — see Logs for outcome", Toast.LENGTH_SHORT).show()
-                },
-                enabled = settings.isConfigured() && hasPermissions(),
-            ) { Text("Sync now") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        onSyncNow()
+                        Toast.makeText(context, "Sync queued — see Logs for outcome", Toast.LENGTH_SHORT).show()
+                    },
+                    enabled = settings.isConfigured() && hasPermissions(),
+                ) { Text("Sync now") }
+                OutlinedButton(
+                    onClick = {
+                        onBackfill(7)
+                        Toast.makeText(context, "Backfilling last 7 days…", Toast.LENGTH_SHORT).show()
+                    },
+                    enabled = settings.isConfigured() && hasPermissions(),
+                ) { Text("Backfill 7d") }
+            }
 
             Text("Last sync: " + (settings.lastSyncInstant()?.let(::formatInstant) ?: "never"))
 

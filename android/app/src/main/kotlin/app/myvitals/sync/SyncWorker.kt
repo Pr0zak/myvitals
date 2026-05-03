@@ -3,9 +3,11 @@ package app.myvitals.sync
 import android.content.Context
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
+import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.StepsRecord
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import kotlin.reflect.KClass
 import app.myvitals.data.AppDatabase
 import app.myvitals.data.BufferedBatch
 import app.myvitals.data.SettingsRepository
@@ -57,17 +59,16 @@ class SyncWorker(
         val since = settings.lastSyncInstant() ?: Instant.now().minusSeconds(6 * 3600)
         val until = Instant.now()
 
-        val batch = try {
-            val hr = gateway.read(HeartRateRecord::class, since, until)
-            val hrv = gateway.read(HeartRateVariabilityRmssdRecord::class, since, until)
-            val steps = gateway.read(StepsRecord::class, since, until)
-            Timber.i("HC reads since %s: hr=%d hrv=%d steps=%d",
-                since, hr.size, hrv.size, steps.size)
-            DataMapper.toBatch(hr, hrv, steps)
-        } catch (e: Exception) {
-            Timber.e(e, "HC read failed; retry later")
-            return Result.retry()
-        }
+        // Per-type try/catch: a SecurityException on one record type (e.g. HC's
+        // "record type 11") should not block the others from ingesting.
+        val hr = safeRead(HeartRateRecord::class, since, until)
+        val hrv = safeRead(HeartRateVariabilityRmssdRecord::class, since, until)
+        val steps = safeRead(StepsRecord::class, since, until)
+        Timber.i(
+            "HC reads since %s: hr=%d hrv=%d steps=%d",
+            since, hr.size, hrv.size, steps.size,
+        )
+        val batch = DataMapper.toBatch(hr, hrv, steps)
 
         if (batch.isEmpty()) {
             Timber.i("Nothing new to send; advancing checkpoint to %s", until)
@@ -90,6 +91,19 @@ class SyncWorker(
             )
             settings.lastSyncEpochSeconds = until.epochSecond
             Result.success()
+        }
+    }
+
+    private suspend fun <T : Record> safeRead(
+        type: KClass<T>,
+        since: Instant,
+        until: Instant,
+    ): List<T> {
+        return try {
+            gateway.read(type, since, until)
+        } catch (e: Exception) {
+            Timber.e(e, "HC read FAILED for %s — continuing with empty list", type.simpleName)
+            emptyList()
         }
     }
 

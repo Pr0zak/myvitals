@@ -59,6 +59,8 @@ $EDITOR .env   # set INGEST_TOKEN, QUERY_TOKEN, POSTGRES_PASSWORD via `openssl r
 ./deploy/ct-bootstrap.sh
 ```
 
+`ct-bootstrap.sh` handles the **runc 1.1.x swap** automatically — Docker's bundled runc 1.2+ crashes on container start inside an unprivileged Proxmox LXC with `open sysctl net.ipv4.ip_unprivileged_port_start ... permission denied`. The script detects the LXC, installs Debian's `runc` package (1.1.x), backs it up, reinstalls `containerd.io`, then swaps the binary at `/usr/bin/runc`. See `feedback_docker_in_lxc.md` in `~/.claude/projects/.../memory/` for the full story.
+
 ## Cutting a release
 
 ```bash
@@ -124,9 +126,17 @@ The app schedules a daily WorkManager job (`UpdateCheckWorker`) that hits the Gi
 
 The installer prompts you to enable "Install unknown apps" for myvitals itself the first time.
 
+> **Note:** the notification path requires `POST_NOTIFICATIONS` (Android 13+). The app requests it at startup; if denied, use the manual check (next section), which shows an inline install button instead.
+
 ### Manual check
 
-Settings screen → "Check for updates" button.
+Settings screen → "Check for updates" button. If a newer release is found, an inline "Install vX.Y.Z" button appears — tap to download + install with no notification dependency.
+
+### Logging + debugging
+
+- Settings → "View logs" — local log viewer (Timber → Room).
+- Settings → "Sync logs now" — POSTs unsent log entries to backend `/debug/logs` immediately (otherwise every 15 min via `LogUploadWorker`).
+- Dashboard `/logs` page — combined view of phone + server logs (auto-refresh every 5s). Filter by source/level.
 
 ### Bootstrap APK (before CI is set up)
 

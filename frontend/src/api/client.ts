@@ -1,4 +1,5 @@
 import axios from "axios";
+import { apiBase, queryToken } from "@/config";
 import type {
   Annotation,
   AnnotationCreate,
@@ -9,11 +10,18 @@ import type {
   TodaySummary,
 } from "./types";
 
-const http = axios.create({
-  baseURL: "/api",
-  headers: {
-    Authorization: `Bearer ${import.meta.env.VITE_QUERY_TOKEN ?? ""}`,
-  },
+const http = axios.create({ baseURL: "/api" });
+
+// Inject the bearer token from the user's saved settings on every request.
+// Reading from the ref means token changes take effect without reload.
+http.interceptors.request.use((cfg) => {
+  if (queryToken.value) {
+    cfg.headers.Authorization = `Bearer ${queryToken.value}`;
+  }
+  if (apiBase.value) {
+    cfg.baseURL = apiBase.value.replace(/\/$/, "");
+  }
+  return cfg;
 });
 
 interface RangeParams {
@@ -79,6 +87,11 @@ export const api = {
 
   async createAnnotation(body: AnnotationCreate): Promise<Annotation> {
     const { data } = await http.post<Annotation>("/log", body);
+    return data;
+  },
+
+  async health(): Promise<{ status: string }> {
+    const { data } = await http.get<{ status: string }>("/health");
     return data;
   },
 };

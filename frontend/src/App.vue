@@ -10,6 +10,7 @@ import { isConfigured } from "@/config";
       <RouterLink to="/trends">Trends</RouterLink>
       <RouterLink to="/sleep">Sleep</RouterLink>
       <RouterLink to="/log">Log</RouterLink>
+      <RouterLink to="/activities">Activities</RouterLink>
       <span class="spacer" />
       <RouterLink to="/logs" class="settings-link">Logs</RouterLink>
       <RouterLink to="/settings" class="settings-link">Settings</RouterLink>

@@ -68,3 +68,31 @@ export interface AppLog {
   message: string;
   stack: string | null;
 }
+
+export interface StravaStatus {
+  connected: boolean;
+  configured: boolean;
+  athlete_id: number | null;
+  athlete_name: string | null;
+  expires_at: string | null;
+  last_sync_at: string | null;
+  scope: string | null;
+}
+
+export interface Activity {
+  source: string;
+  source_id: string;
+  type: string;
+  name: string | null;
+  start_at: string;
+  duration_s: number;
+  distance_m: number | null;
+  elevation_gain_m: number | null;
+  avg_hr: number | null;
+  max_hr: number | null;
+  avg_power_w: number | null;
+  max_power_w: number | null;
+  kcal: number | null;
+  suffer_score: number | null;
+  polyline: string | null;
+}

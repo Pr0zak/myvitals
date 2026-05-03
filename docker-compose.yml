@@ -39,6 +39,9 @@ services:
       HA_URL: ${HA_URL:-}
       HA_TOKEN: ${HA_TOKEN:-}
       HA_ENTITIES: ${HA_ENTITIES:-}
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
+      STRAVA_CALLBACK_URL: ${STRAVA_CALLBACK_URL:-}
     ports:
       - "8000:8000"
     healthcheck:

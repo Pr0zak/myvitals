@@ -2,9 +2,15 @@
     root * /srv
     encode gzip
 
-    # Proxy API calls to the FastAPI backend
+    # Proxy API calls to the FastAPI backend (strip /api prefix)
     handle /api/* {
         uri strip_prefix /api
+        reverse_proxy backend:8000
+    }
+
+    # OAuth flows (Strava etc.) — pass through with original path so the
+    # callback URL the user registers matches what Strava sees.
+    handle /auth/* {
         reverse_proxy backend:8000
     }
 

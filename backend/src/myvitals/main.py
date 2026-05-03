@@ -7,8 +7,9 @@ from fastapi import FastAPI
 
 from . import version as version_mod
 from .analytics.jobs import compute_daily_summary
-from .api import annotations, debug, ingest, query, summary
+from .api import annotations, debug, ingest, query, strava, summary
 from .config import settings
+from .integrations import strava as strava_int
 from .integrations.home_assistant import pull_states as ha_pull_states
 
 log = logging.getLogger(__name__)
@@ -34,6 +35,15 @@ async def lifespan(app: FastAPI):
             next_run_time=None,  # let interval kick in naturally
         )
         log.info("HA poll scheduled every 5 min for %d entities", len(settings.ha_entity_list))
+    if strava_int.is_configured():
+        scheduler.add_job(
+            strava_int.sync_recent,
+            trigger="interval",
+            hours=6,
+            id="strava_sync",
+            replace_existing=True,
+        )
+        log.info("Strava poll scheduled every 6h")
     scheduler.start()
     log.info("scheduler started; daily_summary at 03:00 %s", settings.tz)
 
@@ -59,6 +69,7 @@ app.include_router(query.router, prefix="/query", tags=["query"])
 app.include_router(summary.router, prefix="/summary", tags=["summary"])
 app.include_router(annotations.router, tags=["log"])
 app.include_router(debug.router, tags=["debug"])
+app.include_router(strava.router, tags=["strava"])
 
 
 @app.get("/health")

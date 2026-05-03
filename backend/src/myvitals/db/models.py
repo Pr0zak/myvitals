@@ -1,6 +1,16 @@
 from datetime import date, datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, Date, DateTime, Float, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -114,3 +124,38 @@ class AppLog(Base):
     message: Mapped[str] = mapped_column(Text)
     stack: Mapped[str | None] = mapped_column(Text, nullable=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class StravaCredentials(Base):
+    """Single-row table (id=1) holding the user's Strava OAuth tokens."""
+    __tablename__ = "strava_credentials"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    athlete_id: Mapped[int] = mapped_column(BigInteger)
+    athlete_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    access_token: Mapped[str] = mapped_column(Text)
+    refresh_token: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    scope: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Activity(Base):
+    """Workouts pulled from Strava (and later Garmin, etc.)."""
+    __tablename__ = "activities"
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)
+    source_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    type: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    duration_s: Mapped[int] = mapped_column(Integer)
+    distance_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    elevation_gain_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_power_w: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_power_w: Mapped[float | None] = mapped_column(Float, nullable=True)
+    kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    suffer_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    polyline: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw: Mapped[dict | None] = mapped_column(JSON, nullable=True)

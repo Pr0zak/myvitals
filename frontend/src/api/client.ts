@@ -104,4 +104,28 @@ export const api = {
     const { data } = await http.get<import("./types").AppLog[]>("/debug/logs", { params });
     return data;
   },
+
+  async stravaStatus(): Promise<import("./types").StravaStatus> {
+    const { data } = await http.get<import("./types").StravaStatus>("/strava/status");
+    return data;
+  },
+
+  async stravaSync(days = 90): Promise<{ upserted: number; days: number }> {
+    const { data } = await http.post<{ upserted: number; days: number }>("/strava/sync", null, { params: { days } });
+    return data;
+  },
+
+  async stravaDisconnect(): Promise<{ status: string }> {
+    const { data } = await http.delete<{ status: string }>("/strava");
+    return data;
+  },
+
+  async activities(opts: { since?: Date | string; type?: string; limit?: number } = {}): Promise<import("./types").Activity[]> {
+    const params: Record<string, string | number> = {};
+    if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;
+    if (opts.type) params.type = opts.type;
+    if (opts.limit) params.limit = opts.limit;
+    const { data } = await http.get<import("./types").Activity[]>("/activities", { params });
+    return data;
+  },
 };

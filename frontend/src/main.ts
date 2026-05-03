@@ -12,6 +12,7 @@ const router = createRouter({
     { path: "/trends", name: "trends", component: () => import("./views/Trends.vue") },
     { path: "/sleep", name: "sleep", component: () => import("./views/Sleep.vue") },
     { path: "/log", name: "log", component: () => import("./views/Log.vue") },
+    { path: "/activities", name: "activities", component: () => import("./views/Activities.vue") },
     { path: "/logs", name: "logs", component: () => import("./views/Logs.vue") },
     { path: "/settings", name: "settings", component: () => import("./views/Settings.vue") },
   ],

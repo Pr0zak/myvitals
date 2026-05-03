@@ -121,6 +121,13 @@ fun SettingsScreen(
                     },
                     enabled = settings.isConfigured() && hasPermissions(),
                 ) { Text("Backfill 7d") }
+                OutlinedButton(
+                    onClick = {
+                        onBackfill(30)
+                        Toast.makeText(context, "Backfilling last 30 days…", Toast.LENGTH_LONG).show()
+                    },
+                    enabled = settings.isConfigured() && hasPermissions(),
+                ) { Text("Backfill 30d") }
             }
 
             Text("Last sync: " + (settings.lastSyncInstant()?.let(::formatInstant) ?: "never"))

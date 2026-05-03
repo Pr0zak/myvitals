@@ -28,10 +28,27 @@ class StepsSample(BaseModel):
     count: int
 
 
+class SleepStageSample(BaseModel):
+    time: datetime
+    stage: str
+    duration_s: int
+
+
+class WorkoutSample(BaseModel):
+    time: datetime
+    type: str
+    duration_s: int
+    kcal: float | None = None
+    avg_hr: float | None = None
+    max_hr: float | None = None
+
+
 class Batch(BaseModel):
     heartrate: list[HeartRateSample] = []
     hrv: list[HrvSample] = []
     steps: list[StepsSample] = []
+    sleep_stages: list[SleepStageSample] = []
+    workouts: list[WorkoutSample] = []
 
 
 @router.post("/batch")
@@ -58,6 +75,20 @@ async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) ->
         ).on_conflict_do_nothing(index_elements=["time"])
         await db.execute(stmt)
         counts["steps"] = len(batch.steps)
+
+    if batch.sleep_stages:
+        stmt = insert(models.SleepStage).values(
+            [s.model_dump() for s in batch.sleep_stages]
+        ).on_conflict_do_nothing(index_elements=["time", "stage"])
+        await db.execute(stmt)
+        counts["sleep_stages"] = len(batch.sleep_stages)
+
+    if batch.workouts:
+        stmt = insert(models.Workout).values(
+            [w.model_dump() for w in batch.workouts]
+        ).on_conflict_do_nothing(index_elements=["time"])
+        await db.execute(stmt)
+        counts["workouts"] = len(batch.workouts)
 
     await db.commit()
     return counts

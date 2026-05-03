@@ -1,9 +1,11 @@
 package app.myvitals.sync
 
 import android.content.Context
+import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
 import androidx.health.connect.client.records.Record
+import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -64,11 +66,13 @@ class SyncWorker(
         val hr = safeRead(HeartRateRecord::class, since, until)
         val hrv = safeRead(HeartRateVariabilityRmssdRecord::class, since, until)
         val steps = safeRead(StepsRecord::class, since, until)
+        val sleep = safeRead(SleepSessionRecord::class, since, until)
+        val exercise = safeRead(ExerciseSessionRecord::class, since, until)
         Timber.i(
-            "HC reads since %s: hr=%d hrv=%d steps=%d",
-            since, hr.size, hrv.size, steps.size,
+            "HC reads since %s: hr=%d hrv=%d steps=%d sleep=%d exercise=%d",
+            since, hr.size, hrv.size, steps.size, sleep.size, exercise.size,
         )
-        val batch = DataMapper.toBatch(hr, hrv, steps)
+        val batch = DataMapper.toBatch(hr, hrv, steps, sleep, exercise)
 
         if (batch.isEmpty()) {
             Timber.i("Nothing new to send; advancing checkpoint to %s", until)
@@ -78,7 +82,10 @@ class SyncWorker(
 
         return try {
             val resp = api.ingestBatch(batch)
-            Timber.i("Ingest OK: hr=%d hrv=%d steps=%d", resp.heartrate, resp.hrv, resp.steps)
+            Timber.i(
+                "Ingest OK: hr=%d hrv=%d steps=%d sleep_stages=%d workouts=%d",
+                resp.heartrate, resp.hrv, resp.steps, resp.sleepStages, resp.workouts,
+            )
             settings.lastSyncEpochSeconds = until.epochSecond
             Result.success()
         } catch (e: Exception) {

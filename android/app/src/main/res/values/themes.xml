@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The Activity needs *some* style entry. Compose drives all real theming
+      (colors, typography, dynamic colors) via MaterialTheme { } in Kotlin —
+      this just keeps AAPT happy and gives us a no-action-bar window.
+    -->
+    <style name="Theme.MyVitals" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

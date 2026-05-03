@@ -35,7 +35,7 @@
         android:fullBackupContent="false"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Material3.DynamicColors.DayNight">
+        android:theme="@style/Theme.MyVitals">
 
         <activity
             android:name=".MainActivity"

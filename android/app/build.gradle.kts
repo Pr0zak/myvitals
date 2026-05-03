@@ -1,9 +1,21 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+// Read signing config from android/keystore.properties (gitignored).
+// CI provides values via env vars instead — see ANDROID_* secrets in releasing.md.
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+fun keystoreOrEnv(key: String, env: String): String? =
+    keystoreProps.getProperty(key) ?: System.getenv(env)
 
 android {
     namespace = "app.myvitals"
@@ -13,14 +25,39 @@ android {
         applicationId = "app.myvitals"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI overrides via env vars so the git tag is the single source of truth.
+        versionCode = (System.getenv("BUILD_VERSION_CODE") ?: "1").toInt()
+        versionName = System.getenv("BUILD_VERSION_NAME") ?: "0.1.0"
+
+        // Update checker hits this repo's GitHub Releases API.
+        buildConfigField("String", "GITHUB_REPO", "\"Pr0zak/myvitals\"")
+    }
+
+    signingConfigs {
+        create("release") {
+            val storePath = keystoreOrEnv("storeFile", "ANDROID_KEYSTORE_PATH")
+            val storePass = keystoreOrEnv("storePassword", "ANDROID_KEYSTORE_PASSWORD")
+            val alias = keystoreOrEnv("keyAlias", "ANDROID_KEY_ALIAS")
+            val keyPass = keystoreOrEnv("keyPassword", "ANDROID_KEY_PASSWORD")
+
+            if (storePath != null && storePass != null && alias != null && keyPass != null) {
+                storeFile = file(storePath)
+                storePassword = storePass
+                keyAlias = alias
+                keyPassword = keyPass
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Only attach the signing config if it was actually populated;
+            // otherwise gradle errors instead of silently producing an unsigned APK.
+            signingConfigs.findByName("release")
+                ?.takeIf { it.storeFile != null }
+                ?.let { signingConfig = it }
         }
     }
 

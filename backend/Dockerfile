@@ -15,6 +15,12 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync
 
+# Bake build provenance so /version can report it.
+ARG GIT_SHA=unknown
+ARG BUILD_TIME=unknown
+ENV GIT_SHA=${GIT_SHA} \
+    BUILD_TIME=${BUILD_TIME}
+
 EXPOSE 8000
 
 CMD ["sh", "-c", "alembic upgrade head && fastapi run src/myvitals/main.py --host 0.0.0.0 --port 8000"]

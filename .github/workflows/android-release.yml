@@ -1,0 +1,102 @@
+name: android release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Compute version from tag
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "BUILD_VERSION_NAME=$VERSION" >> $GITHUB_ENV
+          echo "BUILD_VERSION_CODE=$GITHUB_RUN_NUMBER" >> $GITHUB_ENV
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::ANDROID_KEYSTORE_B64 secret is missing — see docs/releasing.md"
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$GITHUB_WORKSPACE/android/release.jks"
+
+      - name: Write keystore.properties
+        env:
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: android
+        run: |
+          cat > keystore.properties <<EOF
+          storeFile=$GITHUB_WORKSPACE/android/release.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Build release APK
+        working-directory: android
+        run: |
+          if [ -f ./gradlew ]; then
+            ./gradlew :app:assembleRelease --no-daemon
+          else
+            gradle :app:assembleRelease --no-daemon
+          fi
+
+      - name: Verify APK is signed
+        run: |
+          APK=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n1)
+          echo "Found APK: $APK"
+          $ANDROID_HOME/build-tools/*/apksigner verify --verbose "$APK"
+
+      - name: Stage release artifacts
+        id: stage
+        run: |
+          mkdir -p release
+          APK=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n1)
+          OUT="release/myvitals-${{ steps.ver.outputs.version }}.apk"
+          cp "$APK" "$OUT"
+          (cd release && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
+          echo "apk=$OUT" >> $GITHUB_OUTPUT
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          files: |
+            release/*.apk
+            release/*.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true

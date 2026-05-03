@@ -18,6 +18,8 @@ services:
       retries: 5
 
   backend:
+    # Pulled from GHCR by default; `docker compose build` (or up --build) builds locally.
+    image: ghcr.io/${GHCR_OWNER:-pr0zak}/myvitals-backend:${BACKEND_TAG:-latest}
     build:
       context: ./backend
     restart: unless-stopped
@@ -38,8 +40,15 @@ services:
       HA_TOKEN: ${HA_TOKEN:-}
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   frontend:
+    image: ghcr.io/${GHCR_OWNER:-pr0zak}/myvitals-frontend:${FRONTEND_TAG:-latest}
     build:
       context: ./frontend
     restart: unless-stopped

@@ -36,6 +36,11 @@ android/captures/
 *.aab
 *.iml
 
+# android signing — NEVER commit
+android/keystore.properties
+*.jks
+*.keystore
+
 # editors
 .vscode/
 .idea/

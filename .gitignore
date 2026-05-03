@@ -1,0 +1,43 @@
+# env / secrets
+.env
+.env.local
+*.local
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.python-version
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+
+# uv
+uv.lock
+
+# node / frontend
+node_modules/
+frontend/dist/
+.pnpm-store/
+*.tsbuildinfo
+
+# android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+*.apk
+*.aab
+*.iml
+
+# editors
+.vscode/
+.idea/
+*.swp
+.DS_Store

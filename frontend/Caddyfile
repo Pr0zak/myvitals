@@ -1,0 +1,16 @@
+:80 {
+    root * /srv
+    encode gzip
+
+    # Proxy API calls to the FastAPI backend
+    handle /api/* {
+        uri strip_prefix /api
+        reverse_proxy backend:8000
+    }
+
+    # SPA fallback
+    handle {
+        try_files {path} /index.html
+        file_server
+    }
+}

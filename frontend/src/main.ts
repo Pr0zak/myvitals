@@ -1,0 +1,17 @@
+import { createApp } from "vue";
+import { createPinia } from "pinia";
+import { createRouter, createWebHistory } from "vue-router";
+
+import App from "./App.vue";
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    { path: "/", name: "today", component: () => import("./views/Today.vue") },
+    { path: "/trends", name: "trends", component: () => import("./views/Trends.vue") },
+    { path: "/sleep", name: "sleep", component: () => import("./views/Sleep.vue") },
+    { path: "/log", name: "log", component: () => import("./views/Log.vue") },
+  ],
+});
+
+createApp(App).use(createPinia()).use(router).mount("#app");

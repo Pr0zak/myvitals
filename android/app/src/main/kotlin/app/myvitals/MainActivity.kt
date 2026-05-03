@@ -68,6 +68,13 @@ class MainActivity : ComponentActivity() {
                         WorkManager.getInstance(applicationContext)
                             .enqueue(OneTimeWorkRequestBuilder<LogUploadWorker>().build())
                     },
+                    onBackfill = { days ->
+                        val newCheckpoint = System.currentTimeMillis() / 1000 - days * 24L * 3600L
+                        settings.lastSyncEpochSeconds = newCheckpoint
+                        Timber.i("Backfill: reset checkpoint to T-%dd (epoch=%d), enqueueing sync", days, newCheckpoint)
+                        WorkManager.getInstance(applicationContext)
+                            .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
+                    },
                     onOpenLogs = { LogViewerActivity.start(this) },
                 )
             }

@@ -28,8 +28,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.myvitals.BuildConfig
 import app.myvitals.data.SettingsRepository
-import app.myvitals.update.Notifier
+import app.myvitals.update.GitHubRelease
 import app.myvitals.update.UpdateChecker
+import app.myvitals.update.UpdateInstallerActivity
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
@@ -48,7 +49,7 @@ fun SettingsScreen(
     var url by remember { mutableStateOf(settings.backendUrl) }
     var token by remember { mutableStateOf(settings.bearerToken) }
     var updateStatus by remember { mutableStateOf("") }
-    var lastSavedAt by remember { mutableStateOf(settings.lastSyncEpochSeconds) }
+    var pendingRelease by remember { mutableStateOf<GitHubRelease?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -120,16 +121,29 @@ fun SettingsScreen(
                 OutlinedButton(onClick = onOpenLogs) { Text("View logs") }
                 OutlinedButton(onClick = {
                     updateStatus = "Checking…"
+                    pendingRelease = null
                     scope.launch {
                         val release = UpdateChecker.checkForUpdate()
-                        updateStatus = if (release == null) {
-                            "Up to date."
+                        if (release == null) {
+                            updateStatus = "Up to date."
                         } else {
-                            Notifier.postUpdateAvailable(context, release)
-                            "Update ${release.tagName} available — see notification."
+                            pendingRelease = release
+                            updateStatus = "Update ${release.tagName} available."
                         }
                     }
                 }) { Text("Check for updates") }
+            }
+
+            // Inline install button — appears when an update was found.
+            pendingRelease?.let { release ->
+                val asset = release.assets.firstOrNull { it.name.endsWith(".apk") }
+                if (asset != null) {
+                    Button(onClick = {
+                        UpdateInstallerActivity.start(context, asset.browserDownloadUrl, asset.name)
+                    }) {
+                        Text("Install ${release.tagName}")
+                    }
+                }
             }
 
             Text(
@@ -142,8 +156,6 @@ fun SettingsScreen(
             }
         }
     }
-    // Quiet a "lastSavedAt unused" warning without removing the recomposition trigger.
-    @Suppress("UNUSED_EXPRESSION") lastSavedAt
 }
 
 private val formatter: DateTimeFormatter =

@@ -9,9 +9,11 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.content.FileProvider
+import timber.log.Timber
 import java.io.File
 
 /**
@@ -19,29 +21,50 @@ import java.io.File
  * system package installer when the download completes. The user is shown the
  * standard "Install / Cancel" Android install dialog.
  *
- * Requires `REQUEST_INSTALL_PACKAGES` permission and the user to have enabled
- * "Install unknown apps" for myvitals in system settings.
+ * If the app isn't allowed to install packages yet, bounce the user to the
+ * system "install unknown apps" settings page first; they retap the install
+ * action when they come back.
  */
 class UpdateInstallerActivity : ComponentActivity() {
 
     private var downloadId: Long = -1
-    private lateinit var receiver: BroadcastReceiver
+    private var receiver: BroadcastReceiver? = null
     private lateinit var apkFile: File
+    private var apkName: String = "myvitals.apk"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val url = intent.getStringExtra(EXTRA_URL) ?: run { finish(); return }
-        val name = intent.getStringExtra(EXTRA_NAME) ?: "myvitals.apk"
+        val url = intent.getStringExtra(EXTRA_URL) ?: run {
+            Timber.w("UpdateInstaller called without URL")
+            finish(); return
+        }
+        apkName = intent.getStringExtra(EXTRA_NAME) ?: "myvitals.apk"
+        Timber.i("UpdateInstaller: url=%s", url)
 
-        apkFile = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), name)
+        if (!canInstallPackages()) {
+            Timber.w("REQUEST_INSTALL_PACKAGES not granted — sending to system settings")
+            Toast.makeText(
+                this,
+                "Allow myvitals to install apps, then tap the update again",
+                Toast.LENGTH_LONG,
+            ).show()
+            val settings = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                .setData(Uri.parse("package:$packageName"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(settings)
+            finish()
+            return
+        }
+
+        apkFile = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), apkName)
         if (apkFile.exists()) apkFile.delete()
 
-        Toast.makeText(this, "Downloading $name…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Downloading $apkName…", Toast.LENGTH_SHORT).show()
 
         val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
         val req = DownloadManager.Request(Uri.parse(url))
             .setTitle("myvitals update")
-            .setDescription(name)
+            .setDescription(apkName)
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationUri(Uri.fromFile(apkFile))
         downloadId = dm.enqueue(req)
@@ -65,13 +88,23 @@ class UpdateInstallerActivity : ComponentActivity() {
         }
     }
 
+    private fun canInstallPackages(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            packageManager.canRequestPackageInstalls()
+        } else {
+            true
+        }
+    }
+
     private fun onDownloadComplete() {
         if (!apkFile.exists() || apkFile.length() == 0L) {
+            Timber.e("Download finished but file is missing/empty: %s", apkFile.absolutePath)
             Toast.makeText(this, "Download failed", Toast.LENGTH_LONG).show()
             cleanupAndFinish()
             return
         }
 
+        Timber.i("Launching install intent for %s (%d bytes)", apkFile.name, apkFile.length())
         val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apkFile)
         val install = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
@@ -82,12 +115,22 @@ class UpdateInstallerActivity : ComponentActivity() {
     }
 
     private fun cleanupAndFinish() {
-        try { unregisterReceiver(receiver) } catch (_: Exception) {}
+        try { receiver?.let { unregisterReceiver(it) } } catch (_: Exception) {}
         finish()
     }
 
     companion object {
         const val EXTRA_URL = "url"
         const val EXTRA_NAME = "name"
+
+        fun start(context: Context, url: String, name: String) {
+            context.startActivity(
+                Intent(context, UpdateInstallerActivity::class.java).apply {
+                    putExtra(EXTRA_URL, url)
+                    putExtra(EXTRA_NAME, name)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+            )
+        }
     }
 }

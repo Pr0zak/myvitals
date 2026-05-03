@@ -1,9 +1,14 @@
 package app.myvitals
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
+import androidx.core.content.ContextCompat
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import app.myvitals.data.SettingsRepository
@@ -24,6 +29,22 @@ class MainActivity : ComponentActivity() {
             gateway.permissionContract()
         ) { granted ->
             Timber.i("HC permissions returned; granted=%d/%d", granted.size, gateway.requiredPermissions.size)
+        }
+
+        // Android 13+ requires runtime permission to post notifications.
+        // Request once at app start; user can deny and the app still works.
+        val notifLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted -> Timber.i("POST_NOTIFICATIONS granted=%b", granted) }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val state = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS
+            )
+            if (state != PackageManager.PERMISSION_GRANTED) {
+                Timber.d("Asking for POST_NOTIFICATIONS")
+                notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
 
         setContent {

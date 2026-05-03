@@ -18,6 +18,13 @@ class Settings(BaseSettings):
 
     ha_url: str | None = None
     ha_token: str | None = None
+    # Comma-separated HA entity IDs to poll into env_readings.
+    # e.g. "sensor.bedroom_temperature,sensor.bedroom_humidity,binary_sensor.bedroom_presence"
+    ha_entities: str = ""
+
+    @property
+    def ha_entity_list(self) -> list[str]:
+        return [e.strip() for e in self.ha_entities.split(",") if e.strip()]
 
     @property
     def database_url(self) -> str:

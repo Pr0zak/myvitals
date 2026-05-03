@@ -9,6 +9,7 @@ from . import version as version_mod
 from .analytics.jobs import compute_daily_summary
 from .api import annotations, ingest, query, summary
 from .config import settings
+from .integrations.home_assistant import pull_states as ha_pull_states
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +24,16 @@ async def lifespan(app: FastAPI):
         id="daily_summary",
         replace_existing=True,
     )
+    if settings.ha_url and settings.ha_token and settings.ha_entity_list:
+        scheduler.add_job(
+            ha_pull_states,
+            trigger="interval",
+            minutes=5,
+            id="ha_pull",
+            replace_existing=True,
+            next_run_time=None,  # let interval kick in naturally
+        )
+        log.info("HA poll scheduled every 5 min for %d entities", len(settings.ha_entity_list))
     scheduler.start()
     log.info("scheduler started; daily_summary at 03:00 %s", settings.tz)
 

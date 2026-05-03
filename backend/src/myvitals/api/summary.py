@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,3 +58,32 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
         steps_total=steps_total,
         last_sync=last_sync,
     )
+
+
+@router.get("/range", response_model=list[TodaySummary])
+async def summary_range(
+    since: date = Query(...),
+    until: date | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> list[TodaySummary]:
+    """Daily summaries between two dates (inclusive)."""
+    end = until or datetime.now(timezone.utc).date()
+    result = await db.execute(
+        select(models.DailySummary)
+        .where(models.DailySummary.date >= since)
+        .where(models.DailySummary.date <= end)
+        .order_by(models.DailySummary.date)
+    )
+    rows = result.scalars().all()
+    return [
+        TodaySummary(
+            date=r.date,
+            resting_hr=r.resting_hr,
+            hrv_avg=r.hrv_avg,
+            recovery_score=r.recovery_score,
+            sleep_duration_s=r.sleep_duration_s,
+            sleep_score=r.sleep_score,
+            steps_total=r.steps_total,
+        )
+        for r in rows
+    ]

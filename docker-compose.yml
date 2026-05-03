@@ -38,6 +38,7 @@ services:
       TZ: ${TZ:-UTC}
       HA_URL: ${HA_URL:-}
       HA_TOKEN: ${HA_TOKEN:-}
+      HA_ENTITIES: ${HA_ENTITIES:-}
     ports:
       - "8000:8000"
     healthcheck:

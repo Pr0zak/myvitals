@@ -59,6 +59,15 @@ export const api = {
     return data;
   },
 
+  async summaryRange(since: Date | string, until?: Date | string): Promise<TodaySummary[]> {
+    const params: Record<string, string> = {
+      since: since instanceof Date ? since.toISOString().slice(0, 10) : since,
+    };
+    if (until) params.until = until instanceof Date ? until.toISOString().slice(0, 10) : until;
+    const { data } = await http.get<TodaySummary[]>("/summary/range", { params });
+    return data;
+  },
+
   async listAnnotations(opts: { since?: Date | string; type?: string; limit?: number } = {}): Promise<Annotation[]> {
     const params: Record<string, string | number> = {};
     if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;

@@ -1,8 +1,75 @@
 import axios from "axios";
+import type {
+  Annotation,
+  AnnotationCreate,
+  HeartRateSeries,
+  HrvSeries,
+  SleepNight,
+  StepsSeries,
+  TodaySummary,
+} from "./types";
 
-export const api = axios.create({
+const http = axios.create({
   baseURL: "/api",
   headers: {
     Authorization: `Bearer ${import.meta.env.VITE_QUERY_TOKEN ?? ""}`,
   },
 });
+
+interface RangeParams {
+  since?: Date | string;
+  until?: Date | string;
+}
+
+function rangeToQuery(p: RangeParams): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (p.since) out.since = p.since instanceof Date ? p.since.toISOString() : p.since;
+  if (p.until) out.until = p.until instanceof Date ? p.until.toISOString() : p.until;
+  return out;
+}
+
+export const api = {
+  async heartRate(p: RangeParams = {}): Promise<HeartRateSeries> {
+    const { data } = await http.get<HeartRateSeries>("/query/heartrate", { params: rangeToQuery(p) });
+    return data;
+  },
+
+  async hrv(p: RangeParams = {}): Promise<HrvSeries> {
+    const { data } = await http.get<HrvSeries>("/query/hrv", { params: rangeToQuery(p) });
+    return data;
+  },
+
+  async steps(p: RangeParams = {}): Promise<StepsSeries> {
+    const { data } = await http.get<StepsSeries>("/query/steps", { params: rangeToQuery(p) });
+    return data;
+  },
+
+  async lastSleep(): Promise<SleepNight | null> {
+    const { data } = await http.get<SleepNight | null>("/query/sleep/last");
+    return data;
+  },
+
+  async lastSync(): Promise<{ last_sync: string | null }> {
+    const { data } = await http.get<{ last_sync: string | null }>("/query/last-sync");
+    return data;
+  },
+
+  async todaySummary(): Promise<TodaySummary> {
+    const { data } = await http.get<TodaySummary>("/summary/today");
+    return data;
+  },
+
+  async listAnnotations(opts: { since?: Date | string; type?: string; limit?: number } = {}): Promise<Annotation[]> {
+    const params: Record<string, string | number> = {};
+    if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;
+    if (opts.type) params.type = opts.type;
+    if (opts.limit) params.limit = opts.limit;
+    const { data } = await http.get<Annotation[]>("/log", { params });
+    return data;
+  },
+
+  async createAnnotation(body: AnnotationCreate): Promise<Annotation> {
+    const { data } = await http.post<Annotation>("/log", body);
+    return data;
+  },
+};

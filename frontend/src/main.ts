@@ -2,6 +2,7 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import { createRouter, createWebHistory } from "vue-router";
 
+import "./echarts";  // side-effect: registers ECharts modules
 import App from "./App.vue";
 
 const router = createRouter({

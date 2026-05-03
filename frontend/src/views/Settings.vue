@@ -2,7 +2,7 @@
 import { onMounted, ref } from "vue";
 import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
-import type { StravaStatus } from "@/api/types";
+import type { StravaAppConfigStatus, StravaStatus } from "@/api/types";
 
 const tokenInput = ref(queryToken.value);
 const apiBaseInput = ref(apiBase.value);
@@ -10,9 +10,18 @@ const status = ref<"idle" | "ok" | "fail">("idle");
 const errorMsg = ref<string>("");
 
 const strava = ref<StravaStatus | null>(null);
+const stravaConfig = ref<StravaAppConfigStatus | null>(null);
 const stravaError = ref<string | null>(null);
 const stravaSyncing = ref(false);
 const stravaSyncResult = ref<string>("");
+
+// Strava OAuth credential fields (dashboard-editable)
+const cidInput = ref("");
+const secretInput = ref("");
+const callbackInput = ref("");
+const credsSaving = ref(false);
+const credsResult = ref<string>("");
+const editingCreds = ref(false);
 
 function save() {
   queryToken.value = tokenInput.value.trim();
@@ -48,13 +57,18 @@ function clearAll() {
   status.value = "idle";
   errorMsg.value = "";
   strava.value = null;
+  stravaConfig.value = null;
 }
 
 async function loadStrava() {
   if (!queryToken.value) return;
   stravaError.value = null;
   try {
-    strava.value = await api.stravaStatus();
+    [strava.value, stravaConfig.value] = await Promise.all([
+      api.stravaStatus(),
+      api.stravaConfig(),
+    ]);
+    callbackInput.value = stravaConfig.value.callback_url ?? "";
   } catch (e: unknown) {
     stravaError.value = e instanceof Error ? e.message : String(e);
   }
@@ -83,6 +97,37 @@ async function disconnectStrava() {
   if (!confirm("Disconnect Strava? Stored activities will stay; tokens will be wiped.")) return;
   try {
     await api.stravaDisconnect();
+    await loadStrava();
+  } catch (e) {
+    stravaError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function saveStravaCreds() {
+  credsSaving.value = true;
+  credsResult.value = "";
+  try {
+    await api.saveStravaConfig({
+      client_id: cidInput.value,
+      client_secret: secretInput.value,
+      callback_url: callbackInput.value || null,
+    });
+    credsResult.value = "Saved. You can now Connect Strava.";
+    cidInput.value = "";
+    secretInput.value = "";
+    editingCreds.value = false;
+    await loadStrava();
+  } catch (e: unknown) {
+    credsResult.value = `Save failed: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    credsSaving.value = false;
+  }
+}
+
+async function clearStravaCreds() {
+  if (!confirm("Clear stored Strava OAuth credentials? Existing connection will stop working.")) return;
+  try {
+    await api.clearStravaConfig();
     await loadStrava();
   } catch (e) {
     stravaError.value = e instanceof Error ? e.message : String(e);
@@ -137,35 +182,76 @@ onMounted(loadStrava);
       <h2>Strava</h2>
       <div v-if="stravaError" class="err">{{ stravaError }}</div>
 
-      <template v-if="strava">
-        <p v-if="!strava.configured" class="warn">
-          Backend is missing <code>STRAVA_CLIENT_ID</code> / <code>STRAVA_CLIENT_SECRET</code>.
-          Add them to <code>.env</code> on the CT and restart the backend.
-        </p>
-
-        <template v-else-if="strava.connected">
-          <p class="ok-text">
-            ✓ Connected as <strong>{{ strava.athlete_name ?? strava.athlete_id }}</strong>
-            <span class="muted"> · scope: {{ strava.scope }}</span><br/>
-            <span class="muted">Last sync: {{ fmt(strava.last_sync_at) }}</span>
+      <template v-if="strava && stravaConfig">
+        <!-- OAuth credentials block -->
+        <div class="block">
+          <p v-if="!stravaConfig.configured" class="hint">
+            Create an app at
+            <a href="https://www.strava.com/settings/api" target="_blank" rel="noreferrer">strava.com/settings/api</a>
+            (Authorization Callback Domain = host of this dashboard, no port). Then paste the Client ID + Client Secret.
           </p>
-          <div class="actions">
-            <button class="primary" :disabled="stravaSyncing" @click="syncStrava(90)">
-              {{ stravaSyncing ? "Syncing…" : "Sync last 90 days" }}
-            </button>
-            <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(30)">Sync 30d</button>
-            <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(365)">Sync 1y</button>
-            <button class="ghost danger" @click="disconnectStrava">Disconnect</button>
-          </div>
-          <div v-if="stravaSyncResult" class="hint">{{ stravaSyncResult }}</div>
-        </template>
+          <p v-else class="muted">
+            OAuth app credentials: <code>{{ stravaConfig.client_id_masked }}</code>
+            <span class="muted"> · source: {{ stravaConfig.source }}</span><br/>
+            <span class="muted">Callback: {{ stravaConfig.callback_url }}</span>
+          </p>
 
-        <template v-else>
-          <p class="hint">Pull rides, runs, and other activities directly from Strava (full GPS, splits, suffer score, etc.).</p>
-          <div class="actions">
-            <button class="primary" @click="connectStrava">Connect Strava</button>
+          <div v-if="!stravaConfig.configured || editingCreds" class="form">
+            <label>
+              <span>Client ID</span>
+              <input v-model="cidInput" placeholder="e.g. 123456" autocomplete="off"/>
+            </label>
+            <label>
+              <span>Client Secret</span>
+              <input v-model="secretInput" type="password" placeholder="40-char hex" autocomplete="off"/>
+            </label>
+            <label>
+              <span>Callback URL <em class="opt">(optional)</em></span>
+              <input v-model="callbackInput" placeholder="http://your-server:8080/auth/strava/callback" autocomplete="off"/>
+            </label>
+            <div class="actions">
+              <button class="primary" :disabled="credsSaving" @click="saveStravaCreds">
+                {{ credsSaving ? "Saving…" : "Save credentials" }}
+              </button>
+              <button v-if="editingCreds" class="ghost" @click="editingCreds = false">Cancel</button>
+            </div>
+            <div v-if="credsResult" class="hint">{{ credsResult }}</div>
           </div>
-        </template>
+
+          <div v-else class="actions">
+            <button class="ghost" @click="editingCreds = true">Edit credentials</button>
+            <button v-if="stravaConfig.source === 'db'" class="ghost danger" @click="clearStravaCreds">
+              Clear stored credentials
+            </button>
+          </div>
+        </div>
+
+        <!-- Connection block (only meaningful once OAuth app is configured) -->
+        <div v-if="stravaConfig.configured" class="block">
+          <template v-if="strava.connected">
+            <p class="ok-text">
+              ✓ Connected as <strong>{{ strava.athlete_name ?? strava.athlete_id }}</strong>
+              <span class="muted"> · scope: {{ strava.scope }}</span><br/>
+              <span class="muted">Last sync: {{ fmt(strava.last_sync_at) }}</span>
+            </p>
+            <div class="actions">
+              <button class="primary" :disabled="stravaSyncing" @click="syncStrava(90)">
+                {{ stravaSyncing ? "Syncing…" : "Sync last 90 days" }}
+              </button>
+              <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(30)">Sync 30d</button>
+              <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(365)">Sync 1y</button>
+              <button class="ghost danger" @click="disconnectStrava">Disconnect</button>
+            </div>
+            <div v-if="stravaSyncResult" class="hint">{{ stravaSyncResult }}</div>
+          </template>
+
+          <template v-else>
+            <p class="hint">Authorize myvitals to read your activities (rides, runs, etc.).</p>
+            <div class="actions">
+              <button class="primary" @click="connectStrava">Connect Strava</button>
+            </div>
+          </template>
+        </div>
       </template>
 
       <div v-else-if="!stravaError" class="hint">Loading…</div>
@@ -178,7 +264,11 @@ onMounted(loadStrava);
 h1 { margin: 0 0 0.4rem; }
 h2 { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin: 1.5rem 0 0.5rem; }
 section { margin-bottom: 2rem; }
+.block { margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #1e293b; }
+.block:last-child { border-bottom: none; padding-bottom: 0; }
+.form { margin: 0.6rem 0; }
 .hint { color: #94a3b8; font-size: 0.9rem; margin: 0 0 1.2rem; }
+.hint a { color: #38bdf8; }
 label { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 1rem; font-size: 0.85rem; color: #94a3b8; }
 .opt { color: #64748b; font-style: italic; font-weight: normal; font-size: 0.8rem; }
 input { background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 0.6rem; font-size: 1rem; font-family: inherit; }
@@ -191,9 +281,8 @@ button { border-radius: 6px; padding: 0.55rem 1rem; cursor: pointer; font-weight
 .danger { color: #ef4444; }
 .ok { color: #22c55e; padding: 0.6rem 0.8rem; background: rgba(34, 197, 94, 0.1); border-left: 3px solid #22c55e; margin-top: 0.6rem; }
 .ok-text { color: #22c55e; }
-.warn { color: #eab308; padding: 0.6rem 0.8rem; background: rgba(234, 179, 8, 0.1); border-left: 3px solid #eab308; }
 .err { color: #ef4444; padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; margin-top: 0.6rem; }
 .err small { color: #94a3b8; font-family: monospace; }
 .muted { color: #94a3b8; font-size: 0.85rem; }
-code { background: #0f172a; padding: 0.1rem 0.3rem; border-radius: 3px; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+code { background: #0f172a; padding: 0.1rem 0.3rem; border-radius: 3px; font-family: ui-monospace, monospace; font-size: 0.85rem; color: #38bdf8; }
 </style>

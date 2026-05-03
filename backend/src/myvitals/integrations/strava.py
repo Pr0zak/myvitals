@@ -1,9 +1,12 @@
 """Strava OAuth client + activity ingest.
 
-Single-user; tokens live in the strava_credentials table (id=1). Refreshes
-the access_token on demand if it's within 5 minutes of expiry.
+Single-user; OAuth tokens live in `strava_credentials` (id=1), and the app's
+client_id/client_secret/callback_url live in `strava_app_config` (id=1).
+The DB row wins over STRAVA_* env vars so the dashboard can edit credentials
+without an SSH-and-restart cycle.
 """
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -26,17 +29,76 @@ _API_BASE = "https://www.strava.com/api/v3"
 _SCOPE = "read,activity:read_all"
 
 
-def is_configured() -> bool:
-    return bool(settings.strava_client_id and settings.strava_client_secret)
+@dataclass
+class AppCreds:
+    client_id: str
+    client_secret: str
+    callback_url: str
+    source: str  # "db" | "env"
 
 
-def authorize_url(state: str = "myvitals") -> str:
-    if not is_configured():
-        raise RuntimeError("STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET not set")
+async def get_app_credentials(db: AsyncSession) -> AppCreds | None:
+    """Returns the OAuth app credentials. DB row beats env vars."""
+    result = await db.execute(
+        select(models.StravaAppConfig).where(models.StravaAppConfig.id == 1)
+    )
+    row = result.scalar_one_or_none()
+    if row is not None:
+        return AppCreds(
+            client_id=row.client_id,
+            client_secret=row.client_secret,
+            callback_url=row.callback_url or settings.strava_callback_url,
+            source="db",
+        )
+    if settings.strava_client_id and settings.strava_client_secret:
+        return AppCreds(
+            client_id=settings.strava_client_id,
+            client_secret=settings.strava_client_secret,
+            callback_url=settings.strava_callback_url,
+            source="env",
+        )
+    return None
+
+
+async def upsert_app_credentials(
+    db: AsyncSession,
+    client_id: str,
+    client_secret: str,
+    callback_url: str | None,
+) -> None:
+    stmt = insert(models.StravaAppConfig).values(
+        id=1,
+        client_id=client_id.strip(),
+        client_secret=client_secret.strip(),
+        callback_url=(callback_url or "").strip() or None,
+        updated_at=datetime.now(timezone.utc),
+    ).on_conflict_do_update(
+        index_elements=["id"],
+        set_={
+            "client_id": client_id.strip(),
+            "client_secret": client_secret.strip(),
+            "callback_url": (callback_url or "").strip() or None,
+            "updated_at": datetime.now(timezone.utc),
+        },
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
+async def clear_app_credentials(db: AsyncSession) -> None:
+    row = (await db.execute(
+        select(models.StravaAppConfig).where(models.StravaAppConfig.id == 1)
+    )).scalar_one_or_none()
+    if row is not None:
+        await db.delete(row)
+        await db.commit()
+
+
+def authorize_url(creds: AppCreds, state: str = "myvitals") -> str:
     params = {
-        "client_id": settings.strava_client_id,
+        "client_id": creds.client_id,
         "response_type": "code",
-        "redirect_uri": settings.strava_callback_url,
+        "redirect_uri": creds.callback_url,
         "scope": _SCOPE,
         "approval_prompt": "auto",
         "state": state,
@@ -45,11 +107,11 @@ def authorize_url(state: str = "myvitals") -> str:
     return f"{_AUTHORIZE_URL}?{qs}"
 
 
-async def exchange_code(code: str) -> dict[str, Any]:
+async def exchange_code(creds: AppCreds, code: str) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(_TOKEN_URL, data={
-            "client_id": settings.strava_client_id,
-            "client_secret": settings.strava_client_secret,
+            "client_id": creds.client_id,
+            "client_secret": creds.client_secret,
             "code": code,
             "grant_type": "authorization_code",
         })
@@ -57,11 +119,11 @@ async def exchange_code(code: str) -> dict[str, Any]:
         return r.json()
 
 
-async def refresh_access_token(refresh_token: str) -> dict[str, Any]:
+async def _refresh_access_token(creds: AppCreds, refresh_token: str) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(_TOKEN_URL, data={
-            "client_id": settings.strava_client_id,
-            "client_secret": settings.strava_client_secret,
+            "client_id": creds.client_id,
+            "client_secret": creds.client_secret,
             "refresh_token": refresh_token,
             "grant_type": "refresh_token",
         })
@@ -106,29 +168,33 @@ async def get_credentials(db: AsyncSession) -> models.StravaCredentials | None:
     return result.scalar_one_or_none()
 
 
-async def _ensure_fresh_token(db: AsyncSession, creds: models.StravaCredentials) -> str:
+async def _ensure_fresh_token(
+    db: AsyncSession,
+    app_creds: AppCreds,
+    user_creds: models.StravaCredentials,
+) -> str:
     """Return a usable access token, refreshing if it expires within 5 min."""
     now = datetime.now(timezone.utc)
-    if creds.expires_at - now > timedelta(minutes=5):
-        return creds.access_token
+    if user_creds.expires_at - now > timedelta(minutes=5):
+        return user_creds.access_token
 
-    log.info("Refreshing Strava access token (expires at %s)", creds.expires_at)
-    payload = await refresh_access_token(creds.refresh_token)
-    creds.access_token = payload["access_token"]
-    creds.refresh_token = payload["refresh_token"]
-    creds.expires_at = datetime.fromtimestamp(payload["expires_at"], tz=timezone.utc)
+    log.info("Refreshing Strava access token (expires at %s)", user_creds.expires_at)
+    payload = await _refresh_access_token(app_creds, user_creds.refresh_token)
+    user_creds.access_token = payload["access_token"]
+    user_creds.refresh_token = payload["refresh_token"]
+    user_creds.expires_at = datetime.fromtimestamp(payload["expires_at"], tz=timezone.utc)
     await db.commit()
-    return creds.access_token
+    return user_creds.access_token
 
 
 async def fetch_activities(
     db: AsyncSession,
-    creds: models.StravaCredentials,
+    app_creds: AppCreds,
+    user_creds: models.StravaCredentials,
     after_ts: int | None = None,
     per_page: int = 100,
 ) -> list[dict[str, Any]]:
-    """Pull all activities after [after_ts] (epoch seconds), paginating."""
-    token = await _ensure_fresh_token(db, creds)
+    token = await _ensure_fresh_token(db, app_creds, user_creds)
     headers = {"Authorization": f"Bearer {token}"}
 
     activities: list[dict[str, Any]] = []
@@ -155,7 +221,6 @@ async def fetch_activities(
 
 
 def _activity_row_values(act: dict[str, Any]) -> dict[str, Any]:
-    """Map a Strava activity payload to our `activities` table columns."""
     start = datetime.fromisoformat(act["start_date"].replace("Z", "+00:00"))
     map_data = act.get("map") or {}
     return {
@@ -195,21 +260,23 @@ async def upsert_activities(db: AsyncSession, payloads: list[dict[str, Any]]) ->
 
 async def sync_recent(after_ts: int | None = None) -> int:
     """Pull activities since [after_ts] (or since last_sync_at) and upsert."""
-    if not is_configured():
-        return 0
     async with SessionLocal() as db:
-        creds = await get_credentials(db)
-        if creds is None:
+        app_creds = await get_app_credentials(db)
+        if app_creds is None:
+            return 0
+
+        user_creds = await get_credentials(db)
+        if user_creds is None:
             return 0
 
         cutoff_ts = after_ts
-        if cutoff_ts is None and creds.last_sync_at is not None:
-            cutoff_ts = int(creds.last_sync_at.timestamp())
+        if cutoff_ts is None and user_creds.last_sync_at is not None:
+            cutoff_ts = int(user_creds.last_sync_at.timestamp())
 
-        activities = await fetch_activities(db, creds, after_ts=cutoff_ts)
+        activities = await fetch_activities(db, app_creds, user_creds, after_ts=cutoff_ts)
         n = await upsert_activities(db, activities)
 
-        creds.last_sync_at = datetime.now(timezone.utc)
+        user_creds.last_sync_at = datetime.now(timezone.utc)
         await db.commit()
 
         if n:

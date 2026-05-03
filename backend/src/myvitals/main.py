@@ -35,15 +35,16 @@ async def lifespan(app: FastAPI):
             next_run_time=None,  # let interval kick in naturally
         )
         log.info("HA poll scheduled every 5 min for %d entities", len(settings.ha_entity_list))
-    if strava_int.is_configured():
-        scheduler.add_job(
-            strava_int.sync_recent,
-            trigger="interval",
-            hours=6,
-            id="strava_sync",
-            replace_existing=True,
-        )
-        log.info("Strava poll scheduled every 6h")
+    # Always schedule — sync_recent is a no-op if credentials aren't set yet,
+    # so the user can configure Strava in the dashboard without restarting.
+    scheduler.add_job(
+        strava_int.sync_recent,
+        trigger="interval",
+        hours=6,
+        id="strava_sync",
+        replace_existing=True,
+    )
+    log.info("Strava poll scheduled every 6h (no-op until configured)")
     scheduler.start()
     log.info("scheduler started; daily_summary at 03:00 %s", settings.tz)
 

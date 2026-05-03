@@ -17,11 +17,25 @@ router = APIRouter()
 class StravaStatus(BaseModel):
     connected: bool
     configured: bool
+    config_source: str | None = None  # "db" | "env" | None
     athlete_id: int | None = None
     athlete_name: str | None = None
     expires_at: datetime | None = None
     last_sync_at: datetime | None = None
     scope: str | None = None
+
+
+class StravaAppConfigOut(BaseModel):
+    configured: bool
+    source: str | None = None  # "db" | "env" | None
+    client_id_masked: str | None = None
+    callback_url: str | None = None
+
+
+class StravaAppConfigIn(BaseModel):
+    client_id: str
+    client_secret: str
+    callback_url: str | None = None
 
 
 class ActivityOut(BaseModel):
@@ -42,14 +56,54 @@ class ActivityOut(BaseModel):
     polyline: str | None
 
 
+def _mask(s: str) -> str:
+    if not s:
+        return ""
+    return f"…{s[-4:]}" if len(s) > 4 else s
+
+
+# --- App config (dashboard-editable) ---
+
+@router.get("/strava/config", response_model=StravaAppConfigOut, dependencies=[Depends(require_query)])
+async def get_strava_config(db: AsyncSession = Depends(get_session)) -> StravaAppConfigOut:
+    creds = await strava.get_app_credentials(db)
+    if creds is None:
+        return StravaAppConfigOut(configured=False)
+    return StravaAppConfigOut(
+        configured=True,
+        source=creds.source,
+        client_id_masked=_mask(creds.client_id),
+        callback_url=creds.callback_url,
+    )
+
+
+@router.post("/strava/config", dependencies=[Depends(require_query)])
+async def save_strava_config(
+    body: StravaAppConfigIn,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, str]:
+    if not body.client_id.strip() or not body.client_secret.strip():
+        raise HTTPException(400, "client_id and client_secret are required")
+    await strava.upsert_app_credentials(
+        db, body.client_id, body.client_secret, body.callback_url
+    )
+    return {"status": "saved"}
+
+
+@router.delete("/strava/config", dependencies=[Depends(require_query)])
+async def clear_strava_config(db: AsyncSession = Depends(get_session)) -> dict[str, str]:
+    await strava.clear_app_credentials(db)
+    return {"status": "cleared"}
+
+
 # --- OAuth ---
 
 @router.get("/auth/strava/login")
-async def strava_login() -> RedirectResponse:
-    """Bounce the browser to Strava's authorize page."""
-    if not strava.is_configured():
-        raise HTTPException(503, "Strava not configured (set STRAVA_CLIENT_ID / SECRET)")
-    return RedirectResponse(url=strava.authorize_url(), status_code=302)
+async def strava_login(db: AsyncSession = Depends(get_session)) -> RedirectResponse:
+    creds = await strava.get_app_credentials(db)
+    if creds is None:
+        raise HTTPException(503, "Strava not configured. Save credentials at /settings first.")
+    return RedirectResponse(url=strava.authorize_url(creds), status_code=302)
 
 
 @router.get("/auth/strava/callback")
@@ -58,12 +112,13 @@ async def strava_callback(
     error: str | None = Query(None),
     db: AsyncSession = Depends(get_session),
 ) -> RedirectResponse:
-    """Strava redirects here after the user approves; exchange code for tokens."""
     if error or not code:
         raise HTTPException(400, f"Strava callback error: {error or 'no code'}")
-    payload = await strava.exchange_code(code)
+    creds = await strava.get_app_credentials(db)
+    if creds is None:
+        raise HTTPException(503, "Strava not configured")
+    payload = await strava.exchange_code(creds, code)
     await strava.store_initial_credentials(db, payload)
-    # Bounce back to the dashboard's settings page.
     return RedirectResponse(url="/settings", status_code=302)
 
 
@@ -71,15 +126,17 @@ async def strava_callback(
 
 @router.get("/strava/status", response_model=StravaStatus, dependencies=[Depends(require_query)])
 async def strava_status(db: AsyncSession = Depends(get_session)) -> StravaStatus:
-    creds = await strava.get_credentials(db)
+    app_creds = await strava.get_app_credentials(db)
+    user_creds = await strava.get_credentials(db)
     return StravaStatus(
-        configured=strava.is_configured(),
-        connected=creds is not None,
-        athlete_id=creds.athlete_id if creds else None,
-        athlete_name=creds.athlete_name if creds else None,
-        expires_at=creds.expires_at if creds else None,
-        last_sync_at=creds.last_sync_at if creds else None,
-        scope=creds.scope if creds else None,
+        configured=app_creds is not None,
+        config_source=app_creds.source if app_creds else None,
+        connected=user_creds is not None,
+        athlete_id=user_creds.athlete_id if user_creds else None,
+        athlete_name=user_creds.athlete_name if user_creds else None,
+        expires_at=user_creds.expires_at if user_creds else None,
+        last_sync_at=user_creds.last_sync_at if user_creds else None,
+        scope=user_creds.scope if user_creds else None,
     )
 
 
@@ -87,7 +144,6 @@ async def strava_status(db: AsyncSession = Depends(get_session)) -> StravaStatus
 async def strava_sync(
     days: int = Query(90, ge=1, le=3650),
 ) -> dict[str, int]:
-    """Force-pull activities from `days` ago. Default 90."""
     after_ts = int(datetime.now(timezone.utc).timestamp()) - days * 86400
     count = await strava.sync_recent(after_ts=after_ts)
     return {"upserted": count, "days": days}
@@ -95,10 +151,9 @@ async def strava_sync(
 
 @router.delete("/strava", dependencies=[Depends(require_query)])
 async def strava_disconnect(db: AsyncSession = Depends(get_session)) -> dict[str, str]:
-    """Wipe stored Strava credentials. Activities stay."""
-    creds = await strava.get_credentials(db)
-    if creds is not None:
-        await db.delete(creds)
+    user_creds = await strava.get_credentials(db)
+    if user_creds is not None:
+        await db.delete(user_creds)
         await db.commit()
     return {"status": "disconnected"}
 

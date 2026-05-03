@@ -72,11 +72,19 @@ export interface AppLog {
 export interface StravaStatus {
   connected: boolean;
   configured: boolean;
+  config_source: "db" | "env" | null;
   athlete_id: number | null;
   athlete_name: string | null;
   expires_at: string | null;
   last_sync_at: string | null;
   scope: string | null;
+}
+
+export interface StravaAppConfigStatus {
+  configured: boolean;
+  source: "db" | "env" | null;
+  client_id_masked: string | null;
+  callback_url: string | null;
 }
 
 export interface Activity {

@@ -140,6 +140,17 @@ class StravaCredentials(Base):
     connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class StravaAppConfig(Base):
+    """Dashboard-editable Strava OAuth credentials. Single row (id=1) wins
+    over the STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET env vars."""
+    __tablename__ = "strava_app_config"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    client_id: Mapped[str] = mapped_column(String(64))
+    client_secret: Mapped[str] = mapped_column(String(255))
+    callback_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class Activity(Base):
     """Workouts pulled from Strava (and later Garmin, etc.)."""
     __tablename__ = "activities"

@@ -110,6 +110,21 @@ export const api = {
     return data;
   },
 
+  async stravaConfig(): Promise<import("./types").StravaAppConfigStatus> {
+    const { data } = await http.get<import("./types").StravaAppConfigStatus>("/strava/config");
+    return data;
+  },
+
+  async saveStravaConfig(body: { client_id: string; client_secret: string; callback_url?: string | null }): Promise<{ status: string }> {
+    const { data } = await http.post<{ status: string }>("/strava/config", body);
+    return data;
+  },
+
+  async clearStravaConfig(): Promise<{ status: string }> {
+    const { data } = await http.delete<{ status: string }>("/strava/config");
+    return data;
+  },
+
   async stravaSync(days = 90): Promise<{ upserted: number; days: number }> {
     const { data } = await http.post<{ upserted: number; days: number }>("/strava/sync", null, { params: { days } });
     return data;

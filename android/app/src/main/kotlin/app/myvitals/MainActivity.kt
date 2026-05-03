@@ -3,7 +3,6 @@ package app.myvitals
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
 import androidx.compose.material3.MaterialTheme
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -30,7 +29,8 @@ class MainActivity : ComponentActivity() {
                     isHealthConnectAvailable = gateway.isAvailable(),
                     hasPermissions = { gateway.hasAllPermissions() },
                     onRequestPermissions = {
-                        permissionLauncher.launch(gateway.requiredPermissions.toTypedArray())
+                        // Health Connect's contract takes the Set<String> directly.
+                        permissionLauncher.launch(gateway.requiredPermissions)
                     },
                     onSyncNow = {
                         WorkManager.getInstance(applicationContext)

@@ -76,7 +76,8 @@ class SyncWorker(
     private suspend fun flushBuffer(api: BackendApi): Boolean {
         val pending = db.buffered().oldest()
         for (b in pending) {
-            val batch = batchAdapter.fromJson(b.json) ?: run {
+            val batch = batchAdapter.fromJson(b.json)
+            if (batch == null) {
                 db.buffered().delete(b.id)
                 continue
             }

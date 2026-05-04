@@ -44,8 +44,22 @@ def _parse_fitbit_ts(s: str) -> datetime | None:
         return None
 
 
-def _parse_iso_ts(s: str | None) -> datetime | None:
-    if not s:
+def _parse_iso_ts(s: Any) -> datetime | None:
+    """Best-effort parse of a Garmin/Fitbit timestamp.
+
+    Accepts str (ISO), int/float (epoch seconds or ms — heuristic on magnitude),
+    or None. Returns None on anything we can't parse.
+    """
+    if s is None:
+        return None
+    if isinstance(s, (int, float)):
+        # ms vs s heuristic: anything past year 5000 in seconds (~1e11) is ms
+        v = s / 1000.0 if s > 1e11 else float(s)
+        try:
+            return datetime.fromtimestamp(v, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    if not isinstance(s, str) or not s:
         return None
     try:
         s2 = s.replace("Z", "+00:00")
@@ -320,7 +334,8 @@ def parse_garmin_zip(zf: zipfile.ZipFile) -> Iterator[tuple[str, list[dict[str, 
             files_seen["body_metrics"] = files_seen.get("body_metrics", 0) + 1
             yield from _parse_garmin_weight(zf, name)
 
-        elif "wellness" in low and low.endswith(".json") and "daily" in low:
+        elif (("wellness" in low and "daily" in low) or "udsfile" in low) \
+                and low.endswith(".json"):
             files_seen["steps"] = files_seen.get("steps", 0) + 1
             yield from _parse_garmin_steps(zf, name)
 
@@ -379,19 +394,38 @@ def _parse_garmin_sleep(zf, name) -> Iterator[tuple[str, list[dict[str, Any]]]]:
     for sess in sessions:
         if not isinstance(sess, dict):
             continue
+        # New shape (export 2024+): per-stage events under sleepLevels.
         levels = sess.get("sleepLevels") or sess.get("sleepStages") or []
-        for lv in levels:
-            ts = _parse_iso_ts(lv.get("startGMT") or lv.get("start"))
-            end = _parse_iso_ts(lv.get("endGMT") or lv.get("end"))
-            stage = str(lv.get("activityLevel") or lv.get("level") or "").lower()
-            if not ts:
-                continue
-            secs = int((end - ts).total_seconds()) if end else int(lv.get("durationInSeconds") or 0)
-            if secs > 0 and stage:
-                batch.append({"time": ts, "stage": stage, "duration_s": secs})
-                if len(batch) >= MAX_BATCH:
-                    yield ("sleep_stages", batch)
-                    batch = []
+        if levels:
+            for lv in levels:
+                ts = _parse_iso_ts(lv.get("startGMT") or lv.get("start"))
+                end = _parse_iso_ts(lv.get("endGMT") or lv.get("end"))
+                stage = str(lv.get("activityLevel") or lv.get("level") or "").lower()
+                if not ts:
+                    continue
+                secs = int((end - ts).total_seconds()) if end else int(lv.get("durationInSeconds") or 0)
+                if secs > 0 and stage:
+                    batch.append({"time": ts, "stage": stage, "duration_s": secs})
+            continue
+
+        # Legacy shape: nightly aggregates with deep/light/rem/awake seconds.
+        # No per-stage timing — emit each non-zero stage at the session start.
+        start = _parse_iso_ts(sess.get("sleepStartTimestampGMT"))
+        if not start:
+            continue
+        for stage_key, stage_name in (
+            ("deepSleepSeconds", "deep"),
+            ("lightSleepSeconds", "light"),
+            ("remSleepSeconds", "rem"),
+            ("awakeSleepSeconds", "awake"),
+            ("unmeasurableSeconds", "unmeasurable"),
+        ):
+            secs = sess.get(stage_key)
+            if isinstance(secs, (int, float)) and secs > 0:
+                batch.append({"time": start, "stage": stage_name, "duration_s": int(secs)})
+        if len(batch) >= MAX_BATCH:
+            yield ("sleep_stages", batch)
+            batch = []
     yield from _emit("sleep_stages", batch)
 
 
@@ -433,33 +467,52 @@ def _parse_garmin_weight(zf, name) -> Iterator[tuple[str, list[dict[str, Any]]]]
     for ent in entries:
         if not isinstance(ent, dict):
             continue
-        rows = ent.get("dateWeightList") or ent.get("weights") or [ent]
-        for r in rows:
-            if not isinstance(r, dict):
-                continue
-            ts = _parse_iso_ts(
-                r.get("calendarDate") or r.get("timestampGmt")
-                or r.get("date") or r.get("samplePk")
-            )
-            w_grams = r.get("weight") if isinstance(r.get("weight"), (int, float)) and r.get("weight", 0) > 1000 else None
-            w_kg = (w_grams / 1000.0) if w_grams else (r.get("weight_kg") or r.get("bodyWeight"))
-            if ts and w_kg:
-                batch.append({
-                    "time": ts,
-                    "weight_kg": float(w_kg),
+        # userBioMetrics.json shape: each entry is {"metaData": {"calendarDate": ...},
+        # "weight": {"weight": <grams>, "sourceType": ...}, ...}. Older exports use
+        # dateWeightList / weights arrays. Normalise to a list of (ts, weight_g, ...)
+        # candidates.
+        candidates: list[dict[str, Any]] = []
+        if "metaData" in ent and "weight" in ent:
+            md = ent.get("metaData") or {}
+            wd = ent.get("weight") or {}
+            cand = {
+                "ts": md.get("calendarDate"),
+                "weight_g": wd.get("weight") if isinstance(wd, dict) else None,
+                "body_fat_pct": (ent.get("bodyFat") or {}).get("bodyFat") if isinstance(ent.get("bodyFat"), dict) else ent.get("bodyFat"),
+                "bmi": (ent.get("bmi") or {}).get("bmi") if isinstance(ent.get("bmi"), dict) else ent.get("bmi"),
+                "muscle_g": (ent.get("muscleMass") or {}).get("muscleMass") if isinstance(ent.get("muscleMass"), dict) else None,
+            }
+            candidates.append(cand)
+        else:
+            rows = ent.get("dateWeightList") or ent.get("weights") or [ent]
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                candidates.append({
+                    "ts": r.get("calendarDate") or r.get("timestampGmt") or r.get("date"),
+                    "weight_g": r.get("weight") if isinstance(r.get("weight"), (int, float)) and r.get("weight", 0) > 1000 else None,
+                    "weight_kg": r.get("weight_kg") or r.get("bodyWeight"),
                     "body_fat_pct": r.get("bodyFat") or r.get("body_fat"),
                     "bmi": r.get("bmi"),
-                    "lean_mass_kg": (
-                        (r.get("muscleMass") / 1000.0)
-                        if isinstance(r.get("muscleMass"), (int, float))
-                        and r.get("muscleMass", 0) > 100
-                        else r.get("muscleMass")
-                    ),
-                    "source": "garmin",
+                    "muscle_g": r.get("muscleMass") if isinstance(r.get("muscleMass"), (int, float)) and r.get("muscleMass", 0) > 100 else None,
                 })
-                if len(batch) >= MAX_BATCH:
-                    yield ("body_metrics", batch)
-                    batch = []
+
+        for c in candidates:
+            ts = _parse_iso_ts(c.get("ts"))
+            w_kg = (c["weight_g"] / 1000.0) if c.get("weight_g") else c.get("weight_kg")
+            if not ts or not w_kg:
+                continue
+            batch.append({
+                "time": ts,
+                "weight_kg": float(w_kg),
+                "body_fat_pct": c.get("body_fat_pct"),
+                "bmi": c.get("bmi"),
+                "lean_mass_kg": (c["muscle_g"] / 1000.0) if c.get("muscle_g") else None,
+                "source": "garmin",
+            })
+            if len(batch) >= MAX_BATCH:
+                yield ("body_metrics", batch)
+                batch = []
     yield from _emit("body_metrics", batch)
 
 

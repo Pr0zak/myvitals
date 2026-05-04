@@ -24,7 +24,7 @@ async def run_analytics(target_date: date | None = Query(None)) -> dict[str, str
 
 
 @router.post("/analytics/backfill")
-async def backfill_analytics(days: int = Query(7, ge=1, le=365)) -> dict[str, int]:
+async def backfill_analytics(days: int = Query(7, ge=1, le=3650)) -> dict[str, int]:
     """Recompute daily_summary for the past `days` days. Useful when raw data
     arrives later than the original nightly job ran (e.g. backfilled from HC)."""
     today = datetime.now(timezone.utc).date()
@@ -45,9 +45,21 @@ async def backfill_analytics(days: int = Query(7, ge=1, le=365)) -> dict[str, in
 SUPPORTED_METRICS = [
     "resting_hr", "hrv_avg", "recovery_score",
     "sleep_duration_s", "sleep_score", "steps_total",
+    "weight_kg", "body_fat_pct",
+    "bp_systolic_avg", "bp_diastolic_avg",
+    "skin_temp_delta_avg",
     "activity_duration_s", "alcohol_count", "caffeine_mg",
     "mood_score",
 ]
+
+# Metrics that map directly to a column in daily_summary.
+_DAILY_SUMMARY_METRICS = {
+    "resting_hr", "hrv_avg", "recovery_score",
+    "sleep_duration_s", "sleep_score", "steps_total",
+    "weight_kg", "body_fat_pct",
+    "bp_systolic_avg", "bp_diastolic_avg",
+    "skin_temp_delta_avg",
+}
 
 
 class CorrelationPoint(BaseModel):
@@ -128,8 +140,7 @@ async def _annotation_per_day(
 async def _series_for_metric(
     db: AsyncSession, metric: str, since: date, until: date,
 ) -> dict[date, float]:
-    if metric in {"resting_hr", "hrv_avg", "recovery_score",
-                  "sleep_duration_s", "sleep_score", "steps_total"}:
+    if metric in _DAILY_SUMMARY_METRICS:
         return await _daily_summary_metric(db, metric, since, until)
     if metric == "activity_duration_s":
         return await _activity_duration_per_day(db, since, until)

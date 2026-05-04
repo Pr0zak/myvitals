@@ -123,6 +123,11 @@ class DailySummary(Base):
     sleep_duration_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sleep_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     steps_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    body_fat_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bp_systolic_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bp_diastolic_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    skin_temp_delta_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

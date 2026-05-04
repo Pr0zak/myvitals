@@ -6,7 +6,8 @@ import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
 import { chartTheme } from "@/theme";
 
-const data = ref<TodaySummary[]>([]);
+type SummaryWithWeight = TodaySummary & { weight_kg?: number | null };
+const data = ref<SummaryWithWeight[]>([]);
 const loading = ref(true);
 
 async function load() {
@@ -14,17 +15,31 @@ async function load() {
   // 9 weeks = 63 days
   const since = new Date();
   since.setDate(since.getDate() - 63);
-  data.value = await api.summaryRange(since);
+  const [summaries, weight] = await Promise.all([
+    api.summaryRange(since),
+    api.weight({ since }).catch(() => ({ points: [] as { time: string; weight_kg: number | null }[] })),
+  ]);
+  // Last weight reading per local YYYY-MM-DD wins (daily weigh-in).
+  const weightByDate = new Map<string, number>();
+  for (const p of weight.points) {
+    if (p.weight_kg == null) continue;
+    const d = new Date(p.time).toISOString().slice(0, 10);
+    weightByDate.set(d, p.weight_kg);
+  }
+  data.value = summaries.map((s) => ({
+    ...s,
+    weight_kg: weightByDate.get(s.date) ?? null,
+  }));
   loading.value = false;
 }
 onMounted(load);
 
-function metricVal(d: TodaySummary, m: string): number | null {
+function metricVal(d: SummaryWithWeight, m: string): number | null {
   if (m === "sleep_hours") return d.sleep_duration_s ? d.sleep_duration_s / 3600 : null;
-  return (d as any)[m];
+  return (d as any)[m] ?? null;
 }
 
-function average(rows: TodaySummary[], metric: string): number | null {
+function average(rows: SummaryWithWeight[], metric: string): number | null {
   const vals = rows.map((r) => metricVal(r, metric)).filter((v): v is number => v !== null);
   if (vals.length === 0) return null;
   return vals.reduce((a, b) => a + b, 0) / vals.length;
@@ -55,6 +70,7 @@ const METRICS = [
   { key: "sleep_hours", label: "Sleep", suffix: "h" },
   { key: "sleep_score", label: "Sleep score", suffix: "" },
   { key: "steps_total", label: "Steps", suffix: "" },
+  { key: "weight_kg", label: "Weight", suffix: "kg" },
 ];
 
 const rows = computed(() => {
@@ -71,6 +87,7 @@ function fmt(v: number | null, suffix: string): string {
   if (v === null) return "—";
   if (suffix === "") return v.toFixed(1);
   if (suffix === "h") return v.toFixed(1) + " h";
+  if (suffix === "kg") return v.toFixed(1) + " kg";
   return Math.round(v).toString() + " " + suffix;
 }
 

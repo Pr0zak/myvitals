@@ -38,7 +38,40 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
         )
         steps_total = int(steps_result.scalar() or 0) or None
 
-        stmt = insert(models.DailySummary).values(
+        # Body metrics — last reading on this day wins (daily weigh-in pattern).
+        body_row = await db.execute(
+            select(models.BodyMetric.weight_kg, models.BodyMetric.body_fat_pct)
+            .where(models.BodyMetric.time >= day_start)
+            .where(models.BodyMetric.time <= day_end)
+            .order_by(models.BodyMetric.time.desc())
+            .limit(1)
+        )
+        body = body_row.first()
+        weight_kg = body[0] if body else None
+        body_fat_pct = body[1] if body else None
+
+        # Blood pressure — average of all readings in the day (often only 1).
+        bp_row = await db.execute(
+            select(
+                func.avg(models.BloodPressure.systolic),
+                func.avg(models.BloodPressure.diastolic),
+            )
+            .where(models.BloodPressure.time >= day_start)
+            .where(models.BloodPressure.time <= day_end)
+        )
+        bp_sys, bp_dia = bp_row.first() or (None, None)
+        bp_systolic_avg = float(bp_sys) if bp_sys is not None else None
+        bp_diastolic_avg = float(bp_dia) if bp_dia is not None else None
+
+        # Skin-temp delta — daily average (overnight wrist sensor reading).
+        temp_val = (await db.execute(
+            select(func.avg(models.SkinTemp.celsius_delta))
+            .where(models.SkinTemp.time >= day_start)
+            .where(models.SkinTemp.time <= day_end)
+        )).scalar()
+        skin_temp_delta_avg = float(temp_val) if temp_val is not None else None
+
+        values = dict(
             date=target,
             resting_hr=rhr,
             hrv_avg=hrv,
@@ -46,16 +79,15 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
             sleep_duration_s=sleep_duration,
             sleep_score=sleep_pts,
             steps_total=steps_total,
-        ).on_conflict_do_update(
+            weight_kg=weight_kg,
+            body_fat_pct=body_fat_pct,
+            bp_systolic_avg=bp_systolic_avg,
+            bp_diastolic_avg=bp_diastolic_avg,
+            skin_temp_delta_avg=skin_temp_delta_avg,
+        )
+        stmt = insert(models.DailySummary).values(**values).on_conflict_do_update(
             index_elements=["date"],
-            set_={
-                "resting_hr": rhr,
-                "hrv_avg": hrv,
-                "recovery_score": recovery,
-                "sleep_duration_s": sleep_duration,
-                "sleep_score": sleep_pts,
-                "steps_total": steps_total,
-            },
+            set_={k: v for k, v in values.items() if k != "date"},
         )
         await db.execute(stmt)
 

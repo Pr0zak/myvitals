@@ -363,15 +363,25 @@ def _parse_garmin_activities(zf, name) -> Iterator[tuple[str, list[dict[str, Any
         aid = ex.get("activityId")
         if not start or aid is None:
             continue
+        # Garmin's summarizedActivities export uses these units (vs SI):
+        #   duration / elapsedDuration / movingDuration: milliseconds
+        #   distance: centimeters
+        #   elevationGain / elevationLoss / *Elevation: centimeters
+        # Prefer movingDuration when available — `duration` is wall-clock and
+        # includes auto-pause time, which produces multi-day sessions when the
+        # watch sat in someone's car overnight mid-activity.
+        dur_ms = ex.get("movingDuration") or ex.get("duration") or ex.get("elapsedDuration") or 0
+        dist_cm = ex.get("distance")
+        elev_cm = ex.get("elevationGain")
         batch.append({
             "source": "garmin",
             "source_id": str(aid),
             "type": str(ex.get("activityType") or "unknown").lower(),
             "name": ex.get("name"),
             "start_at": start,
-            "duration_s": int(ex.get("duration") or ex.get("elapsedDuration") or 0),
-            "distance_m": ex.get("distance"),
-            "elevation_gain_m": ex.get("elevationGain"),
+            "duration_s": int(dur_ms / 1000),
+            "distance_m": (dist_cm / 100.0) if isinstance(dist_cm, (int, float)) else None,
+            "elevation_gain_m": (elev_cm / 100.0) if isinstance(elev_cm, (int, float)) else None,
             "avg_hr": ex.get("avgHr") or ex.get("averageHR"),
             "max_hr": ex.get("maxHr") or ex.get("maxHR"),
             "avg_power_w": ex.get("avgPower"),

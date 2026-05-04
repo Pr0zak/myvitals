@@ -3,6 +3,8 @@ package app.myvitals.ui
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,7 +38,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     settings: SettingsRepository,
@@ -107,7 +109,10 @@ fun SettingsScreen(
                 Text(if (hasPermissions()) "Re-request permissions" else "Grant Health Connect permissions")
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Button(
                     onClick = {
                         onSyncNow()
@@ -142,7 +147,10 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 OutlinedButton(onClick = onOpenLogs) { Text("View logs") }
                 OutlinedButton(
                     onClick = {

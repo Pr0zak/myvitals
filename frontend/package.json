@@ -1,6 +1,6 @@
 {
   "name": "myvitals-frontend",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,10 +16,14 @@
     "echarts": "^5.5.1",
     "vue-echarts": "^7.0.3",
     "axios": "^1.7.9",
-    "date-fns": "^4.1.0"
+    "date-fns": "^4.1.0",
+    "leaflet": "^1.9.4",
+    "@mapbox/polyline": "^1.2.1"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
+    "@types/leaflet": "^1.9.12",
+    "@types/mapbox__polyline": "^1.0.5",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
     "vue-tsc": "^2.2.0"

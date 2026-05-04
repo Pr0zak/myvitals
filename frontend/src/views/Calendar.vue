@@ -99,12 +99,12 @@ const calendarOption = computed(() => {
   };
 });
 
-function onClickCell(params: { data: [string, number] }) {
-  const date = params.data[0];
-  drilldown.value = data.value.find((d) => d.date === date) ?? null;
+function onClickCell(params: unknown) {
+  const d = (params as { data?: [string, number] }).data;
+  if (!d) return;
+  const date = d[0];
+  drilldown.value = data.value.find((s) => s.date === date) ?? null;
 }
-
-const chartEvents = { click: onClickCell };
 </script>
 
 <template>
@@ -128,7 +128,7 @@ const chartEvents = { click: onClickCell };
 
     <Card v-else :title="`${METRICS.find((m) => m.key === metric)?.label} · ${year}`">
       <div class="cal-wrap">
-        <VChart :option="calendarOption" autoresize @click="onClickCell"/>
+        <VChart :option="calendarOption" autoresize @click="(p: any) => onClickCell(p)"/>
       </div>
     </Card>
 

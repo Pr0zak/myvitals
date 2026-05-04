@@ -35,7 +35,9 @@ async function load() {
     since.setFullYear(since.getFullYear() - 1 + yearOffset.value);
     const until = new Date();
     until.setFullYear(until.getFullYear() + yearOffset.value);
-    activities.value = await api.activities({ since, until, limit: 500 });
+    const all = await api.activities({ since, limit: 500 });
+    const untilMs = until.getTime();
+    activities.value = all.filter((a) => new Date(a.start_at).getTime() <= untilMs);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {

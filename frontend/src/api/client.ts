@@ -66,6 +66,14 @@ export const api = {
     return data;
   },
 
+  async sleepRaw(since?: Date | string, until?: Date | string): Promise<{ time: string; stage: string; duration_s: number }[]> {
+    const params: Record<string, string> = {};
+    if (since) params.since = since instanceof Date ? since.toISOString() : since;
+    if (until) params.until = until instanceof Date ? until.toISOString() : until;
+    const { data } = await http.get<{ time: string; stage: string; duration_s: number }[]>("/query/sleep/raw", { params });
+    return data;
+  },
+
   async lastSync(): Promise<{ last_sync: string | null }> {
     const { data } = await http.get<{ last_sync: string | null }>("/query/last-sync");
     return data;

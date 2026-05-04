@@ -17,6 +17,8 @@ const router = createRouter({
     { path: "/activity/:source/:id", name: "activity-detail", component: () => import("./views/ActivityDetail.vue") },
     { path: "/calendar", name: "calendar", component: () => import("./views/Calendar.vue") },
     { path: "/insights", name: "insights", component: () => import("./views/Insights.vue") },
+    { path: "/compare", name: "compare", component: () => import("./views/Compare.vue") },
+    { path: "/alerts", name: "alerts", component: () => import("./views/Alerts.vue") },
     { path: "/logs", name: "logs", component: () => import("./views/Logs.vue") },
     { path: "/settings", name: "settings", component: () => import("./views/Settings.vue") },
   ],

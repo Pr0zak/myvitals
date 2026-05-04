@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import axios from "axios";
 import { onMounted, ref } from "vue";
 import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
@@ -22,6 +23,55 @@ const callbackInput = ref("");
 const credsSaving = ref(false);
 const credsResult = ref<string>("");
 const editingCreds = ref(false);
+
+const analyticsRunning = ref(false);
+const analyticsResult = ref<string>("");
+
+const EXPORT_TABLES = [
+  "heartrate", "hrv", "steps", "sleep_stages", "workouts",
+  "annotations", "activities", "daily_summary",
+];
+
+function exportUrl(table: string, fmt: "csv" | "json"): string {
+  const base = (apiBase.value || "/api").replace(/\/$/, "");
+  // We can't add Authorization headers to a plain <a> click — use a query
+  // param the backend accepts, OR force the user to be on the same origin
+  // where Caddy forwards the bearer header... actually our backend requires
+  // the Bearer header. Easier: keep the same-origin /api/ proxy (which
+  // doesn't do auth either) — so this only works because the user is
+  // already on the dashboard on the same host. Token is injected client-side
+  // via a fetch + blob trick:
+  return `${base}/export/${table}.${fmt}`;
+}
+
+async function downloadExport(table: string, fmt: "csv" | "json") {
+  const r = await axios.get(exportUrl(table, fmt), {
+    headers: { Authorization: `Bearer ${queryToken.value}` },
+    responseType: "blob",
+  });
+  const url = URL.createObjectURL(r.data as Blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `myvitals-${table}.${fmt}`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function runAnalytics() {
+  analyticsRunning.value = true;
+  analyticsResult.value = "";
+  try {
+    const base = (apiBase.value || "/api").replace(/\/$/, "");
+    const r = await axios.post(`${base}/analytics/run`, null, {
+      headers: { Authorization: `Bearer ${queryToken.value}` },
+    });
+    analyticsResult.value = `Ran analytics for ${r.data.target_date}.`;
+  } catch (e) {
+    analyticsResult.value = `Failed: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    analyticsRunning.value = false;
+  }
+}
 
 function save() {
   queryToken.value = tokenInput.value.trim();
@@ -68,7 +118,10 @@ async function loadStrava() {
       api.stravaStatus(),
       api.stravaConfig(),
     ]);
-    callbackInput.value = stravaConfig.value.callback_url ?? "";
+    // Default the callback URL field to whatever this dashboard's host is —
+    // saves the user from typing it. They can override before saving.
+    callbackInput.value = stravaConfig.value.callback_url
+      ?? `${window.location.origin}/auth/strava/callback`;
   } catch (e: unknown) {
     stravaError.value = e instanceof Error ? e.message : String(e);
   }
@@ -179,6 +232,21 @@ onMounted(loadStrava);
     </section>
 
     <section v-if="queryToken">
+      <h2>Tools</h2>
+      <div class="tools">
+        <button class="ghost" @click="runAnalytics" :disabled="analyticsRunning">
+          {{ analyticsRunning ? "Running…" : "Run analytics now" }}
+        </button>
+        <span v-if="analyticsResult" class="hint">{{ analyticsResult }}</span>
+      </div>
+      <h3 class="sub">Export raw data</h3>
+      <div class="exports">
+        <button v-for="t in EXPORT_TABLES" :key="t" class="dl" @click="downloadExport(t, 'csv')">{{ t }}.csv</button>
+        <button v-for="t in EXPORT_TABLES" :key="`${t}-json`" class="dl json" @click="downloadExport(t, 'json')">{{ t }}.json</button>
+      </div>
+    </section>
+
+    <section v-if="queryToken">
       <h2>Strava</h2>
       <div v-if="stravaError" class="err">{{ stravaError }}</div>
 
@@ -284,5 +352,16 @@ button { border-radius: 6px; padding: 0.55rem 1rem; cursor: pointer; font-weight
 .err { color: #ef4444; padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; margin-top: 0.6rem; }
 .err small { color: #94a3b8; font-family: monospace; }
 .muted { color: #94a3b8; font-size: 0.85rem; }
-code { background: #0f172a; padding: 0.1rem 0.3rem; border-radius: 3px; font-family: ui-monospace, monospace; font-size: 0.85rem; color: #38bdf8; }
+code { background: var(--surface); padding: 0.1rem 0.3rem; border-radius: 3px; font-family: ui-monospace, monospace; font-size: 0.85rem; color: var(--accent); }
+
+.tools { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+h3.sub { font-size: 0.75rem; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.05em; margin: 1rem 0 0.5rem; font-weight: 500; }
+.exports { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.exports .dl {
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0.3rem 0.6rem; font-size: 0.75rem; cursor: pointer;
+  font-family: ui-monospace, monospace;
+}
+.exports .dl:hover { border-color: var(--accent); color: var(--accent); }
+.exports .dl.json { color: var(--muted); }
 </style>

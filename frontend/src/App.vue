@@ -19,11 +19,13 @@ function cycleTheme() {
       <RouterLink to="/log">Log</RouterLink>
       <RouterLink to="/activities">Activities</RouterLink>
       <RouterLink to="/calendar">Calendar</RouterLink>
+      <RouterLink to="/compare">Compare</RouterLink>
       <span class="spacer" />
       <button class="theme-btn" @click="cycleTheme" :title="`Theme: ${themeChoice} (click to cycle)`">
         {{ themeChoice === "dark" ? "🌙" : themeChoice === "light" ? "☀️" : "🌓" }}
       </button>
       <RouterLink to="/insights" class="nav-secondary">Insights</RouterLink>
+      <RouterLink to="/alerts" class="nav-secondary">Alerts</RouterLink>
       <RouterLink to="/logs" class="nav-secondary">Logs</RouterLink>
       <RouterLink to="/settings" class="nav-secondary">Settings</RouterLink>
     </nav>

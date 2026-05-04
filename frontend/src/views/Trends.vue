@@ -243,8 +243,8 @@ h1 { margin: 0; }
 .picker button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 
 .grid { display: grid; gap: 1rem; margin-top: 1rem; }
-.chart { flex: 1; min-height: 240px; display: flex; }
-.chart > * { flex: 1; }
+.chart { width: 100%; height: 280px; }
+.chart > * { width: 100%; height: 100%; }
 
 .toggle-row { display: flex; gap: 0.8rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.5rem; font-size: 0.8rem; color: var(--muted); }
 .toggle-row label { display: flex; align-items: center; gap: 0.3rem; cursor: pointer; }

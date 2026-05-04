@@ -231,9 +231,10 @@ h1 { margin: 0; }
 .toggle-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.5rem; font-size: 0.8rem; color: var(--muted); }
 .toggle-row label { display: flex; align-items: center; gap: 0.3rem; cursor: pointer; user-select: none; }
 
-.chart-wrap { flex: 1; min-height: 280px; display: flex; }
-.chart-wrap.small { min-height: 140px; }
-.chart-wrap > * { flex: 1; }
+/* ECharts needs an explicitly-sized parent — flex grow leaves it 0×0. */
+.chart-wrap { width: 100%; height: 320px; }
+.chart-wrap.small { height: 160px; }
+.chart-wrap > * { width: 100%; height: 100%; }
 .empty { color: var(--muted-2); align-self: center; margin: auto; }
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 .footer { margin-top: 1.5rem; color: var(--muted-2); font-size: 0.8rem; text-align: right; }

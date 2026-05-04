@@ -206,8 +206,8 @@ h1 { margin: 0 0 0.4rem; }
   border-radius: 4px; padding: 0.4rem 0.6rem; font-size: 0.95rem; font-family: inherit;
 }
 
-.chart { flex: 1; min-height: 320px; display: flex; }
-.chart > * { flex: 1; }
+.chart { width: 100%; height: 360px; }
+.chart > * { width: 100%; height: 100%; }
 
 .empty { color: var(--muted-2); padding: 2rem 0; text-align: center; align-self: center; margin: auto; }
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }

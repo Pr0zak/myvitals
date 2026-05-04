@@ -228,9 +228,9 @@ h1 { margin: 0; }
 .picker button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 
 .grid { display: grid; gap: 1rem; margin-top: 1rem; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
-.chart { flex: 1; min-height: 240px; display: flex; }
-.chart.small { min-height: 80px; }
-.chart > * { flex: 1; }
+.chart { width: 100%; height: 280px; }
+.chart.small { height: 100px; }
+.chart > * { width: 100%; height: 100%; }
 
 .legend { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted); }
 .lg-item { display: inline-flex; align-items: center; gap: 0.3rem; }

@@ -213,8 +213,8 @@ dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
 
 .map { height: 300px; width: 100%; border-radius: 6px; }
 
-.chart { flex: 1; min-height: 220px; display: flex; }
-.chart > * { flex: 1; }
+.chart { width: 100%; height: 260px; }
+.chart > * { width: 100%; height: 100%; }
 
 .zones { display: flex; flex-direction: column; gap: 0.4rem; }
 .zone { display: grid; grid-template-columns: 110px 1fr 50px; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--muted); }

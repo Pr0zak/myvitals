@@ -164,7 +164,7 @@ h1 { margin: 0 0 0.4rem; }
 .cmp .down { color: var(--bad); font-weight: 500; }
 .cmp .same { color: var(--muted-2); }
 
-.chart { flex: 1; min-height: 280px; display: flex; }
-.chart > * { flex: 1; }
+.chart { width: 100%; height: 320px; }
+.chart > * { width: 100%; height: 100%; }
 .empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
 </style>

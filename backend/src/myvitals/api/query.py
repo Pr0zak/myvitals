@@ -138,6 +138,26 @@ async def get_last_sleep(
     )
 
 
+@router.get("/sleep/raw")
+async def get_sleep_raw(
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """Raw per-stage rows (un-grouped) — used to draw hypnograms."""
+    start, end = _resolve_range(since, until, timedelta(hours=36))
+    result = await db.execute(
+        select(models.SleepStage.time, models.SleepStage.stage, models.SleepStage.duration_s)
+        .where(models.SleepStage.time >= start)
+        .where(models.SleepStage.time <= end)
+        .order_by(models.SleepStage.time)
+    )
+    return [
+        {"time": t.isoformat(), "stage": s, "duration_s": d}
+        for t, s, d in result.all()
+    ]
+
+
 @router.get("/sleep/range", response_model=list[SleepNight])
 async def get_sleep_range(
     since: datetime | None = Query(None),

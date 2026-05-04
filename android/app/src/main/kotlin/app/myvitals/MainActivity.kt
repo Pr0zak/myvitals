@@ -11,9 +11,13 @@ import app.myvitals.ui.MyVitalsTheme
 import androidx.core.content.ContextCompat
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import app.myvitals.data.AppDatabase
 import app.myvitals.data.SettingsRepository
 import app.myvitals.debug.LogUploadWorker
 import app.myvitals.debug.LogViewerActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import app.myvitals.health.HealthConnectGateway
 import app.myvitals.sync.SyncWorker
 import app.myvitals.ui.SettingsScreen
@@ -76,6 +80,12 @@ class MainActivity : ComponentActivity() {
                             .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
                     },
                     onOpenLogs = { LogViewerActivity.start(this) },
+                    onClearBuffer = {
+                        Timber.w("User cleared sync buffer")
+                        CoroutineScope(Dispatchers.IO).launch {
+                            AppDatabase.get(applicationContext).buffered().clear()
+                        }
+                    },
                 )
             }
         }

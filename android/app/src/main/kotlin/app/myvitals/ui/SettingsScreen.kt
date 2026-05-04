@@ -47,6 +47,7 @@ fun SettingsScreen(
     onSyncLogs: () -> Unit,
     onBackfill: (days: Int) -> Unit,
     onOpenLogs: () -> Unit,
+    onClearBuffer: () -> Unit,
 ) {
     var url by remember { mutableStateOf(settings.backendUrl) }
     var token by remember { mutableStateOf(settings.bearerToken) }
@@ -128,6 +129,12 @@ fun SettingsScreen(
                     },
                     enabled = settings.isConfigured() && hasPermissions(),
                 ) { Text("Backfill 30d") }
+                OutlinedButton(
+                    onClick = {
+                        onClearBuffer()
+                        Toast.makeText(context, "Sync buffer cleared", Toast.LENGTH_SHORT).show()
+                    },
+                ) { Text("Clear buffer") }
             }
 
             Text("Last sync: " + (settings.lastSyncInstant()?.let(::formatInstant) ?: "never"))

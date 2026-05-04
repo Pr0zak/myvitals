@@ -35,7 +35,20 @@ interface BufferedBatchDao {
 
     @Query("SELECT COUNT(*) FROM buffered_batches")
     suspend fun count(): Int
+
+    @Query("DELETE FROM buffered_batches")
+    suspend fun clear()
+
+    @Query("SELECT id, length(json) AS json_len, attempts, createdAtEpochS FROM buffered_batches ORDER BY createdAtEpochS ASC")
+    suspend fun summaries(): List<BufferedSummary>
 }
+
+data class BufferedSummary(
+    val id: Long,
+    val json_len: Int,
+    val attempts: Int,
+    val createdAtEpochS: Long,
+)
 
 @Entity(tableName = "logs")
 data class LogEntry(

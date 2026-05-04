@@ -16,6 +16,7 @@ import app.myvitals.health.DataMapper
 import app.myvitals.health.HealthConnectGateway
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import java.time.Instant
 import kotlin.reflect.KClass
@@ -51,7 +52,9 @@ class SyncWorker(
         val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
 
         // 1. Flush any buffered batches first.
-        Timber.d("Flushing buffer (count=%d)", db.buffered().count())
+        val summaries = db.buffered().summaries()
+        Timber.d("Flushing buffer (count=%d): %s", summaries.size,
+            summaries.joinToString { "id=${it.id}/bytes=${it.json_len}/attempts=${it.attempts}" })
         if (!flushBuffer(api)) {
             Timber.w("Buffer flush failed; will retry")
             return Result.retry()
@@ -161,29 +164,68 @@ class SyncWorker(
         if (pending.isEmpty()) return true
         Timber.d("Buffer: %d pending entries to flush", pending.size)
         for (b in pending) {
-            Timber.d("Buffer id=%d: parsing %d-byte payload", b.id, b.json.length)
-            val batch = batchAdapter.fromJson(b.json)
-            if (batch == null) {
-                Timber.w("Dropping malformed buffered batch id=%d", b.id)
+            // Drop poison entries that have failed too many times. Better to lose
+            // some samples than to permanently jam the queue.
+            if (b.attempts >= MAX_BUFFER_ATTEMPTS) {
+                Timber.w("Dropping buffered batch id=%d after %d failed attempts",
+                    b.id, b.attempts)
                 db.buffered().delete(b.id)
                 continue
             }
-            Timber.d(
-                "Buffer id=%d: posting hr=%d hrv=%d steps=%d sleep=%d workouts=%d",
-                b.id, batch.heartrate.size, batch.hrv.size, batch.steps.size,
-                batch.sleepStages.size, batch.workouts.size,
-            )
-            try {
-                ingestChunked(api, batch)
-                db.buffered().delete(b.id)
-                Timber.d("Flushed buffered batch id=%d", b.id)
-            } catch (e: Exception) {
-                Timber.w(e, "Buffered batch id=%d still failing (attempt=%d)", b.id, b.attempts + 1)
-                db.buffered().incrementAttempts(b.id)
-                return false
+
+            // Bound each entry's processing so a hung Moshi/OkHttp call can't
+            // block the worker forever (and so we always increment attempts).
+            val ok = withTimeoutOrNull(BUFFER_ENTRY_TIMEOUT_MS) {
+                processBufferEntry(api, b)
+            }
+
+            when (ok) {
+                true -> {} // entry handled, continue to next
+                false -> return false   // POST failed, stop and retry next sync
+                null -> {                // hit the timeout
+                    Timber.w("Buffer id=%d timed out after %dms — incrementing attempts",
+                        b.id, BUFFER_ENTRY_TIMEOUT_MS)
+                    db.buffered().incrementAttempts(b.id)
+                    return false
+                }
             }
         }
         return true
+    }
+
+    /**
+     * Returns true on success, false on POST failure (caller stops the loop and
+     * lets WorkManager retry). Throws nothing — exceptions are caught inline.
+     */
+    private suspend fun processBufferEntry(api: BackendApi, b: BufferedBatch): Boolean {
+        Timber.d("Buffer id=%d: parsing %d-byte payload", b.id, b.json.length)
+        val batch = try {
+            batchAdapter.fromJson(b.json)
+        } catch (e: Exception) {
+            Timber.w(e, "Buffer id=%d: JSON parse threw — dropping", b.id)
+            db.buffered().delete(b.id)
+            return true
+        }
+        if (batch == null) {
+            Timber.w("Dropping malformed buffered batch id=%d", b.id)
+            db.buffered().delete(b.id)
+            return true
+        }
+        Timber.d(
+            "Buffer id=%d: posting hr=%d hrv=%d steps=%d sleep=%d workouts=%d",
+            b.id, batch.heartrate.size, batch.hrv.size, batch.steps.size,
+            batch.sleepStages.size, batch.workouts.size,
+        )
+        return try {
+            ingestChunked(api, batch)
+            db.buffered().delete(b.id)
+            Timber.d("Flushed buffered batch id=%d", b.id)
+            true
+        } catch (e: Exception) {
+            Timber.w(e, "Buffered batch id=%d still failing (attempt=%d)", b.id, b.attempts + 1)
+            db.buffered().incrementAttempts(b.id)
+            false
+        }
     }
 
     companion object {
@@ -191,5 +233,10 @@ class SyncWorker(
         // Records of any one type per POST. 5 types * 4000 = 20k records max.
         // Backend chunks the INSERT at 4000/chunk too.
         private const val MAX_PER_TYPE = 4000
+        // After this many failed attempts the entry is dropped to unjam the queue.
+        private const val MAX_BUFFER_ATTEMPTS = 3
+        // Per-entry hard wall (parse + ALL its chunked POSTs). Bigger than
+        // OkHttp callTimeout (180s) so it doesn't fire spuriously.
+        private const val BUFFER_ENTRY_TIMEOUT_MS = 240_000L
     }
 }

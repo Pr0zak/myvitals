@@ -69,12 +69,38 @@ class WorkoutSample(BaseModel):
     max_hr: float | None = None
 
 
+class BodyMetricSample(BaseModel):
+    time: datetime
+    weight_kg: float | None = None
+    body_fat_pct: float | None = None
+    bmi: float | None = None
+    lean_mass_kg: float | None = None
+    source: str = "manual"
+
+
+class SkinTempSample(BaseModel):
+    time: datetime
+    celsius_delta: float
+
+
+class BloodPressureSample(BaseModel):
+    time: datetime
+    systolic: int
+    diastolic: int
+    pulse_bpm: int | None = None
+    source: str = "manual"
+    notes: str | None = None
+
+
 class Batch(BaseModel):
     heartrate: list[HeartRateSample] = []
     hrv: list[HrvSample] = []
     steps: list[StepsSample] = []
     sleep_stages: list[SleepStageSample] = []
     workouts: list[WorkoutSample] = []
+    body_metrics: list[BodyMetricSample] = []
+    skin_temp: list[SkinTempSample] = []
+    blood_pressure: list[BloodPressureSample] = []
 
 
 @router.post("/batch")
@@ -105,6 +131,21 @@ async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) ->
         await _bulk_upsert(db, models.Workout,
                            (w.model_dump() for w in batch.workouts), ["time"])
         counts["workouts"] = len(batch.workouts)
+
+    if batch.body_metrics:
+        await _bulk_upsert(db, models.BodyMetric,
+                           (b.model_dump() for b in batch.body_metrics), ["time"])
+        counts["body_metrics"] = len(batch.body_metrics)
+
+    if batch.skin_temp:
+        await _bulk_upsert(db, models.SkinTemp,
+                           (s.model_dump() for s in batch.skin_temp), ["time"])
+        counts["skin_temp"] = len(batch.skin_temp)
+
+    if batch.blood_pressure:
+        await _bulk_upsert(db, models.BloodPressure,
+                           (b.model_dump() for b in batch.blood_pressure), ["time"])
+        counts["blood_pressure"] = len(batch.blood_pressure)
 
     await db.commit()
     return counts

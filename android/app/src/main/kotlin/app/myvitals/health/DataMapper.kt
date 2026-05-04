@@ -1,13 +1,21 @@
 package app.myvitals.health
 
+import androidx.health.connect.client.records.BloodPressureRecord
+import androidx.health.connect.client.records.BodyFatRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
+import androidx.health.connect.client.records.LeanBodyMassRecord
+import androidx.health.connect.client.records.SkinTemperatureRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.WeightRecord
+import app.myvitals.sync.BloodPressureSample
+import app.myvitals.sync.BodyMetricSample
 import app.myvitals.sync.HeartRateSample
 import app.myvitals.sync.HrvSample
 import app.myvitals.sync.IngestBatch
+import app.myvitals.sync.SkinTempSample
 import app.myvitals.sync.SleepStageSample
 import app.myvitals.sync.StepsSample
 import app.myvitals.sync.WorkoutSample
@@ -20,28 +28,72 @@ object DataMapper {
         steps: List<StepsRecord>,
         sleep: List<SleepSessionRecord>,
         exercise: List<ExerciseSessionRecord>,
-    ): IngestBatch = IngestBatch(
-        heartrate = heartRate.flatMap { record ->
-            record.samples.map {
-                HeartRateSample(time = it.time.toString(), bpm = it.beatsPerMinute.toDouble())
-            }
-        },
-        hrv = hrv.map {
-            HrvSample(time = it.time.toString(), rmssdMs = it.heartRateVariabilityMillis)
-        },
-        steps = steps.map {
-            // Health Connect emits stepped intervals; we record at the interval start.
-            StepsSample(time = it.startTime.toString(), count = it.count.toInt())
-        },
-        sleepStages = sleep.flatMap(::sessionStages),
-        workouts = exercise.map { session ->
-            WorkoutSample(
-                time = session.startTime.toString(),
-                type = exerciseTypeName(session.exerciseType),
-                durationS = (session.endTime.epochSecond - session.startTime.epochSecond).toInt(),
+        weight: List<WeightRecord> = emptyList(),
+        bodyFat: List<BodyFatRecord> = emptyList(),
+        leanMass: List<LeanBodyMassRecord> = emptyList(),
+        bloodPressure: List<BloodPressureRecord> = emptyList(),
+        skinTemp: List<SkinTemperatureRecord> = emptyList(),
+    ): IngestBatch {
+        // Body-fat and lean-mass usually arrive as separate HC records but typically
+        // share a timestamp (smart scale). Index them by ISO-instant so the matching
+        // weight row picks them up.
+        val fatByTs = bodyFat.associate { it.time.toString() to it.percentage.value }
+        val leanByTs = leanMass.associate { it.time.toString() to it.mass.inKilograms }
+        val weightSamples = weight.map { w ->
+            val ts = w.time.toString()
+            BodyMetricSample(
+                time = ts,
+                weightKg = w.weight.inKilograms,
+                bodyFatPct = fatByTs[ts],
+                leanMassKg = leanByTs[ts],
+                source = "health_connect",
             )
-        },
-    )
+        }
+        // Standalone body-fat / lean-mass rows that didn't share a timestamp with
+        // a weight reading still get persisted (so a manual % entry isn't lost).
+        val weightTs = weight.map { it.time.toString() }.toHashSet()
+        val orphanFat = bodyFat.filter { it.time.toString() !in weightTs }.map {
+            BodyMetricSample(time = it.time.toString(), bodyFatPct = it.percentage.value, source = "health_connect")
+        }
+        val orphanLean = leanMass.filter { it.time.toString() !in weightTs }.map {
+            BodyMetricSample(time = it.time.toString(), leanMassKg = it.mass.inKilograms, source = "health_connect")
+        }
+        return IngestBatch(
+            heartrate = heartRate.flatMap { record ->
+                record.samples.map {
+                    HeartRateSample(time = it.time.toString(), bpm = it.beatsPerMinute.toDouble())
+                }
+            },
+            hrv = hrv.map {
+                HrvSample(time = it.time.toString(), rmssdMs = it.heartRateVariabilityMillis)
+            },
+            steps = steps.map {
+                StepsSample(time = it.startTime.toString(), count = it.count.toInt())
+            },
+            sleepStages = sleep.flatMap(::sessionStages),
+            workouts = exercise.map { session ->
+                WorkoutSample(
+                    time = session.startTime.toString(),
+                    type = exerciseTypeName(session.exerciseType),
+                    durationS = (session.endTime.epochSecond - session.startTime.epochSecond).toInt(),
+                )
+            },
+            bodyMetrics = weightSamples + orphanFat + orphanLean,
+            bloodPressure = bloodPressure.map { bp ->
+                BloodPressureSample(
+                    time = bp.time.toString(),
+                    systolic = bp.systolic.inMillimetersOfMercury.toInt(),
+                    diastolic = bp.diastolic.inMillimetersOfMercury.toInt(),
+                    source = "health_connect",
+                )
+            },
+            skinTemp = skinTemp.flatMap { rec ->
+                rec.deltas.map { d ->
+                    SkinTempSample(time = d.time.toString(), celsiusDelta = d.delta.inCelsius)
+                }
+            },
+        )
+    }
 
     private fun sessionStages(session: SleepSessionRecord): List<SleepStageSample> {
         // If HC didn't break the session into stages, emit one synthetic "light" stage

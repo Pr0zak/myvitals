@@ -6,6 +6,7 @@ import { api } from "@/api/client";
 import type { StravaAppConfigStatus, StravaStatus } from "@/api/types";
 
 const tokenInput = ref(queryToken.value);
+const tokenVisible = ref(false);
 const apiBaseInput = ref(apiBase.value);
 const status = ref<"idle" | "ok" | "fail">("idle");
 const errorMsg = ref<string>("");
@@ -27,9 +28,63 @@ const editingCreds = ref(false);
 const analyticsRunning = ref(false);
 const analyticsResult = ref<string>("");
 
+// Historical imports
+const importBusy = ref<"" | "fitbit" | "garmin">("");
+const importResult = ref<string>("");
+const importError = ref<string>("");
+const fitbitWeightUnit = ref<"kg" | "lb">("lb");
+
+async function uploadImport(source: "fitbit" | "garmin", file: File) {
+  importBusy.value = source;
+  importResult.value = "";
+  importError.value = "";
+  try {
+    const base = (apiBase.value || "/api").replace(/\/$/, "");
+    const fd = new FormData();
+    fd.append("file", file);
+    const params: Record<string, string> = {};
+    if (source === "fitbit") params.weight_unit = fitbitWeightUnit.value;
+    const r = await axios.post(`${base}/import/${source}`, fd, {
+      headers: {
+        Authorization: `Bearer ${queryToken.value}`,
+        "Content-Type": "multipart/form-data",
+      },
+      params,
+      maxContentLength: 1024 * 1024 * 1024,
+      maxBodyLength: 1024 * 1024 * 1024,
+    });
+    const counts = r.data?.imported ?? {};
+    const parts = Object.entries(counts).map(([k, v]) => `${k}: ${v}`);
+    importResult.value = parts.length
+      ? `Imported from ${source} — ${parts.join(", ")}.`
+      : `Upload accepted but no recognised files were found in the ZIP.`;
+  } catch (e: unknown) {
+    if (e && typeof e === "object" && "response" in e) {
+      const r = (e as { response?: { status?: number; data?: unknown } }).response;
+      importError.value = `HTTP ${r?.status ?? "?"} — ${JSON.stringify(r?.data ?? "")}`;
+    } else {
+      importError.value = e instanceof Error ? e.message : String(e);
+    }
+  } finally {
+    importBusy.value = "";
+  }
+}
+
+function pickImportFile(source: "fitbit" | "garmin") {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".zip,application/zip";
+  inp.onchange = () => {
+    const f = inp.files?.[0];
+    if (f) uploadImport(source, f);
+  };
+  inp.click();
+}
+
 const EXPORT_TABLES = [
   "heartrate", "hrv", "steps", "sleep_stages", "workouts",
   "annotations", "activities", "daily_summary",
+  "body_metrics", "skin_temp", "blood_pressure",
 ];
 
 function exportUrl(table: string, fmt: "csv" | "json"): string {
@@ -208,8 +263,14 @@ onMounted(loadStrava);
 
       <label>
         <span>Query token</span>
-        <input v-model="tokenInput" type="password"
-               placeholder="paste the QUERY_TOKEN from the backend .env" autocomplete="off"/>
+        <div class="token-row">
+          <input v-model="tokenInput" :type="tokenVisible ? 'text' : 'password'"
+                 placeholder="paste the QUERY_TOKEN from the backend .env" autocomplete="off"/>
+          <button type="button" class="eye" @click="tokenVisible = !tokenVisible"
+                  :title="tokenVisible ? 'Hide token' : 'Show token'">
+            {{ tokenVisible ? '🙈' : '👁' }}
+          </button>
+        </div>
       </label>
 
       <label>
@@ -244,6 +305,46 @@ onMounted(loadStrava);
         <button v-for="t in EXPORT_TABLES" :key="t" class="dl" @click="downloadExport(t, 'csv')">{{ t }}.csv</button>
         <button v-for="t in EXPORT_TABLES" :key="`${t}-json`" class="dl json" @click="downloadExport(t, 'json')">{{ t }}.json</button>
       </div>
+    </section>
+
+    <section v-if="queryToken">
+      <h2>Historical imports</h2>
+      <p class="hint">
+        One-shot bulk loads from a downloaded provider archive — useful for back-filling
+        years of data the watch doesn't have. Heart rate, sleep, steps and activities
+        all get merged into the existing tables (duplicates are skipped).
+      </p>
+      <div class="imports">
+        <div class="import-card">
+          <strong>Fitbit</strong>
+          <p class="muted">
+            Request your archive from
+            <a href="https://www.fitbit.com/settings/data/export" target="_blank" rel="noreferrer">fitbit.com/settings/data/export</a>
+            (or via Google Takeout if your account migrated). Upload the unmodified ZIP.
+          </p>
+          <div class="unit-row">
+            <span class="muted">Weight unit in this archive:</span>
+            <label><input type="radio" value="kg" v-model="fitbitWeightUnit"/> kg</label>
+            <label><input type="radio" value="lb" v-model="fitbitWeightUnit"/> lb</label>
+          </div>
+          <button class="ghost" :disabled="!!importBusy" @click="pickImportFile('fitbit')">
+            {{ importBusy === 'fitbit' ? 'Uploading…' : 'Upload Fitbit ZIP' }}
+          </button>
+        </div>
+        <div class="import-card">
+          <strong>Garmin Connect</strong>
+          <p class="muted">
+            Request your archive from
+            <a href="https://www.garmin.com/account/datamanagement/exportdata" target="_blank" rel="noreferrer">garmin.com/account/datamanagement/exportdata</a>.
+            Upload the ZIP once it arrives by email.
+          </p>
+          <button class="ghost" :disabled="!!importBusy" @click="pickImportFile('garmin')">
+            {{ importBusy === 'garmin' ? 'Uploading…' : 'Upload Garmin ZIP' }}
+          </button>
+        </div>
+      </div>
+      <div v-if="importResult" class="ok">{{ importResult }}</div>
+      <div v-if="importError" class="err"><small>{{ importError }}</small></div>
     </section>
 
     <section v-if="queryToken">
@@ -308,6 +409,7 @@ onMounted(loadStrava);
               </button>
               <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(30)">Sync 30d</button>
               <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(365)">Sync 1y</button>
+              <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(3650)">Sync all</button>
               <button class="ghost danger" @click="disconnectStrava">Disconnect</button>
             </div>
             <div v-if="stravaSyncResult" class="hint">{{ stravaSyncResult }}</div>
@@ -364,4 +466,21 @@ h3.sub { font-size: 0.75rem; color: var(--muted-2); text-transform: uppercase; l
 }
 .exports .dl:hover { border-color: var(--accent); color: var(--accent); }
 .exports .dl.json { color: var(--muted); }
+.imports { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+@media (max-width: 600px) { .imports { grid-template-columns: 1fr; } }
+.import-card {
+  border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem;
+  background: var(--surface);
+}
+.import-card strong { display: block; margin-bottom: 0.3rem; color: var(--text); }
+.import-card p { font-size: 0.85rem; margin: 0 0 0.6rem; }
+.unit-row { display: flex; gap: 0.6rem; align-items: center; font-size: 0.8rem; margin-bottom: 0.5rem; }
+.unit-row label { display: inline-flex; align-items: center; gap: 0.2rem; cursor: pointer; }
+.token-row { display: flex; gap: 0.4rem; }
+.token-row input { flex: 1; }
+.eye {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 0 0.7rem; cursor: pointer; font-size: 1.1rem;
+}
+.eye:hover { border-color: var(--accent); }
 </style>

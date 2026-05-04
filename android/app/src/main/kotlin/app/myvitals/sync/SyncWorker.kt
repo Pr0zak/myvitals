@@ -1,12 +1,17 @@
 package app.myvitals.sync
 
 import android.content.Context
+import androidx.health.connect.client.records.BloodPressureRecord
+import androidx.health.connect.client.records.BodyFatRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
+import androidx.health.connect.client.records.LeanBodyMassRecord
 import androidx.health.connect.client.records.Record
+import androidx.health.connect.client.records.SkinTemperatureRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.WeightRecord
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import app.myvitals.data.AppDatabase
@@ -71,11 +76,21 @@ class SyncWorker(
         val steps = safeRead(StepsRecord::class, since, until)
         val sleep = safeRead(SleepSessionRecord::class, since, until)
         val exercise = safeRead(ExerciseSessionRecord::class, since, until)
+        val weight = safeRead(WeightRecord::class, since, until)
+        val bodyFat = safeRead(BodyFatRecord::class, since, until)
+        val leanMass = safeRead(LeanBodyMassRecord::class, since, until)
+        val bp = safeRead(BloodPressureRecord::class, since, until)
+        val skinTemp = safeRead(SkinTemperatureRecord::class, since, until)
         Timber.i(
-            "HC reads since %s: hr=%d hrv=%d steps=%d sleep=%d exercise=%d",
+            "HC reads since %s: hr=%d hrv=%d steps=%d sleep=%d exercise=%d weight=%d bodyFat=%d leanMass=%d bp=%d skinTemp=%d",
             since, hr.size, hrv.size, steps.size, sleep.size, exercise.size,
+            weight.size, bodyFat.size, leanMass.size, bp.size, skinTemp.size,
         )
-        val batch = DataMapper.toBatch(hr, hrv, steps, sleep, exercise)
+        val batch = DataMapper.toBatch(
+            hr, hrv, steps, sleep, exercise,
+            weight = weight, bodyFat = bodyFat, leanMass = leanMass,
+            bloodPressure = bp, skinTemp = skinTemp,
+        )
 
         if (batch.isEmpty()) {
             Timber.i("Nothing new to send; advancing checkpoint to %s", until)
@@ -128,13 +143,18 @@ class SyncWorker(
         val stepsChunks = batch.steps.chunked(MAX_PER_TYPE)
         val sleepChunks = batch.sleepStages.chunked(MAX_PER_TYPE)
         val workoutChunks = batch.workouts.chunked(MAX_PER_TYPE)
+        val bodyChunks = batch.bodyMetrics.chunked(MAX_PER_TYPE)
+        val bpChunks = batch.bloodPressure.chunked(MAX_PER_TYPE)
+        val tempChunks = batch.skinTemp.chunked(MAX_PER_TYPE)
 
         val n = listOf(
             hrChunks.size, hrvChunks.size, stepsChunks.size,
             sleepChunks.size, workoutChunks.size,
+            bodyChunks.size, bpChunks.size, tempChunks.size,
         ).maxOrNull() ?: 0
 
         var totHr = 0; var totHrv = 0; var totSteps = 0; var totSleep = 0; var totWorkouts = 0
+        var totBody = 0; var totBp = 0; var totTemp = 0
         for (i in 0 until n) {
             val sub = IngestBatch(
                 heartrate = hrChunks.getOrElse(i) { emptyList() },
@@ -142,20 +162,25 @@ class SyncWorker(
                 steps = stepsChunks.getOrElse(i) { emptyList() },
                 sleepStages = sleepChunks.getOrElse(i) { emptyList() },
                 workouts = workoutChunks.getOrElse(i) { emptyList() },
+                bodyMetrics = bodyChunks.getOrElse(i) { emptyList() },
+                bloodPressure = bpChunks.getOrElse(i) { emptyList() },
+                skinTemp = tempChunks.getOrElse(i) { emptyList() },
             )
             if (sub.isEmpty()) continue
             Timber.d(
-                "POST chunk %d/%d: hr=%d hrv=%d steps=%d sleep=%d workouts=%d",
+                "POST chunk %d/%d: hr=%d hrv=%d steps=%d sleep=%d workouts=%d body=%d bp=%d temp=%d",
                 i + 1, n, sub.heartrate.size, sub.hrv.size, sub.steps.size,
                 sub.sleepStages.size, sub.workouts.size,
+                sub.bodyMetrics.size, sub.bloodPressure.size, sub.skinTemp.size,
             )
             val resp = api.ingestBatch(sub)
             totHr += resp.heartrate; totHrv += resp.hrv; totSteps += resp.steps
             totSleep += resp.sleepStages; totWorkouts += resp.workouts
+            totBody += resp.bodyMetrics; totBp += resp.bloodPressure; totTemp += resp.skinTemp
         }
         Timber.i(
-            "Ingest OK (%d chunks): hr=%d hrv=%d steps=%d sleep_stages=%d workouts=%d",
-            n, totHr, totHrv, totSteps, totSleep, totWorkouts,
+            "Ingest OK (%d chunks): hr=%d hrv=%d steps=%d sleep_stages=%d workouts=%d body=%d bp=%d skin_temp=%d",
+            n, totHr, totHrv, totSteps, totSleep, totWorkouts, totBody, totBp, totTemp,
         )
     }
 

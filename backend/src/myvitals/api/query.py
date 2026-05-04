@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -202,6 +203,118 @@ async def get_sleep_range(
             stages=[SleepStageBucket(stage=k, duration_s=v) for k, v in by_stage.items()],
         ))
     return out
+
+
+@router.get("/weight")
+async def get_weight(
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    """Body-metric series: weight, body fat, BMI, lean mass."""
+    start, end = _resolve_range(since, until, timedelta(days=90))
+    result = await db.execute(
+        select(
+            models.BodyMetric.time, models.BodyMetric.weight_kg,
+            models.BodyMetric.body_fat_pct, models.BodyMetric.bmi,
+            models.BodyMetric.lean_mass_kg, models.BodyMetric.source,
+        )
+        .where(models.BodyMetric.time >= start)
+        .where(models.BodyMetric.time <= end)
+        .order_by(models.BodyMetric.time)
+    )
+    rows = result.all()
+    points = [
+        {"time": t.isoformat(), "weight_kg": w, "body_fat_pct": bf,
+         "bmi": b, "lean_mass_kg": lm, "source": src}
+        for t, w, bf, b, lm, src in rows
+    ]
+    weights = [r[1] for r in rows if r[1] is not None]
+    return {
+        "points": points,
+        "latest_kg": weights[-1] if weights else None,
+        "min_kg": min(weights) if weights else None,
+        "max_kg": max(weights) if weights else None,
+        "avg_kg": sum(weights) / len(weights) if weights else None,
+    }
+
+
+@router.get("/blood-pressure")
+async def get_blood_pressure(
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    """Blood-pressure cuff readings (OMRON Connect via HC, or manual entry)."""
+    start, end = _resolve_range(since, until, timedelta(days=90))
+    result = await db.execute(
+        select(
+            models.BloodPressure.time, models.BloodPressure.systolic,
+            models.BloodPressure.diastolic, models.BloodPressure.pulse_bpm,
+            models.BloodPressure.source, models.BloodPressure.notes,
+        )
+        .where(models.BloodPressure.time >= start)
+        .where(models.BloodPressure.time <= end)
+        .order_by(models.BloodPressure.time)
+    )
+    rows = result.all()
+    points = [
+        {"time": t.isoformat(), "systolic": s, "diastolic": d,
+         "pulse_bpm": p, "source": src, "notes": n}
+        for t, s, d, p, src, n in rows
+    ]
+    sys_vals = [r[1] for r in rows]
+    dia_vals = [r[2] for r in rows]
+    return {
+        "points": points,
+        "latest": points[-1] if points else None,
+        "avg_sys": sum(sys_vals) / len(sys_vals) if sys_vals else None,
+        "avg_dia": sum(dia_vals) / len(dia_vals) if dia_vals else None,
+    }
+
+
+# Manual-entry shortcut so the dashboard doesn't have to build a Bearer ingest path.
+class BloodPressureIn(BaseModel):
+    systolic: int
+    diastolic: int
+    pulse_bpm: int | None = None
+    notes: str | None = None
+    time: datetime | None = None
+
+
+@router.post("/blood-pressure")
+async def post_blood_pressure(
+    body: BloodPressureIn,
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    ts = body.time or datetime.now(timezone.utc)
+    row = models.BloodPressure(
+        time=ts, systolic=body.systolic, diastolic=body.diastolic,
+        pulse_bpm=body.pulse_bpm, source="manual", notes=body.notes,
+    )
+    await db.merge(row)
+    await db.commit()
+    return {"status": "ok", "time": ts.isoformat()}
+
+
+@router.get("/skin-temp")
+async def get_skin_temp(
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    """Skin temperature delta (°C from baseline) — overnight wrist sensor reading."""
+    start, end = _resolve_range(since, until, timedelta(days=30))
+    result = await db.execute(
+        select(models.SkinTemp.time, models.SkinTemp.celsius_delta)
+        .where(models.SkinTemp.time >= start)
+        .where(models.SkinTemp.time <= end)
+        .order_by(models.SkinTemp.time)
+    )
+    rows = result.all()
+    return {
+        "points": [{"time": t.isoformat(), "value": v} for t, v in rows],
+    }
 
 
 @router.get("/last-sync")

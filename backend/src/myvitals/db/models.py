@@ -47,6 +47,28 @@ class SkinTemp(Base):
     celsius_delta: Mapped[float] = mapped_column(Float)
 
 
+class BloodPressure(Base):
+    """BP cuff readings (OMRON Connect → Health Connect → here, or manual)."""
+    __tablename__ = "blood_pressure"
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    systolic: Mapped[int] = mapped_column(Integer)
+    diastolic: Mapped[int] = mapped_column(Integer)
+    pulse_bpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="manual")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class BodyMetric(Base):
+    """Weight, body fat, BMI snapshots (manual log, scale, watch, import)."""
+    __tablename__ = "body_metrics"
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    body_fat_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bmi: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lean_mass_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="manual")
+
+
 class Steps(Base):
     __tablename__ = "vitals_steps"
     time: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)

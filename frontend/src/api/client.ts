@@ -66,6 +66,33 @@ export const api = {
     return data;
   },
 
+  async weight(p: RangeParams = {}): Promise<{
+    points: { time: string; weight_kg: number | null; body_fat_pct: number | null; bmi: number | null; lean_mass_kg: number | null; source: string }[];
+    latest_kg: number | null; min_kg: number | null; max_kg: number | null; avg_kg: number | null;
+  }> {
+    const { data } = await http.get("/query/weight", { params: rangeToQuery(p) });
+    return data;
+  },
+
+  async skinTemp(p: RangeParams = {}): Promise<{ points: { time: string; value: number }[] }> {
+    const { data } = await http.get("/query/skin-temp", { params: rangeToQuery(p) });
+    return data;
+  },
+
+  async bloodPressure(p: RangeParams = {}): Promise<{
+    points: { time: string; systolic: number; diastolic: number; pulse_bpm: number | null; source: string; notes: string | null }[];
+    latest: { time: string; systolic: number; diastolic: number; pulse_bpm: number | null; source: string; notes: string | null } | null;
+    avg_sys: number | null; avg_dia: number | null;
+  }> {
+    const { data } = await http.get("/query/blood-pressure", { params: rangeToQuery(p) });
+    return data;
+  },
+
+  async logBloodPressure(body: { systolic: number; diastolic: number; pulse_bpm?: number | null; notes?: string | null; time?: string }): Promise<{ status: string; time: string }> {
+    const { data } = await http.post("/query/blood-pressure", body);
+    return data;
+  },
+
   async sleepRaw(since?: Date | string, until?: Date | string): Promise<{ time: string; stage: string; duration_s: number }[]> {
     const params: Record<string, string> = {};
     if (since) params.since = since instanceof Date ? since.toISOString() : since;

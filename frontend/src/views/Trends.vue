@@ -25,6 +25,10 @@ const overlayMetrics = ref({ rhr: true, hrv: true, recovery: true, sleep: false 
 const stepsType = ref<ChartType>("bar");
 const stepsGoal = ref(8000);
 
+type WeightPoint = { time: string; weight_kg: number | null; body_fat_pct: number | null; bmi: number | null; lean_mass_kg: number | null; source: string };
+const weightSeries = ref<WeightPoint[]>([]);
+const weightStats = ref<{ latest_kg: number | null; min_kg: number | null; max_kg: number | null; avg_kg: number | null }>({ latest_kg: null, min_kg: null, max_kg: null, avg_kg: null });
+
 async function load() {
   loading.value = true;
   error.value = null;
@@ -32,13 +36,52 @@ async function load() {
     const days = RANGES.find((r) => r.key === range.value)!.days;
     const since = new Date();
     since.setDate(since.getDate() - days);
-    data.value = await api.summaryRange(since);
+    const [summary, weight] = await Promise.all([
+      api.summaryRange(since),
+      api.weight({ since }).catch(() => ({ points: [], latest_kg: null, min_kg: null, max_kg: null, avg_kg: null })),
+    ]);
+    data.value = summary;
+    weightSeries.value = weight.points;
+    weightStats.value = { latest_kg: weight.latest_kg, min_kg: weight.min_kg, max_kg: weight.max_kg, avg_kg: weight.avg_kg };
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Failed to load";
   } finally {
     loading.value = false;
   }
 }
+
+const weightOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  const pts = weightSeries.value.filter((p) => p.weight_kg != null).map((p) => [p.time, p.weight_kg]);
+  const fatPts = weightSeries.value.filter((p) => p.body_fat_pct != null).map((p) => [p.time, p.body_fat_pct]);
+  const series: Array<Record<string, unknown>> = [];
+  if (pts.length) series.push({
+    name: "Weight (kg)", type: "line", data: pts, smooth: true,
+    symbol: "circle", symbolSize: 5, connectNulls: true,
+    lineStyle: { width: 2, color: t.palette.accent },
+    itemStyle: { color: t.palette.accent }, yAxisIndex: 0,
+  });
+  if (fatPts.length) series.push({
+    name: "Body fat %", type: "line", data: fatPts, smooth: true,
+    symbol: "circle", symbolSize: 4, connectNulls: true,
+    lineStyle: { width: 1.5, color: t.palette.annotation, type: "dashed" as const },
+    itemStyle: { color: t.palette.annotation }, yAxisIndex: 1,
+  });
+  return {
+    grid: { left: 50, right: 50, top: 36, bottom: 28 },
+    legend: { textStyle: t.axisLabel, top: 4 },
+    tooltip: { trigger: "axis", ...t.tooltip },
+    xAxis: { type: "time", axisLabel: t.axisLabel, splitLine: t.splitLine },
+    yAxis: [
+      { type: "value", name: "kg", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
+      { type: "value", name: "%", scale: true, axisLabel: t.axisLabel, splitLine: { show: false } },
+    ],
+    series,
+    dataZoom: [{ type: "inside" }],
+  };
+});
+const hasWeight = computed(() => weightSeries.value.some((p) => p.weight_kg != null));
 
 onMounted(load);
 watch(range, load);
@@ -231,6 +274,20 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
       <Card title="Sleep duration">
         <div class="chart"><VChart :option="sleepStackOption" autoresize/></div>
       </Card>
+
+      <Card title="Body weight">
+        <div v-if="!hasWeight" class="empty-mini">
+          No weight data yet. Import a Fitbit/Garmin ZIP from Settings, or POST to /ingest/batch.
+        </div>
+        <template v-else>
+          <div class="weight-stats">
+            <span><strong>{{ weightStats.latest_kg?.toFixed(1) }}</strong> kg latest</span>
+            <span class="muted">range: {{ weightStats.min_kg?.toFixed(1) }} – {{ weightStats.max_kg?.toFixed(1) }}</span>
+            <span class="muted">avg: {{ weightStats.avg_kg?.toFixed(1) }}</span>
+          </div>
+          <div class="chart"><VChart :option="weightOption" autoresize/></div>
+        </template>
+      </Card>
     </div>
   </div>
 </template>
@@ -261,5 +318,8 @@ h1 { margin: 0; }
 }
 
 .empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
+.empty-mini { color: var(--muted-2); padding: 1.2rem 0; text-align: center; font-size: 0.85rem; }
+.weight-stats { display: flex; gap: 1rem; align-items: baseline; margin-bottom: 0.5rem; font-size: 0.95rem; }
+.weight-stats .muted { color: var(--muted); font-size: 0.8rem; }
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 </style>

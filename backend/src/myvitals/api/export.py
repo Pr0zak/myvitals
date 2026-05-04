@@ -31,6 +31,13 @@ TABLES = {
         "date", "resting_hr", "hrv_avg", "recovery_score",
         "sleep_duration_s", "sleep_score", "steps_total",
     ]),
+    "body_metrics": (models.BodyMetric, [
+        "time", "weight_kg", "body_fat_pct", "bmi", "lean_mass_kg", "source",
+    ]),
+    "skin_temp": (models.SkinTemp, ["time", "celsius_delta"]),
+    "blood_pressure": (models.BloodPressure, [
+        "time", "systolic", "diastolic", "pulse_bpm", "source", "notes",
+    ]),
 }
 
 

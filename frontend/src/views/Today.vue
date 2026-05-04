@@ -33,6 +33,62 @@ const annotations = ref<Annotation[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
+// Blood pressure
+type BpPoint = { time: string; systolic: number; diastolic: number; pulse_bpm: number | null; source: string; notes: string | null };
+const bp = ref<{ latest: BpPoint | null; avg_sys: number | null; avg_dia: number | null; points: BpPoint[] }>({ latest: null, avg_sys: null, avg_dia: null, points: [] });
+const bpForm = ref({ systolic: "", diastolic: "", pulse: "", notes: "" });
+const bpSaving = ref(false);
+const bpError = ref<string | null>(null);
+const bpFormVisible = ref(false);
+
+async function loadBp() {
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - 30);
+    bp.value = await api.bloodPressure({ since });
+  } catch (e) {
+    bpError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function saveBp() {
+  bpSaving.value = true;
+  bpError.value = null;
+  try {
+    const sys = parseInt(bpForm.value.systolic, 10);
+    const dia = parseInt(bpForm.value.diastolic, 10);
+    if (!Number.isFinite(sys) || !Number.isFinite(dia)) throw new Error("Enter both systolic and diastolic");
+    const pulse = bpForm.value.pulse ? parseInt(bpForm.value.pulse, 10) : null;
+    await api.logBloodPressure({
+      systolic: sys, diastolic: dia,
+      pulse_bpm: Number.isFinite(pulse as number) ? pulse : null,
+      notes: bpForm.value.notes || null,
+    });
+    bpForm.value = { systolic: "", diastolic: "", pulse: "", notes: "" };
+    bpFormVisible.value = false;
+    await loadBp();
+  } catch (e) {
+    bpError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    bpSaving.value = false;
+  }
+}
+
+function bpClass(sys: number, dia: number): string {
+  if (sys >= 180 || dia >= 120) return "bp-crisis";
+  if (sys >= 140 || dia >= 90) return "bp-stage2";
+  if (sys >= 130 || dia >= 80) return "bp-stage1";
+  if (sys >= 120) return "bp-elevated";
+  return "bp-normal";
+}
+function bpLabel(sys: number, dia: number): string {
+  if (sys >= 180 || dia >= 120) return "Hypertensive crisis";
+  if (sys >= 140 || dia >= 90) return "Stage 2";
+  if (sys >= 130 || dia >= 80) return "Stage 1";
+  if (sys >= 120) return "Elevated";
+  return "Normal";
+}
+
 // Chart toggles
 const showWorkouts = ref(true);
 const showAnnotations = ref(true);
@@ -68,7 +124,7 @@ async function load() {
   }
 }
 
-onMounted(load);
+onMounted(() => { load(); loadBp(); });
 watch(range, load);
 
 const hrSeriesOption = computed(() => {
@@ -208,6 +264,46 @@ const subtitleHr = computed(() => {
           <div v-else class="empty">No step data</div>
         </div>
       </Card>
+
+      <!-- Blood pressure -->
+      <Card title="Blood pressure" :subtitle="bp.latest ? new Date(bp.latest.time).toLocaleString() : 'No readings yet'">
+        <div v-if="bp.latest" class="bp-latest">
+          <div class="bp-big" :class="bpClass(bp.latest.systolic, bp.latest.diastolic)">
+            <span class="sys">{{ bp.latest.systolic }}</span>
+            <span class="slash">/</span>
+            <span class="dia">{{ bp.latest.diastolic }}</span>
+            <span class="unit">mmHg</span>
+          </div>
+          <div class="bp-meta">
+            <span class="bp-tag" :class="bpClass(bp.latest.systolic, bp.latest.diastolic)">{{ bpLabel(bp.latest.systolic, bp.latest.diastolic) }}</span>
+            <span v-if="bp.latest.pulse_bpm" class="muted">Pulse: {{ bp.latest.pulse_bpm }} bpm</span>
+            <span class="muted">via {{ bp.latest.source }}</span>
+          </div>
+          <div v-if="bp.avg_sys && bp.avg_dia" class="bp-avg">
+            30-day avg: {{ bp.avg_sys.toFixed(0) }}/{{ bp.avg_dia.toFixed(0) }}
+          </div>
+        </div>
+        <div v-else class="empty">
+          Pair OMRON Connect with Health Connect, or log a reading manually.
+        </div>
+
+        <div class="bp-actions">
+          <button class="ghost" @click="bpFormVisible = !bpFormVisible">
+            {{ bpFormVisible ? 'Cancel' : '+ Log a reading' }}
+          </button>
+        </div>
+        <div v-if="bpFormVisible" class="bp-form">
+          <input v-model="bpForm.systolic" type="number" placeholder="Sys" min="40" max="260"/>
+          <span>/</span>
+          <input v-model="bpForm.diastolic" type="number" placeholder="Dia" min="20" max="180"/>
+          <input v-model="bpForm.pulse" type="number" placeholder="Pulse (opt)" min="20" max="250"/>
+          <input v-model="bpForm.notes" type="text" placeholder="Notes (optional)" class="bp-notes"/>
+          <button class="primary" :disabled="bpSaving" @click="saveBp">
+            {{ bpSaving ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
+        <div v-if="bpError" class="err"><small>{{ bpError }}</small></div>
+      </Card>
     </div>
 
     <div v-if="summary?.last_sync" class="footer">
@@ -238,4 +334,25 @@ h1 { margin: 0; }
 .empty { color: var(--muted-2); align-self: center; margin: auto; }
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 .footer { margin-top: 1.5rem; color: var(--muted-2); font-size: 0.8rem; text-align: right; }
+
+.bp-latest { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.4rem 0; }
+.bp-big { display: flex; align-items: baseline; gap: 0.3rem; font-family: ui-monospace, monospace; font-weight: 600; }
+.bp-big .sys, .bp-big .dia { font-size: 2rem; }
+.bp-big .slash { font-size: 1.5rem; color: var(--muted-2); }
+.bp-big .unit { font-size: 0.75rem; color: var(--muted); margin-left: 0.4rem; }
+.bp-meta { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; font-size: 0.85rem; }
+.bp-meta .muted { color: var(--muted); }
+.bp-tag { padding: 0.1rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 500; }
+.bp-normal { color: #22c55e; } .bp-normal.bp-tag { background: rgba(34, 197, 94, 0.15); }
+.bp-elevated { color: #eab308; } .bp-elevated.bp-tag { background: rgba(234, 179, 8, 0.15); }
+.bp-stage1 { color: #f97316; } .bp-stage1.bp-tag { background: rgba(249, 115, 22, 0.15); }
+.bp-stage2 { color: #ef4444; } .bp-stage2.bp-tag { background: rgba(239, 68, 68, 0.15); }
+.bp-crisis { color: #b91c1c; } .bp-crisis.bp-tag { background: rgba(185, 28, 28, 0.2); font-weight: 700; }
+.bp-avg { font-size: 0.8rem; color: var(--muted); }
+.bp-actions { margin: 0.6rem 0 0; }
+.bp-form { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.6rem; }
+.bp-form input { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.35rem 0.5rem; width: 80px; font-size: 0.9rem; font-family: inherit; }
+.bp-form .bp-notes { width: 100%; }
+.bp-form .primary { background: var(--accent); color: var(--accent-text); border: 1px solid var(--accent); border-radius: 4px; padding: 0.4rem 0.9rem; cursor: pointer; }
+.bp-form .primary:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

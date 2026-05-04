@@ -40,15 +40,45 @@ data class WorkoutSample(
 )
 
 @JsonClass(generateAdapter = true)
+data class BodyMetricSample(
+    val time: String,
+    @Json(name = "weight_kg") val weightKg: Double? = null,
+    @Json(name = "body_fat_pct") val bodyFatPct: Double? = null,
+    val bmi: Double? = null,
+    @Json(name = "lean_mass_kg") val leanMassKg: Double? = null,
+    val source: String = "watch",
+)
+
+@JsonClass(generateAdapter = true)
+data class BloodPressureSample(
+    val time: String,
+    val systolic: Int,
+    val diastolic: Int,
+    @Json(name = "pulse_bpm") val pulseBpm: Int? = null,
+    val source: String = "watch",
+    val notes: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class SkinTempSample(
+    val time: String,
+    @Json(name = "celsius_delta") val celsiusDelta: Double,
+)
+
+@JsonClass(generateAdapter = true)
 data class IngestBatch(
     val heartrate: List<HeartRateSample> = emptyList(),
     val hrv: List<HrvSample> = emptyList(),
     val steps: List<StepsSample> = emptyList(),
     @Json(name = "sleep_stages") val sleepStages: List<SleepStageSample> = emptyList(),
     val workouts: List<WorkoutSample> = emptyList(),
+    @Json(name = "body_metrics") val bodyMetrics: List<BodyMetricSample> = emptyList(),
+    @Json(name = "blood_pressure") val bloodPressure: List<BloodPressureSample> = emptyList(),
+    @Json(name = "skin_temp") val skinTemp: List<SkinTempSample> = emptyList(),
 ) {
     fun isEmpty(): Boolean = heartrate.isEmpty() && hrv.isEmpty() && steps.isEmpty()
-        && sleepStages.isEmpty() && workouts.isEmpty()
+        && sleepStages.isEmpty() && workouts.isEmpty() && bodyMetrics.isEmpty()
+        && bloodPressure.isEmpty() && skinTemp.isEmpty()
 }
 
 @JsonClass(generateAdapter = true)
@@ -58,4 +88,7 @@ data class IngestResponse(
     val steps: Int = 0,
     @Json(name = "sleep_stages") val sleepStages: Int = 0,
     val workouts: Int = 0,
+    @Json(name = "body_metrics") val bodyMetrics: Int = 0,
+    @Json(name = "blood_pressure") val bloodPressure: Int = 0,
+    @Json(name = "skin_temp") val skinTemp: Int = 0,
 )

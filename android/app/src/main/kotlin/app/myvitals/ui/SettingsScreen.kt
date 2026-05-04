@@ -136,6 +136,20 @@ fun SettingsScreen(
                 ) { Text("Backfill 30d") }
                 OutlinedButton(
                     onClick = {
+                        onBackfill(365)
+                        Toast.makeText(context, "Backfilling last year…", Toast.LENGTH_LONG).show()
+                    },
+                    enabled = settings.isConfigured() && hasPermissions(),
+                ) { Text("Backfill 1y") }
+                OutlinedButton(
+                    onClick = {
+                        onBackfill(3650)
+                        Toast.makeText(context, "Backfilling ALL history (10y) — this may take a while", Toast.LENGTH_LONG).show()
+                    },
+                    enabled = settings.isConfigured() && hasPermissions(),
+                ) { Text("Backfill ALL") }
+                OutlinedButton(
+                    onClick = {
                         onClearBuffer()
                         Toast.makeText(context, "Sync buffer cleared", Toast.LENGTH_SHORT).show()
                     },

@@ -165,4 +165,14 @@ export const api = {
     const { data } = await http.get<import("./types").Activity>(`/activities/${source}/${sourceId}`);
     return data;
   },
+
+  async activitiesStats(days = 30): Promise<import("./types").ActivityStats> {
+    const { data } = await http.get<import("./types").ActivityStats>("/activities/stats", { params: { days } });
+    return data;
+  },
+
+  async updateActivityNotes(source: string, sourceId: string, body: { notes?: string | null; tags?: string[] | null }): Promise<{ status: string }> {
+    const { data } = await http.post<{ status: string }>(`/activities/${source}/${sourceId}/notes`, body);
+    return data;
+  },
 };

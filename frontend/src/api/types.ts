@@ -69,6 +69,18 @@ export interface AppLog {
   stack: string | null;
 }
 
+export interface ActivityStats {
+  period_label: string;
+  n_activities: number;
+  total_distance_m: number;
+  total_duration_s: number;
+  total_elevation_m: number;
+  total_kcal: number;
+  by_type: Record<string, number>;
+  streak_days: number;
+  period_pct_vs_prev: Record<string, number>;
+}
+
 export interface StravaStatus {
   connected: boolean;
   configured: boolean;
@@ -103,4 +115,6 @@ export interface Activity {
   kcal: number | null;
   suffer_score: number | null;
   polyline: string | null;
+  notes?: string | null;
+  tags?: string[] | null;
 }

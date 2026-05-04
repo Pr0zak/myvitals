@@ -54,6 +54,25 @@ class ActivityOut(BaseModel):
     kcal: float | None
     suffer_score: float | None
     polyline: str | None
+    notes: str | None = None
+    tags: list[str] | None = None
+
+
+class ActivityNotesIn(BaseModel):
+    notes: str | None = None
+    tags: list[str] | None = None
+
+
+class ActivityStatsOut(BaseModel):
+    period_label: str
+    n_activities: int
+    total_distance_m: float
+    total_duration_s: int
+    total_elevation_m: float
+    total_kcal: float
+    by_type: dict[str, int]
+    streak_days: int
+    period_pct_vs_prev: dict[str, float]
 
 
 def _mask(s: str) -> str:
@@ -160,6 +179,91 @@ async def strava_disconnect(db: AsyncSession = Depends(get_session)) -> dict[str
 
 # --- Read activities (any source) ---
 
+def _activity_to_out(a: models.Activity) -> ActivityOut:
+    return ActivityOut(
+        source=a.source, source_id=a.source_id, type=a.type, name=a.name,
+        start_at=a.start_at, duration_s=a.duration_s,
+        distance_m=a.distance_m, elevation_gain_m=a.elevation_gain_m,
+        avg_hr=a.avg_hr, max_hr=a.max_hr,
+        avg_power_w=a.avg_power_w, max_power_w=a.max_power_w,
+        kcal=a.kcal, suffer_score=a.suffer_score, polyline=a.polyline,
+        notes=a.notes, tags=a.tags,
+    )
+
+
+@router.get("/activities/stats", response_model=ActivityStatsOut,
+            dependencies=[Depends(require_query)])
+async def activities_stats(
+    days: int = Query(30, ge=1, le=365),
+    db: AsyncSession = Depends(get_session),
+) -> ActivityStatsOut:
+    """Aggregate stats over the past `days` days, plus comparison vs prior period."""
+    from datetime import timedelta as _td
+    now = datetime.now(timezone.utc)
+    period_start = now - _td(days=days)
+    prev_start = now - _td(days=2 * days)
+
+    res = await db.execute(
+        select(models.Activity)
+        .where(models.Activity.start_at >= period_start)
+        .where(models.Activity.start_at <= now)
+    )
+    rows = res.scalars().all()
+
+    res_prev = await db.execute(
+        select(
+            func.count(models.Activity.source_id),
+            func.coalesce(func.sum(models.Activity.distance_m), 0),
+            func.coalesce(func.sum(models.Activity.duration_s), 0),
+            func.coalesce(func.sum(models.Activity.elevation_gain_m), 0),
+            func.coalesce(func.sum(models.Activity.kcal), 0),
+        )
+        .where(models.Activity.start_at >= prev_start)
+        .where(models.Activity.start_at < period_start)
+    )
+    prev = res_prev.one()
+    pn, pd, pdur, pelev, pkcal = (float(x) for x in prev)
+
+    n = len(rows)
+    total_distance = sum(a.distance_m or 0 for a in rows)
+    total_duration = sum(a.duration_s for a in rows)
+    total_elev = sum(a.elevation_gain_m or 0 for a in rows)
+    total_kcal = sum(a.kcal or 0 for a in rows)
+
+    by_type: dict[str, int] = {}
+    for a in rows:
+        by_type[a.type] = by_type.get(a.type, 0) + 1
+
+    active_days = {a.start_at.date() for a in rows}
+    streak = 0
+    d = now.date()
+    while d in active_days:
+        streak += 1
+        d -= _td(days=1)
+
+    def pct(curr: float, prev_val: float) -> float:
+        if prev_val == 0:
+            return 0.0 if curr == 0 else 100.0
+        return ((curr - prev_val) / prev_val) * 100
+
+    return ActivityStatsOut(
+        period_label=f"Last {days} days",
+        n_activities=n,
+        total_distance_m=total_distance,
+        total_duration_s=total_duration,
+        total_elevation_m=total_elev,
+        total_kcal=total_kcal,
+        by_type=by_type,
+        streak_days=streak,
+        period_pct_vs_prev={
+            "n": pct(n, pn), "distance": pct(total_distance, pd),
+            "duration": pct(total_duration, pdur),
+            "elevation": pct(total_elev, pelev),
+            "kcal": pct(total_kcal, pkcal),
+        },
+    )
+
+
 @router.get("/activities/{source}/{source_id}", response_model=ActivityOut,
             dependencies=[Depends(require_query)])
 async def get_activity(
@@ -175,14 +279,29 @@ async def get_activity(
     a = result.scalar_one_or_none()
     if a is None:
         raise HTTPException(404, "activity not found")
-    return ActivityOut(
-        source=a.source, source_id=a.source_id, type=a.type, name=a.name,
-        start_at=a.start_at, duration_s=a.duration_s,
-        distance_m=a.distance_m, elevation_gain_m=a.elevation_gain_m,
-        avg_hr=a.avg_hr, max_hr=a.max_hr,
-        avg_power_w=a.avg_power_w, max_power_w=a.max_power_w,
-        kcal=a.kcal, suffer_score=a.suffer_score, polyline=a.polyline,
+    return _activity_to_out(a)
+
+
+@router.post("/activities/{source}/{source_id}/notes",
+             dependencies=[Depends(require_query)])
+async def update_activity_notes(
+    source: str,
+    source_id: str,
+    body: ActivityNotesIn,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, str]:
+    result = await db.execute(
+        select(models.Activity)
+        .where(models.Activity.source == source)
+        .where(models.Activity.source_id == source_id)
     )
+    a = result.scalar_one_or_none()
+    if a is None:
+        raise HTTPException(404, "activity not found")
+    a.notes = body.notes
+    a.tags = body.tags or None
+    await db.commit()
+    return {"status": "saved"}
 
 
 @router.get("/activities", response_model=list[ActivityOut], dependencies=[Depends(require_query)])
@@ -202,14 +321,4 @@ async def list_activities(
     if type:
         stmt = stmt.where(models.Activity.type == type)
     result = await db.execute(stmt)
-    return [
-        ActivityOut(
-            source=a.source, source_id=a.source_id, type=a.type, name=a.name,
-            start_at=a.start_at, duration_s=a.duration_s,
-            distance_m=a.distance_m, elevation_gain_m=a.elevation_gain_m,
-            avg_hr=a.avg_hr, max_hr=a.max_hr,
-            avg_power_w=a.avg_power_w, max_power_w=a.max_power_w,
-            kcal=a.kcal, suffer_score=a.suffer_score, polyline=a.polyline,
-        )
-        for a in result.scalars().all()
-    ]
+    return [_activity_to_out(a) for a in result.scalars().all()]

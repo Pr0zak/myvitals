@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -170,3 +171,5 @@ class Activity(Base):
     suffer_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     polyline: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)), nullable=True)

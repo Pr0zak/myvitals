@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { RouterLink } from "vue-router";
 import { api } from "@/api/client";
 import type { Activity } from "@/api/types";
 
@@ -81,7 +82,11 @@ onMounted(load);
     </div>
 
     <div v-else class="list">
-      <article v-for="a in activities" :key="`${a.source}-${a.source_id}`" class="card">
+      <RouterLink
+        v-for="a in activities" :key="`${a.source}-${a.source_id}`"
+        :to="`/activity/${a.source}/${a.source_id}`"
+        class="card"
+      >
         <header class="card-head">
           <span class="type">{{ a.type }}</span>
           <span class="when">{{ fmtDate(a.start_at) }}</span>
@@ -99,7 +104,7 @@ onMounted(load);
           <div v-if="a.kcal"><dt>Calories</dt><dd>{{ Math.round(a.kcal) }} kcal</dd></div>
           <div v-if="a.suffer_score"><dt>Suffer</dt><dd>{{ Math.round(a.suffer_score) }}</dd></div>
         </dl>
-      </article>
+      </RouterLink>
     </div>
   </div>
 </template>
@@ -108,21 +113,26 @@ onMounted(load);
 .head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 1rem; }
 h1 { margin: 0; }
 .controls { display: flex; gap: 0.4rem; align-items: center; font-size: 0.85rem; }
-select, button { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; padding: 0.3rem 0.5rem; font-size: 0.8rem; }
+select, button { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.3rem 0.5rem; font-size: 0.8rem; font-family: inherit; }
 button:disabled { opacity: 0.5; }
 
-.empty { color: #64748b; padding: 2rem 0; text-align: center; }
-.empty a { color: #38bdf8; }
-.err { color: #ef4444; padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; margin: 0.6rem 0; }
+.empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
+.empty a { color: var(--accent); }
+.err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 
 .list { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; margin-top: 1rem; }
-.card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 1rem; }
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 1rem; text-decoration: none; color: inherit; display: block;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.card:hover { border-color: var(--accent); transform: translateY(-1px); }
 .card-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 0.75rem; }
-.type { color: #38bdf8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-.when { color: #64748b; }
-.card h3 { margin: 0.3rem 0 0.6rem; font-size: 1rem; color: #e2e8f0; font-weight: 500; }
+.type { color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.when { color: var(--muted-2); }
+.card h3 { margin: 0.3rem 0 0.6rem; font-size: 1rem; color: var(--text); font-weight: 500; }
 dl.stats { margin: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.4rem 1rem; font-size: 0.85rem; }
 dl.stats > div { display: flex; flex-direction: column; }
-dt { color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
-dd { margin: 0.1rem 0 0; color: #e2e8f0; font-weight: 500; }
+dt { color: var(--muted-2); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
 </style>

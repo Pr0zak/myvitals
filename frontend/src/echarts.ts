@@ -2,13 +2,18 @@
 // chart components can use VChart without each one re-registering.
 import { use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { BarChart, GaugeChart, LineChart, PieChart } from "echarts/charts";
+import { BarChart, GaugeChart, HeatmapChart, LineChart, PieChart, ScatterChart } from "echarts/charts";
 import {
+  CalendarComponent,
   DataZoomComponent,
   GridComponent,
   LegendComponent,
+  MarkAreaComponent,
+  MarkLineComponent,
+  MarkPointComponent,
   TitleComponent,
   TooltipComponent,
+  VisualMapComponent,
 } from "echarts/components";
 
 use([
@@ -17,9 +22,16 @@ use([
   BarChart,
   GaugeChart,
   PieChart,
+  HeatmapChart,
+  ScatterChart,
   GridComponent,
   TooltipComponent,
   TitleComponent,
   LegendComponent,
   DataZoomComponent,
+  MarkAreaComponent,
+  MarkLineComponent,
+  MarkPointComponent,
+  CalendarComponent,
+  VisualMapComponent,
 ]);

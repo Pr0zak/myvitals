@@ -138,6 +138,52 @@ async def get_last_sleep(
     )
 
 
+@router.get("/sleep/range", response_model=list[SleepNight])
+async def get_sleep_range(
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> list[SleepNight]:
+    """All sleep sessions (split by 2h gaps) in the time range, oldest first."""
+    start, end = _resolve_range(since, until, timedelta(days=30))
+    result = await db.execute(
+        select(models.SleepStage.time, models.SleepStage.stage, models.SleepStage.duration_s)
+        .where(models.SleepStage.time >= start)
+        .where(models.SleepStage.time <= end)
+        .order_by(models.SleepStage.time)
+    )
+    rows = result.all()
+    if not rows:
+        return []
+
+    # Group rows into sessions: a 2-hour gap between consecutive stage starts breaks the night.
+    sessions: list[list[tuple[datetime, str, int]]] = []
+    current: list[tuple[datetime, str, int]] = []
+    for ts, stage, dur in rows:
+        if current and (ts - current[-1][0]) > timedelta(hours=2):
+            sessions.append(current)
+            current = []
+        current.append((ts, stage, dur))
+    if current:
+        sessions.append(current)
+
+    out: list[SleepNight] = []
+    for session in sessions:
+        start_t = session[0][0]
+        end_t = session[-1][0] + timedelta(seconds=session[-1][2])
+        by_stage: dict[str, int] = {}
+        for _, stage, dur in session:
+            by_stage[stage] = by_stage.get(stage, 0) + dur
+        out.append(SleepNight(
+            date=start_t.date(),
+            start=start_t,
+            end=end_t,
+            total_s=sum(by_stage.values()),
+            stages=[SleepStageBucket(stage=k, duration_s=v) for k, v in by_stage.items()],
+        ))
+    return out
+
+
 @router.get("/last-sync")
 async def get_last_sync(db: AsyncSession = Depends(get_session)) -> dict[str, datetime | None]:
     """Most recent timestamp across all vitals tables — proxy for 'when did the watch last sync'."""

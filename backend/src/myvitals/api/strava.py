@@ -160,6 +160,31 @@ async def strava_disconnect(db: AsyncSession = Depends(get_session)) -> dict[str
 
 # --- Read activities (any source) ---
 
+@router.get("/activities/{source}/{source_id}", response_model=ActivityOut,
+            dependencies=[Depends(require_query)])
+async def get_activity(
+    source: str,
+    source_id: str,
+    db: AsyncSession = Depends(get_session),
+) -> ActivityOut:
+    result = await db.execute(
+        select(models.Activity)
+        .where(models.Activity.source == source)
+        .where(models.Activity.source_id == source_id)
+    )
+    a = result.scalar_one_or_none()
+    if a is None:
+        raise HTTPException(404, "activity not found")
+    return ActivityOut(
+        source=a.source, source_id=a.source_id, type=a.type, name=a.name,
+        start_at=a.start_at, duration_s=a.duration_s,
+        distance_m=a.distance_m, elevation_gain_m=a.elevation_gain_m,
+        avg_hr=a.avg_hr, max_hr=a.max_hr,
+        avg_power_w=a.avg_power_w, max_power_w=a.max_power_w,
+        kcal=a.kcal, suffer_score=a.suffer_score, polyline=a.polyline,
+    )
+
+
 @router.get("/activities", response_model=list[ActivityOut], dependencies=[Depends(require_query)])
 async def list_activities(
     since: datetime | None = Query(None),

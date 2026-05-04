@@ -3,6 +3,7 @@ import { createPinia } from "pinia";
 import { createRouter, createWebHistory } from "vue-router";
 
 import "./echarts";  // side-effect: registers ECharts modules
+import "./theme";    // side-effect: applies theme on startup
 import App from "./App.vue";
 
 const router = createRouter({
@@ -13,6 +14,9 @@ const router = createRouter({
     { path: "/sleep", name: "sleep", component: () => import("./views/Sleep.vue") },
     { path: "/log", name: "log", component: () => import("./views/Log.vue") },
     { path: "/activities", name: "activities", component: () => import("./views/Activities.vue") },
+    { path: "/activity/:source/:id", name: "activity-detail", component: () => import("./views/ActivityDetail.vue") },
+    { path: "/calendar", name: "calendar", component: () => import("./views/Calendar.vue") },
+    { path: "/insights", name: "insights", component: () => import("./views/Insights.vue") },
     { path: "/logs", name: "logs", component: () => import("./views/Logs.vue") },
     { path: "/settings", name: "settings", component: () => import("./views/Settings.vue") },
   ],

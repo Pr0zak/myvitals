@@ -57,6 +57,15 @@ export const api = {
     return data;
   },
 
+  async sleepRange(since: Date | string, until?: Date | string): Promise<SleepNight[]> {
+    const params: Record<string, string> = {
+      since: since instanceof Date ? since.toISOString() : since,
+    };
+    if (until) params.until = until instanceof Date ? until.toISOString() : until;
+    const { data } = await http.get<SleepNight[]>("/query/sleep/range", { params });
+    return data;
+  },
+
   async lastSync(): Promise<{ last_sync: string | null }> {
     const { data } = await http.get<{ last_sync: string | null }>("/query/last-sync");
     return data;
@@ -141,6 +150,11 @@ export const api = {
     if (opts.type) params.type = opts.type;
     if (opts.limit) params.limit = opts.limit;
     const { data } = await http.get<import("./types").Activity[]>("/activities", { params });
+    return data;
+  },
+
+  async activity(source: string, sourceId: string): Promise<import("./types").Activity> {
+    const { data } = await http.get<import("./types").Activity>(`/activities/${source}/${sourceId}`);
     return data;
   },
 };

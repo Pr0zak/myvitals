@@ -4,18 +4,26 @@ import VChart from "vue-echarts";
 import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
+import { chartTheme } from "@/theme";
 
-type Range = "7d" | "30d" | "90d";
+type Range = "7d" | "30d" | "90d" | "365d";
 const RANGES: { key: Range; label: string; days: number }[] = [
   { key: "7d", label: "7 days", days: 7 },
   { key: "30d", label: "30 days", days: 30 },
   { key: "90d", label: "90 days", days: 90 },
+  { key: "365d", label: "1 year", days: 365 },
 ];
+
+type ChartType = "line" | "bar" | "area";
 
 const range = ref<Range>("30d");
 const data = ref<TodaySummary[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
+
+const overlayMetrics = ref({ rhr: true, hrv: true, recovery: true, sleep: false });
+const stepsType = ref<ChartType>("bar");
+const stepsGoal = ref(8000);
 
 async function load() {
   loading.value = true;
@@ -35,76 +43,145 @@ async function load() {
 onMounted(load);
 watch(range, load);
 
-const baseChart = (color: string, name: string, accessor: (d: TodaySummary) => number | null) =>
-  computed(() => ({
-    grid: { left: 36, right: 12, top: 8, bottom: 24 },
-    xAxis: {
-      type: "time",
-      axisLabel: { color: "#64748b", fontSize: 10 },
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: "value",
-      axisLabel: { color: "#64748b", fontSize: 10 },
-      splitLine: { lineStyle: { color: "#334155", type: "dashed" } },
-      scale: true,
-    },
-    tooltip: {
-      trigger: "axis",
-      backgroundColor: "#1e293b",
-      borderColor: "#334155",
-      textStyle: { color: "#e2e8f0" },
-    },
+// === Multi-overlay chart: RHR + HRV + Recovery + sleep duration on one chart ===
+const overlayOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  const dates = data.value.map((d) => d.date);
+  const series: any[] = [];
+  const yAxes: any[] = [];
+
+  if (overlayMetrics.value.rhr) {
+    yAxes.push({
+      type: "value", axisLabel: t.axisLabel, splitLine: t.splitLine, scale: true,
+      name: "RHR", nameTextStyle: { color: t.palette.hr, fontSize: 9 },
+    });
+    series.push({
+      type: "line", name: "RHR", smooth: true,
+      yAxisIndex: yAxes.length - 1,
+      lineStyle: { color: t.palette.hr, width: 2 },
+      itemStyle: { color: t.palette.hr },
+      connectNulls: true,
+      data: data.value.map((d) => [d.date, d.resting_hr]),
+    });
+  }
+  if (overlayMetrics.value.hrv) {
+    yAxes.push({
+      type: "value", axisLabel: t.axisLabel, splitLine: { show: false }, scale: true, position: "right",
+      name: "HRV", nameTextStyle: { color: t.palette.hrv, fontSize: 9 },
+    });
+    series.push({
+      type: "line", name: "HRV", smooth: true,
+      yAxisIndex: yAxes.length - 1,
+      lineStyle: { color: t.palette.hrv, width: 2 },
+      itemStyle: { color: t.palette.hrv },
+      connectNulls: true,
+      data: data.value.map((d) => [d.date, d.hrv_avg]),
+    });
+  }
+  if (overlayMetrics.value.recovery) {
+    yAxes.push({
+      type: "value", axisLabel: t.axisLabel, splitLine: { show: false }, scale: true, position: "right",
+      name: "Recovery", nameTextStyle: { color: t.palette.recovery, fontSize: 9 },
+      offset: yAxes.filter((a) => a.position === "right").length * 40,
+    });
+    series.push({
+      type: "line", name: "Recovery", smooth: true,
+      yAxisIndex: yAxes.length - 1,
+      lineStyle: { color: t.palette.recovery, width: 2 },
+      itemStyle: { color: t.palette.recovery },
+      connectNulls: true,
+      data: data.value.map((d) => [d.date, d.recovery_score]),
+    });
+  }
+  if (overlayMetrics.value.sleep) {
+    yAxes.push({
+      type: "value", axisLabel: t.axisLabel, splitLine: { show: false }, scale: true, position: "right",
+      name: "Sleep h", nameTextStyle: { color: t.palette.sleep, fontSize: 9 },
+      offset: yAxes.filter((a) => a.position === "right").length * 40,
+    });
+    series.push({
+      type: "line", name: "Sleep (h)", smooth: true,
+      yAxisIndex: yAxes.length - 1,
+      lineStyle: { color: t.palette.sleep, width: 2, type: "dashed" },
+      itemStyle: { color: t.palette.sleep },
+      connectNulls: true,
+      data: data.value.map((d) => [d.date, d.sleep_duration_s ? d.sleep_duration_s / 3600 : null]),
+    });
+  }
+
+  return {
+    grid: { left: 40, right: 60 + (yAxes.filter((a) => a.position === "right").length * 40), top: 30, bottom: 28 },
+    legend: { textStyle: t.axisLabel, top: 4 },
+    xAxis: { type: "category", data: dates, axisLabel: t.axisLabel },
+    yAxis: yAxes.length > 0 ? yAxes : { type: "value" },
+    tooltip: { trigger: "axis", ...t.tooltip },
+    series,
+    dataZoom: [{ type: "inside" }],
+  };
+});
+
+// === Steps chart with goal line ===
+const stepsOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  const baseSeries = {
+    name: "Steps",
+    data: data.value.map((d) => [d.date, d.steps_total ?? 0]),
+    itemStyle: { color: t.palette.steps },
+    markLine: stepsGoal.value > 0 ? {
+      silent: true, symbol: "none",
+      lineStyle: { color: t.palette.recovery, type: "dashed" as const },
+      label: { show: true, formatter: `goal ${stepsGoal.value}`, color: t.axisLabel.color, fontSize: 9 },
+      data: [{ yAxis: stepsGoal.value }],
+    } : undefined,
+  };
+  const seriesByType = {
+    bar: { ...baseSeries, type: "bar" as const },
+    line: { ...baseSeries, type: "line" as const, smooth: true, lineStyle: { color: t.palette.steps, width: 2 } },
+    area: { ...baseSeries, type: "line" as const, smooth: true, areaStyle: { color: `${t.palette.steps}33` }, lineStyle: { color: t.palette.steps, width: 2 } },
+  };
+  return {
+    grid: { left: 50, right: 12, top: 8, bottom: 28 },
+    xAxis: { type: "category", data: data.value.map((d) => d.date), axisLabel: t.axisLabel },
+    yAxis: { type: "value", axisLabel: t.axisLabel, splitLine: t.splitLine },
+    tooltip: { trigger: "axis", ...t.tooltip },
+    series: [seriesByType[stepsType.value]],
+    dataZoom: [{ type: "inside" }],
+  };
+});
+
+// === Sleep stage stacked chart ===
+const sleepStackOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  const dates = data.value.map((d) => d.date);
+  return {
+    grid: { left: 50, right: 12, top: 30, bottom: 28 },
+    legend: { textStyle: t.axisLabel, top: 4 },
+    xAxis: { type: "category", data: dates, axisLabel: t.axisLabel },
+    yAxis: { type: "value", name: "hours", axisLabel: t.axisLabel, splitLine: t.splitLine, nameTextStyle: t.axisLabel },
+    tooltip: { trigger: "axis", ...t.tooltip },
     series: [
       {
-        type: "line",
-        name,
-        showSymbol: true,
-        smooth: true,
-        connectNulls: true,
-        symbolSize: 4,
-        lineStyle: { color, width: 1.8 },
-        itemStyle: { color },
-        areaStyle: { color: `${color}22` },
-        data: data.value
-          .map((d) => [d.date, accessor(d)])
-          .filter((p) => p[1] !== null && p[1] !== undefined),
+        type: "bar", stack: "sleep", name: "Total sleep",
+        data: data.value.map((d) => d.sleep_duration_s ? +(d.sleep_duration_s / 3600).toFixed(2) : null),
+        itemStyle: { color: t.palette.sleep },
       },
     ],
-  }));
-
-const rhrOption = baseChart("#ef4444", "Resting HR (bpm)", (d) => d.resting_hr);
-const hrvOption = baseChart("#22c55e", "HRV (ms)", (d) => d.hrv_avg);
-const recoveryOption = baseChart("#a78bfa", "Recovery", (d) => d.recovery_score);
-const stepsOption = computed(() => ({
-  grid: { left: 36, right: 12, top: 8, bottom: 24 },
-  xAxis: {
-    type: "category",
-    data: data.value.map((d) => d.date),
-    axisLabel: { color: "#64748b", fontSize: 10 },
-  },
-  yAxis: {
-    type: "value",
-    axisLabel: { color: "#64748b", fontSize: 10 },
-    splitLine: { lineStyle: { color: "#334155", type: "dashed" } },
-  },
-  tooltip: {
-    trigger: "axis",
-    backgroundColor: "#1e293b",
-    borderColor: "#334155",
-    textStyle: { color: "#e2e8f0" },
-  },
-  series: [
-    {
-      type: "bar",
-      name: "Steps",
-      itemStyle: { color: "#38bdf8" },
-      data: data.value.map((d) => d.steps_total ?? 0),
-    },
-  ],
-}));
+    dataZoom: [{ type: "inside" }],
+  };
+});
 
 const hasData = computed(() => data.value.length > 0);
+const hasSelected = computed(() => Object.values(overlayMetrics.value).some(Boolean));
+
+function preset(p: "recovery" | "training" | "sleep" | "all") {
+  if (p === "recovery") overlayMetrics.value = { rhr: true, hrv: true, recovery: true, sleep: false };
+  else if (p === "training") overlayMetrics.value = { rhr: true, hrv: true, recovery: false, sleep: false };
+  else if (p === "sleep") overlayMetrics.value = { rhr: false, hrv: false, recovery: false, sleep: true };
+  else overlayMetrics.value = { rhr: true, hrv: true, recovery: true, sleep: true };
+}
 </script>
 
 <template>
@@ -112,30 +189,47 @@ const hasData = computed(() => data.value.length > 0);
     <header class="head">
       <h1>Trends</h1>
       <div class="picker">
-        <button
-          v-for="r in RANGES" :key="r.key"
-          :class="{ active: range === r.key }"
-          @click="range = r.key"
-        >{{ r.label }}</button>
+        <button v-for="r in RANGES" :key="r.key"
+                :class="{ active: range === r.key }" @click="range = r.key">{{ r.label }}</button>
       </div>
     </header>
 
     <div v-if="error" class="err">{{ error }}</div>
-    <div v-if="loading" class="loading">Loading…</div>
-    <div v-else-if="!hasData" class="empty">No daily summaries yet for this range — the analytics job runs at 03:00 local each night.</div>
+    <div v-if="loading" class="empty">Loading…</div>
+    <div v-else-if="!hasData" class="empty">
+      No daily summaries yet for this range. The analytics job runs at 03:00 local each night.
+    </div>
 
     <div v-else class="grid">
-      <Card title="Resting HR">
-        <div class="chart"><VChart :option="rhrOption" autoresize /></div>
+      <Card title="Combined trend">
+        <div class="toggle-row">
+          <label><input type="checkbox" v-model="overlayMetrics.rhr"/><span>RHR</span></label>
+          <label><input type="checkbox" v-model="overlayMetrics.hrv"/><span>HRV</span></label>
+          <label><input type="checkbox" v-model="overlayMetrics.recovery"/><span>Recovery</span></label>
+          <label><input type="checkbox" v-model="overlayMetrics.sleep"/><span>Sleep h</span></label>
+          <span class="presets">presets:</span>
+          <button class="preset" @click="preset('recovery')">recovery</button>
+          <button class="preset" @click="preset('training')">training</button>
+          <button class="preset" @click="preset('sleep')">sleep</button>
+          <button class="preset" @click="preset('all')">all</button>
+        </div>
+        <div class="chart"><VChart v-if="hasSelected" :option="overlayOption" autoresize/></div>
       </Card>
-      <Card title="HRV (RMSSD)">
-        <div class="chart"><VChart :option="hrvOption" autoresize /></div>
-      </Card>
-      <Card title="Recovery score">
-        <div class="chart"><VChart :option="recoveryOption" autoresize /></div>
-      </Card>
+
       <Card title="Steps per day">
-        <div class="chart"><VChart :option="stepsOption" autoresize /></div>
+        <div class="toggle-row">
+          <span>Type:</span>
+          <button class="preset" :class="{ active: stepsType === 'bar' }" @click="stepsType = 'bar'">bar</button>
+          <button class="preset" :class="{ active: stepsType === 'line' }" @click="stepsType = 'line'">line</button>
+          <button class="preset" :class="{ active: stepsType === 'area' }" @click="stepsType = 'area'">area</button>
+          <span style="margin-left: 1rem;">Goal:</span>
+          <input class="goal-input" type="number" v-model.number="stepsGoal" min="0" step="500"/>
+        </div>
+        <div class="chart"><VChart :option="stepsOption" autoresize/></div>
+      </Card>
+
+      <Card title="Sleep duration">
+        <div class="chart"><VChart :option="sleepStackOption" autoresize/></div>
       </Card>
     </div>
   </div>
@@ -145,11 +239,27 @@ const hasData = computed(() => data.value.length > 0);
 .head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 1rem; }
 h1 { margin: 0; }
 .picker { display: flex; gap: 0.4rem; }
-.picker button { background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 6px; padding: 0.4rem 0.8rem; cursor: pointer; font-size: 0.85rem; }
-.picker button.active { background: #38bdf8; color: #0f172a; border-color: #38bdf8; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; margin-top: 1rem; }
-.chart { flex: 1; min-height: 200px; display: flex; }
+.picker button { background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.8rem; cursor: pointer; font-size: 0.85rem; }
+.picker button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+.grid { display: grid; gap: 1rem; margin-top: 1rem; }
+.chart { flex: 1; min-height: 240px; display: flex; }
 .chart > * { flex: 1; }
-.empty, .loading { color: #64748b; padding: 2rem 0; text-align: center; }
-.err { color: #ef4444; padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; margin: 0.6rem 0; }
+
+.toggle-row { display: flex; gap: 0.8rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.5rem; font-size: 0.8rem; color: var(--muted); }
+.toggle-row label { display: flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+.toggle-row .presets { color: var(--muted-2); margin-left: 0.5rem; }
+.preset {
+  background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 4px;
+  padding: 0.15rem 0.5rem; cursor: pointer; font-size: 0.75rem;
+}
+.preset:hover { color: var(--text); }
+.preset.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.goal-input {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0.15rem 0.4rem; width: 80px; font-family: inherit;
+}
+
+.empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
+.err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 </style>

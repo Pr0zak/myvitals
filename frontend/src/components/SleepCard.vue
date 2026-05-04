@@ -35,7 +35,10 @@ const subtitle = computed(() => {
   const start = new Date(props.sleep.start);
   const end = new Date(props.sleep.end);
   const fmt = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return `${fmt(start)} → ${fmt(end)}`;
+  const ms = Date.now() - end.getTime();
+  const h = Math.round(ms / 3600000);
+  const ago = h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+  return `${fmt(start)} → ${fmt(end)}  ·  ${ago}`;
 });
 </script>
 
@@ -67,14 +70,14 @@ const subtitle = computed(() => {
 </template>
 
 <style scoped>
-.big { font-size: 2rem; font-weight: 300; color: #a78bfa; line-height: 1; margin: 0.5rem 0; }
+.big { font-size: 2rem; font-weight: 300; color: var(--violet); line-height: 1; margin: 0.5rem 0; }
 .stack { display: flex; height: 16px; border-radius: 4px; overflow: hidden; margin-top: 0.5rem; }
 .seg { transition: opacity 0.2s; }
 .seg:hover { opacity: 0.85; cursor: help; }
 .legend { list-style: none; padding: 0; margin: 0.6rem 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0.2rem 1rem; font-size: 0.8rem; }
 .legend li { display: flex; align-items: center; gap: 0.4rem; }
 .dot { width: 8px; height: 8px; border-radius: 50%; }
-.lbl { color: #94a3b8; flex: 1; text-transform: capitalize; }
-.val { color: #e2e8f0; }
-.empty { color: #64748b; padding: 1rem 0; text-align: center; }
+.lbl { color: var(--muted); flex: 1; text-transform: capitalize; }
+.val { color: var(--text); }
+.empty { color: var(--muted-2); padding: 1rem 0; text-align: center; }
 </style>

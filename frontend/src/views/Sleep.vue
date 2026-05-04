@@ -51,6 +51,15 @@ function fmtTime(d: Date): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const m = Math.round(ms / 60000);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h}h ago`;
+  return `${Math.round(h / 24)} days ago`;
+}
+
 // === Hypnogram of the most recent night ===
 // Need raw stage timeline; we have totals per stage, not the timeline.
 // The /query/sleep/range groups by stage type — to draw a hypnogram we need
@@ -173,7 +182,13 @@ const stats = computed(() => {
       No sleep sessions in this range. Make sure your watch is logging sleep + Fitbit is sharing it with Health Connect.
     </div>
 
-    <div v-else class="grid">
+    <div v-if="lastNight" class="last-banner">
+      <span class="dot" :style="{ background: 'var(--violet)' }"></span>
+      Last sleep logged: <strong>{{ new Date(lastNight.end).toLocaleString() }}</strong>
+      <span class="rel">({{ relativeTime(lastNight.end) }})</span>
+    </div>
+
+    <div v-if="!loading && nights.length > 0" class="grid">
       <Card v-if="lastNight" title="Last night"
             :subtitle="`${fmtTime(new Date(lastNight.start))} → ${fmtTime(new Date(lastNight.end))}  ·  ${fmtDur(lastNight.total_s)}`">
         <div class="chart small"><VChart v-if="lastNightStackedOption" :option="lastNightStackedOption" autoresize/></div>
@@ -228,4 +243,12 @@ h1 { margin: 0; }
 
 .empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
+
+.last-banner {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.6rem 0.9rem; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; margin: 0.5rem 0 1rem; font-size: 0.9rem; color: var(--muted);
+}
+.last-banner strong { color: var(--text); }
+.last-banner .rel { color: var(--muted-2); font-size: 0.85rem; margin-left: auto; }
 </style>

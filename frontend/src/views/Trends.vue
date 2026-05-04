@@ -29,6 +29,19 @@ type WeightPoint = { time: string; weight_kg: number | null; body_fat_pct: numbe
 const weightSeries = ref<WeightPoint[]>([]);
 const weightStats = ref<{ latest_kg: number | null; min_kg: number | null; max_kg: number | null; avg_kg: number | null }>({ latest_kg: null, min_kg: null, max_kg: null, avg_kg: null });
 
+// Goal tracker — persisted to localStorage (single-user app, no profile yet)
+const heightCm = ref<number>(parseFloat(localStorage.getItem("myvitals.height_cm") ?? "178"));
+const targetKg = ref<number | null>(
+  localStorage.getItem("myvitals.target_kg")
+    ? parseFloat(localStorage.getItem("myvitals.target_kg")!) : null,
+);
+const targetDateStr = ref<string>(localStorage.getItem("myvitals.target_date") ?? "");
+watch(heightCm, (v) => localStorage.setItem("myvitals.height_cm", String(v)));
+watch(targetKg, (v) => v == null ? localStorage.removeItem("myvitals.target_kg")
+                                  : localStorage.setItem("myvitals.target_kg", String(v)));
+watch(targetDateStr, (v) => v ? localStorage.setItem("myvitals.target_date", v)
+                              : localStorage.removeItem("myvitals.target_date"));
+
 async function load() {
   loading.value = true;
   error.value = null;
@@ -50,18 +63,83 @@ async function load() {
   }
 }
 
+function rolling7Avg(pts: { t: number; v: number }[]): { t: number; v: number }[] {
+  // Simple centered window: average of all points within the trailing 7 days.
+  if (pts.length === 0) return [];
+  const sorted = [...pts].sort((a, b) => a.t - b.t);
+  const out: { t: number; v: number }[] = [];
+  const WINDOW_MS = 7 * 86400 * 1000;
+  let i0 = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    while (sorted[i].t - sorted[i0].t > WINDOW_MS) i0++;
+    let sum = 0; let n = 0;
+    for (let j = i0; j <= i; j++) { sum += sorted[j].v; n++; }
+    out.push({ t: sorted[i].t, v: sum / n });
+  }
+  return out;
+}
+
+function bmiBands(heightM: number): unknown[] {
+  const u = 18.5 * heightM * heightM;
+  const n = 25 * heightM * heightM;
+  const o = 30 * heightM * heightM;
+  return [
+    [{ yAxis: 0, itemStyle: { color: "rgba(56, 189, 248, 0.07)" } }, { yAxis: u }],
+    [{ yAxis: u, itemStyle: { color: "rgba(34, 197, 94, 0.07)" } }, { yAxis: n }],
+    [{ yAxis: n, itemStyle: { color: "rgba(234, 179, 8, 0.07)" } }, { yAxis: o }],
+    [{ yAxis: o, itemStyle: { color: "rgba(239, 68, 68, 0.10)" } }, { yAxis: 999 }],
+  ];
+}
+
 const weightOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
-  const pts = weightSeries.value.filter((p) => p.weight_kg != null).map((p) => [p.time, p.weight_kg]);
-  const fatPts = weightSeries.value.filter((p) => p.body_fat_pct != null).map((p) => [p.time, p.body_fat_pct]);
+  const raw = weightSeries.value
+    .filter((p) => p.weight_kg != null)
+    .map((p) => ({ t: new Date(p.time).getTime(), v: p.weight_kg as number }));
+  const pts = raw.map((p) => [p.t, p.v]);
+  const ma = rolling7Avg(raw).map((p) => [p.t, p.v]);
+  const fatPts = weightSeries.value
+    .filter((p) => p.body_fat_pct != null)
+    .map((p) => [new Date(p.time).getTime(), p.body_fat_pct]);
+
   const series: Array<Record<string, unknown>> = [];
-  if (pts.length) series.push({
-    name: "Weight (kg)", type: "line", data: pts, smooth: true,
-    symbol: "circle", symbolSize: 5, connectNulls: true,
-    lineStyle: { width: 2, color: t.palette.accent },
-    itemStyle: { color: t.palette.accent }, yAxisIndex: 0,
-  });
+  const heightM = (heightCm.value || 178) / 100;
+
+  if (pts.length) {
+    series.push({
+      name: "Daily weight", type: "line", data: pts,
+      symbol: "circle", symbolSize: 3, connectNulls: false,
+      lineStyle: { width: 1, color: t.palette.accent, opacity: 0.45 },
+      itemStyle: { color: t.palette.accent }, yAxisIndex: 0,
+      // Render BMI bands behind the daily line (only attached once).
+      markArea: {
+        silent: true,
+        data: bmiBands(heightM),
+      },
+    });
+  }
+  if (ma.length) {
+    series.push({
+      name: "7-day avg", type: "line", data: ma, smooth: true,
+      symbol: "none", lineStyle: { width: 2.5, color: t.palette.accent },
+      yAxisIndex: 0,
+    });
+  }
+  // Goal line: from earliest weight in window to target.
+  if (targetKg.value != null && targetDateStr.value && pts.length) {
+    const start = pts[0];
+    const targetTs = new Date(targetDateStr.value).getTime();
+    if (Number.isFinite(targetTs)) {
+      series.push({
+        name: "Goal", type: "line",
+        data: [[start[0], start[1]], [targetTs, targetKg.value]],
+        symbol: "none", smooth: false,
+        lineStyle: { width: 1.5, color: t.palette.recovery, type: "dashed" as const, opacity: 0.7 },
+        yAxisIndex: 0,
+      });
+    }
+  }
   if (fatPts.length) series.push({
     name: "Body fat %", type: "line", data: fatPts, smooth: true,
     symbol: "circle", symbolSize: 4, connectNulls: true,
@@ -81,7 +159,145 @@ const weightOption = computed(() => {
     dataZoom: [{ type: "inside" }],
   };
 });
+
 const hasWeight = computed(() => weightSeries.value.some((p) => p.weight_kg != null));
+
+// Body composition (lean + fat mass, stacked area)
+const bodyCompOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  const lean: [number, number][] = [];
+  const fat: [number, number][] = [];
+  for (const p of weightSeries.value) {
+    if (p.weight_kg == null) continue;
+    const ts = new Date(p.time).getTime();
+    if (p.lean_mass_kg != null) lean.push([ts, p.lean_mass_kg]);
+    else if (p.body_fat_pct != null) {
+      const fatKg = p.weight_kg * (p.body_fat_pct / 100);
+      lean.push([ts, p.weight_kg - fatKg]);
+      fat.push([ts, fatKg]);
+    }
+  }
+  return {
+    grid: { left: 50, right: 12, top: 36, bottom: 28 },
+    legend: { textStyle: t.axisLabel, top: 4 },
+    tooltip: { trigger: "axis", ...t.tooltip },
+    xAxis: { type: "time", axisLabel: t.axisLabel, splitLine: t.splitLine },
+    yAxis: { type: "value", name: "kg", axisLabel: t.axisLabel, splitLine: t.splitLine },
+    series: [
+      { name: "Lean mass", type: "line", stack: "body", data: lean, smooth: true,
+        symbol: "none", areaStyle: { color: t.palette.hrv, opacity: 0.4 },
+        lineStyle: { width: 0 }, itemStyle: { color: t.palette.hrv } },
+      { name: "Fat mass",  type: "line", stack: "body", data: fat,  smooth: true,
+        symbol: "none", areaStyle: { color: t.palette.annotation, opacity: 0.4 },
+        lineStyle: { width: 0 }, itemStyle: { color: t.palette.annotation } },
+    ],
+    dataZoom: [{ type: "inside" }],
+  };
+});
+const hasBodyComp = computed(() =>
+  weightSeries.value.some((p) => p.weight_kg != null && (p.body_fat_pct != null || p.lean_mass_kg != null)),
+);
+
+// BP card — uses daily_summary.bp_systolic_avg / bp_diastolic_avg
+const bpOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  const sys = data.value.filter((d) => d.bp_systolic_avg != null).map((d) => [d.date, d.bp_systolic_avg]);
+  const dia = data.value.filter((d) => d.bp_diastolic_avg != null).map((d) => [d.date, d.bp_diastolic_avg]);
+  return {
+    grid: { left: 40, right: 12, top: 36, bottom: 28 },
+    legend: { textStyle: t.axisLabel, top: 4 },
+    tooltip: { trigger: "axis", ...t.tooltip },
+    xAxis: { type: "category", data: data.value.map((d) => d.date), axisLabel: t.axisLabel },
+    yAxis: { type: "value", name: "mmHg", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine,
+      // Reference bands: normal (<120/<80), elevated (120-129), stage1 (130/80), stage2 (140/90)
+    },
+    series: [
+      { name: "Systolic", type: "line", data: sys, smooth: true, connectNulls: true,
+        symbol: "circle", symbolSize: 4,
+        lineStyle: { width: 2, color: t.palette.hr }, itemStyle: { color: t.palette.hr },
+        markLine: {
+          silent: true, symbol: "none", lineStyle: { type: "dashed" as const },
+          data: [
+            { yAxis: 120, lineStyle: { color: "#eab308" }, label: { formatter: "elev", color: "#eab308" } },
+            { yAxis: 130, lineStyle: { color: "#f97316" }, label: { formatter: "stage 1", color: "#f97316" } },
+            { yAxis: 140, lineStyle: { color: "#ef4444" }, label: { formatter: "stage 2", color: "#ef4444" } },
+          ],
+        },
+      },
+      { name: "Diastolic", type: "line", data: dia, smooth: true, connectNulls: true,
+        symbol: "circle", symbolSize: 4,
+        lineStyle: { width: 2, color: t.palette.recovery }, itemStyle: { color: t.palette.recovery },
+      },
+    ],
+    dataZoom: [{ type: "inside" }],
+  };
+});
+const hasBp = computed(() => data.value.some((d) => d.bp_systolic_avg != null));
+
+// Skin-temp card
+const skinTempOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  const pts = data.value.filter((d) => d.skin_temp_delta_avg != null).map((d) => [d.date, d.skin_temp_delta_avg]);
+  return {
+    grid: { left: 40, right: 12, top: 36, bottom: 28 },
+    tooltip: { trigger: "axis", ...t.tooltip },
+    xAxis: { type: "category", data: data.value.map((d) => d.date), axisLabel: t.axisLabel },
+    yAxis: { type: "value", name: "Δ °C", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
+    series: [
+      { name: "Skin Δ", type: "line", data: pts, smooth: true, connectNulls: true,
+        symbol: "circle", symbolSize: 3,
+        lineStyle: { width: 2, color: t.palette.violet }, itemStyle: { color: t.palette.violet },
+        markArea: {
+          silent: true,
+          data: [
+            [{ yAxis: -0.5, itemStyle: { color: "rgba(34, 197, 94, 0.08)" } }, { yAxis: 0.5 }],
+          ],
+        },
+        markLine: {
+          silent: true, symbol: "none", lineStyle: { type: "dashed" as const },
+          data: [{ yAxis: 1, lineStyle: { color: "#ef4444" }, label: { formatter: "+1°C", color: "#ef4444" } }],
+        },
+      },
+    ],
+    dataZoom: [{ type: "inside" }],
+  };
+});
+const hasSkinTemp = computed(() => data.value.some((d) => d.skin_temp_delta_avg != null));
+
+// Goal arrival projection: linear regression on last 28d of 7d MA.
+const goalProjection = computed(() => {
+  if (targetKg.value == null) return null;
+  const raw = weightSeries.value
+    .filter((p) => p.weight_kg != null)
+    .map((p) => ({ t: new Date(p.time).getTime(), v: p.weight_kg as number }))
+    .sort((a, b) => a.t - b.t);
+  const ma = rolling7Avg(raw);
+  if (ma.length < 7) return null;
+  const cutoff = ma[ma.length - 1].t - 28 * 86400 * 1000;
+  const recent = ma.filter((p) => p.t >= cutoff);
+  if (recent.length < 5) return null;
+  // Simple OLS: v = a*t + b (t in days from first point)
+  const t0 = recent[0].t;
+  const xs = recent.map((p) => (p.t - t0) / 86400_000);
+  const ys = recent.map((p) => p.v);
+  const n = xs.length;
+  const mx = xs.reduce((s, x) => s + x, 0) / n;
+  const my = ys.reduce((s, y) => s + y, 0) / n;
+  let num = 0; let den = 0;
+  for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) ** 2; }
+  if (den === 0) return null;
+  const a = num / den;  // kg per day
+  if (Math.abs(a) < 0.001) return { etaDate: null, perDay: a, headed: "flat" as const };
+  const last = recent[recent.length - 1];
+  const headingTowards = (targetKg.value < last.v) === (a < 0);
+  if (!headingTowards) return { etaDate: null, perDay: a, headed: "wrong" as const };
+  const daysToGoal = (targetKg.value - last.v) / a;
+  const etaDate = new Date(last.t + daysToGoal * 86400_000);
+  return { etaDate, perDay: a, headed: "right" as const };
+});
 
 onMounted(load);
 watch(range, load);
@@ -285,8 +501,37 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
             <span class="muted">range: {{ weightStats.min_kg?.toFixed(1) }} – {{ weightStats.max_kg?.toFixed(1) }}</span>
             <span class="muted">avg: {{ weightStats.avg_kg?.toFixed(1) }}</span>
           </div>
+          <div class="goal-row">
+            <span class="muted">Height (cm):</span>
+            <input v-model.number="heightCm" type="number" class="goal-input" min="50" max="250"/>
+            <span class="muted" style="margin-left: 0.6rem;">Goal:</span>
+            <input v-model.number="targetKg" type="number" class="goal-input" min="20" max="300" step="0.1" placeholder="kg"/>
+            <input v-model="targetDateStr" type="date" class="goal-input" style="width: 140px;"/>
+            <span v-if="goalProjection" class="muted" style="margin-left: 0.6rem;">
+              <template v-if="goalProjection.etaDate">
+                ETA: {{ goalProjection.etaDate.toISOString().slice(0,10) }}
+                ({{ (goalProjection.perDay * 7).toFixed(2) }} kg/wk)
+              </template>
+              <template v-else-if="goalProjection.headed === 'wrong'">
+                ⚠ trending away from goal
+              </template>
+              <template v-else>flat trend — no ETA</template>
+            </span>
+          </div>
           <div class="chart"><VChart :option="weightOption" autoresize/></div>
         </template>
+      </Card>
+
+      <Card v-if="hasBodyComp" title="Body composition (lean + fat mass)">
+        <div class="chart"><VChart :option="bodyCompOption" autoresize/></div>
+      </Card>
+
+      <Card v-if="hasBp" title="Blood pressure">
+        <div class="chart"><VChart :option="bpOption" autoresize/></div>
+      </Card>
+
+      <Card v-if="hasSkinTemp" title="Skin temperature (Δ from baseline)">
+        <div class="chart"><VChart :option="skinTempOption" autoresize/></div>
       </Card>
     </div>
   </div>
@@ -321,5 +566,7 @@ h1 { margin: 0; }
 .empty-mini { color: var(--muted-2); padding: 1.2rem 0; text-align: center; font-size: 0.85rem; }
 .weight-stats { display: flex; gap: 1rem; align-items: baseline; margin-bottom: 0.5rem; font-size: 0.95rem; }
 .weight-stats .muted { color: var(--muted); font-size: 0.8rem; }
+.goal-row { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; font-size: 0.8rem; }
+.goal-row .muted { color: var(--muted); }
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 </style>

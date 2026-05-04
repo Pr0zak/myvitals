@@ -41,6 +41,11 @@ export interface TodaySummary {
   sleep_duration_s: number | null;
   sleep_score: number | null;
   steps_total: number | null;
+  weight_kg: number | null;
+  body_fat_pct: number | null;
+  bp_systolic_avg: number | null;
+  bp_diastolic_avg: number | null;
+  skin_temp_delta_avg: number | null;
   last_sync: string | null;
 }
 

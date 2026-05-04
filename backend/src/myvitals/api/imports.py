@@ -4,35 +4,42 @@ The upload is streamed to a temp file on disk so the full ZIP never has to
 sit in RAM. The parser then yields per-entry batches that we flush to
 Postgres immediately, committing every COMMIT_EVERY rows so a failure
 mid-import doesn't lose all progress.
+
+Each import creates a row in the import_jobs table that's updated as
+progress is made, so the UI can poll /import/jobs to see live status.
+The progress writes use a separate session so they're visible from
+outside the long ingest transaction.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
+import traceback
 import zipfile
 from collections import defaultdict
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import require_query
 from ..db import models
-from ..db.session import get_session
+from ..db.session import SessionLocal, get_session
+from ..integrations import fit_tracks
 from ..integrations import imports as imp_int
 from .ingest import _bulk_upsert
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/import", dependencies=[Depends(require_query)])
 
-# Read upload from the network in 1 MiB chunks. Bigger means fewer write
-# syscalls but more RAM held by the buffer; 1 MiB is the sweet spot.
 _UPLOAD_CHUNK = 1 << 20
 
-# Stream → (model, conflict-cols). Activities are special-cased below.
 _STREAM_MAP: dict[str, tuple[type, list[str]]] = {
     "heartrate": (models.HeartRate, ["time"]),
     "hrv": (models.Hrv, ["time"]),
@@ -42,12 +49,13 @@ _STREAM_MAP: dict[str, tuple[type, list[str]]] = {
     "skin_temp": (models.SkinTemp, ["time"]),
 }
 
-# Commit every N total rows so a long import doesn't sit in one giant txn.
 _COMMIT_EVERY = 20_000
+# Update the visible job-progress row every N rows. Writes from a separate
+# session so the running ingest's open transaction doesn't hide them.
+_PROGRESS_EVERY = 5_000
 
 
 async def _save_upload_to_tmp(file: UploadFile) -> str:
-    """Stream the upload to a NamedTemporaryFile and return the path."""
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip", prefix="myvitals_import_")
     total = 0
     try:
@@ -64,8 +72,40 @@ async def _save_upload_to_tmp(file: UploadFile) -> str:
     return tmp.name
 
 
+async def _create_job(kind: str, filename: str | None, size_bytes: int | None) -> int:
+    async with SessionLocal() as s:
+        job = models.ImportJob(
+            kind=kind, filename=filename, size_bytes=size_bytes,
+            status="running", started_at=datetime.now(timezone.utc),
+            counts={},
+        )
+        s.add(job)
+        await s.commit()
+        return job.id
+
+
+async def _update_job_counts(job_id: int, counts: dict[str, int]) -> None:
+    async with SessionLocal() as s:
+        job = await s.get(models.ImportJob, job_id)
+        if job:
+            job.counts = dict(counts)
+            await s.commit()
+
+
+async def _finish_job(
+    job_id: int, status: str, counts: dict[str, int], error: str | None = None,
+) -> None:
+    async with SessionLocal() as s:
+        job = await s.get(models.ImportJob, job_id)
+        if job:
+            job.status = status
+            job.counts = dict(counts)
+            job.error = error
+            job.finished_at = datetime.now(timezone.utc)
+            await s.commit()
+
+
 async def _upsert_activities_chunk(db: AsyncSession, rows: list[dict[str, Any]]) -> None:
-    """Upsert a single activities batch, preserving user-edited notes/tags."""
     if not rows:
         return
     stmt = insert(models.Activity).values(rows)
@@ -80,10 +120,11 @@ async def _upsert_activities_chunk(db: AsyncSession, rows: list[dict[str, Any]])
 async def _stream_ingest(
     db: AsyncSession,
     parser: Iterator[tuple[str, list[dict[str, Any]]]],
+    job_id: int | None = None,
 ) -> dict[str, int]:
-    """Drive the parser generator, flushing each batch as it arrives."""
     counts: dict[str, int] = defaultdict(int)
     rows_since_commit = 0
+    rows_since_progress = 0
     for stream, samples in parser:
         if not samples:
             continue
@@ -97,12 +138,56 @@ async def _stream_ingest(
             await _bulk_upsert(db, entry[0], samples, entry[1])
         counts[stream] += len(samples)
         rows_since_commit += len(samples)
+        rows_since_progress += len(samples)
         if rows_since_commit >= _COMMIT_EVERY:
             await db.commit()
             rows_since_commit = 0
             log.info("partial commit: %s", dict(counts))
+        if job_id is not None and rows_since_progress >= _PROGRESS_EVERY:
+            await _update_job_counts(job_id, counts)
+            rows_since_progress = 0
     await db.commit()
+    if job_id is not None:
+        await _update_job_counts(job_id, counts)
     return dict(counts)
+
+
+async def _run_import(
+    kind: str, file: UploadFile, db: AsyncSession,
+    parser_factory,
+) -> dict[str, Any]:
+    """Wraps the upload→parse→ingest flow with job tracking + cleanup."""
+    tmp_path = await _save_upload_to_tmp(file)
+    size = os.path.getsize(tmp_path)
+    job_id = await _create_job(kind=kind, filename=file.filename, size_bytes=size)
+    counts: dict[str, int] = {}
+    try:
+        try:
+            zf = zipfile.ZipFile(tmp_path)
+        except zipfile.BadZipFile as e:
+            await _finish_job(job_id, "failed", {}, error=str(e))
+            raise HTTPException(status_code=400, detail=f"not a valid zip: {e}") from e
+        try:
+            counts = await _stream_ingest(db, parser_factory(zf), job_id=job_id)
+        finally:
+            zf.close()
+        await _finish_job(job_id, "done", counts)
+        return {
+            "job_id": job_id, "filename": file.filename,
+            "size_bytes": size, "imported": counts,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        tb = traceback.format_exc()
+        log.exception("import %s job %d failed", kind, job_id)
+        await _finish_job(job_id, "failed", counts, error=tb)
+        raise HTTPException(status_code=500, detail=f"import failed: see /import/jobs/{job_id}")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 @router.post("/fitbit")
@@ -111,28 +196,10 @@ async def import_fitbit(
     weight_unit: str = Query("kg", pattern="^(kg|lb)$"),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    tmp_path = await _save_upload_to_tmp(file)
-    try:
-        try:
-            zf = zipfile.ZipFile(tmp_path)
-        except zipfile.BadZipFile as e:
-            raise HTTPException(status_code=400, detail=f"not a valid zip: {e}") from e
-        try:
-            counts = await _stream_ingest(
-                db, imp_int.parse_fitbit_zip(zf, weight_unit=weight_unit),
-            )
-        finally:
-            zf.close()
-        return {
-            "source": "fitbit", "filename": file.filename,
-            "size_bytes": os.path.getsize(tmp_path),
-            "weight_unit": weight_unit, "imported": counts,
-        }
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+    return await _run_import(
+        "fitbit", file, db,
+        lambda zf: imp_int.parse_fitbit_zip(zf, weight_unit=weight_unit),
+    ) | {"weight_unit": weight_unit, "source": "fitbit"}
 
 
 @router.post("/garmin")
@@ -140,21 +207,63 @@ async def import_garmin(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    tmp_path = await _save_upload_to_tmp(file)
+    return await _run_import(
+        "garmin", file, db, imp_int.parse_garmin_zip,
+    ) | {"source": "garmin"}
+
+
+# --- Garmin FIT tracks (background job) ------------------------------
+
+# How often to commit DB updates and refresh the visible job-progress row
+# while walking the inner FIT zip. 100 files per checkpoint keeps each
+# transaction fast and the UI ticking once every couple of seconds.
+_FIT_CHECKPOINT_EVERY = 100
+
+
+async def _process_fit_tracks_job(tmp_path: str, job_id: int) -> None:
+    """Background task: walk the FIT zip, attach polylines to activities."""
+    counts = {"processed": 0, "with_track": 0, "matched": 0, "skipped": 0}
     try:
-        try:
-            zf = zipfile.ZipFile(tmp_path)
-        except zipfile.BadZipFile as e:
-            raise HTTPException(status_code=400, detail=f"not a valid zip: {e}") from e
-        try:
-            counts = await _stream_ingest(db, imp_int.parse_garmin_zip(zf))
-        finally:
-            zf.close()
-        return {
-            "source": "garmin", "filename": file.filename,
-            "size_bytes": os.path.getsize(tmp_path),
-            "imported": counts,
-        }
+        with zipfile.ZipFile(tmp_path) as zf:
+            fits = [n for n in zf.namelist() if n.lower().endswith(".fit")]
+            log.info("FIT tracks job %d: %d fit files", job_id, len(fits))
+            since_ckpt = 0
+            async with SessionLocal() as db:
+                for name in fits:
+                    counts["processed"] += 1
+                    aid = fit_tracks.extract_activity_id(name)
+                    if not aid:
+                        counts["skipped"] += 1
+                    else:
+                        try:
+                            with zf.open(name) as f:
+                                data = f.read()
+                            track = await asyncio.to_thread(fit_tracks.parse_fit_track, data)
+                        except Exception as e:
+                            log.warning("FIT parse %s: %s", name, e)
+                            counts["skipped"] += 1
+                            track = {"polyline": None}
+                        if track.get("polyline"):
+                            counts["with_track"] += 1
+                            r = await db.execute(
+                                update(models.Activity)
+                                .where(models.Activity.source == "garmin")
+                                .where(models.Activity.source_id == aid)
+                                .values(polyline=track["polyline"])
+                            )
+                            if r.rowcount:
+                                counts["matched"] += 1
+                    since_ckpt += 1
+                    if since_ckpt >= _FIT_CHECKPOINT_EVERY:
+                        await db.commit()
+                        await _update_job_counts(job_id, counts)
+                        since_ckpt = 0
+                await db.commit()
+        await _finish_job(job_id, "done", counts)
+    except Exception:
+        tb = traceback.format_exc()
+        log.exception("FIT tracks job %d failed", job_id)
+        await _finish_job(job_id, "failed", counts, error=tb)
     finally:
         try:
             os.unlink(tmp_path)
@@ -162,3 +271,69 @@ async def import_garmin(
             pass
 
 
+@router.post("/garmin/tracks", status_code=202)
+async def import_garmin_tracks(
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    """Process the inner UploadedFiles_*.zip from a Garmin export.
+
+    21,000+ FIT files is a 15-30 minute job, so we save the upload, kick
+    off a background task, and return immediately with a job_id the UI
+    can poll on /import/jobs.
+    """
+    tmp_path = await _save_upload_to_tmp(file)
+    size = os.path.getsize(tmp_path)
+    job_id = await _create_job(
+        kind="garmin_fit_tracks", filename=file.filename, size_bytes=size,
+    )
+    asyncio.create_task(_process_fit_tracks_job(tmp_path, job_id))
+    return {
+        "job_id": job_id, "status": "queued",
+        "filename": file.filename, "size_bytes": size,
+        "message": f"Processing in background — poll /import/jobs/{job_id}",
+    }
+
+
+# --- Job status -------------------------------------------------------
+
+@router.get("/jobs")
+async def list_jobs(
+    limit: int = Query(20, ge=1, le=200),
+    db: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    """List recent import jobs, newest first."""
+    rows = (await db.execute(
+        select(models.ImportJob).order_by(models.ImportJob.started_at.desc()).limit(limit)
+    )).scalars().all()
+    return [_job_dict(j) for j in rows]
+
+
+@router.get("/jobs/{job_id}")
+async def get_job(
+    job_id: int, db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    job = await db.get(models.ImportJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return _job_dict(job)
+
+
+def _job_dict(job: models.ImportJob) -> dict[str, Any]:
+    elapsed_s: float | None = None
+    end = job.finished_at or datetime.now(timezone.utc)
+    if job.started_at:
+        elapsed_s = (end - job.started_at).total_seconds()
+    total_rows = sum(job.counts.values()) if job.counts else 0
+    return {
+        "id": job.id,
+        "kind": job.kind,
+        "filename": job.filename,
+        "size_bytes": job.size_bytes,
+        "status": job.status,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "elapsed_s": elapsed_s,
+        "counts": job.counts or {},
+        "total_rows": total_rows,
+        "error": job.error,
+    }

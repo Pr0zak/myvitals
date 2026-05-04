@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
 import type { StravaAppConfigStatus, StravaStatus } from "@/api/types";
@@ -33,6 +33,37 @@ const importBusy = ref<"" | "fitbit" | "garmin">("");
 const importResult = ref<string>("");
 const importError = ref<string>("");
 const fitbitWeightUnit = ref<"kg" | "lb">("lb");
+
+// Live job tracker
+type ImportJob = Awaited<ReturnType<typeof api.importJobs>>[number];
+const jobs = ref<ImportJob[]>([]);
+let jobPoll: ReturnType<typeof setInterval> | null = null;
+
+async function refreshJobs() {
+  if (!queryToken.value) return;
+  try {
+    jobs.value = await api.importJobs(20);
+  } catch {
+    /* ignore polling errors — log shows them in the network tab */
+  }
+}
+
+function startJobPolling() {
+  if (jobPoll) return;
+  refreshJobs();
+  jobPoll = setInterval(refreshJobs, 3000);
+}
+function stopJobPolling() {
+  if (jobPoll) { clearInterval(jobPoll); jobPoll = null; }
+}
+
+function jobAge(j: ImportJob): string {
+  const s = Math.round(j.elapsed_s ?? 0);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return `${h}h ${m}m`;
+}
 
 async function uploadImport(source: "fitbit" | "garmin", file: File) {
   importBusy.value = source;
@@ -247,7 +278,11 @@ function fmt(ts: string | null): string {
   return new Date(ts).toLocaleString();
 }
 
-onMounted(loadStrava);
+onMounted(() => {
+  loadStrava();
+  startJobPolling();
+});
+onUnmounted(stopJobPolling);
 </script>
 
 <template>
@@ -345,6 +380,43 @@ onMounted(loadStrava);
       </div>
       <div v-if="importResult" class="ok">{{ importResult }}</div>
       <div v-if="importError" class="err"><small>{{ importError }}</small></div>
+
+      <h3 class="sub">Recent jobs</h3>
+      <div v-if="jobs.length === 0" class="hint">No imports yet.</div>
+      <table v-else class="jobs">
+        <thead>
+          <tr>
+            <th>Kind</th><th>Status</th><th>Elapsed</th><th>Rows</th><th>Streams</th><th>File</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="j in jobs" :key="j.id" :class="`job-${j.status}`">
+            <td>{{ j.kind }}</td>
+            <td>
+              <span class="dot" :class="`dot-${j.status}`"></span>
+              {{ j.status }}
+            </td>
+            <td>{{ jobAge(j) }}</td>
+            <td>{{ j.total_rows.toLocaleString() }}</td>
+            <td class="counts">
+              <span v-for="(n, k) in j.counts" :key="k" class="chip">
+                {{ k }}: {{ (n as number).toLocaleString() }}
+              </span>
+            </td>
+            <td class="filename" :title="j.filename ?? ''">
+              {{ j.filename ?? '—' }}
+              <span v-if="j.size_bytes" class="muted">
+                ({{ ((j.size_bytes as number) / 1024 / 1024).toFixed(0) }} MB)
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-if="jobs.some((j) => j.error)" class="err">
+        <small v-for="j in jobs.filter((x) => x.error)" :key="j.id">
+          job {{ j.id }} ({{ j.kind }}): {{ (j.error || '').split('\n').slice(-3).join(' / ') }}
+        </small>
+      </div>
     </section>
 
     <section v-if="queryToken">
@@ -483,4 +555,19 @@ h3.sub { font-size: 0.75rem; color: var(--muted-2); text-transform: uppercase; l
   border-radius: 6px; padding: 0 0.7rem; cursor: pointer; font-size: 1.1rem;
 }
 .eye:hover { border-color: var(--accent); }
+
+.jobs { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 0.4rem; }
+.jobs th { text-align: left; color: var(--muted-2); font-size: 0.7rem; text-transform: uppercase; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--border); }
+.jobs td { padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--surface-2); vertical-align: top; }
+.jobs .filename { font-family: ui-monospace, monospace; font-size: 0.75rem; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jobs .filename .muted { color: var(--muted); margin-left: 0.3rem; }
+.jobs .counts { font-size: 0.7rem; }
+.jobs .counts .chip { display: inline-block; background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 0.05rem 0.35rem; margin: 0.05rem 0.15rem 0.05rem 0; font-family: ui-monospace, monospace; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.3rem; vertical-align: middle; }
+.dot-running { background: #38bdf8; box-shadow: 0 0 8px #38bdf8; animation: pulse 1.6s ease-in-out infinite; }
+.dot-done { background: #22c55e; }
+.dot-failed { background: #ef4444; }
+@keyframes pulse { 50% { opacity: 0.4; } }
+tr.job-running { background: rgba(56, 189, 248, 0.04); }
+tr.job-failed { background: rgba(239, 68, 68, 0.05); }
 </style>

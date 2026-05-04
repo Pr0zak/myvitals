@@ -49,6 +49,11 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
             sleep_duration_s=saved.sleep_duration_s,
             sleep_score=saved.sleep_score,
             steps_total=saved.steps_total or steps_total,
+            weight_kg=saved.weight_kg,
+            body_fat_pct=saved.body_fat_pct,
+            bp_systolic_avg=saved.bp_systolic_avg,
+            bp_diastolic_avg=saved.bp_diastolic_avg,
+            skin_temp_delta_avg=saved.skin_temp_delta_avg,
             last_sync=last_sync,
         )
 
@@ -84,6 +89,11 @@ async def summary_range(
             sleep_duration_s=r.sleep_duration_s,
             sleep_score=r.sleep_score,
             steps_total=r.steps_total,
+            weight_kg=r.weight_kg,
+            body_fat_pct=r.body_fat_pct,
+            bp_systolic_avg=r.bp_systolic_avg,
+            bp_diastolic_avg=r.bp_diastolic_avg,
+            skin_temp_delta_avg=r.skin_temp_delta_avg,
         )
         for r in rows
     ]

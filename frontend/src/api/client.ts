@@ -202,4 +202,14 @@ export const api = {
     const { data } = await http.post<{ status: string }>(`/activities/${source}/${sourceId}/notes`, body);
     return data;
   },
+
+  async importJobs(limit = 20): Promise<{
+    id: number; kind: string; filename: string | null; size_bytes: number | null;
+    status: string; started_at: string; finished_at: string | null;
+    elapsed_s: number | null; counts: Record<string, number>; total_rows: number;
+    error: string | null;
+  }[]> {
+    const { data } = await http.get("/import/jobs", { params: { limit } });
+    return data;
+  },
 };

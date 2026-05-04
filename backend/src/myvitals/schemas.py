@@ -47,6 +47,11 @@ class TodaySummary(BaseModel):
     sleep_duration_s: int | None = None
     sleep_score: float | None = None
     steps_total: int | None = None
+    weight_kg: float | None = None
+    body_fat_pct: float | None = None
+    bp_systolic_avg: float | None = None
+    bp_diastolic_avg: float | None = None
+    skin_temp_delta_avg: float | None = None
     last_sync: datetime | None = None
 
 

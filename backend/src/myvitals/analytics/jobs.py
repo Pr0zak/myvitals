@@ -1,9 +1,10 @@
-"""Nightly analytics job: writes a daily_summary row + emits alerts on RHR drift."""
+"""Nightly analytics job: writes a daily_summary row + emits health alerts."""
 import logging
 from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import models
 from ..db.session import SessionLocal
@@ -15,6 +16,14 @@ log = logging.getLogger(__name__)
 
 # An RHR jump above the rolling baseline by this many bpm fires an alert.
 RHR_DRIFT_BPM = 5.0
+
+# Phase 3 alert thresholds.
+BP_SYS_STAGE1 = 130.0  # AHA stage-1 hypertension threshold (rolling 7d mean)
+BP_DIA_STAGE1 = 80.0
+BP_SYS_STAGE2 = 140.0
+BP_DIA_STAGE2 = 90.0
+WEIGHT_RAPID_PCT = 2.0  # rolling 7d delta vs the prior week
+SKIN_TEMP_ANOMALY_DELTA_C = 0.5  # 3d mean above 28d mean
 
 
 async def compute_daily_summary(target_date: date | None = None) -> None:
@@ -110,8 +119,118 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
                     target, delta, rhr_baseline,
                 )
 
+        # Phase 3 alerts (BP / weight trend / skin temp anomaly).
+        await _emit_health_alerts(db, target)
+
         await db.commit()
         log.info(
             "daily_summary written: rhr=%s hrv=%s recovery=%s sleep=%ss/%s steps=%s",
             rhr, hrv, recovery, sleep_duration, sleep_pts, steps_total,
         )
+
+
+async def _rolling_mean(
+    db: AsyncSession, column, target: date, window_days: int,
+) -> float | None:
+    """Average of `column` over the [target-window+1, target] inclusive window."""
+    since = target - timedelta(days=window_days - 1)
+    stmt = (
+        select(func.avg(column))
+        .where(models.DailySummary.date >= since)
+        .where(models.DailySummary.date <= target)
+        .where(column.is_not(None))
+    )
+    result = await db.execute(stmt)
+    val = result.scalar()
+    return float(val) if val is not None else None
+
+
+async def _alert_recently_fired(
+    db: AsyncSession, kind: str, since: datetime,
+) -> bool:
+    stmt = (
+        select(func.count())
+        .select_from(models.Alert)
+        .where(models.Alert.kind == kind)
+        .where(models.Alert.ts >= since)
+    )
+    return ((await db.execute(stmt)).scalar() or 0) > 0
+
+
+async def _emit_health_alerts(db: AsyncSession, target: date) -> None:
+    """BP / weight / skin-temp alerts based on rolling daily_summary windows.
+
+    Each kind suppresses duplicates by checking whether the same kind has
+    fired recently — a noisy hypertensive week shouldn't generate seven
+    alerts.
+    """
+    now = datetime.now(timezone.utc)
+
+    # --- BP rolling 7-day average ---
+    bp_sys_7d = await _rolling_mean(db, models.DailySummary.bp_systolic_avg, target, 7)
+    bp_dia_7d = await _rolling_mean(db, models.DailySummary.bp_diastolic_avg, target, 7)
+    if bp_sys_7d is not None or bp_dia_7d is not None:
+        stage = None
+        if (bp_sys_7d and bp_sys_7d >= BP_SYS_STAGE2) or (bp_dia_7d and bp_dia_7d >= BP_DIA_STAGE2):
+            stage = 2
+        elif (bp_sys_7d and bp_sys_7d >= BP_SYS_STAGE1) or (bp_dia_7d and bp_dia_7d >= BP_DIA_STAGE1):
+            stage = 1
+        if stage is not None:
+            kind = f"bp_elevated_stage{stage}"
+            # Suppress: don't re-fire the same stage within 5 days.
+            recent = await _alert_recently_fired(db, kind, now - timedelta(days=5))
+            if not recent:
+                db.add(models.Alert(ts=now, kind=kind, payload={
+                    "date": target.isoformat(),
+                    "sys_7d_avg": bp_sys_7d,
+                    "dia_7d_avg": bp_dia_7d,
+                    "stage": stage,
+                }))
+                log.warning(
+                    "BP stage-%d alert for %s: 7d avg %s/%s",
+                    stage, target, bp_sys_7d, bp_dia_7d,
+                )
+
+    # --- Weight rapid change (this-week 7d MA vs last-week 7d MA) ---
+    w_now = await _rolling_mean(db, models.DailySummary.weight_kg, target, 7)
+    w_prev = await _rolling_mean(
+        db, models.DailySummary.weight_kg, target - timedelta(days=7), 7,
+    )
+    if w_now and w_prev and w_prev > 0:
+        pct = (w_now - w_prev) / w_prev * 100.0
+        if abs(pct) >= WEIGHT_RAPID_PCT:
+            recent = await _alert_recently_fired(
+                db, "weight_rapid_change", now - timedelta(days=7),
+            )
+            if not recent:
+                db.add(models.Alert(ts=now, kind="weight_rapid_change", payload={
+                    "date": target.isoformat(),
+                    "weight_now_kg": w_now,
+                    "weight_prev_week_kg": w_prev,
+                    "pct_change": pct,
+                }))
+                log.warning(
+                    "Weight rapid change for %s: %.2f → %.2f kg (%.1f%%)",
+                    target, w_prev, w_now, pct,
+                )
+
+    # --- Skin-temp anomaly (3d mean above 28d mean) ---
+    st_3d = await _rolling_mean(db, models.DailySummary.skin_temp_delta_avg, target, 3)
+    st_28d = await _rolling_mean(db, models.DailySummary.skin_temp_delta_avg, target, 28)
+    if st_3d is not None and st_28d is not None:
+        excess = st_3d - st_28d
+        if excess >= SKIN_TEMP_ANOMALY_DELTA_C:
+            recent = await _alert_recently_fired(
+                db, "skin_temp_anomaly", now - timedelta(days=4),
+            )
+            if not recent:
+                db.add(models.Alert(ts=now, kind="skin_temp_anomaly", payload={
+                    "date": target.isoformat(),
+                    "delta_3d_avg_c": st_3d,
+                    "delta_28d_avg_c": st_28d,
+                    "excess_c": excess,
+                }))
+                log.warning(
+                    "Skin-temp anomaly for %s: 3d=%.2f vs 28d=%.2f (+%.2f °C)",
+                    target, st_3d, st_28d, excess,
+                )

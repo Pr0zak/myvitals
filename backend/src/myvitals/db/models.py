@@ -154,6 +154,20 @@ class AppLog(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ImportJob(Base):
+    """Tracks long-running historical imports so the UI can show progress."""
+    __tablename__ = "import_jobs"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)  # "fitbit" | "garmin" | "garmin_fit_tracks" | ...
+    filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), index=True)  # "running" | "done" | "failed"
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    counts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class StravaCredentials(Base):
     """Single-row table (id=1) holding the user's Strava OAuth tokens."""
     __tablename__ = "strava_credentials"

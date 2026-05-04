@@ -9,7 +9,6 @@ import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import kotlin.reflect.KClass
 import app.myvitals.data.AppDatabase
 import app.myvitals.data.BufferedBatch
 import app.myvitals.data.SettingsRepository
@@ -19,6 +18,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import timber.log.Timber
 import java.time.Instant
+import kotlin.reflect.KClass
 
 class SyncWorker(
     context: Context,
@@ -81,11 +81,7 @@ class SyncWorker(
         }
 
         return try {
-            val resp = api.ingestBatch(batch)
-            Timber.i(
-                "Ingest OK: hr=%d hrv=%d steps=%d sleep_stages=%d workouts=%d",
-                resp.heartrate, resp.hrv, resp.steps, resp.sleepStages, resp.workouts,
-            )
+            ingestChunked(api, batch)
             settings.lastSyncEpochSeconds = until.epochSecond
             Result.success()
         } catch (e: Exception) {
@@ -114,17 +110,71 @@ class SyncWorker(
         }
     }
 
+    /**
+     * Send [batch] to the backend in pieces no bigger than [MAX_PER_TYPE]
+     * records of any single table per request. A 30-day backfill (~37k HR
+     * samples) becomes ~10 small POSTs instead of one ~5 MB body that hangs
+     * OkHttp/Moshi serialisation.
+     *
+     * Throws on the first failed POST so the caller can buffer the *original*
+     * un-chunked batch for later retry.
+     */
+    private suspend fun ingestChunked(api: BackendApi, batch: IngestBatch) {
+        val hrChunks = batch.heartrate.chunked(MAX_PER_TYPE)
+        val hrvChunks = batch.hrv.chunked(MAX_PER_TYPE)
+        val stepsChunks = batch.steps.chunked(MAX_PER_TYPE)
+        val sleepChunks = batch.sleepStages.chunked(MAX_PER_TYPE)
+        val workoutChunks = batch.workouts.chunked(MAX_PER_TYPE)
+
+        val n = listOf(
+            hrChunks.size, hrvChunks.size, stepsChunks.size,
+            sleepChunks.size, workoutChunks.size,
+        ).maxOrNull() ?: 0
+
+        var totHr = 0; var totHrv = 0; var totSteps = 0; var totSleep = 0; var totWorkouts = 0
+        for (i in 0 until n) {
+            val sub = IngestBatch(
+                heartrate = hrChunks.getOrElse(i) { emptyList() },
+                hrv = hrvChunks.getOrElse(i) { emptyList() },
+                steps = stepsChunks.getOrElse(i) { emptyList() },
+                sleepStages = sleepChunks.getOrElse(i) { emptyList() },
+                workouts = workoutChunks.getOrElse(i) { emptyList() },
+            )
+            if (sub.isEmpty()) continue
+            Timber.d(
+                "POST chunk %d/%d: hr=%d hrv=%d steps=%d sleep=%d workouts=%d",
+                i + 1, n, sub.heartrate.size, sub.hrv.size, sub.steps.size,
+                sub.sleepStages.size, sub.workouts.size,
+            )
+            val resp = api.ingestBatch(sub)
+            totHr += resp.heartrate; totHrv += resp.hrv; totSteps += resp.steps
+            totSleep += resp.sleepStages; totWorkouts += resp.workouts
+        }
+        Timber.i(
+            "Ingest OK (%d chunks): hr=%d hrv=%d steps=%d sleep_stages=%d workouts=%d",
+            n, totHr, totHrv, totSteps, totSleep, totWorkouts,
+        )
+    }
+
     private suspend fun flushBuffer(api: BackendApi): Boolean {
         val pending = db.buffered().oldest()
+        if (pending.isEmpty()) return true
+        Timber.d("Buffer: %d pending entries to flush", pending.size)
         for (b in pending) {
+            Timber.d("Buffer id=%d: parsing %d-byte payload", b.id, b.json.length)
             val batch = batchAdapter.fromJson(b.json)
             if (batch == null) {
                 Timber.w("Dropping malformed buffered batch id=%d", b.id)
                 db.buffered().delete(b.id)
                 continue
             }
+            Timber.d(
+                "Buffer id=%d: posting hr=%d hrv=%d steps=%d sleep=%d workouts=%d",
+                b.id, batch.heartrate.size, batch.hrv.size, batch.steps.size,
+                batch.sleepStages.size, batch.workouts.size,
+            )
             try {
-                api.ingestBatch(batch)
+                ingestChunked(api, batch)
                 db.buffered().delete(b.id)
                 Timber.d("Flushed buffered batch id=%d", b.id)
             } catch (e: Exception) {
@@ -138,5 +188,8 @@ class SyncWorker(
 
     companion object {
         const val UNIQUE_NAME = "myvitals_periodic_sync"
+        // Records of any one type per POST. 5 types * 4000 = 20k records max.
+        // Backend chunks the INSERT at 4000/chunk too.
+        private const val MAX_PER_TYPE = 4000
     }
 }

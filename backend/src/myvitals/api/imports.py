@@ -1,9 +1,18 @@
-"""Historical imports from Fitbit / Garmin account-data ZIP exports."""
+"""Streaming historical imports from Fitbit / Garmin account-data ZIPs.
+
+The upload is streamed to a temp file on disk so the full ZIP never has to
+sit in RAM. The parser then yields per-entry batches that we flush to
+Postgres immediately, committing every COMMIT_EVERY rows so a failure
+mid-import doesn't lose all progress.
+"""
 from __future__ import annotations
 
-import io
 import logging
+import os
+import tempfile
 import zipfile
+from collections import defaultdict
+from collections.abc import Iterator
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -19,63 +28,81 @@ from .ingest import _bulk_upsert
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/import", dependencies=[Depends(require_query)])
 
+# Read upload from the network in 1 MiB chunks. Bigger means fewer write
+# syscalls but more RAM held by the buffer; 1 MiB is the sweet spot.
+_UPLOAD_CHUNK = 1 << 20
 
-async def _upsert_activities(db: AsyncSession, rows: list[dict[str, Any]]) -> int:
-    if not rows:
-        return 0
-    n = 0
-    # Activities use upsert (replace existing) so re-imports refresh fields.
-    # Chunk to stay under Postgres' 32k bind-param limit (Activity has ~16 cols).
-    CHUNK = 1500
-    for i in range(0, len(rows), CHUNK):
-        chunk = rows[i : i + CHUNK]
-        stmt = insert(models.Activity).values(chunk)
-        # Preserve user-edited notes/tags across re-imports
-        update_cols = {c.name: c for c in stmt.excluded
-                       if c.name not in ("source", "source_id", "notes", "tags")}
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["source", "source_id"], set_=update_cols,
-        )
-        await db.execute(stmt)
-        n += len(chunk)
-    return n
+# Stream → (model, conflict-cols). Activities are special-cased below.
+_STREAM_MAP: dict[str, tuple[type, list[str]]] = {
+    "heartrate": (models.HeartRate, ["time"]),
+    "hrv": (models.Hrv, ["time"]),
+    "steps": (models.Steps, ["time"]),
+    "sleep_stages": (models.SleepStage, ["time", "stage"]),
+    "body_metrics": (models.BodyMetric, ["time"]),
+    "skin_temp": (models.SkinTemp, ["time"]),
+}
+
+# Commit every N total rows so a long import doesn't sit in one giant txn.
+_COMMIT_EVERY = 20_000
 
 
-async def _ingest_streams(
-    db: AsyncSession, streams: dict[str, list[dict[str, Any]]],
-) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    if streams.get("heartrate"):
-        await _bulk_upsert(db, models.HeartRate, streams["heartrate"], ["time"])
-        counts["heartrate"] = len(streams["heartrate"])
-    if streams.get("steps"):
-        await _bulk_upsert(db, models.Steps, streams["steps"], ["time"])
-        counts["steps"] = len(streams["steps"])
-    if streams.get("hrv"):
-        await _bulk_upsert(db, models.Hrv, streams["hrv"], ["time"])
-        counts["hrv"] = len(streams["hrv"])
-    if streams.get("sleep_stages"):
-        await _bulk_upsert(
-            db, models.SleepStage, streams["sleep_stages"], ["time", "stage"],
-        )
-        counts["sleep_stages"] = len(streams["sleep_stages"])
-    if streams.get("body_metrics"):
-        await _bulk_upsert(db, models.BodyMetric, streams["body_metrics"], ["time"])
-        counts["body_metrics"] = len(streams["body_metrics"])
-    if streams.get("skin_temp"):
-        await _bulk_upsert(db, models.SkinTemp, streams["skin_temp"], ["time"])
-        counts["skin_temp"] = len(streams["skin_temp"])
-    if streams.get("activities"):
-        counts["activities"] = await _upsert_activities(db, streams["activities"])
-    await db.commit()
-    return counts
-
-
-def _open_zip(payload: bytes) -> zipfile.ZipFile:
+async def _save_upload_to_tmp(file: UploadFile) -> str:
+    """Stream the upload to a NamedTemporaryFile and return the path."""
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip", prefix="myvitals_import_")
+    total = 0
     try:
-        return zipfile.ZipFile(io.BytesIO(payload))
-    except zipfile.BadZipFile as e:
-        raise HTTPException(status_code=400, detail=f"not a valid zip: {e}") from e
+        while True:
+            chunk = await file.read(_UPLOAD_CHUNK)
+            if not chunk:
+                break
+            tmp.write(chunk)
+            total += len(chunk)
+        tmp.flush()
+    finally:
+        tmp.close()
+    log.info("import upload saved: %s (%.1f MB)", tmp.name, total / (1 << 20))
+    return tmp.name
+
+
+async def _upsert_activities_chunk(db: AsyncSession, rows: list[dict[str, Any]]) -> None:
+    """Upsert a single activities batch, preserving user-edited notes/tags."""
+    if not rows:
+        return
+    stmt = insert(models.Activity).values(rows)
+    update_cols = {
+        c.name: c for c in stmt.excluded
+        if c.name not in ("source", "source_id", "notes", "tags")
+    }
+    stmt = stmt.on_conflict_do_update(index_elements=["source", "source_id"], set_=update_cols)
+    await db.execute(stmt)
+
+
+async def _stream_ingest(
+    db: AsyncSession,
+    parser: Iterator[tuple[str, list[dict[str, Any]]]],
+) -> dict[str, int]:
+    """Drive the parser generator, flushing each batch as it arrives."""
+    counts: dict[str, int] = defaultdict(int)
+    rows_since_commit = 0
+    for stream, samples in parser:
+        if not samples:
+            continue
+        if stream == "activities":
+            await _upsert_activities_chunk(db, samples)
+        else:
+            entry = _STREAM_MAP.get(stream)
+            if not entry:
+                log.warning("unknown stream %r — dropping %d rows", stream, len(samples))
+                continue
+            await _bulk_upsert(db, entry[0], samples, entry[1])
+        counts[stream] += len(samples)
+        rows_since_commit += len(samples)
+        if rows_since_commit >= _COMMIT_EVERY:
+            await db.commit()
+            rows_since_commit = 0
+            log.info("partial commit: %s", dict(counts))
+    await db.commit()
+    return dict(counts)
 
 
 @router.post("/fitbit")
@@ -84,16 +111,28 @@ async def import_fitbit(
     weight_unit: str = Query("kg", pattern="^(kg|lb)$"),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    payload = await file.read()
-    log.info("fitbit import: received %d bytes (%s) weight_unit=%s",
-             len(payload), file.filename, weight_unit)
-    zf = _open_zip(payload)
-    streams = imp_int.parse_fitbit_zip(zf, weight_unit=weight_unit)
-    counts = await _ingest_streams(db, streams)
-    return {
-        "source": "fitbit", "filename": file.filename, "size_bytes": len(payload),
-        "weight_unit": weight_unit, "imported": counts,
-    }
+    tmp_path = await _save_upload_to_tmp(file)
+    try:
+        try:
+            zf = zipfile.ZipFile(tmp_path)
+        except zipfile.BadZipFile as e:
+            raise HTTPException(status_code=400, detail=f"not a valid zip: {e}") from e
+        try:
+            counts = await _stream_ingest(
+                db, imp_int.parse_fitbit_zip(zf, weight_unit=weight_unit),
+            )
+        finally:
+            zf.close()
+        return {
+            "source": "fitbit", "filename": file.filename,
+            "size_bytes": os.path.getsize(tmp_path),
+            "weight_unit": weight_unit, "imported": counts,
+        }
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 @router.post("/garmin")
@@ -101,9 +140,25 @@ async def import_garmin(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    payload = await file.read()
-    log.info("garmin import: received %d bytes (%s)", len(payload), file.filename)
-    zf = _open_zip(payload)
-    streams = imp_int.parse_garmin_zip(zf)
-    counts = await _ingest_streams(db, streams)
-    return {"source": "garmin", "filename": file.filename, "size_bytes": len(payload), "imported": counts}
+    tmp_path = await _save_upload_to_tmp(file)
+    try:
+        try:
+            zf = zipfile.ZipFile(tmp_path)
+        except zipfile.BadZipFile as e:
+            raise HTTPException(status_code=400, detail=f"not a valid zip: {e}") from e
+        try:
+            counts = await _stream_ingest(db, imp_int.parse_garmin_zip(zf))
+        finally:
+            zf.close()
+        return {
+            "source": "garmin", "filename": file.filename,
+            "size_bytes": os.path.getsize(tmp_path),
+            "imported": counts,
+        }
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+

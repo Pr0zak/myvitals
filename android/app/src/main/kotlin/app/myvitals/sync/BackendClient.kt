@@ -26,10 +26,14 @@ object BackendClient {
             chain.proceed(req)
         }
 
+        // 30-day backfills can move ~10 MB of JSON over slow phone wifi.
+        // Default OkHttp writeTimeout is 10 s — far too short. Bump everything.
         val http = OkHttpClient.Builder()
             .addInterceptor(auth)
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .writeTimeout(120, TimeUnit.SECONDS)
+            .callTimeout(180, TimeUnit.SECONDS)
             .build()
 
         return Retrofit.Builder()

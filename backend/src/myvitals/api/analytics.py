@@ -23,6 +23,21 @@ async def run_analytics(target_date: date | None = Query(None)) -> dict[str, str
     return {"status": "ok", "target_date": (target_date or datetime.now(timezone.utc).date()).isoformat()}
 
 
+@router.post("/analytics/backfill")
+async def backfill_analytics(days: int = Query(7, ge=1, le=365)) -> dict[str, int]:
+    """Recompute daily_summary for the past `days` days. Useful when raw data
+    arrives later than the original nightly job ran (e.g. backfilled from HC)."""
+    today = datetime.now(timezone.utc).date()
+    ok = 0
+    for i in range(days):
+        try:
+            await compute_daily_summary(today - timedelta(days=i))
+            ok += 1
+        except Exception:
+            pass
+    return {"computed": ok, "days": days}
+
+
 # === Correlation explorer ===
 
 # Metrics we can correlate. Each maps to an async function that returns

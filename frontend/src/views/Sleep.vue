@@ -19,6 +19,7 @@ const STAGE_COLORS: Record<string, string> = {
 const STAGE_ORDER = ["awake", "rem", "light", "deep"];
 
 const nights = ref<SleepNight[]>([]);
+const lastNightRaw = ref<{ time: string; stage: string; duration_s: number }[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 const range = ref<7 | 30 | 90>(30);
@@ -29,7 +30,12 @@ async function load() {
   try {
     const since = new Date();
     since.setDate(since.getDate() - range.value);
-    nights.value = await api.sleepRange(since);
+    const [n, raw] = await Promise.all([
+      api.sleepRange(since),
+      api.sleepRaw(new Date(Date.now() - 36 * 3600 * 1000)),
+    ]);
+    nights.value = n;
+    lastNightRaw.value = raw;
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Failed to load";
   } finally {
@@ -61,34 +67,87 @@ function relativeTime(iso: string): string {
 }
 
 // === Hypnogram of the most recent night ===
-// Need raw stage timeline; we have totals per stage, not the timeline.
-// The /query/sleep/range groups by stage type — to draw a hypnogram we need
-// the per-stage start/end. For now, render a stacked horizontal bar showing
-// the proportion of each stage. (A real hypnogram requires raw stage rows;
-// future v0.3.x can add /query/sleep/stages for that.)
-const lastNightStackedOption = computed(() => {
+// Real hypnogram: time on X, stage on categorical Y (deep at bottom, awake top).
+// Use a step line that jumps between stages, plus markArea bands colored per
+// segment so the eye reads it like a Fitbit/Garmin sleep chart.
+const STAGE_Y_INDEX: Record<string, number> = {
+  deep: 0, light: 1, rem: 2, awake: 3, out_of_bed: 3, unknown: 1,
+};
+const Y_LABELS = ["Deep", "Light", "REM", "Awake"];
+
+const hypnogramOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
-  const n = lastNight.value;
-  if (!n) return null;
-  const stages = STAGE_ORDER.filter((s) => n.stages.find((x) => x.stage === s));
+  if (lastNightRaw.value.length === 0) return null;
+
+  // Group raw rows into the most recent contiguous session (gap > 2h splits).
+  const sorted = [...lastNightRaw.value].sort(
+    (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
+  );
+  const sessions: typeof sorted[] = [];
+  let cur: typeof sorted = [];
+  for (const row of sorted) {
+    if (cur.length > 0) {
+      const last = cur[cur.length - 1];
+      const gap = new Date(row.time).getTime() - new Date(last.time).getTime();
+      if (gap > 2 * 3600 * 1000) {
+        sessions.push(cur);
+        cur = [];
+      }
+    }
+    cur.push(row);
+  }
+  if (cur.length > 0) sessions.push(cur);
+  const session = sessions[sessions.length - 1];
+  if (!session || session.length === 0) return null;
+
+  // Step line: for each stage row, emit two points (start and end) at its Y.
+  const linePts: [number, number][] = [];
+  // markArea: one rect per stage row, full-height vertical band colored by stage.
+  const areas: any[] = [];
+  for (const row of session) {
+    const start = new Date(row.time).getTime();
+    const end = start + row.duration_s * 1000;
+    const y = STAGE_Y_INDEX[row.stage] ?? 1;
+    linePts.push([start, y]);
+    linePts.push([end, y]);
+    areas.push([
+      { xAxis: row.time, itemStyle: { color: (STAGE_COLORS[row.stage] ?? "#64748b") + "30" } },
+      { xAxis: new Date(end).toISOString() },
+    ]);
+  }
+
   return {
-    grid: { left: 60, right: 12, top: 8, bottom: 24 },
-    xAxis: { type: "value", name: "minutes", axisLabel: t.axisLabel, splitLine: t.splitLine, nameTextStyle: t.axisLabel },
-    yAxis: { type: "category", data: ["Stages"], axisLabel: { color: "transparent" } },
-    tooltip: { trigger: "axis", ...t.tooltip,
-      formatter: (params: any[]) => params.map((p) => `${p.seriesName}: ${p.value} min`).join("<br/>") },
-    legend: { textStyle: t.axisLabel, top: 4 },
-    series: stages.map((stage) => {
-      const item = n.stages.find((x) => x.stage === stage)!;
-      return {
-        name: stage,
-        type: "bar",
-        stack: "stages",
-        data: [Math.round(item.duration_s / 60)],
-        itemStyle: { color: STAGE_COLORS[stage] ?? "#64748b" },
-      };
-    }),
+    grid: { left: 60, right: 12, top: 16, bottom: 30 },
+    xAxis: {
+      type: "time",
+      axisLabel: { ...t.axisLabel, formatter: (v: number) => new Date(v).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: "category",
+      data: Y_LABELS,
+      axisLabel: t.axisLabel,
+      splitLine: t.splitLine,
+    },
+    tooltip: {
+      trigger: "axis",
+      ...t.tooltip,
+      formatter: (params: any[]) => {
+        const p = params[0];
+        if (!p) return "";
+        const t = new Date(p.value[0]);
+        return `${t.toLocaleTimeString()}<br/><b>${Y_LABELS[p.value[1]]}</b>`;
+      },
+    },
+    series: [{
+      type: "line",
+      step: "end" as const,
+      showSymbol: false,
+      lineStyle: { color: t.palette.violet, width: 2 },
+      data: linePts,
+      markArea: { silent: true, data: areas },
+    }],
   };
 });
 
@@ -189,9 +248,9 @@ const stats = computed(() => {
     </div>
 
     <div v-if="!loading && nights.length > 0" class="grid">
-      <Card v-if="lastNight" title="Last night"
+      <Card v-if="lastNight" title="Last night — hypnogram"
             :subtitle="`${fmtTime(new Date(lastNight.start))} → ${fmtTime(new Date(lastNight.end))}  ·  ${fmtDur(lastNight.total_s)}`">
-        <div class="chart small"><VChart v-if="lastNightStackedOption" :option="lastNightStackedOption" autoresize/></div>
+        <div class="chart hypno"><VChart v-if="hypnogramOption" :option="hypnogramOption" autoresize/></div>
         <div class="legend">
           <span v-for="s in lastNight.stages" :key="s.stage" class="lg-item">
             <span class="dot" :style="{ background: STAGE_COLORS[s.stage] ?? '#64748b' }"></span>
@@ -230,6 +289,7 @@ h1 { margin: 0; }
 .grid { display: grid; gap: 1rem; margin-top: 1rem; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
 .chart { width: 100%; height: 280px; }
 .chart.small { height: 100px; }
+.chart.hypno { height: 200px; }
 .chart > * { width: 100%; height: 100%; }
 
 .legend { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted); }

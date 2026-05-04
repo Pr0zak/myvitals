@@ -220,45 +220,145 @@ async def import_garmin(
 _FIT_CHECKPOINT_EVERY = 100
 
 
+async def _process_one_fit(
+    db: AsyncSession,
+    zf: zipfile.ZipFile,
+    name: str,
+    counts: dict[str, int],
+    activity_index: list[tuple[float, str]],
+    activity_epochs: list[float],
+) -> None:
+    """Parse one FIT file: attach polyline to its activity row (matched by
+    start_time, since Garmin FIT filenames use uploadId not activityId)
+    and bulk-upsert any per-second HR samples into vitals_heartrate."""
+    import bisect
+    from datetime import timezone as _tz
+
+    counts["processed"] += 1
+    try:
+        with zf.open(name) as f:
+            data = f.read()
+        track = await asyncio.to_thread(fit_tracks.parse_fit_track, data)
+    except Exception as e:
+        log.warning("FIT parse %s: %s", name, e)
+        counts["skipped"] += 1
+        return
+
+    has_polyline = bool(track.get("polyline"))
+    hr_samples = track.get("hr_samples") or []
+
+    # 1. Bulk-upsert per-second HR samples — these flow in regardless of
+    # whether the FIT had GPS (strength training, indoor cardio, etc.
+    # have HR but no track). PK is `time` so existing Fitbit samples win
+    # on collision; quiet years where Fitbit had no coverage get filled.
+    if hr_samples:
+        rows = [
+            {
+                "time": (ts.replace(tzinfo=_tz.utc) if ts.tzinfo is None else ts),
+                "bpm": float(bpm),
+                "source": "garmin",
+            }
+            for ts, bpm in hr_samples
+        ]
+        await _bulk_upsert(db, models.HeartRate, rows, ["time"])
+        counts["hr_samples"] = counts.get("hr_samples", 0) + len(rows)
+
+    # 2. Polyline → activities row, time-matched to nearest start_at within ±60s.
+    if not has_polyline:
+        return
+    counts["with_track"] += 1
+
+    start = track.get("start_time")
+    if start is None:
+        counts["unmatched_no_time"] = counts.get("unmatched_no_time", 0) + 1
+        return
+    target_epoch = (
+        start.replace(tzinfo=_tz.utc).timestamp() if start.tzinfo is None
+        else start.timestamp()
+    )
+    idx = bisect.bisect_left(activity_epochs, target_epoch)
+    candidates: list[tuple[float, str]] = []
+    if idx < len(activity_index):
+        candidates.append(activity_index[idx])
+    if idx > 0:
+        candidates.append(activity_index[idx - 1])
+    best = min(candidates, key=lambda x: abs(x[0] - target_epoch), default=None)
+    if best is None or abs(best[0] - target_epoch) > 60:
+        counts["unmatched"] = counts.get("unmatched", 0) + 1
+        return
+
+    r = await db.execute(
+        update(models.Activity)
+        .where(models.Activity.source == "garmin")
+        .where(models.Activity.source_id == best[1])
+        .values(polyline=track["polyline"])
+    )
+    if r.rowcount:
+        counts["matched"] += 1
+
+
+async def _walk_zip(
+    db: AsyncSession, zf: zipfile.ZipFile, job_id: int, counts: dict[str, int],
+) -> None:
+    """Process one ZIP: parse any FIT files at the top level, and recurse
+    into any nested *.zip whose path looks like Garmin's uploaded-files
+    archive. Commits + refreshes the visible job-progress row every
+    _FIT_CHECKPOINT_EVERY files."""
+    import io as _io
+
+    # Build a sorted (epoch, source_id) index of all garmin activities so
+    # each FIT file can match by start_time in O(log n).
+    rows = (await db.execute(
+        select(models.Activity.source_id, models.Activity.start_at)
+        .where(models.Activity.source == "garmin")
+    )).all()
+    activity_index: list[tuple[float, str]] = sorted(
+        ((r[1].timestamp(), r[0]) for r in rows), key=lambda x: x[0],
+    )
+    activity_epochs = [e for e, _ in activity_index]
+    log.info("FIT tracks: %d garmin activities indexed for time-matching", len(activity_index))
+
+    fits = [n for n in zf.namelist() if n.lower().endswith(".fit")]
+    nested = [
+        n for n in zf.namelist()
+        if n.lower().endswith(".zip")
+        and ("uploadedfiles" in n.lower() or "uploaded-files" in n.lower())
+    ]
+
+    since_ckpt = 0
+    for name in fits:
+        await _process_one_fit(db, zf, name, counts, activity_index, activity_epochs)
+        since_ckpt += 1
+        if since_ckpt >= _FIT_CHECKPOINT_EVERY:
+            await db.commit()
+            await _update_job_counts(job_id, counts)
+            since_ckpt = 0
+
+    for nz in nested:
+        log.info("FIT tracks: recursing into nested %s", nz)
+        with zf.open(nz) as f:
+            data = f.read()
+        with zipfile.ZipFile(_io.BytesIO(data)) as inner:
+            inner_fits = [n for n in inner.namelist() if n.lower().endswith(".fit")]
+            for name in inner_fits:
+                await _process_one_fit(db, inner, name, counts, activity_index, activity_epochs)
+                since_ckpt += 1
+                if since_ckpt >= _FIT_CHECKPOINT_EVERY:
+                    await db.commit()
+                    await _update_job_counts(job_id, counts)
+                    since_ckpt = 0
+
+
 async def _process_fit_tracks_job(tmp_path: str, job_id: int) -> None:
-    """Background task: walk the FIT zip, attach polylines to activities."""
+    """Background task: walk the upload (which can be either a flat zip
+    of FIT files or the full Garmin archive containing nested
+    UploadedFiles_*.zip), attach polylines to matching activities."""
     counts = {"processed": 0, "with_track": 0, "matched": 0, "skipped": 0}
     try:
-        with zipfile.ZipFile(tmp_path) as zf:
-            fits = [n for n in zf.namelist() if n.lower().endswith(".fit")]
-            log.info("FIT tracks job %d: %d fit files", job_id, len(fits))
-            since_ckpt = 0
-            async with SessionLocal() as db:
-                for name in fits:
-                    counts["processed"] += 1
-                    aid = fit_tracks.extract_activity_id(name)
-                    if not aid:
-                        counts["skipped"] += 1
-                    else:
-                        try:
-                            with zf.open(name) as f:
-                                data = f.read()
-                            track = await asyncio.to_thread(fit_tracks.parse_fit_track, data)
-                        except Exception as e:
-                            log.warning("FIT parse %s: %s", name, e)
-                            counts["skipped"] += 1
-                            track = {"polyline": None}
-                        if track.get("polyline"):
-                            counts["with_track"] += 1
-                            r = await db.execute(
-                                update(models.Activity)
-                                .where(models.Activity.source == "garmin")
-                                .where(models.Activity.source_id == aid)
-                                .values(polyline=track["polyline"])
-                            )
-                            if r.rowcount:
-                                counts["matched"] += 1
-                    since_ckpt += 1
-                    if since_ckpt >= _FIT_CHECKPOINT_EVERY:
-                        await db.commit()
-                        await _update_job_counts(job_id, counts)
-                        since_ckpt = 0
-                await db.commit()
+        async with SessionLocal() as db:
+            with zipfile.ZipFile(tmp_path) as zf:
+                await _walk_zip(db, zf, job_id, counts)
+            await db.commit()
         await _finish_job(job_id, "done", counts)
     except Exception:
         tb = traceback.format_exc()

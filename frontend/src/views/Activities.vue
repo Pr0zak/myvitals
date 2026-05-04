@@ -7,6 +7,7 @@ import PolylineThumbnail from "@/components/PolylineThumbnail.vue";
 import { api } from "@/api/client";
 import type { Activity, ActivityStats } from "@/api/types";
 import { chartTheme } from "@/theme";
+import { fmtDistance, fmtElevation, distanceVal, distanceUnit } from "@/units";
 
 const TYPE_ICON: Record<string, string> = {
   ebikeride: "🚴",
@@ -212,18 +213,23 @@ function fmtDuration(s: number): string {
   const m = Math.floor((s % 3600) / 60);
   return h ? `${h}h ${m}m` : `${m}m`;
 }
-function fmtKm(m: number | null): string { return m === null ? "—" : `${(m / 1000).toFixed(2)} km`; }
-function fmtKmShort(m: number | null): string { return m === null ? "—" : `${(m / 1000).toFixed(1)}km`; }
+function fmtKm(m: number | null): string { return fmtDistance(m, 2); }
+function fmtKmShort(m: number | null): string {
+  const v = distanceVal(m);
+  return v === null ? "—" : `${v.toFixed(1)}${distanceUnit.value}`;
+}
 function fmtPace(meters: number | null, seconds: number): string {
   if (!meters || meters < 50) return "—";
-  const minPerKm = (seconds / 60) / (meters / 1000);
-  const m = Math.floor(minPerKm);
-  const s = Math.round((minPerKm - m) * 60);
-  return `${m}:${s.toString().padStart(2, "0")}/km`;
+  const dist = distanceVal(meters)!;  // in km or mi
+  const minPerUnit = (seconds / 60) / dist;
+  const m = Math.floor(minPerUnit);
+  const s = Math.round((minPerUnit - m) * 60);
+  return `${m}:${s.toString().padStart(2, "0")}/${distanceUnit.value}`;
 }
 function fmtSpeed(meters: number | null, seconds: number): string {
   if (!meters || meters < 50) return "—";
-  return `${((meters / 1000) / (seconds / 3600)).toFixed(1)} km/h`;
+  const dist = distanceVal(meters)!;
+  return `${(dist / (seconds / 3600)).toFixed(1)} ${distanceUnit.value}/h`;
 }
 function isRide(t: string): boolean { return t.includes("ride") || t.includes("bik"); }
 
@@ -274,7 +280,7 @@ const monthLabel = (key: string) =>
           </span></div>
         </div>
         <div class="stat">
-          <div class="num">{{ (stats.total_distance_m / 1000).toFixed(0) }} <span class="unit">km</span></div>
+          <div class="num">{{ distanceVal(stats.total_distance_m)?.toFixed(0) }} <span class="unit">{{ distanceUnit }}</span></div>
           <div class="lbl">distance <span :class="pctClass(stats.period_pct_vs_prev.distance)">
             {{ stats.period_pct_vs_prev.distance > 0 ? "↑" : "↓" }}
             {{ Math.abs(stats.period_pct_vs_prev.distance).toFixed(0) }}%
@@ -325,7 +331,7 @@ const monthLabel = (key: string) =>
                     :to="`/activity/${records.mostElevation.source}/${records.mostElevation.source_id}`"
                     class="pr">
           <div class="pr-label">⛰️ Most climbed</div>
-          <div class="pr-val">{{ Math.round(records.mostElevation.elevation_gain_m!) }} m</div>
+          <div class="pr-val">{{ fmtElevation(records.mostElevation.elevation_gain_m!) }}</div>
           <div class="pr-meta">{{ records.mostElevation.name ?? records.mostElevation.type }}</div>
         </RouterLink>
         <RouterLink v-if="records.highestSuffer"
@@ -401,7 +407,7 @@ const monthLabel = (key: string) =>
                 <dl class="stats">
                   <div><dt>Time</dt><dd>{{ fmtDuration(a.duration_s) }}</dd></div>
                   <div><dt>Distance</dt><dd>{{ fmtKm(a.distance_m) }}</dd></div>
-                  <div v-if="a.elevation_gain_m"><dt>Elev</dt><dd>{{ Math.round(a.elevation_gain_m) }} m</dd></div>
+                  <div v-if="a.elevation_gain_m"><dt>Elev</dt><dd>{{ fmtElevation(a.elevation_gain_m) }}</dd></div>
                   <div><dt>{{ isRide(a.type) ? "Speed" : "Pace" }}</dt>
                        <dd>{{ isRide(a.type) ? fmtSpeed(a.distance_m, a.duration_s) : fmtPace(a.distance_m, a.duration_s) }}</dd></div>
                   <div v-if="a.avg_hr"><dt>HR</dt><dd>{{ Math.round(a.avg_hr) }} / {{ Math.round(a.max_hr ?? 0) }}</dd></div>
@@ -418,7 +424,7 @@ const monthLabel = (key: string) =>
                 <span class="row-name">{{ a.name ?? "(untitled)" }}</span>
                 <span class="row-stat">{{ fmtKmShort(a.distance_m) }}</span>
                 <span class="row-stat">{{ fmtDuration(a.duration_s) }}</span>
-                <span class="row-stat" v-if="a.elevation_gain_m">{{ Math.round(a.elevation_gain_m) }}m</span>
+                <span class="row-stat" v-if="a.elevation_gain_m">{{ fmtElevation(a.elevation_gain_m) }}</span>
                 <span class="row-stat" v-if="a.avg_hr">{{ Math.round(a.avg_hr) }} bpm</span>
                 <span class="row-stat" v-if="a.suffer_score" :style="{ color: intensityColor(a.suffer_score) }">{{ Math.round(a.suffer_score) }}</span>
               </template>
@@ -445,7 +451,7 @@ const monthLabel = (key: string) =>
               <dl class="stats">
                 <div><dt>Time</dt><dd>{{ fmtDuration(a.duration_s) }}</dd></div>
                 <div><dt>Distance</dt><dd>{{ fmtKm(a.distance_m) }}</dd></div>
-                <div v-if="a.elevation_gain_m"><dt>Elev</dt><dd>{{ Math.round(a.elevation_gain_m) }} m</dd></div>
+                <div v-if="a.elevation_gain_m"><dt>Elev</dt><dd>{{ fmtElevation(a.elevation_gain_m) }}</dd></div>
                 <div><dt>{{ isRide(a.type) ? "Speed" : "Pace" }}</dt>
                      <dd>{{ isRide(a.type) ? fmtSpeed(a.distance_m, a.duration_s) : fmtPace(a.distance_m, a.duration_s) }}</dd></div>
                 <div v-if="a.avg_hr"><dt>HR</dt><dd>{{ Math.round(a.avg_hr) }} / {{ Math.round(a.max_hr ?? 0) }}</dd></div>
@@ -462,7 +468,7 @@ const monthLabel = (key: string) =>
               <span class="row-name">{{ a.name ?? "(untitled)" }}</span>
               <span class="row-stat">{{ fmtKmShort(a.distance_m) }}</span>
               <span class="row-stat">{{ fmtDuration(a.duration_s) }}</span>
-              <span class="row-stat" v-if="a.elevation_gain_m">{{ Math.round(a.elevation_gain_m) }}m</span>
+              <span class="row-stat" v-if="a.elevation_gain_m">{{ fmtElevation(a.elevation_gain_m) }}</span>
               <span class="row-stat" v-if="a.avg_hr">{{ Math.round(a.avg_hr) }} bpm</span>
               <span class="row-stat" v-if="a.suffer_score" :style="{ color: intensityColor(a.suffer_score) }">{{ Math.round(a.suffer_score) }}</span>
             </template>

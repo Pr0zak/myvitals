@@ -3,6 +3,7 @@ import axios from "axios";
 import { onMounted, onUnmounted, ref } from "vue";
 import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
+import { units } from "@/units";
 import type { StravaAppConfigStatus, StravaStatus } from "@/api/types";
 
 const tokenInput = ref(queryToken.value);
@@ -65,8 +66,10 @@ function jobAge(j: ImportJob): string {
   return `${h}h ${m}m`;
 }
 
-async function uploadImport(source: "fitbit" | "garmin", file: File) {
-  importBusy.value = source;
+type ImportKind = "fitbit" | "garmin" | "garmin_tracks";
+
+async function uploadImport(kind: ImportKind, file: File) {
+  importBusy.value = kind === "garmin_tracks" ? "garmin" : kind;
   importResult.value = "";
   importError.value = "";
   try {
@@ -74,8 +77,11 @@ async function uploadImport(source: "fitbit" | "garmin", file: File) {
     const fd = new FormData();
     fd.append("file", file);
     const params: Record<string, string> = {};
-    if (source === "fitbit") params.weight_unit = fitbitWeightUnit.value;
-    const r = await axios.post(`${base}/import/${source}`, fd, {
+    if (kind === "fitbit") params.weight_unit = fitbitWeightUnit.value;
+    const path = kind === "garmin_tracks" ? "/import/garmin/tracks"
+               : kind === "fitbit" ? "/import/fitbit"
+               : "/import/garmin";
+    const r = await axios.post(`${base}${path}`, fd, {
       headers: {
         Authorization: `Bearer ${queryToken.value}`,
         "Content-Type": "multipart/form-data",
@@ -84,11 +90,16 @@ async function uploadImport(source: "fitbit" | "garmin", file: File) {
       maxContentLength: 1024 * 1024 * 1024,
       maxBodyLength: 1024 * 1024 * 1024,
     });
-    const counts = r.data?.imported ?? {};
-    const parts = Object.entries(counts).map(([k, v]) => `${k}: ${v}`);
-    importResult.value = parts.length
-      ? `Imported from ${source} — ${parts.join(", ")}.`
-      : `Upload accepted but no recognised files were found in the ZIP.`;
+    if (kind === "garmin_tracks") {
+      importResult.value = `Track parsing started — job ${r.data.job_id}. Watch progress in Recent jobs below.`;
+    } else {
+      const counts = r.data?.imported ?? {};
+      const parts = Object.entries(counts).map(([k, v]) => `${k}: ${v}`);
+      importResult.value = parts.length
+        ? `Imported from ${kind} — ${parts.join(", ")}.`
+        : `Upload accepted but no recognised files were found in the ZIP.`;
+    }
+    refreshJobs();
   } catch (e: unknown) {
     if (e && typeof e === "object" && "response" in e) {
       const r = (e as { response?: { status?: number; data?: unknown } }).response;
@@ -101,13 +112,13 @@ async function uploadImport(source: "fitbit" | "garmin", file: File) {
   }
 }
 
-function pickImportFile(source: "fitbit" | "garmin") {
+function pickImportFile(kind: ImportKind) {
   const inp = document.createElement("input");
   inp.type = "file";
   inp.accept = ".zip,application/zip";
   inp.onchange = () => {
     const f = inp.files?.[0];
-    if (f) uploadImport(source, f);
+    if (f) uploadImport(kind, f);
   };
   inp.click();
 }
@@ -327,6 +338,15 @@ onUnmounted(stopJobPolling);
       </div>
     </section>
 
+    <section>
+      <h2>Display</h2>
+      <label style="flex-direction: row; align-items: center; gap: 0.6rem;">
+        <span>Units:</span>
+        <label><input type="radio" value="metric" v-model="units"/> metric (km, kg, °C)</label>
+        <label><input type="radio" value="imperial" v-model="units"/> imperial (mi, lb, °F)</label>
+      </label>
+    </section>
+
     <section v-if="queryToken">
       <h2>Tools</h2>
       <div class="tools">
@@ -374,8 +394,15 @@ onUnmounted(stopJobPolling);
             Upload the ZIP once it arrives by email.
           </p>
           <button class="ghost" :disabled="!!importBusy" @click="pickImportFile('garmin')">
-            {{ importBusy === 'garmin' ? 'Uploading…' : 'Upload Garmin ZIP' }}
+            {{ importBusy === 'garmin' ? 'Uploading…' : 'Upload Garmin ZIP (summary)' }}
           </button>
+          <button class="ghost" :disabled="!!importBusy" @click="pickImportFile('garmin_tracks')"
+                  style="margin-top: 0.4rem;">
+            Upload Garmin ZIP (GPS + tracks)
+          </button>
+          <p class="muted" style="margin-top: 0.4rem; font-size: 0.75rem;">
+            The track upload reads FIT files (~22k for a long history) and attaches GPS polylines to your activities. Background job, watch progress below.
+          </p>
         </div>
       </div>
       <div v-if="importResult" class="ok">{{ importResult }}</div>

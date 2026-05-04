@@ -7,6 +7,7 @@ import "leaflet/dist/leaflet.css";
 import { api } from "@/api/client";
 import type { Activity } from "@/api/types";
 import { effectiveTheme } from "@/theme";
+import { fmtDistance, distanceVal, distanceUnit } from "@/units";
 
 const TYPE_COLOR: Record<string, string> = {
   ebikeride: "#22c55e", ride: "#22c55e", virtualride: "#22c55e",
@@ -83,7 +84,7 @@ function renderMap() {
       weight: 2.5,
       opacity: 0.7,
     }).bindTooltip(
-      `<b>${a.name ?? a.type}</b><br/>${new Date(a.start_at).toLocaleDateString()}<br/>${((a.distance_m ?? 0) / 1000).toFixed(1)} km`,
+      `<b>${a.name ?? a.type}</b><br/>${new Date(a.start_at).toLocaleDateString()}<br/>${fmtDistance(a.distance_m ?? 0, 1)}`,
       { sticky: true },
     );
     ln.on("mouseover", () => { ln.setStyle({ weight: 5, opacity: 1 }); });
@@ -127,7 +128,7 @@ const yearLabel = () => {
         <span>{{ yearLabel() }}</span>
         <button :disabled="yearOffset >= 0" @click="yearOffset++">›</button>
         <span class="stat">
-          {{ stats.count }} routes · {{ (stats.totalDistance / 1000).toFixed(0) }} km
+          {{ stats.count }} routes · {{ distanceVal(stats.totalDistance)?.toFixed(0) }} {{ distanceUnit }}
         </span>
       </div>
     </header>

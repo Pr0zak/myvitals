@@ -5,6 +5,7 @@ import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
 import { chartTheme } from "@/theme";
+import { weightVal, weightUnit, fmtWeight, weightToKg, isImperial } from "@/units";
 
 type Range = "7d" | "30d" | "90d" | "365d";
 const RANGES: { key: Range; label: string; days: number }[] = [
@@ -80,23 +81,27 @@ function rolling7Avg(pts: { t: number; v: number }[]): { t: number; v: number }[
 }
 
 function bmiBands(heightM: number): unknown[] {
-  const u = 18.5 * heightM * heightM;
-  const n = 25 * heightM * heightM;
-  const o = 30 * heightM * heightM;
+  // BMI thresholds in kg, then converted to display unit so the bands align
+  // with the y-axis (which is in user units).
+  const toUnit = (kg: number) => weightVal(kg) ?? kg;
+  const u = toUnit(18.5 * heightM * heightM);
+  const n = toUnit(25 * heightM * heightM);
+  const o = toUnit(30 * heightM * heightM);
   return [
     [{ yAxis: 0, itemStyle: { color: "rgba(56, 189, 248, 0.07)" } }, { yAxis: u }],
     [{ yAxis: u, itemStyle: { color: "rgba(34, 197, 94, 0.07)" } }, { yAxis: n }],
     [{ yAxis: n, itemStyle: { color: "rgba(234, 179, 8, 0.07)" } }, { yAxis: o }],
-    [{ yAxis: o, itemStyle: { color: "rgba(239, 68, 68, 0.10)" } }, { yAxis: 999 }],
+    [{ yAxis: o, itemStyle: { color: "rgba(239, 68, 68, 0.10)" } }, { yAxis: 9999 }],
   ];
 }
 
 const weightOption = computed(() => {
   void chartTheme.value;
+  void weightUnit.value;  // re-render on unit toggle
   const t = chartTheme.value;
   const raw = weightSeries.value
     .filter((p) => p.weight_kg != null)
-    .map((p) => ({ t: new Date(p.time).getTime(), v: p.weight_kg as number }));
+    .map((p) => ({ t: new Date(p.time).getTime(), v: weightVal(p.weight_kg) as number }));
   const pts = raw.map((p) => [p.t, p.v]);
   const ma = rolling7Avg(raw).map((p) => [p.t, p.v]);
   const fatPts = weightSeries.value
@@ -126,14 +131,15 @@ const weightOption = computed(() => {
       yAxisIndex: 0,
     });
   }
-  // Goal line: from earliest weight in window to target.
+  // Goal line: from earliest weight in window to target (in user units).
   if (targetKg.value != null && targetDateStr.value && pts.length) {
     const start = pts[0];
     const targetTs = new Date(targetDateStr.value).getTime();
-    if (Number.isFinite(targetTs)) {
+    const targetDisplay = weightVal(targetKg.value);
+    if (Number.isFinite(targetTs) && targetDisplay != null) {
       series.push({
         name: "Goal", type: "line",
-        data: [[start[0], start[1]], [targetTs, targetKg.value]],
+        data: [[start[0], start[1]], [targetTs, targetDisplay]],
         symbol: "none", smooth: false,
         lineStyle: { width: 1.5, color: t.palette.recovery, type: "dashed" as const, opacity: 0.7 },
         yAxisIndex: 0,
@@ -152,7 +158,7 @@ const weightOption = computed(() => {
     tooltip: { trigger: "axis", ...t.tooltip },
     xAxis: { type: "time", axisLabel: t.axisLabel, splitLine: t.splitLine },
     yAxis: [
-      { type: "value", name: "kg", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
+      { type: "value", name: weightUnit.value, scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
       { type: "value", name: "%", scale: true, axisLabel: t.axisLabel, splitLine: { show: false } },
     ],
     series,
@@ -171,11 +177,12 @@ const bodyCompOption = computed(() => {
   for (const p of weightSeries.value) {
     if (p.weight_kg == null) continue;
     const ts = new Date(p.time).getTime();
-    if (p.lean_mass_kg != null) lean.push([ts, p.lean_mass_kg]);
-    else if (p.body_fat_pct != null) {
+    if (p.lean_mass_kg != null) {
+      lean.push([ts, weightVal(p.lean_mass_kg)!]);
+    } else if (p.body_fat_pct != null) {
       const fatKg = p.weight_kg * (p.body_fat_pct / 100);
-      lean.push([ts, p.weight_kg - fatKg]);
-      fat.push([ts, fatKg]);
+      lean.push([ts, weightVal(p.weight_kg - fatKg)!]);
+      fat.push([ts, weightVal(fatKg)!]);
     }
   }
   return {
@@ -183,7 +190,7 @@ const bodyCompOption = computed(() => {
     legend: { textStyle: t.axisLabel, top: 4 },
     tooltip: { trigger: "axis", ...t.tooltip },
     xAxis: { type: "time", axisLabel: t.axisLabel, splitLine: t.splitLine },
-    yAxis: { type: "value", name: "kg", axisLabel: t.axisLabel, splitLine: t.splitLine },
+    yAxis: { type: "value", name: weightUnit.value, axisLabel: t.axisLabel, splitLine: t.splitLine },
     series: [
       { name: "Lean mass", type: "line", stack: "body", data: lean, smooth: true,
         symbol: "none", areaStyle: { color: t.palette.hrv, opacity: 0.4 },
@@ -497,20 +504,22 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
         </div>
         <template v-else>
           <div class="weight-stats">
-            <span><strong>{{ weightStats.latest_kg?.toFixed(1) }}</strong> kg latest</span>
-            <span class="muted">range: {{ weightStats.min_kg?.toFixed(1) }} – {{ weightStats.max_kg?.toFixed(1) }}</span>
-            <span class="muted">avg: {{ weightStats.avg_kg?.toFixed(1) }}</span>
+            <span><strong>{{ fmtWeight(weightStats.latest_kg) }}</strong> latest</span>
+            <span class="muted">range: {{ fmtWeight(weightStats.min_kg) }} – {{ fmtWeight(weightStats.max_kg) }}</span>
+            <span class="muted">avg: {{ fmtWeight(weightStats.avg_kg) }}</span>
           </div>
           <div class="goal-row">
             <span class="muted">Height (cm):</span>
             <input v-model.number="heightCm" type="number" class="goal-input" min="50" max="250"/>
-            <span class="muted" style="margin-left: 0.6rem;">Goal:</span>
-            <input v-model.number="targetKg" type="number" class="goal-input" min="20" max="300" step="0.1" placeholder="kg"/>
+            <span class="muted" style="margin-left: 0.6rem;">Goal ({{ weightUnit }}):</span>
+            <input :value="targetKg != null ? weightVal(targetKg)?.toFixed(1) : ''"
+                   @change="targetKg = ($event.target as HTMLInputElement).value ? weightToKg(parseFloat(($event.target as HTMLInputElement).value)) : null"
+                   type="number" class="goal-input" min="20" max="660" step="0.1" :placeholder="weightUnit"/>
             <input v-model="targetDateStr" type="date" class="goal-input" style="width: 140px;"/>
             <span v-if="goalProjection" class="muted" style="margin-left: 0.6rem;">
               <template v-if="goalProjection.etaDate">
                 ETA: {{ goalProjection.etaDate.toISOString().slice(0,10) }}
-                ({{ (goalProjection.perDay * 7).toFixed(2) }} kg/wk)
+                ({{ ((weightVal(goalProjection.perDay * 7) ?? 0)).toFixed(2) }} {{ weightUnit }}/wk)
               </template>
               <template v-else-if="goalProjection.headed === 'wrong'">
                 ⚠ trending away from goal

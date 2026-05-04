@@ -5,6 +5,7 @@ import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
 import { chartTheme } from "@/theme";
+import { weightVal, weightUnit } from "@/units";
 
 type SummaryWithWeight = TodaySummary & { weight_kg?: number | null };
 const data = ref<SummaryWithWeight[]>([]);
@@ -36,6 +37,7 @@ onMounted(load);
 
 function metricVal(d: SummaryWithWeight, m: string): number | null {
   if (m === "sleep_hours") return d.sleep_duration_s ? d.sleep_duration_s / 3600 : null;
+  if (m === "weight_kg") return weightVal(d.weight_kg);
   return (d as any)[m] ?? null;
 }
 
@@ -70,7 +72,7 @@ const METRICS = [
   { key: "sleep_hours", label: "Sleep", suffix: "h" },
   { key: "sleep_score", label: "Sleep score", suffix: "" },
   { key: "steps_total", label: "Steps", suffix: "" },
-  { key: "weight_kg", label: "Weight", suffix: "kg" },
+  { key: "weight_kg", label: "Weight", suffix: "kg" },  // suffix overridden in fmt() based on units
 ];
 
 const rows = computed(() => {
@@ -87,7 +89,7 @@ function fmt(v: number | null, suffix: string): string {
   if (v === null) return "—";
   if (suffix === "") return v.toFixed(1);
   if (suffix === "h") return v.toFixed(1) + " h";
-  if (suffix === "kg") return v.toFixed(1) + " kg";
+  if (suffix === "kg") return v.toFixed(1) + " " + weightUnit.value;
   return Math.round(v).toString() + " " + suffix;
 }
 

@@ -37,29 +37,48 @@ def extract_activity_id(filename: str) -> str | None:
 
 
 def parse_fit_track(data: bytes) -> dict[str, Any]:
-    """Return {polyline, n_points, hr_avg, max_speed_ms} for a FIT byte blob.
+    """Return {polyline, n_points, hr_avg, hr_max, start_time} for a FIT blob.
 
-    Returns polyline=None when the file has no GPS records (indoor
-    sessions, strength training, etc.). Other fields stay None / 0.
+    start_time is a UTC datetime taken from the session message — needed to
+    match the FIT to a row in the activities table since Garmin's FIT
+    filenames use uploadId, not activityId. Returns polyline=None when the
+    file has no GPS records (indoor sessions, strength training, etc.).
     """
     try:
         ff = FitFile(io.BytesIO(data))
         ff.parse()
     except Exception as e:
         log.warning("FIT parse error: %s", e)
-        return {"polyline": None, "n_points": 0, "hr_avg": None, "hr_max": None}
+        return {"polyline": None, "n_points": 0, "hr_avg": None, "hr_max": None, "start_time": None}
+
+    # Session message holds the canonical start_time + sport.
+    start_time = None
+    for s in ff.get_messages("session"):
+        for fld in s:
+            if fld.name == "start_time":
+                start_time = fld.value
+                break
+        if start_time is not None:
+            break
 
     points: list[tuple[float, float]] = []
-    hr_samples: list[int] = []
+    hr_values: list[int] = []                       # for hr_avg / hr_max summary
+    hr_samples: list[tuple[Any, int]] = []          # (timestamp, bpm) per record
     for rec in ff.get_messages("record"):
         d: dict[str, Any] = {x.name: x.value for x in rec}
+        ts = d.get("timestamp")
+        # Fallback start_time from first record if session was missing.
+        if start_time is None and ts is not None:
+            start_time = ts
         lat_raw = d.get("position_lat")
         lon_raw = d.get("position_long")
         if lat_raw is not None and lon_raw is not None:
             points.append((lat_raw * _SEMICIRCLE_TO_DEG, lon_raw * _SEMICIRCLE_TO_DEG))
         hr = d.get("heart_rate")
         if isinstance(hr, (int, float)) and hr > 0:
-            hr_samples.append(int(hr))
+            hr_values.append(int(hr))
+            if ts is not None:
+                hr_samples.append((ts, int(hr)))
 
     if not points:
         encoded: str | None = None
@@ -69,12 +88,14 @@ def parse_fit_track(data: bytes) -> dict[str, Any]:
             points = points[::step]
         encoded = polyline_lib.encode(points)
 
-    hr_avg = (sum(hr_samples) / len(hr_samples)) if hr_samples else None
-    hr_max = max(hr_samples) if hr_samples else None
+    hr_avg = (sum(hr_values) / len(hr_values)) if hr_values else None
+    hr_max = max(hr_values) if hr_values else None
 
     return {
         "polyline": encoded,
         "n_points": len(points),
         "hr_avg": hr_avg,
         "hr_max": hr_max,
+        "hr_samples": hr_samples,  # list[(datetime, int_bpm)]
+        "start_time": start_time,  # naive datetime in UTC per FIT spec
     }

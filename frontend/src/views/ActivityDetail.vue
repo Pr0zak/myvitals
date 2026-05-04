@@ -10,6 +10,7 @@ import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import type { Activity, HeartRateSeries } from "@/api/types";
 import { chartTheme, effectiveTheme } from "@/theme";
+import { fmtDistance, fmtElevation, distanceVal, distanceUnit, isImperial } from "@/units";
 
 const route = useRoute();
 const router = useRouter();
@@ -84,20 +85,20 @@ function renderMap() {
   L.marker(coords[0], { icon: startIcon }).addTo(map).bindTooltip("Start", { direction: "top" });
   L.marker(coords[coords.length - 1], { icon: endIcon }).addTo(map).bindTooltip("End", { direction: "top" });
 
-  // Distance markers every 5 km along the polyline
+  // Distance markers every 5 mi/km along the polyline (user units)
   if (activity.value.distance_m && activity.value.distance_m >= 5000) {
-    const totalKm = activity.value.distance_m / 1000;
-    const stepKm = totalKm > 50 ? 10 : 5;
-    let cumDist = 0;
-    let nextMark = stepKm;
+    const totalUnits = distanceVal(activity.value.distance_m)!;
+    const stepUnits = totalUnits > 50 ? 10 : 5;
+    const unitMeters = isImperial.value ? 1609.344 : 1000;
+    let cumDist = 0;  // meters
+    let nextMark = stepUnits;
     for (let i = 1; i < coords.length; i++) {
-      const seg = haversine(coords[i - 1], coords[i]);
-      cumDist += seg;
-      while (cumDist / 1000 >= nextMark && nextMark < totalKm) {
+      cumDist += haversine(coords[i - 1], coords[i]);
+      while (cumDist / unitMeters >= nextMark && nextMark < totalUnits) {
         L.circleMarker(coords[i], {
           radius: 4, color: "#ffffff", weight: 1, fillColor: "#0ea5e9", fillOpacity: 1,
-        }).addTo(map).bindTooltip(`${nextMark} km`, { permanent: false, direction: "top" });
-        nextMark += stepKm;
+        }).addTo(map).bindTooltip(`${nextMark} ${distanceUnit.value}`, { permanent: false, direction: "top" });
+        nextMark += stepUnits;
       }
     }
   }
@@ -182,7 +183,7 @@ function fmtDur(s: number): string {
 }
 
 function fmtKm(m: number | null): string {
-  return m === null ? "—" : `${(m / 1000).toFixed(2)} km`;
+  return fmtDistance(m, 2);
 }
 
 async function saveNotes() {
@@ -239,7 +240,7 @@ function removeTag(t: string) {
         <Card title="Stats">
           <dl class="kv">
             <div><dt>Distance</dt><dd>{{ fmtKm(activity.distance_m) }}</dd></div>
-            <div v-if="activity.elevation_gain_m !== null"><dt>Elevation</dt><dd>{{ Math.round(activity.elevation_gain_m) }} m</dd></div>
+            <div v-if="activity.elevation_gain_m !== null"><dt>Elevation</dt><dd>{{ fmtElevation(activity.elevation_gain_m) }}</dd></div>
             <div v-if="activity.avg_hr"><dt>Avg HR</dt><dd>{{ Math.round(activity.avg_hr) }} bpm</dd></div>
             <div v-if="activity.max_hr"><dt>Max HR</dt><dd>{{ Math.round(activity.max_hr) }} bpm</dd></div>
             <div v-if="activity.avg_power_w"><dt>Avg power</dt><dd>{{ Math.round(activity.avg_power_w) }} W</dd></div>

@@ -56,8 +56,11 @@ async def export_table(
                      if hasattr(model, c)), None)
     stmt = select(model)
     if time_col is not None:
-        stmt = stmt.where(time_col >= start.date() if time_col.key == "date" else start)
-        stmt = stmt.where(time_col <= end.date() if time_col.key == "date" else end)
+        # `if/else` has lower precedence than `>=` so the operand has to be
+        # parenthesised, otherwise the whole comparison disappears.
+        s = start.date() if time_col.key == "date" else start
+        e = end.date() if time_col.key == "date" else end
+        stmt = stmt.where(time_col >= s).where(time_col <= e)
 
     result = await db.execute(stmt)
     rows = result.scalars().all()

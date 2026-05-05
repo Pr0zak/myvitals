@@ -187,7 +187,18 @@ def _parse_fitbit_sleep(zf, name) -> Iterator[tuple[str, list[dict[str, Any]]]]:
     if not data:
         return
     batch: list[dict[str, Any]] = []
+    sessions: list[dict[str, Any]] = []
     for sess in data:
+        # Capture canonical session boundary so the dashboard can use the
+        # real start/end Fitbit recorded, not just whatever stage range
+        # we happen to parse.
+        s_start = _parse_iso_ts(sess.get("startTime"))
+        s_end = _parse_iso_ts(sess.get("endTime"))
+        if s_start and s_end and s_end > s_start:
+            sessions.append({
+                "start_at": s_start, "end_at": s_end,
+                "source": "fitbit", "title": None,
+            })
         levels = (sess.get("levels") or {}).get("data") or []
         for lv in levels:
             ts = _parse_iso_ts(lv.get("dateTime"))
@@ -199,6 +210,7 @@ def _parse_fitbit_sleep(zf, name) -> Iterator[tuple[str, list[dict[str, Any]]]]:
                     yield ("sleep_stages", batch)
                     batch = []
     yield from _emit("sleep_stages", batch)
+    yield from _emit("sleep_sessions", sessions)
 
 
 def _parse_fitbit_hrv(zf, name) -> Iterator[tuple[str, list[dict[str, Any]]]]:
@@ -401,9 +413,18 @@ def _parse_garmin_sleep(zf, name) -> Iterator[tuple[str, list[dict[str, Any]]]]:
         return
     sessions = payload if isinstance(payload, list) else [payload]
     batch: list[dict[str, Any]] = []
+    session_rows: list[dict[str, Any]] = []
     for sess in sessions:
         if not isinstance(sess, dict):
             continue
+        # Canonical session boundary if Garmin shipped one for this night.
+        s_start = _parse_iso_ts(sess.get("sleepStartTimestampGMT"))
+        s_end = _parse_iso_ts(sess.get("sleepEndTimestampGMT"))
+        if s_start and s_end and s_end > s_start:
+            session_rows.append({
+                "start_at": s_start, "end_at": s_end,
+                "source": "garmin", "title": None,
+            })
         # New shape (export 2024+): per-stage events under sleepLevels.
         levels = sess.get("sleepLevels") or sess.get("sleepStages") or []
         if levels:
@@ -437,6 +458,7 @@ def _parse_garmin_sleep(zf, name) -> Iterator[tuple[str, list[dict[str, Any]]]]:
             yield ("sleep_stages", batch)
             batch = []
     yield from _emit("sleep_stages", batch)
+    yield from _emit("sleep_sessions", session_rows)
 
 
 def _parse_garmin_hr(zf, name) -> Iterator[tuple[str, list[dict[str, Any]]]]:

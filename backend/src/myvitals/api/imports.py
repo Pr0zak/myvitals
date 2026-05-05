@@ -45,6 +45,7 @@ _STREAM_MAP: dict[str, tuple[type, list[str]]] = {
     "hrv": (models.Hrv, ["time"]),
     "steps": (models.Steps, ["time"]),
     "sleep_stages": (models.SleepStage, ["time", "stage"]),
+    "sleep_sessions": (models.SleepSession, ["start_at"]),
     "body_metrics": (models.BodyMetric, ["time"]),
     "skin_temp": (models.SkinTemp, ["time"]),
 }

@@ -18,7 +18,8 @@
     "axios": "^1.7.9",
     "date-fns": "^4.1.0",
     "leaflet": "^1.9.4",
-    "@mapbox/polyline": "^1.2.1"
+    "@mapbox/polyline": "^1.2.1",
+    "lucide-vue-next": "^0.460.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",

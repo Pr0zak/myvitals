@@ -65,7 +65,7 @@ onMounted(load);
             :subtitle="new Date(a.ts).toLocaleString()">
         <pre class="payload">{{ JSON.stringify(a.payload, null, 2) }}</pre>
         <button v-if="!a.acknowledged" class="ack" @click="ack(a.id)">Acknowledge</button>
-        <span v-else class="acked">✓ acknowledged</span>
+        <span v-else class="acked">acknowledged</span>
       </Card>
     </div>
   </div>

@@ -5,7 +5,9 @@ import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
 import { chartTheme } from "@/theme";
-import { weightVal, weightUnit, fmtWeight, weightToKg, isImperial } from "@/units";
+import { weightVal, weightUnit, fmtWeight, weightToKg, isImperial, tempUnit } from "@/units";
+
+const _C_TO_F = 1.8;  // ΔF = ΔC × 9/5
 
 type Range = "7d" | "30d" | "90d" | "365d";
 const RANGES: { key: Range; label: string; days: number }[] = [
@@ -243,29 +245,39 @@ const bpOption = computed(() => {
 });
 const hasBp = computed(() => data.value.some((d) => d.bp_systolic_avg != null));
 
-// Skin-temp card
+// Skin-temp card — values are deltas, so unit conversion is just × 1.8.
 const skinTempOption = computed(() => {
   void chartTheme.value;
+  void tempUnit.value;
   const t = chartTheme.value;
-  const pts = data.value.filter((d) => d.skin_temp_delta_avg != null).map((d) => [d.date, d.skin_temp_delta_avg]);
+  const factor = isImperial.value ? _C_TO_F : 1;
+  const normalBand = 0.5 * factor;
+  const alertLevel = 1 * factor;
+  const pts = data.value
+    .filter((d) => d.skin_temp_delta_avg != null)
+    .map((d) => [d.date, (d.skin_temp_delta_avg as number) * factor]);
   return {
     grid: { left: 40, right: 12, top: 36, bottom: 28 },
     tooltip: { trigger: "axis", ...t.tooltip },
     xAxis: { type: "category", data: data.value.map((d) => d.date), axisLabel: t.axisLabel },
-    yAxis: { type: "value", name: "Δ °C", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
+    yAxis: { type: "value", name: tempUnit.value, scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
     series: [
-      { name: "Skin Δ", type: "line", data: pts, smooth: true, connectNulls: true,
+      { name: `Skin Δ ${tempUnit.value}`, type: "line", data: pts, smooth: true, connectNulls: true,
         symbol: "circle", symbolSize: 3,
         lineStyle: { width: 2, color: t.palette.violet }, itemStyle: { color: t.palette.violet },
         markArea: {
           silent: true,
           data: [
-            [{ yAxis: -0.5, itemStyle: { color: "rgba(34, 197, 94, 0.08)" } }, { yAxis: 0.5 }],
+            [{ yAxis: -normalBand, itemStyle: { color: "rgba(34, 197, 94, 0.08)" } }, { yAxis: normalBand }],
           ],
         },
         markLine: {
           silent: true, symbol: "none", lineStyle: { type: "dashed" as const },
-          data: [{ yAxis: 1, lineStyle: { color: "#ef4444" }, label: { formatter: "+1°C", color: "#ef4444" } }],
+          data: [{
+            yAxis: alertLevel,
+            lineStyle: { color: "#ef4444" },
+            label: { formatter: `+${alertLevel.toFixed(1)} ${tempUnit.value}`, color: "#ef4444" },
+          }],
         },
       },
     ],
@@ -509,8 +521,14 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
             <span class="muted">avg: {{ fmtWeight(weightStats.avg_kg) }}</span>
           </div>
           <div class="goal-row">
-            <span class="muted">Height (cm):</span>
-            <input v-model.number="heightCm" type="number" class="goal-input" min="50" max="250"/>
+            <span class="muted">Height ({{ isImperial ? 'in' : 'cm' }}):</span>
+            <input :value="isImperial ? (heightCm / 2.54).toFixed(1) : heightCm"
+                   @change="heightCm = isImperial
+                     ? parseFloat(($event.target as HTMLInputElement).value) * 2.54
+                     : parseFloat(($event.target as HTMLInputElement).value)"
+                   type="number" class="goal-input"
+                   :min="isImperial ? 20 : 50" :max="isImperial ? 100 : 250"
+                   step="0.1"/>
             <span class="muted" style="margin-left: 0.6rem;">Goal ({{ weightUnit }}):</span>
             <input :value="targetKg != null ? weightVal(targetKg)?.toFixed(1) : ''"
                    @change="targetKg = ($event.target as HTMLInputElement).value ? weightToKg(parseFloat(($event.target as HTMLInputElement).value)) : null"
@@ -522,7 +540,7 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
                 ({{ ((weightVal(goalProjection.perDay * 7) ?? 0)).toFixed(2) }} {{ weightUnit }}/wk)
               </template>
               <template v-else-if="goalProjection.headed === 'wrong'">
-                ⚠ trending away from goal
+                <span style="color: var(--bad);">⚠</span> trending away from goal
               </template>
               <template v-else>flat trend — no ETA</template>
             </span>

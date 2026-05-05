@@ -203,6 +203,27 @@ export const api = {
     return data;
   },
 
+  async getProfile(): Promise<{
+    id: number; birth_date: string | null; sex: string | null;
+    height_cm: number | null; weight_goal_kg: number | null;
+    resting_hr_baseline: number | null; activity_level: string | null;
+    extra: Record<string, unknown> | null; updated_at: string | null;
+    derived: { age?: number; max_hr_estimated?: number; bmi_at_goal?: number;
+               hr_zones?: { zone: number; label: string; low: number; high: number }[] };
+  }> {
+    const { data } = await http.get("/profile");
+    return data;
+  },
+
+  async putProfile(body: {
+    birth_date?: string | null; sex?: string | null; height_cm?: number | null;
+    weight_goal_kg?: number | null; resting_hr_baseline?: number | null;
+    activity_level?: string | null; extra?: Record<string, unknown> | null;
+  }): Promise<unknown> {
+    const { data } = await http.put("/profile", body);
+    return data;
+  },
+
   async importJobs(limit = 20): Promise<{
     id: number; kind: string; filename: string | null; size_bytes: number | null;
     status: string; started_at: string; finished_at: string | null;

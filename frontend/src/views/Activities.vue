@@ -2,35 +2,14 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import VChart from "vue-echarts";
+import { Trophy, Mountain, Flame, Map as MapIcon } from "lucide-vue-next";
 import Card from "@/components/Card.vue";
+import ActivityIcon from "@/components/ActivityIcon.vue";
 import PolylineThumbnail from "@/components/PolylineThumbnail.vue";
 import { api } from "@/api/client";
 import type { Activity, ActivityStats } from "@/api/types";
 import { chartTheme } from "@/theme";
 import { fmtDistance, fmtElevation, distanceVal, distanceUnit } from "@/units";
-
-const TYPE_ICON: Record<string, string> = {
-  ebikeride: "🚴",
-  ride: "🚴",
-  virtualride: "🚴",
-  run: "🏃",
-  trailrun: "🏃",
-  walk: "🚶",
-  hike: "🥾",
-  hiking: "🥾",
-  swim: "🏊",
-  swimming_pool: "🏊",
-  swimming_open_water: "🏊",
-  yoga: "🧘",
-  pilates: "🧘",
-  strength: "🏋️",
-  weightlifting: "🏋️",
-  workout: "💪",
-  rowing: "🚣",
-};
-function iconFor(t: string): string {
-  return TYPE_ICON[t.toLowerCase()] ?? "•";
-}
 
 type SortKey = "date" | "distance" | "duration" | "avg_hr" | "suffer" | "kcal" | "elevation";
 type ViewMode = "grid" | "list";
@@ -81,9 +60,11 @@ async function load() {
       since.setDate(since.getDate() - days);
       params.since = since;
     }
+    // For "all" we ask for 10 years of stats so the period covers everything.
+    const statsDays = days ?? 3650;
     const [list, st] = await Promise.all([
       api.activities(params),
-      api.activitiesStats(days ?? 365),
+      api.activitiesStats(statsDays),
     ]);
     activities.value = list;
     stats.value = st;
@@ -159,12 +140,13 @@ const records = computed(() => {
   };
 });
 
-function isPR(a: Activity): string[] {
+type PRBadge = { label: string; icon: typeof Trophy };
+function isPR(a: Activity): PRBadge[] {
   if (!records.value) return [];
-  const tags: string[] = [];
-  if (records.value.longestDistance?.source_id === a.source_id) tags.push("🏆 longest");
-  if (records.value.mostElevation?.source_id === a.source_id) tags.push("⛰️ most climb");
-  if (records.value.highestSuffer?.source_id === a.source_id) tags.push("🔥 most suffer");
+  const tags: PRBadge[] = [];
+  if (records.value.longestDistance?.source_id === a.source_id) tags.push({ label: "longest", icon: Trophy });
+  if (records.value.mostElevation?.source_id === a.source_id) tags.push({ label: "most climb", icon: Mountain });
+  if (records.value.highestSuffer?.source_id === a.source_id) tags.push({ label: "most suffer", icon: Flame });
   return tags;
 }
 
@@ -265,7 +247,7 @@ const monthLabel = (key: string) =>
           <button v-for="r in RANGES" :key="r.key"
                   :class="{ active: range === r.key }" @click="range = r.key">{{ r.label }}</button>
         </div>
-        <RouterLink to="/activities/map" class="map-link">🗺️ Map view</RouterLink>
+        <RouterLink to="/activities/map" class="map-link"><MapIcon :size="14"/> Map view</RouterLink>
       </div>
     </header>
 
@@ -316,7 +298,7 @@ const monthLabel = (key: string) =>
         <RouterLink v-if="records.longestDistance"
                     :to="`/activity/${records.longestDistance.source}/${records.longestDistance.source_id}`"
                     class="pr">
-          <div class="pr-label">🏆 Longest distance</div>
+          <div class="pr-label"><Trophy :size="14"/> Longest distance</div>
           <div class="pr-val">{{ fmtKm(records.longestDistance.distance_m) }}</div>
           <div class="pr-meta">{{ records.longestDistance.name ?? records.longestDistance.type }}</div>
         </RouterLink>
@@ -330,14 +312,14 @@ const monthLabel = (key: string) =>
         <RouterLink v-if="records.mostElevation"
                     :to="`/activity/${records.mostElevation.source}/${records.mostElevation.source_id}`"
                     class="pr">
-          <div class="pr-label">⛰️ Most climbed</div>
+          <div class="pr-label"><Mountain :size="14"/> Most climbed</div>
           <div class="pr-val">{{ fmtElevation(records.mostElevation.elevation_gain_m!) }}</div>
           <div class="pr-meta">{{ records.mostElevation.name ?? records.mostElevation.type }}</div>
         </RouterLink>
         <RouterLink v-if="records.highestSuffer"
                     :to="`/activity/${records.highestSuffer.source}/${records.highestSuffer.source_id}`"
                     class="pr">
-          <div class="pr-label">🔥 Highest suffer</div>
+          <div class="pr-label"><Flame :size="14"/> Highest suffer</div>
           <div class="pr-val">{{ Math.round(records.highestSuffer.suffer_score!) }}</div>
           <div class="pr-meta">{{ records.highestSuffer.name ?? records.highestSuffer.type }}</div>
         </RouterLink>
@@ -352,7 +334,7 @@ const monthLabel = (key: string) =>
           <button v-for="t in allTypes" :key="t"
                   class="chip" :class="{ active: typesActive.has(t) }"
                   @click="toggleType(t)">
-            <span class="emoji">{{ iconFor(t) }}</span> {{ t }}
+            <span class="emoji"><ActivityIcon :type="t" :size="14"/></span> {{ t }}
           </button>
           <button v-if="typesActive.size > 0" class="chip-clear" @click="typesActive = new Set()">clear</button>
         </div>
@@ -397,12 +379,12 @@ const monthLabel = (key: string) =>
               <template v-if="viewMode === 'grid'">
                 <PolylineThumbnail :polyline="a.polyline" :size="100" class="thumb"/>
                 <header class="card-head">
-                  <span class="type">{{ iconFor(a.type) }} {{ a.type }}</span>
+                  <span class="type"><ActivityIcon :type="a.type" :size="14"/> {{ a.type }}</span>
                   <span class="when">{{ fmtDate(a.start_at) }}</span>
                 </header>
                 <h3>{{ a.name ?? "(untitled)" }}</h3>
                 <div class="badges">
-                  <span v-for="b in isPR(a)" :key="b" class="badge">{{ b }}</span>
+                  <span v-for="b in isPR(a)" :key="b.label" class="badge"><component :is="b.icon" :size="12"/> {{ b.label }}</span>
                 </div>
                 <dl class="stats">
                   <div><dt>Time</dt><dd>{{ fmtDuration(a.duration_s) }}</dd></div>
@@ -419,7 +401,7 @@ const monthLabel = (key: string) =>
               </template>
               <template v-else>
                 <PolylineThumbnail :polyline="a.polyline" :size="48"/>
-                <span class="row-emoji">{{ iconFor(a.type) }}</span>
+                <span class="row-emoji"><ActivityIcon :type="a.type" :size="16"/></span>
                 <span class="row-when">{{ fmtDateTime(a.start_at) }}</span>
                 <span class="row-name">{{ a.name ?? "(untitled)" }}</span>
                 <span class="row-stat">{{ fmtKmShort(a.distance_m) }}</span>
@@ -441,12 +423,12 @@ const monthLabel = (key: string) =>
             <template v-if="viewMode === 'grid'">
               <PolylineThumbnail :polyline="a.polyline" :size="100" class="thumb"/>
               <header class="card-head">
-                <span class="type">{{ iconFor(a.type) }} {{ a.type }}</span>
+                <span class="type"><ActivityIcon :type="a.type" :size="14"/> {{ a.type }}</span>
                 <span class="when">{{ fmtDate(a.start_at) }}</span>
               </header>
               <h3>{{ a.name ?? "(untitled)" }}</h3>
               <div class="badges">
-                <span v-for="b in isPR(a)" :key="b" class="badge">{{ b }}</span>
+                <span v-for="b in isPR(a)" :key="b.label" class="badge"><component :is="b.icon" :size="12"/> {{ b.label }}</span>
               </div>
               <dl class="stats">
                 <div><dt>Time</dt><dd>{{ fmtDuration(a.duration_s) }}</dd></div>
@@ -463,7 +445,7 @@ const monthLabel = (key: string) =>
             </template>
             <template v-else>
               <PolylineThumbnail :polyline="a.polyline" :size="48"/>
-              <span class="row-emoji">{{ iconFor(a.type) }}</span>
+              <span class="row-emoji"><ActivityIcon :type="a.type" :size="16"/></span>
               <span class="row-when">{{ fmtDateTime(a.start_at) }}</span>
               <span class="row-name">{{ a.name ?? "(untitled)" }}</span>
               <span class="row-stat">{{ fmtKmShort(a.distance_m) }}</span>

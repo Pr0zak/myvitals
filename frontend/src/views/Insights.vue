@@ -17,7 +17,7 @@ const METRICS = [
   { key: "body_fat_pct", label: "Body fat (%)" },
   { key: "bp_systolic_avg", label: "Blood pressure systolic (mmHg)" },
   { key: "bp_diastolic_avg", label: "Blood pressure diastolic (mmHg)" },
-  { key: "skin_temp_delta_avg", label: "Skin temp delta (°C)" },
+  { key: "skin_temp_delta_avg", label: "Skin temp delta" },
   { key: "activity_duration_s", label: "Activity duration (s)" },
   { key: "alcohol_count", label: "Alcohol drinks (count)" },
   { key: "caffeine_mg", label: "Caffeine (mg)" },

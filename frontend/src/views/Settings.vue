@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { onMounted, onUnmounted, ref } from "vue";
+import { Eye, EyeOff, Check, X as XIcon } from "lucide-vue-next";
 import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
 import { units } from "@/units";
@@ -34,6 +35,35 @@ const importBusy = ref<"" | "fitbit" | "garmin">("");
 const importResult = ref<string>("");
 const importError = ref<string>("");
 const fitbitWeightUnit = ref<"kg" | "lb">("lb");
+
+// Profile
+type Profile = Awaited<ReturnType<typeof api.getProfile>>;
+const profile = ref<Profile | null>(null);
+const profileSaving = ref(false);
+const profileMsg = ref<string>("");
+
+async function loadProfile() {
+  if (!queryToken.value) return;
+  try { profile.value = await api.getProfile(); } catch { /* ignore */ }
+}
+async function saveProfile() {
+  if (!profile.value) return;
+  profileSaving.value = true;
+  profileMsg.value = "";
+  try {
+    profile.value = await api.putProfile({
+      birth_date: profile.value.birth_date,
+      sex: profile.value.sex,
+      height_cm: profile.value.height_cm,
+      weight_goal_kg: profile.value.weight_goal_kg,
+      resting_hr_baseline: profile.value.resting_hr_baseline,
+      activity_level: profile.value.activity_level,
+    }) as Profile;
+    profileMsg.value = "Saved.";
+  } catch (e) {
+    profileMsg.value = "Save failed: " + (e instanceof Error ? e.message : String(e));
+  } finally { profileSaving.value = false; }
+}
 
 // Live job tracker
 type ImportJob = Awaited<ReturnType<typeof api.importJobs>>[number];
@@ -291,6 +321,7 @@ function fmt(ts: string | null): string {
 
 onMounted(() => {
   loadStrava();
+  loadProfile();
   startJobPolling();
 });
 onUnmounted(stopJobPolling);
@@ -314,7 +345,7 @@ onUnmounted(stopJobPolling);
                  placeholder="paste the QUERY_TOKEN from the backend .env" autocomplete="off"/>
           <button type="button" class="eye" @click="tokenVisible = !tokenVisible"
                   :title="tokenVisible ? 'Hide token' : 'Show token'">
-            {{ tokenVisible ? '🙈' : '👁' }}
+            <component :is="tokenVisible ? EyeOff : Eye" :size="16"/>
           </button>
         </div>
       </label>
@@ -331,9 +362,9 @@ onUnmounted(stopJobPolling);
         <button class="ghost danger" @click="clearAll">Clear</button>
       </div>
 
-      <div v-if="status === 'ok'" class="ok">✓ Reached the backend with this token.</div>
+      <div v-if="status === 'ok'" class="ok"><Check :size="14"/> Reached the backend with this token.</div>
       <div v-if="status === 'fail'" class="err">
-        ✗ Could not authenticate.<br/>
+        <XIcon :size="14"/> Could not authenticate.<br/>
         <small>{{ errorMsg }}</small>
       </div>
     </section>
@@ -345,6 +376,72 @@ onUnmounted(stopJobPolling);
         <label><input type="radio" value="metric" v-model="units"/> metric (km, kg, °C)</label>
         <label><input type="radio" value="imperial" v-model="units"/> imperial (mi, lb, °F)</label>
       </label>
+    </section>
+
+    <section v-if="queryToken && profile">
+      <h2>Profile</h2>
+      <p class="hint">
+        Powers age-adjusted max HR, HR zones, BMI, and (eventually) cohort
+        percentile lookups. Single-user app, all stays on your server.
+      </p>
+      <div class="profile-grid">
+        <label>
+          <span>Birth date</span>
+          <input type="date" v-model="profile.birth_date"/>
+        </label>
+        <label>
+          <span>Sex</span>
+          <select v-model="profile.sex">
+            <option :value="null">—</option>
+            <option value="male">male</option>
+            <option value="female">female</option>
+            <option value="other">other</option>
+          </select>
+        </label>
+        <label>
+          <span>Height (cm)</span>
+          <input type="number" v-model.number="profile.height_cm" min="50" max="250" step="0.1"/>
+        </label>
+        <label>
+          <span>Weight goal (kg)</span>
+          <input type="number" v-model.number="profile.weight_goal_kg" min="20" max="300" step="0.1"/>
+        </label>
+        <label>
+          <span>Resting HR baseline (bpm)</span>
+          <input type="number" v-model.number="profile.resting_hr_baseline" min="30" max="120"/>
+        </label>
+        <label>
+          <span>Activity level</span>
+          <select v-model="profile.activity_level">
+            <option :value="null">—</option>
+            <option value="sedentary">sedentary</option>
+            <option value="light">light (1-3×/wk)</option>
+            <option value="moderate">moderate (3-5×/wk)</option>
+            <option value="active">active (6-7×/wk)</option>
+            <option value="athlete">athlete (2×/day)</option>
+          </select>
+        </label>
+      </div>
+
+      <div v-if="profile.derived?.max_hr_estimated" class="derived">
+        <strong>Derived:</strong>
+        <span class="muted">age {{ profile.derived.age }}</span>
+        <span class="muted">· est. max HR {{ profile.derived.max_hr_estimated }} bpm (Tanaka)</span>
+        <span v-if="profile.derived.bmi_at_goal" class="muted">· BMI at goal {{ profile.derived.bmi_at_goal }}</span>
+      </div>
+      <div v-if="profile.derived?.hr_zones" class="zones">
+        <span v-for="z in profile.derived.hr_zones" :key="z.zone"
+              class="zone" :class="`zone-${z.zone}`">
+          Z{{ z.zone }} {{ z.label }} <strong>{{ z.low }}–{{ z.high }}</strong>
+        </span>
+      </div>
+
+      <div class="actions">
+        <button class="primary" :disabled="profileSaving" @click="saveProfile">
+          {{ profileSaving ? 'Saving…' : 'Save profile' }}
+        </button>
+        <span v-if="profileMsg" class="hint">{{ profileMsg }}</span>
+      </div>
     </section>
 
     <section v-if="queryToken">
@@ -498,7 +595,7 @@ onUnmounted(stopJobPolling);
         <div v-if="stravaConfig.configured" class="block">
           <template v-if="strava.connected">
             <p class="ok-text">
-              ✓ Connected as <strong>{{ strava.athlete_name ?? strava.athlete_id }}</strong>
+              <Check :size="14"/> Connected as <strong>{{ strava.athlete_name ?? strava.athlete_id }}</strong>
               <span class="muted"> · scope: {{ strava.scope }}</span><br/>
               <span class="muted">Last sync: {{ fmt(strava.last_sync_at) }}</span>
             </p>
@@ -597,4 +694,17 @@ h3.sub { font-size: 0.75rem; color: var(--muted-2); text-transform: uppercase; l
 @keyframes pulse { 50% { opacity: 0.4; } }
 tr.job-running { background: rgba(56, 189, 248, 0.04); }
 tr.job-failed { background: rgba(239, 68, 68, 0.05); }
+
+.profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.6rem; }
+.profile-grid label { margin-bottom: 0; }
+.profile-grid select, .profile-grid input { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.45rem; font-size: 0.9rem; font-family: inherit; }
+.derived { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: baseline; margin: 0.6rem 0; font-size: 0.85rem; }
+.derived .muted { color: var(--muted); }
+.zones { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.zone { padding: 0.25rem 0.55rem; border-radius: 4px; font-size: 0.75rem; font-family: ui-monospace, monospace; }
+.zone-1 { background: rgba(56, 189, 248, 0.18); color: #38bdf8; }
+.zone-2 { background: rgba(34, 197, 94, 0.18); color: #22c55e; }
+.zone-3 { background: rgba(234, 179, 8, 0.18); color: #eab308; }
+.zone-4 { background: rgba(249, 115, 22, 0.18); color: #f97316; }
+.zone-5 { background: rgba(239, 68, 68, 0.20); color: #ef4444; }
 </style>

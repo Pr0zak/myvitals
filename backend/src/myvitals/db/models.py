@@ -168,6 +168,26 @@ class ImportJob(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class UserProfile(Base):
+    """Single-row user profile for percentile analytics + zones.
+
+    Single-user app, so id is always 1. Stores enough to compute age-adjusted
+    max HR (Tanaka), HR zones, BMI, and to look up cohort percentiles for
+    RHR / HRV / VO2 max.
+    """
+    __tablename__ = "user_profile"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    sex: Mapped[str | None] = mapped_column(String(8), nullable=True)  # "male" | "female" | "other"
+    height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    weight_goal_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    resting_hr_baseline: Mapped[float | None] = mapped_column(Float, nullable=True)
+    activity_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Free-form JSON for conditions / medications / notes
+    extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class StravaCredentials(Base):
     """Single-row table (id=1) holding the user's Strava OAuth tokens."""
     __tablename__ = "strava_credentials"

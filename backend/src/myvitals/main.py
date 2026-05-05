@@ -7,7 +7,7 @@ from fastapi import FastAPI
 
 from . import version as version_mod
 from .analytics.jobs import compute_daily_summary
-from .api import analytics, annotations, debug, export, imports, ingest, query, strava, summary
+from .api import analytics, annotations, debug, export, imports, ingest, profile, query, strava, summary
 from .config import settings
 from .integrations import strava as strava_int
 from .integrations.home_assistant import pull_states as ha_pull_states
@@ -74,6 +74,7 @@ app.include_router(strava.router, tags=["strava"])
 app.include_router(analytics.router, tags=["analytics"])
 app.include_router(export.router, tags=["export"])
 app.include_router(imports.router, tags=["import"])
+app.include_router(profile.router, tags=["profile"])
 
 
 @app.get("/health")

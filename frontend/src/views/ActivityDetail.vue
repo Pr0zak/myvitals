@@ -295,7 +295,7 @@ function removeTag(t: string) {
             <button class="primary" :disabled="savingNotes" @click="saveNotes">
               {{ savingNotes ? "Saving…" : "Save" }}
             </button>
-            <span v-if="savedFlag" class="saved">✓ saved</span>
+            <span v-if="savedFlag" class="saved">saved</span>
           </div>
         </Card>
       </div>

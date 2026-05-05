@@ -194,7 +194,7 @@ def _activity_to_out(a: models.Activity) -> ActivityOut:
 @router.get("/activities/stats", response_model=ActivityStatsOut,
             dependencies=[Depends(require_query)])
 async def activities_stats(
-    days: int = Query(30, ge=1, le=365),
+    days: int = Query(30, ge=1, le=3650),
     db: AsyncSession = Depends(get_session),
 ) -> ActivityStatsOut:
     """Aggregate stats over the past `days` days, plus comparison vs prior period."""

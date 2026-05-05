@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import VChart from "vue-echarts";
-import { Trophy, Mountain, Flame, Map as MapIcon } from "lucide-vue-next";
+import { Trophy, Mountain, Flame, Map as MapIcon, GitCompareArrows } from "lucide-vue-next";
 import Card from "@/components/Card.vue";
 import ActivityIcon from "@/components/ActivityIcon.vue";
 import PolylineThumbnail from "@/components/PolylineThumbnail.vue";
@@ -248,6 +248,7 @@ const monthLabel = (key: string) =>
                   :class="{ active: range === r.key }" @click="range = r.key">{{ r.label }}</button>
         </div>
         <RouterLink to="/activities/map" class="map-link"><MapIcon :size="14"/> Map view</RouterLink>
+        <RouterLink to="/activities/compare" class="map-link"><GitCompareArrows :size="14"/> Compare</RouterLink>
       </div>
     </header>
 

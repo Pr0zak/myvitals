@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon foreground: a heart with an EKG/heartbeat trace.
+     The 108x108 viewport leaves an 18dp margin on every side; the visible
+     content lives inside the inner 72x72 safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Heart silhouette, white. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,76
+                          C 54,76  30,60  30,46
+                          C 30,38  36,33  43,33
+                          C 49,33  52,36  54,40
+                          C 56,36  59,33  65,33
+                          C 72,33  78,38  78,46
+                          C 78,60  54,76  54,76 Z" />
+    <!-- Heartbeat trace, dark, crossing the heart. -->
+    <path
+        android:fillColor="#0EA5E9"
+        android:pathData="M30,52
+                          L42,52
+                          L46,46
+                          L50,58
+                          L54,40
+                          L58,58
+                          L62,46
+                          L66,52
+                          L78,52
+                          L78,55
+                          L66,55
+                          L62,49
+                          L58,61
+                          L54,43
+                          L50,61
+                          L46,49
+                          L42,55
+                          L30,55 Z" />
+</vector>

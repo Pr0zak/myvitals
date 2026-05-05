@@ -12,7 +12,7 @@ const KEY = "myvitals.units";
 type Units = "metric" | "imperial";
 
 export const units = ref<Units>(
-  (localStorage.getItem(KEY) as Units | null) ?? "metric",
+  (localStorage.getItem(KEY) as Units | null) ?? "imperial",
 );
 watch(units, (v) => localStorage.setItem(KEY, v));
 

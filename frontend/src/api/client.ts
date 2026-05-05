@@ -209,6 +209,7 @@ export const api = {
     resting_hr_baseline: number | null; activity_level: string | null;
     extra: Record<string, unknown> | null; updated_at: string | null;
     derived: { age?: number; max_hr_estimated?: number; bmi_at_goal?: number;
+               resting_hr_baseline_auto?: number | null;
                hr_zones?: { zone: number; label: string; low: number; high: number }[] };
   }> {
     const { data } = await http.get("/profile");

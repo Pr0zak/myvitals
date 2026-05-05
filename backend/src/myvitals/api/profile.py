@@ -1,11 +1,12 @@
 """User profile + derived metrics (age-adjusted max HR, HR zones, BMI)."""
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import require_query
@@ -43,16 +44,32 @@ def _hr_zones(max_hr: float) -> list[dict[str, Any]]:
     ]
 
 
-def _profile_dict(p: models.UserProfile | None) -> dict[str, Any]:
+async def _auto_rhr_baseline(db: AsyncSession) -> float | None:
+    """30-day rolling average of daily_summary.resting_hr — best objective
+    estimate of the user's true resting HR baseline. Used when the profile
+    doesn't override with a manual value."""
+    cutoff = date.today() - timedelta(days=30)
+    val = (await db.execute(
+        select(func.avg(models.DailySummary.resting_hr))
+        .where(models.DailySummary.date >= cutoff)
+        .where(models.DailySummary.resting_hr.is_not(None))
+    )).scalar()
+    return float(val) if val is not None else None
+
+
+async def _profile_dict(
+    db: AsyncSession, p: models.UserProfile | None,
+) -> dict[str, Any]:
+    auto_rhr = await _auto_rhr_baseline(db)
     if p is None:
         return {
             "id": 1, "birth_date": None, "sex": None, "height_cm": None,
             "weight_goal_kg": None, "resting_hr_baseline": None,
             "activity_level": None, "extra": None, "updated_at": None,
-            "derived": {},
+            "derived": {"resting_hr_baseline_auto": auto_rhr},
         }
     age = _age_years(p.birth_date)
-    derived: dict[str, Any] = {"age": age}
+    derived: dict[str, Any] = {"age": age, "resting_hr_baseline_auto": auto_rhr}
     if age is not None:
         # Tanaka 2001: max HR ≈ 208 - 0.7 × age (more accurate than 220-age).
         max_hr = 208 - 0.7 * age
@@ -78,7 +95,7 @@ def _profile_dict(p: models.UserProfile | None) -> dict[str, Any]:
 @router.get("")
 async def get_profile(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     p = await db.get(models.UserProfile, 1)
-    return _profile_dict(p)
+    return await _profile_dict(db, p)
 
 
 @router.put("")
@@ -103,4 +120,4 @@ async def put_profile(
     p.updated_at = now
     await db.commit()
     await db.refresh(p)
-    return _profile_dict(p)
+    return await _profile_dict(db, p)

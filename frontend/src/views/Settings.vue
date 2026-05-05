@@ -4,7 +4,7 @@ import { onMounted, onUnmounted, ref } from "vue";
 import { Eye, EyeOff, Check, X as XIcon } from "lucide-vue-next";
 import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
-import { units } from "@/units";
+import { units, weightUnit, weightVal, weightToKg } from "@/units";
 import type { StravaAppConfigStatus, StravaStatus } from "@/api/types";
 
 const tokenInput = ref(queryToken.value);
@@ -403,12 +403,22 @@ onUnmounted(stopJobPolling);
           <input type="number" v-model.number="profile.height_cm" min="50" max="250" step="0.1"/>
         </label>
         <label>
-          <span>Weight goal (kg)</span>
-          <input type="number" v-model.number="profile.weight_goal_kg" min="20" max="300" step="0.1"/>
+          <span>Weight goal ({{ weightUnit }})</span>
+          <input type="number"
+                 :value="profile.weight_goal_kg != null ? weightVal(profile.weight_goal_kg)?.toFixed(1) : ''"
+                 @change="profile.weight_goal_kg = ($event.target as HTMLInputElement).value
+                          ? weightToKg(parseFloat(($event.target as HTMLInputElement).value)) : null"
+                 min="20" max="660" step="0.1"/>
         </label>
         <label>
-          <span>Resting HR baseline (bpm)</span>
-          <input type="number" v-model.number="profile.resting_hr_baseline" min="30" max="120"/>
+          <span>Resting HR baseline (bpm)
+            <em class="opt" v-if="profile.derived?.resting_hr_baseline_auto">
+              (auto: {{ profile.derived.resting_hr_baseline_auto.toFixed(0) }} bpm from last 30d)
+            </em>
+          </span>
+          <input type="number" v-model.number="profile.resting_hr_baseline"
+                 :placeholder="profile.derived?.resting_hr_baseline_auto?.toFixed(0) ?? 'auto-derived if blank'"
+                 min="30" max="120"/>
         </label>
         <label>
           <span>Activity level</span>

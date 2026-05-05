@@ -66,18 +66,35 @@ class SyncWorker(
         }
 
         // 2. Read fresh data since last sync (default: last 6 hours on first run).
-        // Safety floor: always re-check the past 2 hours even if our checkpoint
-        // is more recent. The Pixel Watch sometimes writes step/HR records into
-        // Health Connect with timestamps an hour or more in the past (records
-        // are queued on the watch and synced when bluetooth is available, so
-        // they "arrive" later than their actual time). Without this, late
-        // arrivals slip past our `since` filter and never get ingested.
-        // Re-uploading already-stored records is a no-op thanks to ON CONFLICT
-        // DO NOTHING on the time PK, so the cost is just bandwidth.
-        val checkpoint = settings.lastSyncInstant() ?: Instant.now().minusSeconds(6 * 3600)
-        val safetyFloor = Instant.now().minusSeconds(2 * 3600)
-        val since = if (checkpoint.isBefore(safetyFloor)) checkpoint else safetyFloor
-        val until = Instant.now()
+        //
+        // Safety floor: always re-check the past 12 hours even if our
+        // checkpoint is more recent. The Pixel Watch batches HR/sleep
+        // records and pushes them to Health Connect when bluetooth /
+        // wifi is stable — sometimes hours after the records' actual
+        // timestamps. With a 2h floor (the v0.4.1 setting) overnight
+        // batches that arrive 4-8h late were missed because lastSync
+        // had already advanced past their record time.
+        //
+        // 12h covers the vast majority of HC delays. ON CONFLICT DO
+        // NOTHING dedupes on the time PK so re-pulls are free.
+        //
+        // Plus: once a day (when checkpoint > 24h old, OR we've never
+        // run the deep sweep today), do a 7-day re-pull to catch
+        // anything that fell through even the 12h floor. Tracked via
+        // settings.lastDeepSweepEpochS.
+        val now = Instant.now()
+        val checkpoint = settings.lastSyncInstant() ?: now.minusSeconds(6 * 3600)
+        val safetyFloor = now.minusSeconds(12 * 3600)
+        val needDeepSweep = (now.epochSecond - settings.lastDeepSweepEpochSeconds) > 24 * 3600
+        val since = when {
+            needDeepSweep -> {
+                Timber.i("Deep sweep — pulling last 7 days of HC")
+                now.minusSeconds(7 * 86400)
+            }
+            checkpoint.isBefore(safetyFloor) -> checkpoint
+            else -> safetyFloor
+        }
+        val until = now
 
         // Per-type try/catch: a SecurityException on one record type (e.g. HC's
         // "record type 11") should not block the others from ingesting.
@@ -105,12 +122,14 @@ class SyncWorker(
         if (batch.isEmpty()) {
             Timber.i("Nothing new to send; advancing checkpoint to %s", until)
             settings.lastSyncEpochSeconds = until.epochSecond
+            if (needDeepSweep) settings.lastDeepSweepEpochSeconds = until.epochSecond
             return Result.success()
         }
 
         return try {
             ingestChunked(api, batch)
             settings.lastSyncEpochSeconds = until.epochSecond
+            if (needDeepSweep) settings.lastDeepSweepEpochSeconds = until.epochSecond
             Result.success()
         } catch (e: Exception) {
             Timber.e(e, "Ingest POST failed; buffering locally")
@@ -121,6 +140,8 @@ class SyncWorker(
                 )
             )
             settings.lastSyncEpochSeconds = until.epochSecond
+            // Don't advance the deep-sweep checkpoint when the request fails —
+            // we want to retry the deep sweep on the next periodic run.
             Result.success()
         }
     }

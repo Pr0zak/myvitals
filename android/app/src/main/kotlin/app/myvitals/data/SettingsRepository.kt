@@ -40,6 +40,11 @@ class SettingsRepository(context: Context) {
         get() = plain.getLong(KEY_LAST_SYNC, 0L)
         set(value) = plain.edit().putLong(KEY_LAST_SYNC, value).apply()
 
+    /** Last time we did the once-a-day 7-day deep sweep. */
+    var lastDeepSweepEpochSeconds: Long
+        get() = plain.getLong(KEY_LAST_DEEP_SWEEP, 0L)
+        set(value) = plain.edit().putLong(KEY_LAST_DEEP_SWEEP, value).apply()
+
     fun lastSyncInstant(): Instant? =
         lastSyncEpochSeconds.takeIf { it > 0 }?.let(Instant::ofEpochSecond)
 
@@ -51,5 +56,6 @@ class SettingsRepository(context: Context) {
         private const val KEY_BACKEND_URL = "backend_url"
         private const val KEY_TOKEN = "bearer_token"
         private const val KEY_LAST_SYNC = "last_sync_epoch_s"
+        private const val KEY_LAST_DEEP_SWEEP = "last_deep_sweep_epoch_s"
     }
 }

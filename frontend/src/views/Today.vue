@@ -25,6 +25,9 @@ const RANGES: { key: Range; hours: number; label: string }[] = [
 const range = ref<Range>("24h");
 const summary = ref<TodaySummary | null>(null);
 const hr = ref<HeartRateSeries | null>(null);
+// Separate "today only" HR series scoped to local midnight → now,
+// independent of the range picker — used for the at-a-glance underlay.
+const todayHr = ref<HeartRateSeries | null>(null);
 const hrv = ref<HrvSeries | null>(null);
 const sleep = ref<SleepNight | null>(null);
 const steps = ref<StepsSeries | null>(null);
@@ -86,10 +89,12 @@ function formClass(tsb: number): string {
 }
 
 // HR sparkline path for the "Today at a glance" underlay. Pure SVG —
-// no chart lib needed. Works as a low-opacity ribbon behind the card.
+// no chart lib needed. Always reads `todayHr` (today's local midnight →
+// now), independent of the range picker, so this card always reflects
+// just today.
 const hrSparkPath = computed(() => {
-  if (!hr.value || hr.value.points.length < 5) return null;
-  const pts = hr.value.points;
+  if (!todayHr.value || todayHr.value.points.length < 5) return null;
+  const pts = todayHr.value.points;
   const xs = pts.map((p) => new Date(p.time).getTime());
   const ys = pts.map((p) => p.value);
   const xMin = Math.min(...xs);
@@ -191,7 +196,10 @@ async function load() {
   try {
     const hours = RANGES.find((r) => r.key === range.value)!.hours;
     const since = new Date(Date.now() - hours * 3600 * 1000);
-    const [s, h, hv, sl, st, a, an] = await Promise.all([
+    // Today's local midnight for the underlay sparkline + glance stats.
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+    const [s, h, hv, sl, st, a, an, hToday] = await Promise.all([
       api.todaySummary(),
       api.heartRate({ since }),
       api.hrv({ since }),
@@ -199,6 +207,7 @@ async function load() {
       api.steps({ since }),
       api.activities({ since, limit: 50 }),
       api.listAnnotations({ since, limit: 200 }),
+      api.heartRate({ since: todayMidnight }),
     ]);
     summary.value = s;
     hr.value = h;
@@ -207,6 +216,7 @@ async function load() {
     steps.value = st;
     activities.value = a;
     annotations.value = an;
+    todayHr.value = hToday;
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : "Failed to load";
   } finally {
@@ -325,12 +335,13 @@ const subtitleHr = computed(() => {
           <path :d="hrSparkPath.fill" fill="url(#hr-fade)"/>
           <path :d="hrSparkPath.stroke" stroke="#ef4444" stroke-width="1.4" fill="none" stroke-opacity="0.55"/>
         </svg>
-        <div v-if="hr && hr.points.length" class="hr-stats-row">
-          <span><strong>{{ Math.round(hr.avg ?? 0) }}</strong> avg bpm</span>
-          <span class="muted">min {{ Math.round(hr.min_bpm ?? 0) }}</span>
-          <span class="muted">max {{ Math.round(hr.max_bpm ?? 0) }}</span>
-          <span class="muted">{{ hr.points.length.toLocaleString() }} samples</span>
+        <div v-if="todayHr && todayHr.points.length" class="hr-stats-row">
+          <span><strong>{{ Math.round(todayHr.avg ?? 0) }}</strong> avg bpm today</span>
+          <span class="muted">min {{ Math.round(todayHr.min_bpm ?? 0) }}</span>
+          <span class="muted">max {{ Math.round(todayHr.max_bpm ?? 0) }}</span>
+          <span class="muted">{{ todayHr.points.length.toLocaleString() }} samples</span>
         </div>
+        <div v-else class="hr-stats-row muted">No HR data yet today.</div>
         <div class="radar-row">
           <div class="chart-wrap radar-chart"><VChart :option="radarOption" autoresize/></div>
           <div class="radar-stats">

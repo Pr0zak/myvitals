@@ -83,6 +83,13 @@ class SkinTempSample(BaseModel):
     celsius_delta: float
 
 
+class SleepSessionSample(BaseModel):
+    start: datetime
+    end: datetime
+    source: str = "watch"
+    title: str | None = None
+
+
 class BloodPressureSample(BaseModel):
     time: datetime
     systolic: int
@@ -101,6 +108,7 @@ class Batch(BaseModel):
     body_metrics: list[BodyMetricSample] = []
     skin_temp: list[SkinTempSample] = []
     blood_pressure: list[BloodPressureSample] = []
+    sleep_sessions: list[SleepSessionSample] = []
 
 
 @router.post("/batch")
@@ -146,6 +154,14 @@ async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) ->
         await _bulk_upsert(db, models.BloodPressure,
                            (b.model_dump() for b in batch.blood_pressure), ["time"])
         counts["blood_pressure"] = len(batch.blood_pressure)
+
+    if batch.sleep_sessions:
+        rows = [
+            {"start_at": s.start, "end_at": s.end, "source": s.source, "title": s.title}
+            for s in batch.sleep_sessions
+        ]
+        await _bulk_upsert(db, models.SleepSession, rows, ["start_at"])
+        counts["sleep_sessions"] = len(rows)
 
     await db.commit()
     return counts

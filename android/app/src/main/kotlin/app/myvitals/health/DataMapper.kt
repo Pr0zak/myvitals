@@ -16,6 +16,7 @@ import app.myvitals.sync.HeartRateSample
 import app.myvitals.sync.HrvSample
 import app.myvitals.sync.IngestBatch
 import app.myvitals.sync.SkinTempSample
+import app.myvitals.sync.SleepSessionSample
 import app.myvitals.sync.SleepStageSample
 import app.myvitals.sync.StepsSample
 import app.myvitals.sync.WorkoutSample
@@ -71,6 +72,14 @@ object DataMapper {
                 StepsSample(time = it.startTime.toString(), count = it.count.toInt())
             },
             sleepStages = sleep.flatMap(::sessionStages),
+            sleepSessions = sleep.map { s ->
+                SleepSessionSample(
+                    start = s.startTime.toString(),
+                    end = s.endTime.toString(),
+                    source = "watch",
+                    title = s.title,
+                )
+            },
             workouts = exercise.map { session ->
                 WorkoutSample(
                     time = session.startTime.toString(),

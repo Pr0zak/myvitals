@@ -82,6 +82,18 @@ class SleepStage(Base):
     duration_s: Mapped[int] = mapped_column(Integer)
 
 
+class SleepSession(Base):
+    """Canonical session boundaries from HC (or import). Authoritative
+    'when did I actually fall asleep / wake up'. Stages are children
+    of these sessions but exist independently to allow back-fill from
+    sources that only ship per-stage data."""
+    __tablename__ = "sleep_sessions"
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source: Mapped[str] = mapped_column(String(32), default="watch")
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
 class Workout(Base):
     __tablename__ = "workouts"
     time: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)

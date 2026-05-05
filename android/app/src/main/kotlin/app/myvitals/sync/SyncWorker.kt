@@ -156,15 +156,16 @@ class SyncWorker(
         val bodyChunks = batch.bodyMetrics.chunked(MAX_PER_TYPE)
         val bpChunks = batch.bloodPressure.chunked(MAX_PER_TYPE)
         val tempChunks = batch.skinTemp.chunked(MAX_PER_TYPE)
+        val sessionChunks = batch.sleepSessions.chunked(MAX_PER_TYPE)
 
         val n = listOf(
             hrChunks.size, hrvChunks.size, stepsChunks.size,
             sleepChunks.size, workoutChunks.size,
-            bodyChunks.size, bpChunks.size, tempChunks.size,
+            bodyChunks.size, bpChunks.size, tempChunks.size, sessionChunks.size,
         ).maxOrNull() ?: 0
 
         var totHr = 0; var totHrv = 0; var totSteps = 0; var totSleep = 0; var totWorkouts = 0
-        var totBody = 0; var totBp = 0; var totTemp = 0
+        var totBody = 0; var totBp = 0; var totTemp = 0; var totSessions = 0
         for (i in 0 until n) {
             val sub = IngestBatch(
                 heartrate = hrChunks.getOrElse(i) { emptyList() },
@@ -175,22 +176,24 @@ class SyncWorker(
                 bodyMetrics = bodyChunks.getOrElse(i) { emptyList() },
                 bloodPressure = bpChunks.getOrElse(i) { emptyList() },
                 skinTemp = tempChunks.getOrElse(i) { emptyList() },
+                sleepSessions = sessionChunks.getOrElse(i) { emptyList() },
             )
             if (sub.isEmpty()) continue
             Timber.d(
-                "POST chunk %d/%d: hr=%d hrv=%d steps=%d sleep=%d workouts=%d body=%d bp=%d temp=%d",
+                "POST chunk %d/%d: hr=%d hrv=%d steps=%d sleep_stages=%d sleep_sess=%d workouts=%d body=%d bp=%d temp=%d",
                 i + 1, n, sub.heartrate.size, sub.hrv.size, sub.steps.size,
-                sub.sleepStages.size, sub.workouts.size,
+                sub.sleepStages.size, sub.sleepSessions.size, sub.workouts.size,
                 sub.bodyMetrics.size, sub.bloodPressure.size, sub.skinTemp.size,
             )
             val resp = api.ingestBatch(sub)
             totHr += resp.heartrate; totHrv += resp.hrv; totSteps += resp.steps
             totSleep += resp.sleepStages; totWorkouts += resp.workouts
             totBody += resp.bodyMetrics; totBp += resp.bloodPressure; totTemp += resp.skinTemp
+            totSessions += resp.sleepSessions
         }
         Timber.i(
-            "Ingest OK (%d chunks): hr=%d hrv=%d steps=%d sleep_stages=%d workouts=%d body=%d bp=%d skin_temp=%d",
-            n, totHr, totHrv, totSteps, totSleep, totWorkouts, totBody, totBp, totTemp,
+            "Ingest OK (%d chunks): hr=%d hrv=%d steps=%d sleep_stages=%d sleep_sess=%d workouts=%d body=%d bp=%d skin_temp=%d",
+            n, totHr, totHrv, totSteps, totSleep, totSessions, totWorkouts, totBody, totBp, totTemp,
         )
     }
 

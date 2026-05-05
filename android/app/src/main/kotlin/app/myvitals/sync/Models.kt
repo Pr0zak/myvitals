@@ -66,6 +66,14 @@ data class SkinTempSample(
 )
 
 @JsonClass(generateAdapter = true)
+data class SleepSessionSample(
+    val start: String,
+    val end: String,
+    val source: String = "watch",
+    val title: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
 data class IngestBatch(
     val heartrate: List<HeartRateSample> = emptyList(),
     val hrv: List<HrvSample> = emptyList(),
@@ -75,10 +83,11 @@ data class IngestBatch(
     @Json(name = "body_metrics") val bodyMetrics: List<BodyMetricSample> = emptyList(),
     @Json(name = "blood_pressure") val bloodPressure: List<BloodPressureSample> = emptyList(),
     @Json(name = "skin_temp") val skinTemp: List<SkinTempSample> = emptyList(),
+    @Json(name = "sleep_sessions") val sleepSessions: List<SleepSessionSample> = emptyList(),
 ) {
     fun isEmpty(): Boolean = heartrate.isEmpty() && hrv.isEmpty() && steps.isEmpty()
         && sleepStages.isEmpty() && workouts.isEmpty() && bodyMetrics.isEmpty()
-        && bloodPressure.isEmpty() && skinTemp.isEmpty()
+        && bloodPressure.isEmpty() && skinTemp.isEmpty() && sleepSessions.isEmpty()
 }
 
 @JsonClass(generateAdapter = true)
@@ -91,4 +100,5 @@ data class IngestResponse(
     @Json(name = "body_metrics") val bodyMetrics: Int = 0,
     @Json(name = "blood_pressure") val bloodPressure: Int = 0,
     @Json(name = "skin_temp") val skinTemp: Int = 0,
+    @Json(name = "sleep_sessions") val sleepSessions: Int = 0,
 )

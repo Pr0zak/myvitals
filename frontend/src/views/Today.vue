@@ -85,6 +85,31 @@ function formClass(tsb: number): string {
   return "";
 }
 
+// HR sparkline path for the "Today at a glance" underlay. Pure SVG —
+// no chart lib needed. Works as a low-opacity ribbon behind the card.
+const hrSparkPath = computed(() => {
+  if (!hr.value || hr.value.points.length < 5) return null;
+  const pts = hr.value.points;
+  const xs = pts.map((p) => new Date(p.time).getTime());
+  const ys = pts.map((p) => p.value);
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
+  const W = 1000;  // viewBox width
+  const H = 100;
+  const xR = xMax - xMin || 1;
+  const yR = yMax - yMin || 1;
+  const path = pts.map((p, i) => {
+    const x = ((xs[i] - xMin) / xR) * W;
+    const y = H - ((ys[i] - yMin) / yR) * H * 0.85 - H * 0.075;
+    return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  // Close path to bottom for area fill
+  const last = `L${W},${H} L0,${H} Z`;
+  return { stroke: path, fill: path + last, yMin, yMax, n: pts.length };
+});
+
 // Radar combining the day's normalised vitals.
 const radarOption = computed(() => {
   void chartTheme.value;
@@ -285,9 +310,27 @@ const subtitleHr = computed(() => {
     <div v-if="error" class="err">{{ error }}</div>
 
     <div v-if="!loading">
-      <!-- Today radar — quick at-a-glance composite -->
+      <!-- Wrapping div needs position:relative for the absolute-positioned HR underlay -->
       <Card v-if="radarOption" title="Today at a glance"
             :subtitle="summary?.readiness_score != null ? `Readiness ${summary.readiness_score.toFixed(0)}/100` : ''">
+       <div class="glance-wrap">
+        <!-- Underlay: full-width SVG of today's HR shape -->
+        <svg v-if="hrSparkPath" class="hr-underlay" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="hr-fade" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#ef4444" stop-opacity="0.18"/>
+              <stop offset="100%" stop-color="#ef4444" stop-opacity="0.0"/>
+            </linearGradient>
+          </defs>
+          <path :d="hrSparkPath.fill" fill="url(#hr-fade)"/>
+          <path :d="hrSparkPath.stroke" stroke="#ef4444" stroke-width="1.4" fill="none" stroke-opacity="0.55"/>
+        </svg>
+        <div v-if="hr && hr.points.length" class="hr-stats-row">
+          <span><strong>{{ Math.round(hr.avg ?? 0) }}</strong> avg bpm</span>
+          <span class="muted">min {{ Math.round(hr.min_bpm ?? 0) }}</span>
+          <span class="muted">max {{ Math.round(hr.max_bpm ?? 0) }}</span>
+          <span class="muted">{{ hr.points.length.toLocaleString() }} samples</span>
+        </div>
         <div class="radar-row">
           <div class="chart-wrap radar-chart"><VChart :option="radarOption" autoresize/></div>
           <div class="radar-stats">
@@ -312,6 +355,7 @@ const subtitleHr = computed(() => {
             </div>
           </div>
         </div>
+       </div>
       </Card>
 
       <!-- top stats row -->
@@ -429,7 +473,19 @@ h1 { margin: 0; }
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 .footer { margin-top: 1.5rem; color: var(--muted-2); font-size: 0.8rem; text-align: right; }
 
-.radar-row { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(220px, 1fr); gap: 1rem; align-items: center; }
+.glance-wrap { position: relative; }
+.hr-underlay {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  width: 100%; height: 100px; pointer-events: none; z-index: 0;
+}
+.hr-stats-row {
+  display: flex; gap: 0.8rem; align-items: baseline; font-size: 0.85rem;
+  margin-bottom: 0.6rem; position: relative; z-index: 1;
+}
+.hr-stats-row strong { font-family: ui-monospace, monospace; font-size: 1.05rem; color: #ef4444; }
+.hr-stats-row .muted { color: var(--muted); font-size: 0.75rem; font-family: ui-monospace, monospace; }
+
+.radar-row { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(220px, 1fr); gap: 1rem; align-items: center; position: relative; z-index: 1; }
 @media (max-width: 700px) { .radar-row { grid-template-columns: 1fr; } }
 .radar-chart { height: 280px; }
 .radar-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }

@@ -40,29 +40,49 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     last_sync_result = await db.execute(select(func.max(models.HeartRate.time)))
     last_sync = last_sync_result.scalar()
 
-    if saved:
+    # Today's row may exist (e.g., backfill ran mid-day) but be sparse —
+    # the Pixel Watch hasn't yet synced today's RHR/HRV/sleep. Pull the
+    # most recent row that has a recovery_score and use ITS values for
+    # any field today's row leaves null. Steps/last_sync still reflect
+    # today's live counts.
+    fallback = (await db.execute(
+        select(models.DailySummary)
+        .where(models.DailySummary.recovery_score.is_not(None))
+        .order_by(models.DailySummary.date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    def pick(field: str):
+        v = getattr(saved, field, None) if saved else None
+        if v is None and fallback is not None:
+            return getattr(fallback, field, None)
+        return v
+
+    if saved or fallback:
         return TodaySummary(
-            date=saved.date,
-            resting_hr=saved.resting_hr,
-            hrv_avg=saved.hrv_avg,
-            recovery_score=saved.recovery_score,
-            sleep_duration_s=saved.sleep_duration_s,
-            sleep_score=saved.sleep_score,
-            steps_total=saved.steps_total or steps_total,
-            weight_kg=saved.weight_kg,
-            body_fat_pct=saved.body_fat_pct,
-            bp_systolic_avg=saved.bp_systolic_avg,
-            bp_diastolic_avg=saved.bp_diastolic_avg,
-            skin_temp_delta_avg=saved.skin_temp_delta_avg,
-            readiness_score=saved.readiness_score,
-            training_stress_score=saved.training_stress_score,
-            ctl=saved.ctl, atl=saved.atl, tsb=saved.tsb,
-            sleep_consistency_score=saved.sleep_consistency_score,
-            sleep_debt_h=saved.sleep_debt_h,
+            date=(saved.date if saved else (fallback.date if fallback else today_local)),
+            resting_hr=pick("resting_hr"),
+            hrv_avg=pick("hrv_avg"),
+            recovery_score=pick("recovery_score"),
+            sleep_duration_s=pick("sleep_duration_s"),
+            sleep_score=pick("sleep_score"),
+            # Steps always use today's live count — never fall back to
+            # yesterday's row, that would show stale step counts as "today's".
+            steps_total=steps_total,
+            weight_kg=pick("weight_kg"),
+            body_fat_pct=pick("body_fat_pct"),
+            bp_systolic_avg=pick("bp_systolic_avg"),
+            bp_diastolic_avg=pick("bp_diastolic_avg"),
+            skin_temp_delta_avg=pick("skin_temp_delta_avg"),
+            readiness_score=pick("readiness_score"),
+            training_stress_score=pick("training_stress_score"),
+            ctl=pick("ctl"), atl=pick("atl"), tsb=pick("tsb"),
+            sleep_consistency_score=pick("sleep_consistency_score"),
+            sleep_debt_h=pick("sleep_debt_h"),
             last_sync=last_sync,
         )
 
-    # No saved summary yet — return live counts only.
+    # No saved summaries at all — return live counts only.
     return TodaySummary(
         date=today_local,
         steps_total=steps_total,

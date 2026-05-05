@@ -66,7 +66,17 @@ class SyncWorker(
         }
 
         // 2. Read fresh data since last sync (default: last 6 hours on first run).
-        val since = settings.lastSyncInstant() ?: Instant.now().minusSeconds(6 * 3600)
+        // Safety floor: always re-check the past 2 hours even if our checkpoint
+        // is more recent. The Pixel Watch sometimes writes step/HR records into
+        // Health Connect with timestamps an hour or more in the past (records
+        // are queued on the watch and synced when bluetooth is available, so
+        // they "arrive" later than their actual time). Without this, late
+        // arrivals slip past our `since` filter and never get ingested.
+        // Re-uploading already-stored records is a no-op thanks to ON CONFLICT
+        // DO NOTHING on the time PK, so the cost is just bandwidth.
+        val checkpoint = settings.lastSyncInstant() ?: Instant.now().minusSeconds(6 * 3600)
+        val safetyFloor = Instant.now().minusSeconds(2 * 3600)
+        val since = if (checkpoint.isBefore(safetyFloor)) checkpoint else safetyFloor
         val until = Instant.now()
 
         // Per-type try/catch: a SecurityException on one record type (e.g. HC's

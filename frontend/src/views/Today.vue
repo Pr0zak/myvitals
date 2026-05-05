@@ -7,6 +7,7 @@ import type {
   SleepNight, StepsSeries, TodaySummary,
 } from "@/api/types";
 import { chartTheme } from "@/theme";
+import { tempUnit, isImperial } from "@/units";
 import { annotationMarkPoint, baseTimeOption, meanMarkLine, workoutMarkArea } from "@/components/charts/chartHelpers";
 
 import Card from "@/components/Card.vue";
@@ -28,6 +29,10 @@ const hr = ref<HeartRateSeries | null>(null);
 // Separate "today only" HR series scoped to local midnight → now,
 // independent of the range picker — used for the at-a-glance underlay.
 const todayHr = ref<HeartRateSeries | null>(null);
+// Local-day step count (UTC midnight rolled into "today" includes
+// yesterday's evening for users west of UTC; this fetches since local
+// midnight so the dashboard matches what the watch shows).
+const todayStepsLocal = ref<number>(0);
 const hrv = ref<HrvSeries | null>(null);
 const sleep = ref<SleepNight | null>(null);
 const steps = ref<StepsSeries | null>(null);
@@ -77,6 +82,26 @@ async function saveBp() {
   }
 }
 
+function hM(seconds: number | null | undefined): string {
+  if (!seconds) return "—";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+function daysAgo(iso: string): string {
+  const d = (Date.now() - new Date(iso).getTime()) / 86400_000;
+  if (d < 1) return "today";
+  if (d < 2) return "yesterday";
+  return `${Math.floor(d)}d ago`;
+}
+function readinessBlurb(s: number): string {
+  if (s >= 80) return "Primed — go hard if you want.";
+  if (s >= 65) return "Solid — moderate-to-hard training is fine.";
+  if (s >= 50) return "Average — keep things easy or moderate.";
+  if (s >= 35) return "Low — prioritise recovery today.";
+  return "Very low — rest day.";
+}
+
 function readinessClass(s: number): string {
   if (s >= 75) return "good";
   if (s >= 50) return "";
@@ -87,6 +112,42 @@ function formClass(tsb: number): string {
   if (tsb < -20) return "bad";  // overreached
   return "";
 }
+
+// Watch wear-time inference: when the Pixel Watch is on charger or off-
+// wrist, HR sampling pauses. Bucket today's HR into hour slots; a slot
+// is "worn" if it has any samples. Returns wear % across hours that have
+// elapsed today, plus the longest contiguous gap.
+const watchState = computed(() => {
+  const now = new Date();
+  const todayMidnight = new Date();
+  todayMidnight.setHours(0, 0, 0, 0);
+  const hoursElapsed = Math.max(1, Math.ceil((now.getTime() - todayMidnight.getTime()) / 3600_000));
+  const slots = new Array<boolean>(hoursElapsed).fill(false);
+  if (todayHr.value) {
+    for (const p of todayHr.value.points) {
+      const h = Math.floor((new Date(p.time).getTime() - todayMidnight.getTime()) / 3600_000);
+      if (h >= 0 && h < slots.length) slots[h] = true;
+    }
+  }
+  const worn = slots.filter(Boolean).length;
+  // Longest gap (consecutive empty slots).
+  let longest = 0; let cur = 0;
+  let gapStart = -1; let gapStartLongest = -1;
+  for (let i = 0; i < slots.length; i++) {
+    if (slots[i]) {
+      cur = 0; gapStart = -1;
+    } else {
+      if (gapStart < 0) gapStart = i;
+      cur += 1;
+      if (cur > longest) { longest = cur; gapStartLongest = gapStart; }
+    }
+  }
+  const pct = Math.round((worn / hoursElapsed) * 100);
+  return {
+    pct, worn, total: hoursElapsed, longestGapH: longest,
+    gapStartHour: gapStartLongest, isLikelyCharging: longest >= 1,
+  };
+});
 
 // HR sparkline path for the "Today at a glance" underlay. Pure SVG —
 // no chart lib needed. Always reads `todayHr` (today's local midnight →
@@ -199,7 +260,7 @@ async function load() {
     // Today's local midnight for the underlay sparkline + glance stats.
     const todayMidnight = new Date();
     todayMidnight.setHours(0, 0, 0, 0);
-    const [s, h, hv, sl, st, a, an, hToday] = await Promise.all([
+    const [s, h, hv, sl, st, a, an, hToday, sToday] = await Promise.all([
       api.todaySummary(),
       api.heartRate({ since }),
       api.hrv({ since }),
@@ -208,6 +269,7 @@ async function load() {
       api.activities({ since, limit: 50 }),
       api.listAnnotations({ since, limit: 200 }),
       api.heartRate({ since: todayMidnight }),
+      api.steps({ since: todayMidnight }),
     ]);
     summary.value = s;
     hr.value = h;
@@ -217,6 +279,7 @@ async function load() {
     activities.value = a;
     annotations.value = an;
     todayHr.value = hToday;
+    todayStepsLocal.value = sToday.total ?? 0;
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : "Failed to load";
   } finally {
@@ -320,50 +383,145 @@ const subtitleHr = computed(() => {
     <div v-if="error" class="err">{{ error }}</div>
 
     <div v-if="!loading">
-      <!-- Wrapping div needs position:relative for the absolute-positioned HR underlay -->
-      <Card v-if="radarOption" title="Today at a glance"
-            :subtitle="summary?.readiness_score != null ? `Readiness ${summary.readiness_score.toFixed(0)}/100` : ''">
+      <Card title="Today at a glance">
        <div class="glance-wrap">
-        <!-- Underlay: full-width SVG of today's HR shape -->
-        <svg v-if="hrSparkPath" class="hr-underlay" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <linearGradient id="hr-fade" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#ef4444" stop-opacity="0.18"/>
-              <stop offset="100%" stop-color="#ef4444" stop-opacity="0.0"/>
-            </linearGradient>
-          </defs>
-          <path :d="hrSparkPath.fill" fill="url(#hr-fade)"/>
-          <path :d="hrSparkPath.stroke" stroke="#ef4444" stroke-width="1.4" fill="none" stroke-opacity="0.55"/>
-        </svg>
-        <div v-if="todayHr && todayHr.points.length" class="hr-stats-row">
-          <span><strong>{{ Math.round(todayHr.avg ?? 0) }}</strong> avg bpm today</span>
-          <span class="muted">min {{ Math.round(todayHr.min_bpm ?? 0) }}</span>
-          <span class="muted">max {{ Math.round(todayHr.max_bpm ?? 0) }}</span>
-          <span class="muted">{{ todayHr.points.length.toLocaleString() }} samples</span>
+        <!-- Hero: readiness gauge -->
+        <div class="hero">
+          <div class="ring" :class="readinessClass(summary?.readiness_score ?? 0)"
+               :style="{ '--pct': `${(summary?.readiness_score ?? 0) * 3.6}deg` }">
+            <div class="ring-inner">
+              <div class="ring-num">{{ summary?.readiness_score?.toFixed(0) ?? '—' }}</div>
+              <div class="ring-lbl">Readiness</div>
+            </div>
+          </div>
+          <div class="hero-blurb">
+            <div class="hero-line" v-if="summary?.readiness_score != null">
+              {{ readinessBlurb(summary.readiness_score) }}
+            </div>
+            <div class="hero-line">
+              <span v-if="summary?.tsb != null">
+                Form
+                <strong :class="formClass(summary.tsb)">{{ summary.tsb > 0 ? '+' : '' }}{{ summary.tsb.toFixed(0) }}</strong>
+                <span class="muted">(CTL {{ summary.ctl?.toFixed(0) }} · ATL {{ summary.atl?.toFixed(0) }})</span>
+              </span>
+            </div>
+            <div class="hero-line muted" v-if="summary?.sleep_debt_h != null">
+              7-day sleep debt:
+              <strong :class="summary.sleep_debt_h > 5 ? 'bad' : summary.sleep_debt_h < -3 ? 'good' : ''">
+                {{ summary.sleep_debt_h > 0 ? '+' : '' }}{{ summary.sleep_debt_h.toFixed(1) }}h
+              </strong>
+            </div>
+          </div>
         </div>
-        <div v-else class="hr-stats-row muted">No HR data yet today.</div>
-        <div class="radar-row">
-          <div class="chart-wrap radar-chart"><VChart :option="radarOption" autoresize/></div>
-          <div class="radar-stats">
-            <div v-if="summary?.readiness_score != null" class="rad-stat">
-              <div class="lbl">Readiness</div>
-              <div class="val" :class="readinessClass(summary.readiness_score)">{{ summary.readiness_score.toFixed(0) }}</div>
+
+        <!-- Compact KPI grid -->
+        <div class="kpi-grid">
+          <div class="kpi-tile">
+            <div class="kpi-lbl">HR today</div>
+            <div class="kpi-num" :style="{ color: '#ef4444' }">
+              <strong>{{ todayHr?.avg ? Math.round(todayHr.avg) : '—' }}</strong> bpm
             </div>
-            <div v-if="summary?.tsb != null" class="rad-stat">
-              <div class="lbl">Form (TSB)</div>
-              <div class="val" :class="formClass(summary.tsb)">{{ summary.tsb > 0 ? '+' : '' }}{{ summary.tsb.toFixed(0) }}</div>
-              <div class="sub">CTL {{ summary.ctl?.toFixed(0) }} · ATL {{ summary.atl?.toFixed(0) }}</div>
+            <div class="kpi-sub muted">
+              <template v-if="todayHr?.min_bpm != null && todayHr?.max_bpm != null">
+                {{ Math.round(todayHr.min_bpm) }}–{{ Math.round(todayHr.max_bpm) }} · {{ todayHr.points.length }} pts
+              </template>
+              <template v-else>no data yet</template>
             </div>
-            <div v-if="summary?.sleep_debt_h != null" class="rad-stat">
-              <div class="lbl">7-day sleep debt</div>
-              <div class="val" :class="summary.sleep_debt_h > 5 ? 'bad' : summary.sleep_debt_h < -3 ? 'good' : ''">
-                {{ summary.sleep_debt_h > 0 ? '+' : '' }}{{ summary.sleep_debt_h.toFixed(1) }} h
-              </div>
+          </div>
+
+          <div class="kpi-tile">
+            <div class="kpi-lbl">BP latest</div>
+            <div class="kpi-num" :class="bp.latest ? bpClass(bp.latest.systolic, bp.latest.diastolic) : ''">
+              <strong>
+                {{ bp.latest ? `${bp.latest.systolic}/${bp.latest.diastolic}` : '—' }}
+              </strong>
+              <span v-if="bp.latest" class="kpi-unit">mmHg</span>
             </div>
-            <div v-if="summary?.sleep_consistency_score != null" class="rad-stat">
-              <div class="lbl">Sleep consistency (14d)</div>
-              <div class="val">{{ summary.sleep_consistency_score.toFixed(0) }}</div>
+            <div class="kpi-sub muted">
+              <template v-if="bp.latest">{{ bpLabel(bp.latest.systolic, bp.latest.diastolic) }} · {{ daysAgo(bp.latest.time) }}</template>
+              <template v-else>no readings</template>
             </div>
+          </div>
+
+          <div class="kpi-tile">
+            <div class="kpi-lbl">Sleep last night</div>
+            <div class="kpi-num" :style="{ color: '#a78bfa' }">
+              <strong>{{ sleep ? hM(sleep.total_s) : '—' }}</strong>
+            </div>
+            <div class="kpi-sub muted">
+              <template v-if="summary?.sleep_score != null">
+                Score {{ summary.sleep_score.toFixed(0) }} · cons. {{ summary?.sleep_consistency_score?.toFixed(0) ?? '—' }}
+              </template>
+            </div>
+          </div>
+
+          <div class="kpi-tile">
+            <div class="kpi-lbl">Recovery</div>
+            <div class="kpi-num" :style="{ color: '#22c55e' }">
+              <strong>{{ summary?.recovery_score?.toFixed(0) ?? '—' }}</strong>
+              <span v-if="summary?.recovery_score" class="kpi-unit">/100</span>
+            </div>
+            <div class="kpi-sub muted">
+              RHR {{ summary?.resting_hr ? Math.round(summary.resting_hr) : '—' }} · HRV {{ summary?.hrv_avg ? Math.round(summary.hrv_avg) : '—' }} ms
+            </div>
+          </div>
+
+          <div class="kpi-tile">
+            <div class="kpi-lbl">Steps today</div>
+            <div class="kpi-num" :style="{ color: '#38bdf8' }">
+              <strong>{{ todayStepsLocal.toLocaleString() }}</strong>
+            </div>
+            <div class="kpi-sub muted">
+              {{ Math.round(todayStepsLocal / 8000 * 100) }}% of 8,000 goal · since local midnight
+            </div>
+          </div>
+
+          <div class="kpi-tile">
+            <div class="kpi-lbl">Watch wear today</div>
+            <div class="kpi-num"
+                 :style="{ color: watchState.pct >= 80 ? '#22c55e' : watchState.pct >= 50 ? '#eab308' : '#ef4444' }">
+              <strong>{{ watchState.pct }}%</strong>
+              <span class="kpi-unit">{{ watchState.worn }}/{{ watchState.total }}h</span>
+            </div>
+            <div class="kpi-sub muted">
+              <template v-if="watchState.longestGapH >= 1">
+                {{ watchState.longestGapH }}h gap from
+                {{ String(watchState.gapStartHour).padStart(2, '0') }}:00
+                {{ watchState.longestGapH >= 3 ? '· likely charging' : '· off-wrist?' }}
+              </template>
+              <template v-else>continuous · worn all day</template>
+            </div>
+          </div>
+
+          <div class="kpi-tile">
+            <div class="kpi-lbl">Skin Δ (last night)</div>
+            <div class="kpi-num">
+              <strong>{{ summary?.skin_temp_delta_avg != null ? (summary.skin_temp_delta_avg * (isImperial ? 1.8 : 1)).toFixed(2) : '—' }}</strong>
+              <span v-if="summary?.skin_temp_delta_avg != null" class="kpi-unit">{{ tempUnit }}</span>
+            </div>
+            <div class="kpi-sub muted">
+              <template v-if="summary?.skin_temp_delta_avg != null && Math.abs(summary.skin_temp_delta_avg) > 0.5">
+                {{ summary.skin_temp_delta_avg > 0 ? 'elevated' : 'cooler than usual' }}
+              </template>
+              <template v-else>normal range</template>
+            </div>
+          </div>
+        </div>
+
+        <!-- HR sparkline ribbon along the bottom for visual context -->
+        <div v-if="hrSparkPath" class="ribbon-wrap">
+          <svg class="hr-ribbon" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="hr-rib" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#ef4444" stop-opacity="0.4"/>
+                <stop offset="100%" stop-color="#ef4444" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path :d="hrSparkPath.fill" fill="url(#hr-rib)"/>
+            <path :d="hrSparkPath.stroke" stroke="#ef4444" stroke-width="1.6" fill="none" stroke-opacity="0.85"/>
+          </svg>
+          <div class="ribbon-axis muted">
+            <span>00</span><span>06</span><span>12</span><span>18</span><span>now</span>
           </div>
         </div>
        </div>
@@ -484,7 +642,60 @@ h1 { margin: 0; }
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 .footer { margin-top: 1.5rem; color: var(--muted-2); font-size: 0.8rem; text-align: right; }
 
-.glance-wrap { position: relative; }
+.glance-wrap { display: flex; flex-direction: column; gap: 0.9rem; }
+
+.hero { display: flex; align-items: center; gap: 1.4rem; }
+.ring {
+  --pct: 0deg;
+  width: 130px; height: 130px; border-radius: 50%; flex-shrink: 0;
+  background:
+    conic-gradient(currentColor var(--pct), var(--surface-2) 0deg) padding-box,
+    var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  color: #38bdf8;
+}
+.ring.good { color: #22c55e; }
+.ring.bad { color: #ef4444; }
+.ring-inner {
+  width: 100px; height: 100px; border-radius: 50%; background: var(--surface);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.ring-num { font-size: 2.2rem; font-weight: 700; font-family: ui-monospace, monospace; line-height: 1; color: var(--text); }
+.ring-lbl { font-size: 0.7rem; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.2rem; }
+.hero-blurb { display: flex; flex-direction: column; gap: 0.35rem; }
+.hero-line { font-size: 0.95rem; color: var(--text); }
+.hero-line:first-child { font-size: 1.05rem; font-weight: 500; }
+.hero-line .muted { color: var(--muted); font-size: 0.85rem; }
+.hero-line strong.good { color: #22c55e; }
+.hero-line strong.bad { color: #ef4444; }
+
+.kpi-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.5rem;
+}
+.kpi-tile {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0.65rem 0.85rem;
+}
+.kpi-lbl { font-size: 0.7rem; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.05em; }
+.kpi-num { font-size: 1.45rem; font-family: ui-monospace, monospace; line-height: 1.2; margin: 0.2rem 0 0.15rem; }
+.kpi-num strong { font-weight: 600; }
+.kpi-num .kpi-unit { font-size: 0.7rem; color: var(--muted); margin-left: 0.2rem; font-family: inherit; }
+.kpi-num.bp-elevated strong { color: #eab308; }
+.kpi-num.bp-stage1 strong { color: #f97316; }
+.kpi-num.bp-stage2 strong { color: #ef4444; }
+.kpi-num.bp-crisis strong { color: #b91c1c; }
+.kpi-num.bp-normal strong { color: #22c55e; }
+.kpi-sub { font-size: 0.75rem; }
+.kpi-sub.muted { color: var(--muted); }
+
+.ribbon-wrap { position: relative; margin-top: 0.4rem; }
+.hr-ribbon { width: 100%; height: 60px; display: block; }
+.ribbon-axis {
+  display: flex; justify-content: space-between; font-size: 0.65rem;
+  color: var(--muted-2); margin-top: 0.1rem; font-family: ui-monospace, monospace;
+}
+
 .hr-underlay {
   position: absolute; left: 0; right: 0; bottom: 0;
   width: 100%; height: 100px; pointer-events: none; z-index: 0;

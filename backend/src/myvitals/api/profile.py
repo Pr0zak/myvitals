@@ -45,13 +45,25 @@ def _hr_zones(max_hr: float) -> list[dict[str, Any]]:
 
 
 async def _auto_rhr_baseline(db: AsyncSession) -> float | None:
-    """30-day rolling average of daily_summary.resting_hr — best objective
-    estimate of the user's true resting HR baseline. Used when the profile
-    doesn't override with a manual value."""
-    cutoff = date.today() - timedelta(days=30)
+    """Recent rolling average of daily_summary.resting_hr — best objective
+    estimate of the user's current resting HR baseline. Used when the
+    profile doesn't override with a manual value.
+
+    Walks back from the most recent day with RHR data (instead of always
+    today minus 30) so a brief gap in syncing doesn't drop the count to 0
+    or pull in stale readings from years ago when historical imports
+    happened to land in the window."""
+    latest = (await db.execute(
+        select(func.max(models.DailySummary.date))
+        .where(models.DailySummary.resting_hr.is_not(None))
+    )).scalar()
+    if latest is None:
+        return None
+    cutoff = latest - timedelta(days=14)
     val = (await db.execute(
         select(func.avg(models.DailySummary.resting_hr))
         .where(models.DailySummary.date >= cutoff)
+        .where(models.DailySummary.date <= latest)
         .where(models.DailySummary.resting_hr.is_not(None))
     )).scalar()
     return float(val) if val is not None else None

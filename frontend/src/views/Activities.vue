@@ -378,7 +378,7 @@ const monthLabel = (key: string) =>
                        :to="`/activity/${a.source}/${a.source_id}`"
                        :class="viewMode === 'grid' ? 'card' : 'row'">
               <template v-if="viewMode === 'grid'">
-                <PolylineThumbnail :polyline="a.polyline" :size="100" class="thumb"/>
+                <PolylineThumbnail :polyline="a.polyline" :activityType="a.type" :size="100" class="thumb"/>
                 <header class="card-head">
                   <span class="type"><ActivityIcon :type="a.type" :size="14"/> {{ a.type }}</span>
                   <span class="when">{{ fmtDate(a.start_at) }}</span>
@@ -401,7 +401,7 @@ const monthLabel = (key: string) =>
                 </dl>
               </template>
               <template v-else>
-                <PolylineThumbnail :polyline="a.polyline" :size="48"/>
+                <PolylineThumbnail :polyline="a.polyline" :activityType="a.type" :size="48"/>
                 <span class="row-emoji"><ActivityIcon :type="a.type" :size="16"/></span>
                 <span class="row-when">{{ fmtDateTime(a.start_at) }}</span>
                 <span class="row-name">{{ a.name ?? "(untitled)" }}</span>
@@ -422,7 +422,7 @@ const monthLabel = (key: string) =>
                      :to="`/activity/${a.source}/${a.source_id}`"
                      :class="viewMode === 'grid' ? 'card' : 'row'">
             <template v-if="viewMode === 'grid'">
-              <PolylineThumbnail :polyline="a.polyline" :size="100" class="thumb"/>
+              <PolylineThumbnail :polyline="a.polyline" :activityType="a.type" :size="100" class="thumb"/>
               <header class="card-head">
                 <span class="type"><ActivityIcon :type="a.type" :size="14"/> {{ a.type }}</span>
                 <span class="when">{{ fmtDate(a.start_at) }}</span>
@@ -445,7 +445,7 @@ const monthLabel = (key: string) =>
               </dl>
             </template>
             <template v-else>
-              <PolylineThumbnail :polyline="a.polyline" :size="48"/>
+              <PolylineThumbnail :polyline="a.polyline" :activityType="a.type" :size="48"/>
               <span class="row-emoji"><ActivityIcon :type="a.type" :size="16"/></span>
               <span class="row-when">{{ fmtDateTime(a.start_at) }}</span>
               <span class="row-name">{{ a.name ?? "(untitled)" }}</span>

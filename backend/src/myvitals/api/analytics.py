@@ -23,6 +23,76 @@ async def run_analytics(target_date: date | None = Query(None)) -> dict[str, str
     return {"status": "ok", "target_date": (target_date or datetime.now(timezone.utc).date()).isoformat()}
 
 
+@router.get("/analytics/discoveries")
+async def discoveries(
+    days: int = Query(90, ge=14, le=730),
+    min_r: float = Query(0.40, ge=0.1, le=1.0),
+    min_n: int = Query(14, ge=5, le=365),
+    db: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    """Scan all (X, Y) pairs of daily-summary metrics over the window;
+    return any with |Pearson r| >= min_r and at least min_n overlap. Useful
+    for surfacing surprising correlations the user wouldn't think to ask
+    about manually.
+    """
+    until = datetime.now(timezone.utc).date()
+    since = until - timedelta(days=days)
+    cache: dict[str, dict[date, float]] = {}
+    for m in _DAILY_SUMMARY_METRICS:
+        cache[m] = await _daily_summary_metric(db, m, since, until)
+
+    out: list[dict[str, Any]] = []
+    keys = list(_DAILY_SUMMARY_METRICS)
+    for i, x in enumerate(keys):
+        for y in keys[i + 1:]:
+            xs_dict = cache[x]
+            ys_dict = cache[y]
+            common = sorted(set(xs_dict) & set(ys_dict))
+            if len(common) < min_n:
+                continue
+            xs = [xs_dict[d] for d in common]
+            ys = [ys_dict[d] for d in common]
+            r = _pearson(xs, ys)
+            if r is not None and abs(r) >= min_r:
+                out.append({"x_metric": x, "y_metric": y, "n": len(common), "pearson_r": r})
+    out.sort(key=lambda d: -abs(d["pearson_r"]))
+    return out[:20]
+
+
+@router.post("/analytics/hr-recovery-backfill")
+async def backfill_hr_recovery() -> dict[str, int]:
+    """Compute hr_recovery_60s/120s for every activity that doesn't have it
+    yet. Reads HR samples around each activity end. Idempotent — already-
+    populated rows are skipped."""
+    from sqlalchemy import or_, update as _update
+    from .. import db as _db
+    from ..analytics.advanced import compute_hr_recovery_for_activity
+    async with _db.session.SessionLocal() as s:
+        rows = (await s.execute(
+            select(models.Activity.source, models.Activity.source_id)
+            .where(or_(
+                models.Activity.hr_recovery_60s.is_(None),
+                models.Activity.hr_recovery_120s.is_(None),
+            ))
+        )).all()
+        n_done = 0
+        for src, sid in rows:
+            r60, r120 = await compute_hr_recovery_for_activity(s, src, sid)
+            if r60 is None and r120 is None:
+                continue
+            await s.execute(
+                _update(models.Activity)
+                .where(models.Activity.source == src)
+                .where(models.Activity.source_id == sid)
+                .values(hr_recovery_60s=r60, hr_recovery_120s=r120)
+            )
+            n_done += 1
+            if n_done % 50 == 0:
+                await s.commit()
+        await s.commit()
+    return {"considered": len(rows), "computed": n_done}
+
+
 @router.post("/analytics/backfill")
 async def backfill_analytics(days: int = Query(7, ge=1, le=3650)) -> dict[str, int]:
     """Recompute daily_summary for the past `days` days. Useful when raw data
@@ -48,6 +118,9 @@ SUPPORTED_METRICS = [
     "weight_kg", "body_fat_pct",
     "bp_systolic_avg", "bp_diastolic_avg",
     "skin_temp_delta_avg",
+    "readiness_score", "training_stress_score",
+    "ctl", "atl", "tsb",
+    "sleep_consistency_score", "sleep_debt_h",
     "activity_duration_s", "alcohol_count", "caffeine_mg",
     "mood_score",
 ]
@@ -59,6 +132,9 @@ _DAILY_SUMMARY_METRICS = {
     "weight_kg", "body_fat_pct",
     "bp_systolic_avg", "bp_diastolic_avg",
     "skin_temp_delta_avg",
+    "readiness_score", "training_stress_score",
+    "ctl", "atl", "tsb",
+    "sleep_consistency_score", "sleep_debt_h",
 }
 
 

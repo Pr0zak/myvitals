@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import polylineDecoder from "@mapbox/polyline";
 import { computed } from "vue";
+import ActivityIcon from "@/components/ActivityIcon.vue";
 
 const props = withDefaults(defineProps<{
   polyline: string | null | undefined;
+  /** Activity type — when polyline is empty, fall back to the type's icon. */
+  activityType?: string | null;
   size?: number;
   stroke?: string;
   strokeWidth?: number;
@@ -77,6 +80,10 @@ const startEnd = computed(() => {
     <circle v-if="startEnd" :cx="startEnd.start.x" :cy="startEnd.start.y" r="3" fill="#22c55e"/>
     <circle v-if="startEnd" :cx="startEnd.end.x" :cy="startEnd.end.y" r="3" fill="#ef4444"/>
   </svg>
+  <div v-else-if="activityType" class="poly-thumb empty"
+       :style="{ width: size + 'px', height: size + 'px' }">
+    <ActivityIcon :type="activityType" :size="Math.round(size * 0.45)"/>
+  </div>
   <div v-else class="poly-thumb empty" :style="{ width: size + 'px', height: size + 'px' }">—</div>
 </template>
 

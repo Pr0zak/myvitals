@@ -52,6 +52,13 @@ class TodaySummary(BaseModel):
     bp_systolic_avg: float | None = None
     bp_diastolic_avg: float | None = None
     skin_temp_delta_avg: float | None = None
+    readiness_score: float | None = None
+    training_stress_score: float | None = None
+    ctl: float | None = None
+    atl: float | None = None
+    tsb: float | None = None
+    sleep_consistency_score: float | None = None
+    sleep_debt_h: float | None = None
     last_sync: datetime | None = None
 
 

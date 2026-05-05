@@ -16,6 +16,7 @@ function cycleTheme() {
       <RouterLink to="/">Today</RouterLink>
       <RouterLink to="/trends">Trends</RouterLink>
       <RouterLink to="/sleep">Sleep</RouterLink>
+      <RouterLink to="/weight">Weight</RouterLink>
       <RouterLink to="/log">Log</RouterLink>
       <RouterLink to="/activities">Activities</RouterLink>
       <RouterLink to="/calendar">Calendar</RouterLink>

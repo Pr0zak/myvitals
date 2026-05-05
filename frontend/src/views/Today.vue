@@ -74,6 +74,71 @@ async function saveBp() {
   }
 }
 
+function readinessClass(s: number): string {
+  if (s >= 75) return "good";
+  if (s >= 50) return "";
+  return "bad";
+}
+function formClass(tsb: number): string {
+  if (tsb > 5) return "good";   // fresh, race-ready
+  if (tsb < -20) return "bad";  // overreached
+  return "";
+}
+
+// Radar combining the day's normalised vitals.
+const radarOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  const s = summary.value;
+  if (!s) return null;
+  // Each axis is 0-100; readiness already is. HRV/Recovery/Sleep score are
+  // already 0-100. Steps + RHR get normalised below.
+  const stepsPct = Math.min(100, Math.round(((s.steps_total ?? 0) / 10000) * 100));
+  // RHR: lower is better. 50bpm → 100, 80bpm → 0.
+  const rhr = s.resting_hr;
+  const rhrPct = rhr != null ? Math.max(0, Math.min(100, ((80 - rhr) / 30) * 100)) : null;
+  // HRV: typical 20-100. 80+ → 100.
+  const hrv = s.hrv_avg;
+  const hrvPct = hrv != null ? Math.max(0, Math.min(100, (hrv / 80) * 100)) : null;
+
+  const indicators = [
+    { name: "Readiness", max: 100 },
+    { name: "Recovery", max: 100 },
+    { name: "Sleep", max: 100 },
+    { name: "HRV", max: 100 },
+    { name: "RHR", max: 100 },
+    { name: "Steps", max: 100 },
+  ];
+  const data = [
+    s.readiness_score ?? 0,
+    s.recovery_score ?? 0,
+    s.sleep_score ?? 0,
+    hrvPct ?? 0,
+    rhrPct ?? 0,
+    stepsPct,
+  ];
+  return {
+    tooltip: { ...t.tooltip },
+    radar: {
+      indicator: indicators,
+      shape: "polygon",
+      splitLine: { lineStyle: { color: t.splitLine.lineStyle.color } },
+      splitArea: { areaStyle: { color: ["rgba(56, 189, 248, 0.02)", "rgba(56, 189, 248, 0.04)"] } },
+      axisName: { color: t.axisLabel.color, fontSize: 11 },
+    },
+    series: [{
+      type: "radar",
+      data: [{
+        value: data,
+        name: "Today",
+        areaStyle: { color: "rgba(56, 189, 248, 0.25)" },
+        lineStyle: { color: t.palette.accent, width: 2 },
+        itemStyle: { color: t.palette.accent },
+      }],
+    }],
+  };
+});
+
 function bpClass(sys: number, dia: number): string {
   if (sys >= 180 || dia >= 120) return "bp-crisis";
   if (sys >= 140 || dia >= 90) return "bp-stage2";
@@ -220,6 +285,35 @@ const subtitleHr = computed(() => {
     <div v-if="error" class="err">{{ error }}</div>
 
     <div v-if="!loading">
+      <!-- Today radar — quick at-a-glance composite -->
+      <Card v-if="radarOption" title="Today at a glance"
+            :subtitle="summary?.readiness_score != null ? `Readiness ${summary.readiness_score.toFixed(0)}/100` : ''">
+        <div class="radar-row">
+          <div class="chart-wrap radar-chart"><VChart :option="radarOption" autoresize/></div>
+          <div class="radar-stats">
+            <div v-if="summary?.readiness_score != null" class="rad-stat">
+              <div class="lbl">Readiness</div>
+              <div class="val" :class="readinessClass(summary.readiness_score)">{{ summary.readiness_score.toFixed(0) }}</div>
+            </div>
+            <div v-if="summary?.tsb != null" class="rad-stat">
+              <div class="lbl">Form (TSB)</div>
+              <div class="val" :class="formClass(summary.tsb)">{{ summary.tsb > 0 ? '+' : '' }}{{ summary.tsb.toFixed(0) }}</div>
+              <div class="sub">CTL {{ summary.ctl?.toFixed(0) }} · ATL {{ summary.atl?.toFixed(0) }}</div>
+            </div>
+            <div v-if="summary?.sleep_debt_h != null" class="rad-stat">
+              <div class="lbl">7-day sleep debt</div>
+              <div class="val" :class="summary.sleep_debt_h > 5 ? 'bad' : summary.sleep_debt_h < -3 ? 'good' : ''">
+                {{ summary.sleep_debt_h > 0 ? '+' : '' }}{{ summary.sleep_debt_h.toFixed(1) }} h
+              </div>
+            </div>
+            <div v-if="summary?.sleep_consistency_score != null" class="rad-stat">
+              <div class="lbl">Sleep consistency (14d)</div>
+              <div class="val">{{ summary.sleep_consistency_score.toFixed(0) }}</div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
       <!-- top stats row -->
       <div class="grid stats">
         <RecoveryCard
@@ -334,6 +428,17 @@ h1 { margin: 0; }
 .empty { color: var(--muted-2); align-self: center; margin: auto; }
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 .footer { margin-top: 1.5rem; color: var(--muted-2); font-size: 0.8rem; text-align: right; }
+
+.radar-row { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(220px, 1fr); gap: 1rem; align-items: center; }
+@media (max-width: 700px) { .radar-row { grid-template-columns: 1fr; } }
+.radar-chart { height: 280px; }
+.radar-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.rad-stat { background: var(--surface-2); border-radius: 6px; padding: 0.5rem 0.7rem; }
+.rad-stat .lbl { color: var(--muted-2); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.rad-stat .val { font-size: 1.4rem; font-weight: 600; font-family: ui-monospace, monospace; margin: 0.1rem 0; }
+.rad-stat .sub { color: var(--muted); font-size: 0.75rem; }
+.rad-stat .good, .val.good { color: #22c55e; }
+.rad-stat .bad, .val.bad { color: #ef4444; }
 
 .bp-latest { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.4rem 0; }
 .bp-big { display: flex; align-items: baseline; gap: 0.3rem; font-family: ui-monospace, monospace; font-weight: 600; }

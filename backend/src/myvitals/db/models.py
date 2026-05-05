@@ -128,6 +128,13 @@ class DailySummary(Base):
     bp_systolic_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
     bp_diastolic_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
     skin_temp_delta_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    readiness_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    training_stress_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ctl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    atl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tsb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sleep_consistency_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sleep_debt_h: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -183,6 +190,7 @@ class UserProfile(Base):
     weight_goal_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     resting_hr_baseline: Mapped[float | None] = mapped_column(Float, nullable=True)
     activity_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    sleep_target_h: Mapped[float | None] = mapped_column(Float, nullable=True, default=8)
     # Free-form JSON for conditions / medications / notes
     extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -234,3 +242,5 @@ class Activity(Base):
     raw: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)), nullable=True)
+    hr_recovery_60s: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hr_recovery_120s: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -8,6 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import models
 from ..db.session import SessionLocal
+from .advanced import (
+    daily_training_stress, illness_warning_signals, readiness_score,
+    sleep_consistency_score, sleep_debt_hours, update_training_load,
+)
 from .baselines import nightly_hrv, nightly_rhr, rolling_baseline
 from .recovery import recovery_score
 from .sleep import sleep_score
@@ -80,6 +84,19 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
         )).scalar()
         skin_temp_delta_avg = float(temp_val) if temp_val is not None else None
 
+        # === Advanced derived metrics ===
+        readiness = await readiness_score(
+            db, target, hrv=hrv, rhr=rhr,
+            sleep_score=sleep_pts, sleep_duration_s=sleep_duration,
+        )
+        tss = await daily_training_stress(db, target)
+        ctl, atl, tsb = await update_training_load(db, target, tss)
+        sc = await sleep_consistency_score(db, target)
+        # Pull profile sleep target (default 8h) for sleep debt calc.
+        prof = await db.get(models.UserProfile, 1)
+        sleep_target_h = float(prof.sleep_target_h) if prof and prof.sleep_target_h else 8.0
+        sd = await sleep_debt_hours(db, target, sleep_target_h)
+
         values = dict(
             date=target,
             resting_hr=rhr,
@@ -93,6 +110,11 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
             bp_systolic_avg=bp_systolic_avg,
             bp_diastolic_avg=bp_diastolic_avg,
             skin_temp_delta_avg=skin_temp_delta_avg,
+            readiness_score=readiness,
+            training_stress_score=tss,
+            ctl=ctl, atl=atl, tsb=tsb,
+            sleep_consistency_score=sc,
+            sleep_debt_h=sd,
         )
         stmt = insert(models.DailySummary).values(**values).on_conflict_do_update(
             index_elements=["date"],
@@ -121,6 +143,23 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
 
         # Phase 3 alerts (BP / weight trend / skin temp anomaly).
         await _emit_health_alerts(db, target)
+
+        # Illness early-warning composite (3+ of {RHR↑, HRV↓, skin temp↑, recovery↓}).
+        warning = await illness_warning_signals(
+            db, target, rhr=rhr, hrv=hrv, recovery=recovery,
+            skin_temp=skin_temp_delta_avg,
+        )
+        if warning is not None:
+            recent = await _alert_recently_fired(
+                db, "illness_warning", datetime.now(timezone.utc) - timedelta(days=5),
+            )
+            if not recent:
+                db.add(models.Alert(
+                    ts=datetime.now(timezone.utc),
+                    kind="illness_warning",
+                    payload=warning,
+                ))
+                log.warning("Illness warning fired for %s: %s", target, warning["signals"])
 
         await db.commit()
         log.info(

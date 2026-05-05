@@ -127,6 +127,81 @@ onUnmounted(() => {
   if (map) { map.remove(); map = null; }
 });
 
+// Profile-driven max HR for zone bucketing (fallback 220 - 30 = 190 if unset).
+const maxHr = ref<number>(190);
+async function loadMaxHr() {
+  try {
+    const p = await api.getProfile();
+    if (p.derived?.max_hr_estimated) maxHr.value = p.derived.max_hr_estimated;
+  } catch { /* ignore */ }
+}
+onMounted(loadMaxHr);
+
+const ZONE_COLORS = ["#38bdf8", "#22c55e", "#eab308", "#f97316", "#ef4444"];
+const ZONE_LABELS = ["Z1 Recovery", "Z2 Endurance", "Z3 Tempo", "Z4 Threshold", "Z5 VO2"];
+
+function zoneFor(bpm: number): number {
+  // 1-indexed Z1..Z5; clamp at 1 below 50% and 5 above 100%.
+  const pct = bpm / maxHr.value;
+  if (pct < 0.60) return 1;
+  if (pct < 0.70) return 2;
+  if (pct < 0.80) return 3;
+  if (pct < 0.90) return 4;
+  return 5;
+}
+
+// Stacked-area streamgraph: time spent in each zone over the activity,
+// bucketed into ~50 buckets across the duration so the curves smooth out.
+const hrZoneStreamOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  if (!hr.value || hr.value.points.length < 5 || !activity.value) return null;
+  const start = new Date(activity.value.start_at).getTime();
+  const dur = activity.value.duration_s * 1000;
+  const N = 50;
+  const buckets: number[][] = Array.from({ length: 5 }, () => Array(N).fill(0));
+  for (const p of hr.value.points) {
+    const t_ms = new Date(p.time).getTime();
+    const idx = Math.max(0, Math.min(N - 1, Math.floor(((t_ms - start) / dur) * N)));
+    const z = zoneFor(p.value) - 1;  // 0-indexed
+    buckets[z][idx] += 1;
+  }
+  const xs = Array.from({ length: N }, (_, i) =>
+    Math.round((i / N) * activity.value!.duration_s / 60));
+  return {
+    grid: { left: 40, right: 12, top: 30, bottom: 28 },
+    legend: { textStyle: t.axisLabel, top: 4 },
+    tooltip: { trigger: "axis", ...t.tooltip },
+    xAxis: { type: "category", data: xs, name: "min", axisLabel: t.axisLabel },
+    yAxis: { type: "value", name: "samples", axisLabel: t.axisLabel, splitLine: t.splitLine },
+    series: buckets.map((data, i) => ({
+      name: ZONE_LABELS[i], type: "line", stack: "z", areaStyle: { color: ZONE_COLORS[i], opacity: 0.7 },
+      symbol: "none", smooth: true, lineStyle: { width: 0 }, data,
+    })),
+  };
+});
+
+// Pie of total time in zone — quick "polarized vs sweet-spot" read.
+const hrZonePieOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  if (!hr.value || hr.value.points.length < 5) return null;
+  const counts = [0, 0, 0, 0, 0];
+  for (const p of hr.value.points) counts[zoneFor(p.value) - 1] += 1;
+  const total = counts.reduce((a, b) => a + b, 0) || 1;
+  return {
+    tooltip: { ...t.tooltip, formatter: (p: any) =>
+      `${p.name}: ${p.value} samples (${(p.value / total * 100).toFixed(0)}%)` },
+    series: [{
+      type: "pie", radius: ["45%", "75%"],
+      label: { color: t.axisLabel.color, formatter: "{b}\n{d}%" },
+      data: counts.map((v, i) => ({
+        value: v, name: ZONE_LABELS[i], itemStyle: { color: ZONE_COLORS[i] },
+      })),
+    }],
+  };
+});
+
 const hrChartOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
@@ -252,6 +327,14 @@ function removeTag(t: string) {
 
         <Card v-if="activity.polyline" title="Route">
           <div ref="mapEl" class="map"></div>
+        </Card>
+
+        <Card v-if="hrZoneStreamOption" title="HR zones over time">
+          <div class="chart"><VChart :option="hrZoneStreamOption" autoresize/></div>
+        </Card>
+
+        <Card v-if="hrZonePieOption" title="HR zone distribution">
+          <div class="chart" style="height: 240px;"><VChart :option="hrZonePieOption" autoresize/></div>
         </Card>
 
         <Card title="Heart rate during activity">

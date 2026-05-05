@@ -46,6 +46,13 @@ export interface TodaySummary {
   bp_systolic_avg: number | null;
   bp_diastolic_avg: number | null;
   skin_temp_delta_avg: number | null;
+  readiness_score: number | null;
+  training_stress_score: number | null;
+  ctl: number | null;
+  atl: number | null;
+  tsb: number | null;
+  sleep_consistency_score: number | null;
+  sleep_debt_h: number | null;
   last_sync: string | null;
 }
 

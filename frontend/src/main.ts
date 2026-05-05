@@ -12,6 +12,7 @@ const router = createRouter({
     { path: "/", name: "today", component: () => import("./views/Today.vue") },
     { path: "/trends", name: "trends", component: () => import("./views/Trends.vue") },
     { path: "/sleep", name: "sleep", component: () => import("./views/Sleep.vue") },
+    { path: "/weight", name: "weight", component: () => import("./views/Weight.vue") },
     { path: "/log", name: "log", component: () => import("./views/Log.vue") },
     { path: "/activities", name: "activities", component: () => import("./views/Activities.vue") },
     { path: "/activity/:source/:id", name: "activity-detail", component: () => import("./views/ActivityDetail.vue") },

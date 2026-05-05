@@ -246,8 +246,15 @@ async def activities_stats(
             return 0.0 if curr == 0 else 100.0
         return ((curr - prev_val) / prev_val) * 100
 
+    if days >= 365 * 9:
+        period_label = "All time"
+    elif days >= 365:
+        years = round(days / 365)
+        period_label = f"Last {years}y" if years > 1 else "Last 1y"
+    else:
+        period_label = f"Last {days} days"
     return ActivityStatsOut(
-        period_label=f"Last {days} days",
+        period_label=period_label,
         n_activities=n,
         total_distance_m=total_distance,
         total_duration_s=total_duration,

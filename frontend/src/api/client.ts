@@ -216,6 +216,16 @@ export const api = {
     return data;
   },
 
+  async discoveries(days = 90): Promise<{ x_metric: string; y_metric: string; n: number; pearson_r: number }[]> {
+    const { data } = await http.get("/analytics/discoveries", { params: { days } });
+    return data;
+  },
+
+  async backfillHrRecovery(): Promise<{ considered: number; computed: number }> {
+    const { data } = await http.post("/analytics/hr-recovery-backfill");
+    return data;
+  },
+
   async putProfile(body: {
     birth_date?: string | null; sex?: string | null; height_cm?: number | null;
     weight_goal_kg?: number | null; resting_hr_baseline?: number | null;

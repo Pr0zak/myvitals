@@ -45,6 +45,31 @@ watch(targetKg, (v) => v == null ? localStorage.removeItem("myvitals.target_kg")
 watch(targetDateStr, (v) => v ? localStorage.setItem("myvitals.target_date", v)
                               : localStorage.removeItem("myvitals.target_date"));
 
+// Stored in kg, displayed in user units. Computed-setter keeps v-model snappy.
+const targetKgDisplay = computed({
+  get(): string {
+    if (targetKg.value == null) return "";
+    const v = weightVal(targetKg.value);
+    return v != null ? v.toFixed(1) : "";
+  },
+  set(v: string) {
+    if (v === "" || v == null) { targetKg.value = null; return; }
+    const n = parseFloat(v);
+    targetKg.value = Number.isFinite(n) ? weightToKg(n) : null;
+  },
+});
+const heightDisplay = computed({
+  get(): string {
+    if (!Number.isFinite(heightCm.value)) return "";
+    return isImperial.value ? (heightCm.value / 2.54).toFixed(1) : String(heightCm.value);
+  },
+  set(v: string) {
+    const n = parseFloat(v);
+    if (!Number.isFinite(n)) return;
+    heightCm.value = isImperial.value ? n * 2.54 : n;
+  },
+});
+
 async function load() {
   loading.value = true;
   error.value = null;
@@ -522,17 +547,11 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
           </div>
           <div class="goal-row">
             <span class="muted">Height ({{ isImperial ? 'in' : 'cm' }}):</span>
-            <input :value="isImperial ? (heightCm / 2.54).toFixed(1) : heightCm"
-                   @change="heightCm = isImperial
-                     ? parseFloat(($event.target as HTMLInputElement).value) * 2.54
-                     : parseFloat(($event.target as HTMLInputElement).value)"
-                   type="number" class="goal-input"
-                   :min="isImperial ? 20 : 50" :max="isImperial ? 100 : 250"
-                   step="0.1"/>
+            <input v-model="heightDisplay" type="number" class="goal-input"
+                   :min="isImperial ? 20 : 50" :max="isImperial ? 100 : 250" step="0.1"/>
             <span class="muted" style="margin-left: 0.6rem;">Goal ({{ weightUnit }}):</span>
-            <input :value="targetKg != null ? weightVal(targetKg)?.toFixed(1) : ''"
-                   @change="targetKg = ($event.target as HTMLInputElement).value ? weightToKg(parseFloat(($event.target as HTMLInputElement).value)) : null"
-                   type="number" class="goal-input" min="20" max="660" step="0.1" :placeholder="weightUnit"/>
+            <input v-model="targetKgDisplay" type="number" class="goal-input"
+                   min="20" max="660" step="0.1" :placeholder="weightUnit"/>
             <input v-model="targetDateStr" type="date" class="goal-input" style="width: 140px;"/>
             <span v-if="goalProjection" class="muted" style="margin-left: 0.6rem;">
               <template v-if="goalProjection.etaDate">

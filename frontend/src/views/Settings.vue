@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { Eye, EyeOff, Check, X as XIcon } from "lucide-vue-next";
 import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
@@ -41,6 +41,26 @@ type Profile = Awaited<ReturnType<typeof api.getProfile>>;
 const profile = ref<Profile | null>(null);
 const profileSaving = ref(false);
 const profileMsg = ref<string>("");
+
+// Weight goal display: stored in kg, shown in user units. Use a computed
+// setter so `v-model` works smoothly (typing fires every keystroke; the
+// `:value`/`@change` pattern only fires on blur and feels broken).
+const weightGoalDisplay = computed({
+  get(): string {
+    if (!profile.value || profile.value.weight_goal_kg == null) return "";
+    const v = weightVal(profile.value.weight_goal_kg);
+    return v != null ? String(v.toFixed(1)) : "";
+  },
+  set(v: string) {
+    if (!profile.value) return;
+    if (v === "" || v == null) {
+      profile.value.weight_goal_kg = null;
+      return;
+    }
+    const num = parseFloat(v);
+    profile.value.weight_goal_kg = Number.isFinite(num) ? weightToKg(num) : null;
+  },
+});
 
 async function loadProfile() {
   if (!queryToken.value) return;
@@ -331,8 +351,8 @@ onUnmounted(stopJobPolling);
   <div class="settings">
     <h1>Settings</h1>
 
-    <section>
-      <h2>Backend access</h2>
+    <details class="section" open>
+      <summary><h2>Backend access</h2></summary>
       <p class="hint">
         Stored locally in this browser only. They never leave the device, and they're
         not committed anywhere.
@@ -367,19 +387,19 @@ onUnmounted(stopJobPolling);
         <XIcon :size="14"/> Could not authenticate.<br/>
         <small>{{ errorMsg }}</small>
       </div>
-    </section>
+    </details>
 
-    <section>
-      <h2>Display</h2>
+    <details class="section" open>
+      <summary><h2>Display</h2></summary>
       <label style="flex-direction: row; align-items: center; gap: 0.6rem;">
         <span>Units:</span>
         <label><input type="radio" value="metric" v-model="units"/> metric (km, kg, °C)</label>
         <label><input type="radio" value="imperial" v-model="units"/> imperial (mi, lb, °F)</label>
       </label>
-    </section>
+    </details>
 
-    <section v-if="queryToken && profile">
-      <h2>Profile</h2>
+    <details class="section" v-if="queryToken && profile" open>
+      <summary><h2>Profile</h2></summary>
       <p class="hint">
         Powers age-adjusted max HR, HR zones, BMI, and (eventually) cohort
         percentile lookups. Single-user app, all stays on your server.
@@ -404,11 +424,8 @@ onUnmounted(stopJobPolling);
         </label>
         <label>
           <span>Weight goal ({{ weightUnit }})</span>
-          <input type="number"
-                 :value="profile.weight_goal_kg != null ? weightVal(profile.weight_goal_kg)?.toFixed(1) : ''"
-                 @change="profile.weight_goal_kg = ($event.target as HTMLInputElement).value
-                          ? weightToKg(parseFloat(($event.target as HTMLInputElement).value)) : null"
-                 min="20" max="660" step="0.1"/>
+          <input type="number" v-model="weightGoalDisplay"
+                 min="20" max="660" step="0.1" :placeholder="weightUnit"/>
         </label>
         <label>
           <span>Resting HR baseline (bpm)
@@ -452,10 +469,10 @@ onUnmounted(stopJobPolling);
         </button>
         <span v-if="profileMsg" class="hint">{{ profileMsg }}</span>
       </div>
-    </section>
+    </details>
 
-    <section v-if="queryToken">
-      <h2>Tools</h2>
+    <details class="section" v-if="queryToken">
+      <summary><h2>Tools &amp; exports</h2></summary>
       <div class="tools">
         <button class="ghost" @click="runAnalytics" :disabled="analyticsRunning">
           {{ analyticsRunning ? "Running…" : "Run analytics now" }}
@@ -467,10 +484,10 @@ onUnmounted(stopJobPolling);
         <button v-for="t in EXPORT_TABLES" :key="t" class="dl" @click="downloadExport(t, 'csv')">{{ t }}.csv</button>
         <button v-for="t in EXPORT_TABLES" :key="`${t}-json`" class="dl json" @click="downloadExport(t, 'json')">{{ t }}.json</button>
       </div>
-    </section>
+    </details>
 
-    <section v-if="queryToken">
-      <h2>Historical imports</h2>
+    <details class="section" v-if="queryToken">
+      <summary><h2>Historical imports</h2></summary>
       <p class="hint">
         One-shot bulk loads from a downloaded provider archive — useful for back-filling
         years of data the watch doesn't have. Heart rate, sleep, steps and activities
@@ -551,10 +568,10 @@ onUnmounted(stopJobPolling);
           job {{ j.id }} ({{ j.kind }}): {{ (j.error || '').split('\n').slice(-3).join(' / ') }}
         </small>
       </div>
-    </section>
+    </details>
 
-    <section v-if="queryToken">
-      <h2>Strava</h2>
+    <details class="section" v-if="queryToken">
+      <summary><h2>Strava</h2></summary>
       <div v-if="stravaError" class="err">{{ stravaError }}</div>
 
       <template v-if="strava && stravaConfig">
@@ -631,7 +648,7 @@ onUnmounted(stopJobPolling);
       </template>
 
       <div v-else-if="!stravaError" class="hint">Loading…</div>
-    </section>
+    </details>
   </div>
 </template>
 
@@ -639,7 +656,14 @@ onUnmounted(stopJobPolling);
 .settings { max-width: 640px; }
 h1 { margin: 0 0 0.4rem; }
 h2 { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin: 1.5rem 0 0.5rem; }
-section { margin-bottom: 2rem; }
+section, details.section { margin-bottom: 1rem; }
+details.section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 1rem; }
+details.section[open] { padding-bottom: 1.2rem; }
+details.section > summary { cursor: pointer; list-style: none; user-select: none; padding: 0.4rem 0; }
+details.section > summary::-webkit-details-marker { display: none; }
+details.section > summary::before { content: "▸"; color: var(--muted); margin-right: 0.5rem; transition: transform 0.15s; display: inline-block; }
+details.section[open] > summary::before { transform: rotate(90deg); }
+details.section > summary > h2 { display: inline; margin: 0; }
 .block { margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #1e293b; }
 .block:last-child { border-bottom: none; padding-bottom: 0; }
 .form { margin: 0.6rem 0; }

@@ -4,25 +4,37 @@ import { computed, onMounted, ref, watch } from "vue";
 import VChart from "vue-echarts";
 import Card from "@/components/Card.vue";
 import { apiBase, queryToken } from "@/config";
+import { api } from "@/api/client";
 import { chartTheme } from "@/theme";
 
-const METRICS = [
-  { key: "hrv_avg", label: "HRV (RMSSD ms)" },
-  { key: "resting_hr", label: "Resting HR (bpm)" },
-  { key: "recovery_score", label: "Recovery score" },
-  { key: "sleep_score", label: "Sleep score" },
-  { key: "sleep_duration_s", label: "Sleep duration (s)" },
-  { key: "steps_total", label: "Steps total" },
-  { key: "weight_kg", label: "Weight (kg)" },
-  { key: "body_fat_pct", label: "Body fat (%)" },
-  { key: "bp_systolic_avg", label: "Blood pressure systolic (mmHg)" },
-  { key: "bp_diastolic_avg", label: "Blood pressure diastolic (mmHg)" },
-  { key: "skin_temp_delta_avg", label: "Skin temp delta" },
-  { key: "activity_duration_s", label: "Activity duration (s)" },
-  { key: "alcohol_count", label: "Alcohol drinks (count)" },
-  { key: "caffeine_mg", label: "Caffeine (mg)" },
-  { key: "mood_score", label: "Mood score" },
+const METRIC_GROUPS = [
+  { label: "Cardio", metrics: [
+    { key: "hrv_avg", label: "HRV (RMSSD ms)" },
+    { key: "resting_hr", label: "Resting HR (bpm)" },
+    { key: "recovery_score", label: "Recovery score" },
+  ]},
+  { label: "Sleep", metrics: [
+    { key: "sleep_score", label: "Sleep score" },
+    { key: "sleep_duration_s", label: "Sleep duration (s)" },
+  ]},
+  { label: "Body", metrics: [
+    { key: "weight_kg", label: "Weight" },
+    { key: "body_fat_pct", label: "Body fat (%)" },
+    { key: "bp_systolic_avg", label: "BP systolic (mmHg)" },
+    { key: "bp_diastolic_avg", label: "BP diastolic (mmHg)" },
+    { key: "skin_temp_delta_avg", label: "Skin temp delta" },
+  ]},
+  { label: "Activity", metrics: [
+    { key: "steps_total", label: "Steps total" },
+    { key: "activity_duration_s", label: "Activity duration (s)" },
+  ]},
+  { label: "Logged inputs", metrics: [
+    { key: "alcohol_count", label: "Alcohol drinks (count)" },
+    { key: "caffeine_mg", label: "Caffeine (mg)" },
+    { key: "mood_score", label: "Mood score" },
+  ]},
 ];
+const METRICS = METRIC_GROUPS.flatMap((g) => g.metrics);
 
 const x = ref("alcohol_count");
 const y = ref("hrv_avg");
@@ -63,7 +75,16 @@ async function fetchData() {
   }
 }
 
-onMounted(fetchData);
+// Auto-discoveries — strong correlations the user didn't ask about.
+const discoveries = ref<Awaited<ReturnType<typeof api.discoveries>>>([]);
+async function fetchDiscoveries() {
+  try { discoveries.value = await api.discoveries(90); } catch { /* ignore */ }
+}
+function pickPair(d: { x_metric: string; y_metric: string }) {
+  x.value = d.x_metric; y.value = d.y_metric; lag.value = 0;
+}
+
+onMounted(() => { fetchData(); fetchDiscoveries(); });
 watch([x, y, lag, days], fetchData);
 
 const scatterOption = computed(() => {
@@ -147,6 +168,21 @@ const rLabel = computed(() => {
       Need ≥ 3 days where both metrics exist for any signal to surface.
     </p>
 
+    <Card v-if="discoveries.length" title="Discoveries — strong correlations from the last 90 days">
+      <p class="hint" style="margin-bottom: 0.6rem;">
+        Pearson |r| ≥ 0.4 over ≥ 14 overlapping days. Click any to load it in the explorer.
+      </p>
+      <div class="discoveries">
+        <button v-for="d in discoveries" :key="`${d.x_metric}-${d.y_metric}`"
+                class="disc" @click="pickPair(d)"
+                :class="{ neg: d.pearson_r < 0 }">
+          <strong>{{ d.x_metric }}</strong> ↔ <strong>{{ d.y_metric }}</strong>
+          <span class="r">r = {{ d.pearson_r.toFixed(2) }}</span>
+          <span class="muted">n={{ d.n }}</span>
+        </button>
+      </div>
+    </Card>
+
     <Card title="Presets">
       <div class="presets">
         <button v-for="p in PRESETS" :key="p.label" class="preset" @click="applyPreset(p)">
@@ -160,13 +196,20 @@ const rLabel = computed(() => {
         <label>
           <span>X (independent)</span>
           <select v-model="x">
-            <option v-for="m in METRICS" :key="m.key" :value="m.key">{{ m.label }}</option>
+            <optgroup v-for="g in METRIC_GROUPS" :key="`x-${g.label}`" :label="g.label">
+              <option v-for="m in g.metrics" :key="m.key" :value="m.key">{{ m.label }}</option>
+            </optgroup>
+            <!-- bare options (no group) for any future ungrouped metric -->
+            <template v-for="m in []" :key="m"><option :value="m">{{ m }}</option></template>
           </select>
         </label>
         <label>
           <span>Y (dependent)</span>
           <select v-model="y">
-            <option v-for="m in METRICS" :key="m.key" :value="m.key">{{ m.label }}</option>
+            <optgroup v-for="g in METRIC_GROUPS" :key="`y-${g.label}`" :label="g.label">
+              <option v-for="m in g.metrics" :key="m.key" :value="m.key">{{ m.label }}</option>
+            </optgroup>
+            <template v-for="m in []" :key="m"><option :value="m">{{ m }}</option></template>
           </select>
         </label>
         <label>
@@ -214,6 +257,16 @@ h1 { margin: 0 0 0.4rem; }
 .chart { width: 100%; height: 360px; }
 .chart > * { width: 100%; height: 100%; }
 
+.discoveries { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.disc { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+        border-radius: 4px; padding: 0.45rem 0.7rem; cursor: pointer;
+        font-size: 0.85rem; font-family: inherit; display: inline-flex; gap: 0.4rem;
+        align-items: baseline; }
+.disc:hover { border-color: var(--accent); }
+.disc strong { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+.disc .r { color: #22c55e; font-family: ui-monospace, monospace; }
+.disc.neg .r { color: #ef4444; }
+.disc .muted { color: var(--muted); font-size: 0.75rem; }
 .empty { color: var(--muted-2); padding: 2rem 0; text-align: center; align-self: center; margin: auto; }
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 </style>

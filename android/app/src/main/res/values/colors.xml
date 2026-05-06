@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Adaptive launcher icon background. Brand sky-blue matches the
-         dashboard accent color so phone + dashboard feel like one app. -->
-    <color name="ic_launcher_background">#0EA5E9</color>
+    <!-- Adaptive launcher icon background. Dark navy so the red heart pops,
+         matches the dashboard favicon treatment. -->
+    <color name="ic_launcher_background">#0B1018</color>
 </resources>

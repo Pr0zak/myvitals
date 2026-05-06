@@ -7,6 +7,7 @@ import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.POST
 import java.util.concurrent.TimeUnit
 
@@ -16,6 +17,12 @@ interface BackendApi {
 
     @POST("ingest/heartbeat")
     suspend fun heartbeat(@Body hb: HeartbeatPayload): Map<String, String>
+
+    @GET("sober/current")
+    suspend fun soberCurrent(): SoberCurrentResponse
+
+    @POST("sober/reset")
+    suspend fun soberReset(@Body body: SoberResetRequest): SoberResetResponse
 }
 
 object BackendClient {

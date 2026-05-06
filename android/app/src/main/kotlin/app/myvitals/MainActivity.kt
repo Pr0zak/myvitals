@@ -7,8 +7,16 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
 import app.myvitals.ui.MyVitalsTheme
+import app.myvitals.ui.SoberHomeScreen
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import app.myvitals.data.AppDatabase
@@ -54,39 +62,56 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MyVitalsTheme {
-                SettingsScreen(
-                    settings = settings,
-                    isHealthConnectAvailable = gateway.isAvailable(),
-                    hasPermissions = { gateway.hasAllPermissions() },
-                    onRequestPermissions = {
-                        Timber.d("Requesting HC permissions: %s", gateway.requiredPermissions)
-                        permissionLauncher.launch(gateway.requiredPermissions)
-                    },
-                    onSyncNow = {
-                        Timber.i("Manual sync triggered")
-                        WorkManager.getInstance(applicationContext)
-                            .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
-                    },
-                    onSyncLogs = {
-                        Timber.i("Manual log upload triggered")
-                        WorkManager.getInstance(applicationContext)
-                            .enqueue(OneTimeWorkRequestBuilder<LogUploadWorker>().build())
-                    },
-                    onBackfill = { days ->
-                        val newCheckpoint = System.currentTimeMillis() / 1000 - days * 24L * 3600L
-                        settings.lastSyncEpochSeconds = newCheckpoint
-                        Timber.i("Backfill: reset checkpoint to T-%dd (epoch=%d), enqueueing sync", days, newCheckpoint)
-                        WorkManager.getInstance(applicationContext)
-                            .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
-                    },
-                    onOpenLogs = { LogViewerActivity.start(this) },
-                    onClearBuffer = {
-                        Timber.w("User cleared sync buffer")
-                        CoroutineScope(Dispatchers.IO).launch {
-                            AppDatabase.get(applicationContext).buffered().clear()
-                        }
-                    },
-                )
+                // Two pages: 0 = Sober time (front-and-center reset),
+                //            1 = Settings. Swipe right ↔ left.
+                val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
+                val pagerScope = rememberCoroutineScope()
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                ) { page ->
+                    when (page) {
+                        0 -> SoberHomeScreen(
+                            settings = settings,
+                            onOpenSettings = {
+                                pagerScope.launch { pagerState.animateScrollToPage(1) }
+                            },
+                        )
+                        else -> SettingsScreen(
+                            settings = settings,
+                            isHealthConnectAvailable = gateway.isAvailable(),
+                            hasPermissions = { gateway.hasAllPermissions() },
+                            onRequestPermissions = {
+                                Timber.d("Requesting HC permissions: %s", gateway.requiredPermissions)
+                                permissionLauncher.launch(gateway.requiredPermissions)
+                            },
+                            onSyncNow = {
+                                Timber.i("Manual sync triggered")
+                                WorkManager.getInstance(applicationContext)
+                                    .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
+                            },
+                            onSyncLogs = {
+                                Timber.i("Manual log upload triggered")
+                                WorkManager.getInstance(applicationContext)
+                                    .enqueue(OneTimeWorkRequestBuilder<LogUploadWorker>().build())
+                            },
+                            onBackfill = { days ->
+                                val newCheckpoint = System.currentTimeMillis() / 1000 - days * 24L * 3600L
+                                settings.lastSyncEpochSeconds = newCheckpoint
+                                Timber.i("Backfill: reset checkpoint to T-%dd (epoch=%d), enqueueing sync", days, newCheckpoint)
+                                WorkManager.getInstance(applicationContext)
+                                    .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
+                            },
+                            onOpenLogs = { LogViewerActivity.start(this) },
+                            onClearBuffer = {
+                                Timber.w("User cleared sync buffer")
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    AppDatabase.get(applicationContext).buffered().clear()
+                                }
+                            },
+                        )
+                    }
+                }
             }
         }
     }

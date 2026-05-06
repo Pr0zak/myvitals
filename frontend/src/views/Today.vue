@@ -10,7 +10,7 @@ import type {
 import { chartTheme } from "@/theme";
 import { tempUnit, isImperial } from "@/units";
 import { TrendingUp, TrendingDown, Sparkles } from "lucide-vue-next";
-import { annotationMarkPoint, baseTimeOption, meanMarkLine, workoutMarkArea } from "@/components/charts/chartHelpers";
+import { annotationMarkPoint, baseTimeOption, meanMarkLine, soberResetMarkLine, workoutMarkArea } from "@/components/charts/chartHelpers";
 
 import Card from "@/components/Card.vue";
 import RecoveryCard from "@/components/RecoveryCard.vue";
@@ -275,6 +275,12 @@ const showWorkouts = ref(true);
 const showAnnotations = ref(true);
 const showHrv = ref(false);
 const showMean = ref(true);
+const showSoberResets = ref(true);
+// Sober resets in the visible range. Computed from the streaks list — every
+// row's start_at is a "this is when the previous streak ended and a new one
+// began" marker, except the very first row (which is the start of tracking,
+// not a reset). Filtered to the chart's xWindow so the markline stays light.
+const soberResets = ref<Array<{ start_at: string }>>([]);
 
 async function load() {
   loading.value = true;
@@ -285,7 +291,7 @@ async function load() {
     // Today's local midnight for the underlay sparkline + glance stats.
     const todayMidnight = new Date();
     todayMidnight.setHours(0, 0, 0, 0);
-    const [s, h, hv, sl, st, a, an, hToday, sToday, sb] = await Promise.all([
+    const [s, h, hv, sl, st, a, an, hToday, sToday, sb, sbHist] = await Promise.all([
       api.todaySummary(),
       api.heartRate({ since }),
       api.hrv({ since }),
@@ -296,6 +302,7 @@ async function load() {
       api.heartRate({ since: todayMidnight }),
       api.steps({ since: todayMidnight }),
       api.soberCurrent().catch(() => null),
+      api.soberHistory(500).catch(() => []),
     ]);
     summary.value = s;
     hr.value = h;
@@ -307,6 +314,17 @@ async function load() {
     todayHr.value = hToday;
     todayStepsLocal.value = sToday.total ?? 0;
     sober.value = sb;
+    // Sober resets in the visible window. The first row chronologically is
+    // the start-of-tracking, not a reset, so drop it.
+    if (Array.isArray(sbHist) && sbHist.length > 0) {
+      const sortedAsc = [...sbHist].sort((a, b) => a.start_at.localeCompare(b.start_at));
+      const resets = sortedAsc.slice(1).filter((r) =>
+        new Date(r.start_at).getTime() >= since.getTime()
+      );
+      soberResets.value = resets.map((r) => ({ start_at: r.start_at }));
+    } else {
+      soberResets.value = [];
+    }
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : "Failed to load";
   } finally {
@@ -336,6 +354,30 @@ const hrSeriesOption = computed(() => {
   if (!hr.value) return opt;
 
   const hrPoints = hr.value.points.map((p) => [p.time, p.value]);
+  // Stack mean line + sober resets into a single markLine (ECharts only
+  // accepts one per series). Mean is a horizontal line at yAxis=avg, resets
+  // are vertical lines at xAxis=reset_ts. ECharts is happy to mix.
+  const markLineData: any[] = [];
+  let markLineConfig: any = null;
+  if (showMean.value && hr.value.avg !== null) {
+    markLineData.push({
+      yAxis: hr.value.avg, name: `avg ${hr.value.avg.toFixed(0)}`,
+      lineStyle: { color: t.palette.steps, type: "dashed" as const, opacity: 0.6 },
+      label: { show: true, formatter: `avg ${hr.value.avg.toFixed(0)}`, color: t.axisLabel.color, fontSize: 9 },
+    });
+    markLineConfig = { silent: true, symbol: "none" };
+  }
+  if (showSoberResets.value && soberResets.value.length > 0) {
+    for (const r of soberResets.value) {
+      markLineData.push({
+        xAxis: r.start_at,
+        name: "🔄 sober reset",
+        lineStyle: { color: "#a78bfa", type: "dashed" as const, opacity: 0.55, width: 1 },
+        label: { show: true, formatter: "🔄", position: "insideEndTop", fontSize: 13, color: "#a78bfa" },
+      });
+    }
+    markLineConfig = markLineConfig ?? { symbol: ["none", "none"] };
+  }
   const series: any[] = [
     {
       type: "line",
@@ -348,9 +390,7 @@ const hrSeriesOption = computed(() => {
       ...(showWorkouts.value && activities.value.length > 0
         ? { markArea: workoutMarkArea(activities.value) }
         : {}),
-      ...(showMean.value && hr.value.avg !== null
-        ? { markLine: meanMarkLine(hr.value.avg, "avg HR") }
-        : {}),
+      ...(markLineConfig ? { markLine: { ...markLineConfig, data: markLineData } } : {}),
       ...(showAnnotations.value && annotations.value.length > 0
         ? { markPoint: annotationMarkPoint(annotations.value, hr.value.max_bpm ?? 100) }
         : {}),
@@ -396,6 +436,16 @@ const stepsBarOption = computed(() => {
       type: "bar",
       data: steps.value.points.map((p) => [p.time, p.value]),
       itemStyle: { color: t.palette.steps },
+      ...(showSoberResets.value && soberResets.value.length > 0 ? {
+        markLine: {
+          symbol: ["none", "none"],
+          data: soberResets.value.map((r) => ({
+            xAxis: r.start_at,
+            lineStyle: { color: "#a78bfa", type: "dashed" as const, opacity: 0.55, width: 1 },
+            label: { show: true, formatter: "🔄", position: "insideEndTop", fontSize: 13, color: "#a78bfa" },
+          })),
+        },
+      } : {}),
     }],
   };
 });
@@ -586,20 +636,6 @@ const subtitleHr = computed(() => {
             </div>
           </div>
 
-          <div class="kpi-tile">
-            <div class="kpi-lbl">Skin Δ (last night)</div>
-            <div class="kpi-num">
-              <strong>{{ summary?.skin_temp_delta_avg != null ? (summary.skin_temp_delta_avg * (isImperial ? 1.8 : 1)).toFixed(2) : '—' }}</strong>
-              <span v-if="summary?.skin_temp_delta_avg != null" class="kpi-unit">{{ tempUnit }}</span>
-            </div>
-            <div class="kpi-sub muted">
-              <template v-if="summary?.skin_temp_delta_avg != null && Math.abs(summary.skin_temp_delta_avg) > 0.5">
-                {{ summary.skin_temp_delta_avg > 0 ? 'elevated' : 'cooler than usual' }}
-              </template>
-              <template v-else>normal range</template>
-            </div>
-          </div>
-
           <RouterLink to="/sober" class="kpi-tile sober-tile" v-if="sober?.active">
             <div class="kpi-lbl">Sober time</div>
             <div class="kpi-num" style="color: #22c55e;">
@@ -659,6 +695,10 @@ const subtitleHr = computed(() => {
           <label>
             <input type="checkbox" v-model="showMean"/>
             <span>Mean line</span>
+          </label>
+          <label v-if="soberResets.length > 0">
+            <input type="checkbox" v-model="showSoberResets"/>
+            <span>🔄 Sober resets ({{ soberResets.length }})</span>
           </label>
         </div>
         <div class="chart-wrap">

@@ -1,0 +1,301 @@
+package app.myvitals.ui
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.myvitals.data.SettingsRepository
+import app.myvitals.sync.BackendClient
+import app.myvitals.sync.SoberCurrentResponse
+import app.myvitals.sync.SoberResetRequest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import timber.log.Timber
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+private val GREEN = Color(0xFF22C55E)
+private val GREEN_SOFT = Color(0xFFA7F3D0)
+private val RED = Color(0xFFEF4444)
+private val DIM = Color(0xFF94A3B8)
+
+@Composable
+fun SoberHomeScreen(
+    settings: SettingsRepository,
+    onOpenSettings: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    var current by remember { mutableStateOf<SoberCurrentResponse?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var refreshing by remember { mutableStateOf(false) }
+    var showResetDialog by remember { mutableStateOf(false) }
+    var resetting by remember { mutableStateOf(false) }
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    suspend fun fetch() {
+        if (!settings.isConfigured()) {
+            loadError = "Backend not configured — swipe right to set URL + token."
+            return
+        }
+        refreshing = true
+        loadError = null
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            current = withContext(Dispatchers.IO) { api.soberCurrent() }
+        } catch (e: Exception) {
+            Timber.w(e, "soberCurrent failed")
+            loadError = e.message?.take(160) ?: "Network error"
+        } finally {
+            refreshing = false
+        }
+    }
+
+    // First load + a 1s ticker so the d/h/m/s display feels alive.
+    LaunchedEffect(Unit) { fetch() }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+
+    val active = current?.active
+    val (d, h, m, s) = remember(active, nowMs) {
+        if (active == null) intArrayOf(0, 0, 0, 0)
+        else {
+            val start = try { Instant.parse(active.startAt) } catch (_: Exception) { null }
+            if (start == null) intArrayOf(0, 0, 0, 0)
+            else {
+                val dur = Duration.between(start, Instant.ofEpochMilli(nowMs))
+                val totalS = maxOf(0, dur.seconds)
+                intArrayOf(
+                    (totalS / 86400).toInt(),
+                    ((totalS % 86400) / 3600).toInt(),
+                    ((totalS % 3600) / 60).toInt(),
+                    (totalS % 60).toInt(),
+                )
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(20.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            // ── Header ──
+            Text(
+                text = "Sober time",
+                style = MaterialTheme.typography.labelLarge,
+                color = DIM,
+            )
+            Spacer(Modifier.height(6.dp))
+
+            // ── Big counter ──
+            if (active != null) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    NumberAndLabel(d, "d", color = GREEN, sizeSp = 88)
+                    Spacer(Modifier.width(10.dp))
+                    NumberAndLabel(h, "h", color = GREEN_SOFT, sizeSp = 56)
+                    Spacer(Modifier.width(6.dp))
+                    NumberAndLabel(m, "m", color = GREEN_SOFT, sizeSp = 56)
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "%02ds".format(s),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 18.sp,
+                    color = DIM,
+                )
+                Spacer(Modifier.height(8.dp))
+                val sinceLabel = remember(active) {
+                    try {
+                        val inst = Instant.parse(active.startAt)
+                        val zoned = inst.atZone(ZoneId.systemDefault())
+                        zoned.format(DateTimeFormatter.ofPattern("EEE d MMM, HH:mm"))
+                    } catch (_: Exception) { active.startAt }
+                }
+                Text(
+                    text = "since $sinceLabel",
+                    color = DIM,
+                    fontSize = 14.sp,
+                )
+            } else {
+                Text(
+                    text = if (refreshing) "Loading…" else "No active streak",
+                    color = DIM,
+                    fontSize = 18.sp,
+                )
+            }
+
+            Spacer(Modifier.height(40.dp))
+
+            // ── Big reset button ──
+            Button(
+                onClick = { showResetDialog = true },
+                enabled = settings.isConfigured() && !resetting,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = RED,
+                    contentColor = Color.White,
+                ),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(96.dp),
+            ) {
+                Text(
+                    text = if (active == null) "Start streak"
+                           else if (resetting) "Resetting…" else "Reset",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            AnimatedVisibility(visible = loadError != null) {
+                Text(
+                    text = loadError.orEmpty(),
+                    color = RED,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+
+        // Bottom-right hint to swipe for settings
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = { scope.launch { fetch() } }) {
+                Text(if (refreshing) "Refreshing…" else "Refresh", color = DIM, fontSize = 12.sp)
+            }
+            TextButton(onClick = onOpenSettings) {
+                Text("Settings ›", color = DIM, fontSize = 12.sp)
+            }
+        }
+    }
+
+    // ── Reset confirmation dialog ──
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetDialog = false
+                        scope.launch {
+                            resetting = true
+                            try {
+                                if (!settings.isConfigured()) {
+                                    loadError = "Backend not configured"
+                                    return@launch
+                                }
+                                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                                withContext(Dispatchers.IO) {
+                                    api.soberReset(SoberResetRequest(addiction = "alcohol"))
+                                }
+                                fetch()
+                            } catch (e: Exception) {
+                                Timber.w(e, "soberReset failed")
+                                loadError = "Reset failed: ${e.message?.take(120)}"
+                            } finally {
+                                resetting = false
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RED, contentColor = Color.White),
+                ) { Text("Yes, reset") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) { Text("Cancel") }
+            },
+            title = { Text(if (active == null) "Start a new streak?" else "Reset sober timer?") },
+            text = {
+                Text(
+                    if (active == null)
+                        "Start tracking from now."
+                    else
+                        "Closes the current ${d}d ${h}h streak and starts a new one from now. " +
+                        "The closed streak stays in your history."
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun NumberAndLabel(
+    value: Int,
+    label: String,
+    color: Color,
+    sizeSp: Int,
+) {
+    Row(verticalAlignment = Alignment.Bottom) {
+        Text(
+            text = value.toString(),
+            color = color,
+            fontSize = sizeSp.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.Monospace,
+        )
+        Spacer(Modifier.width(2.dp))
+        Text(
+            text = label,
+            color = DIM,
+            fontSize = (sizeSp * 0.32).toInt().sp,
+            modifier = Modifier.padding(bottom = (sizeSp * 0.12).toInt().dp),
+        )
+    }
+}

@@ -94,6 +94,31 @@ export function annotationMarkPoint(annotations: Annotation[], yValue: number) {
   };
 }
 
+/**
+ * Vertical dashed lines at each sobriety reset, with a 🔄 label at the top.
+ * Pass the streaks list (the start_at of each row is the reset event — the
+ * moment the streak began, equivalent to when the previous one ended).
+ */
+export function soberResetMarkLine(
+  resets: Array<{ start_at: string }>,
+  color = "#a78bfa",
+) {
+  if (!resets.length) return undefined;
+  return {
+    silent: false,
+    symbol: ["none", "none"],
+    lineStyle: { color, width: 1, type: "dashed" as const, opacity: 0.55 },
+    label: {
+      show: true,
+      formatter: "🔄",
+      position: "insideEndTop" as const,
+      fontSize: 12,
+      color,
+    },
+    data: resets.map((r) => ({ xAxis: r.start_at, name: "reset" })),
+  };
+}
+
 /** A horizontal "mean" line for any axis. */
 export function meanMarkLine(value: number | null, label = "avg") {
   if (value === null) return undefined;

@@ -28,6 +28,12 @@ const overlayMetrics = ref({ rhr: true, hrv: true, recovery: true, sleep: false 
 const stepsType = ref<ChartType>("bar");
 const stepsGoal = ref(8000);
 
+// Sober reset overlay state. The full streak history is loaded once; the
+// computed `soberResetDates` filters down to dates within the data window
+// so chart markLines stay light.
+const showSoberResets = ref(true);
+const soberStreaks = ref<Array<{ start_at: string }>>([]);
+
 type WeightPoint = { time: string; weight_kg: number | null; body_fat_pct: number | null; bmi: number | null; lean_mass_kg: number | null; source: string };
 const weightSeries = ref<WeightPoint[]>([]);
 const weightStats = ref<{ latest_kg: number | null; min_kg: number | null; max_kg: number | null; avg_kg: number | null }>({ latest_kg: null, min_kg: null, max_kg: null, avg_kg: null });
@@ -77,13 +83,15 @@ async function load() {
     const days = RANGES.find((r) => r.key === range.value)!.days;
     const since = new Date();
     since.setDate(since.getDate() - days);
-    const [summary, weight] = await Promise.all([
+    const [summary, weight, sober] = await Promise.all([
       api.summaryRange(since),
       api.weight({ since }).catch(() => ({ points: [], latest_kg: null, min_kg: null, max_kg: null, avg_kg: null })),
+      api.soberHistory(500).catch(() => []),
     ]);
     data.value = summary;
     weightSeries.value = weight.points;
     weightStats.value = { latest_kg: weight.latest_kg, min_kg: weight.min_kg, max_kg: weight.max_kg, avg_kg: weight.avg_kg };
+    soberStreaks.value = (sober as Array<{ start_at: string }>) ?? [];
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Failed to load";
   } finally {
@@ -346,6 +354,37 @@ const goalProjection = computed(() => {
 onMounted(load);
 watch(range, load);
 
+// Sober resets that fall within the loaded date range. Drops the very first
+// chronological entry (start-of-tracking, not a reset). For category-axis
+// charts we map each reset to its YYYY-MM-DD bucket so ECharts can land it
+// on the right column.
+const soberResetDates = computed<string[]>(() => {
+  if (!soberStreaks.value.length || !data.value.length) return [];
+  const dateSet = new Set(data.value.map((d) => d.date));
+  const sortedAsc = [...soberStreaks.value].sort((a, b) =>
+    a.start_at.localeCompare(b.start_at)
+  );
+  // Drop start-of-tracking
+  const resets = sortedAsc.slice(1);
+  // Bucket each reset to YYYY-MM-DD; only keep dates the chart actually has
+  return resets
+    .map((r) => r.start_at.slice(0, 10))
+    .filter((d) => dateSet.has(d));
+});
+
+function soberMarkLineForCategory() {
+  if (!showSoberResets.value || soberResetDates.value.length === 0) return undefined;
+  return {
+    silent: false,
+    symbol: ["none", "none"],
+    data: soberResetDates.value.map((d) => ({
+      xAxis: d,
+      lineStyle: { color: "#a78bfa", type: "dashed" as const, opacity: 0.5, width: 1 },
+      label: { show: true, formatter: "🔄", position: "insideEndTop", fontSize: 12, color: "#a78bfa" },
+    })),
+  };
+}
+
 // === Multi-overlay chart: RHR + HRV + Recovery + sleep duration on one chart ===
 const overlayOption = computed(() => {
   void chartTheme.value;
@@ -411,6 +450,14 @@ const overlayOption = computed(() => {
       connectNulls: true,
       data: data.value.map((d) => [d.date, d.sleep_duration_s ? d.sleep_duration_s / 3600 : null]),
     });
+  }
+
+  // Hang the sober-reset markLine off the first series — ECharts only honours
+  // one markLine per series, but since the lines are vertical and reference
+  // xAxis values they render the same regardless of which series carries them.
+  const reset = soberMarkLineForCategory();
+  if (reset && series.length > 0) {
+    series[0] = { ...series[0], markLine: reset };
   }
 
   return {
@@ -511,6 +558,10 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
           <label><input type="checkbox" v-model="overlayMetrics.hrv"/><span>HRV</span></label>
           <label><input type="checkbox" v-model="overlayMetrics.recovery"/><span>Recovery</span></label>
           <label><input type="checkbox" v-model="overlayMetrics.sleep"/><span>Sleep h</span></label>
+          <label v-if="soberResetDates.length > 0">
+            <input type="checkbox" v-model="showSoberResets"/>
+            <span>🔄 Sober resets ({{ soberResetDates.length }})</span>
+          </label>
           <span class="presets">presets:</span>
           <button class="preset" @click="preset('recovery')">recovery</button>
           <button class="preset" @click="preset('training')">training</button>

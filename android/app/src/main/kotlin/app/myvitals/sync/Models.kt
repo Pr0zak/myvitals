@@ -75,6 +75,43 @@ data class SleepSessionSample(
     val title: String? = null,
 )
 
+// ── Sober tracking ────────────────────────────────────────────
+@JsonClass(generateAdapter = true)
+data class SoberStreak(
+    val id: Int,
+    val addiction: String,
+    @Json(name = "start_at") val startAt: String,
+    @Json(name = "end_at") val endAt: String?,
+    val notes: String?,
+    val days: Double,
+)
+
+@JsonClass(generateAdapter = true)
+data class SoberCurrentResponse(
+    val active: SoberStreak?,
+    val addiction: String,
+    val now: String? = null,
+    @Json(name = "elapsed_seconds") val elapsedSeconds: Long? = null,
+    val days: Int? = null,
+    val hours: Int? = null,
+    val minutes: Int? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class SoberResetRequest(
+    val addiction: String = "alcohol",
+    val notes: String? = null,
+    val at: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class SoberResetResponse(
+    val ok: Boolean,
+    @Json(name = "current_id") val currentId: Int,
+    @Json(name = "started_at") val startedAt: String? = null,
+    val noop: Boolean? = null,
+)
+
 @JsonClass(generateAdapter = true)
 data class HeartbeatPayload(
     @Json(name = "attempt_at") val attemptAt: String,

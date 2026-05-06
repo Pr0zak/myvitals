@@ -230,19 +230,25 @@ fun SoberHomeScreen(
             }
         }
 
-        // Bottom-right hint to swipe for settings
-        Row(
+        // Bottom area: sync status pill + Refresh / Settings
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            TextButton(onClick = { scope.launch { fetch() } }) {
-                Text(if (refreshing) "Refreshing…" else "Refresh", color = DIM, fontSize = 12.sp)
-            }
-            TextButton(onClick = onOpenSettings) {
-                Text("Settings ›", color = DIM, fontSize = 12.sp)
+            SyncStatusPill(settings = settings, nowMs = nowMs)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { scope.launch { fetch() } }) {
+                    Text(if (refreshing) "Refreshing…" else "Refresh", color = DIM, fontSize = 12.sp)
+                }
+                TextButton(onClick = onOpenSettings) {
+                    Text("Settings ›", color = DIM, fontSize = 12.sp)
+                }
             }
         }
     }
@@ -296,6 +302,51 @@ fun SoberHomeScreen(
     }
 }
 
+/**
+ * Compact bottom-of-screen status pill: green dot + "synced 4m ago",
+ * amber if stale (>30 min), red if HC perms revoked. The label updates
+ * automatically because [nowMs] ticks every second from the parent.
+ */
+@Composable
+private fun SyncStatusPill(
+    settings: SettingsRepository,
+    nowMs: Long,
+) {
+    val lastSync = settings.lastSyncInstant()
+    val lastSuccess = settings.lastSuccessInstant()
+    val permsLost = settings.permissionsLost
+
+    // Pick the freshest of the two for the relative-time display
+    val freshest = listOfNotNull(lastSync, lastSuccess).maxByOrNull { it.epochSecond }
+    val ageS = freshest?.let { (nowMs / 1000) - it.epochSecond } ?: -1L
+
+    val (dot, text) = when {
+        permsLost -> Color(0xFFEF4444) to "perms revoked — open Settings"
+        freshest == null -> Color(0xFF94A3B8) to "no sync yet"
+        ageS < 60 -> Color(0xFF22C55E) to "synced just now"
+        ageS < 3600 -> Color(0xFF22C55E) to "synced ${ageS / 60}m ago"
+        ageS < 86400 -> Color(0xFFEAB308) to "synced ${ageS / 3600}h ago"
+        else -> Color(0xFFEAB308) to "synced ${ageS / 86400}d ago"
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.padding(bottom = 4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(RoundedCornerShape(50))
+                .background(dot),
+        )
+        Text(
+            text = text,
+            color = DIM,
+            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+        )
+    }
+}
 
 private const val HOLD_DURATION_MS = 1500L
 

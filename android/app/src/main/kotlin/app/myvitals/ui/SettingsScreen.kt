@@ -103,7 +103,7 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    BrandMark(size = 22.dp)
+                    BrandMark(dimension = 22.dp)
                     Text(
                         "myvitals",
                         fontSize = 13.sp,

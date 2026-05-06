@@ -129,7 +129,7 @@ fun SoberHomeScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                BrandMark(size = 22.dp)
+                BrandMark(dimension = 22.dp)
                 Text(
                     "myvitals",
                     fontSize = 13.sp,
@@ -317,7 +317,7 @@ private fun EmptyState() {
             .clip(RoundedCornerShape(50))
             .border(1.5.dp, MV.Outline, RoundedCornerShape(50)),
         contentAlignment = Alignment.Center,
-    ) { BrandMark(size = 40.dp) }
+    ) { BrandMark(dimension = 40.dp) }
     Spacer(Modifier.height(24.dp))
     Text(
         "SOBER TIME",

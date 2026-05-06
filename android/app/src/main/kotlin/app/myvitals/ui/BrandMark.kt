@@ -1,9 +1,11 @@
 package app.myvitals.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.vector.PathParser
@@ -18,7 +20,7 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 fun BrandMark(
-    size: Dp = 28.dp,
+    dimension: Dp = 28.dp,
     heart: Color = Color(0xFFEF4444),
     trace: Color = Color(0xFFFFFFFF),
 ) {
@@ -36,9 +38,9 @@ fun BrandMark(
         ).toPath()
     }
 
-    Canvas(modifier = Modifier.size(size)) {
+    Canvas(modifier = Modifier.size(dimension)) {
         val s = this.size.minDimension / 108f
-        scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) {
+        scale(s, s, pivot = Offset.Zero) {
             drawPath(heartPath, heart)
             drawPath(tracePath, trace)
         }

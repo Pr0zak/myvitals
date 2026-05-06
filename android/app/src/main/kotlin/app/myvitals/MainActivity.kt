@@ -42,6 +42,14 @@ class MainActivity : ComponentActivity() {
             gateway.permissionContract()
         ) { granted ->
             Timber.i("HC permissions returned; granted=%d/%d", granted.size, gateway.requiredPermissions.size)
+            // If everything we need just got granted, fire a sync immediately so
+            // the dashboard's "permissions lost" banner clears within seconds
+            // instead of waiting up to 15 min for the next periodic worker.
+            if (granted.containsAll(gateway.requiredPermissions)) {
+                Timber.i("All HC perms granted — kicking off an immediate sync")
+                WorkManager.getInstance(applicationContext)
+                    .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
+            }
         }
 
         // Android 13+ requires runtime permission to post notifications.

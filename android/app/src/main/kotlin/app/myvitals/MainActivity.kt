@@ -60,6 +60,11 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Capture the activity reference outside `setContent` so it survives
+        // the Compose closures — `this` inside HorizontalPager's lambda
+        // resolves to PagerScope, not ComponentActivity.
+        val activity: ComponentActivity = this
+
         setContent {
             MyVitalsTheme {
                 // Two pages: 0 = Sober time (front-and-center reset),
@@ -102,7 +107,7 @@ class MainActivity : ComponentActivity() {
                                 WorkManager.getInstance(applicationContext)
                                     .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
                             },
-                            onOpenLogs = { LogViewerActivity.start(this) },
+                            onOpenLogs = { LogViewerActivity.start(activity) },
                             onClearBuffer = {
                                 Timber.w("User cleared sync buffer")
                                 CoroutineScope(Dispatchers.IO).launch {

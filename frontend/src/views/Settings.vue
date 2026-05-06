@@ -6,7 +6,7 @@ import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
 import { units, weightUnit, weightVal, weightToKg } from "@/units";
 import { themeChoice } from "@/theme";
-import { fmtDateTime } from "@/format";
+import { fmtDateTime, timeFormat } from "@/format";
 import type { StravaAppConfigStatus, StravaStatus } from "@/api/types";
 
 const tokenInput = ref(queryToken.value);
@@ -448,6 +448,12 @@ onUnmounted(stopJobPolling);
         <span>Units:</span>
         <label><input type="radio" value="metric" v-model="units"/> metric (km, kg, °C)</label>
         <label><input type="radio" value="imperial" v-model="units"/> imperial (mi, lb, °F)</label>
+      </label>
+      <label style="flex-direction: row; align-items: center; gap: 0.6rem;">
+        <span>Time format:</span>
+        <label><input type="radio" value="auto" v-model="timeFormat"/> auto (follow system)</label>
+        <label><input type="radio" value="12h" v-model="timeFormat"/> 12-hour (7:35 PM)</label>
+        <label><input type="radio" value="24h" v-model="timeFormat"/> 24-hour (19:35)</label>
       </label>
     </details>
 

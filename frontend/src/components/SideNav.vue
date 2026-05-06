@@ -67,6 +67,7 @@ const lastAttemptAt = ref<Date | null>(null);
 const permissionsLost = ref(false);
 const permsMissing = ref<string[] | null>(null);
 const soberDays = ref<number | null>(null);
+const backendVersion = ref<string | null>(null);
 const nowTick = ref(Date.now());
 
 async function refreshSidebarData() {
@@ -144,6 +145,8 @@ let pollHandle: ReturnType<typeof setInterval> | null = null;
 let tickHandle: ReturnType<typeof setInterval> | null = null;
 onMounted(() => {
   refreshSidebarData();
+  // /version is stable per deploy — fetch once, no need to poll.
+  api.version().then((v) => { backendVersion.value = v.version; }).catch(() => {});
   pollHandle = setInterval(refreshSidebarData, 60_000);
   tickHandle = setInterval(() => { nowTick.value = Date.now(); }, 30_000);
 });
@@ -311,7 +314,10 @@ const emit = defineEmits<{ (e: "navigate"): void }>();
         <div class="avatar">myv</div>
         <div class="user-meta">
           <div class="username">myvitals</div>
-          <div class="endpoint mono">{{ backendOk === false ? 'offline' : 'self-host · ok' }}</div>
+          <div class="endpoint mono">
+            {{ backendOk === false ? 'offline' : 'self-host · ok' }}
+            <span v-if="backendVersion" class="ver">· v{{ backendVersion }}</span>
+          </div>
         </div>
         <a href="https://github.com/Pr0zak/myvitals" target="_blank" rel="noreferrer"
            class="footer-link" title="View source on GitHub">
@@ -471,6 +477,7 @@ const emit = defineEmits<{ (e: "navigate"): void }>();
 .user-meta { flex: 1; min-width: 0; }
 .username { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .endpoint { font-size: 9.5px; color: #64748b; }
+.endpoint .ver { color: #94a3b8; font-weight: 500; }
 .footer-link {
   color: #64748b; display: flex;
   padding: 0.2rem; border-radius: 4px;

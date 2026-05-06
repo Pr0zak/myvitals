@@ -1,49 +1,63 @@
+import { ref, watch } from "vue";
+
 /**
- * Centralised time / date formatters. All user-facing time displays go
- * through these so the 12-hour preference is consistent and we don't have
- * to chase `hour12: true` flags across every component.
+ * Centralised time / date formatters. Whether to render times in 12h or
+ * 24h is a user preference, persisted in localStorage; "auto" defers to
+ * the OS locale. All user-facing time displays go through these helpers.
  */
 
-const TIME_OPTS: Intl.DateTimeFormatOptions = {
-  hour: "numeric",
-  minute: "2-digit",
-  hour12: true,
-};
+export type TimeFormat = "auto" | "12h" | "24h";
 
-const DATETIME_OPTS: Intl.DateTimeFormatOptions = {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  hour12: true,
-};
+const KEY = "myvitals.time_format";
 
-const DATETIME_WITH_SEC_OPTS: Intl.DateTimeFormatOptions = {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  second: "2-digit",
-  hour12: true,
-};
+function loadInitial(): TimeFormat {
+  const v = localStorage.getItem(KEY);
+  return v === "12h" || v === "24h" || v === "auto" ? v : "auto";
+}
+
+export const timeFormat = ref<TimeFormat>(loadInitial());
+watch(timeFormat, (v) => localStorage.setItem(KEY, v));
+
+function hour12(): boolean | undefined {
+  // Returning undefined lets toLocale*() defer to the OS locale.
+  if (timeFormat.value === "12h") return true;
+  if (timeFormat.value === "24h") return false;
+  return undefined;
+}
 
 function asDate(d: Date | string | number): Date {
   return d instanceof Date ? d : new Date(d);
 }
 
-/** "7:35 PM" */
+function timeOpts(): Intl.DateTimeFormatOptions {
+  return { hour: "numeric", minute: "2-digit", hour12: hour12() };
+}
+
+function dateTimeOpts(): Intl.DateTimeFormatOptions {
+  return {
+    year: "numeric", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: hour12(),
+  };
+}
+
+function dateTimeWithSecOpts(): Intl.DateTimeFormatOptions {
+  return {
+    year: "numeric", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit", second: "2-digit", hour12: hour12(),
+  };
+}
+
+/** "7:35 PM" (12h) or "19:35" (24h). */
 export function fmtTime(d: Date | string | number): string {
-  return asDate(d).toLocaleTimeString([], TIME_OPTS);
+  return asDate(d).toLocaleTimeString([], timeOpts());
 }
 
-/** "May 6, 2026, 7:35 PM" */
+/** "May 6, 2026, 7:35 PM" (12h) or "May 6, 2026, 19:35" (24h). */
 export function fmtDateTime(d: Date | string | number): string {
-  return asDate(d).toLocaleString([], DATETIME_OPTS);
+  return asDate(d).toLocaleString([], dateTimeOpts());
 }
 
-/** "May 6, 2026, 7:35:42 PM" — for diagnostic / log views */
+/** With seconds — for diagnostic / log views. */
 export function fmtDateTimeWithSec(d: Date | string | number): string {
-  return asDate(d).toLocaleString([], DATETIME_WITH_SEC_OPTS);
+  return asDate(d).toLocaleString([], dateTimeWithSecOpts());
 }

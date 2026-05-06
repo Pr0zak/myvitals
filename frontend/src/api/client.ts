@@ -211,6 +211,11 @@ export const api = {
     return data;
   },
 
+  async version(): Promise<{ version: string; git_sha: string; build_time: string }> {
+    const { data } = await http.get<{ version: string; git_sha: string; build_time: string }>("/version");
+    return data;
+  },
+
   async logs(opts: { since?: Date | string; source?: string; level?: string; limit?: number } = {}): Promise<import("./types").AppLog[]> {
     const params: Record<string, string | number> = {};
     if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;

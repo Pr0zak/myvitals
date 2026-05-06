@@ -1,18 +1,35 @@
 import type { Activity, Annotation } from "@/api/types";
 import { chartTheme } from "@/theme";
+import { fmtTime, timeFormat } from "@/format";
 import { computed } from "vue";
 
 /** A no-icon SVG path so markPoint can render dots without text. */
 const DOT_SYMBOL = "circle";
 
+/**
+ * Smart time-axis label formatter. Renders intraday timestamps as the
+ * user's preferred 12h/24h format and dates (midnight) as "MMM d".
+ * Reading `timeFormat.value` here means callers must reference it in
+ * their computed() to trigger a re-render when the user toggles.
+ */
+function timeAxisFormatter(v: number): string {
+  const d = new Date(v);
+  // Midnight tick → show date label instead of "12:00 AM" / "00:00"
+  if (d.getHours() === 0 && d.getMinutes() === 0) {
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  }
+  return fmtTime(d);
+}
+
 /** Common ECharts options every time-series chart starts from. */
 export function baseTimeOption() {
   const t = chartTheme.value;
+  void timeFormat.value;  // re-render charts when the user flips 12h/24h
   return {
     grid: { left: 40, right: 12, top: 8, bottom: 28 },
     xAxis: {
       type: "time",
-      axisLabel: t.axisLabel,
+      axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
       splitLine: { show: false },
     },
     yAxis: {

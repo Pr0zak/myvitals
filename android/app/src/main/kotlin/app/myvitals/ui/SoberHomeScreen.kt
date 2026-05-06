@@ -71,9 +71,24 @@ fun SoberHomeScreen(
     var current by remember { mutableStateOf<SoberCurrentResponse?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
-    var showResetDialog by remember { mutableStateOf(false) }
     var resetting by remember { mutableStateOf(false) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    suspend fun doReset() {
+        if (!settings.isConfigured()) { loadError = "Backend not configured"; return }
+        resetting = true
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            withContext(Dispatchers.IO) {
+                api.soberReset(SoberResetRequest(addiction = "alcohol"))
+            }
+            // Refetch from backend
+            current = withContext(Dispatchers.IO) { api.soberCurrent() }
+        } catch (e: Exception) {
+            Timber.w(e, "soberReset failed")
+            loadError = "Reset failed: ${e.message?.take(120)}"
+        } finally { resetting = false }
+    }
 
     suspend fun fetch() {
         if (!settings.isConfigured()) {
@@ -117,23 +132,50 @@ fun SoberHomeScreen(
         }
     }
 
+    // Big faded BrandMark sits behind everything as a watermark — adds
+    // brand identity to the screen without taking real estate from the
+    // counter or reset button.
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MV.Bg),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 80.dp),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            BrandMark(
+                dimension = 360.dp,
+                heart = MV.BrandRed.copy(alpha = 0.05f),
+                trace = MV.OnSurface.copy(alpha = 0.04f),
+            )
+        }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MV.Bg)
             .statusBarsPadding()
             .navigationBarsPadding(),
     ) {
-        // ── Top brand row — centered logo, dots beneath ──
-        Column(
+        // ── Top brand row — wordmark only; the big logo is the watermark behind. ──
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 16.dp, bottom = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            BrandMark(dimension = 44.dp)
-            Spacer(Modifier.height(10.dp))
+            Text(
+                "myvitals",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.4.sp,
+                color = MV.OnSurfaceVariant,
+            )
             PagerDots(active = 0)
+            Spacer(Modifier.width(48.dp))
         }
 
         // ── Hero ──
@@ -207,7 +249,9 @@ fun SoberHomeScreen(
         Box(modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 18.dp)) {
             ResetButton(
                 hasActive = active != null,
-                onTap = { showResetDialog = true },
+                onTriggered = {
+                    scope.launch { doReset() }
+                },
                 resetting = resetting,
             )
         }
@@ -261,36 +305,9 @@ fun SoberHomeScreen(
             )
         }
     }
+    }   // Close watermark Box wrapper
 
-    // ── Hold-to-reset dialog ──
-    if (showResetDialog) {
-        HoldToResetDialog(
-            currentDays = d,
-            currentHours = h,
-            onDismiss = { showResetDialog = false },
-            onConfirm = {
-                showResetDialog = false
-                scope.launch {
-                    resetting = true
-                    try {
-                        if (!settings.isConfigured()) {
-                            loadError = "Backend not configured"; return@launch
-                        }
-                        val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-                        withContext(Dispatchers.IO) {
-                            api.soberReset(SoberResetRequest(addiction = "alcohol"))
-                        }
-                        fetch()
-                    } catch (e: Exception) {
-                        Timber.w(e, "soberReset failed")
-                        loadError = "Reset failed: ${e.message?.take(120)}"
-                    } finally {
-                        resetting = false
-                    }
-                }
-            },
-        )
-    }
+    // (Hold-to-reset is now the home button itself — no popup.)
 }
 
 @Composable
@@ -342,7 +359,8 @@ private fun EmptyState() {
 }
 
 @Composable
-private fun ResetButton(hasActive: Boolean, onTap: () -> Unit, resetting: Boolean) {
+private fun ResetButton(hasActive: Boolean, onTriggered: () -> Unit, resetting: Boolean) {
+    // No-active-streak: simple tap, this is the lightweight "Start counting" path.
     if (!hasActive) {
         Box(
             modifier = Modifier
@@ -350,7 +368,7 @@ private fun ResetButton(hasActive: Boolean, onTap: () -> Unit, resetting: Boolea
                 .height(88.dp)
                 .clip(RoundedCornerShape(24.dp))
                 .background(MV.SurfaceContainer)
-                .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) },
+                .pointerInput(Unit) { detectTapGestures(onTap = { onTriggered() }) },
             contentAlignment = Alignment.Center,
         ) {
             Text(
@@ -361,65 +379,9 @@ private fun ResetButton(hasActive: Boolean, onTap: () -> Unit, resetting: Boolea
         }
         return
     }
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(96.dp)
-            .clip(RoundedCornerShape(28.dp))
-            .background(MV.Amber)
-            .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = if (resetting) "Resetting…" else "Reset streak",
-            fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.6.sp, color = MV.AmberOn,
-        )
-    }
-}
-
-/**
- * Bottom-sheet style dialog with a hold-to-confirm button. The button's
- * progress fill grows from 0 to 100% over 1.5s; releasing early aborts.
- */
-@Composable
-private fun HoldToResetDialog(
-    currentDays: Int,
-    currentHours: Int,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = MV.SurfaceContainerHigh,
-        shape = RoundedCornerShape(32.dp),
-        title = {
-            Text(
-                "Reset your sober streak?",
-                fontSize = 22.sp, fontWeight = FontWeight.Medium,
-                color = MV.OnSurface,
-            )
-        },
-        text = {
-            Text(
-                "This will end your current ${currentDays}-day, ${currentHours}h streak. " +
-                "The reset point will be logged at this moment. This can't be undone.",
-                fontSize = 14.sp, color = MV.OnSurfaceVariant, lineHeight = 21.sp,
-            )
-        },
-        confirmButton = {
-            HoldToConfirmButton(onConfirm = onConfirm)
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = MV.OnSurfaceVariant, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            }
-        },
-    )
-}
-
-@Composable
-private fun HoldToConfirmButton(onConfirm: () -> Unit) {
+    // Active streak: hold-to-open. Same gesture pattern as the dialog's
+    // confirm button — completing the hold opens the popup instead of
+    // firing the reset, so casual taps never even see the dialog.
     val progress = remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
     var heldJob: Job? = remember { null }
@@ -430,9 +392,9 @@ private fun HoldToConfirmButton(onConfirm: () -> Unit) {
             .fillMaxWidth()
             .height(96.dp)
             .clip(RoundedCornerShape(28.dp))
-            .background(MV.SurfaceContainer)
-            .border(1.5.dp, MV.Amber, RoundedCornerShape(28.dp))
-            .pointerInput(Unit) {
+            .background(MV.AmberDim)
+            .pointerInput(resetting) {
+                if (resetting) return@pointerInput
                 detectTapGestures(
                     onPress = {
                         progress.floatValue = 0f
@@ -444,7 +406,7 @@ private fun HoldToConfirmButton(onConfirm: () -> Unit) {
                                 val p = (elapsed.toFloat() / HOLD_DURATION_MS).coerceIn(0f, 1f)
                                 progress.floatValue = p
                                 if (p >= 1f) {
-                                    onConfirm(); break
+                                    onTriggered(); break
                                 }
                                 delay(16)
                             }
@@ -456,41 +418,26 @@ private fun HoldToConfirmButton(onConfirm: () -> Unit) {
                 )
             },
     ) {
-        // Progress fill (gradient amber → amberDim)
         Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .fillMaxWidth(progress.floatValue)
-                .background(
-                    Brush.horizontalGradient(listOf(MV.Amber, MV.AmberDim)),
-                ),
+                .fillMaxWidth(if (resetting) 1f else progress.floatValue.coerceAtLeast(if (holding) 0.001f else 1f))
+                .background(MV.Amber),
         )
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                text = if (holding) "Keep holding…" else "Press and hold",
-                fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.4.sp,
-                color = if (progress.floatValue > 0.5f) MV.AmberOn else MV.OnSurface,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = if (holding) {
-                    val seconds = (progress.floatValue * (HOLD_DURATION_MS / 1000f) * 10).toInt() / 10f
-                    "${seconds}s of ${HOLD_DURATION_MS / 1000f}s"
-                } else {
-                    "Release to cancel"
+                text = when {
+                    resetting -> "Resetting…"
+                    holding -> "Keep holding…"
+                    else -> "Press & hold to reset"
                 },
-                fontSize = 12.sp, letterSpacing = 0.2.sp,
-                color = if (progress.floatValue > 0.5f) MV.AmberOn.copy(alpha = 0.8f)
-                        else MV.OnSurfaceVariant,
+                fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.6.sp, color = MV.AmberOn,
             )
         }
     }
 }
+
 
 @Composable
 private fun SyncStatusPill(settings: SettingsRepository, nowMs: Long) {

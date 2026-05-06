@@ -4,6 +4,7 @@ import VChart from "vue-echarts";
 import Card from "../Card.vue";
 import type { HeartRateSeries } from "@/api/types";
 import { fmtTime } from "@/format";
+import { timeAxisFormatter } from "@/components/charts/chartHelpers";
 
 const props = defineProps<{ series: HeartRateSeries | null }>();
 
@@ -17,7 +18,7 @@ const option = computed(() => ({
   grid: { left: 36, right: 12, top: 8, bottom: 24 },
   xAxis: {
     type: "time",
-    axisLabel: { color: "#64748b", fontSize: 10 },
+    axisLabel: { color: "#64748b", fontSize: 10, formatter: timeAxisFormatter },
     splitLine: { show: false },
   },
   yAxis: {

@@ -86,25 +86,55 @@ fun SettingsScreen(
         ).show()
     }
 
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MV.Bg),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 80.dp),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            BrandMark(
+                dimension = 360.dp,
+                heart = MV.BrandRed.copy(alpha = 0.05f),
+                trace = MV.OnSurface.copy(alpha = 0.04f),
+            )
+        }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(MV.Bg)
             .statusBarsPadding()
             .navigationBarsPadding(),
         contentPadding = PaddingValues(bottom = 32.dp),
     ) {
-        // ── Top brand row — centered logo, dots beneath ──
+        // ── Top brand row — original left layout, slightly larger logo ──
         item {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 16.dp, bottom = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                BrandMark(dimension = 44.dp)
-                Spacer(Modifier.height(10.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    BrandMark(dimension = 32.dp)
+                    Text(
+                        "myvitals",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.4.sp,
+                        color = MV.OnSurfaceVariant,
+                    )
+                }
                 PagerDotsLocal(active = 1)
+                Spacer(Modifier.width(48.dp))
             }
         }
 

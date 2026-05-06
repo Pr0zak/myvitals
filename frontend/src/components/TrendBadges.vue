@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
-import { ArrowUp, ArrowDown, Minus, Zap, Flame, AlertTriangle } from "lucide-vue-next";
+import { onMounted, ref } from "vue";
+import { ArrowUp, ArrowDown, Minus, Zap, Flame, AlertTriangle, Sparkles } from "lucide-vue-next";
 import { api } from "@/api/client";
 
 interface Badge {
@@ -11,6 +11,9 @@ interface Badge {
   tone: "good" | "warn" | "bad" | "neutral";
   direction: "up" | "down" | "flat" | "spike" | "streak";
 }
+
+const props = defineProps<{ clickable?: boolean }>();
+const emit = defineEmits<{ (e: "badge-clicked", key: string): void }>();
 
 const badges = ref<Badge[]>([]);
 const loading = ref(true);
@@ -26,6 +29,10 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+function onClick(b: Badge) {
+  if (props.clickable) emit("badge-clicked", b.key);
 }
 
 onMounted(load);
@@ -55,7 +62,10 @@ function iconFor(b: Badge) {
   </div>
   <div v-else class="badges">
     <div v-for="b in badges" :key="b.key" class="badge"
-         :style="{ '--tone': TONE_COLOR[b.tone] }">
+         :class="{ clickable }"
+         :style="{ '--tone': TONE_COLOR[b.tone] }"
+         :title="clickable ? 'Click for AI-explained context' : ''"
+         @click="onClick(b)">
       <component :is="iconFor(b)" :size="14" class="badge-icon"/>
       <div class="badge-text">
         <div class="badge-head">
@@ -64,13 +74,17 @@ function iconFor(b: Badge) {
         </div>
         <div class="badge-sub">{{ b.subtitle }}</div>
       </div>
+      <Sparkles v-if="clickable" :size="11" class="badge-ai-hint"/>
     </div>
   </div>
 </template>
 
 <style scoped>
 .badges {
-  display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.6rem 0 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem;
+  margin: 0.6rem 0 1rem;
 }
 .badges-loading, .badges-err, .badges-empty {
   color: var(--muted-2); font-size: 0.85rem; padding: 0.4rem 0;
@@ -83,7 +97,7 @@ function iconFor(b: Badge) {
   background: color-mix(in srgb, var(--tone) 8%, var(--surface-2));
   border: 1px solid color-mix(in srgb, var(--tone) 35%, transparent);
   border-radius: 10px;
-  min-width: 0; max-width: 320px;
+  min-width: 0;
 }
 .badge-icon { color: var(--tone); flex-shrink: 0; }
 .badge-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
@@ -97,4 +111,11 @@ function iconFor(b: Badge) {
   font-feature-settings: "tnum";
 }
 .badge-sub { color: var(--muted); font-size: 0.72rem; line-height: 1.2; }
+.badge.clickable { cursor: pointer; transition: transform 0.1s, border-color 0.1s; }
+.badge.clickable:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--tone) 60%, transparent);
+}
+.badge-ai-hint { color: var(--violet); opacity: 0.6; flex-shrink: 0; }
+.badge.clickable:hover .badge-ai-hint { opacity: 1; }
 </style>

@@ -11,7 +11,7 @@ import { chartTheme } from "@/theme";
 import { fmtDateTime } from "@/format";
 import { tempUnit, isImperial } from "@/units";
 import { TrendingUp, TrendingDown, Sparkles } from "lucide-vue-next";
-import { annotationMarkPoint, baseTimeOption, meanMarkLine, soberResetMarkLine, workoutMarkArea } from "@/components/charts/chartHelpers";
+import { annotationMarkPoint, baseTimeOption, meanMarkLine, soberResetMarkLine, timeAxisFormatter, workoutMarkArea } from "@/components/charts/chartHelpers";
 
 import Card from "@/components/Card.vue";
 import RecoveryCard from "@/components/RecoveryCard.vue";
@@ -80,6 +80,32 @@ async function askTopic(topic: Topic) {
     }
   } finally { aiBusy.value = false; }
 }
+
+// Re-ask the current topic — useful when the cached response feels stale
+// (server-side cache is keyed by payload hash, so a real refresh requires
+// the data to have moved since last call. If hash unchanged we just see
+// the same cached body again — that's expected, not a bug).
+async function refreshTopic() {
+  if (activeTopic.value) await askTopic(activeTopic.value as Topic);
+}
+
+// Click handler for trend badges → AI explain on the relevant topic.
+// Maps badge.key → topic. Bad/warn badges nudge toward the topic that
+// most likely explains them; good streaks open the matching topic too.
+function onBadgeClicked(badgeKey: string) {
+  if (!aiCfg.value?.enabled) return;
+  const topic: Topic =
+    badgeKey.startsWith("sleep") ? "sleep"
+    : badgeKey === "sober" ? "sober"
+    : badgeKey.includes("anomaly") ? "anomaly"
+    : "recovery";
+  askTopic(topic);
+  // Scroll to the AI card if needed (it's at the top, but nice for confirmation)
+  setTimeout(() => {
+    document.querySelector(".ai-topics")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 50);
+}
+
 onMounted(loadAi);
 const hrv = ref<HrvSeries | null>(null);
 const sleep = ref<SleepNight | null>(null);
@@ -474,7 +500,9 @@ const stepsBarOption = computed(() => {
   return {
     grid: { left: 36, right: 12, top: 8, bottom: 24 },
     xAxis: {
-      type: "time", axisLabel: t.axisLabel, splitLine: { show: false },
+      type: "time",
+      axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
+      splitLine: { show: false },
       min: xWindow.value.min, max: xWindow.value.max,
     },
     yAxis: { type: "value", axisLabel: t.axisLabel, splitLine: t.splitLine },
@@ -522,6 +550,43 @@ const subtitleHr = computed(() => {
     <div v-if="error" class="err">{{ error }}</div>
 
     <div v-if="!loading">
+      <!-- ════ AI + Trend badges at the top ══════════════════════ -->
+      <!-- AI insights card (only if enabled in Settings) -->
+      <Card v-if="aiCfg?.enabled" title="AI insights"
+            :subtitle="aiCfg ? `${aiCfg.calls_today}/${aiCfg.daily_call_limit} today · ${aiCfg.model.replace(/-\\d{8}$/, '')}` : ''">
+        <div class="ai-topics">
+          <button v-for="t in AI_TOPICS" :key="t.id" class="ai-topic"
+                  :class="{ active: activeTopic === t.id, primary: t.id === 'week' }"
+                  :disabled="aiBusy" @click="askTopic(t.id)">
+            {{ t.label }}
+          </button>
+        </div>
+        <div v-if="aiError" class="err" style="margin-top:0.5rem;">{{ aiError }}</div>
+        <div v-if="aiBusy" class="muted ai-thinking">Thinking…</div>
+        <div v-else-if="aiTopicResult" class="ai-card" :class="`tone-${aiTopicResult.tone}`">
+          <div class="ai-headline">{{ aiTopicResult.headline }}</div>
+          <ul class="ai-evidence">
+            <li v-for="(e, i) in aiTopicResult.evidence" :key="i">{{ e }}</li>
+          </ul>
+          <div v-if="aiTopicResult.suggestion" class="ai-suggestion">
+            <strong>Try:</strong> {{ aiTopicResult.suggestion }}
+          </div>
+          <div class="ai-foot muted">
+            {{ aiTopicResult.cached ? 'cached' : 'fresh' }}
+            · {{ aiTopicResult.model.replace(/-\\d{8}$/, '') }}
+            · {{ fmtDateTime(aiTopicResult.generated_at) }}
+            <button v-if="aiTopicResult.cached && activeTopic" class="ai-refresh"
+                    :disabled="aiBusy" @click="refreshTopic">↻ refresh</button>
+          </div>
+        </div>
+        <div v-else class="muted" style="margin-top:0.4rem; font-size:0.85rem;">
+          Pick a topic for a focused, structured read of your data.
+        </div>
+      </Card>
+
+      <!-- Trend badges — pure stats, no LLM, always on -->
+      <TrendBadges @badge-clicked="onBadgeClicked" :clickable="aiCfg?.enabled" />
+
       <!-- KPI headline strip — 4 trend badges above the hero -->
       <div v-if="summary" class="kpi-strip">
         <div class="kpi-badge"
@@ -803,39 +868,6 @@ const subtitleHr = computed(() => {
       </Card>
     </div>
 
-    <!-- Trend badges — pure stats, no LLM, always on -->
-    <TrendBadges />
-
-    <!-- AI insights card — opt-in via Settings -->
-    <Card v-if="aiCfg?.enabled" title="AI insights"
-          :subtitle="aiCfg ? `${aiCfg.calls_today}/${aiCfg.daily_call_limit} today · ${aiCfg.model.replace(/-\\d{8}$/, '')}` : ''">
-      <div class="ai-topics">
-        <button v-for="t in AI_TOPICS" :key="t.id" class="ai-topic"
-                :class="{ active: activeTopic === t.id, primary: t.id === 'week' }"
-                :disabled="aiBusy" @click="askTopic(t.id)">
-          {{ t.label }}
-        </button>
-      </div>
-      <div v-if="aiError" class="err" style="margin-top:0.5rem;">{{ aiError }}</div>
-      <div v-if="aiBusy" class="muted ai-thinking">Thinking…</div>
-      <div v-else-if="aiTopicResult" class="ai-card" :class="`tone-${aiTopicResult.tone}`">
-        <div class="ai-headline">{{ aiTopicResult.headline }}</div>
-        <ul class="ai-evidence">
-          <li v-for="(e, i) in aiTopicResult.evidence" :key="i">{{ e }}</li>
-        </ul>
-        <div v-if="aiTopicResult.suggestion" class="ai-suggestion">
-          <strong>Try:</strong> {{ aiTopicResult.suggestion }}
-        </div>
-        <div class="ai-foot muted">
-          {{ aiTopicResult.cached ? 'cached' : 'fresh' }}
-          · {{ aiTopicResult.model.replace(/-\\d{8}$/, '') }}
-          · {{ fmtDateTime(aiTopicResult.generated_at) }}
-        </div>
-      </div>
-      <div v-else class="muted" style="margin-top:0.4rem; font-size:0.85rem;">
-        Pick a topic for a focused, structured read.
-      </div>
-    </Card>
 
     <!-- Recent insights — violet ribbon (auto-discovered correlations) -->
     <div v-if="discoveries.length" class="insights-ribbon">
@@ -976,7 +1008,16 @@ h1 { margin: 0; }
 .ai-foot {
   margin-top: 0.5rem; font-size: 0.7rem; font-family: 'Geist Mono', monospace;
   color: var(--muted-2); letter-spacing: 0.02em;
+  display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;
 }
+.ai-refresh {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--muted); border-radius: 4px;
+  font-size: 0.7rem; padding: 0.15rem 0.5rem; cursor: pointer;
+  font-family: inherit; margin-left: auto;
+}
+.ai-refresh:hover { color: var(--accent); border-color: var(--accent); }
+.ai-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Violet "Recent insights" ribbon */
 .insights-ribbon {

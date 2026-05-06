@@ -7,18 +7,28 @@ import { computed } from "vue";
 const DOT_SYMBOL = "circle";
 
 /**
- * Smart time-axis label formatter. Renders intraday timestamps as the
+ * Smart time-axis label formatter. Renders intraday timestamps in the
  * user's preferred 12h/24h format and dates (midnight) as "MMM d".
  * Reading `timeFormat.value` here means callers must reference it in
  * their computed() to trigger a re-render when the user toggles.
+ *
+ * Exported so charts that build their own xAxis (HR component,
+ * Activity detail, Today's steps) can apply it directly.
  */
-function timeAxisFormatter(v: number): string {
+export function timeAxisFormatter(v: number): string {
   const d = new Date(v);
   // Midnight tick → show date label instead of "12:00 AM" / "00:00"
   if (d.getHours() === 0 && d.getMinutes() === 0) {
     return d.toLocaleDateString([], { month: "short", day: "numeric" });
   }
   return fmtTime(d);
+}
+
+/** Drop-in `axisLabel` object for ECharts time axes that respects the
+ *  user's 12h/24h preference. Use as: `axisLabel: { ...t.axisLabel, ...timeAxisLabel() }`. */
+export function timeAxisLabel() {
+  void timeFormat.value;  // re-render trigger
+  return { formatter: timeAxisFormatter };
 }
 
 /** Common ECharts options every time-series chart starts from. */

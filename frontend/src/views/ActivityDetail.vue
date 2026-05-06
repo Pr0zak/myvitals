@@ -12,6 +12,7 @@ import type { Activity, HeartRateSeries } from "@/api/types";
 import { chartTheme, effectiveTheme } from "@/theme";
 import { fmtDistance, fmtElevation, distanceVal, distanceUnit, isImperial } from "@/units";
 import { fmtDateTime } from "@/format";
+import { timeAxisFormatter } from "@/components/charts/chartHelpers";
 
 const route = useRoute();
 const router = useRouter();
@@ -211,7 +212,7 @@ const hrChartOption = computed(() => {
   const end = start + activity.value.duration_s * 1000;
   return {
     grid: { left: 40, right: 12, top: 8, bottom: 28 },
-    xAxis: { type: "time", axisLabel: t.axisLabel, splitLine: { show: false } },
+    xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter }, splitLine: { show: false } },
     yAxis: { type: "value", axisLabel: t.axisLabel, splitLine: t.splitLine, scale: true },
     tooltip: { trigger: "axis", ...t.tooltip },
     series: [{

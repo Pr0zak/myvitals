@@ -342,6 +342,7 @@ fun SettingsScreen(
             )
         }
     }
+    }   // Close watermark Box wrapper
 }
 
 // ── Layout primitives ───────────────────────────────────────────

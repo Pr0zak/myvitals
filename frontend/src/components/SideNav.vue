@@ -107,7 +107,12 @@ function relTime(d: Date | null, now: number): string {
   const days = Math.floor(h / 24);
   return `${days}d ago`;
 }
-const lastSyncLabel = computed(() => relTime(lastSyncAt.value, nowTick.value));
+// Show "last attempt" rather than "newest vital" so the chip means the
+// same thing as the phone app's status pill ("phone tried X ago").
+// Falls back to lastSync if heartbeats aren't yet flowing (older APK).
+const lastSyncLabel = computed(() =>
+  relTime(lastAttemptAt.value ?? lastSyncAt.value, nowTick.value)
+);
 
 // Sync-health derivation. Three buckets:
 //  - "ok"     — recent attempt + no perms issue (green)

@@ -268,7 +268,7 @@ class AiConfig(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     anthropic_api_key: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    model: Mapped[str] = mapped_column(String(64), default="claude-sonnet-4-6")
+    model: Mapped[str] = mapped_column(String(64), default="claude-haiku-4-5-20251001")
     daily_call_limit: Mapped[int] = mapped_column(Integer, default=10)
     calls_today: Mapped[int] = mapped_column(Integer, default=0)
     calls_today_date: Mapped[date | None] = mapped_column(Date, nullable=True)

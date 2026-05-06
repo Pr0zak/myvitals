@@ -94,30 +94,17 @@ fun SettingsScreen(
             .navigationBarsPadding(),
         contentPadding = PaddingValues(bottom = 32.dp),
     ) {
-        // ── Top brand row ──
+        // ── Top brand row — centered logo, dots beneath ──
         item {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                    .padding(top = 16.dp, bottom = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    BrandMark(dimension = 22.dp)
-                    Text(
-                        "myvitals",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 0.4.sp,
-                        color = MV.OnSurfaceVariant,
-                    )
-                }
+                BrandMark(dimension = 44.dp)
+                Spacer(Modifier.height(10.dp))
                 PagerDotsLocal(active = 1)
-                Spacer(Modifier.width(64.dp))
             }
         }
 

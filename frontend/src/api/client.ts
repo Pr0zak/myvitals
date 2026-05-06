@@ -266,6 +266,28 @@ export const api = {
     return data;
   },
 
+  async aiBadges(): Promise<Array<{
+    key: string; label: string; value: string; subtitle: string;
+    tone: "good" | "warn" | "bad" | "neutral";
+    direction: "up" | "down" | "flat" | "spike" | "streak";
+  }>> {
+    const { data } = await http.get("/ai/badges");
+    return data;
+  },
+
+  async aiExplainTopic(topic: "week" | "month" | "sleep" | "recovery" | "sober" | "anomaly"): Promise<{
+    headline: string;
+    tone: "good" | "warn" | "bad" | "neutral";
+    evidence: string[];
+    suggestion: string;
+    generated_at: string;
+    model: string;
+    cached: boolean;
+  }> {
+    const { data } = await http.post(`/ai/explain/${topic}`);
+    return data;
+  },
+
   async logs(opts: { since?: Date | string; source?: string; level?: string; limit?: number } = {}): Promise<import("./types").AppLog[]> {
     const params: Record<string, string | number> = {};
     if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;

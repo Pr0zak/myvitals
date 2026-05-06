@@ -9,7 +9,6 @@ import type {
 } from "@/api/types";
 import { chartTheme } from "@/theme";
 import { fmtDateTime } from "@/format";
-import { renderMarkdown } from "@/markdown";
 import { tempUnit, isImperial } from "@/units";
 import { TrendingUp, TrendingDown, Sparkles } from "lucide-vue-next";
 import { annotationMarkPoint, baseTimeOption, meanMarkLine, soberResetMarkLine, workoutMarkArea } from "@/components/charts/chartHelpers";
@@ -18,6 +17,7 @@ import Card from "@/components/Card.vue";
 import RecoveryCard from "@/components/RecoveryCard.vue";
 import SleepCard from "@/components/SleepCard.vue";
 import StepsCard from "@/components/StepsCard.vue";
+import TrendBadges from "@/components/TrendBadges.vue";
 
 type Range = "6h" | "24h" | "3d" | "7d";
 const RANGES: { key: Range; hours: number; label: string }[] = [
@@ -46,21 +46,31 @@ async function loadDiscoveries() {
 }
 onMounted(loadDiscoveries);
 
-// ── AI summary ─────────────────────────────────────────────
+// ── AI insights ─────────────────────────────────────────────
 const aiCfg = ref<Awaited<ReturnType<typeof api.aiConfig>> | null>(null);
-const aiSummary = ref<{ content: string; generated_at: string; model: string } | null>(null);
+const aiTopicResult = ref<Awaited<ReturnType<typeof api.aiExplainTopic>> | null>(null);
+const activeTopic = ref<string | null>(null);
 const aiBusy = ref(false);
 const aiError = ref<string | null>(null);
+
+type Topic = "week" | "month" | "sleep" | "recovery" | "sober" | "anomaly";
+const AI_TOPICS: { id: Topic; label: string }[] = [
+  { id: "week",     label: "This week" },
+  { id: "sleep",    label: "Sleep" },
+  { id: "recovery", label: "Recovery" },
+  { id: "sober",    label: "Sober" },
+  { id: "anomaly",  label: "Anomalies" },
+  { id: "month",    label: "Month" },
+];
+
 async function loadAi() {
   try { aiCfg.value = await api.aiConfig(); } catch { return; }
-  if (!aiCfg.value?.enabled) return;
-  try { aiSummary.value = await api.aiLatest("week"); } catch { /* ignore */ }
 }
-async function askAi(range: "week" | "month") {
-  aiBusy.value = true; aiError.value = null;
+async function askTopic(topic: Topic) {
+  aiBusy.value = true; aiError.value = null; activeTopic.value = topic;
   try {
-    aiSummary.value = await api.aiExplain(range);
-    await loadAi();  // refresh calls_today counter
+    aiTopicResult.value = await api.aiExplainTopic(topic);
+    await loadAi();
   } catch (e: unknown) {
     if (e && typeof e === "object" && "response" in e) {
       const r = (e as { response?: { status?: number; data?: { detail?: string } } }).response;
@@ -793,20 +803,37 @@ const subtitleHr = computed(() => {
       </Card>
     </div>
 
-    <!-- AI summary card — opt-in via Settings -->
-    <Card v-if="aiCfg?.enabled" title="AI summary"
-          :subtitle="aiSummary?.generated_at ? `last generated ${fmtDateTime(aiSummary.generated_at)}` : 'click to generate'">
-      <div class="ai-actions">
-        <button class="ai-btn primary" :disabled="aiBusy" @click="askAi('week')">
-          {{ aiBusy ? 'Thinking…' : 'Explain my week' }}
+    <!-- Trend badges — pure stats, no LLM, always on -->
+    <TrendBadges />
+
+    <!-- AI insights card — opt-in via Settings -->
+    <Card v-if="aiCfg?.enabled" title="AI insights"
+          :subtitle="aiCfg ? `${aiCfg.calls_today}/${aiCfg.daily_call_limit} today · ${aiCfg.model.replace(/-\\d{8}$/, '')}` : ''">
+      <div class="ai-topics">
+        <button v-for="t in AI_TOPICS" :key="t.id" class="ai-topic"
+                :class="{ active: activeTopic === t.id, primary: t.id === 'week' }"
+                :disabled="aiBusy" @click="askTopic(t.id)">
+          {{ t.label }}
         </button>
-        <button class="ai-btn" :disabled="aiBusy" @click="askAi('month')">Explain my month</button>
-        <span v-if="aiCfg" class="muted ai-meta">{{ aiCfg.calls_today }}/{{ aiCfg.daily_call_limit }} today · {{ aiCfg.model }}</span>
       </div>
       <div v-if="aiError" class="err" style="margin-top:0.5rem;">{{ aiError }}</div>
-      <div v-if="aiSummary?.content" class="ai-content" v-html="renderMarkdown(aiSummary.content)"/>
-      <div v-else-if="!aiBusy" class="muted" style="margin-top:0.4rem; font-size:0.85rem;">
-        Pick a range to get a plain-English read of your data.
+      <div v-if="aiBusy" class="muted ai-thinking">Thinking…</div>
+      <div v-else-if="aiTopicResult" class="ai-card" :class="`tone-${aiTopicResult.tone}`">
+        <div class="ai-headline">{{ aiTopicResult.headline }}</div>
+        <ul class="ai-evidence">
+          <li v-for="(e, i) in aiTopicResult.evidence" :key="i">{{ e }}</li>
+        </ul>
+        <div v-if="aiTopicResult.suggestion" class="ai-suggestion">
+          <strong>Try:</strong> {{ aiTopicResult.suggestion }}
+        </div>
+        <div class="ai-foot muted">
+          {{ aiTopicResult.cached ? 'cached' : 'fresh' }}
+          · {{ aiTopicResult.model.replace(/-\\d{8}$/, '') }}
+          · {{ fmtDateTime(aiTopicResult.generated_at) }}
+        </div>
+      </div>
+      <div v-else class="muted" style="margin-top:0.4rem; font-size:0.85rem;">
+        Pick a topic for a focused, structured read.
       </div>
     </Card>
 
@@ -904,28 +931,52 @@ h1 { margin: 0; }
   color: var(--kpi-c); font-variant-numeric: tabular-nums;
 }
 
-/* AI summary card */
-.ai-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
-.ai-btn {
+/* AI insights card */
+.ai-topics { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+.ai-topic {
   background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
-  border-radius: 8px; padding: 0.5rem 0.9rem; cursor: pointer; font-family: inherit;
-  font-size: 0.85rem;
+  border-radius: 100px; padding: 0.4rem 0.85rem; cursor: pointer; font-family: inherit;
+  font-size: 0.82rem;
 }
-.ai-btn:hover { border-color: var(--accent); }
-.ai-btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-.ai-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.ai-meta { font-size: 0.75rem; margin-left: auto; }
-.ai-content {
-  margin-top: 0.8rem; padding: 0.8rem 1rem;
-  background: rgba(167, 139, 250, 0.05);
-  border-left: 3px solid var(--violet);
-  border-radius: 4px;
-  color: var(--text-soft); font-size: 0.92rem; line-height: 1.55;
+.ai-topic:hover { border-color: var(--accent); color: var(--accent); }
+.ai-topic.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.ai-topic.primary { background: var(--surface-2); color: var(--text); border-color: rgba(56, 189, 248, 0.4); }
+.ai-topic.primary.active, .ai-topic.primary:hover {
+  background: var(--accent); color: var(--accent-text); border-color: var(--accent);
 }
-.ai-content :deep(h2) { margin: 0.4rem 0 0.6rem; font-size: 1.05rem; color: var(--text); }
-.ai-content :deep(p) { margin: 0.6rem 0; }
-.ai-content :deep(ul) { margin: 0.4rem 0; padding-left: 1.2rem; }
-.ai-content :deep(strong) { color: var(--text); }
+.ai-topic:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ai-thinking { margin-top: 0.6rem; font-size: 0.85rem; color: var(--muted); }
+
+.ai-card {
+  margin-top: 0.6rem; padding: 0.85rem 1rem;
+  background: rgba(148, 163, 184, 0.04);
+  border-left: 3px solid var(--muted-2);
+  border-radius: 6px;
+}
+.ai-card.tone-good { border-left-color: var(--good); background: rgba(34, 197, 94, 0.05); }
+.ai-card.tone-warn { border-left-color: var(--warn); background: rgba(234, 179, 8, 0.05); }
+.ai-card.tone-bad  { border-left-color: var(--bad);  background: rgba(239, 68, 68, 0.05); }
+
+.ai-headline {
+  font-size: 1rem; font-weight: 600; color: var(--text);
+  letter-spacing: -0.01em; margin-bottom: 0.6rem; line-height: 1.35;
+}
+.ai-evidence { margin: 0.3rem 0 0.7rem; padding-left: 1.1rem; }
+.ai-evidence li {
+  color: var(--text-soft); font-size: 0.88rem; line-height: 1.5;
+  margin-bottom: 0.25rem;
+}
+.ai-suggestion {
+  margin-top: 0.5rem; padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+  color: var(--text-soft); font-size: 0.88rem;
+}
+.ai-suggestion strong { color: var(--accent); margin-right: 0.3rem; }
+.ai-foot {
+  margin-top: 0.5rem; font-size: 0.7rem; font-family: 'Geist Mono', monospace;
+  color: var(--muted-2); letter-spacing: 0.02em;
+}
 
 /* Violet "Recent insights" ribbon */
 .insights-ribbon {

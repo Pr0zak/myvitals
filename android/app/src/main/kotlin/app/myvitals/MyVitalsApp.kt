@@ -5,6 +5,7 @@ import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import app.myvitals.debug.LogUploadWorker
@@ -70,14 +71,22 @@ class MyVitalsApp : Application() {
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
-        val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(24, TimeUnit.HOURS)
+        // Tighter cadence so notifications about new builds don't lag a day.
+        val periodic = PeriodicWorkRequestBuilder<UpdateCheckWorker>(6, TimeUnit.HOURS)
             .setConstraints(constraints)
             .build()
-
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             UpdateCheckWorker.UNIQUE_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
-            request,
+            ExistingPeriodicWorkPolicy.UPDATE,  // pick up the new 6h period on upgrade
+            periodic,
         )
+
+        // One-shot on every app start so users get notified within seconds of
+        // opening the app if a release dropped overnight.
+        val oneShot = OneTimeWorkRequestBuilder<UpdateCheckWorker>()
+            .setConstraints(constraints)
+            .build()
+        WorkManager.getInstance(this).enqueue(oneShot)
+        Timber.d("Update check: 6h periodic + one-shot on launch")
     }
 }

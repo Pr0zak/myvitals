@@ -1,4 +1,4 @@
-"""AI summary endpoints — config + explain + weekly digest."""
+"""AI summary endpoints — config + targeted explain + weekly digest."""
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
@@ -9,10 +9,17 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..analytics.trends import compute_badges
 from ..auth import require_query
 from ..db import models
 from ..db.session import get_session
-from ..integrations.claude import build_summary_payload, explain, hash_payload
+from ..integrations.claude import (
+    build_summary_payload,
+    build_topic_payload,
+    explain_legacy,
+    explain_topic,
+    hash_payload,
+)
 
 router = APIRouter(prefix="/ai", dependencies=[Depends(require_query)])
 
@@ -28,12 +35,14 @@ def _mask_key(k: str | None) -> str | None:
 async def _get_config(db: AsyncSession) -> models.AiConfig:
     cfg = await db.get(models.AiConfig, 1)
     if cfg is None:
-        cfg = models.AiConfig(id=1, enabled=False, model="claude-sonnet-4-6")
+        cfg = models.AiConfig(id=1, enabled=False, model="claude-haiku-4-5-20251001")
         db.add(cfg)
         await db.commit()
         await db.refresh(cfg)
     return cfg
 
+
+# ─────────────── Config ───────────────
 
 @router.get("/config")
 async def get_config(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
@@ -51,7 +60,7 @@ async def get_config(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
 
 class ConfigUpdate(BaseModel):
     enabled: bool | None = None
-    anthropic_api_key: str | None = None  # null = leave unchanged; "" = clear
+    anthropic_api_key: str | None = None
     clear_key: bool = False
     model: str | None = None
     daily_call_limit: int | None = None
@@ -80,30 +89,38 @@ async def update_config(
     return await get_config(db)
 
 
+# ─────────────── Trend badges (no LLM) ───────────────
+
+@router.get("/badges")
+async def get_badges(db: AsyncSession = Depends(get_session)) -> list[dict[str, Any]]:
+    """Pure-stats trend badges for the Today header. No external calls."""
+    return await compute_badges(db, max_badges=5)
+
+
+# ─────────────── Preview / debug ───────────────
+
 @router.get("/preview-payload")
 async def preview_payload(
-    range: str = "week", db: AsyncSession = Depends(get_session)
+    range: str = "week",
+    topic: str | None = None,
+    db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Return the exact aggregate JSON we'd send to Claude — for the user to
-    audit before flipping the feature on. No external calls are made."""
+    """Return the exact aggregate JSON we'd send to Claude — for the user
+    to audit before flipping the feature on. No external calls."""
+    if topic and topic in ("sleep", "recovery", "sober", "anomaly"):
+        return await build_topic_payload(db, topic, days=14)
     if range not in ("week", "month"):
         raise HTTPException(status_code=400, detail="range must be week or month")
     return await build_summary_payload(db, range)
 
 
-@router.post("/explain")
-async def explain_endpoint(
-    range: str = "week", db: AsyncSession = Depends(get_session)
-) -> dict[str, Any]:
-    if range not in ("week", "month"):
-        raise HTTPException(status_code=400, detail="range must be week or month")
-    cfg = await _get_config(db)
+# ─────────────── Quota guard ───────────────
+
+async def _check_and_bump_quota(db: AsyncSession, cfg: models.AiConfig) -> None:
     if not cfg.enabled:
         raise HTTPException(status_code=400, detail="AI summaries disabled in Settings")
     if not cfg.anthropic_api_key:
         raise HTTPException(status_code=400, detail="Anthropic API key not configured")
-
-    # Reset daily counter at UTC midnight rollover
     today = date.today()
     if cfg.calls_today_date != today:
         cfg.calls_today = 0
@@ -114,10 +131,20 @@ async def explain_endpoint(
             detail=f"Daily call limit ({cfg.daily_call_limit}) reached",
         )
 
+
+# ─────────────── Legacy free-form explain (markdown) ───────────────
+
+@router.post("/explain")
+async def explain_endpoint(
+    range: str = "week", db: AsyncSession = Depends(get_session)
+) -> dict[str, Any]:
+    if range not in ("week", "month"):
+        raise HTTPException(status_code=400, detail="range must be week or month")
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+
     payload = await build_summary_payload(db, range)
     payload_hash = hash_payload(payload)
-
-    # Cache hit: return existing summary for the same payload-hash + range.
     cached = (await db.execute(
         select(models.AiSummary)
         .where(models.AiSummary.range_kind == range)
@@ -127,16 +154,12 @@ async def explain_endpoint(
     )).scalar_one_or_none()
     if cached is not None:
         return {
-            "content": cached.content,
-            "generated_at": cached.generated_at,
-            "model": cached.model,
-            "cached": True,
-            "input_tokens": cached.input_tokens,
-            "output_tokens": cached.output_tokens,
+            "content": cached.content, "generated_at": cached.generated_at,
+            "model": cached.model, "cached": True,
+            "input_tokens": cached.input_tokens, "output_tokens": cached.output_tokens,
         }
 
-    result = await explain(db, range, cfg)
-
+    result = await explain_legacy(db, range, cfg)
     cfg.calls_today += 1
     summary = models.AiSummary(
         generated_at=datetime.now(timezone.utc),
@@ -149,14 +172,10 @@ async def explain_endpoint(
     )
     db.add(summary)
     await db.commit()
-
     return {
-        "content": result.content,
-        "generated_at": summary.generated_at,
-        "model": result.model,
-        "cached": False,
-        "input_tokens": result.input_tokens,
-        "output_tokens": result.output_tokens,
+        "content": result.content, "generated_at": summary.generated_at,
+        "model": result.model, "cached": False,
+        "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
     }
 
 
@@ -164,8 +183,6 @@ async def explain_endpoint(
 async def latest_summary(
     range: str = "week", db: AsyncSession = Depends(get_session)
 ) -> dict[str, Any] | None:
-    """Return the most recent AI summary for the given range, if any.
-    Used by Today.vue to show last week's digest without re-billing."""
     if range not in ("week", "month"):
         raise HTTPException(status_code=400, detail="range must be week or month")
     row = (await db.execute(
@@ -176,8 +193,72 @@ async def latest_summary(
     )).scalar_one_or_none()
     if row is None:
         return None
+    return {"content": row.content, "generated_at": row.generated_at, "model": row.model}
+
+
+# ─────────────── Targeted explain (structured JSON) ───────────────
+
+ALLOWED_TOPICS = {"week", "month", "sleep", "recovery", "sober", "anomaly"}
+
+
+@router.post("/explain/{topic}")
+async def explain_topic_endpoint(
+    topic: str, db: AsyncSession = Depends(get_session)
+) -> dict[str, Any]:
+    """Targeted analysis with structured output. Returns:
+        { headline, tone, evidence: [...], suggestion, generated_at, model }"""
+    if topic not in ALLOWED_TOPICS:
+        raise HTTPException(status_code=400, detail=f"topic must be one of {sorted(ALLOWED_TOPICS)}")
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+
+    if topic in ("week", "month"):
+        payload = await build_summary_payload(db, topic)
+    else:
+        payload = await build_topic_payload(db, topic, days=14)
+    payload_hash = hash_payload({"topic": topic, **payload})
+
+    cached = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == topic)
+        .where(models.AiSummary.payload_hash == payload_hash)
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if cached is not None:
+        try:
+            import json as _json
+            data = _json.loads(cached.content)
+        except Exception:  # noqa: BLE001
+            data = {"headline": cached.content, "tone": "neutral", "evidence": [], "suggestion": ""}
+        return {
+            **data,
+            "generated_at": cached.generated_at,
+            "model": cached.model,
+            "cached": True,
+        }
+
+    result = await explain_topic(db, topic, cfg)
+    cfg.calls_today += 1
+    summary = models.AiSummary(
+        generated_at=datetime.now(timezone.utc),
+        range_kind=topic,
+        payload_hash=payload_hash,
+        model=result.model,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        content=result.content,
+    )
+    db.add(summary)
+    await db.commit()
+    import json as _json
+    try:
+        data = _json.loads(result.content)
+    except Exception:  # noqa: BLE001
+        data = {"headline": result.content, "tone": "neutral", "evidence": [], "suggestion": ""}
     return {
-        "content": row.content,
-        "generated_at": row.generated_at,
-        "model": row.model,
+        **data,
+        "generated_at": summary.generated_at,
+        "model": result.model,
+        "cached": False,
     }

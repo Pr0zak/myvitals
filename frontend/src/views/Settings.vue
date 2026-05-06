@@ -78,6 +78,31 @@ async function aiUpdateLimit(n: number) {
   try { await api.aiUpdateConfig({ daily_call_limit: Math.floor(n) }); await loadAiCfg(); }
   catch { /* swallow */ }
 }
+async function aiUpdateModel(model: string) {
+  if (!model) return;
+  try { await api.aiUpdateConfig({ model }); await loadAiCfg(); }
+  catch { /* swallow */ }
+}
+
+// Available Claude models with their cost / capability profile so the
+// picker can show "Haiku (cheapest, fast)" rather than just an ID.
+const AI_MODELS = [
+  {
+    id: "claude-haiku-4-5-20251001",
+    label: "Haiku 4.5",
+    sub: "cheapest, fastest — recommended for structured summaries",
+  },
+  {
+    id: "claude-sonnet-4-6",
+    label: "Sonnet 4.6",
+    sub: "stronger reasoning, ~4× the cost of Haiku",
+  },
+  {
+    id: "claude-opus-4-7",
+    label: "Opus 4.7",
+    sub: "deepest analysis, ~5× Sonnet — overkill for daily reads",
+  },
+];
 async function aiPreview() {
   aiPreviewing.value = true; aiPreviewJson.value = "";
   try {
@@ -488,23 +513,27 @@ onUnmounted(stopJobPolling);
 
     <details class="section" open>
       <summary><h2>Display</h2></summary>
-      <label style="flex-direction: row; align-items: center; gap: 0.6rem;">
-        <span>Theme:</span>
-        <label><input type="radio" value="dark" v-model="themeChoice"/> dark</label>
-        <label><input type="radio" value="light" v-model="themeChoice"/> light</label>
-        <label><input type="radio" value="auto" v-model="themeChoice"/> auto (follow system)</label>
-      </label>
-      <label style="flex-direction: row; align-items: center; gap: 0.6rem;">
-        <span>Units:</span>
-        <label><input type="radio" value="metric" v-model="units"/> metric (km, kg, °C)</label>
-        <label><input type="radio" value="imperial" v-model="units"/> imperial (mi, lb, °F)</label>
-      </label>
-      <label style="flex-direction: row; align-items: center; gap: 0.6rem;">
-        <span>Time format:</span>
-        <label><input type="radio" value="auto" v-model="timeFormat"/> auto (follow system)</label>
-        <label><input type="radio" value="12h" v-model="timeFormat"/> 12-hour (7:35 PM)</label>
-        <label><input type="radio" value="24h" v-model="timeFormat"/> 24-hour (19:35)</label>
-      </label>
+      <div class="display-grid">
+        <div class="lbl">Theme</div>
+        <div class="choices">
+          <label class="pick"><input type="radio" value="dark" v-model="themeChoice"/> Dark</label>
+          <label class="pick"><input type="radio" value="light" v-model="themeChoice"/> Light</label>
+          <label class="pick"><input type="radio" value="auto" v-model="themeChoice"/> Auto</label>
+        </div>
+
+        <div class="lbl">Units</div>
+        <div class="choices">
+          <label class="pick"><input type="radio" value="metric" v-model="units"/> Metric (km, kg, °C)</label>
+          <label class="pick"><input type="radio" value="imperial" v-model="units"/> Imperial (mi, lb, °F)</label>
+        </div>
+
+        <div class="lbl">Time format</div>
+        <div class="choices">
+          <label class="pick"><input type="radio" value="auto" v-model="timeFormat"/> Auto</label>
+          <label class="pick"><input type="radio" value="12h" v-model="timeFormat"/> 12-hour <span class="muted">(7:35 PM)</span></label>
+          <label class="pick"><input type="radio" value="24h" v-model="timeFormat"/> 24-hour <span class="muted">(19:35)</span></label>
+        </div>
+      </div>
     </details>
 
     <details class="section" v-if="queryToken && profile" open>
@@ -608,6 +637,17 @@ onUnmounted(stopJobPolling);
           <input type="checkbox" :checked="!!aiCfg?.weekly_digest_enabled"
                  @change="aiToggleWeekly(($event.target as HTMLInputElement).checked)"/>
           <span>Weekly digest (Sunday 22:00)</span>
+        </label>
+        <label class="ai-toggle">
+          <span>Model:</span>
+          <select :value="aiCfg?.model ?? 'claude-haiku-4-5-20251001'"
+                  @change="aiUpdateModel(($event.target as HTMLSelectElement).value)"
+                  style="min-width: 180px;">
+            <option v-for="m in AI_MODELS" :key="m.id" :value="m.id">{{ m.label }}</option>
+          </select>
+          <span class="muted" style="font-size: 0.75rem;">
+            {{ AI_MODELS.find((m) => m.id === aiCfg?.model)?.sub ?? '' }}
+          </span>
         </label>
         <label class="ai-toggle">
           <span>Daily call limit:</span>
@@ -909,6 +949,46 @@ tr.job-failed { background: rgba(239, 68, 68, 0.05); }
 .zone-3 { background: rgba(234, 179, 8, 0.18); color: #eab308; }
 .zone-4 { background: rgba(249, 115, 22, 0.18); color: #f97316; }
 .zone-5 { background: rgba(239, 68, 68, 0.20); color: #ef4444; }
+
+.display-grid {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 0.7rem 1rem;
+  align-items: center;
+  margin-top: 0.4rem;
+}
+.display-grid .lbl {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  text-align: right;
+}
+.display-grid .choices {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.display-grid .pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  margin-bottom: 0;
+  color: var(--text);
+}
+.display-grid .pick:hover { border-color: var(--accent); }
+.display-grid .pick input[type="radio"] { margin: 0; }
+.display-grid .pick .muted { color: var(--muted); font-size: 0.78rem; }
+@media (max-width: 520px) {
+  .display-grid { grid-template-columns: 1fr; }
+  .display-grid .lbl { text-align: left; }
+}
 
 .ai-toggles { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.6rem 0 0.4rem; }
 .ai-toggle { flex-direction: row; align-items: center; gap: 0.5rem; font-size: 0.85rem; }

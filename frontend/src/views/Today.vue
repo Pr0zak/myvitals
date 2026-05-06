@@ -50,6 +50,15 @@ const activities = ref<Activity[]>([]);
 const annotations = ref<Annotation[]>([]);
 const sober = ref<Awaited<ReturnType<typeof api.soberCurrent>> | null>(null);
 const loading = ref(true);
+
+// SleepNight.total_s is the in-bed window (start→end). For "Sleep last
+// night" the headline number people expect is time *asleep* — subtract
+// the awake bucket. Same convention as SleepCard.vue.
+const asleepSeconds = computed(() => {
+  if (!sleep.value) return 0;
+  const awake = sleep.value.stages.find((s) => s.stage === "awake")?.duration_s ?? 0;
+  return Math.max(0, sleep.value.total_s - awake);
+});
 const error = ref<string | null>(null);
 
 // Blood pressure
@@ -587,7 +596,7 @@ const subtitleHr = computed(() => {
           <div class="kpi-tile">
             <div class="kpi-lbl">Sleep last night</div>
             <div class="kpi-num" :style="{ color: '#a78bfa' }">
-              <strong>{{ sleep ? hM(sleep.total_s) : '—' }}</strong>
+              <strong>{{ sleep ? hM(asleepSeconds) : '—' }}</strong>
             </div>
             <div class="kpi-sub muted">
               <template v-if="summary?.sleep_score != null">

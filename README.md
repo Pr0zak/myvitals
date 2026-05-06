@@ -101,16 +101,3 @@ deploy/                   ct-bootstrap.sh + upgrade.sh
 docs/                     architecture / operations / releasing + images
 ```
 
-## Privacy
-
-This is a personal-data app. The repo is public; the data is not.
-
-- **Never commit `.env`** — it holds bearer tokens, the DB password, any HA token. `.gitignore` blocks it. Same for `keystore.properties` and `*.jks`.
-- **No real data in the repo** — the DB volume lives outside the repo; migrations create empty schemas only.
-- **Bearer tokens** — generate with `openssl rand -hex 32`. Rotate by editing `.env` and `docker compose restart backend`.
-- **Sober history, watch data, screenshots** — keep all of it on the host. The Sober Time CSV importer in Settings lives behind your bearer token.
-- **Before pushing**, run:
-  ```bash
-  git diff --cached | grep -iE 'token|password|secret|@gmail|@outlook|10\.[0-9]+\.[0-9]+|192\.168'
-  ```
-

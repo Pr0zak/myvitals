@@ -24,3 +24,19 @@ def require_query(authorization: str = Header(...)) -> None:
     if scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="bearer required")
     _check(token, settings.query_token)
+
+
+def require_any(authorization: str = Header(...)) -> None:
+    """Accept either the ingest or the query token. Used on endpoints
+    that both the phone and the dashboard legitimately need — e.g. sober
+    time, where the phone's reset button and the dashboard counter both
+    hit the same API but the phone only stores one (ingest) token."""
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="bearer required")
+    if token != settings.ingest_token and token != settings.query_token:
+        raise HTTPException(
+            status_code=401,
+            detail="invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )

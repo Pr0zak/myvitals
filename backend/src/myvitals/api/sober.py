@@ -9,11 +9,14 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import require_query
+from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
 
-router = APIRouter(prefix="/sober", dependencies=[Depends(require_query)])
+# Both the dashboard and the phone need to hit /sober/* — the phone only
+# stores the ingest token, the dashboard sends the query token. require_any
+# accepts either.
+router = APIRouter(prefix="/sober", dependencies=[Depends(require_any)])
 
 
 class SoberStreakOut(BaseModel):

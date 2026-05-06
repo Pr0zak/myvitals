@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="200" height="200" role="img" aria-label="myvitals logo">
+  <rect width="108" height="108" rx="22" fill="#0B1018"/>
+  <path d="M54,76 C 54,76 30,60 30,46 C 30,38 36,33 43,33 C 49,33 52,36 54,40 C 56,36 59,33 65,33 C 72,33 78,38 78,46 C 78,60 54,76 54,76 Z" fill="#EF4444"/>
+  <path d="M30,52 L42,52 L46,46 L50,58 L54,40 L58,58 L62,46 L66,52 L78,52 L78,55 L66,55 L62,49 L58,61 L54,43 L50,61 L46,49 L42,55 L30,55 Z" fill="#FFFFFF"/>
+</svg>

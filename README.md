@@ -1,25 +1,59 @@
-# myvitals
+<p align="center">
+  <img src="docs/images/wordmark.svg" alt="myvitals — self-hosted, personal, health" width="540"/>
+</p>
 
-Self-hosted personal health tracking & analytics. Single user.
+<p align="center">
+  Self-hosted personal health tracking &amp; analytics. <em>Single user.</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Pr0zak/myvitals/releases/latest"><img src="https://img.shields.io/github/v/release/Pr0zak/myvitals?include_prereleases&color=ef4444&label=release" alt="release"/></a>
+  <a href="https://github.com/Pr0zak/myvitals/actions/workflows/android-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/Pr0zak/myvitals/android-release.yml?branch=main&label=APK%20build" alt="APK build"/></a>
+  <img src="https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white" alt="python"/>
+  <img src="https://img.shields.io/badge/vue-3-42b883?logo=vue.js&logoColor=white" alt="vue 3"/>
+  <img src="https://img.shields.io/badge/kotlin-android-7f52ff?logo=kotlin&logoColor=white" alt="kotlin"/>
+</p>
+
+---
+
+<p align="center">
+  <img src="docs/images/feature-strip.svg" alt="features" width="100%"/>
+</p>
+
+## What it does
+
+Pulls your **Pixel Watch / Wear OS** data out of **Health Connect** on the phone, ships it to a **FastAPI + TimescaleDB** backend you run yourself, and renders a **Vue 3 + ECharts** dashboard on top. No cloud, no third-party SaaS — your health data lives on hardware you own.
+
+- **Today** — readiness ring, KPI grid (HR, BP, sleep, recovery, steps, watch wear-time, sober counter), 24h heart-rate ribbon with sync-gap visualisation
+- **Trends** — long-term overlays (RHR / HRV / Recovery / Sleep) with sober-reset markers
+- **Insights** — story-first feed of auto-discovered correlations (`More alcohol → less HRV`) with plain-English effect sentences and an explorer for ad-hoc questions
+- **Sleep / Weight / Blood pressure / Skin Δ** — dedicated views per metric
+- **Sober time** — live `d/h/m/s` counter on the phone home screen with a 1.5s hold-to-confirm reset, full history with editable streaks, distribution + timeline charts on the web
+- **Activities** — Strava sync + Garmin/Fitbit imports, GPS map view, side-by-side compare
+- **Log** — caffeine / alcohol / mood / food / meds, all editable inline (date/time included)
+- **Calendar** — year heatmap, any metric
+
+Companion **Android app** does the heavy lifting: Health Connect reads on a 15-min `WorkManager`, retries via local Room buffer, posts a structured **sync heartbeat** to the backend so the dashboard can tell the difference between "phone is offline", "HC perms revoked", and "watch isn't pushing data".
+
+## Architecture
 
 ```
 Pixel Watch 3
      │
      ▼  Health Connect
-  Phone (Kotlin app — Health Connect → WorkManager → Retrofit)
+  Phone (Kotlin / Compose — Health Connect → WorkManager → Retrofit)
      │
-     ▼  HTTP(S) POST + bearer token        ↩ optional log shipping
-  FastAPI ingest  ──►  TimescaleDB  ◄──────  HA REST poller (env_readings)
-     │
+     ▼  HTTP(S) bearer token              ↩ /ingest/heartbeat
+  FastAPI ingest  ──►  TimescaleDB  ◄──── HA REST poller (env_readings)
+     │                                         (optional)
      ▼
-  Vue 3 + ECharts dashboard      iOS-style: Today / Trends / Sleep / Log / Logs / Settings
+  Vue 3 + ECharts dashboard
+   ├ Today / Trends / Insights / Sleep / Activities
+   ├ Calendar / Compare / Sober / Log / Logs
+   └ Settings (token, units, theme, profile, imports, Strava)
 ```
 
-## Status
-
-- **Backend, frontend, Android app**: shipped through v0.1.4.
-- **Production deploy**: an unprivileged Proxmox LXC running Docker Compose (see `docs/operations.md`).
-- **Releases**: signed APK + GHCR images on every `v*` tag (see `docs/releasing.md`).
+Full diagram in [`docs/architecture.md`](docs/architecture.md).
 
 ## Stack
 
@@ -27,8 +61,8 @@ Pixel Watch 3
 |----------|------|
 | Backend  | FastAPI, SQLAlchemy 2.x, asyncpg, Alembic, APScheduler |
 | DB       | PostgreSQL 16 + TimescaleDB |
-| Frontend | Vue 3, Vite, ECharts |
-| Android  | Kotlin, Compose, Health Connect, WorkManager, Retrofit, Room, Timber |
+| Frontend | Vue 3, Vite, ECharts, Lucide, Geist |
+| Android  | Kotlin, Compose Material 3, Health Connect, WorkManager, Retrofit, Room, Timber |
 | Deploy   | Docker Compose in a Proxmox LXC (unprivileged, runc 1.1.x) |
 | CI       | GitHub Actions → GHCR images + signed APK on tag |
 | Tooling  | uv (Python), pnpm (frontend) |
@@ -43,25 +77,40 @@ cd backend && uv sync && uv run alembic upgrade head && uv run fastapi dev src/m
 cd frontend && cp .env.example .env && pnpm install && pnpm dev
 ```
 
-## Deploy (Proxmox CT)
+Open `http://localhost:5173`, paste your `QUERY_TOKEN` in Settings, and the dashboard wires up.
 
-See `docs/releasing.md` for the keystore + secrets dance and `docs/operations.md` for the running CT.
+## Deploy
+
+Production runs in an unprivileged Proxmox LXC with Docker Compose:
+
+```bash
+# Bootstrap a fresh CT (pulls runc 1.1.x to dodge the unprivileged-LXC sysctl bug)
+deploy/ct-bootstrap.sh
+```
+
+See [`docs/operations.md`](docs/operations.md) for day-to-day commands and [`docs/releasing.md`](docs/releasing.md) for the keystore + GHCR + APK release flow.
 
 ## Repo layout
 
-- `backend/` — FastAPI ingest + analytics
-- `frontend/` — Vue 3 dashboard
-- `android/` — Health Connect companion app (open in Android Studio)
-- `deploy/` — CT bootstrap + upgrade scripts
-- `.github/workflows/` — `images.yml` (GHCR) + `android-release.yml` (signed APK)
-- `docs/` — architecture, releasing, operations
+```
+backend/                  FastAPI ingest + analytics + alembic migrations
+frontend/                 Vue 3 dashboard
+android/                  Kotlin / Compose companion app
+deploy/                   ct-bootstrap.sh + upgrade.sh
+.github/workflows/        images.yml (GHCR) + android-release.yml (signed APK)
+docs/                     architecture / operations / releasing + images
+```
 
 ## Privacy
 
-This is a personal-data app. Treat the repo as if it could one day be public.
+This is a personal-data app. The repo is public; the data is not.
 
-- **Never commit `.env`** — it holds bearer tokens, the DB password, any HA token. `.gitignore` blocks it.
-- **No real data in the repo** — the DB volume (`db_data`) lives outside the repo; migrations create empty schemas only.
+- **Never commit `.env`** — it holds bearer tokens, the DB password, any HA token. `.gitignore` blocks it. Same for `keystore.properties` and `*.jks`.
+- **No real data in the repo** — the DB volume lives outside the repo; migrations create empty schemas only.
 - **Bearer tokens** — generate with `openssl rand -hex 32`. Rotate by editing `.env` and `docker compose restart backend`.
-- **Don't paste real values into examples** — `.env.example` is a template; keep it free of locations, hostnames, IPs, or anything you wouldn't put on a sticker.
-- **Before pushing**, run: `git diff --cached | grep -iE 'token|password|secret|@gmail|@outlook|192\.168|10\.\d+\.\d+'`
+- **Sober history, watch data, screenshots** — keep all of it on the host. The Sober Time CSV importer in Settings lives behind your bearer token.
+- **Before pushing**, run:
+  ```bash
+  git diff --cached | grep -iE 'token|password|secret|@gmail|@outlook|10\.[0-9]+\.[0-9]+|192\.168'
+  ```
+

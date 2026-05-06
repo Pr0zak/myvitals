@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 180" width="720" height="180" role="img" aria-label="myvitals — self-hosted personal health">
+  <style>
+    .wm-name { font-family: 'Geist', 'Helvetica Neue', system-ui, sans-serif; font-weight: 600; font-size: 64px; fill: #E2E8F0; letter-spacing: -0.02em; }
+    .wm-tag  { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 18px; fill: #94A3B8; letter-spacing: 0.06em; text-transform: uppercase; }
+  </style>
+  <rect width="720" height="180" rx="20" fill="#0B1018"/>
+  <!-- Logo tile -->
+  <g transform="translate(34,30)">
+    <rect width="120" height="120" rx="22" fill="#1A2332"/>
+    <g transform="translate(6,6) scale(1.0)">
+      <path d="M54,76 C 54,76 30,60 30,46 C 30,38 36,33 43,33 C 49,33 52,36 54,40 C 56,36 59,33 65,33 C 72,33 78,38 78,46 C 78,60 54,76 54,76 Z" fill="#EF4444" transform="scale(1.08)"/>
+      <path d="M30,52 L42,52 L46,46 L50,58 L54,40 L58,58 L62,46 L66,52 L78,52 L78,55 L66,55 L62,49 L58,61 L54,43 L50,61 L46,49 L42,55 L30,55 Z" fill="#FFFFFF" transform="scale(1.08)"/>
+    </g>
+  </g>
+  <!-- Wordmark -->
+  <text x="186" y="86" class="wm-name">myvitals</text>
+  <text x="188" y="120" class="wm-tag">self-hosted · personal · health</text>
+</svg>

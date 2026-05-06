@@ -952,42 +952,71 @@ tr.job-failed { background: rgba(239, 68, 68, 0.05); }
 
 .display-grid {
   display: grid;
-  grid-template-columns: 100px 1fr;
-  gap: 0.7rem 1rem;
+  grid-template-columns: 96px 1fr;
+  gap: 0.6rem 1rem;
   align-items: center;
   margin-top: 0.4rem;
 }
 .display-grid .lbl {
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
   font-weight: 600;
   text-align: right;
+  align-self: center;
 }
+/* Segmented control — pills look + behave like a single button group.
+   Native radio is hidden via opacity:0 + absolute, the whole label is
+   the click target. Active state is filled accent. */
 .display-grid .choices {
-  display: flex;
-  gap: 0.4rem;
+  display: inline-flex;
   flex-wrap: wrap;
+  gap: 0;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
 }
 .display-grid .pick {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 0.85rem;
+  justify-content: center;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--muted);
   cursor: pointer;
-  margin-bottom: 0;
-  color: var(--text);
+  border-radius: 6px;
+  margin: 0;
+  white-space: nowrap;
+  transition: background-color 0.12s, color 0.12s;
+  user-select: none;
+  flex-direction: row;
 }
-.display-grid .pick:hover { border-color: var(--accent); }
-.display-grid .pick input[type="radio"] { margin: 0; }
-.display-grid .pick .muted { color: var(--muted); font-size: 0.78rem; }
+.display-grid .pick input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+.display-grid .pick:hover { color: var(--text); }
+.display-grid .pick:has(input:checked) {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.display-grid .pick .muted {
+  color: inherit; opacity: 0.7;
+  margin-left: 0.35rem; font-size: 0.78rem; font-weight: 400;
+}
 @media (max-width: 520px) {
   .display-grid { grid-template-columns: 1fr; }
   .display-grid .lbl { text-align: left; }
+  .display-grid .choices { width: 100%; }
+  .display-grid .pick { flex: 1; }
 }
 
 .ai-toggles { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.6rem 0 0.4rem; }

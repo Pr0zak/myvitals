@@ -178,7 +178,7 @@ fun SoberHomeScreen(
                     try {
                         val inst = Instant.parse(active.startAt)
                         val zoned = inst.atZone(ZoneId.systemDefault())
-                        zoned.format(DateTimeFormatter.ofPattern("EEE d MMM, HH:mm"))
+                        zoned.format(DateTimeFormatter.ofPattern("EEE d MMM, h:mm a"))
                     } catch (_: Exception) { active.startAt }
                 }
                 Text(

@@ -9,6 +9,7 @@ import { useRoute, useRouter } from "vue-router";
 import Card from "@/components/Card.vue";
 import ActivityIcon from "@/components/ActivityIcon.vue";
 import { api } from "@/api/client";
+import { fmtDateTime } from "@/format";
 import type { Activity, HeartRateSeries } from "@/api/types";
 import { chartTheme, effectiveTheme } from "@/theme";
 import { fmtDistance, fmtElevation, distanceVal, distanceUnit } from "@/units";
@@ -216,8 +217,8 @@ onUnmounted(() => { if (map) { map.remove(); map = null; } });
         </thead>
         <tbody>
           <tr><td class="m">Date</td>
-              <td>{{ a ? new Date(a.start_at).toLocaleString() : '—' }}</td>
-              <td>{{ b ? new Date(b.start_at).toLocaleString() : '—' }}</td>
+              <td>{{ a ? fmtDateTime(a.start_at) : '—' }}</td>
+              <td>{{ b ? fmtDateTime(b.start_at) : '—' }}</td>
               <td>—</td></tr>
           <tr><td class="m">Distance</td>
               <td>{{ fmtDistance(a?.distance_m, 2) }}</td>

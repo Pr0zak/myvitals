@@ -3,6 +3,7 @@ import { computed } from "vue";
 import VChart from "vue-echarts";
 import Card from "../Card.vue";
 import type { HeartRateSeries } from "@/api/types";
+import { fmtTime } from "@/format";
 
 const props = defineProps<{ series: HeartRateSeries | null }>();
 
@@ -33,7 +34,7 @@ const option = computed(() => ({
     formatter: (params: any) => {
       const p = params[0];
       const d = new Date(p.value[0]);
-      return `${d.toLocaleTimeString()}<br/><b>${Math.round(p.value[1])} bpm</b>`;
+      return `${fmtTime(d)}<br/><b>${Math.round(p.value[1])} bpm</b>`;
     },
   },
   series: [

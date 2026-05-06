@@ -21,6 +21,7 @@ import {
   Terminal, Thermometer, TrendingUp, type LucideIcon,
 } from "lucide-vue-next";
 import { api } from "@/api/client";
+import { fmtDateTime } from "@/format";
 import { fmtWeight, fmtDistance, weightVal, distanceUnit } from "@/units";
 import AppLogo from "@/components/AppLogo.vue";
 
@@ -132,8 +133,8 @@ const syncChipText = computed(() => {
 
 const syncChipTitle = computed(() => {
   const lines: string[] = [];
-  if (lastSyncAt.value) lines.push(`Last data: ${lastSyncAt.value.toLocaleString()}`);
-  if (lastAttemptAt.value) lines.push(`Last attempt: ${lastAttemptAt.value.toLocaleString()}`);
+  if (lastSyncAt.value) lines.push(`Last data: ${fmtDateTime(lastSyncAt.value)}`);
+  if (lastAttemptAt.value) lines.push(`Last attempt: ${fmtDateTime(lastAttemptAt.value)}`);
   if (permsMissing.value?.length) lines.push(`Missing perms: ${permsMissing.value.join(", ")}`);
   if (lines.length === 0) return "No sync data yet";
   return lines.join("\n");

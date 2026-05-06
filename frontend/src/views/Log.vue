@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { Pencil, Trash2, X, Check } from "lucide-vue-next";
 import { api } from "@/api/client";
 import type { Annotation, AnnotationCreate } from "@/api/types";
+import { fmtDateTime } from "@/format";
 
 type LogType = "caffeine" | "alcohol" | "mood" | "food" | "meds" | "note";
 
@@ -245,7 +246,7 @@ onMounted(loadRecent);
     <ul class="recent">
       <template v-for="a in recent" :key="a.id">
         <li v-if="editing?.id !== a.id" class="row">
-          <span class="when" :title="new Date(a.ts).toLocaleString()">{{ formatTime(a.ts) }}</span>
+          <span class="when" :title="fmtDateTime(a.ts)">{{ formatTime(a.ts) }}</span>
           <span class="what">
             <strong>{{ a.type }}</strong> {{ payloadSummary(a) }}
           </span>

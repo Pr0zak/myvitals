@@ -3,6 +3,7 @@ import axios from "axios";
 import { onMounted, ref } from "vue";
 import Card from "@/components/Card.vue";
 import { apiBase, queryToken } from "@/config";
+import { fmtDateTime } from "@/format";
 
 interface Alert {
   id: number;
@@ -62,7 +63,7 @@ onMounted(load);
     <div v-else class="list">
       <Card v-for="a in alerts" :key="a.id"
             :title="a.kind"
-            :subtitle="new Date(a.ts).toLocaleString()">
+            :subtitle="fmtDateTime(a.ts)">
         <pre class="payload">{{ JSON.stringify(a.payload, null, 2) }}</pre>
         <button v-if="!a.acknowledged" class="ack" @click="ack(a.id)">Acknowledge</button>
         <span v-else class="acked">acknowledged</span>

@@ -6,6 +6,7 @@ import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
 import { units, weightUnit, weightVal, weightToKg } from "@/units";
 import { themeChoice } from "@/theme";
+import { fmtDateTime } from "@/format";
 import type { StravaAppConfigStatus, StravaStatus } from "@/api/types";
 
 const tokenInput = ref(queryToken.value);
@@ -57,7 +58,7 @@ async function uploadSober(file: File) {
     });
     soberImportResult.value = `Imported ${r.data.imported} streaks${
       r.data.started_active_from
-        ? `, active streak from ${new Date(r.data.started_active_from).toLocaleString()}`
+        ? `, active streak from ${fmtDateTime(r.data.started_active_from)}`
         : ""
     }.`;
   } catch (e: unknown) {
@@ -382,7 +383,7 @@ async function clearStravaCreds() {
 
 function fmt(ts: string | null): string {
   if (!ts) return "—";
-  return new Date(ts).toLocaleString();
+  return fmtDateTime(ts);
 }
 
 onMounted(() => {

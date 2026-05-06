@@ -8,6 +8,7 @@ import type {
   SleepNight, StepsSeries, TodaySummary,
 } from "@/api/types";
 import { chartTheme } from "@/theme";
+import { fmtDateTime } from "@/format";
 import { tempUnit, isImperial } from "@/units";
 import { TrendingUp, TrendingDown, Sparkles } from "lucide-vue-next";
 import { annotationMarkPoint, baseTimeOption, meanMarkLine, soberResetMarkLine, workoutMarkArea } from "@/components/charts/chartHelpers";
@@ -725,7 +726,7 @@ const subtitleHr = computed(() => {
       </Card>
 
       <!-- Blood pressure -->
-      <Card title="Blood pressure" :subtitle="bp.latest ? new Date(bp.latest.time).toLocaleString() : 'No readings yet'">
+      <Card title="Blood pressure" :subtitle="bp.latest ? fmtDateTime(bp.latest.time) : 'No readings yet'">
         <div v-if="bp.latest" class="bp-latest">
           <div class="bp-big" :class="bpClass(bp.latest.systolic, bp.latest.diastolic)">
             <span class="sys">{{ bp.latest.systolic }}</span>
@@ -792,7 +793,7 @@ const subtitleHr = computed(() => {
     </div>
 
     <div v-if="summary?.last_sync" class="footer">
-      Last sync: {{ new Date(summary.last_sync).toLocaleString() }}
+      Last sync: {{ fmtDateTime(summary.last_sync) }}
     </div>
   </div>
 </template>

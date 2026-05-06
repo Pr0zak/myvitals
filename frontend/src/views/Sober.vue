@@ -4,6 +4,7 @@ import VChart from "vue-echarts";
 import { Pencil, Trash2, X, Check, RotateCcw, Award, Calendar as CalIcon, TrendingUp } from "lucide-vue-next";
 import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
+import { fmtDateTime } from "@/format";
 import { chartTheme } from "@/theme";
 
 interface Streak {
@@ -40,7 +41,7 @@ const liveCounter = computed(() => {
 
 const startedAtLabel = computed(() => {
   if (!current.value?.active) return "—";
-  return new Date(current.value.active.start_at).toLocaleString();
+  return fmtDateTime(current.value.active.start_at);
 });
 
 async function load() {

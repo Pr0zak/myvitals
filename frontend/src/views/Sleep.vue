@@ -5,6 +5,7 @@ import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import type { SleepNight } from "@/api/types";
 import { chartTheme } from "@/theme";
+import { fmtTime, fmtDateTime } from "@/format";
 
 const STAGE_COLORS: Record<string, string> = {
   awake: "#f97316",
@@ -53,9 +54,6 @@ function fmtDur(s: number): string {
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 
-function fmtTime(d: Date): string {
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 function relativeTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -121,7 +119,7 @@ const hypnogramOption = computed(() => {
     grid: { left: 60, right: 12, top: 16, bottom: 30 },
     xAxis: {
       type: "time",
-      axisLabel: { ...t.axisLabel, formatter: (v: number) => new Date(v).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
+      axisLabel: { ...t.axisLabel, formatter: (v: number) => fmtTime(v) },
       splitLine: { show: false },
     },
     yAxis: {
@@ -137,7 +135,7 @@ const hypnogramOption = computed(() => {
         const p = params[0];
         if (!p) return "";
         const t = new Date(p.value[0]);
-        return `${t.toLocaleTimeString()}<br/><b>${Y_LABELS[p.value[1]]}</b>`;
+        return `${fmtTime(t)}<br/><b>${Y_LABELS[p.value[1]]}</b>`;
       },
     },
     series: [{
@@ -243,7 +241,7 @@ const stats = computed(() => {
 
     <div v-if="lastNight" class="last-banner">
       <span class="dot" :style="{ background: 'var(--violet)' }"></span>
-      Last sleep logged: <strong>{{ new Date(lastNight.end).toLocaleString() }}</strong>
+      Last sleep logged: <strong>{{ fmtDateTime(lastNight.end) }}</strong>
       <span class="rel">({{ relativeTime(lastNight.end) }})</span>
     </div>
 

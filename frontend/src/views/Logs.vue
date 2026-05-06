@@ -57,7 +57,8 @@ function levelColor(level: string): string {
 
 function fmtTime(ts: string): string {
   return new Date(ts).toLocaleTimeString([], {
-    hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3,
+    hour: "numeric", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3,
+    hour12: true,
   });
 }
 </script>

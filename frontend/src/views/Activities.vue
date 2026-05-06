@@ -10,6 +10,7 @@ import { api } from "@/api/client";
 import type { Activity, ActivityStats } from "@/api/types";
 import { chartTheme } from "@/theme";
 import { fmtDistance, fmtElevation, distanceVal, distanceUnit } from "@/units";
+import { fmtDateTime } from "@/format";
 
 type SortKey = "date" | "distance" | "duration" | "avg_hr" | "suffer" | "kcal" | "elevation";
 type ViewMode = "grid" | "list";
@@ -190,9 +191,6 @@ const heatmapOption = computed(() => {
 // === Formatters ===
 function fmtDate(ts: string): string {
   return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
-}
-function fmtDateTime(ts: string): string {
-  return new Date(ts).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 function fmtDuration(s: number): string {
   const h = Math.floor(s / 3600);

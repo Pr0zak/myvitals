@@ -4,6 +4,7 @@ import VChart from "vue-echarts";
 import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import { chartTheme } from "@/theme";
+import { fmtDateTime } from "@/format";
 
 type Range = "30d" | "90d" | "1y" | "all";
 const RANGES: { key: Range; label: string; days: number | null }[] = [
@@ -162,7 +163,7 @@ const tableRows = computed(() => {
 });
 
 function fmtDate(s: string): string {
-  return new Date(s).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  return fmtDateTime(s);
 }
 function categoryLabel(s: number, d: number): string {
   const labels: Record<string, string> = {

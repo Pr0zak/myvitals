@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import Card from "./Card.vue";
 import type { SleepNight } from "@/api/types";
+import { fmtTime } from "@/format";
 
 const props = defineProps<{ sleep: SleepNight | null }>();
 
@@ -44,7 +45,7 @@ const subtitle = computed(() => {
   if (!props.sleep) return "";
   const start = new Date(props.sleep.start);
   const end = new Date(props.sleep.end);
-  const fmt = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const fmt = (d: Date) => fmtTime(d);
   const ms = Date.now() - end.getTime();
   const h = Math.round(ms / 3600000);
   const ago = h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;

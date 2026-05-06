@@ -11,6 +11,7 @@ import { api } from "@/api/client";
 import type { Activity, HeartRateSeries } from "@/api/types";
 import { chartTheme, effectiveTheme } from "@/theme";
 import { fmtDistance, fmtElevation, distanceVal, distanceUnit, isImperial } from "@/units";
+import { fmtDateTime } from "@/format";
 
 const route = useRoute();
 const router = useRouter();
@@ -304,7 +305,7 @@ function removeTag(t: string) {
           <p class="meta">
             <span class="type">{{ activity.type }}</span>
             ·
-            {{ new Date(activity.start_at).toLocaleString() }}
+            {{ fmtDateTime(activity.start_at) }}
             ·
             {{ fmtDur(activity.duration_s) }}
           </p>

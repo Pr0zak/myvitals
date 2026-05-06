@@ -147,5 +147,5 @@ private fun levelChar(level: Int): Char = when (level) {
     else -> '?'
 }
 
-private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+private val timeFormat = SimpleDateFormat("h:mm:ss.SSS a", Locale.getDefault())
 private fun formatTime(epochMs: Long): String = timeFormat.format(Date(epochMs))

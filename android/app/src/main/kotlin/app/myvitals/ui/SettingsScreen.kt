@@ -365,6 +365,6 @@ private fun toast(ctx: android.content.Context, msg: String) {
 }
 
 private val formatter: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault())
+    DateTimeFormatter.ofPattern("yyyy-MM-dd h:mm:ss a").withZone(ZoneId.systemDefault())
 
 private fun formatInstant(instant: Instant): String = formatter.format(instant)

@@ -38,6 +38,55 @@ const importResult = ref<string>("");
 const importError = ref<string>("");
 const fitbitWeightUnit = ref<"kg" | "lb">("lb");
 
+// ── AI summaries ──────────────────────────────────────────
+const aiCfg = ref<Awaited<ReturnType<typeof api.aiConfig>> | null>(null);
+const aiKeyInput = ref("");
+const aiKeyVisible = ref(false);
+const aiPreviewing = ref(false);
+const aiPreviewJson = ref<string>("");
+const aiResult = ref<string>("");
+
+async function loadAiCfg() {
+  if (!queryToken.value) return;
+  try { aiCfg.value = await api.aiConfig(); } catch { /* ignore */ }
+}
+async function aiSaveKey() {
+  if (!aiKeyInput.value.trim()) return;
+  aiResult.value = "";
+  try {
+    await api.aiUpdateConfig({ anthropic_api_key: aiKeyInput.value.trim() });
+    aiKeyInput.value = "";
+    await loadAiCfg();
+    aiResult.value = "API key saved.";
+  } catch (e) { aiResult.value = `Save failed: ${e instanceof Error ? e.message : String(e)}`; }
+}
+async function aiClearKey() {
+  if (!confirm("Clear stored Anthropic API key?")) return;
+  try { await api.aiUpdateConfig({ clear_key: true }); await loadAiCfg(); aiResult.value = "Key cleared."; }
+  catch (e) { aiResult.value = `Failed: ${e instanceof Error ? e.message : String(e)}`; }
+}
+async function aiToggleEnabled(v: boolean) {
+  try { await api.aiUpdateConfig({ enabled: v }); await loadAiCfg(); }
+  catch { /* swallow */ }
+}
+async function aiToggleWeekly(v: boolean) {
+  try { await api.aiUpdateConfig({ weekly_digest_enabled: v }); await loadAiCfg(); }
+  catch { /* swallow */ }
+}
+async function aiUpdateLimit(n: number) {
+  if (!Number.isFinite(n) || n < 1) return;
+  try { await api.aiUpdateConfig({ daily_call_limit: Math.floor(n) }); await loadAiCfg(); }
+  catch { /* swallow */ }
+}
+async function aiPreview() {
+  aiPreviewing.value = true; aiPreviewJson.value = "";
+  try {
+    const p = await api.aiPreviewPayload("week");
+    aiPreviewJson.value = JSON.stringify(p, null, 2);
+  } catch (e) { aiResult.value = `Preview failed: ${e instanceof Error ? e.message : String(e)}`; }
+  finally { aiPreviewing.value = false; }
+}
+
 // Sober-time CSV import (separate from the main importer flow above)
 const soberImportBusy = ref(false);
 const soberImportResult = ref<string>("");
@@ -389,6 +438,7 @@ function fmt(ts: string | null): string {
 onMounted(() => {
   loadStrava();
   loadProfile();
+  loadAiCfg();
   startJobPolling();
 });
 onUnmounted(stopJobPolling);
@@ -528,6 +578,53 @@ onUnmounted(stopJobPolling);
         </button>
         <span v-if="profileMsg" class="hint">{{ profileMsg }}</span>
       </div>
+    </details>
+
+    <details class="section" v-if="queryToken">
+      <summary><h2>AI summaries</h2></summary>
+      <p class="hint">
+        Claude turns your weekly / monthly stats into a plain-English read.
+        <strong>Aggregate only</strong> — no raw HR samples, GPS, or sober history dates leave your server.
+        Tap <em>Preview payload</em> to see exactly what gets sent.
+      </p>
+      <label>
+        <span>Anthropic API key
+          <em class="opt">{{ aiCfg?.api_key_set ? `currently ${aiCfg.api_key_masked}` : "not configured" }}</em>
+        </span>
+        <div class="token-row">
+          <input v-model="aiKeyInput" :type="aiKeyVisible ? 'text' : 'password'"
+                 placeholder="sk-ant-…  (paste a new key to update)" autocomplete="off"/>
+          <button type="button" class="eye" @click="aiKeyVisible = !aiKeyVisible">
+            <component :is="aiKeyVisible ? EyeOff : Eye" :size="16"/>
+          </button>
+        </div>
+      </label>
+      <div class="ai-toggles">
+        <label class="ai-toggle">
+          <input type="checkbox" :checked="!!aiCfg?.enabled" @change="aiToggleEnabled(($event.target as HTMLInputElement).checked)"/>
+          <span>Enable AI summaries</span>
+        </label>
+        <label class="ai-toggle">
+          <input type="checkbox" :checked="!!aiCfg?.weekly_digest_enabled"
+                 @change="aiToggleWeekly(($event.target as HTMLInputElement).checked)"/>
+          <span>Weekly digest (Sunday 22:00)</span>
+        </label>
+        <label class="ai-toggle">
+          <span>Daily call limit:</span>
+          <input type="number" min="1" max="200"
+                 :value="aiCfg?.daily_call_limit ?? 10"
+                 @change="aiUpdateLimit(($event.target as HTMLInputElement).valueAsNumber)"
+                 style="width: 80px;"/>
+          <span class="muted" v-if="aiCfg">used {{ aiCfg.calls_today }}/{{ aiCfg.daily_call_limit }} today</span>
+        </label>
+      </div>
+      <div class="actions">
+        <button class="primary" :disabled="!aiKeyInput.trim()" @click="aiSaveKey">Save API key</button>
+        <button class="ghost danger" v-if="aiCfg?.api_key_set" @click="aiClearKey">Clear key</button>
+        <button class="ghost" @click="aiPreview">{{ aiPreviewing ? 'Loading…' : 'Preview payload' }}</button>
+      </div>
+      <pre v-if="aiPreviewJson" class="ai-preview">{{ aiPreviewJson }}</pre>
+      <p v-if="aiResult" class="ok">{{ aiResult }}</p>
     </details>
 
     <details class="section" v-if="queryToken">
@@ -812,4 +909,14 @@ tr.job-failed { background: rgba(239, 68, 68, 0.05); }
 .zone-3 { background: rgba(234, 179, 8, 0.18); color: #eab308; }
 .zone-4 { background: rgba(249, 115, 22, 0.18); color: #f97316; }
 .zone-5 { background: rgba(239, 68, 68, 0.20); color: #ef4444; }
+
+.ai-toggles { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.6rem 0 0.4rem; }
+.ai-toggle { flex-direction: row; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+.ai-toggle input[type="checkbox"] { margin: 0; }
+.ai-preview {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0.7rem; max-height: 280px; overflow: auto;
+  font-family: ui-monospace, monospace; font-size: 0.75rem;
+  color: var(--text-soft); margin-top: 0.5rem; white-space: pre-wrap;
+}
 </style>

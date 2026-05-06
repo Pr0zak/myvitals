@@ -9,6 +9,7 @@ import type {
 } from "@/api/types";
 import { chartTheme } from "@/theme";
 import { fmtDateTime } from "@/format";
+import { renderMarkdown } from "@/markdown";
 import { tempUnit, isImperial } from "@/units";
 import { TrendingUp, TrendingDown, Sparkles } from "lucide-vue-next";
 import { annotationMarkPoint, baseTimeOption, meanMarkLine, soberResetMarkLine, workoutMarkArea } from "@/components/charts/chartHelpers";
@@ -44,6 +45,32 @@ async function loadDiscoveries() {
   try { discoveries.value = await api.discoveries(90); } catch { /* ignore */ }
 }
 onMounted(loadDiscoveries);
+
+// ── AI summary ─────────────────────────────────────────────
+const aiCfg = ref<Awaited<ReturnType<typeof api.aiConfig>> | null>(null);
+const aiSummary = ref<{ content: string; generated_at: string; model: string } | null>(null);
+const aiBusy = ref(false);
+const aiError = ref<string | null>(null);
+async function loadAi() {
+  try { aiCfg.value = await api.aiConfig(); } catch { return; }
+  if (!aiCfg.value?.enabled) return;
+  try { aiSummary.value = await api.aiLatest("week"); } catch { /* ignore */ }
+}
+async function askAi(range: "week" | "month") {
+  aiBusy.value = true; aiError.value = null;
+  try {
+    aiSummary.value = await api.aiExplain(range);
+    await loadAi();  // refresh calls_today counter
+  } catch (e: unknown) {
+    if (e && typeof e === "object" && "response" in e) {
+      const r = (e as { response?: { status?: number; data?: { detail?: string } } }).response;
+      aiError.value = r?.data?.detail ?? `HTTP ${r?.status ?? "?"}`;
+    } else {
+      aiError.value = e instanceof Error ? e.message : "AI request failed";
+    }
+  } finally { aiBusy.value = false; }
+}
+onMounted(loadAi);
 const hrv = ref<HrvSeries | null>(null);
 const sleep = ref<SleepNight | null>(null);
 const steps = ref<StepsSeries | null>(null);
@@ -766,6 +793,23 @@ const subtitleHr = computed(() => {
       </Card>
     </div>
 
+    <!-- AI summary card — opt-in via Settings -->
+    <Card v-if="aiCfg?.enabled" title="AI summary"
+          :subtitle="aiSummary?.generated_at ? `last generated ${fmtDateTime(aiSummary.generated_at)}` : 'click to generate'">
+      <div class="ai-actions">
+        <button class="ai-btn primary" :disabled="aiBusy" @click="askAi('week')">
+          {{ aiBusy ? 'Thinking…' : 'Explain my week' }}
+        </button>
+        <button class="ai-btn" :disabled="aiBusy" @click="askAi('month')">Explain my month</button>
+        <span v-if="aiCfg" class="muted ai-meta">{{ aiCfg.calls_today }}/{{ aiCfg.daily_call_limit }} today · {{ aiCfg.model }}</span>
+      </div>
+      <div v-if="aiError" class="err" style="margin-top:0.5rem;">{{ aiError }}</div>
+      <div v-if="aiSummary?.content" class="ai-content" v-html="renderMarkdown(aiSummary.content)"/>
+      <div v-else-if="!aiBusy" class="muted" style="margin-top:0.4rem; font-size:0.85rem;">
+        Pick a range to get a plain-English read of your data.
+      </div>
+    </Card>
+
     <!-- Recent insights — violet ribbon (auto-discovered correlations) -->
     <div v-if="discoveries.length" class="insights-ribbon">
       <div class="ir-head">
@@ -859,6 +903,29 @@ h1 { margin: 0; }
   font-size: 10.5px; font-weight: 600;
   color: var(--kpi-c); font-variant-numeric: tabular-nums;
 }
+
+/* AI summary card */
+.ai-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.ai-btn {
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0.5rem 0.9rem; cursor: pointer; font-family: inherit;
+  font-size: 0.85rem;
+}
+.ai-btn:hover { border-color: var(--accent); }
+.ai-btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.ai-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ai-meta { font-size: 0.75rem; margin-left: auto; }
+.ai-content {
+  margin-top: 0.8rem; padding: 0.8rem 1rem;
+  background: rgba(167, 139, 250, 0.05);
+  border-left: 3px solid var(--violet);
+  border-radius: 4px;
+  color: var(--text-soft); font-size: 0.92rem; line-height: 1.55;
+}
+.ai-content :deep(h2) { margin: 0.4rem 0 0.6rem; font-size: 1.05rem; color: var(--text); }
+.ai-content :deep(p) { margin: 0.6rem 0; }
+.ai-content :deep(ul) { margin: 0.4rem 0; padding-left: 1.2rem; }
+.ai-content :deep(strong) { color: var(--text); }
 
 /* Violet "Recent insights" ribbon */
 .insights-ribbon {

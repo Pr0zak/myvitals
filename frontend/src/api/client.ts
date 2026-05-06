@@ -216,6 +216,56 @@ export const api = {
     return data;
   },
 
+  // ── AI summaries ───────────────────────────────────────────
+  async aiConfig(): Promise<{
+    enabled: boolean;
+    api_key_set: boolean;
+    api_key_masked: string | null;
+    model: string;
+    daily_call_limit: number;
+    calls_today: number;
+    weekly_digest_enabled: boolean;
+  }> {
+    const { data } = await http.get("/ai/config");
+    return data;
+  },
+
+  async aiUpdateConfig(body: {
+    enabled?: boolean;
+    anthropic_api_key?: string;
+    clear_key?: boolean;
+    model?: string;
+    daily_call_limit?: number;
+    weekly_digest_enabled?: boolean;
+  }) {
+    const { data } = await http.post("/ai/config", body);
+    return data;
+  },
+
+  async aiPreviewPayload(range: "week" | "month" = "week") {
+    const { data } = await http.get("/ai/preview-payload", { params: { range } });
+    return data;
+  },
+
+  async aiExplain(range: "week" | "month" = "week"): Promise<{
+    content: string;
+    generated_at: string;
+    model: string;
+    cached: boolean;
+    input_tokens?: number;
+    output_tokens?: number;
+  }> {
+    const { data } = await http.post("/ai/explain", null, { params: { range } });
+    return data;
+  },
+
+  async aiLatest(range: "week" | "month" = "week"): Promise<{
+    content: string; generated_at: string; model: string;
+  } | null> {
+    const { data } = await http.get("/ai/latest", { params: { range } });
+    return data;
+  },
+
   async logs(opts: { since?: Date | string; source?: string; level?: string; limit?: number } = {}): Promise<import("./types").AppLog[]> {
     const params: Record<string, string | number> = {};
     if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;

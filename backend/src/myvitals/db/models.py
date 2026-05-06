@@ -260,6 +260,37 @@ class Activity(Base):
     hr_recovery_120s: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class AiConfig(Base):
+    """Single-row table (id=1) holding the user's Claude API settings.
+    Lives in DB rather than .env so the user can manage it from the
+    dashboard without touching the host."""
+    __tablename__ = "ai_config"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    anthropic_api_key: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    model: Mapped[str] = mapped_column(String(64), default="claude-sonnet-4-6")
+    daily_call_limit: Mapped[int] = mapped_column(Integer, default=10)
+    calls_today: Mapped[int] = mapped_column(Integer, default=0)
+    calls_today_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    weekly_digest_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AiSummary(Base):
+    """Cached AI-generated summary. Hashing the payload means rerunning the
+    same window without new data is free; once a fresh sync arrives, the
+    hash differs and a new summary is generated."""
+    __tablename__ = "ai_summaries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    range_kind: Mapped[str] = mapped_column(String(16))   # 'week' | 'month'
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str] = mapped_column(String(64))
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content: Mapped[str] = mapped_column(Text)
+
+
 class SoberStreak(Base):
     """One row per sobriety streak — past streaks are closed (end_at set),
     the current streak has end_at = NULL (enforced by partial unique index)."""

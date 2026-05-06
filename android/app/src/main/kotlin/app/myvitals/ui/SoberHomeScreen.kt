@@ -144,29 +144,36 @@ fun SoberHomeScreen(
         ) {
             // ── Header ──
             Text(
-                text = "Sober time",
-                style = MaterialTheme.typography.labelLarge,
+                text = "SOBER TIME",
+                style = MaterialTheme.typography.labelMedium,
                 color = DIM,
+                letterSpacing = 2.sp,
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(12.dp))
 
-            // ── Big counter ──
+            // ── Big counter ── Use Material 3 display typography rather than
+            // hand-rolled sp + Monospace (cleaner, scales properly across
+            // densities, respects user font-size preference).
             if (active != null) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    NumberAndLabel(d, "d", color = GREEN, sizeSp = 88)
-                    Spacer(Modifier.width(10.dp))
-                    NumberAndLabel(h, "h", color = GREEN_SOFT, sizeSp = 56)
-                    Spacer(Modifier.width(6.dp))
-                    NumberAndLabel(m, "m", color = GREEN_SOFT, sizeSp = 56)
-                }
-                Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "%02ds".format(s),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 18.sp,
-                    color = DIM,
+                    text = "$d",
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = GREEN,
+                )
+                Text(
+                    text = if (d == 1) "day" else "days",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = GREEN_SOFT,
                 )
                 Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "%dh %02dm %02ds".format(h, m, s),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = DIM,
+                )
+                Spacer(Modifier.height(12.dp))
                 val sinceLabel = remember(active) {
                     try {
                         val inst = Instant.parse(active.startAt)
@@ -176,14 +183,14 @@ fun SoberHomeScreen(
                 }
                 Text(
                     text = "since $sinceLabel",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = DIM,
-                    fontSize = 14.sp,
                 )
             } else {
                 Text(
                     text = if (refreshing) "Loading…" else "No active streak",
+                    style = MaterialTheme.typography.titleMedium,
                     color = DIM,
-                    fontSize = 18.sp,
                 )
             }
 
@@ -289,30 +296,6 @@ fun SoberHomeScreen(
     }
 }
 
-@Composable
-private fun NumberAndLabel(
-    value: Int,
-    label: String,
-    color: Color,
-    sizeSp: Int,
-) {
-    Row(verticalAlignment = Alignment.Bottom) {
-        Text(
-            text = value.toString(),
-            color = color,
-            fontSize = sizeSp.sp,
-            fontWeight = FontWeight.SemiBold,
-            fontFamily = FontFamily.Monospace,
-        )
-        Spacer(Modifier.width(2.dp))
-        Text(
-            text = label,
-            color = DIM,
-            fontSize = (sizeSp * 0.32).toInt().sp,
-            modifier = Modifier.padding(bottom = (sizeSp * 0.12).toInt().dp),
-        )
-    }
-}
 
 private const val HOLD_DURATION_MS = 1500L
 

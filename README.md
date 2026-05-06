@@ -22,18 +22,38 @@
 
 ## What it does
 
-Pulls your **Pixel Watch / Wear OS** data out of **Health Connect** on the phone, ships it to a **FastAPI + TimescaleDB** backend you run yourself, and renders a **Vue 3 + ECharts** dashboard on top. No cloud, no third-party SaaS — your health data lives on hardware you own.
+Pulls your **Pixel Watch / Wear OS** data out of **Health Connect** on the phone, ships it to a **FastAPI + TimescaleDB** backend you run yourself, and renders a **Vue 3 + ECharts** dashboard on top. Optional **Claude AI layer** narrates your aggregate stats in plain English. No cloud SaaS — your data lives on hardware you own.
 
-- **Today** — readiness ring, KPI grid (HR, BP, sleep, recovery, steps, watch wear-time, sober counter), 24h heart-rate ribbon with sync-gap visualisation
+### Dashboard views
+
+- **Today** — `✦` AI verdict headline, 🏋 pre-workout chip, statistical trend badges, readiness ring, KPI grid (HR, BP, sleep, recovery, steps, watch wear-time, sober counter), 24h heart-rate ribbon with sync-gap visualisation
+- **Insights** — story-first feed of auto-discovered correlations with plain-English effect sentences, free-form `Ask` box ("what's hurting my sleep this month?"), `✦ Explain` button per finding for AI-narrated context
 - **Trends** — long-term overlays (RHR / HRV / Recovery / Sleep) with sober-reset markers
-- **Insights** — story-first feed of auto-discovered correlations (`More alcohol → less HRV`) with plain-English effect sentences and an explorer for ad-hoc questions
 - **Sleep / Weight / Blood pressure / Skin Δ** — dedicated views per metric
-- **Sober time** — live `d/h/m/s` counter on the phone home screen with a 1.5s hold-to-confirm reset, full history with editable streaks, distribution + timeline charts on the web
+- **Sober time** — live `d/h/m/s` counter on the phone home screen with a 1.5s press-and-hold reset, full history with editable streaks, distribution + timeline charts on the web
+- **Goals** — set targets (weight, sober streak, sleep, steps, custom) with per-goal AI coaching checks
 - **Activities** — Strava sync + Garmin/Fitbit imports, GPS map view, side-by-side compare
 - **Log** — caffeine / alcohol / mood / food / meds, all editable inline (date/time included)
 - **Calendar** — year heatmap, any metric
+- **AI alerts banner** — anomaly detection cron flags z-score outliers; Claude phrases them, surfaces as colour-coded banners on every page until dismissed
 
-Companion **Android app** does the heavy lifting: Health Connect reads on a 15-min `WorkManager`, retries via local Room buffer, posts a structured **sync heartbeat** to the backend so the dashboard can tell the difference between "phone is offline", "HC perms revoked", and "watch isn't pushing data".
+Companion **Android app** does the heavy lifting: Health Connect reads on a 15-min `WorkManager`, retries via local Room buffer, posts a structured **sync heartbeat** to the backend so the dashboard can tell the difference between "phone is offline", "HC perms revoked", and "watch isn't pushing data". The home screen is the sober counter — large `d/h/m/s` ticker with a single press-and-hold-to-reset button.
+
+### AI integration (opt-in)
+
+Configured in Settings → AI (paste an Anthropic key, default model is Haiku 4.5):
+
+- **Today's verdict** — one-sentence headline cached per data state
+- **Targeted explainers** — week / month / sleep / recovery / sober / anomaly, each with structured output (headline + evidence + suggestion)
+- **Free-form Q&A** — ask anything about your data
+- **Discovery explainer** — plain-English read of any correlation
+- **Pre-workout** — Go hard / Moderate / Easy / Rest recommendation
+- **Goal coaching** — trajectory + leverage + ETA per goal
+- **Weekly digest** — cron-scheduled Sunday 22:00 narrative
+- **Anomaly cron** — every 6h, statistical detection → Claude phrasing → alerts banner
+- **Tone** — Supportive / Blunt / Data-only
+
+Bounded payload only: aggregate daily summaries, top correlations, profile (age range / sex / activity), workout details (no GPS), sober streak shape (no history dates). Never sent: raw HR samples, GPS tracks, exact sleep timestamps, the user's name/email, or sober history. Tap **Preview payload** in Settings to audit exactly what would be sent before enabling.
 
 ## Architecture
 
@@ -48,9 +68,21 @@ Pixel Watch 3
      │                                         (optional)
      ▼
   Vue 3 + ECharts dashboard
-   ├ Today / Trends / Insights / Sleep / Activities
-   ├ Calendar / Compare / Sober / Log / Logs
-   └ Settings (token, units, theme, profile, imports, Strava)
+   ├ Today (verdict + pre-workout + trend badges + KPI grid + ring)
+   ├ Trends · Insights (AI Ask + Explain) · Goals (AI coaching)
+   ├ Sleep · BP · Weight · Skin Δ · Activities (map / compare)
+   ├ Sober · Calendar · Compare · Log · Logs
+   └ Settings (token, units, theme, time format, profile, imports,
+              Strava, AI key + model + tone + daily limit)
+
+  ┌──────────────────────────────────────────────┐
+  │ Optional Claude AI layer (Anthropic API)     │
+  │  cron anomaly scan ─► ai_alerts ─► banners   │
+  │  on-demand: verdict, ask, explain-discovery, │
+  │  pre-workout, goal-check, batch all-topics   │
+  │  weekly digest cron ─► ai_summaries cache    │
+  │  prompt caching (system) for ~50% savings    │
+  └──────────────────────────────────────────────┘
 ```
 
 Full diagram in [`docs/architecture.md`](docs/architecture.md).
@@ -94,10 +126,14 @@ See [`docs/operations.md`](docs/operations.md) for day-to-day commands and [`doc
 
 ```
 backend/                  FastAPI ingest + analytics + alembic migrations
+  └─ src/myvitals/api/    ingest, query, summary, analytics,
+                          ai (verdict / ask / explain-* / goals /
+                          alerts), sober, strava, profile, exports
 frontend/                 Vue 3 dashboard
 android/                  Kotlin / Compose companion app
 deploy/                   ct-bootstrap.sh + upgrade.sh
 .github/workflows/        images.yml (GHCR) + android-release.yml (signed APK)
 docs/                     architecture / operations / releasing + images
+TODO.md                   deferred work
 ```
 

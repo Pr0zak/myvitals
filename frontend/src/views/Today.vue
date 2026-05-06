@@ -84,6 +84,21 @@ async function refreshVerdict() {
   }
   finally { aiVerdictBusy.value = false; }
 }
+
+const aiPreWorkout = ref<{ content: string; generated_at: string; model: string } | null>(null);
+const aiPreWorkoutBusy = ref(false);
+async function getPreWorkout() {
+  if (!aiCfg.value?.enabled) return;
+  aiPreWorkoutBusy.value = true;
+  try { aiPreWorkout.value = await api.aiPreWorkout(); }
+  catch (e) {
+    if (e && typeof e === "object" && "response" in e) {
+      const r = (e as { response?: { data?: { detail?: string } } }).response;
+      aiError.value = r?.data?.detail ?? "pre-workout failed";
+    }
+  }
+  finally { aiPreWorkoutBusy.value = false; }
+}
 async function askTopic(topic: Topic) {
   aiBusy.value = true; aiError.value = null; activeTopic.value = topic;
   try {
@@ -580,6 +595,14 @@ const subtitleHr = computed(() => {
         </button>
       </div>
 
+      <!-- Pre-workout chip — small, opt-in via tap -->
+      <div v-if="aiCfg?.enabled" class="prework-strip">
+        <button class="prework-btn" :disabled="aiPreWorkoutBusy" @click="getPreWorkout">
+          🏋  {{ aiPreWorkout ? "Refresh pre-workout" : "Pre-workout call" }}
+        </button>
+        <span v-if="aiPreWorkout" class="prework-text">{{ aiPreWorkout.content }}</span>
+      </div>
+
       <!-- ════ AI + Trend badges at the top ══════════════════════ -->
       <!-- AI insights card (only if enabled in Settings) -->
       <Card v-if="aiCfg?.enabled" title="AI insights"
@@ -1014,6 +1037,21 @@ h1 { margin: 0; }
 }
 .verdict-refresh:hover { color: var(--violet); border-color: var(--violet); }
 .verdict-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.prework-strip {
+  display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
+  padding: 0.5rem 1rem; margin: 0 0 0.8rem;
+  font-size: 0.88rem; color: var(--text-soft);
+}
+.prework-btn {
+  background: rgba(56, 189, 248, 0.08); color: var(--accent);
+  border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 100px;
+  padding: 0.35rem 0.85rem; font-size: 0.78rem; font-weight: 600;
+  cursor: pointer; font-family: inherit; flex-shrink: 0;
+}
+.prework-btn:hover { background: rgba(56, 189, 248, 0.15); }
+.prework-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.prework-text { flex: 1; }
 
 /* AI insights card */
 .ai-topics { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.4rem; }

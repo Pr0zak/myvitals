@@ -404,3 +404,208 @@ async def explain_discovery_endpoint(
         "generated_at": datetime.now(timezone.utc),
         "model": result.model,
     }
+
+
+# ─────────────── Alerts (anomaly notifications) ───────────────
+
+@router.get("/alerts")
+async def list_alerts(
+    unacked_only: bool = True, limit: int = 20,
+    db: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    stmt = (
+        select(models.AiAlert)
+        .order_by(models.AiAlert.created_at.desc())
+        .limit(limit)
+    )
+    if unacked_only:
+        stmt = stmt.where(models.AiAlert.acked_at.is_(None))
+    rows = (await db.execute(stmt)).scalars().all()
+    return [
+        {"id": r.id, "created_at": r.created_at, "kind": r.kind,
+         "severity": r.severity, "title": r.title, "body": r.body,
+         "metric": r.metric, "z_score": r.z_score, "acked_at": r.acked_at}
+        for r in rows
+    ]
+
+
+@router.post("/alerts/{alert_id}/ack")
+async def ack_alert(alert_id: int, db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    row = await db.get(models.AiAlert, alert_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="alert not found")
+    row.acked_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/alerts/ack-all")
+async def ack_all_alerts(db: AsyncSession = Depends(get_session)) -> dict[str, int]:
+    from sqlalchemy import update as _update
+    res = await db.execute(
+        _update(models.AiAlert)
+        .where(models.AiAlert.acked_at.is_(None))
+        .values(acked_at=datetime.now(timezone.utc))
+    )
+    await db.commit()
+    return {"acked": res.rowcount or 0}
+
+
+@router.post("/alerts/mark-notified")
+async def mark_alerts_notified(
+    ids: list[int], db: AsyncSession = Depends(get_session),
+) -> dict[str, int]:
+    """Phone calls this after posting a system notification — prevents
+    re-notifying for the same alert next sync."""
+    if not ids:
+        return {"marked": 0}
+    from sqlalchemy import update as _update
+    res = await db.execute(
+        _update(models.AiAlert)
+        .where(models.AiAlert.id.in_(ids))
+        .values(phone_notified_at=datetime.now(timezone.utc))
+    )
+    await db.commit()
+    return {"marked": res.rowcount or 0}
+
+
+# ─────────────── Goals (CRUD + check-in) ───────────────
+
+class GoalCreate(BaseModel):
+    kind: str
+    title: str
+    target_value: float | None = None
+    target_unit: str | None = None
+    target_date: date | None = None
+    notes: str | None = None
+
+
+class GoalUpdate(BaseModel):
+    title: str | None = None
+    target_value: float | None = None
+    target_unit: str | None = None
+    target_date: date | None = None
+    ended_at: datetime | None = None
+    notes: str | None = None
+
+
+def _goal_to_dict(g: models.AiGoal) -> dict[str, Any]:
+    return {
+        "id": g.id, "kind": g.kind, "title": g.title,
+        "target_value": g.target_value, "target_unit": g.target_unit,
+        "target_date": g.target_date, "started_at": g.started_at,
+        "ended_at": g.ended_at, "notes": g.notes,
+    }
+
+
+@router.get("/goals")
+async def list_goals(
+    active_only: bool = True, db: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    stmt = select(models.AiGoal).order_by(models.AiGoal.started_at.desc())
+    if active_only:
+        stmt = stmt.where(models.AiGoal.ended_at.is_(None))
+    return [_goal_to_dict(g) for g in (await db.execute(stmt)).scalars().all()]
+
+
+@router.post("/goals")
+async def create_goal(
+    body: GoalCreate, db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    g = models.AiGoal(
+        kind=body.kind, title=body.title,
+        target_value=body.target_value, target_unit=body.target_unit,
+        target_date=body.target_date, started_at=datetime.now(timezone.utc),
+        notes=body.notes,
+    )
+    db.add(g)
+    await db.commit()
+    await db.refresh(g)
+    return _goal_to_dict(g)
+
+
+@router.patch("/goals/{goal_id}")
+async def update_goal(
+    goal_id: int, body: GoalUpdate, db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    g = await db.get(models.AiGoal, goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="goal not found")
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(g, k, v)
+    await db.commit()
+    await db.refresh(g)
+    return _goal_to_dict(g)
+
+
+@router.delete("/goals/{goal_id}", status_code=204)
+async def delete_goal(goal_id: int, db: AsyncSession = Depends(get_session)) -> None:
+    g = await db.get(models.AiGoal, goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="goal not found")
+    await db.delete(g)
+    await db.commit()
+
+
+@router.post("/goals/{goal_id}/check")
+async def goal_check_endpoint(
+    goal_id: int, db: AsyncSession = Depends(get_session)
+) -> dict[str, Any]:
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    g = await db.get(models.AiGoal, goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="goal not found")
+    from ..integrations.claude import goal_check
+    result = await goal_check(db, cfg, g)
+    cfg.calls_today += 1
+    await db.commit()
+    return {"content": result.content, "model": result.model,
+            "generated_at": datetime.now(timezone.utc)}
+
+
+# ─────────────── Post-activity summary ───────────────
+
+@router.post("/activity/{source}/{source_id}/summary")
+async def activity_summary_endpoint(
+    source: str, source_id: str, db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    act = (await db.execute(
+        select(models.Activity).where(
+            (models.Activity.source == source) & (models.Activity.source_id == source_id)
+        )
+    )).scalar_one_or_none()
+    if act is None:
+        raise HTTPException(status_code=404, detail="activity not found")
+    from ..integrations.claude import activity_summary
+    result = await activity_summary(db, cfg, act)
+    cfg.calls_today += 1
+    await db.commit()
+    return {"content": result.content, "model": result.model,
+            "generated_at": datetime.now(timezone.utc)}
+
+
+# ─────────────── Batch mode ───────────────
+
+@router.post("/explain-all")
+async def explain_all_endpoint(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    from ..integrations.claude import explain_all
+    result = await explain_all(db, cfg)
+    cfg.calls_today += 1
+    await db.commit()
+    import json as _json
+    try:
+        topics = _json.loads(result.content)
+    except Exception:  # noqa: BLE001
+        topics = {"raw": result.content}
+    return {
+        "topics": topics,
+        "generated_at": datetime.now(timezone.utc),
+        "model": result.model,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+    }

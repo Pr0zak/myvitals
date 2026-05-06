@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
@@ -57,6 +58,19 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
     log.info("Weekly AI digest scheduled for Sun 22:00 %s", settings.tz)
+
+    # Anomaly scan — every 6h. Stats-side detection is no-LLM; the LLM
+    # only phrases new (unseen) anomalies into a notification body, so
+    # quiet days cost nothing.
+    scheduler.add_job(
+        _anomaly_scan,
+        trigger="interval",
+        hours=6,
+        id="ai_anomaly_scan",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
+    )
+    log.info("Anomaly scan scheduled every 6h")
     scheduler.start()
     log.info("scheduler started; daily_summary at 03:00 %s", settings.tz)
 
@@ -73,6 +87,64 @@ async def _safe_initial_summary() -> None:
         await compute_daily_summary()
     except Exception as e:  # noqa: BLE001
         log.warning("initial daily_summary failed (likely no data yet): %s", e)
+
+
+async def _anomaly_scan() -> None:
+    """Every 6h: detect statistical anomalies in the last day's vitals.
+    For each new anomaly (not already in ai_alerts), call Claude for a
+    one-sentence notification body and persist. Phone polls /ai/alerts
+    and posts system notifications for any unnotified rows."""
+    from sqlalchemy import select
+    from .db import models, session as _session
+    from .integrations.claude import detect_anomalies, phrase_anomaly
+
+    async with _session.SessionLocal() as db:
+        cfg = await db.get(models.AiConfig, 1)
+        if not cfg or not cfg.enabled:
+            return
+        try:
+            anomalies = await detect_anomalies(db)
+        except Exception as e:  # noqa: BLE001
+            log.warning("anomaly detection failed: %s", e)
+            return
+        if not anomalies:
+            log.debug("anomaly scan: no anomalies")
+            return
+
+        for a in anomalies:
+            dedup_key = f"{a['date']}:{a['metric']}"
+            existing = (await db.execute(
+                select(models.AiAlert)
+                .where(models.AiAlert.dedup_key == dedup_key)
+                .limit(1)
+            )).scalar_one_or_none()
+            if existing:
+                continue
+            # Generate the phrasing only if Claude is configured;
+            # otherwise drop a structured one-liner.
+            try:
+                if cfg.anthropic_api_key:
+                    body = await phrase_anomaly(cfg, a)
+                else:
+                    body = (
+                        f"{a['metric']} {'spike' if a['z_score'] > 0 else 'dip'}: "
+                        f"{a['value']:.1f} (z={a['z_score']:+.1f})."
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning("anomaly phrase failed: %s", e)
+                continue
+            db.add(models.AiAlert(
+                created_at=datetime.now(timezone.utc),
+                kind="anomaly",
+                severity=a["severity"],
+                title=f"{a['metric'].upper()} anomaly",
+                body=body,
+                metric=a["metric"],
+                z_score=a["z_score"],
+                dedup_key=dedup_key,
+            ))
+        await db.commit()
+        log.info("anomaly scan: persisted %d new alerts", len(anomalies))
 
 
 async def _weekly_ai_digest() -> None:

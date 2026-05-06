@@ -315,6 +315,48 @@ export const api = {
     return data;
   },
 
+  async aiAlerts(unackedOnly = true): Promise<Array<{
+    id: number; created_at: string; kind: string; severity: string;
+    title: string; body: string; metric: string | null; z_score: number | null;
+    acked_at: string | null;
+  }>> {
+    const { data } = await http.get("/ai/alerts", { params: { unacked_only: unackedOnly } });
+    return data;
+  },
+
+  async aiAckAlert(id: number) { await http.post(`/ai/alerts/${id}/ack`); },
+  async aiAckAllAlerts() { await http.post("/ai/alerts/ack-all"); },
+
+  async aiGoals(activeOnly = true): Promise<Array<{
+    id: number; kind: string; title: string;
+    target_value: number | null; target_unit: string | null;
+    target_date: string | null; started_at: string;
+    ended_at: string | null; notes: string | null;
+  }>> {
+    const { data } = await http.get("/ai/goals", { params: { active_only: activeOnly } });
+    return data;
+  },
+
+  async aiCreateGoal(body: {
+    kind: string; title: string; target_value?: number;
+    target_unit?: string; target_date?: string; notes?: string;
+  }) {
+    const { data } = await http.post("/ai/goals", body);
+    return data;
+  },
+
+  async aiUpdateGoal(id: number, body: Record<string, unknown>) {
+    const { data } = await http.patch(`/ai/goals/${id}`, body);
+    return data;
+  },
+
+  async aiDeleteGoal(id: number) { await http.delete(`/ai/goals/${id}`); },
+
+  async aiCheckGoal(id: number): Promise<{ content: string; model: string; generated_at: string }> {
+    const { data } = await http.post(`/ai/goals/${id}/check`);
+    return data;
+  },
+
   async logs(opts: { since?: Date | string; source?: string; level?: string; limit?: number } = {}): Promise<import("./types").AppLog[]> {
     const params: Record<string, string | number> = {};
     if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;

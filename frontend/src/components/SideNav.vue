@@ -18,7 +18,7 @@ import {
   Activity, AlertTriangle, BarChart3, Bed, Calendar, ChevronDown,
   ChevronRight, Droplets, Edit3, Footprints, Github, GitCompare,
   Heart, Home, List, Map, Menu, RotateCcw, Scale, Search, Settings, Sparkles,
-  Terminal, Thermometer, TrendingUp, type LucideIcon,
+  Target, Terminal, Thermometer, TrendingUp, type LucideIcon,
 } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { fmtDateTime } from "@/format";
@@ -212,6 +212,7 @@ const groups = computed<Group[]>(() => {
       badge: soberDays.value != null ? `${Math.floor(soberDays.value)}d` : undefined,
       badgeColor: "#22c55e",
     },
+    { id: "goals",  to: "/goals",  icon: Target,         label: "Goals" },
     {
       id: "alerts",  to: "/alerts",  icon: AlertTriangle, label: "Alerts",
       badge: alertsCount.value && alertsCount.value > 0

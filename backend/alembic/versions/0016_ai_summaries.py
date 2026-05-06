@@ -24,7 +24,7 @@ def upgrade() -> None:
         sa.Column("enabled", sa.Boolean, nullable=False, server_default=sa.text("false")),
         sa.Column("anthropic_api_key", sa.String(256), nullable=True),
         sa.Column("model", sa.String(64), nullable=False, server_default="claude-haiku-4-5-20251001"),
-        sa.Column("daily_call_limit", sa.Integer, nullable=False, server_default=sa.text("10")),
+        sa.Column("daily_call_limit", sa.Integer, nullable=False, server_default=sa.text("30")),
         sa.Column("calls_today", sa.Integer, nullable=False, server_default=sa.text("0")),
         sa.Column("calls_today_date", sa.Date, nullable=True),
         sa.Column("weekly_digest_enabled", sa.Boolean, nullable=False, server_default=sa.text("false")),

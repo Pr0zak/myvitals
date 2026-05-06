@@ -187,6 +187,9 @@ async def _daily_rows(db: AsyncSession, days: int) -> list[dict[str, Any]]:
 
 
 async def _activities(db: AsyncSession, days: int) -> list[dict[str, Any]]:
+    """Workout details enriched: type, duration, distance, avg+max HR,
+    elevation, power, kcal, suffer score, HR recovery — gives Claude
+    real workout context instead of just step counts."""
     if not hasattr(models, "Activity"):
         return []
     today = datetime.now(timezone.utc)
@@ -200,17 +203,27 @@ async def _activities(db: AsyncSession, days: int) -> list[dict[str, Any]]:
         )).scalars().all()
     except Exception:  # noqa: BLE001
         return []
-    return [
-        {
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        d: dict[str, Any] = {
             "date": str(r.start_at.date()),
             "type": r.type,
             "duration_min": int((r.duration_s or 0) / 60),
-            "distance_km": round((r.distance_m or 0) / 1000, 1) if r.distance_m else None,
-            "avg_hr": int(r.avg_hr) if r.avg_hr else None,
-            "kcal": int(r.kcal) if r.kcal else None,
         }
-        for r in rows
-    ]
+        if r.distance_m: d["distance_km"] = round(r.distance_m / 1000, 1)
+        if r.elevation_gain_m: d["elev_m"] = int(r.elevation_gain_m)
+        if r.avg_hr: d["avg_hr"] = int(r.avg_hr)
+        if r.max_hr: d["max_hr"] = int(r.max_hr)
+        if getattr(r, "avg_power_w", None): d["avg_power_w"] = int(r.avg_power_w)
+        if r.kcal: d["kcal"] = int(r.kcal)
+        if getattr(r, "suffer_score", None): d["suffer"] = int(r.suffer_score)
+        if getattr(r, "hr_recovery_60s", None): d["hr_rec_60s"] = int(r.hr_recovery_60s)
+        # Pace: only meaningful for distance activities
+        if r.distance_m and r.duration_s and r.distance_m > 100:
+            pace_s_per_km = (r.duration_s / (r.distance_m / 1000.0))
+            d["pace_min_per_km"] = round(pace_s_per_km / 60.0, 2)
+        out.append(d)
+    return out
 
 
 async def _annotations(db: AsyncSession, days: int) -> list[dict[str, Any]]:
@@ -586,3 +599,248 @@ async def pre_workout(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
         input_tokens=resp.usage.input_tokens,
         output_tokens=resp.usage.output_tokens,
     )
+
+
+# ─────────────── Activity summary ───────────────
+
+async def activity_summary(
+    db: AsyncSession, cfg: models.AiConfig, act: "models.Activity",
+) -> AiResult:
+    """Two-line context for a just-finished workout."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+
+    # Recent metric context — what's the user's recovery state going in
+    rows = await _daily_rows(db, 7)
+    payload = {
+        "activity": {
+            "date": str(act.start_at.date()),
+            "type": act.type,
+            "name": act.name,
+            "duration_min": int((act.duration_s or 0) / 60),
+            "distance_km": round((act.distance_m or 0) / 1000, 1) if act.distance_m else None,
+            "elev_m": int(act.elevation_gain_m) if act.elevation_gain_m else None,
+            "avg_hr": int(act.avg_hr) if act.avg_hr else None,
+            "max_hr": int(act.max_hr) if act.max_hr else None,
+            "kcal": int(act.kcal) if act.kcal else None,
+            "suffer": int(act.suffer_score) if getattr(act, "suffer_score", None) else None,
+            "hr_recovery_60s": int(act.hr_recovery_60s) if getattr(act, "hr_recovery_60s", None) else None,
+        },
+        "context_last_7_days": rows,
+    }
+    user_text = (
+        f"User just finished a workout. Two-sentence context for it.\n\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n\n"
+        f"Sentence 1: characterise the session (zone / intensity / "
+        f"effort) using the data. Sentence 2: what to expect or do "
+        f"tomorrow (HRV impact, recovery focus). ≤ 50 words total."
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=200,
+        system=_cached_system(ASK_SYSTEM),
+        messages=[{"role": "user", "content": user_text}],
+    )
+    text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+    return AiResult(
+        content="\n\n".join(text_parts).strip(),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
+# ─────────────── Goal check ───────────────
+
+async def goal_check(
+    db: AsyncSession, cfg: models.AiConfig, goal: "models.AiGoal",
+) -> AiResult:
+    """Coaching read on a goal — trajectory + leverage + ETA."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+
+    # 30-day context, plus any goal-relevant metric
+    rows = await _daily_rows(db, 30)
+
+    relevant: list[dict[str, Any]] = []
+    if goal.kind == "weight":
+        # Pull recent weight readings
+        try:
+            wts = (await db.execute(
+                select(models.BodyMetric)
+                .where(models.BodyMetric.weight_kg.is_not(None))
+                .order_by(models.BodyMetric.time.desc())
+                .limit(60)
+            )).scalars().all()
+            relevant = [
+                {"date": str(w.time.date()), "weight_kg": w.weight_kg,
+                 "body_fat_pct": w.body_fat_pct}
+                for w in wts
+            ]
+        except Exception:  # noqa: BLE001
+            relevant = []
+    elif goal.kind == "sober":
+        s = await _sober_status(db)
+        if s: relevant = [s]
+    elif goal.kind == "sleep":
+        relevant = [{"date": r["date"], "sleep_h": r["sleep_h"], "score": r["sleep_score"]}
+                    for r in rows]
+    elif goal.kind == "steps":
+        relevant = [{"date": r["date"], "steps": r["steps"]} for r in rows]
+
+    payload = {
+        "goal": {
+            "kind": goal.kind, "title": goal.title,
+            "target_value": goal.target_value, "target_unit": goal.target_unit,
+            "target_date": str(goal.target_date) if goal.target_date else None,
+            "started_at": str(goal.started_at),
+            "notes": goal.notes,
+        },
+        "relevant_data": relevant,
+        "context_last_30_days": rows,
+    }
+    user_text = (
+        f"Coach the user on this goal. Cite numbers / dates from the data.\n\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n\n"
+        f"In ≤ 80 words: trajectory (on track / behind / wrong direction), "
+        f"the most useful next-step lever, and an honest ETA if the data "
+        f"supports one. No false optimism."
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=300,
+        system=_cached_system(ASK_SYSTEM),
+        messages=[{"role": "user", "content": user_text}],
+    )
+    text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+    return AiResult(
+        content="\n\n".join(text_parts).strip(),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
+# ─────────────── Batch mode (all topics in one call) ───────────────
+
+ALL_TOPICS_TOOL = {
+    "name": "give_all_topics",
+    "description": "Return one analysis per topic in a single call.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "week":     {"$ref": "#/definitions/topic"},
+            "sleep":    {"$ref": "#/definitions/topic"},
+            "recovery": {"$ref": "#/definitions/topic"},
+            "sober":    {"$ref": "#/definitions/topic"},
+            "anomaly":  {"$ref": "#/definitions/topic"},
+        },
+        "required": ["week", "sleep", "recovery", "sober", "anomaly"],
+        "definitions": {
+            "topic": {
+                "type": "object",
+                "properties": {
+                    "headline":   {"type": "string"},
+                    "tone":       {"type": "string", "enum": ["good", "warn", "bad", "neutral"]},
+                    "evidence":   {"type": "array", "items": {"type": "string"}},
+                    "suggestion": {"type": "string"},
+                },
+                "required": ["headline", "tone", "evidence", "suggestion"],
+            },
+        },
+    },
+}
+
+
+async def explain_all(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    payload = await build_summary_payload(db, "week")
+    user_text = (
+        "Run analyses on each of week / sleep / recovery / sober / anomaly. "
+        "Each topic gets its own headline + evidence + suggestion. Use the "
+        "give_all_topics tool — one call, all topics.\n\n"
+        f"Aggregate data:\n{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=1500,
+        system=_cached_system(structured_system(cfg.tone)),
+        tools=[ALL_TOPICS_TOOL],
+        tool_choice={"type": "tool", "name": "give_all_topics"},
+        messages=[{"role": "user", "content": user_text}],
+    )
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use" and block.name == "give_all_topics":
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
+# ─────────────── Anomaly detection (no LLM, then optional LLM phrasing) ───────────────
+
+async def detect_anomalies(db: AsyncSession, z_threshold: float = 2.0) -> list[dict[str, Any]]:
+    """Statistical scan: find metric values today that are >z_threshold
+    away from the user's 30-day baseline. Returns list of structured
+    anomaly dicts. The Claude phrasing layer runs on top of this."""
+    rows = await _daily_rows(db, 30)
+    if len(rows) < 7:
+        return []
+    today_row = rows[-1] if rows else None
+    if today_row is None:
+        return []
+    out: list[dict[str, Any]] = []
+    for metric in ("rhr", "hrv", "recovery", "sleep_h", "readiness"):
+        baseline = [r[metric] for r in rows[:-1] if r.get(metric) is not None]
+        last = today_row.get(metric)
+        if last is None or len(baseline) < 7:
+            continue
+        mu = sum(baseline) / len(baseline)
+        var = sum((v - mu) ** 2 for v in baseline) / max(1, len(baseline) - 1)
+        if var <= 0:
+            continue
+        sigma = var ** 0.5
+        z = (last - mu) / sigma if sigma else 0
+        if abs(z) >= z_threshold:
+            # Lower-is-better metrics: a high z is bad (RHR up = warning).
+            lower_better = metric == "rhr"
+            is_bad = (z > 0) == lower_better
+            out.append({
+                "date": today_row["date"],
+                "metric": metric,
+                "value": last,
+                "baseline_mean": round(mu, 2),
+                "z_score": round(z, 2),
+                "severity": "bad" if is_bad else "good",
+            })
+    return out
+
+
+async def phrase_anomaly(cfg: models.AiConfig, anomaly: dict[str, Any]) -> str:
+    """Single-sentence push notification body for an anomaly. ~$0.0005/call."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    user_text = (
+        f"Statistical anomaly detected:\n{json.dumps(anomaly)}\n\n"
+        f"Write ONE sentence (≤ 18 words) for a phone notification. Plain "
+        f"English. Mention the metric, the magnitude, and a one-word read "
+        f"(spike / dip / etc). No emoji."
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=60,
+        system=_cached_system(VERDICT_SYSTEM),
+        messages=[{"role": "user", "content": user_text}],
+    )
+    text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+    return "\n".join(text_parts).strip().strip('"').strip()

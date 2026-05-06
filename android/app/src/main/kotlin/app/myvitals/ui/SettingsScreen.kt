@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -87,7 +89,9 @@ fun SettingsScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(MV.Bg),
+            .background(MV.Bg)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
         contentPadding = PaddingValues(bottom = 32.dp),
     ) {
         // ── Top brand row ──
@@ -331,9 +335,9 @@ private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) 
         Text(
             text = title.uppercase(),
             fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold,
             letterSpacing = 2.4.sp,
-            color = MV.BrandRed,
+            color = MV.OnSurfaceVariant,
             modifier = Modifier.padding(start = 8.dp, bottom = 10.dp),
         )
         content()

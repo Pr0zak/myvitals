@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -118,7 +120,9 @@ fun SoberHomeScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MV.Bg),
+            .background(MV.Bg)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
     ) {
         // ── Top brand row ──
         Row(
@@ -218,14 +222,21 @@ fun SoberHomeScreen(
             )
         }
 
-        // ── Sync pill + actions ──
+        // ── Sync pill + actions (full-width column so the children's
+        //     CenterHorizontally + Center arrangement actually centers) ──
         Column(
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 20.dp, bottom = 14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             SyncStatusPill(settings = settings, nowMs = nowMs)
             Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 TextButton(onClick = { scope.launch { fetch() } }) {
                     Text(
                         if (refreshing) "Refreshing…" else "Refresh",
@@ -234,7 +245,9 @@ fun SoberHomeScreen(
                         fontWeight = FontWeight.Medium,
                     )
                 }
+                Spacer(Modifier.width(8.dp))
                 Text("·", color = MV.OnSurfaceDim, fontSize = 14.sp)
+                Spacer(Modifier.width(8.dp))
                 TextButton(onClick = onOpenSettings) {
                     Text(
                         "Settings ›",

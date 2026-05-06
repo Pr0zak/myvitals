@@ -8,6 +8,7 @@ import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
 import { chartTheme } from "@/theme";
 import { weightUnit, weightVal, units } from "@/units";
+import { renderMarkdown } from "@/markdown";
 
 // ────────── METRIC METADATA ──────────
 const METRIC_LABEL: Record<string, string> = {
@@ -255,8 +256,48 @@ function swapXY() {
   y.value = t;
 }
 
+// ── AI integration: Ask + Discovery explainer ─────────────
+const aiCfgEnabled = ref(false);
+const askQuestion = ref("");
+const askAnswer = ref<{ content: string } | null>(null);
+const askBusy = ref(false);
+const askError = ref<string | null>(null);
+const explainResults = ref<Record<string, string>>({});
+const explainBusy = ref<string | null>(null);
+
+async function loadAiCfg() {
+  try {
+    const cfg = await api.aiConfig();
+    aiCfgEnabled.value = !!cfg.enabled;
+  } catch { /* ignore */ }
+}
+async function submitAsk() {
+  if (!askQuestion.value.trim()) return;
+  askBusy.value = true; askError.value = null; askAnswer.value = null;
+  try {
+    askAnswer.value = await api.aiAsk(askQuestion.value.trim());
+  } catch (e: unknown) {
+    if (e && typeof e === "object" && "response" in e) {
+      const r = (e as { response?: { data?: { detail?: string } } }).response;
+      askError.value = r?.data?.detail ?? "Ask failed";
+    } else askError.value = e instanceof Error ? e.message : "Ask failed";
+  } finally { askBusy.value = false; }
+}
+async function explainCorrelation(xm: string, ym: string) {
+  const k = `${xm}-${ym}`;
+  explainBusy.value = k;
+  try {
+    const r = await api.aiExplainDiscovery(xm, ym);
+    explainResults.value = { ...explainResults.value, [k]: r.content };
+  } catch (e) {
+    explainResults.value = { ...explainResults.value, [k]: "(explain failed: " +
+      (e instanceof Error ? e.message : "unknown") + ")" };
+  } finally { explainBusy.value = null; }
+}
+
 onMounted(() => {
   loadFindings();
+  loadAiCfg();
   if (queryToken.value) fetchData();
 });
 watch([x, y, lag, days], fetchData);
@@ -353,6 +394,25 @@ const explorerStrength = computed(() => strengthIdx(result.value?.pearson_r));
       or scroll down to test your own hunches.
     </p>
 
+    <!-- ──────── ASK CLAUDE ──────── -->
+    <Card v-if="aiCfgEnabled" title="Ask">
+      <p class="hint" style="margin-bottom: 0.6rem;">
+        Free-form question about your data — e.g. "what's hurting my sleep this month?"
+      </p>
+      <div class="ask-row">
+        <input v-model="askQuestion" type="text"
+               placeholder="What's hurting my sleep this month?"
+               class="ask-input"
+               @keydown.enter="submitAsk()"/>
+        <button class="ask-send" :disabled="askBusy || !askQuestion.trim()"
+                @click="submitAsk()">
+          {{ askBusy ? 'Thinking…' : 'Ask' }}
+        </button>
+      </div>
+      <div v-if="askError" class="err" style="margin-top: 0.5rem;">{{ askError }}</div>
+      <div v-if="askAnswer" class="ask-answer" v-html="renderMarkdown(askAnswer.content)"/>
+    </Card>
+
     <!-- ──────── FINDINGS FEED ──────── -->
     <div v-if="findingsLoading" class="loading">Looking for patterns…</div>
     <div v-else-if="findingsErr" class="err">{{ findingsErr }}</div>
@@ -369,6 +429,13 @@ const explorerStrength = computed(() => strengthIdx(result.value?.pearson_r));
       <Card v-for="f in findings" :key="`${f.x_metric}-${f.y_metric}`" flat>
         <div class="finding-row">
           <div class="finding-text">
+            <button v-if="aiCfgEnabled" class="explain-btn"
+                    :disabled="explainBusy === `${f.x_metric}-${f.y_metric}`"
+                    @click="explainCorrelation(f.x_metric, f.y_metric)">
+              {{ explainBusy === `${f.x_metric}-${f.y_metric}` ? '…' : '✦ Explain' }}
+            </button>
+            <div v-if="explainResults[`${f.x_metric}-${f.y_metric}`]" class="explain-out"
+                 v-html="renderMarkdown(explainResults[`${f.x_metric}-${f.y_metric}`])"/>
             <div class="finding-headline" :class="{ neg: f.pearson_r < 0 }">
               <component :is="f.pearson_r < 0 ? ArrowDown : ArrowUp" :size="16" class="dir-icon"/>
               {{ findingPhrase(f.x_metric, f.y_metric, f.pearson_r) }}
@@ -479,6 +546,48 @@ const explorerStrength = computed(() => strengthIdx(result.value?.pearson_r));
 </template>
 
 <style scoped>
+.ask-row { display: flex; gap: 0.5rem; }
+.ask-input {
+  flex: 1; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.6rem 0.8rem; font-family: inherit; font-size: 0.9rem;
+}
+.ask-input:focus { outline: none; border-color: var(--violet); }
+.ask-send {
+  background: var(--violet); color: #fff; border: 0;
+  border-radius: 8px; padding: 0.5rem 1rem; cursor: pointer;
+  font-family: inherit; font-weight: 600; font-size: 0.85rem;
+}
+.ask-send:disabled { opacity: 0.5; cursor: not-allowed; }
+.ask-answer {
+  margin-top: 0.7rem; padding: 0.8rem 1rem;
+  background: rgba(167, 139, 250, 0.05);
+  border-left: 3px solid var(--violet);
+  border-radius: 4px;
+  color: var(--text-soft); font-size: 0.92rem; line-height: 1.55;
+}
+.ask-answer :deep(p) { margin: 0.3rem 0; }
+.ask-answer :deep(ul) { margin: 0.3rem 0 0.3rem 1rem; padding: 0; }
+.ask-answer :deep(strong) { color: var(--text); }
+
+.explain-btn {
+  background: rgba(167, 139, 250, 0.1); color: var(--violet);
+  border: 1px solid rgba(167, 139, 250, 0.3); border-radius: 6px;
+  padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer;
+  font-family: inherit; font-weight: 600;
+  align-self: flex-start;
+  margin-bottom: 0.3rem;
+}
+.explain-btn:hover { background: rgba(167, 139, 250, 0.2); }
+.explain-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.explain-out {
+  background: rgba(167, 139, 250, 0.05);
+  border-left: 2px solid var(--violet);
+  border-radius: 4px;
+  padding: 0.5rem 0.7rem; margin-bottom: 0.4rem;
+  font-size: 0.85rem; line-height: 1.45; color: var(--text-soft);
+}
+.explain-out :deep(p) { margin: 0.2rem 0; }
 h1 { margin: 0 0 0.4rem; }
 .hint { color: var(--muted); font-size: 0.9rem; margin: 0 0 1.2rem; }
 .hint em { color: var(--text-soft); font-style: normal; font-weight: 500; }

@@ -49,6 +49,8 @@ onMounted(loadDiscoveries);
 // ── AI insights ─────────────────────────────────────────────
 const aiCfg = ref<Awaited<ReturnType<typeof api.aiConfig>> | null>(null);
 const aiTopicResult = ref<Awaited<ReturnType<typeof api.aiExplainTopic>> | null>(null);
+const aiVerdict = ref<{ content: string; generated_at: string; model: string } | null>(null);
+const aiVerdictBusy = ref(false);
 const activeTopic = ref<string | null>(null);
 const aiBusy = ref(false);
 const aiError = ref<string | null>(null);
@@ -65,6 +67,22 @@ const AI_TOPICS: { id: Topic; label: string }[] = [
 
 async function loadAi() {
   try { aiCfg.value = await api.aiConfig(); } catch { return; }
+  if (!aiCfg.value?.enabled) return;
+  // Pull cached verdict on mount — no API call unless user taps refresh.
+  try { aiVerdict.value = await api.aiVerdictLatest(); } catch { /* ignore */ }
+}
+
+async function refreshVerdict() {
+  if (!aiCfg.value?.enabled) return;
+  aiVerdictBusy.value = true;
+  try { aiVerdict.value = await api.aiVerdict(); }
+  catch (e) {
+    if (e && typeof e === "object" && "response" in e) {
+      const r = (e as { response?: { data?: { detail?: string } } }).response;
+      aiError.value = r?.data?.detail ?? "verdict failed";
+    }
+  }
+  finally { aiVerdictBusy.value = false; }
 }
 async function askTopic(topic: Topic) {
   aiBusy.value = true; aiError.value = null; activeTopic.value = topic;
@@ -550,6 +568,18 @@ const subtitleHr = computed(() => {
     <div v-if="error" class="err">{{ error }}</div>
 
     <div v-if="!loading">
+      <!-- ════ AI verdict headline (one sentence above everything) ════ -->
+      <div v-if="aiCfg?.enabled" class="verdict-strip">
+        <span class="verdict-icon">✦</span>
+        <span class="verdict-text" v-if="aiVerdict">{{ aiVerdict.content }}</span>
+        <span class="verdict-text muted" v-else>Tap ↻ for today's read.</span>
+        <button class="verdict-refresh" :disabled="aiVerdictBusy"
+                :title="aiVerdict ? `${fmtDateTime(aiVerdict.generated_at)} · ${aiVerdict.model.replace(/-\\d{8}$/, '')}` : 'Generate'"
+                @click="refreshVerdict">
+          {{ aiVerdictBusy ? '…' : '↻' }}
+        </button>
+      </div>
+
       <!-- ════ AI + Trend badges at the top ══════════════════════ -->
       <!-- AI insights card (only if enabled in Settings) -->
       <Card v-if="aiCfg?.enabled" title="AI insights"
@@ -962,6 +992,28 @@ h1 { margin: 0; }
   font-size: 10.5px; font-weight: 600;
   color: var(--kpi-c); font-variant-numeric: tabular-nums;
 }
+
+/* AI verdict — one-line headline above the page */
+.verdict-strip {
+  display: flex; align-items: center; gap: 0.7rem;
+  padding: 0.7rem 1rem; margin: 0.6rem 0 1rem;
+  background: linear-gradient(90deg, rgba(167, 139, 250, 0.08), rgba(56, 189, 248, 0.04));
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 12px;
+  font-size: 0.95rem; line-height: 1.4;
+  color: var(--text);
+}
+.verdict-icon { color: var(--violet); font-size: 1.05rem; flex-shrink: 0; }
+.verdict-text { flex: 1; }
+.verdict-text.muted { color: var(--muted); font-style: italic; }
+.verdict-refresh {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--muted); border-radius: 6px;
+  width: 28px; height: 28px; padding: 0;
+  cursor: pointer; font-family: inherit; flex-shrink: 0;
+}
+.verdict-refresh:hover { color: var(--violet); border-color: var(--violet); }
+.verdict-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* AI insights card */
 .ai-topics { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.4rem; }

@@ -83,6 +83,11 @@ async function aiUpdateModel(model: string) {
   try { await api.aiUpdateConfig({ model }); await loadAiCfg(); }
   catch { /* swallow */ }
 }
+async function aiUpdateTone(tone: string) {
+  if (tone !== "supportive" && tone !== "blunt" && tone !== "data-only") return;
+  try { await api.aiUpdateConfig({ tone }); await loadAiCfg(); }
+  catch { /* swallow */ }
+}
 
 // Available Claude models with their cost / capability profile so the
 // picker can show "Haiku (cheapest, fast)" rather than just an ID.
@@ -648,6 +653,15 @@ onUnmounted(stopJobPolling);
           <span class="muted" style="font-size: 0.75rem;">
             {{ AI_MODELS.find((m) => m.id === aiCfg?.model)?.sub ?? '' }}
           </span>
+        </label>
+        <label class="ai-toggle">
+          <span>Tone:</span>
+          <select :value="aiCfg?.tone ?? 'supportive'"
+                  @change="aiUpdateTone(($event.target as HTMLSelectElement).value)">
+            <option value="supportive">Supportive</option>
+            <option value="blunt">Blunt</option>
+            <option value="data-only">Data-only</option>
+          </select>
         </label>
         <label class="ai-toggle">
           <span>Daily call limit:</span>

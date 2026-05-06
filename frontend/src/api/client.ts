@@ -225,6 +225,7 @@ export const api = {
     daily_call_limit: number;
     calls_today: number;
     weekly_digest_enabled: boolean;
+    tone: "supportive" | "blunt" | "data-only";
   }> {
     const { data } = await http.get("/ai/config");
     return data;
@@ -237,6 +238,7 @@ export const api = {
     model?: string;
     daily_call_limit?: number;
     weekly_digest_enabled?: boolean;
+    tone?: "supportive" | "blunt" | "data-only";
   }) {
     const { data } = await http.post("/ai/config", body);
     return data;
@@ -285,6 +287,31 @@ export const api = {
     cached: boolean;
   }> {
     const { data } = await http.post(`/ai/explain/${topic}`);
+    return data;
+  },
+
+  async aiVerdict(): Promise<{ content: string; generated_at: string; model: string; cached: boolean }> {
+    const { data } = await http.post("/ai/verdict");
+    return data;
+  },
+
+  async aiVerdictLatest(): Promise<{ content: string; generated_at: string; model: string } | null> {
+    const { data } = await http.get("/ai/verdict/latest");
+    return data;
+  },
+
+  async aiPreWorkout(): Promise<{ content: string; generated_at: string; model: string }> {
+    const { data } = await http.post("/ai/pre-workout");
+    return data;
+  },
+
+  async aiAsk(question: string): Promise<{ content: string; generated_at: string; model: string; input_tokens: number; output_tokens: number }> {
+    const { data } = await http.post("/ai/ask", { question });
+    return data;
+  },
+
+  async aiExplainDiscovery(x_metric: string, y_metric: string): Promise<{ content: string; generated_at: string; model: string }> {
+    const { data } = await http.post("/ai/explain-discovery", { x_metric, y_metric });
     return data;
   },
 

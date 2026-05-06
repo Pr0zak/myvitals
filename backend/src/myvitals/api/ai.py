@@ -14,11 +14,15 @@ from ..auth import require_query
 from ..db import models
 from ..db.session import get_session
 from ..integrations.claude import (
+    ask,
     build_summary_payload,
     build_topic_payload,
+    explain_discovery,
     explain_legacy,
     explain_topic,
     hash_payload,
+    pre_workout,
+    verdict,
 )
 
 router = APIRouter(prefix="/ai", dependencies=[Depends(require_query)])
@@ -55,6 +59,7 @@ async def get_config(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
         "daily_call_limit": cfg.daily_call_limit,
         "calls_today": cfg.calls_today if cfg.calls_today_date == date.today() else 0,
         "weekly_digest_enabled": cfg.weekly_digest_enabled,
+        "tone": cfg.tone,
     }
 
 
@@ -65,6 +70,7 @@ class ConfigUpdate(BaseModel):
     model: str | None = None
     daily_call_limit: int | None = None
     weekly_digest_enabled: bool | None = None
+    tone: str | None = None
 
 
 @router.post("/config")
@@ -84,6 +90,8 @@ async def update_config(
         cfg.daily_call_limit = max(1, min(200, body.daily_call_limit))
     if body.weekly_digest_enabled is not None:
         cfg.weekly_digest_enabled = body.weekly_digest_enabled
+    if body.tone is not None and body.tone in ("supportive", "blunt", "data-only"):
+        cfg.tone = body.tone
     cfg.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return await get_config(db)
@@ -261,4 +269,138 @@ async def explain_topic_endpoint(
         "generated_at": summary.generated_at,
         "model": result.model,
         "cached": False,
+    }
+
+
+# ─────────────── Today's verdict ───────────────
+
+@router.post("/verdict")
+async def verdict_endpoint(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    """One-line headline summarising current state. Cached by the most
+    recent vital timestamp, so the headline doesn't re-bill on every
+    page load — it only refreshes when new data arrives."""
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    payload = {
+        "kind": "verdict",
+        "tone": cfg.tone,
+        # Use only the freshest day as cache key — stable across reloads
+        # but flips when fresh data lands.
+    }
+    # Build the real payload to compute hash
+    from ..integrations.claude import build_verdict_payload as _bvp
+    real = await _bvp(db)
+    payload_hash = hash_payload({**payload, "snapshot": real})
+
+    cached = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == "verdict")
+        .where(models.AiSummary.payload_hash == payload_hash)
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if cached is not None:
+        return {
+            "content": cached.content,
+            "generated_at": cached.generated_at,
+            "model": cached.model,
+            "cached": True,
+        }
+    result = await verdict(db, cfg)
+    cfg.calls_today += 1
+    summary = models.AiSummary(
+        generated_at=datetime.now(timezone.utc),
+        range_kind="verdict",
+        payload_hash=payload_hash,
+        model=result.model,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        content=result.content,
+    )
+    db.add(summary)
+    await db.commit()
+    return {
+        "content": result.content,
+        "generated_at": summary.generated_at,
+        "model": result.model,
+        "cached": False,
+    }
+
+
+@router.get("/verdict/latest")
+async def verdict_latest(db: AsyncSession = Depends(get_session)) -> dict[str, Any] | None:
+    row = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == "verdict")
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    return {"content": row.content, "generated_at": row.generated_at, "model": row.model}
+
+
+# ─────────────── Pre-workout ───────────────
+
+@router.post("/pre-workout")
+async def pre_workout_endpoint(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    result = await pre_workout(db, cfg)
+    cfg.calls_today += 1
+    await db.commit()
+    return {
+        "content": result.content,
+        "generated_at": datetime.now(timezone.utc),
+        "model": result.model,
+    }
+
+
+# ─────────────── Free-form Q&A ───────────────
+
+class AskBody(BaseModel):
+    question: str
+
+
+@router.post("/ask")
+async def ask_endpoint(
+    body: AskBody, db: AsyncSession = Depends(get_session)
+) -> dict[str, Any]:
+    if not body.question or not body.question.strip():
+        raise HTTPException(status_code=400, detail="question is required")
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    result = await ask(db, cfg, body.question.strip())
+    cfg.calls_today += 1
+    await db.commit()
+    return {
+        "content": result.content,
+        "generated_at": datetime.now(timezone.utc),
+        "model": result.model,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+    }
+
+
+# ─────────────── Discovery explainer ───────────────
+
+class DiscoveryBody(BaseModel):
+    x_metric: str
+    y_metric: str
+
+
+@router.post("/explain-discovery")
+async def explain_discovery_endpoint(
+    body: DiscoveryBody, db: AsyncSession = Depends(get_session)
+) -> dict[str, Any]:
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    result = await explain_discovery(db, cfg, body.x_metric, body.y_metric)
+    if result.input_tokens > 0:
+        cfg.calls_today += 1
+        await db.commit()
+    return {
+        "content": result.content,
+        "generated_at": datetime.now(timezone.utc),
+        "model": result.model,
     }

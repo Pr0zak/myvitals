@@ -40,8 +40,31 @@ class AiResult:
     output_tokens: int
 
 
-SYSTEM_PROMPT = """You are a brief, friendly health coach narrating
-aggregate self-tracked metrics for the user themselves.
+_TONE_FLAVORS = {
+    "supportive": (
+        "Tone: warm, encouraging, plain-English. Acknowledge wins, frame "
+        "setbacks with a path forward. Never preachy."
+    ),
+    "blunt": (
+        "Tone: direct, no-nonsense. Skip pleasantries. State the data, "
+        "the most likely cause, and the most useful action. Never rude."
+    ),
+    "data-only": (
+        "Tone: neutral, clinical, factual. State only what the numbers "
+        "show — no encouragement or qualitative judgment. Cite figures."
+    ),
+}
+
+
+def _tone_line(tone: str) -> str:
+    return _TONE_FLAVORS.get(tone, _TONE_FLAVORS["supportive"])
+
+
+def system_prompt(tone: str) -> str:
+    return f"""You are a brief health coach narrating aggregate self-tracked
+metrics for the user themselves.
+
+{_tone_line(tone)}
 
 OUTPUT FORMAT — strict:
 - Headline: one sentence, ≤ 12 words.
@@ -57,10 +80,14 @@ Rules:
 - No emoji. Markdown bullets only.
 """
 
-STRUCTURED_SYSTEM = """You are a brief health coach. The user gives you
-pre-aggregated metric data and asks for an analysis on a specific topic.
 
-Use the `give_analysis` tool to return your response. The schema is:
+def structured_system(tone: str) -> str:
+    return f"""You are a brief health coach. The user gives you pre-aggregated
+metric data and asks for an analysis on a specific topic.
+
+{_tone_line(tone)}
+
+Use the `give_analysis` tool to return your response. Schema:
 - headline: ONE sentence, ≤ 14 words, the most important takeaway
 - tone: "good" | "warn" | "bad" | "neutral"
 - evidence: 2-4 short bullets (≤ 22 words each), each citing a number
@@ -69,6 +96,22 @@ Use the `give_analysis` tool to return your response. The schema is:
 
 Be specific. Never alarmist. If data is sparse, say so in the headline.
 """
+
+
+VERDICT_SYSTEM = """You are a brief health coach. Read the user's most
+recent stats and produce ONE headline sentence (≤ 12 words) summarising
+how their body is doing right now. Plain English. No emoji.
+Examples:
+- "Recovery day — HRV still suppressed, prioritise sleep tonight."
+- "Strong morning — readiness 86 after 7.4h sleep."
+- "Watch your RHR — running 5bpm above baseline for 3 days."
+Output ONLY the sentence. No bullets, no markdown."""
+
+
+ASK_SYSTEM = """You are a brief health coach. The user has aggregate
+data and a specific question. Answer in ≤ 80 words. Be concrete: cite
+numbers and dates. Use bullets if listing > 1 cause. If the data
+doesn't support an answer, say so honestly. No emoji."""
 
 ANALYSIS_TOOL = {
     "name": "give_analysis",
@@ -308,9 +351,15 @@ def hash_payload(payload: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _cached_system(text: str) -> list[dict]:
+    """Wrap the system prompt for Anthropic's prompt cache so the fixed
+    template doesn't get re-billed at full input rate on every call.
+    Saves ~50% on repeated topical reads."""
+    return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+
+
 async def explain_legacy(db: AsyncSession, range_kind: str, cfg: models.AiConfig) -> AiResult:
-    """Backwards-compat narrative output (markdown). Used by the original
-    /ai/explain endpoint."""
+    """Backwards-compat narrative output (markdown). Used by /ai/explain."""
     if not cfg.enabled or not cfg.anthropic_api_key:
         raise RuntimeError("AI is disabled or no API key configured")
     payload = await build_summary_payload(db, range_kind)
@@ -322,7 +371,7 @@ async def explain_legacy(db: AsyncSession, range_kind: str, cfg: models.AiConfig
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
-        system=SYSTEM_PROMPT,
+        system=_cached_system(system_prompt(cfg.tone)),
         messages=[{"role": "user", "content": user_text}],
     )
     text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
@@ -369,7 +418,7 @@ async def explain_topic(
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
-        system=STRUCTURED_SYSTEM,
+        system=_cached_system(structured_system(cfg.tone)),
         tools=[ANALYSIS_TOOL],
         tool_choice={"type": "tool", "name": "give_analysis"},
         messages=[{"role": "user", "content": user_text}],
@@ -391,6 +440,148 @@ async def explain_topic(
         }
     return AiResult(
         content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
+# ─────────────── Verdict (one-line summary) ───────────────
+
+async def build_verdict_payload(db: AsyncSession) -> dict[str, Any]:
+    rows = await _daily_rows(db, 7)
+    return {
+        "today": rows[-1] if rows else None,
+        "last_7_days": rows,
+        "trend_badges": await compute_badges(db, max_badges=4),
+        "sober": await _sober_status(db),
+    }
+
+
+async def verdict(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    payload = await build_verdict_payload(db)
+    user_text = f"Aggregate snapshot:\n{json.dumps(payload, indent=2, default=str)}\n"
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=80,
+        system=_cached_system(VERDICT_SYSTEM),
+        messages=[{"role": "user", "content": user_text}],
+    )
+    text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+    return AiResult(
+        content="\n".join(text_parts).strip().strip('"').strip(),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
+# ─────────────── Free-form Q&A ───────────────
+
+async def ask(db: AsyncSession, cfg: models.AiConfig, question: str) -> AiResult:
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    if len(question) > 500:
+        question = question[:500]
+    payload = await build_summary_payload(db, "week")
+    user_text = (
+        f"Question: {question}\n\n"
+        f"Aggregate context (last 7 days + correlations + sober):\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=400,
+        system=_cached_system(ASK_SYSTEM),
+        messages=[{"role": "user", "content": user_text}],
+    )
+    text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+    return AiResult(
+        content="\n\n".join(text_parts).strip(),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
+# ─────────────── Discovery explainer ───────────────
+
+async def explain_discovery(
+    db: AsyncSession, cfg: models.AiConfig,
+    x_metric: str, y_metric: str,
+) -> AiResult:
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    discoveries = await _correlations(db, days=90, top_n=20)
+    target = next(
+        (d for d in discoveries if (d["x"] == x_metric and d["y"] == y_metric)
+         or (d["x"] == y_metric and d["y"] == x_metric)),
+        None,
+    )
+    if target is None:
+        return AiResult(
+            content=f"No statistically meaningful correlation between {x_metric} and {y_metric} "
+                    f"in the last 90 days (need n≥14 with |r|≥0.4).",
+            model=cfg.model, input_tokens=0, output_tokens=0,
+        )
+    context_days = await _daily_rows(db, 30)
+    user_text = (
+        f"The user found a correlation in their data:\n{json.dumps(target)}\n\n"
+        f"Context (last 30 days of daily summaries):\n"
+        f"{json.dumps(context_days, default=str)}\n\n"
+        f"In ≤ 70 words: explain in plain English what this correlation likely "
+        f"means in their day-to-day. Cite the direction (negative r = more X "
+        f"means less Y). Suggest one practical takeaway."
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=300,
+        system=_cached_system(ASK_SYSTEM),
+        messages=[{"role": "user", "content": user_text}],
+    )
+    text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+    return AiResult(
+        content="\n\n".join(text_parts).strip(),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
+# ─────────────── Pre-workout recommendation ───────────────
+
+async def pre_workout(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    rows = await _daily_rows(db, 7)
+    today = rows[-1] if rows else None
+    payload = {
+        "today": today,
+        "last_7_days": rows,
+        "trend_badges": await compute_badges(db, max_badges=3),
+    }
+    user_text = (
+        f"User wants a one-line training recommendation for today.\n\n"
+        f"Aggregate context:\n{json.dumps(payload, indent=2, default=str)}\n\n"
+        f"Output: ONE verdict (Go hard / Moderate / Easy / Rest) with a "
+        f"one-sentence justification citing the most important number. "
+        f"≤ 25 words total. No markdown."
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=80,
+        system=_cached_system(VERDICT_SYSTEM),
+        messages=[{"role": "user", "content": user_text}],
+    )
+    text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+    return AiResult(
+        content="\n".join(text_parts).strip(),
         model=resp.model,
         input_tokens=resp.usage.input_tokens,
         output_tokens=resp.usage.output_tokens,

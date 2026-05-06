@@ -273,7 +273,22 @@ class AiConfig(Base):
     calls_today: Mapped[int] = mapped_column(Integer, default=0)
     calls_today_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     weekly_digest_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    tone: Mapped[str] = mapped_column(String(16), default="supportive")
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AiGoal(Base):
+    """User-defined goal for AI coaching ("lose 5 kg by Sept 1", "30 sober days")."""
+    __tablename__ = "ai_goals"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(32))  # weight | sober | sleep | steps | custom
+    title: Mapped[str] = mapped_column(String(255))
+    target_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AiSummary(Base):

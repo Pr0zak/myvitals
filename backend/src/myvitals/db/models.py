@@ -102,6 +102,8 @@ class Workout(Base):
     kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
     avg_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class EnvReading(Base):

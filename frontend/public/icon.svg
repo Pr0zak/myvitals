@@ -1,7 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#0f172a"/>
-  <path d="M256 432 L96 256 Q56 200 96 144 Q156 80 216 144 L256 184 L296 144 Q356 80 416 144 Q456 200 416 256 Z"
-        fill="#ef4444" opacity="0.95"/>
-  <polyline points="120,256 180,256 200,200 240,320 270,240 310,290 340,260 392,260"
-            fill="none" stroke="#22d3ee" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108">
+  <!-- Brand background, dark to make the red heart pop -->
+  <rect width="108" height="108" rx="20" fill="#0B1018"/>
+  <!-- Heart silhouette, red -->
+  <path d="M54,76 C 54,76 30,60 30,46 C 30,38 36,33 43,33 C 49,33 52,36 54,40 C 56,36 59,33 65,33 C 72,33 78,38 78,46 C 78,60 54,76 54,76 Z"
+        fill="#EF4444"/>
+  <!-- EKG trace through the heart, white -->
+  <path d="M30,52 L42,52 L46,46 L50,58 L54,40 L58,58 L62,46 L66,52 L78,52 L78,55 L66,55 L62,49 L58,61 L54,43 L50,61 L46,49 L42,55 L30,55 Z"
+        fill="#FFFFFF"/>
 </svg>

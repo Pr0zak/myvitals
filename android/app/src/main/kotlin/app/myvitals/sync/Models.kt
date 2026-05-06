@@ -37,6 +37,8 @@ data class WorkoutSample(
     val kcal: Double? = null,
     @Json(name = "avg_hr") val avgHr: Double? = null,
     @Json(name = "max_hr") val maxHr: Double? = null,
+    val source: String? = null,
+    val title: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

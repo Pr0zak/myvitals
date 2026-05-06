@@ -504,6 +504,7 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
     </div>
 
     <div v-else class="grid">
+      <div id="rhr"></div>
       <Card title="Combined trend">
         <div class="toggle-row">
           <label><input type="checkbox" v-model="overlayMetrics.rhr"/><span>RHR</span></label>
@@ -576,6 +577,7 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
         <div class="chart"><VChart :option="bpOption" autoresize/></div>
       </Card>
 
+      <div id="skin-temp"></div>
       <Card v-if="hasSkinTemp" title="Skin temperature (Δ from baseline)">
         <div class="chart"><VChart :option="skinTempOption" autoresize/></div>
       </Card>

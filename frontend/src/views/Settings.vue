@@ -5,6 +5,7 @@ import { Eye, EyeOff, Check, X as XIcon } from "lucide-vue-next";
 import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
 import { units, weightUnit, weightVal, weightToKg } from "@/units";
+import { themeChoice } from "@/theme";
 import type { StravaAppConfigStatus, StravaStatus } from "@/api/types";
 
 const tokenInput = ref(queryToken.value);
@@ -391,6 +392,12 @@ onUnmounted(stopJobPolling);
 
     <details class="section" open>
       <summary><h2>Display</h2></summary>
+      <label style="flex-direction: row; align-items: center; gap: 0.6rem;">
+        <span>Theme:</span>
+        <label><input type="radio" value="dark" v-model="themeChoice"/> dark</label>
+        <label><input type="radio" value="light" v-model="themeChoice"/> light</label>
+        <label><input type="radio" value="auto" v-model="themeChoice"/> auto (follow system)</label>
+      </label>
       <label style="flex-direction: row; align-items: center; gap: 0.6rem;">
         <span>Units:</span>
         <label><input type="radio" value="metric" v-model="units"/> metric (km, kg, °C)</label>

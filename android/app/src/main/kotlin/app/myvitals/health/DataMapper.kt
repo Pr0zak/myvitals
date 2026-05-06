@@ -85,6 +85,8 @@ object DataMapper {
                     time = session.startTime.toString(),
                     type = exerciseTypeName(session.exerciseType),
                     durationS = (session.endTime.epochSecond - session.startTime.epochSecond).toInt(),
+                    source = session.metadata.dataOrigin.packageName.takeIf { it.isNotBlank() },
+                    title = session.title,
                 )
             },
             bodyMetrics = weightSamples + orphanFat + orphanLean,

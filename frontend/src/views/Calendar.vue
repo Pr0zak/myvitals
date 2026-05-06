@@ -85,7 +85,14 @@ const calendarOption = computed(() => {
       top: 40, left: 30, right: 30,
       cellSize: ["auto", 16],
       range: year.value.toString(),
-      itemStyle: { borderColor: t.tooltip.backgroundColor, borderWidth: 1 },
+      // Calendar's own itemStyle sets the BACKGROUND for cells (empty days
+      // would otherwise render white from ECharts' default). Match the
+      // surrounding card background and use a soft border.
+      itemStyle: {
+        color: "#1a2332",
+        borderColor: "rgba(148, 163, 184, 0.12)",
+        borderWidth: 1,
+      },
       splitLine: { show: false },
       yearLabel: { show: false },
       monthLabel: { color: t.axisLabel.color, fontSize: 11 },

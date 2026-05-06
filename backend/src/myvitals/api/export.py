@@ -20,7 +20,7 @@ TABLES = {
     "hrv": (models.Hrv, ["time", "rmssd_ms"]),
     "steps": (models.Steps, ["time", "count"]),
     "sleep_stages": (models.SleepStage, ["time", "stage", "duration_s"]),
-    "workouts": (models.Workout, ["time", "type", "duration_s", "kcal", "avg_hr", "max_hr"]),
+    "workouts": (models.Workout, ["time", "type", "duration_s", "kcal", "avg_hr", "max_hr", "source", "title"]),
     "annotations": (models.Annotation, ["id", "ts", "type", "payload", "note"]),
     "activities": (models.Activity, [
         "source", "source_id", "type", "name", "start_at", "duration_s",

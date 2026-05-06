@@ -8,11 +8,23 @@ import App from "./App.vue";
 
 const router = createRouter({
   history: createWebHistory(),
+  scrollBehavior(to, _from, savedPosition) {
+    if (to.hash) {
+      // Wait for the target view's data + charts to mount before scrolling
+      // (most page Cards render after an async load).
+      return new Promise((resolve) => {
+        setTimeout(() => resolve({ el: to.hash, behavior: "smooth", top: 16 }), 250);
+      });
+    }
+    if (savedPosition) return savedPosition;
+    return { top: 0 };
+  },
   routes: [
     { path: "/", name: "today", component: () => import("./views/Today.vue") },
     { path: "/trends", name: "trends", component: () => import("./views/Trends.vue") },
     { path: "/sleep", name: "sleep", component: () => import("./views/Sleep.vue") },
     { path: "/weight", name: "weight", component: () => import("./views/Weight.vue") },
+    { path: "/blood-pressure", name: "blood-pressure", component: () => import("./views/BloodPressure.vue") },
     { path: "/log", name: "log", component: () => import("./views/Log.vue") },
     { path: "/activities", name: "activities", component: () => import("./views/Activities.vue") },
     { path: "/activity/:source/:id", name: "activity-detail", component: () => import("./views/ActivityDetail.vue") },

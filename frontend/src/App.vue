@@ -1,57 +1,55 @@
 <script setup lang="ts">
-import { RouterLink, RouterView } from "vue-router";
+import { ref, watch } from "vue";
+import { RouterView, useRoute } from "vue-router";
+import { Menu as MenuIcon } from "lucide-vue-next";
 import { isConfigured } from "@/config";
-import { themeChoice } from "@/theme";
+import SideNav from "@/components/SideNav.vue";
 
-function cycleTheme() {
-  const order: Array<"dark" | "light" | "auto"> = ["dark", "light", "auto"];
-  const i = order.indexOf(themeChoice.value);
-  themeChoice.value = order[(i + 1) % order.length];
-}
+const sideNavOpen = ref(false);
+const route = useRoute();
+watch(() => route.fullPath, () => { sideNavOpen.value = false; });
 </script>
 
 <template>
   <div class="app">
-    <nav>
-      <RouterLink to="/">Today</RouterLink>
-      <RouterLink to="/trends">Trends</RouterLink>
-      <RouterLink to="/sleep">Sleep</RouterLink>
-      <RouterLink to="/weight">Weight</RouterLink>
-      <RouterLink to="/log">Log</RouterLink>
-      <RouterLink to="/activities">Activities</RouterLink>
-      <RouterLink to="/calendar">Calendar</RouterLink>
-      <RouterLink to="/compare">Compare</RouterLink>
-      <span class="spacer" />
-      <button class="theme-btn" @click="cycleTheme" :title="`Theme: ${themeChoice} (click to cycle)`">
-        {{ themeChoice === "dark" ? "🌙" : themeChoice === "light" ? "☀️" : "🌓" }}
-      </button>
-      <RouterLink to="/insights" class="nav-secondary">Insights</RouterLink>
-      <RouterLink to="/alerts" class="nav-secondary">Alerts</RouterLink>
-      <RouterLink to="/logs" class="nav-secondary">Logs</RouterLink>
-      <RouterLink to="/settings" class="nav-secondary">Settings</RouterLink>
-    </nav>
-    <RouterLink v-if="!isConfigured()" to="/settings" class="banner">
-      ⚠ No query token set — go to Settings to paste your QUERY_TOKEN.
-    </RouterLink>
-    <main>
-      <RouterView />
-    </main>
+    <SideNav :class="{ open: sideNavOpen }" @navigate="sideNavOpen = false"/>
+    <button class="mobile-toggle" aria-label="Toggle navigation"
+            @click="sideNavOpen = !sideNavOpen">
+      <MenuIcon :size="18"/>
+    </button>
+    <div v-if="sideNavOpen" class="scrim" @click="sideNavOpen = false"/>
+
+    <div class="main-col">
+      <RouterLink v-if="!isConfigured()" to="/settings" class="banner">
+        ⚠ No query token set — go to Settings to paste your QUERY_TOKEN.
+      </RouterLink>
+      <main>
+        <RouterView />
+      </main>
+    </div>
   </div>
 </template>
 
 <style>
 :root,
 [data-theme="dark"] {
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --surface-2: #334155;
-  --border: #334155;
+  /* Deeper, design-spec palette */
+  --bg-0: #07090e;
+  --bg-1: #0d1117;
+  --bg-2: #131a24;
+  --bg-3: #1a2332;
+  --bg: var(--bg-0);
+  --surface: var(--bg-1);
+  --surface-2: var(--bg-2);
+  --line: rgba(148, 163, 184, 0.10);
+  --line-2: rgba(148, 163, 184, 0.18);
+  --border: var(--line);
   --text: #e2e8f0;
   --text-soft: #cbd5e1;
   --muted: #94a3b8;
   --muted-2: #64748b;
   --accent: #38bdf8;
-  --accent-text: #0f172a;
+  --accent-text: #0b1018;
   --good: #22c55e;
   --warn: #eab308;
   --bad: #ef4444;
@@ -60,10 +58,16 @@ function cycleTheme() {
 }
 
 [data-theme="light"] {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --surface-2: #f1f5f9;
-  --border: #e2e8f0;
+  --bg-0: #f1f5f9;
+  --bg-1: #ffffff;
+  --bg-2: #f8fafc;
+  --bg-3: #f1f5f9;
+  --bg: var(--bg-0);
+  --surface: var(--bg-1);
+  --surface-2: var(--bg-2);
+  --line: rgba(15, 23, 42, 0.08);
+  --line-2: rgba(15, 23, 42, 0.14);
+  --border: var(--line);
   --text: #0f172a;
   --text-soft: #1e293b;
   --muted: #475569;
@@ -78,44 +82,90 @@ function cycleTheme() {
 }
 
 html { background: var(--bg); }
+body { margin: 0; }
 
 :root {
-  font-family: system-ui, sans-serif;
+  font-family: 'Geist', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-feature-settings: 'ss01', 'cv11';
   background: var(--bg);
   color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
-body { margin: 0; }
-.app { max-width: 1200px; margin: 0 auto; padding: 1rem; }
-
-nav { display: flex; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--border); align-items: center; flex-wrap: wrap; }
-nav a { color: var(--muted); text-decoration: none; }
-nav a.router-link-active { color: var(--accent); }
-nav .spacer { flex: 1; }
-nav .nav-secondary { font-size: 0.85rem; }
-.theme-btn {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 1rem;
-  padding: 0.2rem 0.5rem;
-  line-height: 1;
+.mono {
+  font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-feature-settings: 'ss01', 'cv11';
+  letter-spacing: -0.01em;
 }
-.theme-btn:hover { color: var(--text); border-color: var(--accent); }
 
+/* Design-system label class — caps, 0.12em tracking, weight 600 */
+.label {
+  font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600;
+}
+.label-sm {
+  font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted-2); font-weight: 600;
+}
+.focus-num { font-variant-numeric: tabular-nums; }
+
+/* Layout shell */
+.app {
+  display: flex;
+  min-height: 100vh;
+  align-items: stretch;
+}
+.main-col {
+  flex: 1;
+  min-width: 0;          /* lets content scroll inside flex */
+  display: flex;
+  flex-direction: column;
+}
+main {
+  padding: 1.25rem 1.5rem;
+  flex: 1;
+  position: relative;
+}
+
+/* Mobile hamburger */
+.mobile-toggle {
+  display: none;
+  position: fixed; top: 0.6rem; left: 0.6rem; z-index: 60;
+  width: 36px; height: 36px;
+  background: var(--surface); color: var(--muted);
+  border: 1px solid var(--border); border-radius: 8px;
+  align-items: center; justify-content: center; cursor: pointer;
+}
+.scrim {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 40;
+}
+
+@media (max-width: 700px) {
+  .mobile-toggle { display: flex; }
+  .scrim { display: block; }
+  main { padding: 3.2rem 0.9rem 1rem; }
+}
+
+/* Banner */
 .banner {
   display: block;
-  margin: 0.8rem 0 0;
+  margin: 0.8rem 1.5rem;
   padding: 0.6rem 0.9rem;
-  background: rgba(234, 179, 8, 0.12);
+  background: rgba(234, 179, 8, 0.10);
   border-left: 3px solid var(--warn);
   color: var(--warn);
   text-decoration: none;
   font-size: 0.9rem;
-  border-radius: 4px;
+  border-radius: 8px;
 }
-.banner:hover { background: rgba(234, 179, 8, 0.18); }
-main { padding: 1rem 0; }
+.banner:hover { background: rgba(234, 179, 8, 0.16); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.2); border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
 </style>

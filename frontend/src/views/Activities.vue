@@ -173,7 +173,11 @@ const heatmapOption = computed(() => {
       top: 24, left: 30, right: 12,
       cellSize: ["auto", 14],
       range: year.toString(),
-      itemStyle: { borderColor: t.tooltip.backgroundColor, borderWidth: 1 },
+      itemStyle: {
+        color: "#1a2332",
+        borderColor: "rgba(148, 163, 184, 0.12)",
+        borderWidth: 1,
+      },
       splitLine: { show: false },
       yearLabel: { show: false },
       monthLabel: { color: t.axisLabel.color, fontSize: 10 },

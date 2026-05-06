@@ -8,6 +8,7 @@ import type {
 } from "@/api/types";
 import { chartTheme } from "@/theme";
 import { tempUnit, isImperial } from "@/units";
+import { TrendingUp, TrendingDown, Sparkles } from "lucide-vue-next";
 import { annotationMarkPoint, baseTimeOption, meanMarkLine, workoutMarkArea } from "@/components/charts/chartHelpers";
 
 import Card from "@/components/Card.vue";
@@ -33,6 +34,14 @@ const todayHr = ref<HeartRateSeries | null>(null);
 // yesterday's evening for users west of UTC; this fetches since local
 // midnight so the dashboard matches what the watch shows).
 const todayStepsLocal = ref<number>(0);
+
+// Auto-discovered correlations for the violet "Recent insights" ribbon
+type Discovery = { x_metric: string; y_metric: string; n: number; pearson_r: number };
+const discoveries = ref<Discovery[]>([]);
+async function loadDiscoveries() {
+  try { discoveries.value = await api.discoveries(90); } catch { /* ignore */ }
+}
+onMounted(loadDiscoveries);
 const hrv = ref<HrvSeries | null>(null);
 const sleep = ref<SleepNight | null>(null);
 const steps = ref<StepsSeries | null>(null);
@@ -87,6 +96,12 @@ function hM(seconds: number | null | undefined): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   return h ? `${h}h ${m}m` : `${m}m`;
+}
+function minutesAgo(iso: string): string {
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  return `${Math.round(m / 60)}h ago`;
 }
 function daysAgo(iso: string): string {
   const d = (Date.now() - new Date(iso).getTime()) / 86400_000;
@@ -383,6 +398,55 @@ const subtitleHr = computed(() => {
     <div v-if="error" class="err">{{ error }}</div>
 
     <div v-if="!loading">
+      <!-- KPI headline strip — 4 trend badges above the hero -->
+      <div v-if="summary" class="kpi-strip">
+        <div class="kpi-badge"
+             :style="{ '--kpi-c': (summary.recovery_score ?? 0) < 50 ? '#ef4444' : (summary.recovery_score ?? 0) < 70 ? '#fb923c' : '#22c55e' }">
+          <div class="kpi-icon">
+            <component :is="(summary.recovery_score ?? 60) < 60 ? TrendingDown : TrendingUp" :size="13"/>
+          </div>
+          <div class="kpi-content">
+            <div class="kpi-l">Recovery</div>
+            <div class="kpi-vrow">
+              <span class="mono kpi-v">{{ summary.recovery_score?.toFixed(0) ?? '—' }}</span>
+              <span class="kpi-s">/100</span>
+            </div>
+          </div>
+        </div>
+        <div class="kpi-badge" style="--kpi-c: #a78bfa;">
+          <div class="kpi-icon"><component :is="TrendingUp" :size="13"/></div>
+          <div class="kpi-content">
+            <div class="kpi-l">Sleep</div>
+            <div class="kpi-vrow">
+              <span class="mono kpi-v">{{ hM(summary.sleep_duration_s) }}</span>
+              <span class="kpi-s">{{ summary.sleep_score?.toFixed(0) ?? '—' }} sc</span>
+            </div>
+          </div>
+        </div>
+        <div class="kpi-badge" style="--kpi-c: #ef4444;">
+          <div class="kpi-icon"><component :is="TrendingUp" :size="13"/></div>
+          <div class="kpi-content">
+            <div class="kpi-l">RHR</div>
+            <div class="kpi-vrow">
+              <span class="mono kpi-v">{{ summary.resting_hr ? Math.round(summary.resting_hr) : '—' }}</span>
+              <span class="kpi-s">bpm</span>
+            </div>
+          </div>
+        </div>
+        <div class="kpi-badge" :style="{ '--kpi-c': (summary.hrv_avg ?? 50) < 30 ? '#fb923c' : '#a78bfa' }">
+          <div class="kpi-icon">
+            <component :is="(summary.hrv_avg ?? 50) < 30 ? TrendingDown : TrendingUp" :size="13"/>
+          </div>
+          <div class="kpi-content">
+            <div class="kpi-l">HRV</div>
+            <div class="kpi-vrow">
+              <span class="mono kpi-v">{{ summary.hrv_avg ? summary.hrv_avg.toFixed(1) : '—' }}</span>
+              <span class="kpi-s">ms</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <Card title="Today at a glance">
        <div class="glance-wrap">
         <!-- Hero: readiness gauge -->
@@ -472,7 +536,9 @@ const subtitleHr = computed(() => {
               <strong>{{ todayStepsLocal.toLocaleString() }}</strong>
             </div>
             <div class="kpi-sub muted">
-              {{ Math.round(todayStepsLocal / 8000 * 100) }}% of 8,000 goal · since local midnight
+              {{ Math.round(todayStepsLocal / 8000 * 100) }}% of 8k ·
+              <template v-if="summary?.last_sync">last HC sync {{ minutesAgo(summary.last_sync) }}</template>
+              <template v-else>local midnight</template>
             </div>
           </div>
 
@@ -534,7 +600,7 @@ const subtitleHr = computed(() => {
           :rhr="summary?.resting_hr ?? null"
           :hrv="summary?.hrv_avg ?? null"
         />
-        <StepsCard :total="summary?.steps_total ?? steps?.total ?? 0" />
+        <StepsCard :total="todayStepsLocal" />
         <SleepCard :sleep="sleep" />
       </div>
 
@@ -613,6 +679,32 @@ const subtitleHr = computed(() => {
       </Card>
     </div>
 
+    <!-- Recent insights — violet ribbon (auto-discovered correlations) -->
+    <div v-if="discoveries.length" class="insights-ribbon">
+      <div class="ir-head">
+        <Sparkles :size="13" class="ir-icon"/>
+        <span class="label" style="color: #c4b5fd;">Recent insights</span>
+        <span class="ir-meta mono">|r| ≥ 0.4 · 90d window</span>
+      </div>
+      <div class="ir-grid">
+        <div v-for="d in discoveries.slice(0, 6)" :key="`${d.x_metric}-${d.y_metric}`"
+             class="ir-row">
+          <span class="ir-r mono"
+                :style="{ color: d.pearson_r > 0 ? '#22c55e' : '#ef4444',
+                          background: (d.pearson_r > 0 ? '#22c55e' : '#ef4444') + '15',
+                          borderColor: (d.pearson_r > 0 ? '#22c55e' : '#ef4444') + '40' }">
+            r={{ d.pearson_r > 0 ? '+' : '' }}{{ d.pearson_r.toFixed(2) }}
+          </span>
+          <div class="ir-pair">
+            <span class="ir-x">{{ d.x_metric }}</span>
+            <span class="ir-arr">↔</span>
+            <span class="ir-y">{{ d.y_metric }}</span>
+          </div>
+          <span class="ir-n mono">n={{ d.n }}</span>
+        </div>
+      </div>
+    </div>
+
     <div v-if="summary?.last_sync" class="footer">
       Last sync: {{ new Date(summary.last_sync).toLocaleString() }}
     </div>
@@ -628,7 +720,7 @@ h1 { margin: 0; }
 .range button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0.3rem 0.55rem; cursor: pointer; font-size: 0.9rem; }
 
-.grid { display: grid; gap: 1rem; margin-bottom: 1rem; }
+.grid { display: grid; gap: 1rem; margin-bottom: 1rem; margin-top: 1rem; }
 .stats { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 
 .toggle-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.5rem; font-size: 0.8rem; color: var(--muted); }
@@ -643,6 +735,70 @@ h1 { margin: 0; }
 .footer { margin-top: 1.5rem; color: var(--muted-2); font-size: 0.8rem; text-align: right; }
 
 .glance-wrap { display: flex; flex-direction: column; gap: 0.9rem; }
+
+/* KPI badge strip floating above hero */
+.kpi-strip {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem; margin-bottom: 0.85rem;
+}
+@media (max-width: 700px) { .kpi-strip { grid-template-columns: 1fr 1fr; } }
+.kpi-badge {
+  display: flex; align-items: center; gap: 0.7rem;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.6rem 0.75rem;
+}
+.kpi-icon {
+  width: 30px; height: 30px; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--kpi-c) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--kpi-c) 35%, transparent);
+  color: var(--kpi-c);
+  flex-shrink: 0;
+}
+.kpi-content { flex: 1; min-width: 0; }
+.kpi-l {
+  font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted-2); font-weight: 600;
+}
+.kpi-vrow { display: flex; align-items: baseline; gap: 0.25rem; margin-top: 0.15rem; }
+.kpi-v {
+  font-size: 18px; font-weight: 600; line-height: 1;
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+}
+.kpi-s { font-size: 10px; color: var(--muted-2); }
+.kpi-delta {
+  font-size: 10.5px; font-weight: 600;
+  color: var(--kpi-c); font-variant-numeric: tabular-nums;
+}
+
+/* Violet "Recent insights" ribbon */
+.insights-ribbon {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(167, 139, 250, 0.05), rgba(167, 139, 250, 0));
+  border: 1px solid rgba(167, 139, 250, 0.20);
+}
+.ir-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+.ir-icon { color: #a78bfa; }
+.ir-meta { margin-left: auto; font-size: 10px; color: var(--muted-2); }
+.ir-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.4rem 0.8rem;
+}
+.ir-row { display: flex; align-items: center; gap: 0.5rem; }
+.ir-r {
+  font-size: 10px; font-weight: 600; padding: 0.05rem 0.35rem;
+  border-radius: 3px; border: 1px solid; flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.ir-pair { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ir-x { color: #38bdf8; }
+.ir-y { color: #22c55e; }
+.ir-arr { color: var(--muted-2); margin: 0 0.3rem; }
+.ir-n { font-size: 10px; color: var(--muted-2); }
 
 .hero { display: flex; align-items: center; gap: 1.4rem; }
 .ring {

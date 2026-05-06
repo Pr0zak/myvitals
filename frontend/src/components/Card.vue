@@ -1,11 +1,11 @@
 <script setup lang="ts">
-defineProps<{ title: string; subtitle?: string }>();
+defineProps<{ title?: string; subtitle?: string; flat?: boolean }>();
 </script>
 
 <template>
-  <section class="card">
-    <header>
-      <h2>{{ title }}</h2>
+  <section class="card" :class="{ flat }">
+    <header v-if="title || subtitle">
+      <h2 v-if="title">{{ title }}</h2>
       <span v-if="subtitle" class="sub">{{ subtitle }}</span>
     </header>
     <div class="body">
@@ -16,16 +16,30 @@ defineProps<{ title: string; subtitle?: string }>();
 
 <style scoped>
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  /* Subtle top→bottom gradient on tier-2 → tier-1 (design spec) */
+  background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
+  border: 1px solid var(--line);
+  border-radius: 14px;
   padding: 1rem;
   display: flex;
   flex-direction: column;
-  min-height: 160px;
+  min-height: 140px;
+  margin-bottom: 0.85rem;
 }
-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.5rem; }
-h2 { margin: 0; font-size: 0.95rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.sub { font-size: 0.8rem; color: var(--muted-2); }
+.card.flat { background: var(--bg-1); }
+header {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 0.6rem; gap: 0.6rem;
+}
+h2 {
+  margin: 0;
+  font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600;
+}
+.sub {
+  font-size: 11.5px; color: var(--muted-2);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  letter-spacing: -0.01em;
+}
 .body { flex: 1; display: flex; flex-direction: column; }
 </style>

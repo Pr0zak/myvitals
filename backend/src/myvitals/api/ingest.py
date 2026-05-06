@@ -67,6 +67,8 @@ class WorkoutSample(BaseModel):
     kcal: float | None = None
     avg_hr: float | None = None
     max_hr: float | None = None
+    source: str | None = None
+    title: str | None = None
 
 
 class BodyMetricSample(BaseModel):

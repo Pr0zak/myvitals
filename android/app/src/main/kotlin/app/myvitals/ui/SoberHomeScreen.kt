@@ -1,12 +1,16 @@
 package app.myvitals.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,6 +27,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,12 +37,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.SoberCurrentResponse
@@ -232,8 +240,9 @@ fun SoberHomeScreen(
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
             confirmButton = {
-                Button(
-                    onClick = {
+                HoldToConfirmButton(
+                    label = if (active == null) "Hold to start" else "Hold to reset",
+                    onConfirm = {
                         showResetDialog = false
                         scope.launch {
                             resetting = true
@@ -255,8 +264,7 @@ fun SoberHomeScreen(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = RED, contentColor = Color.White),
-                ) { Text("Yes, reset") }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { showResetDialog = false }) { Text("Cancel") }
@@ -265,10 +273,11 @@ fun SoberHomeScreen(
             text = {
                 Text(
                     if (active == null)
-                        "Start tracking from now."
+                        "Hold the red button below for a moment to start tracking from now."
                     else
                         "Closes the current ${d}d ${h}h streak and starts a new one from now. " +
-                        "The closed streak stays in your history."
+                        "The closed streak stays in your history. " +
+                        "Hold the red button below to confirm — release to cancel."
                 )
             },
         )
@@ -297,5 +306,79 @@ private fun NumberAndLabel(
             fontSize = (sizeSp * 0.32).toInt().sp,
             modifier = Modifier.padding(bottom = (sizeSp * 0.12).toInt().dp),
         )
+    }
+}
+
+private const val HOLD_DURATION_MS = 1500L
+
+/**
+ * A red confirm button that fires [onConfirm] only after the user
+ * holds it for [HOLD_DURATION_MS]. Lifting before completion cancels
+ * the animation and the action — prevents accidental taps from
+ * destroying a streak.
+ *
+ * Implementation: pointerInput(detectTapGestures) drives a coroutine
+ * that ramps a `progress` ref from 0→1 over the hold duration;
+ * if that coroutine is cancelled (finger lifted), the action never fires.
+ * The fill bar inside the button visualises the held progress.
+ */
+@Composable
+private fun HoldToConfirmButton(
+    label: String,
+    onConfirm: () -> Unit,
+) {
+    val progress = remember { mutableFloatStateOf(0f) }
+    val scope = rememberCoroutineScope()
+    var heldJob: Job? = remember { null }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF7F1D1D))   // dim red base
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        progress.floatValue = 0f
+                        heldJob?.cancel()
+                        heldJob = scope.launch {
+                            val start = System.currentTimeMillis()
+                            while (isActive) {
+                                val elapsed = System.currentTimeMillis() - start
+                                val p = (elapsed.toFloat() / HOLD_DURATION_MS).coerceIn(0f, 1f)
+                                progress.floatValue = p
+                                if (p >= 1f) {
+                                    onConfirm()
+                                    break
+                                }
+                                kotlinx.coroutines.delay(16)
+                            }
+                        }
+                        // Suspend until release / cancel
+                        val released = tryAwaitRelease()
+                        if (!released || progress.floatValue < 1f) {
+                            heldJob?.cancel()
+                        }
+                        progress.floatValue = 0f
+                    },
+                )
+            },
+    ) {
+        // Progress fill
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(progress.floatValue)
+                .background(RED),
+        )
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = if (progress.floatValue > 0f && progress.floatValue < 1f) "Keep holding…" else label,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }

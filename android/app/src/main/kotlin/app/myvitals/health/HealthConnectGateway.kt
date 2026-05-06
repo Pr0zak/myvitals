@@ -58,6 +58,17 @@ class HealthConnectGateway(private val context: Context) {
     }
 
     /**
+     * The set of permissions we need but don't currently have. Empty set = all good.
+     * Returns the simple record-type names (e.g. "HeartRateRecord") rather than the
+     * full Health Connect permission strings — easier to read in logs / UI.
+     */
+    suspend fun missingPermissionShortNames(): List<String> {
+        if (!isAvailable()) return requiredPermissions.map { it.substringAfterLast('.') }
+        val granted = client().permissionController.getGrantedPermissions()
+        return (requiredPermissions - granted).map { it.substringAfterLast('.') }.sorted()
+    }
+
+    /**
      * Reads ALL records of [type] in the time range, walking HC's pageToken.
      * pageSize=5000 (HC max) keeps round-trips down. Hard cap at 100 pages
      * (≤ 500k records) to avoid runaway loops on bad data.

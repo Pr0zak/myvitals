@@ -1,13 +1,29 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { RouterView, useRoute } from "vue-router";
 import { Menu as MenuIcon } from "lucide-vue-next";
 import { isConfigured } from "@/config";
+import { api } from "@/api/client";
 import SideNav from "@/components/SideNav.vue";
 
 const sideNavOpen = ref(false);
 const route = useRoute();
 watch(() => route.fullPath, () => { sideNavOpen.value = false; });
+
+// Phone-side sync health — surfaced as a top banner when HC perms are
+// revoked, so the user knows why the data dried up without having to
+// open the side nav status chip.
+const permsLost = ref(false);
+const permsMissing = ref<string[]>([]);
+async function refreshSyncHealth() {
+  if (!isConfigured()) return;
+  try {
+    const s = await api.lastSync();
+    permsLost.value = !!s.permissions_lost;
+    permsMissing.value = s.perms_missing ?? [];
+  } catch { /* ignore */ }
+}
+onMounted(() => { refreshSyncHealth(); setInterval(refreshSyncHealth, 60_000); });
 </script>
 
 <template>
@@ -23,6 +39,11 @@ watch(() => route.fullPath, () => { sideNavOpen.value = false; });
       <RouterLink v-if="!isConfigured()" to="/settings" class="banner">
         ⚠ No query token set — go to Settings to paste your QUERY_TOKEN.
       </RouterLink>
+      <div v-else-if="permsLost" class="banner banner-perms">
+        ⚠ Health Connect permissions lost on the phone — open the myvitals app and re-grant
+        <span v-if="permsMissing.length" class="muted-mono"> ({{ permsMissing.join(', ') }})</span>.
+        Sync attempts are firing but every read is denied.
+      </div>
       <main>
         <RouterView />
       </main>
@@ -163,6 +184,16 @@ main {
   border-radius: 8px;
 }
 .banner:hover { background: rgba(234, 179, 8, 0.16); }
+.banner-perms {
+  background: rgba(239, 68, 68, 0.12);
+  border-left-color: var(--bad);
+  color: var(--bad);
+}
+.banner-perms .muted-mono {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  color: rgba(239, 68, 68, 0.75);
+  font-size: 0.78rem;
+}
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 8px; height: 8px; }

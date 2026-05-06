@@ -76,3 +76,10 @@ class AnnotationCreate(BaseModel):
     type: str = Field(..., description="caffeine | alcohol | food | mood | meds | note")
     payload: dict[str, Any] = Field(default_factory=dict)
     note: str | None = None
+
+
+class AnnotationUpdate(BaseModel):
+    """Partial update — only fields explicitly provided are touched."""
+    ts: datetime | None = None
+    payload: dict[str, Any] | None = None
+    note: str | None = None

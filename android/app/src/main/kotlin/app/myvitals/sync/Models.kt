@@ -76,6 +76,20 @@ data class SleepSessionSample(
 )
 
 @JsonClass(generateAdapter = true)
+data class HeartbeatPayload(
+    @Json(name = "attempt_at") val attemptAt: String,
+    val success: Boolean,
+    @Json(name = "permissions_lost") val permissionsLost: Boolean = false,
+    @Json(name = "perms_granted") val permsGranted: Int? = null,
+    @Json(name = "perms_required") val permsRequired: Int? = null,
+    @Json(name = "perms_missing") val permsMissing: List<String>? = null,
+    @Json(name = "last_success_at") val lastSuccessAt: String? = null,
+    @Json(name = "error_summary") val errorSummary: String? = null,
+    @Json(name = "records_pulled") val recordsPulled: Int? = null,
+    @Json(name = "app_version") val appVersion: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
 data class IngestBatch(
     val heartrate: List<HeartRateSample> = emptyList(),
     val hrv: List<HrvSample> = emptyList(),

@@ -26,6 +26,7 @@ const router = createRouter({
     { path: "/weight", name: "weight", component: () => import("./views/Weight.vue") },
     { path: "/blood-pressure", name: "blood-pressure", component: () => import("./views/BloodPressure.vue") },
     { path: "/log", name: "log", component: () => import("./views/Log.vue") },
+    { path: "/sober", name: "sober", component: () => import("./views/Sober.vue") },
     { path: "/activities", name: "activities", component: () => import("./views/Activities.vue") },
     { path: "/activity/:source/:id", name: "activity-detail", component: () => import("./views/ActivityDetail.vue") },
     { path: "/activities/map", name: "activities-map", component: () => import("./views/ActivitiesMap.vue") },

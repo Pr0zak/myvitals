@@ -45,8 +45,21 @@ class SettingsRepository(context: Context) {
         get() = plain.getLong(KEY_LAST_DEEP_SWEEP, 0L)
         set(value) = plain.edit().putLong(KEY_LAST_DEEP_SWEEP, value).apply()
 
+    /** Last time the SyncWorker actually finished a successful upload (or no-op). */
+    var lastSuccessEpochSeconds: Long
+        get() = plain.getLong(KEY_LAST_SUCCESS, 0L)
+        set(value) = plain.edit().putLong(KEY_LAST_SUCCESS, value).apply()
+
+    /** Most recent doWork() saw a HC SecurityException — UI surfaces this. */
+    var permissionsLost: Boolean
+        get() = plain.getBoolean(KEY_PERMS_LOST, false)
+        set(value) = plain.edit().putBoolean(KEY_PERMS_LOST, value).apply()
+
     fun lastSyncInstant(): Instant? =
         lastSyncEpochSeconds.takeIf { it > 0 }?.let(Instant::ofEpochSecond)
+
+    fun lastSuccessInstant(): Instant? =
+        lastSuccessEpochSeconds.takeIf { it > 0 }?.let(Instant::ofEpochSecond)
 
     fun isConfigured(): Boolean = backendUrl.isNotBlank() && bearerToken.isNotBlank()
 
@@ -57,5 +70,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_TOKEN = "bearer_token"
         private const val KEY_LAST_SYNC = "last_sync_epoch_s"
         private const val KEY_LAST_DEEP_SWEEP = "last_deep_sweep_epoch_s"
+        private const val KEY_LAST_SUCCESS = "last_success_epoch_s"
+        private const val KEY_PERMS_LOST = "perms_lost"
     }
 }

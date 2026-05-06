@@ -29,12 +29,25 @@ async def _bulk_upsert(
     table: type,
     rows: Iterable[dict[str, Any]],
     conflict_cols: list[str],
+    update_cols: list[str] | None = None,
 ) -> None:
-    """Insert in CHUNK-sized batches; on duplicate (conflict_cols) do nothing."""
+    """Insert in CHUNK-sized batches.
+
+    Default behaviour: on (conflict_cols) collision, do nothing — vitals
+    samples at a given timestamp are immutable.
+
+    If ``update_cols`` is provided, conflicting rows have those columns
+    overwritten with the incoming values. Used for tables where ingest can
+    legitimately update existing rows (e.g. workouts gained source/title
+    columns post-hoc; we want re-syncs to populate them on existing rows).
+    """
     for chunk in _chunked(list(rows)):
-        stmt = insert(table).values(chunk).on_conflict_do_nothing(
-            index_elements=conflict_cols
-        )
+        stmt = insert(table).values(chunk)
+        if update_cols:
+            excluded = {c: stmt.excluded[c] for c in update_cols}
+            stmt = stmt.on_conflict_do_update(index_elements=conflict_cols, set_=excluded)
+        else:
+            stmt = stmt.on_conflict_do_nothing(index_elements=conflict_cols)
         await db.execute(stmt)
 
 
@@ -138,8 +151,13 @@ async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) ->
         counts["sleep_stages"] = len(batch.sleep_stages)
 
     if batch.workouts:
-        await _bulk_upsert(db, models.Workout,
-                           (w.model_dump() for w in batch.workouts), ["time"])
+        await _bulk_upsert(
+            db,
+            models.Workout,
+            (w.model_dump() for w in batch.workouts),
+            ["time"],
+            update_cols=["type", "duration_s", "kcal", "avg_hr", "max_hr", "source", "title"],
+        )
         counts["workouts"] = len(batch.workouts)
 
     if batch.body_metrics:
@@ -167,3 +185,38 @@ async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) ->
 
     await db.commit()
     return counts
+
+
+class Heartbeat(BaseModel):
+    attempt_at: datetime
+    success: bool
+    permissions_lost: bool = False
+    perms_granted: int | None = None
+    perms_required: int | None = None
+    perms_missing: list[str] | None = None
+    last_success_at: datetime | None = None
+    error_summary: str | None = None
+    records_pulled: int | None = None
+    app_version: str | None = None
+
+
+@router.post("/heartbeat")
+async def ingest_heartbeat(
+    hb: Heartbeat, db: AsyncSession = Depends(get_session)
+) -> dict[str, str]:
+    """Companion-app sync diagnostic ping. One row per doWork() invocation."""
+    stmt = insert(models.SyncHeartbeat).values(
+        attempt_at=hb.attempt_at,
+        success=hb.success,
+        permissions_lost=hb.permissions_lost,
+        perms_granted=hb.perms_granted,
+        perms_required=hb.perms_required,
+        perms_missing=hb.perms_missing,
+        last_success_at=hb.last_success_at,
+        error_summary=(hb.error_summary or "")[:1900] or None,
+        records_pulled=hb.records_pulled,
+        app_version=hb.app_version,
+    ).on_conflict_do_nothing(index_elements=["attempt_at"])
+    await db.execute(stmt)
+    await db.commit()
+    return {"status": "ok"}

@@ -37,6 +37,51 @@ const importResult = ref<string>("");
 const importError = ref<string>("");
 const fitbitWeightUnit = ref<"kg" | "lb">("lb");
 
+// Sober-time CSV import (separate from the main importer flow above)
+const soberImportBusy = ref(false);
+const soberImportResult = ref<string>("");
+const soberImportError = ref<string>("");
+async function uploadSober(file: File) {
+  soberImportBusy.value = true;
+  soberImportResult.value = "";
+  soberImportError.value = "";
+  try {
+    const base = (apiBase.value || "/api").replace(/\/$/, "");
+    const fd = new FormData();
+    fd.append("file", file);
+    const r = await axios.post(`${base}/sober/import`, fd, {
+      headers: {
+        Authorization: `Bearer ${queryToken.value}`,
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    soberImportResult.value = `Imported ${r.data.imported} streaks${
+      r.data.started_active_from
+        ? `, active streak from ${new Date(r.data.started_active_from).toLocaleString()}`
+        : ""
+    }.`;
+  } catch (e: unknown) {
+    if (e && typeof e === "object" && "response" in e) {
+      const r = (e as { response?: { status?: number; data?: unknown } }).response;
+      soberImportError.value = `HTTP ${r?.status ?? "?"} — ${JSON.stringify(r?.data ?? "")}`;
+    } else {
+      soberImportError.value = e instanceof Error ? e.message : String(e);
+    }
+  } finally {
+    soberImportBusy.value = false;
+  }
+}
+function pickSoberFile() {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".csv,text/csv";
+  inp.onchange = () => {
+    const f = inp.files?.[0];
+    if (f) uploadSober(f);
+  };
+  inp.click();
+}
+
 // Profile
 type Profile = Awaited<ReturnType<typeof api.getProfile>>;
 const profile = ref<Profile | null>(null);
@@ -534,6 +579,18 @@ onUnmounted(stopJobPolling);
           <p class="muted" style="margin-top: 0.4rem; font-size: 0.75rem;">
             The track upload reads FIT files (~22k for a long history) and attaches GPS polylines to your activities. Background job, watch progress below.
           </p>
+        </div>
+        <div class="import-card">
+          <strong>Sober time</strong>
+          <p class="muted">
+            Export from <em>I Am Sober</em> / <em>Sober Time</em> / similar — should have
+            columns <code>start, end, days, notes</code>. Replaces existing sober history.
+          </p>
+          <button class="ghost" :disabled="soberImportBusy" @click="pickSoberFile">
+            {{ soberImportBusy ? 'Uploading…' : 'Upload sober CSV' }}
+          </button>
+          <p v-if="soberImportResult" class="ok" style="margin-top: 0.4rem;">{{ soberImportResult }}</p>
+          <p v-if="soberImportError" class="err" style="margin-top: 0.4rem;"><small>{{ soberImportError }}</small></p>
         </div>
       </div>
       <div v-if="importResult" class="ok">{{ importResult }}</div>

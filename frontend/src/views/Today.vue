@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { RouterLink } from "vue-router";
 import VChart from "vue-echarts";
 import { api } from "@/api/client";
 import type {
@@ -47,6 +48,7 @@ const sleep = ref<SleepNight | null>(null);
 const steps = ref<StepsSeries | null>(null);
 const activities = ref<Activity[]>([]);
 const annotations = ref<Annotation[]>([]);
+const sober = ref<Awaited<ReturnType<typeof api.soberCurrent>> | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
@@ -165,16 +167,19 @@ const watchState = computed(() => {
 });
 
 // HR sparkline path for the "Today at a glance" underlay. Pure SVG —
-// no chart lib needed. Always reads `todayHr` (today's local midnight →
-// now), independent of the range picker, so this card always reflects
-// just today.
+// no chart lib needed. The x-axis is anchored to the full local-day
+// window (midnight → now), so if HR sync stalls the trailing portion
+// renders as empty space — a visible "no data" gap against the fixed
+// 00 / 06 / 12 / 18 / now axis labels.
 const hrSparkPath = computed(() => {
   if (!todayHr.value || todayHr.value.points.length < 5) return null;
   const pts = todayHr.value.points;
   const xs = pts.map((p) => new Date(p.time).getTime());
   const ys = pts.map((p) => p.value);
-  const xMin = Math.min(...xs);
-  const xMax = Math.max(...xs);
+  const now = new Date();
+  const localMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const xMin = localMidnight;
+  const xMax = now.getTime();
   const yMin = Math.min(...ys);
   const yMax = Math.max(...ys);
   const W = 1000;  // viewBox width
@@ -186,9 +191,14 @@ const hrSparkPath = computed(() => {
     const y = H - ((ys[i] - yMin) / yR) * H * 0.85 - H * 0.075;
     return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
-  // Close path to bottom for area fill
-  const last = `L${W},${H} L0,${H} Z`;
-  return { stroke: path, fill: path + last, yMin, yMax, n: pts.length };
+  const firstX = ((xs[0] - xMin) / xR) * W;
+  const lastX = ((xs[xs.length - 1] - xMin) / xR) * W;
+  // Close fill to the data extent only, not the full viewBox — keeps the
+  // post-last-sample region truly empty so the gap is visible.
+  const last = `L${lastX.toFixed(1)},${H} L${firstX.toFixed(1)},${H} Z`;
+  // Gap-from-now in minutes; surface > 30 min as a stale flag.
+  const gapMin = Math.round((xMax - xs[xs.length - 1]) / 60000);
+  return { stroke: path, fill: path + last, yMin, yMax, n: pts.length, gapMin };
 });
 
 // Radar combining the day's normalised vitals.
@@ -275,7 +285,7 @@ async function load() {
     // Today's local midnight for the underlay sparkline + glance stats.
     const todayMidnight = new Date();
     todayMidnight.setHours(0, 0, 0, 0);
-    const [s, h, hv, sl, st, a, an, hToday, sToday] = await Promise.all([
+    const [s, h, hv, sl, st, a, an, hToday, sToday, sb] = await Promise.all([
       api.todaySummary(),
       api.heartRate({ since }),
       api.hrv({ since }),
@@ -285,6 +295,7 @@ async function load() {
       api.listAnnotations({ since, limit: 200 }),
       api.heartRate({ since: todayMidnight }),
       api.steps({ since: todayMidnight }),
+      api.soberCurrent().catch(() => null),
     ]);
     summary.value = s;
     hr.value = h;
@@ -295,6 +306,7 @@ async function load() {
     annotations.value = an;
     todayHr.value = hToday;
     todayStepsLocal.value = sToday.total ?? 0;
+    sober.value = sb;
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : "Failed to load";
   } finally {
@@ -305,10 +317,22 @@ async function load() {
 onMounted(() => { load(); loadBp(); });
 watch(range, load);
 
+// Anchor every time-series chart on this page to the same window — full
+// range (since → now). When sync stalls, the right side is empty space
+// rather than the chart silently truncating to the last data point.
+const xWindow = computed(() => {
+  const hours = RANGES.find((r) => r.key === range.value)!.hours;
+  const max = Date.now();
+  return { min: max - hours * 3600 * 1000, max };
+});
+
 const hrSeriesOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
   const opt = baseTimeOption() as Record<string, any>;
+  // Anchor x-axis to the full range window so a stalled sync shows as a
+  // visible gap on the right edge instead of a chart that just ends early.
+  opt.xAxis = { ...(opt.xAxis as object), min: xWindow.value.min, max: xWindow.value.max };
   if (!hr.value) return opt;
 
   const hrPoints = hr.value.points.map((p) => [p.time, p.value]);
@@ -362,7 +386,10 @@ const stepsBarOption = computed(() => {
   if (!steps.value || steps.value.points.length === 0) return null;
   return {
     grid: { left: 36, right: 12, top: 8, bottom: 24 },
-    xAxis: { type: "time", axisLabel: t.axisLabel, splitLine: { show: false } },
+    xAxis: {
+      type: "time", axisLabel: t.axisLabel, splitLine: { show: false },
+      min: xWindow.value.min, max: xWindow.value.max,
+    },
     yAxis: { type: "value", axisLabel: t.axisLabel, splitLine: t.splitLine },
     tooltip: { trigger: "axis", ...t.tooltip },
     series: [{
@@ -572,6 +599,16 @@ const subtitleHr = computed(() => {
               <template v-else>normal range</template>
             </div>
           </div>
+
+          <RouterLink to="/sober" class="kpi-tile sober-tile" v-if="sober?.active">
+            <div class="kpi-lbl">Sober time</div>
+            <div class="kpi-num" style="color: #22c55e;">
+              <strong>{{ sober.days ?? 0 }}d {{ sober.hours ?? 0 }}h</strong>
+            </div>
+            <div class="kpi-sub muted">
+              since {{ new Date(sober.active.start_at).toLocaleDateString() }}
+            </div>
+          </RouterLink>
         </div>
 
         <!-- HR sparkline ribbon along the bottom for visual context -->
@@ -832,7 +869,10 @@ h1 { margin: 0; }
 .kpi-tile {
   background: var(--surface-2); border: 1px solid var(--border);
   border-radius: 8px; padding: 0.65rem 0.85rem;
+  text-decoration: none; color: inherit;
 }
+.kpi-tile.sober-tile { border-color: rgba(34, 197, 94, 0.25); cursor: pointer; }
+.kpi-tile.sober-tile:hover { border-color: rgba(34, 197, 94, 0.6); background: rgba(34, 197, 94, 0.04); }
 .kpi-lbl { font-size: 0.7rem; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.05em; }
 .kpi-num { font-size: 1.45rem; font-family: ui-monospace, monospace; line-height: 1.2; margin: 0.2rem 0 0.15rem; }
 .kpi-num strong { font-weight: 600; }

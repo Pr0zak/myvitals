@@ -17,7 +17,7 @@ import { RouterLink, useRoute } from "vue-router";
 import {
   Activity, AlertTriangle, BarChart3, Bed, Calendar, ChevronDown,
   ChevronRight, Droplets, Edit3, Footprints, Github, GitCompare,
-  Heart, Home, List, Map, Menu, Scale, Search, Settings, Sparkles,
+  Heart, Home, List, Map, Menu, RotateCcw, Scale, Search, Settings, Sparkles,
   Terminal, Thermometer, TrendingUp, type LucideIcon,
 } from "lucide-vue-next";
 import { api } from "@/api/client";
@@ -61,13 +61,21 @@ const activitiesDistanceM = ref<number | null>(null);
 const discoveriesCount = ref<number | null>(null);
 const alertsCount = ref<number | null>(null);
 const backendOk = ref<boolean | null>(null);
+const lastSyncAt = ref<Date | null>(null);
+const lastAttemptAt = ref<Date | null>(null);
+const permissionsLost = ref(false);
+const permsMissing = ref<string[] | null>(null);
+const soberDays = ref<number | null>(null);
+const nowTick = ref(Date.now());
 
 async function refreshSidebarData() {
   try {
-    const [s, stats, disc] = await Promise.all([
+    const [s, stats, disc, sync, sober] = await Promise.all([
       api.todaySummary().catch(() => null),
       api.activitiesStats(365).catch(() => null),
       api.discoveries(90).catch(() => []),
+      api.lastSync().catch(() => null),
+      api.soberCurrent().catch(() => null),
     ]);
     summary.value = s;
     if (stats) {
@@ -75,15 +83,73 @@ async function refreshSidebarData() {
       activitiesDistanceM.value = stats.total_distance_m;
     }
     discoveriesCount.value = disc?.length ?? 0;
+    soberDays.value = sober?.days ?? null;
+    lastSyncAt.value = sync?.last_sync ? new Date(sync.last_sync) : null;
+    lastAttemptAt.value = sync?.last_attempt ? new Date(sync.last_attempt) : null;
+    permissionsLost.value = !!sync?.permissions_lost;
+    permsMissing.value = sync?.perms_missing ?? null;
     backendOk.value = true;
   } catch {
     backendOk.value = false;
   }
 }
 
+function relTime(d: Date | null, now: number): string {
+  if (!d) return "no data";
+  const s = Math.max(0, Math.floor((now - d.getTime()) / 1000));
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const days = Math.floor(h / 24);
+  return `${days}d ago`;
+}
+const lastSyncLabel = computed(() => relTime(lastSyncAt.value, nowTick.value));
+
+// Sync-health derivation. Three buckets:
+//  - "ok"     — recent attempt + no perms issue (green)
+//  - "perms"  — phone tried but HC perms revoked (amber/red)
+//  - "stale"  — phone hasn't checked in for >30 min (amber)
+//  - "off"    — backend unreachable from this browser (red)
+type SyncStatus = "ok" | "perms" | "stale" | "off";
+const syncStatus = computed<SyncStatus>(() => {
+  if (backendOk.value === false) return "off";
+  if (permissionsLost.value) return "perms";
+  // If we never received a heartbeat, fall back to the data-freshness signal.
+  const ts = lastAttemptAt.value ?? lastSyncAt.value;
+  if (!ts) return "stale";
+  const ageMin = (nowTick.value - ts.getTime()) / 60000;
+  if (ageMin > 30) return "stale";
+  return "ok";
+});
+
+const syncChipText = computed(() => {
+  if (backendOk.value === false) return "offline";
+  if (permissionsLost.value) return "perms lost";
+  return `synced ${lastSyncLabel.value}`;
+});
+
+const syncChipTitle = computed(() => {
+  const lines: string[] = [];
+  if (lastSyncAt.value) lines.push(`Last data: ${lastSyncAt.value.toLocaleString()}`);
+  if (lastAttemptAt.value) lines.push(`Last attempt: ${lastAttemptAt.value.toLocaleString()}`);
+  if (permsMissing.value?.length) lines.push(`Missing perms: ${permsMissing.value.join(", ")}`);
+  if (lines.length === 0) return "No sync data yet";
+  return lines.join("\n");
+});
+
 let pollHandle: ReturnType<typeof setInterval> | null = null;
-onMounted(() => { refreshSidebarData(); pollHandle = setInterval(refreshSidebarData, 60_000); });
-onUnmounted(() => { if (pollHandle) clearInterval(pollHandle); });
+let tickHandle: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  refreshSidebarData();
+  pollHandle = setInterval(refreshSidebarData, 60_000);
+  tickHandle = setInterval(() => { nowTick.value = Date.now(); }, 30_000);
+});
+onUnmounted(() => {
+  if (pollHandle) clearInterval(pollHandle);
+  if (tickHandle) clearInterval(tickHandle);
+});
 
 // Format last-night sleep h+m
 function fmtSleep(seconds: number | null | undefined): string {
@@ -133,6 +199,11 @@ const groups = computed<Group[]>(() => {
     },
     { id: "log",     to: "/log",     icon: Edit3,         label: "Log" },
     {
+      id: "sober",   to: "/sober",   icon: RotateCcw,     label: "Sober time",
+      badge: soberDays.value != null ? `${Math.floor(soberDays.value)}d` : undefined,
+      badgeColor: "#22c55e",
+    },
+    {
       id: "alerts",  to: "/alerts",  icon: AlertTriangle, label: "Alerts",
       badge: alertsCount.value && alertsCount.value > 0
         ? `${alertsCount.value}` : undefined,
@@ -164,10 +235,13 @@ const emit = defineEmits<{ (e: "navigate"): void }>();
     <div class="brand">
       <template v-if="!collapsed">
         <AppLogo :size="28" tile/>
-        <div class="brand-name">myvitals</div>
-        <span class="live" :class="{ ok: backendOk, bad: backendOk === false }">
-          <span class="dot"/>{{ backendOk === false ? 'down' : 'live' }}
-        </span>
+        <div class="brand-id">
+          <div class="brand-name">myvitals</div>
+          <div class="last-sync" :class="`status-${syncStatus}`" :title="syncChipTitle">
+            <span class="dot"/>
+            <span>{{ syncChipText }}</span>
+          </div>
+        </div>
       </template>
       <button class="collapse-btn" :title="collapsed ? 'Expand' : 'Collapse'"
               @click="collapsed = !collapsed">
@@ -271,13 +345,21 @@ const emit = defineEmits<{ (e: "navigate"): void }>();
   padding: 0 0.85rem; height: 56px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.10);
 }
-.brand-name { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
-.live {
-  margin-left: auto; font-size: 10px; font-family: ui-monospace, monospace;
+.brand-id { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.brand-name { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.1; }
+.last-sync {
+  font-size: 10px; font-family: 'Geist Mono', ui-monospace, monospace;
   display: inline-flex; align-items: center; gap: 0.3rem; color: #22c55e;
+  letter-spacing: 0.01em;
 }
-.live.bad { color: #ef4444; }
-.live .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.last-sync.status-ok    { color: #22c55e; }
+.last-sync.status-stale { color: #eab308; }
+.last-sync.status-perms { color: #ef4444; }
+.last-sync.status-off   { color: #ef4444; opacity: 0.85; }
+.last-sync .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
 .collapse-btn {
   background: transparent; border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 6px; color: #64748b; cursor: pointer; padding: 0.25rem;

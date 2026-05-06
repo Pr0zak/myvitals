@@ -101,8 +101,18 @@ export const api = {
     return data;
   },
 
-  async lastSync(): Promise<{ last_sync: string | null }> {
-    const { data } = await http.get<{ last_sync: string | null }>("/query/last-sync");
+  async lastSync(): Promise<{
+    last_sync: string | null;
+    last_attempt: string | null;
+    last_success: string | null;
+    permissions_lost: boolean;
+    perms_granted: number | null;
+    perms_required: number | null;
+    perms_missing: string[] | null;
+    error_summary: string | null;
+    app_version: string | null;
+  }> {
+    const { data } = await http.get("/query/last-sync");
     return data;
   },
 
@@ -132,6 +142,68 @@ export const api = {
   async createAnnotation(body: AnnotationCreate): Promise<Annotation> {
     const { data } = await http.post<Annotation>("/log", body);
     return data;
+  },
+
+  async updateAnnotation(id: number, body: {
+    ts?: string;
+    payload?: Record<string, unknown>;
+    note?: string | null;
+  }): Promise<Annotation> {
+    const { data } = await http.patch<Annotation>(`/log/${id}`, body);
+    return data;
+  },
+
+  async deleteAnnotation(id: number): Promise<void> {
+    await http.delete(`/log/${id}`);
+  },
+
+  // ── Sober tracking ─────────────────────────────────────────
+  async soberCurrent(): Promise<{
+    active: { id: number; addiction: string; start_at: string; end_at: string | null; notes: string | null; days: number } | null;
+    addiction: string;
+    now?: string;
+    elapsed_seconds?: number;
+    days?: number;
+    hours?: number;
+    minutes?: number;
+  }> {
+    const { data } = await http.get("/sober/current");
+    return data;
+  },
+
+  async soberHistory(limit = 500): Promise<Array<{
+    id: number; addiction: string; start_at: string; end_at: string | null; notes: string | null; days: number;
+  }>> {
+    const { data } = await http.get("/sober/history", { params: { limit } });
+    return data;
+  },
+
+  async soberStats(): Promise<{
+    addiction: string;
+    total_resets: number;
+    longest_days: number;
+    avg_days: number;
+    current_days: number;
+    current_started_at: string | null;
+    first_started_at: string | null;
+    total_tracked_days: number;
+  }> {
+    const { data } = await http.get("/sober/stats");
+    return data;
+  },
+
+  async soberReset(notes?: string): Promise<{ ok: boolean; current_id: number; started_at?: string; noop?: boolean }> {
+    const { data } = await http.post("/sober/reset", { notes });
+    return data;
+  },
+
+  async soberUpdate(id: number, body: { start_at?: string; end_at?: string | null; notes?: string | null }) {
+    const { data } = await http.patch(`/sober/streak/${id}`, body);
+    return data;
+  },
+
+  async soberDelete(id: number): Promise<void> {
+    await http.delete(`/sober/streak/${id}`);
   },
 
   async health(): Promise<{ status: string }> {

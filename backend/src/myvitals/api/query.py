@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -440,8 +441,16 @@ async def get_skin_temp(
 
 
 @router.get("/last-sync")
-async def get_last_sync(db: AsyncSession = Depends(get_session)) -> dict[str, datetime | None]:
-    """Most recent timestamp across all vitals tables — proxy for 'when did the watch last sync'."""
+async def get_last_sync(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    """Most recent vitals timestamp + companion-app sync health.
+
+    last_sync       — newest record across HR / HRV / SpO2 / Steps
+    last_attempt    — when the phone last *tried* to sync (heartbeat)
+    last_success    — when the phone last *succeeded* in syncing
+    permissions_lost — true if the most recent attempt saw HC denials
+    perms_missing   — names of the HC perms still revoked, if any
+    error_summary   — first ~few error lines from the most recent attempt
+    """
     tables = [models.HeartRate, models.Hrv, models.Spo2, models.Steps]
     latest: datetime | None = None
     for t in tables:
@@ -449,4 +458,21 @@ async def get_last_sync(db: AsyncSession = Depends(get_session)) -> dict[str, da
         ts = result.scalar()
         if ts and (latest is None or ts > latest):
             latest = ts
-    return {"last_sync": latest}
+
+    hb = (await db.execute(
+        select(models.SyncHeartbeat)
+        .order_by(models.SyncHeartbeat.attempt_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    return {
+        "last_sync": latest,
+        "last_attempt": hb.attempt_at if hb else None,
+        "last_success": hb.last_success_at if hb else None,
+        "permissions_lost": bool(hb.permissions_lost) if hb else False,
+        "perms_granted": hb.perms_granted if hb else None,
+        "perms_required": hb.perms_required if hb else None,
+        "perms_missing": hb.perms_missing if hb else None,
+        "error_summary": hb.error_summary if hb else None,
+        "app_version": hb.app_version if hb else None,
+    }

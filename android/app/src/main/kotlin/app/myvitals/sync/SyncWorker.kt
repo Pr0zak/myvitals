@@ -14,6 +14,7 @@ import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import app.myvitals.BuildConfig
 import app.myvitals.data.AppDatabase
 import app.myvitals.data.BufferedBatch
 import app.myvitals.data.SettingsRepository
@@ -26,6 +27,27 @@ import timber.log.Timber
 import java.time.Instant
 import kotlin.reflect.KClass
 
+/**
+ * Per-attempt diagnostic state. Mutated as the worker runs; posted to the
+ * backend as a heartbeat at the end of every doWork() invocation, even if
+ * the worker exited early (not configured / no perms / HC unavailable).
+ *
+ * Lets the dashboard tell the difference between
+ *   - "phone tried 3 min ago but every HC read 401'd" (perms_lost)
+ *   - "phone hasn't checked in for 6 hours" (last_attempt is old)
+ *   - "phone is syncing fine but watch hasn't pushed new data" (success +
+ *     records_pulled = 0).
+ */
+private data class AttemptState(
+    var success: Boolean = false,
+    var permissionsLost: Boolean = false,
+    var permsGranted: Int? = null,
+    var permsRequired: Int? = null,
+    var permsMissing: List<String>? = null,
+    val errors: MutableList<String> = mutableListOf(),
+    var recordsPulled: Int = 0,
+)
+
 class SyncWorker(
     context: Context,
     params: WorkerParameters,
@@ -36,21 +58,57 @@ class SyncWorker(
     private val db = AppDatabase.get(context)
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val batchAdapter = moshi.adapter(IngestBatch::class.java)
+    private val state = AttemptState()
 
     override suspend fun doWork(): Result {
         Timber.d("SyncWorker.doWork()")
+        val attemptAt = Instant.now()
+        return try {
+            runSync(attemptAt)
+        } finally {
+            persistFlags()
+            sendHeartbeat(attemptAt)
+        }
+    }
 
+    private suspend fun runSync(now: Instant): Result {
         if (!settings.isConfigured()) {
-            Timber.w("Skipping sync: not configured (url='%s' tokenSet=%b)",
-                settings.backendUrl, settings.bearerToken.isNotEmpty())
+            val msg = "Skipping sync: not configured (url='${settings.backendUrl}' tokenSet=${settings.bearerToken.isNotEmpty()})"
+            Timber.w(msg)
+            state.errors += msg
             return Result.success()
         }
         if (!gateway.isAvailable()) {
-            Timber.w("Skipping sync: Health Connect not available on this device")
+            val msg = "Skipping sync: Health Connect not available on this device"
+            Timber.w(msg)
+            state.errors += msg
             return Result.success()
         }
+
+        // Permission inventory — log explicit granted vs missing list every
+        // run. Way easier to diagnose revocations than chasing SecurityException
+        // stack traces.
+        try {
+            val missing = gateway.missingPermissionShortNames()
+            state.permsRequired = gateway.requiredPermissions.size
+            state.permsGranted = state.permsRequired!! - missing.size
+            state.permsMissing = missing.takeIf { it.isNotEmpty() }
+            if (missing.isEmpty()) {
+                Timber.i("Perms: %d/%d granted", state.permsGranted, state.permsRequired)
+            } else {
+                Timber.w("Perms: %d/%d granted; MISSING %s",
+                    state.permsGranted, state.permsRequired, missing.joinToString())
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Permission inventory failed")
+            state.errors += "perm inventory: ${e.javaClass.simpleName}: ${e.message?.take(160)}"
+        }
+
         if (!gateway.hasAllPermissions()) {
-            Timber.w("Skipping sync: HC permissions not granted")
+            val msg = "Skipping sync: HC permissions not granted (missing=${state.permsMissing ?: "?"})"
+            Timber.w(msg)
+            state.errors += msg
+            state.permissionsLost = true
             return Result.success()
         }
 
@@ -62,6 +120,7 @@ class SyncWorker(
             summaries.joinToString { "id=${it.id}/bytes=${it.json_len}/attempts=${it.attempts}" })
         if (!flushBuffer(api)) {
             Timber.w("Buffer flush failed; will retry")
+            state.errors += "buffer flush failed"
             return Result.retry()
         }
 
@@ -71,18 +130,10 @@ class SyncWorker(
         // checkpoint is more recent. The Pixel Watch batches HR/sleep
         // records and pushes them to Health Connect when bluetooth /
         // wifi is stable — sometimes hours after the records' actual
-        // timestamps. With a 2h floor (the v0.4.1 setting) overnight
-        // batches that arrive 4-8h late were missed because lastSync
-        // had already advanced past their record time.
+        // timestamps.
         //
-        // 12h covers the vast majority of HC delays. ON CONFLICT DO
-        // NOTHING dedupes on the time PK so re-pulls are free.
-        //
-        // Plus: once a day (when checkpoint > 24h old, OR we've never
-        // run the deep sweep today), do a 7-day re-pull to catch
-        // anything that fell through even the 12h floor. Tracked via
-        // settings.lastDeepSweepEpochS.
-        val now = Instant.now()
+        // Plus once a day a 7-day deep sweep covers anything that fell
+        // through the 12h floor.
         val checkpoint = settings.lastSyncInstant() ?: now.minusSeconds(6 * 3600)
         val safetyFloor = now.minusSeconds(12 * 3600)
         val needDeepSweep = (now.epochSecond - settings.lastDeepSweepEpochSeconds) > 24 * 3600
@@ -96,8 +147,8 @@ class SyncWorker(
         }
         val until = now
 
-        // Per-type try/catch: a SecurityException on one record type (e.g. HC's
-        // "record type 11") should not block the others from ingesting.
+        // Per-type try/catch: a SecurityException on one record type should
+        // not block the others.
         val hr = safeRead(HeartRateRecord::class, since, until)
         val hrv = safeRead(HeartRateVariabilityRmssdRecord::class, since, until)
         val steps = safeRead(StepsRecord::class, since, until)
@@ -113,6 +164,9 @@ class SyncWorker(
             since, hr.size, hrv.size, steps.size, sleep.size, exercise.size,
             weight.size, bodyFat.size, leanMass.size, bp.size, skinTemp.size,
         )
+        state.recordsPulled = hr.size + hrv.size + steps.size + sleep.size + exercise.size +
+            weight.size + bodyFat.size + leanMass.size + bp.size + skinTemp.size
+
         val batch = DataMapper.toBatch(
             hr, hrv, steps, sleep, exercise,
             weight = weight, bodyFat = bodyFat, leanMass = leanMass,
@@ -123,6 +177,7 @@ class SyncWorker(
             Timber.i("Nothing new to send; advancing checkpoint to %s", until)
             settings.lastSyncEpochSeconds = until.epochSecond
             if (needDeepSweep) settings.lastDeepSweepEpochSeconds = until.epochSecond
+            state.success = true
             return Result.success()
         }
 
@@ -130,9 +185,11 @@ class SyncWorker(
             ingestChunked(api, batch)
             settings.lastSyncEpochSeconds = until.epochSecond
             if (needDeepSweep) settings.lastDeepSweepEpochSeconds = until.epochSecond
+            state.success = true
             Result.success()
         } catch (e: Exception) {
             Timber.e(e, "Ingest POST failed; buffering locally")
+            state.errors += "ingest POST: ${e.javaClass.simpleName}: ${e.message?.take(200)}"
             db.buffered().insert(
                 BufferedBatch(
                     json = batchAdapter.toJson(batch),
@@ -146,6 +203,41 @@ class SyncWorker(
         }
     }
 
+    private fun persistFlags() {
+        if (state.success) {
+            settings.lastSuccessEpochSeconds = Instant.now().epochSecond
+            settings.permissionsLost = false
+        } else if (state.permissionsLost) {
+            settings.permissionsLost = true
+        }
+    }
+
+    private suspend fun sendHeartbeat(attemptAt: Instant) {
+        if (!settings.isConfigured()) return
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val errorSummary = state.errors.joinToString("\n")
+                .take(1800)
+                .ifEmpty { null }
+            api.heartbeat(
+                HeartbeatPayload(
+                    attemptAt = attemptAt.toString(),
+                    success = state.success,
+                    permissionsLost = state.permissionsLost,
+                    permsGranted = state.permsGranted,
+                    permsRequired = state.permsRequired,
+                    permsMissing = state.permsMissing,
+                    lastSuccessAt = settings.lastSuccessInstant()?.toString(),
+                    errorSummary = errorSummary,
+                    recordsPulled = state.recordsPulled.takeIf { it > 0 },
+                    appVersion = BuildConfig.VERSION_NAME,
+                )
+            )
+        } catch (e: Exception) {
+            Timber.w(e, "Heartbeat POST failed (non-fatal)")
+        }
+    }
+
     private suspend fun <T : Record> safeRead(
         type: KClass<T>,
         since: Instant,
@@ -153,20 +245,25 @@ class SyncWorker(
     ): List<T> {
         return try {
             gateway.read(type, since, until)
+        } catch (e: SecurityException) {
+            // HC denied — almost always means the user revoked perms (or the
+            // grant got dropped on app upgrade). Track it so the dashboard
+            // can surface a clear "re-grant permissions" prompt.
+            state.permissionsLost = true
+            val concise = "HC ${type.simpleName} denied: ${e.message?.lineSequence()?.firstOrNull()?.take(180)}"
+            Timber.e(concise)
+            state.errors += concise
+            emptyList()
         } catch (e: Exception) {
             Timber.e(e, "HC read FAILED for %s — continuing with empty list", type.simpleName)
+            state.errors += "HC ${type.simpleName}: ${e.javaClass.simpleName}: ${e.message?.take(160)}"
             emptyList()
         }
     }
 
     /**
      * Send [batch] to the backend in pieces no bigger than [MAX_PER_TYPE]
-     * records of any single table per request. A 30-day backfill (~37k HR
-     * samples) becomes ~10 small POSTs instead of one ~5 MB body that hangs
-     * OkHttp/Moshi serialisation.
-     *
-     * Throws on the first failed POST so the caller can buffer the *original*
-     * un-chunked batch for later retry.
+     * records of any single table per request.
      */
     private suspend fun ingestChunked(api: BackendApi, batch: IngestBatch) {
         val hrChunks = batch.heartrate.chunked(MAX_PER_TYPE)
@@ -223,8 +320,6 @@ class SyncWorker(
         if (pending.isEmpty()) return true
         Timber.d("Buffer: %d pending entries to flush", pending.size)
         for (b in pending) {
-            // Drop poison entries that have failed too many times. Better to lose
-            // some samples than to permanently jam the queue.
             if (b.attempts >= MAX_BUFFER_ATTEMPTS) {
                 Timber.w("Dropping buffered batch id=%d after %d failed attempts",
                     b.id, b.attempts)
@@ -232,16 +327,14 @@ class SyncWorker(
                 continue
             }
 
-            // Bound each entry's processing so a hung Moshi/OkHttp call can't
-            // block the worker forever (and so we always increment attempts).
             val ok = withTimeoutOrNull(BUFFER_ENTRY_TIMEOUT_MS) {
                 processBufferEntry(api, b)
             }
 
             when (ok) {
-                true -> {} // entry handled, continue to next
-                false -> return false   // POST failed, stop and retry next sync
-                null -> {                // hit the timeout
+                true -> {}
+                false -> return false
+                null -> {
                     Timber.w("Buffer id=%d timed out after %dms — incrementing attempts",
                         b.id, BUFFER_ENTRY_TIMEOUT_MS)
                     db.buffered().incrementAttempts(b.id)
@@ -252,10 +345,6 @@ class SyncWorker(
         return true
     }
 
-    /**
-     * Returns true on success, false on POST failure (caller stops the loop and
-     * lets WorkManager retry). Throws nothing — exceptions are caught inline.
-     */
     private suspend fun processBufferEntry(api: BackendApi, b: BufferedBatch): Boolean {
         Timber.d("Buffer id=%d: parsing %d-byte payload", b.id, b.json.length)
         val batch = try {
@@ -289,13 +378,8 @@ class SyncWorker(
 
     companion object {
         const val UNIQUE_NAME = "myvitals_periodic_sync"
-        // Records of any one type per POST. 5 types * 4000 = 20k records max.
-        // Backend chunks the INSERT at 4000/chunk too.
         private const val MAX_PER_TYPE = 4000
-        // After this many failed attempts the entry is dropped to unjam the queue.
         private const val MAX_BUFFER_ATTEMPTS = 3
-        // Per-entry hard wall (parse + ALL its chunked POSTs). Bigger than
-        // OkHttp callTimeout (180s) so it doesn't fire spuriously.
         private const val BUFFER_ENTRY_TIMEOUT_MS = 240_000L
     }
 }

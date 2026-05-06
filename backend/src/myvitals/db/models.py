@@ -258,3 +258,29 @@ class Activity(Base):
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)), nullable=True)
     hr_recovery_60s: Mapped[float | None] = mapped_column(Float, nullable=True)
     hr_recovery_120s: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class SoberStreak(Base):
+    """One row per sobriety streak — past streaks are closed (end_at set),
+    the current streak has end_at = NULL (enforced by partial unique index)."""
+    __tablename__ = "sober_streaks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    addiction: Mapped[str] = mapped_column(String(64), default="alcohol")
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class SyncHeartbeat(Base):
+    """Companion-app sync diagnostics — one row per doWork() invocation."""
+    __tablename__ = "sync_heartbeat"
+    attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    success: Mapped[bool] = mapped_column(Boolean)
+    permissions_lost: Mapped[bool] = mapped_column(Boolean, default=False)
+    perms_granted: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    perms_required: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    perms_missing: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_summary: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    records_pulled: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    app_version: Mapped[str | None] = mapped_column(String(64), nullable=True)

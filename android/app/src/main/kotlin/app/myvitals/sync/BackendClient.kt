@@ -13,6 +13,9 @@ import java.util.concurrent.TimeUnit
 interface BackendApi {
     @POST("ingest/batch")
     suspend fun ingestBatch(@Body batch: IngestBatch): IngestResponse
+
+    @POST("ingest/heartbeat")
+    suspend fun heartbeat(@Body hb: HeartbeatPayload): Map<String, String>
 }
 
 object BackendClient {

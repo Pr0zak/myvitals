@@ -25,7 +25,7 @@
        │ HTTP(S) bearer token (Ingest)
        ▼
 ┌────────────────────────────────────────────────────────┐
-│ Proxmox LXC (CT 104, pve5) — Docker Compose            │
+│ Proxmox LXC — Docker Compose                           │
 │                                                         │
 │  ┌──────────────────┐    ┌────────────────────────┐    │
 │  │ FastAPI          │◄──►│ TimescaleDB            │    │

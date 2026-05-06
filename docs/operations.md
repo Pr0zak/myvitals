@@ -6,9 +6,9 @@ How myvitals is currently deployed and how to maintain it.
 
 | Component | Location |
 |-----------|----------|
-| LXC | CT 104 on **pve5**, hostname `myvitals` |
+| LXC | An unprivileged Proxmox CT (`$CT_ID`) on a Proxmox host (`$PVE_HOST`), hostname `myvitals` |
 | OS | Debian 12 (template `debian-12-standard_12.12-1_amd64.tar.zst`) |
-| Resources | 2 vCPU, 2 GB RAM, 512 MB swap, 16 GB disk on `local-lvm-2t` |
+| Resources | 2 vCPU, 2 GB RAM, 512 MB swap, 16 GB disk on the cluster's LVM-thin pool |
 | Network | bridge `vmbr0`, IP via DHCP |
 | Privilege | unprivileged, `features=keyctl=1,nesting=1` |
 | App path | `/opt/myvitals` |
@@ -19,25 +19,34 @@ How myvitals is currently deployed and how to maintain it.
 
 ## Getting in
 
+These docs use `$PVE_HOST` (your Proxmox node) and `$CT_ID` (the LXC ID
+the install script picked, default `104` from `deploy/ct-bootstrap.sh`).
+Set them once per shell:
+
+```bash
+export PVE_HOST=your-proxmox-host
+export CT_ID=104
+```
+
 ```bash
 # Direct (your SSH key was injected at create time)
 ssh root@<CT-IP>
 
 # Via the host (always works, no SSH config required)
-ssh root@pve5 "pct exec 104 -- bash -c '<cmd>'"
+ssh root@$PVE_HOST "pct exec $CT_ID -- bash -c '<cmd>'"
 
 # CT lifecycle
-ssh root@pve5 "pct status 104"
-ssh root@pve5 "pct start 104"
-ssh root@pve5 "pct reboot 104"
-ssh root@pve5 "pct stop 104"
+ssh root@$PVE_HOST "pct status $CT_ID"
+ssh root@$PVE_HOST "pct start $CT_ID"
+ssh root@$PVE_HOST "pct reboot $CT_ID"
+ssh root@$PVE_HOST "pct stop $CT_ID"
 ```
 
 ## Quick checks
 
 ```bash
 # Container health
-ssh root@pve5 "pct exec 104 -- docker compose -f /opt/myvitals/docker-compose.yml ps"
+ssh root@$PVE_HOST "pct exec $CT_ID -- docker compose -f /opt/myvitals/docker-compose.yml ps"
 
 # Backend version + git sha + build time
 curl -s http://<CT-IP>:8000/version
@@ -46,7 +55,7 @@ curl -s http://<CT-IP>:8000/version
 curl -s -H "Authorization: Bearer <QUERY_TOKEN>" "http://<CT-IP>:8000/debug/logs?limit=20"
 
 # Backend container logs (in-process, not /debug/logs)
-ssh root@pve5 "pct exec 104 -- docker compose -f /opt/myvitals/docker-compose.yml logs --tail=50 backend"
+ssh root@$PVE_HOST "pct exec $CT_ID -- docker compose -f /opt/myvitals/docker-compose.yml logs --tail=50 backend"
 ```
 
 ## Upgrade
@@ -79,14 +88,14 @@ docker compose restart backend      # forces restart even without compose change
 
 ```bash
 # psql shell
-ssh root@pve5 "pct exec 104 -- docker compose -f /opt/myvitals/docker-compose.yml exec db psql -U myvitals -d myvitals"
+ssh root@$PVE_HOST "pct exec $CT_ID -- docker compose -f /opt/myvitals/docker-compose.yml exec db psql -U myvitals -d myvitals"
 
 # pg_dump (run on the CT, then scp the file out)
-ssh root@pve5 "pct exec 104 -- bash -c 'docker compose -f /opt/myvitals/docker-compose.yml exec -T db pg_dump -U myvitals myvitals | gzip > /tmp/myvitals-$(date +%F).sql.gz'"
-ssh root@pve5 "pct pull 104 /tmp/myvitals-$(date +%F).sql.gz ./myvitals-backup.sql.gz"
+ssh root@$PVE_HOST "pct exec $CT_ID -- bash -c 'docker compose -f /opt/myvitals/docker-compose.yml exec -T db pg_dump -U myvitals myvitals | gzip > /tmp/myvitals-$(date +%F).sql.gz'"
+ssh root@$PVE_HOST "pct pull $CT_ID /tmp/myvitals-$(date +%F).sql.gz ./myvitals-backup.sql.gz"
 ```
 
-The DB volume (`myvitals_db_data`) lives in the container's local-lvm-2t volume. For real backups, schedule a periodic `pg_dump` to a CIFS share (the cluster has `Images` available) or to PBS9000.
+The DB volume (`myvitals_db_data`) lives in the container's LVM-thin pool. For real backups, schedule a periodic `pg_dump` to a CIFS share or to a Proxmox Backup Server.
 
 ## Common gotchas
 

@@ -18,7 +18,7 @@ Pixel Watch 3
 ## Status
 
 - **Backend, frontend, Android app**: shipped through v0.1.4.
-- **Production deploy**: CT 104 on `pve5` (Docker Compose, see `docs/operations.md`).
+- **Production deploy**: an unprivileged Proxmox LXC running Docker Compose (see `docs/operations.md`).
 - **Releases**: signed APK + GHCR images on every `v*` tag (see `docs/releasing.md`).
 
 ## Stack

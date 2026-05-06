@@ -62,8 +62,13 @@ import java.time.format.DateTimeFormatter
 
 private val GREEN = Color(0xFF22C55E)
 private val GREEN_SOFT = Color(0xFFA7F3D0)
-private val RED = Color(0xFFEF4444)
+// Reset button uses amber rather than red — "caution, this clears your
+// streak" reads better than alarm-level red, and stays clearly distinct
+// from the green active-streak text above it.
+private val ACCENT = Color(0xFFF59E0B)        // amber-500
+private val ACCENT_DIM = Color(0xFF78350F)    // amber-900 (hold-base)
 private val DIM = Color(0xFF94A3B8)
+private val ERROR = Color(0xFFEF4444)          // still red for actual errors
 
 @Composable
 fun SoberHomeScreen(
@@ -189,8 +194,8 @@ fun SoberHomeScreen(
                 onClick = { showResetDialog = true },
                 enabled = settings.isConfigured() && !resetting,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = RED,
-                    contentColor = Color.White,
+                    containerColor = ACCENT,
+                    contentColor = Color.Black,
                 ),
                 shape = RoundedCornerShape(20.dp),
                 modifier = Modifier
@@ -210,7 +215,7 @@ fun SoberHomeScreen(
             AnimatedVisibility(visible = loadError != null) {
                 Text(
                     text = loadError.orEmpty(),
-                    color = RED,
+                    color = ERROR,
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
@@ -336,7 +341,7 @@ private fun HoldToConfirmButton(
             .fillMaxWidth()
             .height(56.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF7F1D1D))   // dim red base
+            .background(ACCENT_DIM)          // dim amber base
             .pointerInput(Unit) {
                 detectTapGestures(
                     onPress = {
@@ -370,7 +375,7 @@ private fun HoldToConfirmButton(
             modifier = Modifier
                 .fillMaxHeight()
                 .fillMaxWidth(progress.floatValue)
-                .background(RED),
+                .background(ACCENT),
         )
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(

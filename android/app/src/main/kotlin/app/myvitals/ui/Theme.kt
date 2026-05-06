@@ -5,22 +5,51 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-// Single dark palette — the slate/sky combo the dashboard uses.
+/**
+ * Brand palette — matches the Claude Design handoff (myvitals Android).
+ * The brand red (#EF4444) is intentionally `primary` so section headers
+ * and accents pull it; amber lives outside the M3 scheme as a callable
+ * token for the reset action.
+ */
+object MV {
+    val Bg = Color(0xFF0B1018)              // brand navy
+    val Surface = Color(0xFF0F1620)         // dim surface
+    val SurfaceContainer = Color(0xFF151D29)
+    val SurfaceContainerHigh = Color(0xFF1B2434)
+    val SurfaceContainerLow = Color(0xFF121925)
+    val Outline = Color(0xFF2A3447)
+    val OutlineVariant = Color(0xFF1F2738)
+
+    val OnSurface = Color(0xFFE6EAF2)
+    val OnSurfaceVariant = Color(0xFF94A3B8)
+    val OnSurfaceDim = Color(0xFF6B7689)
+
+    val BrandRed = Color(0xFFEF4444)
+    val Amber = Color(0xFFF59E0B)
+    val AmberDim = Color(0xFFB97506)
+    val AmberOn = Color(0xFF1A1305)
+    val Green = Color(0xFF22C55E)
+    val Red = Color(0xFFEF4444)
+}
+
 private val DarkPalette = darkColorScheme(
-    primary = Color(0xFF38BDF8),         // sky-400
-    onPrimary = Color(0xFF0F172A),       // slate-900
-    secondary = Color(0xFFA78BFA),       // violet-400
-    onSecondary = Color(0xFF0F172A),
-    tertiary = Color(0xFF22D3EE),
-    background = Color(0xFF0F172A),
-    onBackground = Color(0xFFE2E8F0),    // slate-200
-    surface = Color(0xFF1E293B),         // slate-800
-    onSurface = Color(0xFFE2E8F0),
-    surfaceVariant = Color(0xFF334155),  // slate-700
-    onSurfaceVariant = Color(0xFF94A3B8),
-    error = Color(0xFFEF4444),
-    onError = Color(0xFFFFFFFF),
-    outline = Color(0xFF334155),
+    primary = MV.BrandRed,
+    onPrimary = Color.White,
+    secondary = MV.Amber,
+    onSecondary = MV.AmberOn,
+    background = MV.Bg,
+    onBackground = MV.OnSurface,
+    surface = MV.Surface,
+    onSurface = MV.OnSurface,
+    surfaceContainer = MV.SurfaceContainer,
+    surfaceContainerHigh = MV.SurfaceContainerHigh,
+    surfaceContainerLow = MV.SurfaceContainerLow,
+    surfaceVariant = MV.SurfaceContainer,
+    onSurfaceVariant = MV.OnSurfaceVariant,
+    error = MV.Red,
+    onError = Color.White,
+    outline = MV.Outline,
+    outlineVariant = MV.OutlineVariant,
 )
 
 @Composable

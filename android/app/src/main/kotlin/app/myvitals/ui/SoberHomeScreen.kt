@@ -1,9 +1,8 @@
 package app.myvitals.ui
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,8 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,22 +33,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.SoberCurrentResponse
 import app.myvitals.sync.SoberResetRequest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -60,15 +57,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-private val GREEN = Color(0xFF22C55E)
-private val GREEN_SOFT = Color(0xFFA7F3D0)
-// Reset button uses amber rather than red — "caution, this clears your
-// streak" reads better than alarm-level red, and stays clearly distinct
-// from the green active-streak text above it.
-private val ACCENT = Color(0xFFF59E0B)        // amber-500
-private val ACCENT_DIM = Color(0xFF78350F)    // amber-900 (hold-base)
-private val DIM = Color(0xFF94A3B8)
-private val ERROR = Color(0xFFEF4444)          // still red for actual errors
+private const val HOLD_DURATION_MS = 1500L
 
 @Composable
 fun SoberHomeScreen(
@@ -76,7 +65,6 @@ fun SoberHomeScreen(
     onOpenSettings: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
 
     var current by remember { mutableStateOf<SoberCurrentResponse?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
@@ -103,7 +91,6 @@ fun SoberHomeScreen(
         }
     }
 
-    // First load + a 1s ticker so the d/h/m/s display feels alive.
     LaunchedEffect(Unit) { fetch() }
     LaunchedEffect(Unit) {
         while (true) {
@@ -114,13 +101,10 @@ fun SoberHomeScreen(
 
     val active = current?.active
     val (d, h, m, s) = remember(active, nowMs) {
-        if (active == null) intArrayOf(0, 0, 0, 0)
-        else {
+        if (active == null) intArrayOf(0, 0, 0, 0) else {
             val start = try { Instant.parse(active.startAt) } catch (_: Exception) { null }
-            if (start == null) intArrayOf(0, 0, 0, 0)
-            else {
-                val dur = Duration.between(start, Instant.ofEpochMilli(nowMs))
-                val totalS = maxOf(0, dur.seconds)
+            if (start == null) intArrayOf(0, 0, 0, 0) else {
+                val totalS = maxOf(0, Duration.between(start, Instant.ofEpochMilli(nowMs)).seconds)
                 intArrayOf(
                     (totalS / 86400).toInt(),
                     ((totalS % 86400) / 3600).toInt(),
@@ -131,49 +115,84 @@ fun SoberHomeScreen(
         }
     }
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(20.dp),
+            .background(MV.Bg),
     ) {
+        // ── Top brand row ──
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                BrandMark(size = 22.dp)
+                Text(
+                    "myvitals",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.4.sp,
+                    color = MV.OnSurfaceVariant,
+                )
+            }
+            PagerDots(active = 0)
+            Spacer(Modifier.width(64.dp))
+        }
+
+        // ── Hero ──
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            // ── Header ──
-            Text(
-                text = "SOBER TIME",
-                style = MaterialTheme.typography.labelMedium,
-                color = DIM,
-                letterSpacing = 2.sp,
-            )
-            Spacer(Modifier.height(12.dp))
+            if (active == null) {
+                EmptyState()
+            } else {
+                Text(
+                    "SOBER TIME",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 3.6.sp,
+                    color = MV.OnSurfaceVariant,
+                )
+                Spacer(Modifier.height(36.dp))
 
-            // ── Big counter ── Use Material 3 display typography rather than
-            // hand-rolled sp + Monospace (cleaner, scales properly across
-            // densities, respects user font-size preference).
-            if (active != null) {
                 Text(
                     text = "$d",
-                    style = MaterialTheme.typography.displayLarge.copy(
-                        fontWeight = FontWeight.SemiBold,
+                    fontSize = 132.sp,
+                    fontWeight = FontWeight.Light,
+                    color = MV.OnSurface,
+                    style = androidx.compose.ui.text.TextStyle(
+                        fontFeatureSettings = "tnum",
+                        letterSpacing = (-4).sp,
                     ),
-                    color = GREEN,
                 )
                 Text(
                     text = if (d == 1) "day" else "days",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = GREEN_SOFT,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = MV.OnSurface.copy(alpha = 0.92f),
+                    letterSpacing = 0.2.sp,
+                    modifier = Modifier.padding(top = 6.dp),
                 )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "%dh %02dm %02ds".format(h, m, s),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = DIM,
-                )
-                Spacer(Modifier.height(12.dp))
+
+                Spacer(Modifier.height(28.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    TickerSeg(value = h.toString(), unit = "h")
+                    TickerSeg(value = m.toString().padStart(2, '0'), unit = "m")
+                    TickerSeg(value = s.toString().padStart(2, '0'), unit = "s")
+                }
+
+                Spacer(Modifier.height(18.dp))
                 val sinceLabel = remember(active) {
                     try {
                         val inst = Instant.parse(active.startAt)
@@ -182,200 +201,234 @@ fun SoberHomeScreen(
                     } catch (_: Exception) { active.startAt }
                 }
                 Text(
-                    text = "since $sinceLabel",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = DIM,
-                )
-            } else {
-                Text(
-                    text = if (refreshing) "Loading…" else "No active streak",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = DIM,
-                )
-            }
-
-            Spacer(Modifier.height(40.dp))
-
-            // ── Big reset button ──
-            Button(
-                onClick = { showResetDialog = true },
-                enabled = settings.isConfigured() && !resetting,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = ACCENT,
-                    contentColor = Color.Black,
-                ),
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(96.dp),
-            ) {
-                Text(
-                    text = if (active == null) "Start streak"
-                           else if (resetting) "Resetting…" else "Reset",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            AnimatedVisibility(visible = loadError != null) {
-                Text(
-                    text = loadError.orEmpty(),
-                    color = ERROR,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
+                    "since $sinceLabel",
+                    fontSize = 13.sp,
+                    color = MV.OnSurfaceDim,
+                    letterSpacing = 0.2.sp,
                 )
             }
         }
 
-        // Bottom area: sync status pill + Refresh / Settings
+        // ── Reset button ──
+        Box(modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 18.dp)) {
+            ResetButton(
+                hasActive = active != null,
+                onTap = { showResetDialog = true },
+                resetting = resetting,
+            )
+        }
+
+        // ── Sync pill + actions ──
         Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth(),
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             SyncStatusPill(settings = settings, nowMs = nowMs)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { scope.launch { fetch() } }) {
-                    Text(if (refreshing) "Refreshing…" else "Refresh", color = DIM, fontSize = 12.sp)
+                    Text(
+                        if (refreshing) "Refreshing…" else "Refresh",
+                        color = MV.OnSurfaceVariant,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
                 }
+                Text("·", color = MV.OnSurfaceDim, fontSize = 14.sp)
                 TextButton(onClick = onOpenSettings) {
-                    Text("Settings ›", color = DIM, fontSize = 12.sp)
+                    Text(
+                        "Settings ›",
+                        color = MV.OnSurfaceVariant,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
                 }
             }
         }
+
+        AnimatedVisibility(visible = loadError != null) {
+            Text(
+                text = loadError.orEmpty(),
+                color = MV.Red,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+            )
+        }
     }
 
-    // ── Reset confirmation dialog ──
+    // ── Hold-to-reset dialog ──
     if (showResetDialog) {
-        AlertDialog(
-            onDismissRequest = { showResetDialog = false },
-            confirmButton = {
-                HoldToConfirmButton(
-                    label = if (active == null) "Hold to start" else "Hold to reset",
-                    onConfirm = {
-                        showResetDialog = false
-                        scope.launch {
-                            resetting = true
-                            try {
-                                if (!settings.isConfigured()) {
-                                    loadError = "Backend not configured"
-                                    return@launch
-                                }
-                                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-                                withContext(Dispatchers.IO) {
-                                    api.soberReset(SoberResetRequest(addiction = "alcohol"))
-                                }
-                                fetch()
-                            } catch (e: Exception) {
-                                Timber.w(e, "soberReset failed")
-                                loadError = "Reset failed: ${e.message?.take(120)}"
-                            } finally {
-                                resetting = false
-                            }
+        HoldToResetDialog(
+            currentDays = d,
+            currentHours = h,
+            onDismiss = { showResetDialog = false },
+            onConfirm = {
+                showResetDialog = false
+                scope.launch {
+                    resetting = true
+                    try {
+                        if (!settings.isConfigured()) {
+                            loadError = "Backend not configured"; return@launch
                         }
-                    },
-                )
-            },
-            dismissButton = {
-                TextButton(onClick = { showResetDialog = false }) { Text("Cancel") }
-            },
-            title = { Text(if (active == null) "Start a new streak?" else "Reset sober timer?") },
-            text = {
-                Text(
-                    if (active == null)
-                        "Hold the red button below for a moment to start tracking from now."
-                    else
-                        "Closes the current ${d}d ${h}h streak and starts a new one from now. " +
-                        "The closed streak stays in your history. " +
-                        "Hold the red button below to confirm — release to cancel."
-                )
+                        val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                        withContext(Dispatchers.IO) {
+                            api.soberReset(SoberResetRequest(addiction = "alcohol"))
+                        }
+                        fetch()
+                    } catch (e: Exception) {
+                        Timber.w(e, "soberReset failed")
+                        loadError = "Reset failed: ${e.message?.take(120)}"
+                    } finally {
+                        resetting = false
+                    }
+                }
             },
         )
     }
 }
 
-/**
- * Compact bottom-of-screen status pill: green dot + "synced 4m ago",
- * amber if stale (>30 min), red if HC perms revoked. The label updates
- * automatically because [nowMs] ticks every second from the parent.
- */
 @Composable
-private fun SyncStatusPill(
-    settings: SettingsRepository,
-    nowMs: Long,
-) {
-    val lastSync = settings.lastSyncInstant()
-    val lastSuccess = settings.lastSuccessInstant()
-    val permsLost = settings.permissionsLost
-
-    // Pick the freshest of the two for the relative-time display
-    val freshest = listOfNotNull(lastSync, lastSuccess).maxByOrNull { it.epochSecond }
-    val ageS = freshest?.let { (nowMs / 1000) - it.epochSecond } ?: -1L
-
-    val (dot, text) = when {
-        permsLost -> Color(0xFFEF4444) to "perms revoked — open Settings"
-        freshest == null -> Color(0xFF94A3B8) to "no sync yet"
-        ageS < 60 -> Color(0xFF22C55E) to "synced just now"
-        ageS < 3600 -> Color(0xFF22C55E) to "synced ${ageS / 60}m ago"
-        ageS < 86400 -> Color(0xFFEAB308) to "synced ${ageS / 3600}h ago"
-        else -> Color(0xFFEAB308) to "synced ${ageS / 86400}d ago"
-    }
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        modifier = Modifier.padding(bottom = 4.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(RoundedCornerShape(50))
-                .background(dot),
+private fun TickerSeg(value: String, unit: String) {
+    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = value,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Medium,
+            color = MV.OnSurface.copy(alpha = 0.85f),
+            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
         )
         Text(
-            text = text,
-            color = DIM,
-            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+            text = unit,
+            fontSize = 13.sp,
+            color = MV.OnSurfaceDim,
+            modifier = Modifier.padding(end = 4.dp, bottom = 2.dp),
         )
     }
 }
 
-private const val HOLD_DURATION_MS = 1500L
+@Composable
+private fun EmptyState() {
+    Box(
+        modifier = Modifier
+            .size(84.dp)
+            .clip(RoundedCornerShape(50))
+            .border(1.5.dp, MV.Outline, RoundedCornerShape(50)),
+        contentAlignment = Alignment.Center,
+    ) { BrandMark(size = 40.dp) }
+    Spacer(Modifier.height(24.dp))
+    Text(
+        "SOBER TIME",
+        fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.6.sp,
+        color = MV.OnSurfaceVariant,
+    )
+    Spacer(Modifier.height(16.dp))
+    Text(
+        "No active streak yet",
+        fontSize = 28.sp, fontWeight = FontWeight.Normal,
+        color = MV.OnSurface, textAlign = TextAlign.Center,
+    )
+    Spacer(Modifier.height(10.dp))
+    Text(
+        "Start counting from now, or pick a date in Settings.",
+        fontSize = 14.sp, color = MV.OnSurfaceVariant,
+        textAlign = TextAlign.Center,
+    )
+}
+
+@Composable
+private fun ResetButton(hasActive: Boolean, onTap: () -> Unit, resetting: Boolean) {
+    if (!hasActive) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(88.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(MV.SurfaceContainer)
+                .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "Start counting",
+                fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.5.sp, color = MV.OnSurfaceVariant,
+            )
+        }
+        return
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(96.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(MV.Amber)
+            .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = if (resetting) "Resetting…" else "Reset streak",
+            fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.6.sp, color = MV.AmberOn,
+        )
+    }
+}
 
 /**
- * A red confirm button that fires [onConfirm] only after the user
- * holds it for [HOLD_DURATION_MS]. Lifting before completion cancels
- * the animation and the action — prevents accidental taps from
- * destroying a streak.
- *
- * Implementation: pointerInput(detectTapGestures) drives a coroutine
- * that ramps a `progress` ref from 0→1 over the hold duration;
- * if that coroutine is cancelled (finger lifted), the action never fires.
- * The fill bar inside the button visualises the held progress.
+ * Bottom-sheet style dialog with a hold-to-confirm button. The button's
+ * progress fill grows from 0 to 100% over 1.5s; releasing early aborts.
  */
 @Composable
-private fun HoldToConfirmButton(
-    label: String,
+private fun HoldToResetDialog(
+    currentDays: Int,
+    currentHours: Int,
+    onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MV.SurfaceContainerHigh,
+        shape = RoundedCornerShape(32.dp),
+        title = {
+            Text(
+                "Reset your sober streak?",
+                fontSize = 22.sp, fontWeight = FontWeight.Medium,
+                color = MV.OnSurface,
+            )
+        },
+        text = {
+            Text(
+                "This will end your current ${currentDays}-day, ${currentHours}h streak. " +
+                "The reset point will be logged at this moment. This can't be undone.",
+                fontSize = 14.sp, color = MV.OnSurfaceVariant, lineHeight = 21.sp,
+            )
+        },
+        confirmButton = {
+            HoldToConfirmButton(onConfirm = onConfirm)
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = MV.OnSurfaceVariant, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            }
+        },
+    )
+}
+
+@Composable
+private fun HoldToConfirmButton(onConfirm: () -> Unit) {
     val progress = remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
     var heldJob: Job? = remember { null }
+    val holding = progress.floatValue > 0f && progress.floatValue < 1f
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(ACCENT_DIM)          // dim amber base
+            .height(96.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(MV.SurfaceContainer)
+            .border(1.5.dp, MV.Amber, RoundedCornerShape(28.dp))
             .pointerInput(Unit) {
                 detectTapGestures(
                     onPress = {
@@ -388,35 +441,109 @@ private fun HoldToConfirmButton(
                                 val p = (elapsed.toFloat() / HOLD_DURATION_MS).coerceIn(0f, 1f)
                                 progress.floatValue = p
                                 if (p >= 1f) {
-                                    onConfirm()
-                                    break
+                                    onConfirm(); break
                                 }
-                                kotlinx.coroutines.delay(16)
+                                delay(16)
                             }
                         }
-                        // Suspend until release / cancel
                         val released = tryAwaitRelease()
-                        if (!released || progress.floatValue < 1f) {
-                            heldJob?.cancel()
-                        }
+                        if (!released || progress.floatValue < 1f) heldJob?.cancel()
                         progress.floatValue = 0f
                     },
                 )
             },
     ) {
-        // Progress fill
+        // Progress fill (gradient amber → amberDim)
         Box(
             modifier = Modifier
                 .fillMaxHeight()
                 .fillMaxWidth(progress.floatValue)
-                .background(ACCENT),
+                .background(
+                    Brush.horizontalGradient(listOf(MV.Amber, MV.AmberDim)),
+                ),
         )
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
             Text(
-                text = if (progress.floatValue > 0f && progress.floatValue < 1f) "Keep holding…" else label,
-                color = Color.White,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
+                text = if (holding) "Keep holding…" else "Press and hold",
+                fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.4.sp,
+                color = if (progress.floatValue > 0.5f) MV.AmberOn else MV.OnSurface,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = if (holding) {
+                    val seconds = (progress.floatValue * (HOLD_DURATION_MS / 1000f) * 10).toInt() / 10f
+                    "${seconds}s of ${HOLD_DURATION_MS / 1000f}s"
+                } else {
+                    "Release to cancel"
+                },
+                fontSize = 12.sp, letterSpacing = 0.2.sp,
+                color = if (progress.floatValue > 0.5f) MV.AmberOn.copy(alpha = 0.8f)
+                        else MV.OnSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SyncStatusPill(settings: SettingsRepository, nowMs: Long) {
+    val lastSync = settings.lastSyncInstant()
+    val lastSuccess = settings.lastSuccessInstant()
+    val permsLost = settings.permissionsLost
+    val freshest = listOfNotNull(lastSync, lastSuccess).maxByOrNull { it.epochSecond }
+    val ageS = freshest?.let { (nowMs / 1000) - it.epochSecond } ?: -1L
+
+    val (dot, text) = when {
+        permsLost -> MV.Red to "perms revoked — open Settings"
+        freshest == null -> MV.OnSurfaceDim to "no sync yet"
+        ageS < 60 -> MV.Green to "synced just now"
+        ageS < 3600 -> MV.Green to "synced ${ageS / 60}m ago"
+        ageS < 86400 -> MV.Amber to "synced ${ageS / 3600}h ago"
+        else -> MV.Amber to "synced ${ageS / 86400}d ago"
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(MV.SurfaceContainer)
+            .border(1.dp, MV.OutlineVariant, RoundedCornerShape(50))
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(RoundedCornerShape(50))
+                .background(dot),
+        )
+        Text(
+            text = text,
+            fontSize = 13.sp,
+            color = MV.OnSurfaceVariant,
+            letterSpacing = 0.1.sp,
+        )
+    }
+}
+
+@Composable
+private fun PagerDots(active: Int) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        for (i in 0..1) {
+            val isActive = i == active
+            Box(
+                modifier = Modifier
+                    .height(6.dp)
+                    .width(if (isActive) 18.dp else 6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(
+                        if (isActive) MV.OnSurface.copy(alpha = 0.95f)
+                        else MV.OnSurfaceDim.copy(alpha = 0.5f),
+                    ),
             )
         }
     }

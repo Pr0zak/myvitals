@@ -330,8 +330,8 @@ private fun ActivityMap(a: ActivityRow, trails: List<Trail>) {
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
 <style>$leafletCss
-html,body{height:100%;margin:0;background:#0F1620;}
-#m{position:absolute;top:0;left:0;right:0;bottom:0;}</style>
+html,body{margin:0;background:#0F1620;height:100vh;width:100vw;overflow:hidden;}
+#m{height:100vh;width:100vw;}</style>
 </head><body>
 <div id="m"></div>
 <script>$leafletJs</script>
@@ -351,25 +351,28 @@ function decodePolyline(str) {
   return points;
 }
 try {
-  const map = L.map('m', {zoomControl:true,scrollWheelZoom:false}).setView([39, -94], 13);
+  window.map = L.map('m', {zoomControl:true,scrollWheelZoom:false}).setView([39, -94], 13);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(map);
+    {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(window.map);
   const enc = '$polylineEsc';
   let bounds = null;
   if (enc.length > 0) {
     const pts = decodePolyline(enc);
     if (pts.length > 1) {
-      const line = L.polyline(pts, {color:'#ef4444', weight:3, opacity:0.9}).addTo(map);
+      const line = L.polyline(pts, {color:'#ef4444', weight:3, opacity:0.9}).addTo(window.map);
       bounds = line.getBounds();
     }
   }
   ${if (trailLat != null && trailLon != null) """
-  const m = L.marker([$trailLat,$trailLon]).addTo(map).bindPopup('$nameEsc');
+  L.marker([$trailLat,$trailLon]).addTo(window.map).bindPopup('$nameEsc');
   if (bounds) bounds.extend([$trailLat,$trailLon]);
   else bounds = L.latLngBounds([$trailLat,$trailLon], [$trailLat,$trailLon]);
   """ else ""}
-  if (bounds) map.fitBounds(bounds.pad(0.1));
-  setTimeout(() => map.invalidateSize(), 50);
+  if (bounds) window.map.fitBounds(bounds.pad(0.1));
+  function fix() { try { window.map.invalidateSize(); } catch (e) {} }
+  setTimeout(fix, 50); setTimeout(fix, 250); setTimeout(fix, 600);
+  setTimeout(() => console.log('map ready', window.map.getSize().x, 'x',
+    window.map.getSize().y), 700);
 } catch (e) { console.error('map init failed:', e.toString()); }
 </script></body></html>"""
     AndroidView(

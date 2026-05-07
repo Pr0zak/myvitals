@@ -56,6 +56,18 @@ def _trim_lounging(
 def _resolve_range(
     since: datetime | None, until: datetime | None, default_window: timedelta
 ) -> tuple[datetime, datetime]:
+    # Callers (esp. the phone) sometimes pass a date-only string like
+    # "2026-03-01"; FastAPI parses that as a tz-naive datetime, which
+    # fails the comparison below against `datetime.now(timezone.utc)`.
+    # Force any naive input into UTC.
+    def _aware(dt: datetime | None) -> datetime | None:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+    since = _aware(since)
+    until = _aware(until)
     end = until or datetime.now(timezone.utc)
     start = since or (end - default_window)
     if start >= end:

@@ -850,27 +850,32 @@ private fun MiniMap(lat: Double, lon: Double, name: String, osmGeoJson: String? 
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
 <style>$leafletCss
-html,body{height:100%;margin:0;background:#0F1620;}
-#m{position:absolute;top:0;left:0;right:0;bottom:0;}</style>
+html,body{margin:0;background:#0F1620;height:100vh;width:100vw;overflow:hidden;}
+#m{height:100vh;width:100vw;}</style>
 </head><body>
 <div id="m"></div>
 <script>$leafletJs</script>
 <script>
 window.addEventListener('error', e => console.error('JS error:', e.message));
 try {
-  const map = L.map('m', {zoomControl:true,scrollWheelZoom:false}).setView([$lat,$lon], 14);
+  window.map = L.map('m', {zoomControl:true,scrollWheelZoom:false}).setView([$lat,$lon], 14);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(map);
-  L.marker([$lat,$lon]).addTo(map).bindPopup('$nameEsc').openPopup();
+    {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(window.map);
+  L.marker([$lat,$lon]).addTo(window.map).bindPopup('$nameEsc').openPopup();
   const osm = $osmLiteral;
   if (osm) {
     const layer = L.geoJSON(osm, {
       style: {color:'#94a3b8', weight:3, opacity:0.9, dashArray:'6,4'}
-    }).addTo(map);
-    try { map.fitBounds(layer.getBounds().pad(0.1)); } catch (e) {}
+    }).addTo(window.map);
+    try { window.map.fitBounds(layer.getBounds().pad(0.1)); } catch (e) {}
   }
-  setTimeout(() => map.invalidateSize(), 50);
-  console.log('map ready', map.getSize().x, 'x', map.getSize().y);
+  // Re-size after the WebView has actually been measured by Compose.
+  // 100vh resolves correctly only after layout — give it a few ticks
+  // and re-call invalidateSize so Leaflet re-reads the container.
+  function fix() { try { window.map.invalidateSize(); } catch (e) {} }
+  setTimeout(fix, 50); setTimeout(fix, 250); setTimeout(fix, 600);
+  setTimeout(() => console.log('map ready', window.map.getSize().x, 'x',
+    window.map.getSize().y), 700);
 } catch (e) { console.error('map init failed:', e.toString()); }
 </script></body></html>"""
     AndroidView(

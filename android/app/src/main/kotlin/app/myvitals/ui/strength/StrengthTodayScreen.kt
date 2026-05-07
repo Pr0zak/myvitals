@@ -392,8 +392,12 @@ fun StrengthTodayScreen(
 
             groupedIncomplete + complete
         }
-        LazyColumn(
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = loading,
+            onRefresh = { scope.launch { reload() } },
             modifier = Modifier.weight(1f),
+        ) {
+        LazyColumn(
             contentPadding = PaddingValues(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -514,6 +518,7 @@ fun StrengthTodayScreen(
                 }
             }
         }
+        }  // end PullToRefreshBox
     }
 
     // Swap bottom sheet

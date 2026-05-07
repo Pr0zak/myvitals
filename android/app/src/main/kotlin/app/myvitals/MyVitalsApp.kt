@@ -10,6 +10,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import app.myvitals.debug.LogUploadWorker
 import app.myvitals.debug.RoomLogTree
+import app.myvitals.strength.WorkoutReminderWorker
 import app.myvitals.sync.SyncWorker
 import app.myvitals.trails.TrailAlertWorker
 import app.myvitals.update.Notifier
@@ -39,10 +40,27 @@ class MyVitalsApp : Application() {
         }
 
         Notifier.ensureChannel(this)
+        WorkoutReminderWorker.ensureChannel(this)
         schedulePeriodicSync()
         scheduleUpdateCheck()
         scheduleLogUpload()
         scheduleTrailAlertPoll()
+        scheduleWorkoutReminder()
+    }
+
+    private fun scheduleWorkoutReminder() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+        val request = PeriodicWorkRequestBuilder<WorkoutReminderWorker>(1, TimeUnit.HOURS)
+            .setConstraints(constraints)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 60, TimeUnit.SECONDS)
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            WorkoutReminderWorker.UNIQUE_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
     }
 
     private fun scheduleTrailAlertPoll() {

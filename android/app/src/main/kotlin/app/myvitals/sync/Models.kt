@@ -520,6 +520,8 @@ data class ProfileExtra(
     @Json(name = "sleep_goal_h") val sleepGoalH: Double? = null,
     @Json(name = "vitals_order") val vitalsOrder: List<String>? = null,
     @Json(name = "vitals_hidden") val vitalsHidden: List<String>? = null,
+    @Json(name = "workout_reminder_enabled") val workoutReminderEnabled: Boolean? = null,
+    @Json(name = "workout_reminder_hour") val workoutReminderHour: Int? = null,
 )
 
 @JsonClass(generateAdapter = true)

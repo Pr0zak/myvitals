@@ -69,6 +69,7 @@ sealed class FeedEntry {
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ActivitiesScreen(
     settings: SettingsRepository,
@@ -81,12 +82,29 @@ fun ActivitiesScreen(
         mutableStateOf<List<app.myvitals.sync.StrengthWorkoutSummary>>(emptyList())
     }
     var loading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     suspend fun load() {
         if (!settings.isConfigured()) {
             error = "Backend not configured — open Settings."; loading = false; return
+        }
+        // Stale-while-revalidate cache for instant render.
+        val cachedRows = app.myvitals.data.JsonCache.read<List<ActivityRow>>(
+            context, "activities_feed",
+            app.myvitals.data.JsonCache.listType(ActivityRow::class.java),
+        )
+        val cachedWorkouts = app.myvitals.data.JsonCache.read<List<app.myvitals.sync.StrengthWorkoutSummary>>(
+            context, "activities_workouts",
+            app.myvitals.data.JsonCache.listType(app.myvitals.sync.StrengthWorkoutSummary::class.java),
+        )
+        if (cachedRows != null) {
+            rows = cachedRows.value
+            workouts = cachedWorkouts?.value ?: emptyList()
+            loading = false
+            refreshing = true
         }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
@@ -99,6 +117,17 @@ fun ActivitiesScreen(
                 }
                 rows = actsD.await()
                 workouts = woD.await()
+
+                app.myvitals.data.JsonCache.write(
+                    context, "activities_feed",
+                    app.myvitals.data.JsonCache.listType(ActivityRow::class.java), rows,
+                )
+                app.myvitals.data.JsonCache.write(
+                    context, "activities_workouts",
+                    app.myvitals.data.JsonCache.listType(
+                        app.myvitals.sync.StrengthWorkoutSummary::class.java),
+                    workouts,
+                )
             }
             error = null
             Timber.i("activities loaded: %d strava + %d strength workouts",
@@ -106,7 +135,7 @@ fun ActivitiesScreen(
         } catch (e: Exception) {
             Timber.w(e, "activities load failed")
             error = e.message?.take(160)
-        } finally { loading = false }
+        } finally { loading = false; refreshing = false }
     }
 
     val feed = remember(rows, workouts) {
@@ -126,9 +155,16 @@ fun ActivitiesScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column {
-                Text("ACTIVITIES",
-                    color = MV.OnSurfaceVariant,
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("ACTIVITIES",
+                        color = MV.OnSurfaceVariant,
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                    if (refreshing) {
+                        Spacer(Modifier.width(8.dp))
+                        Text("refreshing…",
+                            color = MV.OnSurfaceVariant, fontSize = 10.sp)
+                    }
+                }
                 Text(
                     if (feed.isEmpty() && !loading) "—"
                     else "${feed.size} recent",
@@ -140,6 +176,11 @@ fun ActivitiesScreen(
             }
         }
 
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = loading,
+            onRefresh = { scope.launch { loading = true; load() } },
+            modifier = Modifier.weight(1f),
+        ) {
         when {
             loading && feed.isEmpty() -> Text("Loading…", color = MV.OnSurfaceVariant)
             error != null -> Text(error!!, color = MV.Red)
@@ -176,6 +217,7 @@ fun ActivitiesScreen(
                 }
             }
         }
+        }  // end PullToRefreshBox
     }
 }
 

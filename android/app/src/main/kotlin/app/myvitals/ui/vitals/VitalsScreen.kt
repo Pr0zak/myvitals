@@ -2,6 +2,7 @@ package app.myvitals.ui.vitals
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -99,6 +100,7 @@ data class HrSnapshot(val points: List<TimePoint>, val latest: Double?, val last
 data class WeightSnapshot(val points: List<Pair<Long, Double>>, val latestKg: Double?, val lastIso: String?)
 data class BpSnapshot(val latestSys: Int?, val latestDia: Int?, val lastIso: String?)
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun VitalsScreen(
     settings: SettingsRepository,
@@ -123,12 +125,26 @@ fun VitalsScreen(
         mutableStateOf<app.myvitals.sync.StrengthWorkoutSummary?>(null)
     }
     var loading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val context = LocalContext.current
 
     suspend fun load() {
         if (!settings.isConfigured()) {
             error = "Backend not configured — open Settings."; loading = false; return
+        }
+        // Stale-while-revalidate: render cached state immediately so the
+        // grid doesn't flash "Loading…" between launches. Fresh fetch runs
+        // below and overwrites on success.
+        val cachedToday = app.myvitals.data.JsonCache.read<DailySummary>(
+            context, "vitals_today",
+            app.myvitals.sync.DailySummary::class.java,
+        )
+        if (cachedToday != null) {
+            today = cachedToday.value
+            loading = false
+            refreshing = true
         }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
@@ -227,6 +243,13 @@ fun VitalsScreen(
                 lastActivity = activityD.await()
                 trailCounts = trailsD.await()
                 lastWorkout = workoutD.await()
+
+                today?.let {
+                    app.myvitals.data.JsonCache.write(
+                        context, "vitals_today",
+                        app.myvitals.sync.DailySummary::class.java, it,
+                    )
+                }
             }
             error = null
             Timber.i(
@@ -238,7 +261,7 @@ fun VitalsScreen(
         } catch (e: Exception) {
             Timber.w(e, "vitals load failed")
             error = e.message?.take(160)
-        } finally { loading = false }
+        } finally { loading = false; refreshing = false }
     }
 
     LaunchedEffect(Unit) { load() }
@@ -274,9 +297,17 @@ fun VitalsScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column {
-                Text("VITALS",
-                    color = MV.OnSurfaceVariant,
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("VITALS",
+                        color = MV.OnSurfaceVariant,
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                    if (refreshing) {
+                        Spacer(Modifier.width(8.dp))
+                        Text("refreshing…",
+                            color = MV.OnSurfaceVariant, fontSize = 10.sp,
+                            fontWeight = FontWeight.Normal)
+                    }
+                }
                 Text(
                     rows.lastOrNull()?.date ?: "—",
                     color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
@@ -354,6 +385,11 @@ fun VitalsScreen(
             )
         }
 
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = loading,
+            onRefresh = { scope.launch { loading = true; load() } },
+            modifier = Modifier.weight(1f),
+        ) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -393,6 +429,7 @@ fun VitalsScreen(
                 }
             }
         }
+        }  // end PullToRefreshBox
     }
 }
 

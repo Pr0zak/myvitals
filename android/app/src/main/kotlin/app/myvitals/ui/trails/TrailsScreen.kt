@@ -134,10 +134,24 @@ fun TrailsScreen(settings: SettingsRepository) {
             loading = false
             return
         }
+        // SWR: render last cached trails immediately.
+        val cached = app.myvitals.data.JsonCache.read<List<Trail>>(
+            context, "trails_list",
+            app.myvitals.data.JsonCache.listType(Trail::class.java),
+        )
+        if (cached != null) {
+            trails = cached.value.sortedBy { it.name }
+            loading = false
+        }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val r = withContext(Dispatchers.IO) { api.trails() }
             trails = r.trails.sortedBy { it.name }
+            app.myvitals.data.JsonCache.write(
+                context, "trails_list",
+                app.myvitals.data.JsonCache.listType(Trail::class.java),
+                trails,
+            )
             error = null
             val o = trails.count { it.status == "open" }
             val d = trails.count { it.status == "delayed" }
@@ -360,6 +374,11 @@ fun TrailsScreen(settings: SettingsRepository) {
             }
         }
 
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = loading || refreshing,
+            onRefresh = { scope.launch { refreshNow(); load(); loadRecentRides() } },
+            modifier = Modifier.weight(1f),
+        ) {
         when {
             loading -> Text("Loading…", color = MV.OnSurfaceVariant)
             error != null -> Text(error!!, color = MV.Red)
@@ -426,6 +445,7 @@ fun TrailsScreen(settings: SettingsRepository) {
                 }
             }
         }
+        }  // end PullToRefreshBox
 
         // Link-trail bottom sheet
         if (linkTarget != null) {

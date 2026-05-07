@@ -23,11 +23,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,10 +51,16 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.detectTapGestures
 import app.myvitals.BuildConfig
 import app.myvitals.data.SettingsRepository
+import app.myvitals.sync.BackendClient
+import app.myvitals.sync.ProfilePutBody
+import app.myvitals.sync.ProfileResponse
 import app.myvitals.update.GitHubRelease
 import app.myvitals.update.UpdateChecker
 import app.myvitals.update.UpdateInstallerActivity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -72,8 +83,55 @@ fun SettingsScreen(
     var updateStatus by remember { mutableStateOf("") }
     var pendingRelease by remember { mutableStateOf<GitHubRelease?>(null) }
     var dirty by remember { mutableStateOf(false) }
+    var profile by remember { mutableStateOf<ProfileResponse?>(null) }
+    var reminderEnabled by remember { mutableStateOf(false) }
+    var reminderHour by remember { mutableStateOf(8) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        if (!settings.isConfigured()) return@LaunchedEffect
+        runCatching {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            withContext(Dispatchers.IO) { api.profile() }
+        }.onSuccess { p ->
+            profile = p
+            reminderEnabled = p.extra?.workoutReminderEnabled == true
+            reminderHour = p.extra?.workoutReminderHour ?: 8
+        }
+    }
+
+    suspend fun saveReminderPrefs(enabled: Boolean, hour: Int) {
+        if (!settings.isConfigured()) return
+        val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+        val newExtra = mutableMapOf<String, Any>()
+        profile?.extra?.let { ex ->
+            ex.stepsGoal?.let { newExtra["steps_goal"] = it }
+            ex.sleepGoalH?.let { newExtra["sleep_goal_h"] = it }
+            ex.vitalsOrder?.let { newExtra["vitals_order"] = it }
+            ex.vitalsHidden?.let { newExtra["vitals_hidden"] = it }
+        }
+        newExtra["workout_reminder_enabled"] = enabled
+        newExtra["workout_reminder_hour"] = hour
+        try {
+            withContext(Dispatchers.IO) {
+                api.putProfile(ProfilePutBody(
+                    birthDate = profile?.birthDate,
+                    sex = profile?.sex,
+                    heightCm = profile?.heightCm,
+                    weightGoalKg = profile?.weightGoalKg,
+                    restingHrBaseline = profile?.restingHrBaseline,
+                    activityLevel = profile?.activityLevel,
+                    extra = newExtra,
+                ))
+            }
+            Timber.i("workout reminder saved: enabled=%s hour=%d", enabled, hour)
+        } catch (e: Exception) {
+            Timber.w(e, "save workout reminder failed")
+            Toast.makeText(context, "Save failed: ${e.message?.take(80)}",
+                Toast.LENGTH_SHORT).show()
+        }
+    }
 
     fun saveAndToast() {
         settings.backendUrl = url.trim()
@@ -259,6 +317,81 @@ fun SettingsScreen(
                             BackfillChip("30 days") { onBackfill(30); toast(context, "Backfilling 30 days…") }
                             BackfillChip("1 year") { onBackfill(365); toast(context, "Backfilling 1 year…") }
                             BackfillChip("All (10y)") { onBackfill(3650); toast(context, "Backfilling ALL — may take a while") }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Workout reminders ──
+        item {
+            Section(title = "Workout reminders") {
+                Card {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Daily reminder", fontSize = 15.sp, color = MV.OnSurface)
+                            Text(
+                                "Notification on workout days with split + first 3 exercises.",
+                                fontSize = 12.sp, color = MV.OnSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = reminderEnabled,
+                            onCheckedChange = { v ->
+                                reminderEnabled = v
+                                scope.launch { saveReminderPrefs(v, reminderHour) }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MV.OnSurface,
+                                checkedTrackColor = MV.BrandRed,
+                            ),
+                        )
+                    }
+                    if (reminderEnabled) {
+                        Divider()
+                        var menuOpen by remember { mutableStateOf(false) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .pointerInput(Unit) {
+                                    detectTapGestures(onTap = { menuOpen = true })
+                                }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Time", fontSize = 15.sp, color = MV.OnSurface)
+                            Box {
+                                Text(
+                                    String.format("%02d:00", reminderHour),
+                                    fontSize = 14.sp, color = MV.OnSurfaceVariant,
+                                    style = androidx.compose.ui.text.TextStyle(
+                                        fontFeatureSettings = "tnum"),
+                                )
+                                DropdownMenu(
+                                    expanded = menuOpen,
+                                    onDismissRequest = { menuOpen = false },
+                                ) {
+                                    (5..21).forEach { h ->
+                                        DropdownMenuItem(
+                                            text = { Text(String.format("%02d:00", h)) },
+                                            onClick = {
+                                                reminderHour = h
+                                                menuOpen = false
+                                                scope.launch {
+                                                    saveReminderPrefs(reminderEnabled, h)
+                                                }
+                                            },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

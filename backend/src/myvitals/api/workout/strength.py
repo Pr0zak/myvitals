@@ -813,6 +813,79 @@ async def get_today(
     return await _hydrate_workout(db, workout)
 
 
+@router.get("/by-date/{date_iso}")
+async def get_workout_by_date(
+    date_iso: str,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return the workout for a specific date.
+
+    - Past or today: returns the persisted StrengthWorkout (hydrated) if
+      one exists, else a 404.
+    - Future: synthesises a preview using the same generator the
+      /upcoming endpoint uses (but a single day, full plan with sets).
+      Returns the WorkoutOut shape with id=-1 so callers can tell it's
+      not persisted.
+    """
+    from datetime import date as _date
+    try:
+        d = _date.fromisoformat(date_iso)
+    except ValueError as e:
+        raise HTTPException(400, f"invalid date: {e}") from e
+    today = _date.today()
+    existing = await _existing_workout_for(db, d)
+    if existing is not None:
+        wo = await _hydrate_workout(db, existing)
+        return wo.model_dump() if hasattr(wo, "model_dump") else wo
+    if d < today:
+        raise HTTPException(
+            404, f"no workout recorded for {date_iso}",
+        )
+    # Future date — preview using the planner. Don't persist.
+    equipment = await _equipment_payload(db)
+    profile = await db.get(models.UserProfile, 1)
+    plan = await strength_algo.generate_plan(db, d, equipment, profile)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if plan.rest_day_recommended:
+        return {
+            "id": -1,
+            "date": d.isoformat(),
+            "generated_at": now_iso,
+            "split_focus": "rest",
+            "status": "preview",
+            "seed": "",
+            "preview": True,
+            "rest_day_recommended": True,
+            "rest_day_reason": plan.rest_day_reason,
+            "exercises": [],
+        }
+    return {
+        "id": -1,
+        "date": d.isoformat(),
+        "generated_at": now_iso,
+        "split_focus": plan.split_focus,
+        "status": "preview",
+        "seed": "",
+        "preview": True,
+        "rest_day_recommended": False,
+        "exercises": [
+            {
+                "id": -1,
+                "exercise_id": ex.exercise_id,
+                "order_index": idx,
+                "target_sets": ex.target_sets,
+                "target_reps_low": ex.target_reps_low,
+                "target_reps_high": ex.target_reps_high,
+                "target_weight_lb": ex.target_weight_lb,
+                "target_rest_s": ex.target_rest_s,
+                "superset_id": ex.superset_id,
+                "sets": [],
+            }
+            for idx, ex in enumerate(plan.exercises)
+        ],
+    }
+
+
 class RegenerateBody(BaseModel):
     force: bool = False  # bypass rest-day recommendation
 

@@ -90,6 +90,7 @@ fun StrengthTodayScreen(
     onOpenHistory: () -> Unit,
     onOpenCatalog: () -> Unit = {},
     onOpenTrainingPrefs: () -> Unit = {},
+    onOpenDay: (dateIso: String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -282,6 +283,7 @@ fun StrengthTodayScreen(
             history = history,
             daysPerWeek = daysPerWeek,
             todayStatus = plan.status,
+            onDayClick = { dateIso -> onOpenDay(dateIso) },
         )
         Spacer(Modifier.height(8.dp))
 
@@ -600,13 +602,17 @@ private fun ContextRow(plan: StrengthWorkoutDetail, totalSets: Int) {
     val completedSets = plan.exercises.flatMap { it.sets }
         .count { !it.skipped && it.actualReps != null }
     val target = plan.exercises.sumOf { it.targetSets }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        ContextChip("$completedSets/$target sets")
-        plan.recoveryScoreUsed?.let { ContextChip("recovery ${it.toInt()}") }
-        plan.sleepHUsed?.let { ContextChip("sleep ${"%.1f".format(it)}h") }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            "${plan.splitFocus.replaceFirstChar { it.titlecase() }} day · "
+                + muscleGroupsFor(plan.splitFocus),
+            color = MV.OnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ContextChip("$completedSets/$target sets")
+            plan.recoveryScoreUsed?.let { ContextChip("recovery ${it.toInt()}") }
+            plan.sleepHUsed?.let { ContextChip("sleep ${"%.1f".format(it)}h") }
+        }
     }
 }
 
@@ -963,6 +969,7 @@ private fun WeekStrip(
     history: List<app.myvitals.sync.StrengthWorkoutSummary>,
     daysPerWeek: Int,
     todayStatus: String,
+    onDayClick: (dateIso: String) -> Unit = {},
 ) {
     val today = java.time.LocalDate.now()
     val statusByDate = history.associate { it.date to it.status }
@@ -1007,6 +1014,7 @@ private fun WeekStrip(
                         androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
                     )
                     .background(MV.SurfaceContainerLow)
+                    .clickable(enabled = !isToday) { onDayClick(iso) }
                     .padding(vertical = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp),

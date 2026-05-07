@@ -31,6 +31,11 @@ interface BackendApi {
     @GET("workout/strength/today")
     suspend fun strengthToday(): Response<StrengthWorkoutDetail>
 
+    @GET("workout/strength/by-date/{date}")
+    suspend fun strengthWorkoutByDate(
+        @Path("date") date: String,
+    ): Response<StrengthWorkoutDetail>
+
     @POST("workout/strength/today/regenerate")
     suspend fun regenerateStrengthToday(@Body body: RegenerateRequest): StrengthWorkoutDetail
 

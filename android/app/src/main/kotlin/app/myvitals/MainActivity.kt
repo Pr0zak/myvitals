@@ -41,8 +41,10 @@ import app.myvitals.ui.MV
 import app.myvitals.ui.MyVitalsTheme
 import app.myvitals.ui.SettingsScreen
 import app.myvitals.ui.SoberHomeScreen
+import app.myvitals.ui.strength.StrengthCatalogScreen
 import app.myvitals.ui.strength.StrengthHistoryScreen
 import app.myvitals.ui.strength.StrengthTodayScreen
+import app.myvitals.ui.strength.StrengthTrainingPrefsScreen
 import app.myvitals.ui.trails.TrailsScreen
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +55,8 @@ private object Routes {
     const val SOBER = "sober"
     const val WORKOUT = "workout/today"
     const val WORKOUT_HISTORY = "workout/history"
+    const val WORKOUT_CATALOG = "workout/catalog"
+    const val WORKOUT_TRAINING_PREFS = "workout/training-prefs"
     const val TRAILS = "trails"
     const val SETTINGS = "settings"
 }
@@ -113,10 +117,24 @@ class MainActivity : ComponentActivity() {
                             StrengthTodayScreen(
                                 settings = settings,
                                 onOpenHistory = { nav.navigate(Routes.WORKOUT_HISTORY) },
+                                onOpenCatalog = { nav.navigate(Routes.WORKOUT_CATALOG) },
+                                onOpenTrainingPrefs = { nav.navigate(Routes.WORKOUT_TRAINING_PREFS) },
                             )
                         }
                         composable(Routes.WORKOUT_HISTORY) {
                             StrengthHistoryScreen(
+                                settings = settings,
+                                onBack = { nav.popBackStack() },
+                            )
+                        }
+                        composable(Routes.WORKOUT_CATALOG) {
+                            StrengthCatalogScreen(
+                                settings = settings,
+                                onBack = { nav.popBackStack() },
+                            )
+                        }
+                        composable(Routes.WORKOUT_TRAINING_PREFS) {
+                            StrengthTrainingPrefsScreen(
                                 settings = settings,
                                 onBack = { nav.popBackStack() },
                             )
@@ -181,7 +199,11 @@ private fun BottomBar(nav: NavHostController) {
     NavigationBar(containerColor = MV.SurfaceContainerLow) {
         Item(current, Routes.SOBER, "Sober", Icons.Filled.Refresh) { nav.navigateTab(Routes.SOBER) }
         Item(current, Routes.WORKOUT, "Workout", Icons.Filled.FitnessCenter,
-            highlightAlsoFor = setOf(Routes.WORKOUT_HISTORY)) { nav.navigateTab(Routes.WORKOUT) }
+            highlightAlsoFor = setOf(
+                Routes.WORKOUT_HISTORY,
+                Routes.WORKOUT_CATALOG,
+                Routes.WORKOUT_TRAINING_PREFS,
+            )) { nav.navigateTab(Routes.WORKOUT) }
         Item(current, Routes.TRAILS, "Trails", Icons.Filled.Terrain) { nav.navigateTab(Routes.TRAILS) }
         Item(current, Routes.SETTINGS, "Settings", Icons.Filled.Settings) { nav.navigateTab(Routes.SETTINGS) }
     }

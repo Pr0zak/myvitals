@@ -25,7 +25,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -35,6 +37,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -78,6 +81,8 @@ import timber.log.Timber
 fun StrengthTodayScreen(
     settings: SettingsRepository,
     onOpenHistory: () -> Unit,
+    onOpenCatalog: () -> Unit = {},
+    onOpenTrainingPrefs: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -170,10 +175,25 @@ fun StrengthTodayScreen(
                     fontWeight = FontWeight.SemiBold,
                 )
             }
-            TextButton(onClick = onOpenHistory) {
-                Icon(Icons.Filled.History, contentDescription = null, tint = MV.OnSurfaceVariant)
-                Spacer(Modifier.width(4.dp))
-                Text("History", color = MV.OnSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onOpenCatalog) {
+                    Icon(
+                        Icons.Filled.MenuBook,
+                        contentDescription = "Catalog", tint = MV.OnSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onOpenTrainingPrefs) {
+                    Icon(
+                        Icons.Filled.Tune,
+                        contentDescription = "Training prefs", tint = MV.OnSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onOpenHistory) {
+                    Icon(
+                        Icons.Filled.History, contentDescription = "History",
+                        tint = MV.OnSurfaceVariant,
+                    )
+                }
             }
         }
 

@@ -37,7 +37,21 @@ function defaultEquip(): StrengthEquipment {
     kettlebells_lb: [],
     resistance_bands: false,
     bodyweight: true,
+    training: {
+      level: "intermediate",
+      days_per_week: 3,
+      split_preference: "auto",
+      workout_minutes: 50,
+    },
   };
+}
+
+function ensureTraining(e: StrengthEquipment): NonNullable<StrengthEquipment["training"]> {
+  if (!e.training) {
+    e.training = { level: "intermediate", days_per_week: 3,
+                   split_preference: "auto", workout_minutes: 50 };
+  }
+  return e.training;
 }
 
 async function load() {
@@ -194,6 +208,51 @@ onMounted(() => { equip.value = defaultEquip(); load(); });
         <label><input type="checkbox" v-model="equip.cable_stack"/> Cable stack / lat pulldown</label>
       </div>
 
+      <h3 class="sub">Training preferences</h3>
+      <p class="hint">
+        Drive how the generator picks today's plan. "Auto" split maps to
+        Full Body for 2–3 days/week, Upper-Lower for 4, Push-Pull-Legs
+        for 5–6.
+      </p>
+
+      <div class="train-grid">
+        <label class="train-row">
+          <span>Experience level</span>
+          <div class="seg">
+            <button v-for="lvl in (['beginner','intermediate','advanced'] as const)" :key="lvl"
+                    :class="{ on: ensureTraining(equip).level === lvl }"
+                    @click="ensureTraining(equip).level = lvl">{{ lvl }}</button>
+          </div>
+        </label>
+
+        <label class="train-row">
+          <span>Days per week</span>
+          <div class="seg">
+            <button v-for="n in [2,3,4,5,6]" :key="n"
+                    :class="{ on: ensureTraining(equip).days_per_week === n }"
+                    @click="ensureTraining(equip).days_per_week = n">{{ n }}</button>
+          </div>
+        </label>
+
+        <label class="train-row">
+          <span>Split preference</span>
+          <div class="seg">
+            <button v-for="s in (['auto','full_body','upper_lower','ppl'] as const)" :key="s"
+                    :class="{ on: ensureTraining(equip).split_preference === s }"
+                    @click="ensureTraining(equip).split_preference = s">{{ s.replace('_',' ') }}</button>
+          </div>
+        </label>
+
+        <label class="train-row">
+          <span>Target session length</span>
+          <input type="number" min="20" max="120" step="5"
+                 :value="ensureTraining(equip).workout_minutes"
+                 @input="ensureTraining(equip).workout_minutes = parseInt(($event.target as HTMLInputElement).value, 10) || 50"
+                 style="width: 5rem"/>
+          <span class="muted-suffix">min</span>
+        </label>
+      </div>
+
       <div class="actions">
         <button class="primary" :disabled="saving" @click="save">
           {{ saving ? "Saving…" : "Save equipment" }}
@@ -240,4 +299,24 @@ h1 { margin: 0 0 0.6rem; }
   padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; cursor: pointer;
 }
 .actions .primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.train-grid { display: flex; flex-direction: column; gap: 0.7rem; margin: 0.4rem 0 0.6rem; }
+.train-row {
+  display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;
+  font-size: 0.85rem; color: var(--text);
+}
+.train-row > span:first-child { min-width: 11rem; color: var(--muted); }
+.muted-suffix { color: var(--muted); font-size: 0.8rem; }
+.seg { display: inline-flex; gap: 0.25rem; flex-wrap: wrap; }
+.seg button {
+  padding: 0.32rem 0.7rem; font-size: 0.8rem;
+  border-radius: 5px; border: 1px solid var(--line); background: var(--bg-2);
+  color: var(--muted); cursor: pointer;
+  font-family: 'Geist Mono', ui-monospace, monospace; text-transform: capitalize;
+}
+.seg button:hover { color: var(--text); border-color: var(--accent, #ef4444); }
+.seg button.on {
+  background: var(--accent, #ef4444); color: #fff; font-weight: 600;
+  border-color: var(--accent, #ef4444);
+}
 </style>

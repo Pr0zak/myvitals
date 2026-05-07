@@ -150,6 +150,13 @@ export interface StrengthEquipment {
   kettlebells_lb: number[];
   resistance_bands: boolean;
   bodyweight: boolean;
+  exercise_prefs?: Record<string, string>;
+  training?: {
+    level: "beginner" | "intermediate" | "advanced";
+    days_per_week: number;
+    split_preference: "auto" | "full_body" | "upper_lower" | "ppl";
+    workout_minutes: number;
+  };
 }
 
 export interface StrengthExercise {

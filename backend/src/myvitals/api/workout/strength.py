@@ -71,6 +71,21 @@ class BenchSpec(BaseModel):
     decline: bool = False
 
 
+class TrainingPreferences(BaseModel):
+    """Settings the workout generator reads when picking today's plan.
+
+    Stored as a sub-object inside user_equipment.payload to keep all
+    strength configuration in one place. Pure JSON, no migration when
+    adding fields here."""
+    level: Literal["beginner", "intermediate", "advanced"] = "intermediate"
+    # 2-6 sessions per week — drives "auto" split selection
+    days_per_week: int = 3
+    split_preference: Literal["auto", "full_body", "upper_lower", "ppl"] = "auto"
+    # Target session length in minutes (informational; not yet used by
+    # the generator — placeholder for v0.8 progressive shortening logic)
+    workout_minutes: int = 50
+
+
 class EquipmentPayload(BaseModel):
     """The shape of user_equipment.payload. Adding new fields here
     is enough — no migration required (column is JSON)."""
@@ -92,6 +107,10 @@ class EquipmentPayload(BaseModel):
     #   "avoid"     — picked only when no other option exists
     # Absence from the dict = neutral (default behaviour).
     exercise_prefs: dict[str, str] = Field(default_factory=dict)
+    # Read by analytics.strength.generate_plan to pick split / starting
+    # weights / pacing. Defaults to the same constants the algorithm
+    # used to hard-code.
+    training: TrainingPreferences = Field(default_factory=TrainingPreferences)
 
 
 class EquipmentIn(BaseModel):

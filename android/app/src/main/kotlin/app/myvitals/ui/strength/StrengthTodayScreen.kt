@@ -345,12 +345,27 @@ fun StrengthTodayScreen(
             Spacer(Modifier.height(8.dp))
         }
 
+        // Float incomplete exercises to the top so the active set card
+        // is always visible without scrolling. Within each group, keep
+        // the planner's original order. Done exercises drop to the
+        // bottom for reference.
+        val orderedExercises = remember(plan.exercises) {
+            plan.exercises.sortedWith(
+                compareBy(
+                    { wex -> (1..wex.targetSets).all { n ->
+                        wex.sets.any { it.setNumber == n &&
+                            (it.actualReps != null || it.skipped) }
+                    } },
+                    { it.orderIndex },
+                )
+            )
+        }
         LazyColumn(
             modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(plan.exercises, key = { it.id }) { wex ->
+            items(orderedExercises, key = { it.id }) { wex ->
                 val canSwap = wex.sets.none { it.actualReps != null && !it.skipped }
                 ExerciseCard(
                     wex = wex,

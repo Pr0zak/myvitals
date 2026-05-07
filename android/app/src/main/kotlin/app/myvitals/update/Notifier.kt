@@ -69,6 +69,24 @@ object Notifier {
             }
         } catch (_: SecurityException) { /* no haptic permission */ }
 
+        // Audible chime — uses the system default notification tone so it
+        // respects the user's volume / DND. Plays whether or not the
+        // notification itself fires.
+        try {
+            val uri = android.media.RingtoneManager.getDefaultUri(
+                android.media.RingtoneManager.TYPE_NOTIFICATION
+            )
+            android.media.RingtoneManager.getRingtone(context, uri)?.also { rt ->
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    rt.audioAttributes = android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                }
+                rt.play()
+            }
+        } catch (e: Exception) { /* sound failed — non-critical */ }
+
         val notif = NotificationCompat.Builder(context, REST_TIMER_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle("Rest done")

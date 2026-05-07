@@ -93,6 +93,11 @@ interface BackendApi {
 
     @POST("trails/alerts/mark-notified")
     suspend fun markTrailAlertsNotified(@Body body: MarkNotifiedBody): Map<String, Int>
+
+    @retrofit2.http.PUT("trails/{id}/location")
+    suspend fun editTrailLocation(
+        @Path("id") id: Long, @Body body: TrailLocationBody,
+    ): Map<String, Any>
 }
 
 object BackendClient {

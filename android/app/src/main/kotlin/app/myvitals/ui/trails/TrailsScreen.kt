@@ -2,14 +2,17 @@ package app.myvitals.ui.trails
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -23,10 +26,17 @@ import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,9 +56,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.input.KeyboardType
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.Trail
+import app.myvitals.sync.TrailLocationBody
 import app.myvitals.sync.TrailSubscribeBody
 import app.myvitals.ui.MV
 import kotlinx.coroutines.Dispatchers
@@ -58,14 +70,34 @@ import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.time.Instant
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrailsScreen(settings: SettingsRepository) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var trails by remember { mutableStateOf<List<Trail>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    // Edit-pin state
+    var editTrail by remember { mutableStateOf<Trail?>(null) }
+    var editLat by remember { mutableStateOf("") }
+    var editLon by remember { mutableStateOf("") }
+    var editCity by remember { mutableStateOf("") }
+    var editState by remember { mutableStateOf("") }
+    var editSaving by remember { mutableStateOf(false) }
+    var editError by remember { mutableStateOf<String?>(null) }
+
+    fun openEdit(t: Trail) {
+        editTrail = t
+        editLat = t.latitude?.toString() ?: ""
+        editLon = t.longitude?.toString() ?: ""
+        editCity = t.city ?: ""
+        editState = t.state ?: ""
+        editError = null
+    }
 
     suspend fun load() {
         if (!settings.isConfigured()) {
@@ -177,20 +209,140 @@ fun TrailsScreen(settings: SettingsRepository) {
                 if (grouped.first.isNotEmpty()) {
                     item { GroupHeader("Open · ${grouped.first.size}") }
                     items(grouped.first, key = { it.id }) { t ->
-                        TrailRow(t, nowMs) { scope.launch { toggleSubscribe(t) } }
+                        TrailRow(t, nowMs,
+                            onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
+                            onLongPress = { openEdit(t) })
                     }
                 }
                 if (grouped.second.isNotEmpty()) {
                     item { GroupHeader("Closed · ${grouped.second.size}") }
                     items(grouped.second, key = { it.id }) { t ->
-                        TrailRow(t, nowMs) { scope.launch { toggleSubscribe(t) } }
+                        TrailRow(t, nowMs,
+                            onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
+                            onLongPress = { openEdit(t) })
                     }
                 }
                 if (grouped.third.isNotEmpty()) {
                     item { GroupHeader("Other · ${grouped.third.size}") }
                     items(grouped.third, key = { it.id }) { t ->
-                        TrailRow(t, nowMs) { scope.launch { toggleSubscribe(t) } }
+                        TrailRow(t, nowMs,
+                            onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
+                            onLongPress = { openEdit(t) })
                     }
+                }
+            }
+        }
+
+        // Edit-pin bottom sheet
+        if (editTrail != null) {
+            val t = editTrail!!
+            ModalBottomSheet(
+                onDismissRequest = { editTrail = null },
+                containerColor = MV.SurfaceContainer,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Edit pin · ${t.name}",
+                        color = MV.OnSurface, fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold)
+                    Text("Decimal degrees. Tip: tap & hold a spot in Google Maps and the lat/lon pair appears at the top.",
+                        color = MV.OnSurfaceVariant, fontSize = 11.sp)
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = editLat, onValueChange = { editLat = it },
+                            label = { Text("Latitude") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedTextField(
+                            value = editLon, onValueChange = { editLon = it },
+                            label = { Text("Longitude") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = editCity, onValueChange = { editCity = it },
+                            label = { Text("City (optional)") },
+                            singleLine = true,
+                            modifier = Modifier.weight(2f),
+                        )
+                        OutlinedTextField(
+                            value = editState, onValueChange = { editState = it },
+                            label = { Text("State") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            // Open Maps centered on existing pin (or search by name)
+                            val uri = if (t.latitude != null && t.longitude != null) {
+                                Uri.parse("geo:${t.latitude},${t.longitude}?q=${t.latitude},${t.longitude}(${Uri.encode(t.name)})")
+                            } else {
+                                Uri.parse("geo:0,0?q=${Uri.encode(t.name)}")
+                            }
+                            try {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                })
+                            } catch (_: Exception) { /* no map app */ }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("🗺  Open in Maps to find coords") }
+
+                    if (editError != null) {
+                        Text(editError!!, color = MV.Red, fontSize = 12.sp)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                val lat = editLat.toDoubleOrNull()
+                                val lon = editLon.toDoubleOrNull()
+                                if (editLat.isNotBlank() && (lat == null || lat < -90 || lat > 90)) {
+                                    editError = "Latitude out of range"; return@Button
+                                }
+                                if (editLon.isNotBlank() && (lon == null || lon < -180 || lon > 180)) {
+                                    editError = "Longitude out of range"; return@Button
+                                }
+                                scope.launch {
+                                    editSaving = true; editError = null
+                                    try {
+                                        val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                                        withContext(Dispatchers.IO) {
+                                            api.editTrailLocation(t.id, TrailLocationBody(
+                                                latitude = if (editLat.isBlank()) null else lat,
+                                                longitude = if (editLon.isBlank()) null else lon,
+                                                city = editCity.ifBlank { null },
+                                                state = editState.ifBlank { null },
+                                            ))
+                                        }
+                                        load()
+                                        editTrail = null
+                                    } catch (e: Exception) {
+                                        editError = e.message?.take(160)
+                                    } finally { editSaving = false }
+                                }
+                            },
+                            enabled = !editSaving,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MV.BrandRed, contentColor = MV.OnSurface,
+                            ),
+                            modifier = Modifier.weight(1f),
+                        ) { Text(if (editSaving) "Saving…" else "Save") }
+                        OutlinedButton(
+                            onClick = { editTrail = null },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Cancel") }
+                    }
+                    Spacer(Modifier.height(16.dp))
                 }
             }
         }
@@ -206,8 +358,13 @@ private fun GroupHeader(text: String) {
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TrailRow(t: Trail, nowMs: Long, onSubscribeToggle: () -> Unit) {
+private fun TrailRow(
+    t: Trail, nowMs: Long,
+    onSubscribeToggle: () -> Unit,
+    onLongPress: () -> Unit,
+) {
     val context = LocalContext.current
     val color = when (t.status) {
         "open" -> Color(0xFF22C55E)
@@ -217,9 +374,10 @@ private fun TrailRow(t: Trail, nowMs: Long, onSubscribeToggle: () -> Unit) {
     val hasLocation = t.latitude != null && t.longitude != null
     Card(
         colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
-        modifier = Modifier.fillMaxWidth().clickable {
-            if (hasLocation) openMapsNav(context, t)
-        },
+        modifier = Modifier.fillMaxWidth().combinedClickable(
+            onClick = { if (hasLocation) openMapsNav(context, t) },
+            onLongClick = onLongPress,
+        ),
     ) {
         Row(
             modifier = Modifier.padding(12.dp),

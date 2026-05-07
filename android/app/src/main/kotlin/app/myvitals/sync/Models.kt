@@ -399,6 +399,14 @@ data class TrailAlertRow(
 data class MarkNotifiedBody(val ids: List<Long>)
 
 @JsonClass(generateAdapter = true)
+data class TrailLocationBody(
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val city: String? = null,
+    val state: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
 data class WorkoutPatchRequest(
     val status: String? = null,
     @Json(name = "started_at") val startedAt: String? = null,

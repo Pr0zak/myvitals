@@ -330,13 +330,24 @@ private fun ActivityMap(a: ActivityRow, trails: List<Trail>) {
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
 <style>$leafletCss
-html,body{margin:0;background:#0F1620;overflow:hidden;}
-html,body{position:absolute;inset:0;}
-#m{position:absolute;inset:0;}</style>
+html,body{margin:0;padding:0;background:#0F1620;overflow:hidden;}
+#m{display:block;}</style>
 </head><body>
 <div id="m"></div>
 <script>$leafletJs</script>
 <script>
+function applySize() {
+  const w = window.innerWidth || document.documentElement.clientWidth || 360;
+  const h = window.innerHeight || document.documentElement.clientHeight || 200;
+  const m = document.getElementById('m');
+  m.style.width = w + 'px';
+  m.style.height = h + 'px';
+  document.body.style.width = w + 'px';
+  document.body.style.height = h + 'px';
+  document.documentElement.style.width = w + 'px';
+  document.documentElement.style.height = h + 'px';
+}
+applySize();
 window.addEventListener('error', e => console.error('JS error:', e.message));
 function decodePolyline(str) {
   let idx = 0, lat = 0, lon = 0, points = [];
@@ -371,20 +382,21 @@ try {
   """ else ""}
   function fix() {
     try {
+      applySize();
       window.map.invalidateSize();
-      if (bounds && document.body.clientHeight > 0) {
+      if (bounds && window.innerHeight > 0) {
         try { window.map.fitBounds(bounds.pad(0.1)); } catch (e) {}
       }
     } catch (e) {}
   }
   if (typeof ResizeObserver !== 'undefined') {
-    new ResizeObserver(fix).observe(document.body);
+    new ResizeObserver(fix).observe(document.documentElement);
   }
   window.addEventListener('resize', fix);
   setTimeout(fix, 50); setTimeout(fix, 250); setTimeout(fix, 800);
   setTimeout(() => console.log(
     'map size:', window.map.getSize().x, 'x', window.map.getSize().y,
-    'bodyH:', document.body.clientHeight,
+    'innerH:', window.innerHeight, 'bodyH:', document.body.clientHeight,
   ), 900);
 } catch (e) { console.error('map init failed:', e.toString()); }
 </script></body></html>"""

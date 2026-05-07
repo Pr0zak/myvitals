@@ -850,14 +850,28 @@ private fun MiniMap(lat: Double, lon: Double, name: String, osmGeoJson: String? 
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
 <style>$leafletCss
-html,body{margin:0;background:#0F1620;overflow:hidden;}
-html,body{position:absolute;inset:0;}
-#m{position:absolute;inset:0;}</style>
+html,body{margin:0;padding:0;background:#0F1620;overflow:hidden;}
+#m{display:block;}</style>
 </head><body>
 <div id="m"></div>
 <script>$leafletJs</script>
 <script>
 window.addEventListener('error', e => console.error('JS error:', e.message));
+// Some Android WebView layouts leave document.body.clientHeight at 0
+// even after the viewport has measured. Drive the map div size from
+// window.innerHeight/innerWidth, and re-set it on every resize.
+function applySize() {
+  const w = window.innerWidth || document.documentElement.clientWidth || 360;
+  const h = window.innerHeight || document.documentElement.clientHeight || 200;
+  const m = document.getElementById('m');
+  m.style.width = w + 'px';
+  m.style.height = h + 'px';
+  document.body.style.width = w + 'px';
+  document.body.style.height = h + 'px';
+  document.documentElement.style.width = w + 'px';
+  document.documentElement.style.height = h + 'px';
+}
+applySize();
 try {
   window.map = L.map('m', {zoomControl:true,scrollWheelZoom:false}).setView([$lat,$lon], 14);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
@@ -870,22 +884,20 @@ try {
       style: {color:'#94a3b8', weight:3, opacity:0.9, dashArray:'6,4'}
     }).addTo(window.map);
   }
-  // The WebView often lays out AFTER initial render with size 0;
-  // listen for body-size changes and retell Leaflet whenever the
-  // container actually has dimensions, then fitBounds.
   function fix() {
     try {
+      applySize();
       window.map.invalidateSize();
-      if (osmLayer && document.body.clientHeight > 0) {
+      if (osmLayer && window.innerHeight > 0) {
         try { window.map.fitBounds(osmLayer.getBounds().pad(0.1)); }
         catch (e) {}
       }
     } catch (e) {}
   }
-  if (typeof ResizeObserver !== 'undefined') {
-    new ResizeObserver(fix).observe(document.body);
-  }
   window.addEventListener('resize', fix);
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(fix).observe(document.documentElement);
+  }
   setTimeout(fix, 50); setTimeout(fix, 250); setTimeout(fix, 800);
   setTimeout(() => console.log(
     'map size:', window.map.getSize().x, 'x', window.map.getSize().y,

@@ -105,6 +105,9 @@ interface BackendApi {
         @retrofit2.http.Query("relink") relink: Boolean = false,
     ): TrailLinkActivitiesResponse
 
+    @GET("trails/{id}/osm-paths")
+    suspend fun trailOsmPaths(@Path("id") id: Long): Response<okhttp3.ResponseBody>
+
     @POST("trails/fetch-all-osm-paths")
     suspend fun fetchAllTrailOsmPaths(
         @retrofit2.http.Query("radius_m") radiusM: Double = 500.0,

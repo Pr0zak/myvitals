@@ -528,7 +528,25 @@ private fun TrailRow(
 
             // Mini-map preview when expanded
             if (expanded && t.latitude != null && t.longitude != null) {
-                MiniMap(t.latitude, t.longitude, t.name)
+                val settings = remember { SettingsRepository(context) }
+                var osmJson by remember(t.id) { mutableStateOf<String?>(null) }
+                LaunchedEffect(t.id) {
+                    if (!settings.isConfigured()) return@LaunchedEffect
+                    try {
+                        val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                        val resp = withContext(Dispatchers.IO) { api.trailOsmPaths(t.id) }
+                        if (resp.isSuccessful) {
+                            val raw = resp.body()?.string()
+                            if (!raw.isNullOrBlank()) {
+                                osmJson = org.json.JSONObject(raw)
+                                    .optJSONObject("geojson")?.toString()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Timber.d(e, "trailOsmPaths(${t.id}) — no cache or fetch failed")
+                    }
+                }
+                MiniMap(t.latitude, t.longitude, t.name, osmJson)
                 Row(
                     Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -571,8 +589,9 @@ private fun visitAgeColor(iso: String?, nowMs: Long): Color {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun MiniMap(lat: Double, lon: Double, name: String) {
+private fun MiniMap(lat: Double, lon: Double, name: String, osmGeoJson: String? = null) {
     val nameEsc = name.replace("'", "\\'")
+    val osmLiteral = osmGeoJson ?: "null"
     val html = """<!DOCTYPE html>
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
@@ -585,7 +604,14 @@ private fun MiniMap(lat: Double, lon: Double, name: String) {
 const map = L.map('m', {zoomControl:true,scrollWheelZoom:false}).setView([$lat,$lon], 14);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
   {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(map);
-L.marker([$lat,$lon]).addTo(map).bindPopup('$nameEsc').openPopup();
+const pin = L.marker([$lat,$lon]).addTo(map).bindPopup('$nameEsc').openPopup();
+const osm = $osmLiteral;
+if (osm) {
+  const layer = L.geoJSON(osm, {
+    style: {color:'#94a3b8', weight:3, opacity:0.9, dashArray:'6,4'}
+  }).addTo(map);
+  try { map.fitBounds(layer.getBounds().pad(0.1)); } catch (e) { /* empty */ }
+}
 </script></body></html>"""
     AndroidView(
         factory = { ctx ->
@@ -594,8 +620,10 @@ L.marker([$lat,$lon]).addTo(map).bindPopup('$nameEsc').openPopup();
                 settings.domStorageEnabled = true
                 webViewClient = WebViewClient()
                 setBackgroundColor(android.graphics.Color.parseColor("#0F1620"))
-                loadDataWithBaseURL("https://localhost/", html, "text/html", "utf-8", null)
             }
+        },
+        update = { webview ->
+            webview.loadDataWithBaseURL("https://localhost/", html, "text/html", "utf-8", null)
         },
         modifier = Modifier.fillMaxWidth().height(220.dp),
     )

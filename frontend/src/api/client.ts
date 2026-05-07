@@ -636,6 +636,7 @@ export const api = {
       source_ts: string | null;
       fetched_at: string | null;
       visits_30d?: number;
+      visits_total?: number;
       last_visit_at?: string | null;
     }>;
   }> {

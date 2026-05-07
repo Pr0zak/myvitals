@@ -99,19 +99,30 @@ async def list_trails(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
         )).all()
     }
 
-    # Visit counts (last 30d) per trail in one batched query
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-    visit_rows = (await db.execute(
+    # All-time count + last-visit max per trail
+    all_rows = (await db.execute(
         select(
             models.Activity.trail_id,
             func.count(models.Activity.source_id).label("n"),
             func.max(models.Activity.start_at).label("last"),
         )
         .where(models.Activity.trail_id.is_not(None))
-        .where(models.Activity.start_at >= cutoff)
         .group_by(models.Activity.trail_id)
     )).all()
-    visits_by_trail = {tid: (n, last) for tid, n, last in visit_rows}
+    all_by_trail = {tid: (n, last) for tid, n, last in all_rows}
+
+    # 30-day count for the recent-activity badge
+    cutoff_30 = datetime.now(timezone.utc) - timedelta(days=30)
+    rec_rows = (await db.execute(
+        select(
+            models.Activity.trail_id,
+            func.count(models.Activity.source_id).label("n"),
+        )
+        .where(models.Activity.trail_id.is_not(None))
+        .where(models.Activity.start_at >= cutoff_30)
+        .group_by(models.Activity.trail_id)
+    )).all()
+    visits_30d_by_trail = {tid: n for tid, n in rec_rows}
 
     for t in trails:
         latest = (await db.execute(
@@ -120,7 +131,8 @@ async def list_trails(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
             .order_by(models.TrailStatusSnapshot.fetched_at.desc())
             .limit(1)
         )).scalar_one_or_none()
-        v_count, v_last = visits_by_trail.get(t.id, (0, None))
+        v_total, v_last = all_by_trail.get(t.id, (0, None))
+        v_30d = visits_30d_by_trail.get(t.id, 0)
         out.append({
             "id": t.id,
             "extension": t.extension,
@@ -137,7 +149,8 @@ async def list_trails(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
             "comment": latest.comment if latest else None,
             "source_ts": latest.source_ts if latest else None,
             "fetched_at": latest.fetched_at if latest else None,
-            "visits_30d": v_count,
+            "visits_30d": v_30d,
+            "visits_total": v_total,
             "last_visit_at": v_last,
         })
     return {"count": len(out), "trails": out}

@@ -570,6 +570,7 @@ header h1 { margin: 0; }
 .loc { color: var(--muted); }
 .loc.nopin { color: #f59e0b; }
 .visits { color: #22c55e; font-weight: 500; }
+.last-visit { color: var(--muted-2); font-weight: 400; font-size: 0.7rem; }
 .header-actions { display: flex; gap: 0.5rem; }
 .edit-pin { color: var(--muted-2); }
 .edit-pin:hover { color: var(--accent, #ef4444); }

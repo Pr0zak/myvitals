@@ -641,7 +641,7 @@ export const api = {
       latitude: number | null; longitude: number | null;
       city: string | null; state: string | null;
       subscribed: boolean; notify_on: string | null;
-      status: "open" | "closed" | "pending" | "unknown" | null;
+      status: "open" | "closed" | "delayed" | "unknown" | null;
       comment: string | null;
       source_ts: string | null;
       fetched_at: string | null;

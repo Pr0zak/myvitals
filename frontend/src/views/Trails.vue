@@ -9,7 +9,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "@/leaflet-icons";   // side-effect: fixes default marker URLs under Vite
 import { effectiveTheme } from "@/theme";
-import { Star, RefreshCw, Navigation, Pencil, Map as MapIcon } from "lucide-vue-next";
+import { Star, RefreshCw, Navigation, Pencil, Map as MapIcon, Bike } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { queryToken } from "@/config";
 import Card from "@/components/Card.vue";
@@ -362,8 +362,11 @@ function fmtAge(iso: string | null): string {
 const grouped = computed(() => {
   const open = trails.value.filter((t) => t.status === "open");
   const closed = trails.value.filter((t) => t.status === "closed");
-  const other = trails.value.filter((t) => t.status !== "open" && t.status !== "closed");
-  return { open, closed, other };
+  const delayed = trails.value.filter((t) => t.status === "delayed");
+  const other = trails.value.filter(
+    (t) => t.status !== "open" && t.status !== "closed" && t.status !== "delayed",
+  );
+  return { open, closed, delayed, other };
 });
 
 onMounted(() => {
@@ -384,7 +387,7 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
         </button>
         <button class="refresh" :disabled="linking" @click="linkActivities"
                 title="Auto-link Strava / Garmin activities to trails by GPS proximity">
-          🚴 {{ linking ? "Linking…" : "Link activities" }}
+          <Bike :size="14" /> {{ linking ? "Linking…" : "Link activities" }}
         </button>
         <button class="refresh" :disabled="fetchingOsm" @click="fetchAllOsm"
                 title="Pull official trail route geometry from OpenStreetMap (free, no key)">
@@ -439,7 +442,7 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
               <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
               <span v-if="(t.visits_total ?? 0) > 0" class="visits"
                     :class="visitAgeClass(t.last_visit_at)">
-                · 🚴 {{ t.visits_total }} visit{{ t.visits_total === 1 ? '' : 's' }}
+                · <Bike :size="11" class="bike-ic" /> {{ t.visits_total }} visit{{ t.visits_total === 1 ? '' : 's' }}
                 <span v-if="t.last_visit_at" class="last-visit">
                   · last {{ fmtAge(t.last_visit_at) }}
                 </span>
@@ -490,11 +493,55 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
               <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
               <span v-if="(t.visits_total ?? 0) > 0" class="visits"
                     :class="visitAgeClass(t.last_visit_at)">
-                · 🚴 {{ t.visits_total }} visit{{ t.visits_total === 1 ? '' : 's' }}
+                · <Bike :size="11" class="bike-ic" /> {{ t.visits_total }} visit{{ t.visits_total === 1 ? '' : 's' }}
                 <span v-if="t.last_visit_at" class="last-visit">
                   · last {{ fmtAge(t.last_visit_at) }}
                 </span>
               </span>
+              <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
+            </p>
+            <TrailMap
+              v-if="expandedMaps.has(t.id) && t.latitude != null && t.longitude != null"
+              :trail-id="t.id" :name="t.name"
+              :latitude="t.latitude" :longitude="t.longitude"
+              @click.stop
+              @expand="openFullMap(t)"
+            />
+          </article>
+        </div>
+      </section>
+
+      <section v-if="grouped.delayed.length" class="group group-delayed">
+        <h2>Delayed · {{ grouped.delayed.length }}</h2>
+        <div class="grid">
+          <article v-for="t in grouped.delayed" :key="t.id" class="card status-delayed"
+                   :class="{ has_loc: t.latitude != null }"
+                   @click="openMaps(t)">
+            <header>
+              <span class="dot"></span>
+              <strong>{{ t.name }}</strong>
+              <button class="star" :class="{ on: t.subscribed }"
+                      :title="t.subscribed ? 'Unsubscribe' : 'Subscribe to status flips'"
+                      @click.stop="toggleSubscribe(t)">
+                <Star :size="16" />
+              </button>
+              <button v-if="t.latitude != null" class="star map-toggle"
+                      :class="{ on: expandedMaps.has(t.id) }"
+                      title="Show map + linked rides"
+                      @click.stop="toggleMap(t)">
+                <MapIcon :size="14" />
+              </button>
+              <button class="star edit-pin"
+                      title="Edit pin location"
+                      @click.stop="openEdit(t)">
+                <Pencil :size="14" />
+              </button>
+            </header>
+            <p v-if="t.comment" class="comment">{{ t.comment }}</p>
+            <p class="meta">
+              <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
+              <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
+              <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
               <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
             </p>
             <TrailMap
@@ -627,6 +674,7 @@ header h1 { margin: 0; }
 }
 .card.status-open { border-left: 3px solid #22c55e; }
 .card.status-closed { border-left: 3px solid #ef4444; opacity: 0.85; }
+.card.status-delayed { border-left: 3px solid #eab308; }
 .card.has_loc { cursor: pointer; transition: border-color 0.12s; }
 .card.has_loc:hover { border-color: var(--accent, #ef4444); }
 .nav-ic { color: var(--muted-2); margin-left: 0.4rem; vertical-align: middle; }
@@ -724,6 +772,7 @@ header h1 { margin: 0; }
 }
 .card.status-open .dot { background: #22c55e; }
 .card.status-closed .dot { background: #ef4444; }
+.card.status-delayed .dot { background: #eab308; }
 
 .star {
   background: none; border: none; cursor: pointer; padding: 4px;

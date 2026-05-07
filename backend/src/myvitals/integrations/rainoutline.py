@@ -34,9 +34,11 @@ SOURCE_URL = "https://rainoutline.com/search/dnis_refresh/{dnis}/updated/0"
 USER_AGENT = "myvitals-trail-poller/0.7 (+self-hosted)"
 
 # RainoutLine's CSS classes map to status codes
+# (status1 is labelled "Delayed" on rainoutline.com — typically means
+# the day's trail-check result hasn't been published yet.)
 STATUS_FROM_CLASS = {
     "status0": "open",
-    "status1": "pending",
+    "status1": "delayed",
     "status2": "closed",
     "status3": "unknown",
 }

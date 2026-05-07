@@ -26,6 +26,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Refresh
@@ -243,12 +245,22 @@ fun TrailsScreen(settings: SettingsRepository) {
         while (true) { delay(60_000); nowMs = System.currentTimeMillis() }
     }
 
+    data class TrailGroups(
+        val open: List<Trail>,
+        val closed: List<Trail>,
+        val delayed: List<Trail>,
+        val other: List<Trail>,
+    )
+
     val grouped by remember(trails) {
         derivedStateOf {
-            Triple(
-                trails.filter { it.status == "open" },
-                trails.filter { it.status == "closed" },
-                trails.filter { it.status != "open" && it.status != "closed" },
+            TrailGroups(
+                open = trails.filter { it.status == "open" },
+                closed = trails.filter { it.status == "closed" },
+                delayed = trails.filter { it.status == "delayed" },
+                other = trails.filter {
+                    it.status != "open" && it.status != "closed" && it.status != "delayed"
+                },
             )
         }
     }
@@ -269,7 +281,7 @@ fun TrailsScreen(settings: SettingsRepository) {
                 )
                 Text(
                     if (trails.isEmpty()) "—"
-                    else "${grouped.first.size} open · ${grouped.second.size} closed",
+                    else "${grouped.open.size} open · ${grouped.closed.size} closed",
                     color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
                 )
             }
@@ -336,9 +348,9 @@ fun TrailsScreen(settings: SettingsRepository) {
                 contentPadding = PaddingValues(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                if (grouped.first.isNotEmpty()) {
-                    item { GroupHeader("Open · ${grouped.first.size}") }
-                    items(grouped.first, key = { it.id }) { t ->
+                if (grouped.open.isNotEmpty()) {
+                    item { GroupHeader("Open · ${grouped.open.size}") }
+                    items(grouped.open, key = { it.id }) { t ->
                         TrailRow(t, nowMs,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
@@ -346,9 +358,9 @@ fun TrailsScreen(settings: SettingsRepository) {
                             onLongPress = { openEdit(t) })
                     }
                 }
-                if (grouped.second.isNotEmpty()) {
-                    item { GroupHeader("Closed · ${grouped.second.size}") }
-                    items(grouped.second, key = { it.id }) { t ->
+                if (grouped.closed.isNotEmpty()) {
+                    item { GroupHeader("Closed · ${grouped.closed.size}") }
+                    items(grouped.closed, key = { it.id }) { t ->
                         TrailRow(t, nowMs,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
@@ -356,9 +368,19 @@ fun TrailsScreen(settings: SettingsRepository) {
                             onLongPress = { openEdit(t) })
                     }
                 }
-                if (grouped.third.isNotEmpty()) {
-                    item { GroupHeader("Other · ${grouped.third.size}") }
-                    items(grouped.third, key = { it.id }) { t ->
+                if (grouped.delayed.isNotEmpty()) {
+                    item { GroupHeader("Delayed · ${grouped.delayed.size}") }
+                    items(grouped.delayed, key = { it.id }) { t ->
+                        TrailRow(t, nowMs,
+                            expanded = expandedTrail.value == t.id,
+                            onTap = { togglePreview(t) },
+                            onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
+                            onLongPress = { openEdit(t) })
+                    }
+                }
+                if (grouped.other.isNotEmpty()) {
+                    item { GroupHeader("Other · ${grouped.other.size}") }
+                    items(grouped.other, key = { it.id }) { t ->
                         TrailRow(t, nowMs,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
@@ -589,6 +611,7 @@ private fun TrailRow(
     val color = when (t.status) {
         "open" -> Color(0xFF22C55E)
         "closed" -> Color(0xFFEF4444)
+        "delayed" -> Color(0xFFEAB308)  // amber — RainoutLine "Delayed"
         else -> MV.OnSurfaceVariant
     }
     val hasLocation = t.latitude != null && t.longitude != null
@@ -627,8 +650,15 @@ private fun TrailRow(
                         }
                         if (t.visitsTotal > 0) {
                             val visitColor = visitAgeColor(t.lastVisitAt, nowMs)
+                            Text("  ·  ", color = MV.OnSurfaceDim, fontSize = 11.sp)
+                            Icon(
+                                Icons.AutoMirrored.Outlined.DirectionsBike,
+                                contentDescription = "Visits",
+                                tint = visitColor,
+                                modifier = Modifier.size(12.dp),
+                            )
                             Text(
-                                "  ·  🚴 ${t.visitsTotal}",
+                                " ${t.visitsTotal}",
                                 color = visitColor, fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                             )
@@ -734,11 +764,17 @@ private fun RideLinkRow(ride: ActivityRow, nowMs: Long, onTap: () -> Unit) {
                 }
             }
             if (ride.trailName != null) {
-                Text(
-                    "🔗 ${ride.trailName}",
-                    color = MV.OnSurfaceVariant, fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Link, contentDescription = "Linked trail",
+                        tint = MV.OnSurfaceVariant,
+                        modifier = Modifier.size(12.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        ride.trailName,
+                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             } else {
                 Text("Link…", color = MV.BrandRed, fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold)
@@ -774,26 +810,35 @@ private fun visitAgeColor(iso: String?, nowMs: Long): Color {
 private fun MiniMap(lat: Double, lon: Double, name: String, osmGeoJson: String? = null) {
     val nameEsc = name.replace("'", "\\'")
     val osmLiteral = osmGeoJson ?: "null"
+    // Leaflet is bundled at app/src/main/assets/leaflet/ so the map renders
+    // without depending on unpkg.com. Tiles still need network (CARTO CDN);
+    // if offline the marker pin renders on a dark background.
     val html = """<!DOCTYPE html>
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<style>html,body,#m{height:100%;margin:0;background:#0F1620;}</style>
+<link rel="stylesheet" href="leaflet.css"/>
+<style>html,body{height:100%;margin:0;background:#0F1620;}
+#m{position:absolute;top:0;left:0;right:0;bottom:0;}</style>
 </head><body>
 <div id="m"></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="leaflet.js"></script>
 <script>
-const map = L.map('m', {zoomControl:true,scrollWheelZoom:false}).setView([$lat,$lon], 14);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(map);
-const pin = L.marker([$lat,$lon]).addTo(map).bindPopup('$nameEsc').openPopup();
-const osm = $osmLiteral;
-if (osm) {
-  const layer = L.geoJSON(osm, {
-    style: {color:'#94a3b8', weight:3, opacity:0.9, dashArray:'6,4'}
-  }).addTo(map);
-  try { map.fitBounds(layer.getBounds().pad(0.1)); } catch (e) { /* empty */ }
-}
+window.addEventListener('error', e => console.error('JS error:', e.message));
+try {
+  const map = L.map('m', {zoomControl:true,scrollWheelZoom:false}).setView([$lat,$lon], 14);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(map);
+  L.marker([$lat,$lon]).addTo(map).bindPopup('$nameEsc').openPopup();
+  const osm = $osmLiteral;
+  if (osm) {
+    const layer = L.geoJSON(osm, {
+      style: {color:'#94a3b8', weight:3, opacity:0.9, dashArray:'6,4'}
+    }).addTo(map);
+    try { map.fitBounds(layer.getBounds().pad(0.1)); } catch (e) {}
+  }
+  setTimeout(() => map.invalidateSize(), 50);
+  console.log('map ready', map.getSize().x, 'x', map.getSize().y);
+} catch (e) { console.error('map init failed:', e.toString()); }
 </script></body></html>"""
     AndroidView(
         factory = { ctx ->
@@ -801,22 +846,32 @@ if (osm) {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.loadsImagesAutomatically = true
-                // Allow Leaflet's https tile/script URLs from a localhost
-                // base context.
                 settings.mixedContentMode =
                     android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                settings.allowFileAccess = true
                 webViewClient = WebViewClient()
+                webChromeClient = object : android.webkit.WebChromeClient() {
+                    override fun onConsoleMessage(
+                        m: android.webkit.ConsoleMessage,
+                    ): Boolean {
+                        Timber.tag("MiniMap").i(
+                            "[${m.messageLevel()}] ${m.message()} (${m.sourceId()}:${m.lineNumber()})",
+                        )
+                        return true
+                    }
+                }
                 setBackgroundColor(android.graphics.Color.parseColor("#0F1620"))
-                loadDataWithBaseURL("https://localhost/", html, "text/html", "utf-8", null)
+                loadDataWithBaseURL(
+                    "file:///android_asset/leaflet/", html, "text/html", "utf-8", null,
+                )
                 tag = html
             }
         },
         update = { webview ->
-            // Only reload when the HTML actually changed (e.g., OSM
-            // GeoJSON arrived after first render). Avoids re-loading
-            // on every parent recomposition, which produces a blank map.
             if (webview.tag != html) {
-                webview.loadDataWithBaseURL("https://localhost/", html, "text/html", "utf-8", null)
+                webview.loadDataWithBaseURL(
+                    "file:///android_asset/leaflet/", html, "text/html", "utf-8", null,
+                )
                 webview.tag = html
             }
         },

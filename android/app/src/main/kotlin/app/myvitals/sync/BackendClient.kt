@@ -98,6 +98,18 @@ interface BackendApi {
     suspend fun editTrailLocation(
         @Path("id") id: Long, @Body body: TrailLocationBody,
     ): Map<String, Any>
+
+    @POST("trails/link-activities")
+    suspend fun linkAllActivitiesToTrails(
+        @retrofit2.http.Query("max_km") maxKm: Double = 2.0,
+        @retrofit2.http.Query("relink") relink: Boolean = false,
+    ): TrailLinkActivitiesResponse
+
+    @POST("trails/fetch-all-osm-paths")
+    suspend fun fetchAllTrailOsmPaths(
+        @retrofit2.http.Query("radius_m") radiusM: Double = 500.0,
+        @retrofit2.http.Query("relink") relink: Boolean = false,
+    ): TrailOsmFetchAllResponse
 }
 
 object BackendClient {

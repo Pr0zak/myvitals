@@ -2,10 +2,14 @@ package app.myvitals.ui.trails
 
 import android.content.Intent
 import android.net.Uri
+import android.annotation.SuppressLint
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -81,7 +85,17 @@ fun TrailsScreen(settings: SettingsRepository) {
     var error by remember { mutableStateOf<String?>(null) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-    // Edit-pin state
+    // Mini-map preview state
+    val expandedTrail = remember { mutableStateOf<Long?>(null) }
+    fun togglePreview(t: Trail) {
+        expandedTrail.value = if (expandedTrail.value == t.id) null else t.id
+    }
+
+    // Header action state
+    var linking by remember { mutableStateOf(false) }
+    var fetchingOsm by remember { mutableStateOf(false) }
+    var actionResult by remember { mutableStateOf<String?>(null) }
+
     var editTrail by remember { mutableStateOf<Trail?>(null) }
     var editLat by remember { mutableStateOf("") }
     var editLon by remember { mutableStateOf("") }
@@ -133,6 +147,33 @@ fun TrailsScreen(settings: SettingsRepository) {
         }
     }
 
+    suspend fun linkActivities() {
+        if (!settings.isConfigured()) return
+        linking = true; actionResult = null
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val r = withContext(Dispatchers.IO) { api.linkAllActivitiesToTrails() }
+            actionResult = "Linked ${r.linked} new · ${r.alreadyLinkedSkipped} already · ${r.noMatchWithinKm} no match"
+            load()
+        } catch (e: Exception) {
+            Timber.w(e, "linkActivities failed")
+            actionResult = e.message?.take(160)
+        } finally { linking = false }
+    }
+
+    suspend fun fetchOsmRoutes() {
+        if (!settings.isConfigured()) return
+        fetchingOsm = true; actionResult = null
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val r = withContext(Dispatchers.IO) { api.fetchAllTrailOsmPaths() }
+            actionResult = "OSM: ${r.fetched} fetched · ${r.skipped} cached · ${r.failed} failed"
+        } catch (e: Exception) {
+            Timber.w(e, "fetchOsmRoutes failed")
+            actionResult = e.message?.take(160)
+        } finally { fetchingOsm = false }
+    }
+
     suspend fun toggleSubscribe(t: Trail) {
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
@@ -182,10 +223,48 @@ fun TrailsScreen(settings: SettingsRepository) {
                     color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
                 )
             }
-            TextButton(onClick = { scope.launch { refreshNow() } }, enabled = !refreshing) {
-                Icon(Icons.Filled.Refresh, contentDescription = "Refresh", tint = MV.OnSurface)
-                Spacer(Modifier.width(4.dp))
-                Text(if (refreshing) "Refreshing…" else "Refresh", color = MV.OnSurface)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = { scope.launch { linkActivities() } },
+                    enabled = !linking,
+                ) {
+                    Text(
+                        if (linking) "Linking…" else "Link rides",
+                        color = MV.OnSurface, fontSize = 12.sp,
+                    )
+                }
+                TextButton(
+                    onClick = { scope.launch { fetchOsmRoutes() } },
+                    enabled = !fetchingOsm,
+                ) {
+                    Text(
+                        if (fetchingOsm) "OSM…" else "OSM routes",
+                        color = MV.OnSurface, fontSize = 12.sp,
+                    )
+                }
+                TextButton(onClick = { scope.launch { refreshNow() } }, enabled = !refreshing) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh", tint = MV.OnSurface)
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (refreshing) "…" else "Refresh", color = MV.OnSurface)
+                }
+            }
+        }
+        if (actionResult != null) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            ) {
+                Row(
+                    Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(actionResult!!,
+                        modifier = Modifier.weight(1f),
+                        color = MV.OnSurface, fontSize = 12.sp)
+                    TextButton(onClick = { actionResult = null }) {
+                        Text("OK", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    }
+                }
             }
         }
 
@@ -210,6 +289,8 @@ fun TrailsScreen(settings: SettingsRepository) {
                     item { GroupHeader("Open · ${grouped.first.size}") }
                     items(grouped.first, key = { it.id }) { t ->
                         TrailRow(t, nowMs,
+                            expanded = expandedTrail.value == t.id,
+                            onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
                             onLongPress = { openEdit(t) })
                     }
@@ -218,6 +299,8 @@ fun TrailsScreen(settings: SettingsRepository) {
                     item { GroupHeader("Closed · ${grouped.second.size}") }
                     items(grouped.second, key = { it.id }) { t ->
                         TrailRow(t, nowMs,
+                            expanded = expandedTrail.value == t.id,
+                            onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
                             onLongPress = { openEdit(t) })
                     }
@@ -226,6 +309,8 @@ fun TrailsScreen(settings: SettingsRepository) {
                     item { GroupHeader("Other · ${grouped.third.size}") }
                     items(grouped.third, key = { it.id }) { t ->
                         TrailRow(t, nowMs,
+                            expanded = expandedTrail.value == t.id,
+                            onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
                             onLongPress = { openEdit(t) })
                     }
@@ -362,6 +447,8 @@ private fun GroupHeader(text: String) {
 @Composable
 private fun TrailRow(
     t: Trail, nowMs: Long,
+    expanded: Boolean = false,
+    onTap: () -> Unit,
     onSubscribeToggle: () -> Unit,
     onLongPress: () -> Unit,
 ) {
@@ -375,63 +462,154 @@ private fun TrailRow(
     Card(
         colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
         modifier = Modifier.fillMaxWidth().combinedClickable(
-            onClick = { if (hasLocation) openMapsNav(context, t) },
+            onClick = { if (hasLocation) onTap() },
             onLongClick = onLongPress,
         ),
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(color))
-            Spacer(Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(t.name, color = MV.OnSurface, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                if (!t.comment.isNullOrBlank()) {
-                    Text(t.comment, color = MV.OnSurfaceVariant, fontSize = 12.sp)
+        Column {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(color))
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(t.name, color = MV.OnSurface, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    if (!t.comment.isNullOrBlank()) {
+                        Text(t.comment, color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val ageStr = remember(nowMs, t.sourceTs, t.fetchedAt) {
+                            fmtAge(t.sourceTs ?: t.fetchedAt, nowMs)
+                        }
+                        if (ageStr.isNotEmpty()) {
+                            Text(ageStr, color = MV.OnSurfaceDim, fontSize = 11.sp)
+                        }
+                        val cityStr = listOfNotNull(t.city, t.state).joinToString(", ")
+                        if (cityStr.isNotEmpty()) {
+                            Text(
+                                "  ·  $cityStr",
+                                color = MV.OnSurfaceDim, fontSize = 11.sp,
+                            )
+                        }
+                        if (t.visitsTotal > 0) {
+                            val visitColor = visitAgeColor(t.lastVisitAt, nowMs)
+                            Text(
+                                "  ·  🚴 ${t.visitsTotal}",
+                                color = visitColor, fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            if (t.lastVisitAt != null) {
+                                Text(
+                                    " · ${fmtAge(t.lastVisitAt, nowMs)}",
+                                    color = MV.OnSurfaceDim, fontSize = 10.sp,
+                                )
+                            }
+                        }
+                        if (hasLocation) {
+                            Spacer(Modifier.width(6.dp))
+                            Icon(
+                                Icons.Filled.Navigation,
+                                contentDescription = "Open mini map",
+                                tint = MV.OnSurfaceDim,
+                                modifier = Modifier.size(12.dp),
+                            )
+                        }
+                    }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val ageStr = remember(nowMs, t.sourceTs, t.fetchedAt) {
-                        fmtAge(t.sourceTs ?: t.fetchedAt, nowMs)
-                    }
-                    if (ageStr.isNotEmpty()) {
-                        Text(ageStr, color = MV.OnSurfaceDim, fontSize = 11.sp)
-                    }
-                    val cityStr = listOfNotNull(t.city, t.state).joinToString(", ")
-                    if (cityStr.isNotEmpty()) {
-                        Text(
-                            "  ·  $cityStr",
-                            color = MV.OnSurfaceDim, fontSize = 11.sp,
-                        )
-                    }
-                    if (hasLocation) {
-                        Spacer(Modifier.width(6.dp))
-                        Icon(
-                            Icons.Filled.Navigation,
-                            contentDescription = "Open in maps",
-                            tint = MV.OnSurfaceDim,
-                            modifier = Modifier.size(12.dp),
-                        )
-                    }
+                IconButton(onClick = onSubscribeToggle) {
+                    Icon(
+                        if (t.subscribed) Icons.Filled.Star else Icons.Filled.StarBorder,
+                        contentDescription = if (t.subscribed) "Unsubscribe" else "Subscribe",
+                        tint = if (t.subscribed) MV.Amber else MV.OnSurfaceVariant,
+                    )
                 }
             }
-            IconButton(onClick = onSubscribeToggle) {
-                Icon(
-                    if (t.subscribed) Icons.Filled.Star else Icons.Filled.StarBorder,
-                    contentDescription = if (t.subscribed) "Unsubscribe" else "Subscribe",
-                    tint = if (t.subscribed) MV.Amber else MV.OnSurfaceVariant,
-                )
+
+            // Mini-map preview when expanded
+            if (expanded && t.latitude != null && t.longitude != null) {
+                MiniMap(t.latitude, t.longitude, t.name)
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = { openMapsNav(context, t) },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = MV.BrandRed, contentColor = MV.OnSurface,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Filled.Navigation, contentDescription = null,
+                            modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Navigate")
+                    }
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = onLongPress,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Edit pin") }
+                }
             }
         }
     }
+}
+
+/** Visit-recency colour scale, matching the web's age-fresh → age-stale ramp. */
+private fun visitAgeColor(iso: String?, nowMs: Long): Color {
+    if (iso == null) return MV.OnSurfaceVariant
+    val days = try { (nowMs - Instant.parse(iso).toEpochMilli()) / 86_400_000L }
+               catch (_: Exception) { return MV.OnSurfaceVariant }
+    return when {
+        days < 7   -> Color(0xFF22C55E)   // fresh — green
+        days < 30  -> Color(0xFF84CC16)   // recent — lime
+        days < 90  -> Color(0xFFF59E0B)   // medium — amber
+        days < 180 -> Color(0xFFFB923C)   // old — orange
+        else       -> Color(0xFF94A3B8)   // stale — slate
+    }
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun MiniMap(lat: Double, lon: Double, name: String) {
+    val nameEsc = name.replace("'", "\\'")
+    val html = """<!DOCTYPE html>
+<html><head>
+<meta name="viewport" content="initial-scale=1.0,width=device-width"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>html,body,#m{height:100%;margin:0;background:#0F1620;}</style>
+</head><body>
+<div id="m"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('m', {zoomControl:true,scrollWheelZoom:false}).setView([$lat,$lon], 14);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(map);
+L.marker([$lat,$lon]).addTo(map).bindPopup('$nameEsc').openPopup();
+</script></body></html>"""
+    AndroidView(
+        factory = { ctx ->
+            WebView(ctx).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                webViewClient = WebViewClient()
+                setBackgroundColor(android.graphics.Color.parseColor("#0F1620"))
+                loadDataWithBaseURL("https://localhost/", html, "text/html", "utf-8", null)
+            }
+        },
+        modifier = Modifier.fillMaxWidth().height(220.dp),
+    )
 }
 
 private fun openMapsNav(context: android.content.Context, t: Trail) {
     val lat = t.latitude ?: return
     val lon = t.longitude ?: return
     val label = Uri.encode(t.name)
-    // Prefer Google Maps' navigation intent; fall back to a generic geo: query;
-    // fall back to an https Maps URL if neither registers.
+    // Try in order: Google's navigation: scheme (turn-by-turn), generic geo:,
+    // then a final https://maps fallback. Skip resolveActivity — on Android 12+
+    // it requires a <queries> manifest declaration and silently returns null
+    // otherwise, which used to make every trail tap appear to do nothing.
+    // Just try startActivity directly; ActivityNotFoundException → next URI.
     val candidates = listOf(
         Uri.parse("google.navigation:q=$lat,$lon"),
         Uri.parse("geo:$lat,$lon?q=$lat,$lon($label)"),
@@ -439,12 +617,10 @@ private fun openMapsNav(context: android.content.Context, t: Trail) {
     )
     for (uri in candidates) {
         try {
-            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            context.startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            if (intent.resolveActivity(context.packageManager) != null) {
-                context.startActivity(intent); return
-            }
+            })
+            return
         } catch (_: Exception) { /* try next */ }
     }
     Timber.w("openMapsNav: no map app could handle the intent")

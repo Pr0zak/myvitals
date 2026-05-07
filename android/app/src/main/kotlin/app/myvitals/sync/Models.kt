@@ -369,6 +369,23 @@ data class Trail(
     val comment: String? = null,
     @Json(name = "source_ts") val sourceTs: String? = null,
     @Json(name = "fetched_at") val fetchedAt: String? = null,
+    @Json(name = "visits_30d") val visits30d: Int = 0,
+    @Json(name = "visits_total") val visitsTotal: Int = 0,
+    @Json(name = "last_visit_at") val lastVisitAt: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class TrailLinkActivitiesResponse(
+    val scanned: Int = 0, val linked: Int = 0,
+    @Json(name = "already_linked_skipped") val alreadyLinkedSkipped: Int = 0,
+    @Json(name = "no_match_within_km") val noMatchWithinKm: Int = 0,
+    @Json(name = "no_gps") val noGps: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class TrailOsmFetchAllResponse(
+    val fetched: Int = 0, val skipped: Int = 0, val failed: Int = 0,
+    @Json(name = "total_with_pins") val totalWithPins: Int = 0,
 )
 
 @JsonClass(generateAdapter = true)

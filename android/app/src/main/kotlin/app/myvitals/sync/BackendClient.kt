@@ -108,6 +108,19 @@ interface BackendApi {
     @GET("trails/{id}/osm-paths")
     suspend fun trailOsmPaths(@Path("id") id: Long): Response<okhttp3.ResponseBody>
 
+    @GET("activities")
+    suspend fun activities(
+        @retrofit2.http.Query("type") type: String? = null,
+        @retrofit2.http.Query("limit") limit: Int = 50,
+    ): List<ActivityRow>
+
+    @POST("activities/{source}/{sourceId}/link-trail")
+    suspend fun linkActivityTrail(
+        @Path("source") source: String,
+        @Path("sourceId") sourceId: String,
+        @Body body: ActivityLinkTrailBody,
+    ): Response<okhttp3.ResponseBody>
+
     @POST("trails/fetch-all-osm-paths")
     suspend fun fetchAllTrailOsmPaths(
         @retrofit2.http.Query("radius_m") radiusM: Double = 500.0,

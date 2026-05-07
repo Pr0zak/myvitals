@@ -416,6 +416,25 @@ data class TrailAlertRow(
 data class MarkNotifiedBody(val ids: List<Long>)
 
 @JsonClass(generateAdapter = true)
+data class ActivityRow(
+    val source: String,
+    @Json(name = "source_id") val sourceId: String,
+    val type: String,
+    val name: String?,
+    @Json(name = "start_at") val startAt: String,
+    @Json(name = "duration_s") val durationS: Int,
+    @Json(name = "distance_m") val distanceM: Double?,
+    @Json(name = "elevation_gain_m") val elevationGainM: Double?,
+    @Json(name = "trail_id") val trailId: Long? = null,
+    @Json(name = "trail_name") val trailName: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class ActivityLinkTrailBody(
+    @Json(name = "trail_id") val trailId: Long?,
+)
+
+@JsonClass(generateAdapter = true)
 data class TrailLocationBody(
     val latitude: Double? = null,
     val longitude: Double? = null,

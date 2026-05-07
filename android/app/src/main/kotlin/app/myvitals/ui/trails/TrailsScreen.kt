@@ -62,6 +62,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.input.KeyboardType
 import app.myvitals.data.SettingsRepository
+import app.myvitals.sync.ActivityLinkTrailBody
+import app.myvitals.sync.ActivityRow
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.Trail
 import app.myvitals.sync.TrailLocationBody
@@ -95,6 +97,11 @@ fun TrailsScreen(settings: SettingsRepository) {
     var linking by remember { mutableStateOf(false) }
     var fetchingOsm by remember { mutableStateOf(false) }
     var actionResult by remember { mutableStateOf<String?>(null) }
+
+    // Recent rides + link-to-trail picker
+    var recentRides by remember { mutableStateOf<List<ActivityRow>>(emptyList()) }
+    var linkTarget by remember { mutableStateOf<ActivityRow?>(null) }
+    var linkSaving by remember { mutableStateOf(false) }
 
     var editTrail by remember { mutableStateOf<Trail?>(null) }
     var editLat by remember { mutableStateOf("") }
@@ -147,6 +154,45 @@ fun TrailsScreen(settings: SettingsRepository) {
         }
     }
 
+    suspend fun loadRecentRides() {
+        if (!settings.isConfigured()) return
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val rows = withContext(Dispatchers.IO) { api.activities(limit = 30) }
+            // Keep types most likely to match a trail visit
+            recentRides = rows.filter { r ->
+                val t = r.type
+                t.contains("Ride", ignoreCase = true) ||
+                    t.contains("Run", ignoreCase = true) ||
+                    t.contains("Hike", ignoreCase = true) ||
+                    t.contains("Walk", ignoreCase = true)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "loadRecentRides failed")
+        }
+    }
+
+    suspend fun setRideTrail(ride: ActivityRow, trailId: Long?) {
+        if (!settings.isConfigured()) return
+        linkSaving = true
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val resp = withContext(Dispatchers.IO) {
+                api.linkActivityTrail(ride.source, ride.sourceId, ActivityLinkTrailBody(trailId))
+            }
+            if (resp.isSuccessful) {
+                linkTarget = null
+                loadRecentRides()
+                load()  // refresh trail visit counts
+            } else {
+                actionResult = "link failed: HTTP ${resp.code()}"
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "setRideTrail failed")
+            actionResult = e.message?.take(160)
+        } finally { linkSaving = false }
+    }
+
     suspend fun linkActivities() {
         if (!settings.isConfigured()) return
         linking = true; actionResult = null
@@ -189,6 +235,7 @@ fun TrailsScreen(settings: SettingsRepository) {
     }
 
     LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) { loadRecentRides() }
     LaunchedEffect(Unit) {
         while (true) { delay(60_000); nowMs = System.currentTimeMillis() }
     }
@@ -313,6 +360,88 @@ fun TrailsScreen(settings: SettingsRepository) {
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
                             onLongPress = { openEdit(t) })
+                    }
+                }
+
+                if (recentRides.isNotEmpty()) {
+                    item { GroupHeader("Recent rides · tap to link a trail") }
+                    items(recentRides, key = { "${it.source}-${it.sourceId}" }) { ride ->
+                        RideLinkRow(ride, nowMs, onTap = { linkTarget = ride })
+                    }
+                }
+            }
+        }
+
+        // Link-trail bottom sheet
+        if (linkTarget != null) {
+            val ride = linkTarget!!
+            ModalBottomSheet(
+                onDismissRequest = { if (!linkSaving) linkTarget = null },
+                containerColor = MV.SurfaceContainer,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text("Link to trail", color = MV.OnSurface,
+                        fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(rideSubtitle(ride), color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                    if (ride.trailName != null) {
+                        Text("Currently linked: ${ride.trailName}",
+                            color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.height(6.dp))
+
+                    val pickable = remember(trails) {
+                        trails.filter { it.latitude != null && it.longitude != null }
+                            .sortedBy { it.name }
+                    }
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().height(360.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        items(pickable, key = { it.id }) { t ->
+                            val isCurrent = t.id == ride.trailId
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor =
+                                        if (isCurrent) MV.BrandRed.copy(alpha = 0.15f)
+                                        else MV.SurfaceContainerLow,
+                                ),
+                                modifier = Modifier.fillMaxWidth().clickable(enabled = !linkSaving) {
+                                    scope.launch { setRideTrail(ride, t.id) }
+                                },
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(t.name, modifier = Modifier.weight(1f),
+                                        color = MV.OnSurface, fontSize = 14.sp)
+                                    val cityStr = listOfNotNull(t.city, t.state).joinToString(", ")
+                                    if (cityStr.isNotEmpty()) {
+                                        Text(cityStr, color = MV.OnSurfaceDim, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (ride.trailId != null) {
+                            OutlinedButton(
+                                onClick = { scope.launch { setRideTrail(ride, null) } },
+                                enabled = !linkSaving,
+                                modifier = Modifier.weight(1f),
+                            ) { Text("Clear link") }
+                        }
+                        TextButton(
+                            onClick = { if (!linkSaving) linkTarget = null },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Cancel") }
                     }
                 }
             }
@@ -571,6 +700,55 @@ private fun TrailRow(
             }
         }
     }
+}
+
+@Composable
+private fun RideLinkRow(ride: ActivityRow, nowMs: Long, onTap: () -> Unit) {
+    val context = LocalContext.current
+    val typeLabel = ride.type.replace("Ride", " ride", ignoreCase = true).trim()
+    val ageStr = remember(nowMs, ride.startAt) { fmtAge(ride.startAt, nowMs) }
+    val distStr = ride.distanceM?.let { "${"%.1f".format(it / 1609.34)} mi" } ?: "—"
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        modifier = Modifier.fillMaxWidth().clickable { onTap() },
+    ) {
+        Row(
+            Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    ride.name?.takeIf { it.isNotBlank() } ?: typeLabel.ifBlank { "Activity" },
+                    color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                Row {
+                    Text("$ageStr  ·  $distStr", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    if (typeLabel.isNotEmpty()) {
+                        Text("  ·  $typeLabel", color = MV.OnSurfaceDim, fontSize = 11.sp)
+                    }
+                }
+            }
+            if (ride.trailName != null) {
+                Text(
+                    "🔗 ${ride.trailName}",
+                    color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            } else {
+                Text("Link…", color = MV.BrandRed, fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+    // Suppress unused-import warning for context (kept in case we open a detail later)
+    @Suppress("UNUSED_EXPRESSION") context
+}
+
+private fun rideSubtitle(ride: ActivityRow): String {
+    val mi = ride.distanceM?.let { "%.1f mi".format(it / 1609.34) } ?: "—"
+    val mins = ride.durationS / 60
+    return "${ride.type} · $mi · ${mins}m"
 }
 
 /** Visit-recency colour scale, matching the web's age-fresh → age-stale ramp. */

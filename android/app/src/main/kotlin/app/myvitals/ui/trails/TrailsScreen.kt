@@ -1,5 +1,7 @@
 package app.myvitals.ui.trails
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
@@ -39,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -204,14 +208,18 @@ private fun GroupHeader(text: String) {
 
 @Composable
 private fun TrailRow(t: Trail, nowMs: Long, onSubscribeToggle: () -> Unit) {
+    val context = LocalContext.current
     val color = when (t.status) {
         "open" -> Color(0xFF22C55E)
         "closed" -> Color(0xFFEF4444)
         else -> MV.OnSurfaceVariant
     }
+    val hasLocation = t.latitude != null && t.longitude != null
     Card(
         colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
-        modifier = Modifier.fillMaxWidth().clickable { onSubscribeToggle() },
+        modifier = Modifier.fillMaxWidth().clickable {
+            if (hasLocation) openMapsNav(context, t)
+        },
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -224,11 +232,29 @@ private fun TrailRow(t: Trail, nowMs: Long, onSubscribeToggle: () -> Unit) {
                 if (!t.comment.isNullOrBlank()) {
                     Text(t.comment, color = MV.OnSurfaceVariant, fontSize = 12.sp)
                 }
-                val ageStr = remember(nowMs, t.sourceTs, t.fetchedAt) {
-                    fmtAge(t.sourceTs ?: t.fetchedAt, nowMs)
-                }
-                if (ageStr.isNotEmpty()) {
-                    Text(ageStr, color = MV.OnSurfaceDim, fontSize = 11.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val ageStr = remember(nowMs, t.sourceTs, t.fetchedAt) {
+                        fmtAge(t.sourceTs ?: t.fetchedAt, nowMs)
+                    }
+                    if (ageStr.isNotEmpty()) {
+                        Text(ageStr, color = MV.OnSurfaceDim, fontSize = 11.sp)
+                    }
+                    val cityStr = listOfNotNull(t.city, t.state).joinToString(", ")
+                    if (cityStr.isNotEmpty()) {
+                        Text(
+                            "  ·  $cityStr",
+                            color = MV.OnSurfaceDim, fontSize = 11.sp,
+                        )
+                    }
+                    if (hasLocation) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.Navigation,
+                            contentDescription = "Open in maps",
+                            tint = MV.OnSurfaceDim,
+                            modifier = Modifier.size(12.dp),
+                        )
+                    }
                 }
             }
             IconButton(onClick = onSubscribeToggle) {
@@ -240,6 +266,30 @@ private fun TrailRow(t: Trail, nowMs: Long, onSubscribeToggle: () -> Unit) {
             }
         }
     }
+}
+
+private fun openMapsNav(context: android.content.Context, t: Trail) {
+    val lat = t.latitude ?: return
+    val lon = t.longitude ?: return
+    val label = Uri.encode(t.name)
+    // Prefer Google Maps' navigation intent; fall back to a generic geo: query;
+    // fall back to an https Maps URL if neither registers.
+    val candidates = listOf(
+        Uri.parse("google.navigation:q=$lat,$lon"),
+        Uri.parse("geo:$lat,$lon?q=$lat,$lon($label)"),
+        Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lon"),
+    )
+    for (uri in candidates) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            if (intent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(intent); return
+            }
+        } catch (_: Exception) { /* try next */ }
+    }
+    Timber.w("openMapsNav: no map app could handle the intent")
 }
 
 private fun fmtAge(iso: String?, nowMs: Long): String {

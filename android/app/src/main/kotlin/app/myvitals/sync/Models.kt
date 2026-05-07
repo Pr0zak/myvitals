@@ -301,6 +301,10 @@ data class Trail(
     val name: String,
     val slug: String,
     @Json(name = "last_seen_at") val lastSeenAt: String,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val city: String? = null,
+    val state: String? = null,
     val subscribed: Boolean = false,
     @Json(name = "notify_on") val notifyOn: String? = null,
     val status: String? = null,            // open | closed | pending | unknown

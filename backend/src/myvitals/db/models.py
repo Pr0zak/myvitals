@@ -417,7 +417,8 @@ class Trail(Base):
     """Single trail (one RainoutLine 'extension' under a DNIS).
 
     Status history is in trail_status_snapshots; the user opts into
-    push notifications via trail_subscriptions."""
+    push notifications via trail_subscriptions. Lat/lon point at the
+    primary trailhead (parking lot) for one-tap maps navigation."""
     __tablename__ = "trails"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     dnis: Mapped[str] = mapped_column(String(16))
@@ -425,6 +426,10 @@ class Trail(Base):
     name: Mapped[str] = mapped_column(String(255))
     slug: Mapped[str] = mapped_column(String(64))
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    city: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
 
 class TrailStatusSnapshot(Base):

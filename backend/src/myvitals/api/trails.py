@@ -60,6 +60,10 @@ async def list_trails(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
             "name": t.name,
             "slug": t.slug,
             "last_seen_at": t.last_seen_at,
+            "latitude": t.latitude,
+            "longitude": t.longitude,
+            "city": t.city,
+            "state": t.state,
             "subscribed": t.id in sub_ids,
             "notify_on": sub_notify.get(t.id),
             "status": latest.status if latest else None,
@@ -68,6 +72,47 @@ async def list_trails(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
             "fetched_at": latest.fetched_at if latest else None,
         })
     return {"count": len(out), "trails": out}
+
+
+# ------------------------------------------------------------------
+# Location seeding (one-shot, idempotent)
+# ------------------------------------------------------------------
+
+@router.post("/seed-locations")
+async def seed_locations(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Read backend/src/myvitals/data/trail_locations.json and update
+    each known trail's lat/lon/city/state. Idempotent — only updates
+    rows whose lat/lon are currently null OR differ from the file."""
+    import json
+    from pathlib import Path
+    p = Path(__file__).resolve().parent.parent / "data" / "trail_locations.json"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="trail_locations.json not found in data/")
+    data: dict[str, Any] = json.loads(p.read_text())
+    trails = (await db.execute(select(models.Trail))).scalars().all()
+    updated = 0
+    skipped = 0
+    for t in trails:
+        loc = data.get(t.name)
+        if loc is None:
+            skipped += 1
+            continue
+        lat = loc.get("latitude")
+        lon = loc.get("longitude")
+        if lat is None or lon is None:
+            skipped += 1
+            continue
+        if t.latitude == lat and t.longitude == lon:
+            continue
+        t.latitude = lat
+        t.longitude = lon
+        t.city = loc.get("city")
+        t.state = loc.get("state")
+        updated += 1
+    await db.commit()
+    return {"updated": updated, "skipped": skipped, "total_in_db": len(trails)}
 
 
 @router.get("/{trail_id}/history")

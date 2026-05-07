@@ -5,7 +5,7 @@
  * subscribes for status-flip pings.
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Star, RefreshCw } from "lucide-vue-next";
+import { Star, RefreshCw, Navigation } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { queryToken } from "@/config";
 import Card from "@/components/Card.vue";
@@ -58,6 +58,12 @@ async function toggleSubscribe(t: Trail) {
   }
 }
 
+function openMaps(t: Trail) {
+  if (t.latitude == null || t.longitude == null) return;
+  const q = encodeURIComponent(`${t.latitude},${t.longitude} (${t.name})`);
+  window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank", "noreferrer");
+}
+
 function fmtAge(iso: string | null): string {
   if (!iso) return "";
   const ms = tickNow.value - new Date(iso).getTime();
@@ -108,18 +114,24 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
       <section v-if="grouped.open.length" class="group group-open">
         <h2>Open · {{ grouped.open.length }}</h2>
         <div class="grid">
-          <article v-for="t in grouped.open" :key="t.id" class="card status-open">
+          <article v-for="t in grouped.open" :key="t.id" class="card status-open"
+                   :class="{ has_loc: t.latitude != null }"
+                   @click="openMaps(t)">
             <header>
               <span class="dot"></span>
               <strong>{{ t.name }}</strong>
               <button class="star" :class="{ on: t.subscribed }"
                       :title="t.subscribed ? 'Unsubscribe' : 'Subscribe to status flips'"
-                      @click="toggleSubscribe(t)">
+                      @click.stop="toggleSubscribe(t)">
                 <Star :size="16" />
               </button>
             </header>
             <p v-if="t.comment" class="comment">{{ t.comment }}</p>
-            <p class="meta">{{ fmtAge(t.source_ts || t.fetched_at) }}</p>
+            <p class="meta">
+              <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
+              <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
+              <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
+            </p>
           </article>
         </div>
       </section>
@@ -127,18 +139,24 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
       <section v-if="grouped.closed.length" class="group group-closed">
         <h2>Closed · {{ grouped.closed.length }}</h2>
         <div class="grid">
-          <article v-for="t in grouped.closed" :key="t.id" class="card status-closed">
+          <article v-for="t in grouped.closed" :key="t.id" class="card status-closed"
+                   :class="{ has_loc: t.latitude != null }"
+                   @click="openMaps(t)">
             <header>
               <span class="dot"></span>
               <strong>{{ t.name }}</strong>
               <button class="star" :class="{ on: t.subscribed }"
                       :title="t.subscribed ? 'Unsubscribe' : 'Subscribe to status flips'"
-                      @click="toggleSubscribe(t)">
+                      @click.stop="toggleSubscribe(t)">
                 <Star :size="16" />
               </button>
             </header>
             <p v-if="t.comment" class="comment">{{ t.comment }}</p>
-            <p class="meta">{{ fmtAge(t.source_ts || t.fetched_at) }}</p>
+            <p class="meta">
+              <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
+              <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
+              <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
+            </p>
           </article>
         </div>
       </section>
@@ -198,6 +216,10 @@ header h1 { margin: 0; }
 }
 .card.status-open { border-left: 3px solid #22c55e; }
 .card.status-closed { border-left: 3px solid #ef4444; opacity: 0.85; }
+.card.has_loc { cursor: pointer; transition: border-color 0.12s; }
+.card.has_loc:hover { border-color: var(--accent, #ef4444); }
+.nav-ic { color: var(--muted-2); margin-left: 0.4rem; vertical-align: middle; }
+.loc { color: var(--muted); }
 
 .card header {
   display: flex; align-items: center; gap: 0.5rem;

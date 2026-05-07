@@ -593,6 +593,8 @@ export const api = {
     trails: Array<{
       id: number; extension: number; name: string; slug: string;
       last_seen_at: string;
+      latitude: number | null; longitude: number | null;
+      city: string | null; state: string | null;
       subscribed: boolean; notify_on: string | null;
       status: "open" | "closed" | "pending" | "unknown" | null;
       comment: string | null;

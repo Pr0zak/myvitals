@@ -9,11 +9,11 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import require_query
+from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
 
-router = APIRouter(prefix="/profile", dependencies=[Depends(require_query)])
+router = APIRouter(prefix="/profile", dependencies=[Depends(require_any)])
 
 
 class ProfileIn(BaseModel):

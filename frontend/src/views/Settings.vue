@@ -195,15 +195,35 @@ const weightGoalDisplay = computed({
   },
 });
 
+// Goals live in profile.extra so we don't need a schema migration; the
+// phone reads them via /profile.extra.{steps_goal,sleep_goal_h}.
+const stepsGoalInput = ref<number | null>(null);
+const sleepGoalInput = ref<number | null>(null);
+
 async function loadProfile() {
   if (!queryToken.value) return;
-  try { profile.value = await api.getProfile(); } catch { /* ignore */ }
+  try {
+    profile.value = await api.getProfile();
+    const extra = (profile.value?.extra ?? {}) as Record<string, unknown>;
+    stepsGoalInput.value = (extra.steps_goal as number | undefined) ?? null;
+    sleepGoalInput.value = (extra.sleep_goal_h as number | undefined) ?? null;
+  } catch { /* ignore */ }
 }
 async function saveProfile() {
   if (!profile.value) return;
   profileSaving.value = true;
   profileMsg.value = "";
   try {
+    const extra: Record<string, unknown> = {
+      ...(profile.value.extra as Record<string, unknown> | null ?? {}),
+    };
+    if (stepsGoalInput.value && stepsGoalInput.value > 0) {
+      extra.steps_goal = Number(stepsGoalInput.value);
+    } else { delete extra.steps_goal; }
+    if (sleepGoalInput.value && sleepGoalInput.value > 0) {
+      extra.sleep_goal_h = Number(sleepGoalInput.value);
+    } else { delete extra.sleep_goal_h; }
+
     profile.value = await api.putProfile({
       birth_date: profile.value.birth_date,
       sex: profile.value.sex,
@@ -211,6 +231,7 @@ async function saveProfile() {
       weight_goal_kg: profile.value.weight_goal_kg,
       resting_hr_baseline: profile.value.resting_hr_baseline,
       activity_level: profile.value.activity_level,
+      extra: Object.keys(extra).length ? extra : null,
     }) as Profile;
     profileMsg.value = "Saved.";
   } catch (e) {
@@ -637,6 +658,16 @@ onUnmounted(stopJobPolling);
             <option value="active">active (6-7×/wk)</option>
             <option value="athlete">athlete (2×/day)</option>
           </select>
+        </label>
+        <label>
+          <span>Daily steps goal</span>
+          <input type="number" min="1000" step="500" v-model.number="stepsGoalInput"
+                 placeholder="10000"/>
+        </label>
+        <label>
+          <span>Sleep goal (hours)</span>
+          <input type="number" min="4" max="12" step="0.25" v-model.number="sleepGoalInput"
+                 placeholder="8"/>
         </label>
       </div>
 

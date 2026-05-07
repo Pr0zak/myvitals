@@ -109,6 +109,9 @@ interface BackendApi {
     suspend fun trailOsmPaths(@Path("id") id: Long): Response<okhttp3.ResponseBody>
 
     // ── Vitals dashboard ──────────────────────────────────────
+    @GET("profile")
+    suspend fun profile(): ProfileResponse
+
     @GET("summary/today")
     suspend fun summaryToday(): DailySummary
 

@@ -50,9 +50,9 @@ import java.time.format.DateTimeFormatter
 fun StepsDetailScreen(
     settings: SettingsRepository,
     onBack: () -> Unit,
-    goal: Int = 10_000,
 ) {
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
+    var goal by remember { mutableStateOf(10_000) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -60,6 +60,8 @@ fun StepsDetailScreen(
         if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return@LaunchedEffect }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            // Pull user-configured step goal from the server profile.
+            runCatching { api.profile() }.getOrNull()?.let { goal = it.stepsGoal() }
             val since = LocalDate.now().minusDays(29).toString()
             rows = withContext(Dispatchers.IO) { api.summaryRange(since = since) }
             Timber.i("steps detail: %d rows", rows.size)

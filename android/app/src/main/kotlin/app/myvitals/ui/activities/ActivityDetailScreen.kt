@@ -71,6 +71,7 @@ fun ActivityDetailScreen(
     var hrPoints by remember {
         mutableStateOf<List<app.myvitals.sync.TimePoint>>(emptyList())
     }
+    var maxHr by remember { mutableStateOf(190) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var showPicker by remember { mutableStateOf(false) }
@@ -86,6 +87,9 @@ fun ActivityDetailScreen(
                 Pair(api.activity(source, sourceId), api.trails())
             }
             activity = a
+            runCatching {
+                withContext(Dispatchers.IO) { api.profile() }
+            }.getOrNull()?.let { maxHr = it.maxHr() }
             trails = ts.trails.sortedBy { it.name }
             error = null
             Timber.i(
@@ -170,7 +174,7 @@ fun ActivityDetailScreen(
                         item { ActivityMap(a, trails) }
                     }
                     if (hrPoints.isNotEmpty()) {
-                        item { ActivityHrChart(hrPoints) }
+                        item { ActivityHrChart(hrPoints, maxHr = maxHr) }
                     }
                     item { TrailLinkCard(a, trails, onPick = { showPicker = true }) }
                     if (!a.notes.isNullOrBlank()) {

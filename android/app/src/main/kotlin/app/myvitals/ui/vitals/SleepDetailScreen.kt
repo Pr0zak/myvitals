@@ -74,6 +74,7 @@ fun SleepDetailScreen(
 ) {
     var nights by remember { mutableStateOf<List<SleepNight>>(emptyList()) }
     var lastRaw by remember { mutableStateOf<List<SleepRawSegment>>(emptyList()) }
+    var goalH by remember { mutableStateOf(8.0) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -81,6 +82,7 @@ fun SleepDetailScreen(
         if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return@LaunchedEffect }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            runCatching { api.profile() }.getOrNull()?.let { goalH = it.sleepGoalH() }
             val since = LocalDate.now().minusDays(13).toString()
             val rawSince = Instant.now().minusSeconds(48 * 3600).toString()
             coroutineScope {
@@ -119,7 +121,7 @@ fun SleepDetailScreen(
                 item { LastNightHero(nights.lastOrNull()) }
                 item { Hypnogram(lastRaw) }
                 item { StageBreakdownChart(nights.takeLast(14)) }
-                item { DurationTrend(nights.takeLast(14)) }
+                item { DurationTrend(nights.takeLast(14), goalH) }
                 item { StageLegend() }
             }
         }
@@ -289,7 +291,7 @@ private fun StageBreakdownChart(nights: List<SleepNight>) {
 }
 
 @Composable
-private fun DurationTrend(nights: List<SleepNight>) {
+private fun DurationTrend(nights: List<SleepNight>, goalH: Double) {
     Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
             Text("DURATION", color = MV.OnSurfaceVariant,
@@ -305,17 +307,19 @@ private fun DurationTrend(nights: List<SleepNight>) {
                 Stat("Avg", "%.1f h".format(avgH))
                 if (minN != null) Stat("Min", "%.1f h".format(minN.totalS / 3600.0))
                 if (maxN != null) Stat("Max", "%.1f h".format(maxN.totalS / 3600.0))
+                Stat("Goal", "%.1f h".format(goalH))
             }
             Spacer(Modifier.height(8.dp))
             Box(Modifier.fillMaxWidth().height(60.dp)) {
-                SleepDurationLine(nights, color = STAGE_COLORS["light"] ?: Color(0xFF60A5FA))
+                SleepDurationLine(nights, goalH = goalH.toFloat(),
+                    color = STAGE_COLORS["light"] ?: Color(0xFF60A5FA))
             }
         }
     }
 }
 
 @Composable
-private fun SleepDurationLine(nights: List<SleepNight>, color: Color) {
+private fun SleepDurationLine(nights: List<SleepNight>, goalH: Float, color: Color) {
     Canvas(Modifier.fillMaxSize()) {
         if (nights.size < 2) return@Canvas
         val ys = nights.map { it.totalS.toFloat() / 3600f }
@@ -325,8 +329,8 @@ private fun SleepDurationLine(nights: List<SleepNight>, color: Color) {
         val padY = size.height * 0.15f
         val plotH = size.height - 2 * padY
         val stepX = size.width / (ys.size - 1)
-        // Goal line at 8h
-        val gy = size.height - padY - ((8f - minY) / span) * plotH
+        // Goal line — sourced from /profile.extra.sleep_goal_h.
+        val gy = size.height - padY - ((goalH - minY) / span) * plotH
         drawLine(
             color = color.copy(alpha = 0.30f),
             start = Offset(0f, gy), end = Offset(size.width, gy),

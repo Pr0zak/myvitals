@@ -465,6 +465,36 @@ data class TimePoint(
 )
 
 @JsonClass(generateAdapter = true)
+data class ProfileDerived(
+    val age: Int? = null,
+    @Json(name = "max_hr_estimated") val maxHrEstimated: Int? = null,
+    @Json(name = "resting_hr_baseline_auto") val restingHrBaselineAuto: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class ProfileExtra(
+    @Json(name = "steps_goal") val stepsGoal: Int? = null,
+    @Json(name = "sleep_goal_h") val sleepGoalH: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class ProfileResponse(
+    @Json(name = "birth_date") val birthDate: String? = null,
+    val sex: String? = null,
+    @Json(name = "height_cm") val heightCm: Double? = null,
+    @Json(name = "weight_goal_kg") val weightGoalKg: Double? = null,
+    @Json(name = "resting_hr_baseline") val restingHrBaseline: Double? = null,
+    @Json(name = "activity_level") val activityLevel: String? = null,
+    val extra: ProfileExtra? = null,
+    val derived: ProfileDerived? = null,
+) {
+    fun stepsGoal(): Int = extra?.stepsGoal ?: 10_000
+    fun sleepGoalH(): Double = extra?.sleepGoalH ?: 8.0
+    /** Max HR for zone bucketing; fallback assumes age ~30 (Tanaka). */
+    fun maxHr(): Int = derived?.maxHrEstimated ?: 187
+}
+
+@JsonClass(generateAdapter = true)
 data class SleepStageBucket(
     val stage: String,
     @Json(name = "duration_s") val durationS: Int,

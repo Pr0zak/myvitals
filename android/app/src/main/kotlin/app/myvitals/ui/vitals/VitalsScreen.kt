@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.DailySummary
+import app.myvitals.sync.ProfileResponse
 import app.myvitals.sync.SoberCurrentResponse
 import app.myvitals.sync.TimePoint
 import app.myvitals.ui.MV
@@ -97,6 +98,7 @@ fun VitalsScreen(
     var weight by remember { mutableStateOf(WeightSnapshot(emptyList(), null, null)) }
     var bp by remember { mutableStateOf(BpSnapshot(null, null, null)) }
     var sober by remember { mutableStateOf<SoberCurrentResponse?>(null) }
+    var profile by remember { mutableStateOf<ProfileResponse?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -168,6 +170,9 @@ fun VitalsScreen(
                 val soberD = async(Dispatchers.IO) {
                     runCatching { api.soberCurrent() }.getOrNull()
                 }
+                val profileD = async(Dispatchers.IO) {
+                    runCatching { api.profile() }.getOrNull()
+                }
 
                 rows = rowsD.await()
                 today = todayD.await()
@@ -175,6 +180,7 @@ fun VitalsScreen(
                 weight = weightD.await()
                 bp = bpD.await()
                 sober = soberD.await()
+                profile = profileD.await()
             }
             error = null
             Timber.i(
@@ -248,7 +254,7 @@ fun VitalsScreen(
                     Vital.SLEEP -> SleepBadge(rows, nowMs, onClick = { onOpenVitalDetail(v) })
                     Vital.STEPS -> StepsBadge(
                         todayCount = today?.stepsTotal ?: rows.lastOrNull()?.stepsTotal,
-                        goal = 10_000,
+                        goal = profile?.stepsGoal() ?: 10_000,
                         lastDate = today?.date ?: rows.lastOrNull()?.date,
                         nowMs = nowMs,
                         onClick = { onOpenVitalDetail(v) },

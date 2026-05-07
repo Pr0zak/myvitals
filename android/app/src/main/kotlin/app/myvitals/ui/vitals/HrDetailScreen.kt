@@ -67,13 +67,16 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    val maxHr = 190  // TODO: pull from /profile
+    var maxHr by remember { mutableStateOf(190) }
 
     LaunchedEffect(range) {
         if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return@LaunchedEffect }
         loading = true; error = null
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            // Profile drives zone thresholds. Re-fetch on every load so a
+            // birth-date update flows through to the chart immediately.
+            runCatching { api.profile() }.getOrNull()?.let { maxHr = it.maxHr() }
             coroutineScope {
                 if (range == VitalRange.DAY) {
                     val liveD = async(Dispatchers.IO) {

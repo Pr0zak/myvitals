@@ -541,6 +541,36 @@ export const api = {
     return data;
   },
 
+  async strengthWorkoutByDate(date: string): Promise<import("./types").StrengthWorkoutDetail | null> {
+    try {
+      const { data } = await http.get(`/workout/strength/by-date/${date}`);
+      return data;
+    } catch (e) {
+      if ((e as { response?: { status?: number } })?.response?.status === 404) return null;
+      throw e;
+    }
+  },
+
+  async strengthExplain(id: number): Promise<{
+    workout_id: number; split_focus: string;
+    why_split: string; why_exercises: string; why_targets: string;
+  }> {
+    const { data } = await http.get(`/workout/strength/explain/${id}`);
+    return data;
+  },
+
+  async strengthStats(days = 90): Promise<{
+    since: string; days: number; n_workouts: number; n_sets: number;
+    total_volume_lb: number; rpe_avg: number | null;
+    daily: Array<{ date: string; volume_lb: number; sets: number }>;
+    per_muscle: Array<{ muscle: string; volume_lb: number }>;
+    progression: Record<string, Array<{ date: string; top_weight_lb: number }>>;
+    progression_names: Record<string, string>;
+  }> {
+    const { data } = await http.get("/workout/strength/stats", { params: { days } });
+    return data;
+  },
+
   async createStrengthWorkout(body: {
     date: string;
     split_focus: string;

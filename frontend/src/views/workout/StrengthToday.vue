@@ -548,7 +548,9 @@ onMounted(loadAll);
 
       <!-- 7-day strip: past 3, today, projected 3 -->
       <div class="week-strip">
-        <div v-for="d in weekStrip" :key="d.iso" class="day"
+        <RouterLink v-for="d in weekStrip" :key="d.iso"
+             :to="{ name: 'workout-strength-day', params: { date: d.iso } }"
+             class="day"
              :class="{
                today: d.isToday,
                completed: d.status === 'completed',
@@ -561,7 +563,7 @@ onMounted(loadAll);
              :title="d.iso + (d.status ? ' · ' + d.status : (d.projected ? ' · projected workout day' : ' · rest day'))">
           <div class="dow">{{ d.label }}</div>
           <div class="dot"></div>
-        </div>
+        </RouterLink>
       </div>
 
       <Card v-if="workout.status === 'skipped'" class="skip-banner" :flat="true">

@@ -876,7 +876,16 @@ try {
   window.map = L.map('m', {zoomControl:true,scrollWheelZoom:false}).setView([$lat,$lon], 14);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(window.map);
-  L.marker([$lat,$lon]).addTo(window.map).bindPopup('$nameEsc').openPopup();
+  // CSS-only pin (avoids the broken-image fallback when Leaflet's
+  // default PNG marker can't resolve under loadDataWithBaseURL(null)).
+  const pinIcon = L.divIcon({
+    html: '<div style="width:18px;height:18px;border-radius:50%;'
+        + 'background:#22C55E;border:2px solid #FFFFFF;'
+        + 'box-shadow:0 2px 6px rgba(0,0,0,0.6);"></div>',
+    className: 'mvpin', iconSize: [18,18], iconAnchor: [9,9],
+  });
+  L.marker([$lat,$lon], {icon: pinIcon}).addTo(window.map)
+    .bindPopup('$nameEsc').openPopup();
   const osm = $osmLiteral;
   let osmLayer = null;
   if (osm) {

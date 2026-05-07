@@ -376,7 +376,14 @@ try {
     }
   }
   ${if (trailLat != null && trailLon != null) """
-  L.marker([$trailLat,$trailLon]).addTo(window.map).bindPopup('$nameEsc');
+  const pinIcon = L.divIcon({
+    html: '<div style="width:16px;height:16px;border-radius:50%;'
+        + 'background:#22C55E;border:2px solid #FFFFFF;'
+        + 'box-shadow:0 2px 6px rgba(0,0,0,0.6);"></div>',
+    className: 'mvpin', iconSize: [16,16], iconAnchor: [8,8],
+  });
+  L.marker([$trailLat,$trailLon], {icon: pinIcon}).addTo(window.map)
+    .bindPopup('$nameEsc');
   if (bounds) bounds.extend([$trailLat,$trailLon]);
   else bounds = L.latLngBounds([$trailLat,$trailLon], [$trailLat,$trailLon]);
   """ else ""}

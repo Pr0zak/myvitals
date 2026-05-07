@@ -460,6 +460,50 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
         </div>
       </section>
 
+      <section v-if="grouped.delayed.length" class="group group-delayed">
+        <h2>Delayed · {{ grouped.delayed.length }}</h2>
+        <div class="grid">
+          <article v-for="t in grouped.delayed" :key="t.id" class="card status-delayed"
+                   :class="{ has_loc: t.latitude != null }"
+                   @click="openMaps(t)">
+            <header>
+              <span class="dot"></span>
+              <strong>{{ t.name }}</strong>
+              <button class="star" :class="{ on: t.subscribed }"
+                      :title="t.subscribed ? 'Unsubscribe' : 'Subscribe to status flips'"
+                      @click.stop="toggleSubscribe(t)">
+                <Star :size="16" />
+              </button>
+              <button v-if="t.latitude != null" class="star map-toggle"
+                      :class="{ on: expandedMaps.has(t.id) }"
+                      title="Show map + linked rides"
+                      @click.stop="toggleMap(t)">
+                <MapIcon :size="14" />
+              </button>
+              <button class="star edit-pin"
+                      title="Edit pin location"
+                      @click.stop="openEdit(t)">
+                <Pencil :size="14" />
+              </button>
+            </header>
+            <p v-if="t.comment" class="comment">{{ t.comment }}</p>
+            <p class="meta">
+              <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
+              <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
+              <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
+              <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
+            </p>
+            <TrailMap
+              v-if="expandedMaps.has(t.id) && t.latitude != null && t.longitude != null"
+              :trail-id="t.id" :name="t.name"
+              :latitude="t.latitude" :longitude="t.longitude"
+              @click.stop
+              @expand="openFullMap(t)"
+            />
+          </article>
+        </div>
+      </section>
+
       <section v-if="grouped.closed.length" class="group group-closed">
         <h2>Closed · {{ grouped.closed.length }}</h2>
         <div class="grid">
@@ -498,50 +542,6 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
                   · last {{ fmtAge(t.last_visit_at) }}
                 </span>
               </span>
-              <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
-            </p>
-            <TrailMap
-              v-if="expandedMaps.has(t.id) && t.latitude != null && t.longitude != null"
-              :trail-id="t.id" :name="t.name"
-              :latitude="t.latitude" :longitude="t.longitude"
-              @click.stop
-              @expand="openFullMap(t)"
-            />
-          </article>
-        </div>
-      </section>
-
-      <section v-if="grouped.delayed.length" class="group group-delayed">
-        <h2>Delayed · {{ grouped.delayed.length }}</h2>
-        <div class="grid">
-          <article v-for="t in grouped.delayed" :key="t.id" class="card status-delayed"
-                   :class="{ has_loc: t.latitude != null }"
-                   @click="openMaps(t)">
-            <header>
-              <span class="dot"></span>
-              <strong>{{ t.name }}</strong>
-              <button class="star" :class="{ on: t.subscribed }"
-                      :title="t.subscribed ? 'Unsubscribe' : 'Subscribe to status flips'"
-                      @click.stop="toggleSubscribe(t)">
-                <Star :size="16" />
-              </button>
-              <button v-if="t.latitude != null" class="star map-toggle"
-                      :class="{ on: expandedMaps.has(t.id) }"
-                      title="Show map + linked rides"
-                      @click.stop="toggleMap(t)">
-                <MapIcon :size="14" />
-              </button>
-              <button class="star edit-pin"
-                      title="Edit pin location"
-                      @click.stop="openEdit(t)">
-                <Pencil :size="14" />
-              </button>
-            </header>
-            <p v-if="t.comment" class="comment">{{ t.comment }}</p>
-            <p class="meta">
-              <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
-              <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
-              <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
               <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
             </p>
             <TrailMap

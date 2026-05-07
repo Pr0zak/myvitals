@@ -102,6 +102,9 @@ fun TrailsScreen(settings: SettingsRepository) {
     var linking by remember { mutableStateOf(false) }
     var fetchingOsm by remember { mutableStateOf(false) }
     var actionResult by remember { mutableStateOf<String?>(null) }
+    // Bumped after a fetch-all-osm-paths run so expanded TrailRows refetch
+    // their geometry from the (possibly newly-cached) backend.
+    var osmCacheEpoch by remember { mutableStateOf(0) }
 
     // Recent rides + link-to-trail picker
     var recentRides by remember { mutableStateOf<List<ActivityRow>>(emptyList()) }
@@ -136,6 +139,11 @@ fun TrailsScreen(settings: SettingsRepository) {
             val r = withContext(Dispatchers.IO) { api.trails() }
             trails = r.trails.sortedBy { it.name }
             error = null
+            val o = trails.count { it.status == "open" }
+            val d = trails.count { it.status == "delayed" }
+            val c = trails.count { it.status == "closed" }
+            Timber.i("trails loaded: %d total — %d open, %d delayed, %d closed",
+                trails.size, o, d, c)
         } catch (e: Exception) {
             Timber.w(e, "trails load failed")
             error = e.message?.take(160)
@@ -149,7 +157,9 @@ fun TrailsScreen(settings: SettingsRepository) {
         refreshing = true
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-            withContext(Dispatchers.IO) { api.refreshTrails() }
+            val r = withContext(Dispatchers.IO) { api.refreshTrails() }
+            Timber.i("trails refresh: fetched=%d snapshots=%d alerts=%d",
+                r.fetched, r.snapshots, r.alerts)
             load()
         } catch (e: Exception) {
             Timber.w(e, "trails refresh failed")
@@ -218,7 +228,13 @@ fun TrailsScreen(settings: SettingsRepository) {
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val r = withContext(Dispatchers.IO) { api.fetchAllTrailOsmPaths() }
-            actionResult = "OSM: ${r.fetched} fetched · ${r.skipped} cached · ${r.failed} failed"
+            Timber.i("OSM fetch: fetched=%d skipped=%d failed=%d total=%d",
+                r.fetched, r.skipped, r.failed, r.totalWithPins)
+            actionResult = if (r.fetched == 0 && r.skipped > 0)
+                "All ${r.skipped} routes already cached. Tap a trail to view."
+                else "OSM: ${r.fetched} fetched · ${r.skipped} cached · ${r.failed} failed"
+            // Bump the cache epoch so any expanded trail's WebView refetches.
+            osmCacheEpoch++
         } catch (e: Exception) {
             Timber.w(e, "fetchOsmRoutes failed")
             actionResult = e.message?.take(160)
@@ -281,9 +297,22 @@ fun TrailsScreen(settings: SettingsRepository) {
                 )
                 Text(
                     if (trails.isEmpty()) "—"
-                    else "${grouped.open.size} open · ${grouped.closed.size} closed",
+                    else listOfNotNull(
+                        "${grouped.open.size} open",
+                        if (grouped.delayed.isNotEmpty()) "${grouped.delayed.size} delayed" else null,
+                        "${grouped.closed.size} closed",
+                    ).joinToString(" · "),
                     color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
                 )
+                val mostRecentFetch = remember(trails) {
+                    trails.mapNotNull { it.fetchedAt }.maxOrNull()
+                }
+                if (mostRecentFetch != null) {
+                    Text(
+                        "synced ${fmtAge(mostRecentFetch, nowMs)}",
+                        color = MV.OnSurfaceDim, fontSize = 10.sp,
+                    )
+                }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { scope.launch { refreshNow() } }, enabled = !refreshing) {
@@ -351,17 +380,7 @@ fun TrailsScreen(settings: SettingsRepository) {
                 if (grouped.open.isNotEmpty()) {
                     item { GroupHeader("Open · ${grouped.open.size}") }
                     items(grouped.open, key = { it.id }) { t ->
-                        TrailRow(t, nowMs,
-                            expanded = expandedTrail.value == t.id,
-                            onTap = { togglePreview(t) },
-                            onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
-                            onLongPress = { openEdit(t) })
-                    }
-                }
-                if (grouped.closed.isNotEmpty()) {
-                    item { GroupHeader("Closed · ${grouped.closed.size}") }
-                    items(grouped.closed, key = { it.id }) { t ->
-                        TrailRow(t, nowMs,
+                        TrailRow(t, nowMs, osmCacheEpoch = osmCacheEpoch,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
@@ -371,7 +390,17 @@ fun TrailsScreen(settings: SettingsRepository) {
                 if (grouped.delayed.isNotEmpty()) {
                     item { GroupHeader("Delayed · ${grouped.delayed.size}") }
                     items(grouped.delayed, key = { it.id }) { t ->
-                        TrailRow(t, nowMs,
+                        TrailRow(t, nowMs, osmCacheEpoch = osmCacheEpoch,
+                            expanded = expandedTrail.value == t.id,
+                            onTap = { togglePreview(t) },
+                            onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
+                            onLongPress = { openEdit(t) })
+                    }
+                }
+                if (grouped.closed.isNotEmpty()) {
+                    item { GroupHeader("Closed · ${grouped.closed.size}") }
+                    items(grouped.closed, key = { it.id }) { t ->
+                        TrailRow(t, nowMs, osmCacheEpoch = osmCacheEpoch,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
@@ -381,7 +410,7 @@ fun TrailsScreen(settings: SettingsRepository) {
                 if (grouped.other.isNotEmpty()) {
                     item { GroupHeader("Other · ${grouped.other.size}") }
                     items(grouped.other, key = { it.id }) { t ->
-                        TrailRow(t, nowMs,
+                        TrailRow(t, nowMs, osmCacheEpoch = osmCacheEpoch,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
@@ -603,6 +632,7 @@ private fun GroupHeader(text: String) {
 private fun TrailRow(
     t: Trail, nowMs: Long,
     expanded: Boolean = false,
+    osmCacheEpoch: Int = 0,
     onTap: () -> Unit,
     onSubscribeToggle: () -> Unit,
     onLongPress: () -> Unit,
@@ -692,8 +722,8 @@ private fun TrailRow(
             // Mini-map preview when expanded
             if (expanded && t.latitude != null && t.longitude != null) {
                 val settings = remember { SettingsRepository(context) }
-                var osmJson by remember(t.id) { mutableStateOf<String?>(null) }
-                LaunchedEffect(t.id) {
+                var osmJson by remember(t.id, osmCacheEpoch) { mutableStateOf<String?>(null) }
+                LaunchedEffect(t.id, osmCacheEpoch) {
                     if (!settings.isConfigured()) return@LaunchedEffect
                     try {
                         val api = BackendClient.create(settings.backendUrl, settings.bearerToken)

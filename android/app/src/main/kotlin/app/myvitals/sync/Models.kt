@@ -442,6 +442,35 @@ data class ActivityLinkTrailBody(
 )
 
 @JsonClass(generateAdapter = true)
+data class DailySummary(
+    val date: String,
+    @Json(name = "resting_hr") val restingHr: Double? = null,
+    @Json(name = "hrv_avg") val hrvAvg: Double? = null,
+    @Json(name = "recovery_score") val recoveryScore: Double? = null,
+    @Json(name = "sleep_duration_s") val sleepDurationS: Int? = null,
+    @Json(name = "sleep_score") val sleepScore: Double? = null,
+    @Json(name = "steps_total") val stepsTotal: Int? = null,
+    @Json(name = "weight_kg") val weightKg: Double? = null,
+    @Json(name = "body_fat_pct") val bodyFatPct: Double? = null,
+    @Json(name = "bp_systolic_avg") val bpSystolicAvg: Double? = null,
+    @Json(name = "bp_diastolic_avg") val bpDiastolicAvg: Double? = null,
+    @Json(name = "readiness_score") val readinessScore: Double? = null,
+    @Json(name = "sleep_debt_h") val sleepDebtH: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class TimePoint(
+    val time: String,
+    val value: Double,
+)
+
+@JsonClass(generateAdapter = true)
+data class TimeSeries(
+    val points: List<TimePoint> = emptyList(),
+    val avg: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
 data class TrailLocationBody(
     val latitude: Double? = null,
     val longitude: Double? = null,

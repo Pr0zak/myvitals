@@ -112,5 +112,10 @@ dependencies {
 
     implementation("com.jakewharton.timber:timber:5.0.1")
 
+    // Vico — Compose-native chart library used on Vitals detail screens.
+    implementation("com.patrykandpatrick.vico:compose:2.1.0")
+    implementation("com.patrykandpatrick.vico:compose-m3:2.1.0")
+    implementation("com.patrykandpatrick.vico:core:2.1.0")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

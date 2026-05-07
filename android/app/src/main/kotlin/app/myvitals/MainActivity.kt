@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
-import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terrain
 import androidx.compose.material3.Icon
@@ -56,6 +56,9 @@ import kotlinx.coroutines.launch
 import timber.log.Timber
 
 private object Routes {
+    const val VITALS = "vitals"
+    const val VITAL_DETAIL = "vitals/{key}"
+    fun vitalDetail(key: String) = "vitals/$key"
     const val SOBER = "sober"
     const val WORKOUT = "workout/today"
     const val WORKOUT_HISTORY = "workout/history"
@@ -111,10 +114,38 @@ class MainActivity : ComponentActivity() {
                 ) { padding ->
                     NavHost(
                         navController = nav,
-                        startDestination = Routes.SOBER,
+                        startDestination = Routes.VITALS,
                         modifier = Modifier.fillMaxSize().padding(padding)
                             .swipeBetweenTopTabs(nav),
                     ) {
+                        composable(Routes.VITALS) {
+                            app.myvitals.ui.vitals.VitalsScreen(
+                                settings = settings,
+                                onOpenSettings = { nav.navigateTab(Routes.SETTINGS) },
+                                onOpenSober = { nav.navigate(Routes.SOBER) },
+                                onOpenVitalDetail = { v ->
+                                    nav.navigate(Routes.vitalDetail(v.name))
+                                },
+                            )
+                        }
+                        composable(
+                            Routes.VITAL_DETAIL,
+                            arguments = listOf(
+                                androidx.navigation.navArgument("key") {
+                                    type = androidx.navigation.NavType.StringType
+                                },
+                            ),
+                        ) { entry ->
+                            val key = entry.arguments?.getString("key") ?: "HR"
+                            val vital = runCatching {
+                                app.myvitals.ui.vitals.Vital.valueOf(key)
+                            }.getOrDefault(app.myvitals.ui.vitals.Vital.HR)
+                            app.myvitals.ui.vitals.VitalsDetailScreen(
+                                settings = settings,
+                                vital = vital,
+                                onBack = { nav.popBackStack() },
+                            )
+                        }
                         composable(Routes.SOBER) {
                             SoberHomeScreen(
                                 settings = settings,
@@ -220,7 +251,7 @@ class MainActivity : ComponentActivity() {
 
 /** Top-level tab routes, ordered to match the bottom-bar layout. */
 private val TOP_TABS = listOf(
-    Routes.SOBER, Routes.WORKOUT, Routes.ACTIVITIES, Routes.TRAILS, Routes.SETTINGS,
+    Routes.VITALS, Routes.WORKOUT, Routes.ACTIVITIES, Routes.TRAILS, Routes.SETTINGS,
 )
 
 /**
@@ -266,7 +297,10 @@ private fun BottomBar(nav: NavHostController) {
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination?.route ?: Routes.SOBER
     NavigationBar(containerColor = MV.SurfaceContainerLow) {
-        Item(current, Routes.SOBER, "Sober", Icons.Outlined.Bedtime) { nav.navigateTab(Routes.SOBER) }
+        Item(current, Routes.VITALS, "Vitals", Icons.Outlined.MonitorHeart,
+            highlightAlsoFor = setOf(Routes.SOBER, Routes.VITAL_DETAIL)) {
+            nav.navigateTab(Routes.VITALS)
+        }
         Item(current, Routes.WORKOUT, "Workout", Icons.Outlined.FitnessCenter,
             highlightAlsoFor = setOf(
                 Routes.WORKOUT_HISTORY,

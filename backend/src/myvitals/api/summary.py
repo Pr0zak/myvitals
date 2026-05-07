@@ -4,12 +4,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import require_query
+from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
 from ..schemas import TodaySummary
 
-router = APIRouter(dependencies=[Depends(require_query)])
+router = APIRouter(dependencies=[Depends(require_any)])
 
 
 @router.get("/today", response_model=TodaySummary)

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import require_query
+from ..auth import require_any, require_query
 from ..db import models
 from ..db.session import get_session
 from ..integrations import strava
@@ -202,7 +202,7 @@ def _activity_to_out(
 
 
 @router.get("/activities/stats", response_model=ActivityStatsOut,
-            dependencies=[Depends(require_query)])
+            dependencies=[Depends(require_any)])
 async def activities_stats(
     days: int = Query(30, ge=1, le=3650),
     db: AsyncSession = Depends(get_session),
@@ -282,7 +282,7 @@ async def activities_stats(
 
 
 @router.get("/activities/{source}/{source_id}", response_model=ActivityOut,
-            dependencies=[Depends(require_query)])
+            dependencies=[Depends(require_any)])
 async def get_activity(
     source: str,
     source_id: str,
@@ -305,7 +305,7 @@ async def get_activity(
 
 
 @router.post("/activities/{source}/{source_id}/link-trail",
-             dependencies=[Depends(require_query)])
+             dependencies=[Depends(require_any)])
 async def link_activity_trail(
     source: str,
     source_id: str,
@@ -334,7 +334,7 @@ async def link_activity_trail(
 
 
 @router.post("/activities/{source}/{source_id}/notes",
-             dependencies=[Depends(require_query)])
+             dependencies=[Depends(require_any)])
 async def update_activity_notes(
     source: str,
     source_id: str,
@@ -355,7 +355,7 @@ async def update_activity_notes(
     return {"status": "saved"}
 
 
-@router.get("/activities", response_model=list[ActivityOut], dependencies=[Depends(require_query)])
+@router.get("/activities", response_model=list[ActivityOut], dependencies=[Depends(require_any)])
 async def list_activities(
     since: datetime | None = Query(None),
     type: str | None = Query(None),

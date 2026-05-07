@@ -108,6 +108,31 @@ interface BackendApi {
     @GET("trails/{id}/osm-paths")
     suspend fun trailOsmPaths(@Path("id") id: Long): Response<okhttp3.ResponseBody>
 
+    // ── Vitals dashboard ──────────────────────────────────────
+    @GET("summary/range")
+    suspend fun summaryRange(
+        @retrofit2.http.Query("since") since: String,
+        @retrofit2.http.Query("until") until: String? = null,
+    ): List<DailySummary>
+
+    @GET("query/heartrate")
+    suspend fun heartRateSeries(
+        @retrofit2.http.Query("since") since: String? = null,
+        @retrofit2.http.Query("until") until: String? = null,
+    ): TimeSeries
+
+    @GET("query/hrv")
+    suspend fun hrvSeries(
+        @retrofit2.http.Query("since") since: String? = null,
+        @retrofit2.http.Query("until") until: String? = null,
+    ): TimeSeries
+
+    @GET("query/steps")
+    suspend fun stepsSeries(
+        @retrofit2.http.Query("since") since: String? = null,
+        @retrofit2.http.Query("until") until: String? = null,
+    ): TimeSeries
+
     @GET("activities/{source}/{sourceId}")
     suspend fun activity(
         @Path("source") source: String,

@@ -231,6 +231,22 @@ class StravaCredentials(Base):
     connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class Concept2Credentials(Base):
+    """Single-row table (id=1) for the Concept2 Logbook API. Long-lived
+    personal tokens (issued from the Concept2 dev console) cover the
+    single-user case; OAuth refresh fields are present for future use."""
+    __tablename__ = "concept2_credentials"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    access_token: Mapped[str] = mapped_column(Text)
+    refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scope: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class TrailStatusConfig(Base):
     """Dashboard-editable RainoutLine DNIS. Single row (id=1)."""
     __tablename__ = "trail_status_config"

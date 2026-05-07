@@ -28,6 +28,14 @@ const stravaError = ref<string | null>(null);
 const stravaSyncing = ref(false);
 const stravaSyncResult = ref<string>("");
 
+// Concept2 (rower) — long-lived personal token from log.concept2.com/developers
+type Concept2Status = Awaited<ReturnType<typeof api.concept2Status>>;
+const concept2 = ref<Concept2Status | null>(null);
+const concept2Error = ref<string | null>(null);
+const concept2TokenInput = ref("");
+const concept2Saving = ref(false);
+const concept2Result = ref<string>("");
+
 // Strava OAuth credential fields (dashboard-editable)
 const cidInput = ref("");
 const secretInput = ref("");
@@ -388,7 +396,7 @@ async function test() {
     await api.health();
     await api.lastSync();
     status.value = "ok";
-    await Promise.all([loadStrava(), loadTrailCfg()]);
+    await Promise.all([loadStrava(), loadTrailCfg(), loadConcept2()]);
   } catch (e: unknown) {
     status.value = "fail";
     if (e && typeof e === "object" && "response" in e) {
@@ -494,6 +502,47 @@ async function disconnectStrava() {
     await loadStrava();
   } catch (e) {
     stravaError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function loadConcept2() {
+  if (!queryToken.value) return;
+  concept2Error.value = null;
+  try { concept2.value = await api.concept2Status(); }
+  catch (e: unknown) {
+    concept2Error.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function saveConcept2() {
+  const token = concept2TokenInput.value.trim();
+  if (!token) {
+    concept2Result.value = "Paste a token first.";
+    return;
+  }
+  concept2Saving.value = true;
+  concept2Result.value = "";
+  concept2Error.value = null;
+  try {
+    const r = await api.concept2Connect(token);
+    concept2.value = r as Concept2Status;
+    concept2TokenInput.value = "";
+    concept2Result.value = r.connected
+      ? `Connected as ${r.user_name ?? r.user_id ?? "Concept2 user"}.`
+      : "Saved.";
+  } catch (e: unknown) {
+    concept2Error.value = e instanceof Error ? e.message : String(e);
+  } finally { concept2Saving.value = false; }
+}
+
+async function disconnectConcept2() {
+  if (!confirm("Disconnect Concept2? Stored erg sessions will stay; the token will be wiped.")) return;
+  try {
+    await api.concept2Disconnect();
+    await loadConcept2();
+    concept2Result.value = "Disconnected.";
+  } catch (e) {
+    concept2Error.value = e instanceof Error ? e.message : String(e);
   }
 }
 
@@ -983,6 +1032,53 @@ onUnmounted(stopJobPolling);
       </template>
 
       <div v-else-if="!stravaError" class="hint">Loading…</div>
+    </details>
+
+    <!-- ── Concept2 ── -->
+    <details class="section">
+      <summary><h2>Concept2 (rower)</h2></summary>
+      <div v-if="concept2Error" class="err">{{ concept2Error }}</div>
+
+      <template v-if="concept2">
+        <template v-if="concept2.connected">
+          <p class="ok-text">
+            <Check :size="14"/> Connected as
+            <strong>{{ concept2.user_name ?? concept2.user_id }}</strong><br/>
+            <span class="muted">Token: <code>{{ concept2.token_masked }}</code></span><br/>
+            <span class="muted" v-if="concept2.last_sync_at">
+              Last sync: {{ fmt(concept2.last_sync_at) }}
+            </span>
+            <span class="muted" v-else>Last sync: never</span>
+          </p>
+          <div class="actions">
+            <button class="ghost danger" @click="disconnectConcept2">Disconnect</button>
+          </div>
+          <div v-if="concept2Result" class="hint">{{ concept2Result }}</div>
+        </template>
+
+        <template v-else>
+          <p class="hint">
+            Generate a long-lived personal token at
+            <a href="https://log.concept2.com/developers" target="_blank" rel="noreferrer">
+              log.concept2.com/developers</a>
+            (scopes: <code>user:read,results:read</code>) and paste it here.
+            Stored in the database, never echoed back.
+          </p>
+          <label>
+            <span>Personal access token</span>
+            <input v-model="concept2TokenInput" type="password"
+                   placeholder="Concept2 token" autocomplete="off"/>
+          </label>
+          <div class="actions">
+            <button class="primary" :disabled="concept2Saving" @click="saveConcept2">
+              {{ concept2Saving ? "Validating…" : "Connect Concept2" }}
+            </button>
+          </div>
+          <div v-if="concept2Result" class="hint">{{ concept2Result }}</div>
+        </template>
+      </template>
+
+      <div v-else-if="!concept2Error" class="hint">Loading…</div>
     </details>
   </div>
 </template>

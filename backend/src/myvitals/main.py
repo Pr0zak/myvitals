@@ -15,6 +15,7 @@ from .api import (
     ai,
     analytics,
     annotations,
+    concept2,
     debug,
     export,
     imports,
@@ -244,6 +245,7 @@ app.include_router(sober.router, tags=["sober"])
 app.include_router(ai.router, tags=["ai"])
 app.include_router(workout_strength.router, tags=["workout-strength"])
 app.include_router(trails.router, tags=["trails"])
+app.include_router(concept2.router)
 
 # Bundled exercise images (yuhonas/free-exercise-db, public domain).
 # Mounted off the package's data dir so the wheel ships them.

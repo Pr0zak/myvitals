@@ -407,6 +407,33 @@ export const api = {
     return data;
   },
 
+  async concept2Status(): Promise<{
+    connected: boolean;
+    user_id?: number | null;
+    user_name?: string | null;
+    token_masked?: string | null;
+    last_sync_at?: string | null;
+    connected_at?: string | null;
+  }> {
+    const { data } = await http.get("/integrations/concept2/status");
+    return data;
+  },
+
+  async concept2Connect(access_token: string): Promise<{
+    connected: boolean;
+    user_id?: number | null;
+    user_name?: string | null;
+    token_masked?: string | null;
+  }> {
+    const { data } = await http.put("/integrations/concept2/token", { access_token });
+    return data;
+  },
+
+  async concept2Disconnect(): Promise<{ connected: boolean }> {
+    const { data } = await http.delete("/integrations/concept2/token");
+    return data;
+  },
+
   async activities(opts: { since?: Date | string; type?: string; limit?: number } = {}): Promise<import("./types").Activity[]> {
     const params: Record<string, string | number> = {};
     if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;

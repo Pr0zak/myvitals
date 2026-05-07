@@ -38,6 +38,7 @@ const router = createRouter({
     { path: "/alerts", name: "alerts", component: () => import("./views/Alerts.vue") },
     { path: "/trails", name: "trails", component: () => import("./views/Trails.vue") },
     { path: "/workout/strength/today", name: "workout-strength-today", component: () => import("./views/workout/StrengthToday.vue") },
+    { path: "/workout/strength/catalog", name: "workout-strength-catalog", component: () => import("./views/workout/StrengthCatalog.vue") },
     { path: "/workout/strength/history", name: "workout-strength-history", component: () => import("./views/workout/StrengthHistory.vue") },
     { path: "/workout/strength/equipment", name: "workout-strength-equipment", component: () => import("./views/workout/StrengthEquipment.vue") },
     { path: "/logs", name: "logs", component: () => import("./views/Logs.vue") },

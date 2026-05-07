@@ -86,6 +86,12 @@ class EquipmentPayload(BaseModel):
     kettlebells_lb: list[float] = []
     resistance_bands: bool = False
     bodyweight: bool = True
+    # Per-exercise overrides — exercise_id → one of:
+    #   "disabled"  — never include in generated plans
+    #   "favorite"  — prefer when filling a slot the exercise can fill
+    #   "avoid"     — picked only when no other option exists
+    # Absence from the dict = neutral (default behaviour).
+    exercise_prefs: dict[str, str] = Field(default_factory=dict)
 
 
 class EquipmentIn(BaseModel):
@@ -187,6 +193,42 @@ async def get_exercise(exercise_id: str) -> dict[str, Any]:
     if row is None:
         raise HTTPException(status_code=404, detail="exercise not found")
     return row
+
+
+class ExercisePrefBody(BaseModel):
+    pref: Literal["neutral", "disabled", "favorite", "avoid"]
+
+
+@router.put("/exercises/{exercise_id}/pref")
+async def put_exercise_pref(
+    exercise_id: str, body: ExercisePrefBody,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Set a per-exercise preference. 'neutral' clears any existing pref."""
+    if exercise_id not in _CATALOG_BY_ID:
+        raise HTTPException(status_code=404, detail="exercise not found")
+    now = datetime.now(timezone.utc)
+    row = await db.get(models.UserEquipment, 1)
+    if row is None:
+        row = models.UserEquipment(
+            id=1,
+            payload=EquipmentPayload().model_dump(),
+            unit="lb",
+            updated_at=now,
+        )
+        db.add(row)
+        await db.flush()
+    payload = dict(row.payload or {})
+    prefs = dict(payload.get("exercise_prefs") or {})
+    if body.pref == "neutral":
+        prefs.pop(exercise_id, None)
+    else:
+        prefs[exercise_id] = body.pref
+    payload["exercise_prefs"] = prefs
+    row.payload = payload
+    row.updated_at = now
+    await db.commit()
+    return {"exercise_id": exercise_id, "pref": body.pref}
 
 
 # ------------------------------------------------------------------

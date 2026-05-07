@@ -202,9 +202,10 @@ const groups = computed<Group[]>(() => {
     },
     {
       id: "workout", icon: Dumbbell, label: "Workout", children: [
-        { to: "/workout/strength/today",     icon: Home,     label: "Strength today" },
-        { to: "/workout/strength/history",   icon: List,     label: "Strength history" },
-        { to: "/workout/strength/equipment", icon: Settings, label: "Strength equipment" },
+        { to: "/workout/strength/today",     icon: Home,        label: "Strength today" },
+        { to: "/workout/strength/catalog",   icon: BarChart3,   label: "Strength catalog" },
+        { to: "/workout/strength/history",   icon: List,        label: "Strength history" },
+        { to: "/workout/strength/equipment", icon: Settings,    label: "Strength equipment" },
       ],
     },
     { id: "trails", to: "/trails", icon: Mountain, label: "Trails" },

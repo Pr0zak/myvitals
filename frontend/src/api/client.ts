@@ -577,6 +577,16 @@ export const api = {
     await http.delete(`/workout/strength/sets/${id}`);
   },
 
+  async setExercisePref(
+    exerciseId: string,
+    pref: "neutral" | "disabled" | "favorite" | "avoid",
+  ): Promise<{ exercise_id: string; pref: string }> {
+    const { data } = await http.put(
+      `/workout/strength/exercises/${exerciseId}/pref`, { pref },
+    );
+    return data;
+  },
+
   // ── Trails (RainoutLine status) ───────────────────────────
   async trails(): Promise<{
     count: number;

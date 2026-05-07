@@ -394,15 +394,26 @@ def select_exercises_for_split(
     focus: str,
     level: str,
     rng: random.Random,
+    exercise_prefs: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Pick 1 main compound + 2 secondaries + 2-3 isolations for the focus.
+
+    `exercise_prefs` (optional) lets the user opt out of disliked
+    exercises and bias toward favorites:
+        "disabled"  — fully excluded
+        "favorite"  — moved to top of candidates for any slot it fits
+        "avoid"     — pushed to bottom of candidates (last-resort pick)
 
     Returns (chosen_exercises, advisory_notes).
     Determinism: pass a seeded random.Random and the same input always
     returns the same output.
     """
     notes: list[str] = []
+    prefs = exercise_prefs or {}
     patterns = SPLIT_PATTERNS.get(focus) or SPLIT_PATTERNS["full_body"]
+
+    # Pre-filter: drop disabled exercises entirely
+    catalog = [e for e in catalog if prefs.get(e["id"]) != "disabled"]
 
     chosen: list[dict[str, Any]] = []
     chosen_ids: set[str] = set()
@@ -411,6 +422,19 @@ def select_exercises_for_split(
         candidates = _exercises_for_pattern(catalog, pattern, level)
         # Drop any already chosen (avoid duplicates across passes).
         candidates = [c for c in candidates if c["id"] not in chosen_ids]
+        # Apply user prefs:
+        #   - favorites: if any candidate is favorited, pick from favorites only
+        #   - avoid: only consider these as a last resort (push to back)
+        if prefs and candidates:
+            favs = [c for c in candidates if prefs.get(c["id"]) == "favorite"]
+            if favs:
+                # Hard filter to favorites — user explicitly wants these
+                candidates = favs
+            else:
+                # Push 'avoid' picks to the bottom; preserve relative order otherwise
+                avoids = [c for c in candidates if prefs.get(c["id"]) == "avoid"]
+                normal = [c for c in candidates if prefs.get(c["id"]) != "avoid"]
+                candidates = normal + avoids
         if not candidates:
             if pattern == "vertical_pull":
                 notes.append(
@@ -650,7 +674,13 @@ async def generate_plan(
             notes=["No exercises match your equipment. Add gear in Settings."],
         )
 
-    chosen, sel_notes = select_exercises_for_split(catalog, focus, level, rng)
+    exercise_prefs = (
+        equipment.get("exercise_prefs") or {}
+        if isinstance(equipment, dict) else {}
+    )
+    chosen, sel_notes = select_exercises_for_split(
+        catalog, focus, level, rng, exercise_prefs=exercise_prefs,
+    )
     notes.extend(sel_notes)
 
     superset_map = pair_supersets(chosen)

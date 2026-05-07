@@ -626,6 +626,8 @@ export const api = {
       comment: string | null;
       source_ts: string | null;
       fetched_at: string | null;
+      visits_30d?: number;
+      last_visit_at?: string | null;
     }>;
   }> {
     const { data } = await http.get("/trails");
@@ -674,6 +676,28 @@ export const api = {
     city?: string | null; state?: string | null;
   }): Promise<unknown> {
     const { data } = await http.put(`/trails/${id}/location`, body);
+    return data;
+  },
+
+  async linkActivitiesToTrails(maxKm = 2.0, relink = false): Promise<{
+    scanned: number; linked: number; already_linked_skipped: number;
+    no_match_within_km: number; no_gps: number; max_km: number;
+  }> {
+    const { data } = await http.post("/trails/link-activities", null, {
+      params: { max_km: maxKm, relink },
+    });
+    return data;
+  },
+
+  async trailVisits(id: number, days = 365): Promise<{
+    trail_id: number; name: string; count: number;
+    visits: Array<{
+      source: string; source_id: string; type: string; name: string | null;
+      start_at: string; duration_s: number;
+      distance_m: number | null; avg_hr: number | null; kcal: number | null;
+    }>;
+  }> {
+    const { data } = await http.get(`/trails/${id}/visits`, { params: { days } });
     return data;
   },
 

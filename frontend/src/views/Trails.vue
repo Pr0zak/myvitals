@@ -45,6 +45,22 @@ async function refresh() {
   }
 }
 
+const linking = ref(false);
+const linkResult = ref<string>("");
+async function linkActivities() {
+  linking.value = true;
+  linkResult.value = "";
+  try {
+    const r = await api.linkActivitiesToTrails(2.0, false);
+    linkResult.value = `Linked ${r.linked} new · ${r.already_linked_skipped} already · ${r.no_match_within_km} no match · ${r.no_gps} no GPS`;
+    await load();
+  } catch (e) {
+    linkResult.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    linking.value = false;
+  }
+}
+
 async function toggleSubscribe(t: Trail) {
   try {
     if (t.subscribed) {
@@ -82,6 +98,33 @@ function openEdit(t: Trail) {
   editError.value = "";
 }
 function closeEdit() { editTrail.value = null; }
+
+function useMyLocation() {
+  if (!navigator.geolocation) {
+    editError.value = "Geolocation not supported in this browser";
+    return;
+  }
+  editError.value = "Locating…";
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      editLat.value = pos.coords.latitude.toFixed(6);
+      editLon.value = pos.coords.longitude.toFixed(6);
+      editError.value = "";
+    },
+    (err) => { editError.value = `Location failed: ${err.message}`; },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 60_000 },
+  );
+}
+
+function openInMaps() {
+  const t = editTrail.value;
+  if (!t) return;
+  // Pre-zoom to the existing pin if known, else search by trail name.
+  const url = (t.latitude != null && t.longitude != null)
+    ? `https://www.google.com/maps/@${t.latitude},${t.longitude},15z`
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t.name)}`;
+  window.open(url, "_blank", "noreferrer");
+}
 
 async function saveEdit() {
   if (!editTrail.value) return;
@@ -141,11 +184,18 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
   <main class="trails">
     <header>
       <h1>Trails</h1>
-      <button class="refresh" :disabled="refreshing" @click="refresh">
-        <RefreshCw :size="16" :class="{ spinning: refreshing }" />
-        {{ refreshing ? "Refreshing…" : "Refresh now" }}
-      </button>
+      <div class="header-actions">
+        <button class="refresh" :disabled="refreshing" @click="refresh">
+          <RefreshCw :size="16" :class="{ spinning: refreshing }" />
+          {{ refreshing ? "Refreshing…" : "Refresh" }}
+        </button>
+        <button class="refresh" :disabled="linking" @click="linkActivities"
+                title="Auto-link Strava / Garmin activities to trails by GPS proximity">
+          🚴 {{ linking ? "Linking…" : "Link activities" }}
+        </button>
+      </div>
     </header>
+    <p v-if="linkResult" class="hint" style="text-align: right">{{ linkResult }}</p>
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load trails.</p>
     <p v-else-if="loading" class="hint">Loading…</p>
@@ -184,6 +234,9 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
               <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
               <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
               <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
+              <span v-if="t.visits_30d && t.visits_30d > 0" class="visits">
+                · 🚴 {{ t.visits_30d }} visit{{ t.visits_30d === 1 ? '' : 's' }} (30d)
+              </span>
               <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
             </p>
           </article>
@@ -215,6 +268,9 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
               <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
               <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
               <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
+              <span v-if="t.visits_30d && t.visits_30d > 0" class="visits">
+                · 🚴 {{ t.visits_30d }} visit{{ t.visits_30d === 1 ? '' : 's' }} (30d)
+              </span>
               <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
             </p>
           </article>
@@ -247,8 +303,15 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
           <button class="close" @click="closeEdit">✕</button>
         </header>
         <p class="hint">
-          Decimal degrees. Find a trail's coords by searching it on Google Maps,
-          right-clicking the trailhead, and copying the lat/lon pair.
+          Decimal degrees. Two quick ways to fill these in:
+        </p>
+        <div class="quick-actions">
+          <button class="ghost" @click="useMyLocation">📍 Use my location</button>
+          <button class="ghost" @click="openInMaps">🗺 Open in Google Maps</button>
+        </div>
+        <p class="hint" style="font-size: 0.7rem; color: var(--muted-2)">
+          Or right-click any spot in Google Maps and the lat/lon pair appears
+          at the top of the menu — paste below.
         </p>
         <div class="form-grid">
           <label>Latitude<input type="number" step="0.0001" v-model="editLat" placeholder="e.g. 38.9881" /></label>
@@ -308,6 +371,8 @@ header h1 { margin: 0; }
 .nav-ic { color: var(--muted-2); margin-left: 0.4rem; vertical-align: middle; }
 .loc { color: var(--muted); }
 .loc.nopin { color: #f59e0b; }
+.visits { color: #22c55e; font-weight: 500; }
+.header-actions { display: flex; gap: 0.5rem; }
 .edit-pin { color: var(--muted-2); }
 .edit-pin:hover { color: var(--accent, #ef4444); }
 
@@ -328,6 +393,9 @@ header h1 { margin: 0; }
   border-radius: 6px; padding: 0.4rem 0.55rem; color: var(--text);
   font-family: inherit;
 }
+.quick-actions { display: flex; gap: 0.4rem; margin: 0.5rem 0 0.6rem; flex-wrap: wrap; }
+.quick-actions .ghost { padding: 0.4rem 0.7rem; font-size: 0.78rem; }
+
 .actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
 .actions .primary {
   background: var(--accent, #ef4444); color: #fff; border: none;

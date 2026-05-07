@@ -261,6 +261,10 @@ class Activity(Base):
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)), nullable=True)
     hr_recovery_60s: Mapped[float | None] = mapped_column(Float, nullable=True)
     hr_recovery_120s: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Linked trail (RainoutLine catalog) when the activity's start GPS
+    # falls within ~2km of a trail's pinned coords. Auto-detected on
+    # ingest + via /trails/link-activities; manually settable.
+    trail_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
 
 
 class AiConfig(Base):

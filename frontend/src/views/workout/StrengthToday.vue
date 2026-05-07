@@ -136,19 +136,28 @@ function addRest(s: number) {
 }
 onUnmounted(stopRest);
 
+// Week-strip + training prefs (drives the projected workout-day pattern)
+const recentWorkouts = ref<Array<{ date: string; status: string }>>([]);
+const trainingPrefs = ref<{ days_per_week: number } | null>(null);
+
 async function loadAll() {
   if (!queryToken.value) { loading.value = false; return; }
   loading.value = true;
   error.value = "";
   try {
-    const [w, r, cat] = await Promise.all([
+    const [w, r, cat, hist, eq] = await Promise.all([
       api.strengthToday(),
       api.strengthRecovery().catch(() => null),
       api.strengthExercises().catch(() => ({ count: 0, exercises: [] as StrengthExercise[] })),
+      api.strengthWorkouts({ limit: 30 }).catch(() => ({ count: 0, workouts: [] })),
+      api.strengthEquipment().catch(() => null),
     ]);
     workout.value = w;
     recovery.value = r;
     catalogById.value = Object.fromEntries(cat.exercises.map((e) => [e.id, e]));
+    recentWorkouts.value = hist.workouts.map((x) => ({ date: x.date, status: x.status }));
+    trainingPrefs.value = (eq?.payload as unknown as { training?: { days_per_week: number } })
+      ?.training ?? { days_per_week: 3 };
     // Pre-fill set entries from any already-logged sets so the user can
     // resume without losing data
     if (w) {
@@ -197,6 +206,70 @@ async function regenerate(force = false) {
     busy.value = "";
   }
 }
+
+async function deferToday() {
+  if (!workout.value) return;
+  if (!confirm("Defer today's workout? It'll be marked as skipped and tomorrow generates fresh.")) return;
+  busy.value = "defer";
+  try {
+    await api.patchStrengthWorkout(workout.value.id, { status: "skipped" });
+    await loadAll();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy.value = "";
+  }
+}
+
+// Per-day strip: today centered, 3 days before + 3 days after.
+type DayCell = {
+  iso: string;
+  label: string;            // "Mon", "Tue" or "Today"
+  dow: number;              // 0=Sunday..6=Saturday
+  isToday: boolean;
+  isPast: boolean;
+  status: string | null;    // completed | in_progress | skipped | planned | null
+  projected: boolean;       // backend hasn't planned yet, but our cadence says it should be
+};
+
+const weekStrip = computed<DayCell[]>(() => {
+  const out: DayCell[] = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const histByDate: Record<string, string> = {};
+  for (const w of recentWorkouts.value) histByDate[w.date] = w.status;
+
+  // Workout-day pattern (Mon..Sun = 0..6 in our local-Mon-first model).
+  // 3 days/week → Mon/Wed/Fri; 4 → Mon/Tue/Thu/Fri; 5 → Mon-Fri; 6 → Mon-Sat.
+  const dpw = trainingPrefs.value?.days_per_week ?? 3;
+  const PATTERN: Record<number, number[]> = {
+    2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4],
+    5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5],
+  };
+  const pattern = new Set(PATTERN[dpw] ?? PATTERN[3]);
+  // Map JS dow (0=Sun..6=Sat) to our Mon-first index (0=Mon..6=Sun)
+  const monFirst = (jsDow: number) => (jsDow + 6) % 7;
+
+  for (let offset = -3; offset <= 3; offset++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + offset);
+    const iso = d.toISOString().slice(0, 10);
+    const label = offset === 0 ? "Today"
+      : d.toLocaleDateString(undefined, { weekday: "short" });
+    const past = d.getTime() < todayMs;
+    const status = histByDate[iso] ?? null;
+    const projected = !past && status === null && pattern.has(monFirst(d.getDay()));
+    out.push({
+      iso, label, dow: d.getDay(),
+      isToday: offset === 0,
+      isPast: past,
+      status,
+      projected,
+    });
+  }
+  return out;
+});
 
 function entryKey(wexId: number, setNum: number) { return `${wexId}-${setNum}`; }
 function entry(wexId: number, setNum: number, target: number, targetWeight: number | null): SetEntry {
@@ -338,6 +411,24 @@ onMounted(loadAll);
 
     <!-- Plan exists -->
     <template v-else>
+      <!-- 7-day strip: past 3, today, projected 3 -->
+      <div class="week-strip">
+        <div v-for="d in weekStrip" :key="d.iso" class="day"
+             :class="{
+               today: d.isToday,
+               completed: d.status === 'completed',
+               in_progress: d.status === 'in_progress',
+               skipped: d.status === 'skipped',
+               planned: d.status === 'planned',
+               projected: d.projected,
+               past: d.isPast,
+             }"
+             :title="d.iso + (d.status ? ' · ' + d.status : (d.projected ? ' · projected workout day' : ' · rest day'))">
+          <div class="dow">{{ d.label }}</div>
+          <div class="dot"></div>
+        </div>
+      </div>
+
       <Card class="ctx" :flat="true">
         <div class="ctx-row">
           <span><strong>{{ completedSetsCount }}</strong> / {{ totalSetsCount }} sets</span>
@@ -350,9 +441,13 @@ onMounted(loadAll);
           <span class="status">{{ workout.status.replace('_', ' ') }}</span>
         </div>
         <p v-if="workout.notes" class="notes">{{ workout.notes }}</p>
-        <div class="actions" v-if="workout.status === 'planned'">
-          <button class="ghost" :disabled="busy === 'regen'" @click="regenerate(true)">
+        <div class="actions" v-if="workout.status === 'planned' || workout.status === 'in_progress'">
+          <button class="ghost" v-if="workout.status === 'planned'"
+                  :disabled="busy === 'regen'" @click="regenerate(true)">
             <RotateCw :size="14" /> Regenerate
+          </button>
+          <button class="ghost" :disabled="busy === 'defer'" @click="deferToday">
+            <SkipForward :size="14" /> Defer to tomorrow
           </button>
         </div>
       </Card>
@@ -617,6 +712,36 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 .review-card .next { margin: 0.6rem 0 0; color: var(--text-soft); font-size: 0.88rem; }
 .review-card .cached { font-size: 0.7rem; color: var(--muted-2);
   margin-top: 0.4rem; font-family: 'Geist Mono', ui-monospace, monospace; }
+
+.week-strip {
+  display: flex; gap: 0.4rem; margin: 0.4rem 0 0.8rem;
+  justify-content: space-between;
+}
+.week-strip .day {
+  flex: 1; padding: 0.5rem 0.3rem; text-align: center;
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 8px; cursor: default;
+  display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+}
+.week-strip .day .dow {
+  font-size: 0.68rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
+}
+.week-strip .day .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--line);
+}
+.week-strip .day.today { border-color: var(--accent, #ef4444); }
+.week-strip .day.today .dow { color: var(--text); }
+.week-strip .day.completed .dot { background: #22c55e; }
+.week-strip .day.in_progress .dot { background: #f59e0b; }
+.week-strip .day.skipped .dot { background: #94a3b8; }
+.week-strip .day.planned .dot { background: var(--accent, #ef4444); }
+.week-strip .day.projected .dot {
+  background: transparent; border: 1.5px solid var(--accent, #ef4444);
+}
+.week-strip .day.past:not(.completed):not(.in_progress):not(.skipped) {
+  opacity: 0.55;
+}
 
 .swap-btn {
   display: inline-flex; align-items: center; gap: 0.3rem;

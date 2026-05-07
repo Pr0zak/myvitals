@@ -198,37 +198,73 @@ function isPR(a: Activity): PRBadge[] {
 const heatmapOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
+  // Bucket minutes-per-day, keyed by ISO date.
   const bucket: Record<string, number> = {};
   for (const a of activities.value) {
     const d = a.start_at.slice(0, 10);
-    bucket[d] = (bucket[d] ?? 0) + a.duration_s / 60; // minutes
+    bucket[d] = (bucket[d] ?? 0) + a.duration_s / 60;
   }
-  const data = Object.entries(bucket).map(([d, v]) => [d, +v.toFixed(0)]);
-  if (data.length === 0) return null;
-  const year = new Date(activities.value[0]?.start_at ?? Date.now()).getFullYear();
+  if (Object.keys(bucket).length === 0) return null;
+
+  // One calendar strip per distinct year present in the data, newest at
+  // top so the user sees this-year first when 1y / all is selected.
+  const years = Array.from(
+    new Set(Object.keys(bucket).map((d) => d.slice(0, 4)))
+  ).sort((a, b) => b.localeCompare(a));
+
+  const STRIP_H = 110;     // px reserved per year
+  const TOP_PAD = 24;
+  const calendars = years.map((y, i) => ({
+    top: TOP_PAD + i * STRIP_H,
+    left: 30,
+    right: 12,
+    cellSize: ["auto", 14] as [string, number],
+    range: y,
+    itemStyle: {
+      color: "#1a2332",
+      borderColor: "rgba(148, 163, 184, 0.12)",
+      borderWidth: 1,
+    },
+    splitLine: { show: false },
+    yearLabel: { show: true, color: t.axisLabel.color, fontSize: 11,
+                 fontWeight: 600, margin: 14 },
+    monthLabel: { color: t.axisLabel.color, fontSize: 10 },
+    dayLabel: { color: t.axisLabel.color, fontSize: 9 },
+  }));
+
+  // One series per calendar strip — each filtered to its year.
+  const series = years.map((y, i) => ({
+    type: "heatmap" as const,
+    coordinateSystem: "calendar" as const,
+    calendarIndex: i,
+    data: Object.entries(bucket)
+      .filter(([d]) => d.startsWith(y))
+      .map(([d, v]) => [d, +v.toFixed(0)]),
+  }));
+
+  const allValues = Object.values(bucket).map((v) => +v.toFixed(0));
   return {
-    tooltip: { ...t.tooltip, formatter: (p: any) => `${p.value[0]}: ${p.value[1]} min` },
+    tooltip: {
+      ...t.tooltip,
+      formatter: (p: any) => `${p.value[0]}: ${p.value[1]} min`,
+    },
     visualMap: {
-      min: 0, max: Math.max(...data.map((d) => d[1] as number)),
+      min: 0, max: Math.max(...allValues),
       calculable: false, orient: "horizontal", show: false,
       inRange: { color: ["#1e3a5f", "#7dd3fc", "#22c55e"] },
     },
-    calendar: {
-      top: 24, left: 30, right: 12,
-      cellSize: ["auto", 14],
-      range: year.toString(),
-      itemStyle: {
-        color: "#1a2332",
-        borderColor: "rgba(148, 163, 184, 0.12)",
-        borderWidth: 1,
-      },
-      splitLine: { show: false },
-      yearLabel: { show: false },
-      monthLabel: { color: t.axisLabel.color, fontSize: 10 },
-      dayLabel: { color: t.axisLabel.color, fontSize: 9 },
-    },
-    series: { type: "heatmap", coordinateSystem: "calendar", data },
+    calendar: calendars,
+    series,
   };
+});
+
+// Reserve enough chart height for one strip per year so all calendars
+// render without overflow.
+const heatmapHeight = computed(() => {
+  const years = new Set<string>();
+  for (const a of activities.value) years.add(a.start_at.slice(0, 4));
+  if (years.size === 0) return 140;
+  return 24 + years.size * 110 + 16;
 });
 
 // === Formatters ===
@@ -335,7 +371,9 @@ const monthLabel = (key: string) =>
 
     <!-- Activity heatmap -->
     <Card v-if="heatmapOption" title="Activity calendar">
-      <div class="heat"><VChart :option="heatmapOption" autoresize/></div>
+      <div class="heat" :style="{ height: heatmapHeight + 'px' }">
+        <VChart :option="heatmapOption" autoresize/>
+      </div>
     </Card>
 
     <!-- Personal records -->
@@ -547,7 +585,7 @@ h1 { margin: 0; }
 .stat .same { color: var(--muted-2); margin-left: 0.3rem; }
 
 /* Heatmap */
-.heat { width: 100%; height: 200px; }
+.heat { width: 100%; }
 .heat > * { width: 100%; height: 100%; }
 
 /* PRs */

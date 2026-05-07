@@ -64,7 +64,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
 import app.myvitals.strength.StrengthRepository
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material.icons.outlined.ThumbDownOffAlt
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.ExercisePrefBody
 import app.myvitals.sync.LogSetRequest
@@ -1023,18 +1027,50 @@ private fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
             expanded = open, onDismissRequest = { open = false },
         ) {
             androidx.compose.material3.DropdownMenuItem(
-                text = { Text("❤ Favorite — show more often") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Outlined.FavoriteBorder,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MV.OnSurface,
+                    )
+                },
+                text = { Text("Favorite — show more often") },
                 onClick = { open = false; onSetPref("favorite") },
             )
             androidx.compose.material3.DropdownMenuItem(
-                text = { Text("👎 Avoid — show less often") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Outlined.ThumbDownOffAlt,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MV.OnSurface,
+                    )
+                },
+                text = { Text("Avoid — show less often") },
                 onClick = { open = false; onSetPref("avoid") },
             )
             androidx.compose.material3.DropdownMenuItem(
-                text = { Text("🚫 Disable — never include") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Outlined.Block,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MV.OnSurface,
+                    )
+                },
+                text = { Text("Disable — never include") },
                 onClick = { open = false; onSetPref("disabled") },
             )
             androidx.compose.material3.DropdownMenuItem(
+                leadingIcon = {
+                    Icon(
+                        Icons.Outlined.Restore,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MV.OnSurface,
+                    )
+                },
                 text = { Text("Reset to neutral") },
                 onClick = { open = false; onSetPref("neutral") },
             )

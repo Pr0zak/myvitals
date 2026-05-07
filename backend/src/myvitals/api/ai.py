@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics.trends import compute_badges
-from ..auth import require_query
+from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
 from ..integrations.claude import (
@@ -25,7 +25,7 @@ from ..integrations.claude import (
     verdict,
 )
 
-router = APIRouter(prefix="/ai", dependencies=[Depends(require_query)])
+router = APIRouter(prefix="/ai", dependencies=[Depends(require_any)])
 
 
 def _mask_key(k: str | None) -> str | None:

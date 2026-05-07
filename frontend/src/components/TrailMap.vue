@@ -11,6 +11,7 @@
 import { onMounted, onUnmounted, ref, watch } from "vue";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import "@/leaflet-icons";   // side-effect: fixes default marker URLs under Vite
 import polylineDecoder from "@mapbox/polyline";
 import { api } from "@/api/client";
 import { effectiveTheme } from "@/theme";

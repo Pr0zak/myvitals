@@ -7,6 +7,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import "@/leaflet-icons";   // side-effect: fixes default marker URLs under Vite
 import { effectiveTheme } from "@/theme";
 import { Star, RefreshCw, Navigation, Pencil, Map as MapIcon } from "lucide-vue-next";
 import { api } from "@/api/client";

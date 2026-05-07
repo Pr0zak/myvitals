@@ -69,7 +69,12 @@ object DataMapper {
                 HrvSample(time = it.time.toString(), rmssdMs = it.heartRateVariabilityMillis)
             },
             steps = steps.map {
-                StepsSample(time = it.startTime.toString(), count = it.count.toInt())
+                StepsSample(
+                    time = it.startTime.toString(),
+                    count = it.count.toInt(),
+                    source = it.metadata.dataOrigin.packageName
+                        .takeIf { p -> p.isNotBlank() } ?: "unknown",
+                )
             },
             sleepStages = sleep.flatMap(::sessionStages),
             sleepSessions = sleep.map { s ->

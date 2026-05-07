@@ -65,6 +65,11 @@ class HrvSample(BaseModel):
 class StepsSample(BaseModel):
     time: datetime
     count: int
+    # Health Connect's dataOrigin.packageName (e.g.
+    # "com.google.android.apps.fitness", "com.google.android.wearable.app").
+    # Defaults to "unknown" so older phone builds without source-tagging
+    # still ingest.
+    source: str = "unknown"
 
 
 class SleepStageSample(BaseModel):
@@ -142,7 +147,8 @@ async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) ->
 
     if batch.steps:
         await _bulk_upsert(db, models.Steps,
-                           (s.model_dump() for s in batch.steps), ["time"])
+                           (s.model_dump() for s in batch.steps),
+                           ["time", "source"])
         counts["steps"] = len(batch.steps)
 
     if batch.sleep_stages:

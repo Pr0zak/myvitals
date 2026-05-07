@@ -71,7 +71,11 @@ class BodyMetric(Base):
 
 class Steps(Base):
     __tablename__ = "vitals_steps"
+    # Source is part of the PK so multiple HC writers (watch + phone
+    # pedometer + Google Fit aggregator) can co-exist for the same
+    # minute without overwriting each other; the summary picks one.
     time: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    source: Mapped[str] = mapped_column(String(96), primary_key=True, default="unknown")
     count: Mapped[int] = mapped_column(Integer)
 
 

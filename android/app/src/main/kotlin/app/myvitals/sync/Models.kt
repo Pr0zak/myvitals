@@ -20,6 +20,7 @@ data class HrvSample(
 data class StepsSample(
     val time: String,
     val count: Int,
+    val source: String = "unknown",
 )
 
 @JsonClass(generateAdapter = true)

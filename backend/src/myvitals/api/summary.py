@@ -44,18 +44,40 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     # phone pedometer + Google Fit aggregator) all report overlapping
     # steps in the same minute. Without source tagging this is the best
     # we can do at query time.
-    minute_col = func.date_trunc("minute", models.Steps.time)
-    per_min_subq = (
-        select(func.max(models.Steps.count).label("mx"))
+    # Prefer a single canonical step source (Wear / Pixel Watch package)
+    # if present; otherwise fall back to per-minute MAX dedup across all
+    # sources.
+    sources_q = await db.execute(
+        select(models.Steps.source).distinct()
         .where(models.Steps.time >= midnight_local)
         .where(models.Steps.time <= end)
-        .group_by(minute_col)
-        .subquery()
     )
-    steps_result = await db.execute(
-        select(func.coalesce(func.sum(per_min_subq.c.mx), 0))
+    sources = [s for s, in sources_q.all()]
+    canonical = next(
+        (s for s in sources if "wearable" in (s or "").lower() or "fit.wearable" in (s or "").lower()),
+        None,
     )
-    steps_total = int(steps_result.scalar() or 0)
+    if canonical:
+        single = await db.execute(
+            select(func.coalesce(func.sum(models.Steps.count), 0))
+            .where(models.Steps.source == canonical)
+            .where(models.Steps.time >= midnight_local)
+            .where(models.Steps.time <= end)
+        )
+        steps_total = int(single.scalar() or 0)
+    else:
+        minute_col = func.date_trunc("minute", models.Steps.time)
+        per_min_subq = (
+            select(func.max(models.Steps.count).label("mx"))
+            .where(models.Steps.time >= midnight_local)
+            .where(models.Steps.time <= end)
+            .group_by(minute_col)
+            .subquery()
+        )
+        steps_result = await db.execute(
+            select(func.coalesce(func.sum(per_min_subq.c.mx), 0))
+        )
+        steps_total = int(steps_result.scalar() or 0)
 
     last_sync_result = await db.execute(select(func.max(models.HeartRate.time)))
     last_sync = last_sync_result.scalar()

@@ -74,7 +74,7 @@ class TestSelectExercisesForSplit:
     def test_full_body_returns_multiple_patterns(self, user_equipment):
         catalog = filter_catalog_for_equipment(CATALOG, user_equipment)
         rng = random.Random("test_seed")
-        chosen, notes = select_exercises_for_split(
+        chosen, _slots, notes = select_exercises_for_split(
             catalog, "full_body", "intermediate", rng,
         )
         # Full body should hit at least 4 distinct movement patterns
@@ -85,10 +85,10 @@ class TestSelectExercisesForSplit:
         """Same seed → same output (so 'today's plan' is stable until
         the user hits regenerate)."""
         catalog = filter_catalog_for_equipment(CATALOG, user_equipment)
-        a, _ = select_exercises_for_split(
+        a, _, _ = select_exercises_for_split(
             catalog, "upper", "intermediate", random.Random("x"),
         )
-        b, _ = select_exercises_for_split(
+        b, _, _ = select_exercises_for_split(
             catalog, "upper", "intermediate", random.Random("x"),
         )
         assert [e["id"] for e in a] == [e["id"] for e in b]

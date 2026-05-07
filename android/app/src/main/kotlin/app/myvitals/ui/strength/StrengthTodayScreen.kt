@@ -67,6 +67,7 @@ import app.myvitals.sync.StrengthReviewBody
 import app.myvitals.sync.StrengthWorkoutDetail
 import app.myvitals.sync.StrengthWorkoutExerciseRow
 import app.myvitals.ui.MV
+import app.myvitals.update.Notifier
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -128,6 +129,15 @@ fun StrengthTodayScreen(
 
     val restRemainingS = remember(nowMs, restEndsAt) {
         derivedStateOf { ((restEndsAt - nowMs) / 1000).coerceAtLeast(0L) }
+    }
+
+    // Fire haptic + notification at the moment the timer reaches 0.
+    var lastNotifiedFor by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(restRemainingS.value, restEndsAt) {
+        if (restEndsAt > 0L && restRemainingS.value <= 0L && restEndsAt != lastNotifiedFor) {
+            lastNotifiedFor = restEndsAt
+            Notifier.postRestTimerDone(context, (restTotal / 1000).toInt())
+        }
     }
 
     Column(
@@ -254,7 +264,7 @@ fun StrengthTodayScreen(
                 ) {
                     Icon(Icons.Filled.SkipNext, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
-                    Text(if (deferring) "Deferring…" else "Defer to tomorrow")
+                    Text(if (deferring) "Deferring…" else "Skip workout day")
                 }
             }
             Spacer(Modifier.height(8.dp))

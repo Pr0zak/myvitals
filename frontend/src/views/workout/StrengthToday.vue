@@ -116,6 +116,31 @@ const restRemaining = ref<number | null>(null);  // seconds
 const restTotal = ref<number>(0);
 let restHandle: number | null = null;
 
+function chime() {
+  // Quick web-audio beep — no asset bundling needed
+  try {
+    const ctx = new (window.AudioContext || (window as unknown as {
+      webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 880; o.type = "sine";
+    g.gain.setValueAtTime(0.001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    o.start(); o.stop(ctx.currentTime + 0.6);
+  } catch (_) { /* audio context blocked */ }
+}
+
+function notifyDone(seconds: number) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "granted") {
+    new Notification("Rest done", { body: `${seconds}s rest complete — start your next set.`, silent: false });
+  } else if (Notification.permission !== "denied") {
+    Notification.requestPermission(); // permission ask only fires once
+  }
+}
+
 function startRest(seconds: number) {
   stopRest();
   restRemaining.value = seconds;
@@ -123,7 +148,13 @@ function startRest(seconds: number) {
   restHandle = window.setInterval(() => {
     if (restRemaining.value === null) return;
     restRemaining.value -= 1;
-    if (restRemaining.value <= 0) stopRest();
+    if (restRemaining.value <= 0) {
+      chime();
+      notifyDone(seconds);
+      // Vibrate (Android Chrome only)
+      if ("vibrate" in navigator) navigator.vibrate([200, 80, 200]);
+      stopRest();
+    }
   }, 1000);
 }
 function stopRest() {
@@ -447,7 +478,7 @@ onMounted(loadAll);
             <RotateCw :size="14" /> Regenerate
           </button>
           <button class="ghost" :disabled="busy === 'defer'" @click="deferToday">
-            <SkipForward :size="14" /> Defer to tomorrow
+            <SkipForward :size="14" /> Skip workout day
           </button>
         </div>
       </Card>

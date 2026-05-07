@@ -56,10 +56,15 @@ CATALOG_BY_ID: dict[str, dict[str, Any]] = {e["id"]: e for e in CATALOG}
 DEFAULT_LEVEL = "intermediate"
 DEFAULT_DAYS_PER_WEEK = 3
 DEFAULT_SPLIT_PREFERENCE = "auto"
-DEFAULT_REST_S_HEAVY = 180
-DEFAULT_REST_S_MODERATE = 120
-DEFAULT_REST_S_ISOLATION = 75
-DEFAULT_REST_S_SUPERSET_AFTER = 90
+# Inter-set rest periods (seconds). Bumped 2026-05 after user feedback +
+# Frontiers 2024 Bayesian meta — compound rest plateau is ~3 min, not 2.
+DEFAULT_REST_S_HEAVY = 210            # was 180; ≤5-rep main compounds
+DEFAULT_REST_S_MODERATE = 150         # was 120; 6-8-rep secondary compounds
+DEFAULT_REST_S_ISOLATION = 90         # was 75
+DEFAULT_REST_S_SUPERSET_AFTER = 120   # was 90; rest after a full superset round
+# Within-round (partner-swap) rest for supersets — used by the active
+# workout flow when alternating between A and B mid-round.
+DEFAULT_REST_S_SUPERSET_WITHIN = 35
 
 # Per-movement-pattern starting weights (lb on each dumbbell, or single
 # weight for goblet-style). Tuned for dumbbell-only home gym.
@@ -79,32 +84,71 @@ STARTING_WEIGHTS_DB_LB: dict[str, tuple[float, float, float]] = {
 LEVEL_INDEX = {"beginner": 0, "intermediate": 1, "advanced": 2}
 
 # Movement patterns each split focuses on.
-SPLIT_PATTERNS: dict[str, list[str]] = {
+# Per-split slot specs. Each entry describes ONE exercise the generator
+# should fill, with explicit role + movement pattern + optional muscle
+# filter (so e.g. push day's `isolation_arm` slot sees only triceps,
+# never biceps) + an optional superset_group tag.
+#
+# Slots tagged with the same superset_group get paired into a superset
+# in pair_supersets() (overriding the older antagonist auto-detect).
+#
+# Built from research-backed PPL canon — see commit body / TODO.md for
+# Schoenfeld + RP volume-landmark refs.
+SPLIT_SLOTS: dict[str, list[dict[str, Any]]] = {
     "full_body": [
-        "squat", "horizontal_push", "horizontal_pull",
-        "hinge", "vertical_push", "isolation_arm",
+        {"role": "main_compound",      "pattern": "squat",            "muscles": None,                      "superset_group": None},
+        {"role": "secondary_compound", "pattern": "horizontal_push",  "muscles": ["chest"],                 "superset_group": "A"},
+        {"role": "secondary_compound", "pattern": "horizontal_pull",  "muscles": ["back", "lats"],          "superset_group": "A"},
+        {"role": "secondary_compound", "pattern": "hinge",            "muscles": None,                      "superset_group": None},
+        {"role": "isolation",          "pattern": "isolation_shoulder","muscles": ["shoulders"],            "superset_group": "B"},
+        {"role": "isolation",          "pattern": "isolation_core",   "muscles": ["abdominals"],            "superset_group": "B"},
     ],
     "upper": [
-        "horizontal_push", "horizontal_pull",
-        "vertical_push", "vertical_pull",
-        "isolation_arm", "isolation_shoulder",
+        {"role": "main_compound",      "pattern": "horizontal_push",  "muscles": ["chest"],                 "superset_group": None},
+        {"role": "secondary_compound", "pattern": "horizontal_pull",  "muscles": ["back", "lats"],          "superset_group": None},
+        {"role": "secondary_compound", "pattern": "vertical_push",    "muscles": ["shoulders", "chest"],    "superset_group": "A"},
+        {"role": "secondary_compound", "pattern": "vertical_pull",    "muscles": ["lats", "back"],          "superset_group": "A"},
+        {"role": "isolation",          "pattern": "isolation_arm",    "muscles": ["biceps"],                "superset_group": "B"},
+        {"role": "isolation",          "pattern": "isolation_arm",    "muscles": ["triceps"],               "superset_group": "B"},
     ],
     "lower": [
-        "squat", "hinge", "lunge",
-        "isolation_leg", "isolation_core",
+        {"role": "main_compound",      "pattern": "squat",            "muscles": None,                      "superset_group": None},
+        {"role": "secondary_compound", "pattern": "hinge",            "muscles": None,                      "superset_group": None},
+        {"role": "secondary_compound", "pattern": "lunge",            "muscles": None,                      "superset_group": None},
+        {"role": "isolation",          "pattern": "isolation_leg",    "muscles": ["quadriceps"],            "superset_group": "A"},
+        {"role": "isolation",          "pattern": "isolation_leg",    "muscles": ["hamstrings", "glutes"],  "superset_group": "A"},
+        {"role": "isolation",          "pattern": "isolation_core",   "muscles": ["abdominals"],            "superset_group": None},
     ],
-    "push": [
-        "horizontal_push", "vertical_push",
-        "isolation_shoulder", "isolation_arm",
+    "push": [  # chest + front/side delts + triceps. NEVER biceps.
+        {"role": "main_compound",      "pattern": "horizontal_push",  "muscles": ["chest"],                 "superset_group": None},
+        {"role": "secondary_compound", "pattern": "vertical_push",    "muscles": ["shoulders", "chest"],    "superset_group": None},
+        {"role": "secondary_compound", "pattern": "horizontal_push",  "muscles": ["chest", "triceps"],      "superset_group": None},
+        {"role": "isolation",          "pattern": "isolation_shoulder","muscles": ["shoulders"],            "superset_group": "A"},
+        {"role": "isolation",          "pattern": "isolation_arm",    "muscles": ["triceps"],               "superset_group": "A"},
+        {"role": "isolation",          "pattern": "isolation_arm",    "muscles": ["triceps"],               "superset_group": None},
     ],
-    "pull": [
-        "horizontal_pull", "vertical_pull",
-        "isolation_arm", "isolation_shoulder",
+    "pull": [  # back + lats + rear delts + biceps + forearms. NEVER triceps.
+        {"role": "main_compound",      "pattern": "horizontal_pull",  "muscles": ["back", "lats"],          "superset_group": None},
+        {"role": "secondary_compound", "pattern": "vertical_pull",    "muscles": ["lats", "back"],          "superset_group": None},
+        {"role": "secondary_compound", "pattern": "horizontal_pull",  "muscles": ["back", "lats", "traps"], "superset_group": None},
+        {"role": "isolation",          "pattern": "isolation_shoulder","muscles": ["shoulders"],            "superset_group": "A"},  # rear-delt slot — catalog has only one shoulder bucket
+        {"role": "isolation",          "pattern": "isolation_arm",    "muscles": ["biceps"],                "superset_group": "A"},
+        {"role": "isolation",          "pattern": "isolation_arm",    "muscles": ["biceps", "forearms"],    "superset_group": None},
     ],
     "legs": [
-        "squat", "hinge", "lunge",
-        "isolation_leg", "isolation_core",
+        {"role": "main_compound",      "pattern": "squat",            "muscles": ["quadriceps", "glutes"],  "superset_group": None},
+        {"role": "secondary_compound", "pattern": "hinge",            "muscles": ["hamstrings", "glutes", "lower_back"], "superset_group": None},
+        {"role": "secondary_compound", "pattern": "lunge",            "muscles": ["quadriceps", "glutes"],  "superset_group": None},
+        {"role": "isolation",          "pattern": "isolation_leg",    "muscles": ["hamstrings", "glutes"],  "superset_group": "A"},
+        {"role": "isolation",          "pattern": "isolation_leg",    "muscles": ["calves", "quadriceps"],  "superset_group": "A"},
+        {"role": "isolation",          "pattern": "isolation_core",   "muscles": ["abdominals"],            "superset_group": None},
     ],
+}
+
+# Back-compat alias for any external caller still expecting the old
+# bare-pattern map. Derived; do not edit.
+SPLIT_PATTERNS: dict[str, list[str]] = {
+    k: [s["pattern"] for s in slots] for k, slots in SPLIT_SLOTS.items()
 }
 
 # Antagonist pairings for supersets — keyed by primary muscle.
@@ -366,9 +410,14 @@ def filter_catalog_for_equipment(
 # ------------------------------------------------------------------
 
 def _exercises_for_pattern(
-    catalog: list[dict[str, Any]], pattern: str, level: str
+    catalog: list[dict[str, Any]], pattern: str, level: str,
+    muscles: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Catalog rows matching this movement pattern, ranked.
+
+    `muscles` (optional): restrict to exercises whose primary_muscle is
+    one of these. Used by the split slot specs to e.g. force "isolation_
+    arm" on push day to only pick triceps.
 
     Ranking:
     1. Compound first when the pattern is a compound slot (squat/hinge/...)
@@ -377,6 +426,9 @@ def _exercises_for_pattern(
     3. Stable by id (deterministic).
     """
     matches = [e for e in catalog if e["movement_pattern"] == pattern]
+    if muscles is not None:
+        wanted = set(muscles)
+        matches = [e for e in matches if e["primary_muscle"] in wanted]
     is_compound_slot = not pattern.startswith("isolation")
 
     def rank_key(e: dict[str, Any]) -> tuple:
@@ -395,46 +447,60 @@ def select_exercises_for_split(
     level: str,
     rng: random.Random,
     exercise_prefs: dict[str, str] | None = None,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Pick 1 main compound + 2 secondaries + 2-3 isolations for the focus.
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    """Pick exercises for the focus's slot list, in slot order.
 
     `exercise_prefs` (optional) lets the user opt out of disliked
     exercises and bias toward favorites:
         "disabled"  — fully excluded
-        "favorite"  — moved to top of candidates for any slot it fits
+        "favorite"  — picked first if any of that slot's candidates is favorited
         "avoid"     — pushed to bottom of candidates (last-resort pick)
 
-    Returns (chosen_exercises, advisory_notes).
+    Returns (chosen_exercises, slot_specs_for_each_chosen, advisory_notes).
+    The second list is parallel to the first — each entry is the slot spec
+    that produced that exercise (so the caller can read role/superset_group
+    without re-deriving). Skipped slots don't appear in either list.
+
     Determinism: pass a seeded random.Random and the same input always
     returns the same output.
     """
     notes: list[str] = []
     prefs = exercise_prefs or {}
-    patterns = SPLIT_PATTERNS.get(focus) or SPLIT_PATTERNS["full_body"]
+    slots = SPLIT_SLOTS.get(focus) or SPLIT_SLOTS["full_body"]
 
     # Pre-filter: drop disabled exercises entirely
     catalog = [e for e in catalog if prefs.get(e["id"]) != "disabled"]
 
     chosen: list[dict[str, Any]] = []
+    chosen_slots: list[dict[str, Any]] = []
     chosen_ids: set[str] = set()
+    fallback_used: list[str] = []  # slots that fell back to muscles=None
 
-    for pattern in patterns:
-        candidates = _exercises_for_pattern(catalog, pattern, level)
+    for slot in slots:
+        pattern = slot["pattern"]
+        muscles = slot.get("muscles")
+        candidates = _exercises_for_pattern(catalog, pattern, level, muscles)
         # Drop any already chosen (avoid duplicates across passes).
         candidates = [c for c in candidates if c["id"] not in chosen_ids]
+        # If muscle filter was unsatisfiable, retry without it and note.
+        if not candidates and muscles is not None:
+            candidates = _exercises_for_pattern(catalog, pattern, level, None)
+            candidates = [c for c in candidates if c["id"] not in chosen_ids]
+            if candidates:
+                fallback_used.append(f"{pattern}({'/'.join(muscles)})")
+
         # Apply user prefs:
         #   - favorites: if any candidate is favorited, pick from favorites only
         #   - avoid: only consider these as a last resort (push to back)
         if prefs and candidates:
             favs = [c for c in candidates if prefs.get(c["id"]) == "favorite"]
             if favs:
-                # Hard filter to favorites — user explicitly wants these
                 candidates = favs
             else:
-                # Push 'avoid' picks to the bottom; preserve relative order otherwise
                 avoids = [c for c in candidates if prefs.get(c["id"]) == "avoid"]
                 normal = [c for c in candidates if prefs.get(c["id"]) != "avoid"]
                 candidates = normal + avoids
+
         if not candidates:
             if pattern == "vertical_pull":
                 notes.append(
@@ -447,36 +513,69 @@ def select_exercises_for_split(
         # Among the top 3 candidates, pick one (lets seeded RNG vary across
         # regen calls without dropping into low-quality picks).
         top = candidates[: min(3, len(candidates))]
-        chosen.append(rng.choice(top))
-        chosen_ids.add(chosen[-1]["id"])
+        pick = rng.choice(top)
+        chosen.append(pick)
+        chosen_slots.append(slot)
+        chosen_ids.add(pick["id"])
 
-    return chosen, notes
+    if fallback_used:
+        notes.append(
+            "Some slots couldn't satisfy their muscle filter and fell back "
+            "to the broader pattern: " + ", ".join(fallback_used) +
+            ". Catalog gap — usually means the target muscle isn't well-"
+            "covered by your equipment."
+        )
+
+    return chosen, chosen_slots, notes
 
 
 # ------------------------------------------------------------------
 # Pure: superset pairing for the isolation block
 # ------------------------------------------------------------------
 
-def pair_supersets(exercises: list[dict[str, Any]]) -> dict[str, str]:
+def pair_supersets(
+    exercises: list[dict[str, Any]],
+    slots: list[dict[str, Any]] | None = None,
+) -> dict[str, str]:
     """Return {exercise_id: superset_id} for the isolation block.
 
-    Two-pass strategy:
-    1. First fill antagonist pairs (biceps↔triceps, chest↔back, etc.) —
-       these are the textbook supersets.
-    2. Then sweep the remaining isolation exercises and pair them up
-       in encounter order so every isolation lift ends up partnered
-       (a "lower-quality" superset is still better than a stand-alone
-       isolation set for time efficiency, which is what supersets are
-       for in a self-paced home workout).
+    Three-pass strategy:
+    1. **Slot-spec pairs** (preferred) — when `slots` is provided, slots
+       sharing a non-null `superset_group` get paired directly. This is
+       the explicit, intentional pairing from `SPLIT_SLOTS`.
+    2. **Antagonist pairs** — fill any remaining isolations with the
+       textbook bicep↔tricep / chest↔back style pairings.
+    3. **Encounter-order fallback** — pair anything still loose so every
+       isolation slot ends up in a superset (different primary muscles
+       only; same-muscle pairs would defeat the rest-while-other-works
+       point).
 
     Compounds always stand alone — never paired.
     """
     iso = [e for e in exercises if e["movement_pattern"].startswith("isolation")]
+    iso_ids = {e["id"] for e in iso}
     pairs: dict[str, str] = {}
     used: set[str] = set()
     sid = 0
 
-    # Pass 1: antagonist pairs
+    # Pass 0: explicit slot-spec groups (when caller passed parallel slots)
+    if slots is not None and len(slots) == len(exercises):
+        groups: dict[str, list[str]] = {}
+        for ex, slot in zip(exercises, slots, strict=False):
+            if ex["id"] not in iso_ids:
+                continue   # only isolation slots get paired
+            tag = slot.get("superset_group")
+            if tag is not None:
+                groups.setdefault(tag, []).append(ex["id"])
+        for tag, ex_ids in groups.items():
+            if len(ex_ids) >= 2:
+                sid += 1
+                out_tag = f"S{sid}"
+                for eid in ex_ids:
+                    pairs[eid] = out_tag
+                    used.add(eid)
+
+    # Pass 1: antagonist pairs over remaining
     for a, b in ANTAGONIST_PAIRS:
         ax = next((e for e in iso if e["primary_muscle"] == a and e["id"] not in used), None)
         bx = next((e for e in iso if e["primary_muscle"] == b and e["id"] not in used), None)
@@ -488,9 +587,7 @@ def pair_supersets(exercises: list[dict[str, Any]]) -> dict[str, str]:
             used.add(ax["id"])
             used.add(bx["id"])
 
-    # Pass 2: pair remaining isolations in encounter order. Skip pairs that
-    # share the SAME primary muscle (would defeat the rest-while-the-other-
-    # muscle-works point of a superset).
+    # Pass 2: encounter-order fallback for stragglers (skip same-muscle pairs).
     remaining = [e for e in iso if e["id"] not in used]
     i = 0
     while i + 1 < len(remaining):
@@ -504,7 +601,6 @@ def pair_supersets(exercises: list[dict[str, Any]]) -> dict[str, str]:
             used.add(b["id"])
             i += 2
         else:
-            # Skip this pairing; try the next combination.
             i += 1
 
     return pairs
@@ -678,12 +774,12 @@ async def generate_plan(
         equipment.get("exercise_prefs") or {}
         if isinstance(equipment, dict) else {}
     )
-    chosen, sel_notes = select_exercises_for_split(
+    chosen, chosen_slots, sel_notes = select_exercises_for_split(
         catalog, focus, level, rng, exercise_prefs=exercise_prefs,
     )
     notes.extend(sel_notes)
 
-    superset_map = pair_supersets(chosen)
+    superset_map = pair_supersets(chosen, chosen_slots)
 
     # Compute target weights for each exercise, applying history + deload
     deload = recovery.deload_factor() if recovery else 1.0

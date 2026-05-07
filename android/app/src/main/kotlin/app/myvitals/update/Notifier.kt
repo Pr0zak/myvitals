@@ -14,6 +14,8 @@ object Notifier {
     private const val NOTIF_ID = 1001
     const val TRAIL_CHANNEL_ID = "trail_status"
     private const val TRAIL_NOTIF_BASE = 2000
+    const val REST_TIMER_CHANNEL_ID = "rest_timer"
+    private const val REST_TIMER_NOTIF_ID = 3001
 
     fun ensureChannel(context: Context) {
         val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -35,6 +37,50 @@ object Notifier {
                 ).apply { description = "Subscribed trails opened or closed" }
             )
         }
+        if (mgr.getNotificationChannel(REST_TIMER_CHANNEL_ID) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    REST_TIMER_CHANNEL_ID,
+                    "Rest timer",
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = "Cue when an inter-set rest period finishes"
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0, 200, 80, 200)
+                }
+            )
+        }
+    }
+
+    /** Briefly vibrate + post a heads-up notification when rest hits 0. */
+    fun postRestTimerDone(context: Context, secondsRested: Int) {
+        ensureChannel(context)
+        // Vibrate explicitly — heads-up channel will vibrate on its own but
+        // this also fires when the channel is muted
+        val vib = context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                vib?.vibrate(android.os.VibrationEffect.createWaveform(
+                    longArrayOf(0, 200, 80, 200), -1,
+                ))
+            } else {
+                @Suppress("DEPRECATION")
+                vib?.vibrate(longArrayOf(0, 200, 80, 200), -1)
+            }
+        } catch (_: SecurityException) { /* no haptic permission */ }
+
+        val notif = NotificationCompat.Builder(context, REST_TIMER_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setContentTitle("Rest done")
+            .setContentText("${secondsRested}s rest complete — start your next set.")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setAutoCancel(true)
+            .setTimeoutAfter(15_000)   // self-dismiss after 15s
+            .build()
+        try {
+            NotificationManagerCompat.from(context).notify(REST_TIMER_NOTIF_ID, notif)
+        } catch (_: SecurityException) { /* permission revoked */ }
     }
 
     /** Post a single trail-status flip notification. Stable per alert id

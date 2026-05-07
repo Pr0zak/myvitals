@@ -611,6 +611,81 @@ async def log_set(
     return _set_to_out(s)
 
 
+class SwapBody(BaseModel):
+    exercise_id: str
+
+
+@router.post("/workout-exercises/{wex_id}/swap", response_model=WorkoutExerciseOut)
+async def swap_exercise(
+    wex_id: int, body: SwapBody,
+    db: AsyncSession = Depends(get_session),
+) -> WorkoutExerciseOut:
+    """Replace one exercise within an in-progress / planned workout.
+
+    Refuses (409) if any non-skipped sets have already been logged for
+    this slot — the actuals belong to the original exercise and would
+    be misleading attached to a different one. Caller should delete
+    the offending sets first if they really want to swap mid-session.
+
+    Preserves order_index, superset_id, target_sets/reps_low/reps_high,
+    target_rest_s. Recomputes target_weight_lb for the new exercise from
+    its starting-weight table (history-driven progression kicks in next
+    session)."""
+    if body.exercise_id not in _CATALOG_BY_ID:
+        raise HTTPException(status_code=404, detail="exercise not found")
+
+    wex = await db.get(models.StrengthWorkoutExercise, wex_id)
+    if wex is None:
+        raise HTTPException(status_code=404, detail="workout_exercise not found")
+
+    # Refuse if sets are logged (excluding skipped placeholders)
+    logged = (await db.execute(
+        select(models.StrengthSet.id)
+        .where(models.StrengthSet.workout_exercise_id == wex_id)
+        .where(models.StrengthSet.skipped.is_(False))
+        .where(models.StrengthSet.actual_reps.is_not(None))
+    )).scalars().all()
+    if logged:
+        raise HTTPException(
+            status_code=409,
+            detail="cannot swap — sets already logged for this slot. "
+                   "Delete the logged sets first.",
+        )
+
+    new_ex = _CATALOG_BY_ID[body.exercise_id]
+    equip = await _equipment_payload(db)
+    level = (equip.get("training") or {}).get("level", "intermediate")
+    pairs = (equip.get("dumbbells") or {}).get("pairs_lb") or []
+    wrist = equip.get("wrist_weights_lb") or []
+
+    # Recompute target weight from history (if any) or starting table
+    avg_rating, avg_weight = await strength_algo.last_target_weight_for_exercise(
+        db, body.exercise_id,
+    )
+    if avg_rating is not None and avg_weight is not None:
+        target = strength_algo.progress_from_rating(
+            avg_weight, avg_rating, new_ex["is_compound"],
+        )
+    else:
+        target = strength_algo.starting_weight_lb(new_ex["movement_pattern"], level)
+
+    if target is not None and "dumbbell" in new_ex["equipment"]:
+        target = strength_algo.round_weight(target, pairs, wrist)
+    if "dumbbell" not in new_ex["equipment"]:
+        target = None
+
+    wex.exercise_id = body.exercise_id
+    wex.target_weight_lb = target
+    await db.commit()
+    await db.refresh(wex)
+
+    sets = (await db.execute(
+        select(models.StrengthSet)
+        .where(models.StrengthSet.workout_exercise_id == wex.id)
+    )).scalars().all()
+    return _wex_to_out(wex, sets)
+
+
 @router.delete("/sets/{set_id}", status_code=204)
 async def delete_set(
     set_id: int, db: AsyncSession = Depends(get_session)

@@ -6,7 +6,7 @@
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { Play, Pause, RotateCw, Plus, SkipForward } from "lucide-vue-next";
+import { Play, Pause, RotateCw, Plus, SkipForward, Replace as SwapIcon } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { apiBase, queryToken } from "@/config";
 import Card from "@/components/Card.vue";
@@ -27,6 +27,61 @@ interface SetEntry {
   rating: number | null;
 }
 const setEntries = ref<Record<string, SetEntry>>({});
+
+// Swap-exercise modal state
+const swapWexId = ref<number | null>(null);
+const swapBusy = ref(false);
+const swapError = ref<string>("");
+
+function openSwap(wexId: number) {
+  swapError.value = "";
+  swapWexId.value = wexId;
+}
+function closeSwap() { swapWexId.value = null; }
+
+const swapAlternatives = computed<StrengthExercise[]>(() => {
+  if (swapWexId.value === null || !workout.value) return [];
+  const wex = workout.value.exercises.find((x) => x.id === swapWexId.value);
+  if (!wex) return [];
+  const current = catalogById.value[wex.exercise_id];
+  if (!current) return [];
+  // In-workout already, exclude
+  const inWorkout = new Set(workout.value.exercises.map((x) => x.exercise_id));
+  return Object.values(catalogById.value)
+    .filter((e) =>
+      e.id !== wex.exercise_id
+      && !inWorkout.has(e.id)
+      && (e.primary_muscle === current.primary_muscle
+          || e.movement_pattern === current.movement_pattern),
+    )
+    .sort((a, b) => {
+      // Prefer same movement pattern first, then alphabetical
+      const aPat = a.movement_pattern === current.movement_pattern ? 0 : 1;
+      const bPat = b.movement_pattern === current.movement_pattern ? 0 : 1;
+      return aPat - bPat || a.name.localeCompare(b.name);
+    })
+    .slice(0, 12);
+});
+
+async function applySwap(newExId: string) {
+  if (swapWexId.value === null) return;
+  swapBusy.value = true;
+  swapError.value = "";
+  try {
+    await api.swapStrengthExercise(swapWexId.value, newExId);
+    await loadAll();
+    closeSwap();
+  } catch (e: unknown) {
+    if (e && typeof e === "object" && "response" in e) {
+      const resp = (e as { response?: { status?: number; data?: { detail?: string } } }).response;
+      swapError.value = resp?.data?.detail ?? `HTTP ${resp?.status}`;
+    } else {
+      swapError.value = e instanceof Error ? e.message : String(e);
+    }
+  } finally {
+    swapBusy.value = false;
+  }
+}
 
 // AI review (optional, on-demand)
 const review = ref<Awaited<ReturnType<typeof api.aiStrengthReview>>["review"] | null>(null);
@@ -333,6 +388,10 @@ onMounted(loadAll);
             <a class="yt" :href="youtubeUrl(wex.exercise_id)" target="_blank" rel="noreferrer">
               Watch form video on YouTube ↗
             </a>
+            <button v-if="wex.sets.filter(s => s.actual_reps != null).length === 0"
+                    class="swap-btn" @click="openSwap(wex.id)">
+              <SwapIcon :size="13" /> Swap exercise
+            </button>
           </div>
 
           <div class="sets">
@@ -395,6 +454,27 @@ onMounted(loadAll);
           <small>({{ completedSetsCount }}/{{ totalSetsCount }} sets)</small>
         </button>
       </div>
+      <!-- Swap-exercise modal -->
+      <div v-if="swapWexId !== null" class="overlay" @click.self="closeSwap">
+        <div class="drawer swap-drawer">
+          <header>
+            <h2>Swap exercise</h2>
+            <button class="close" @click="closeSwap">✕</button>
+          </header>
+          <p v-if="swapError" class="err">{{ swapError }}</p>
+          <p v-if="swapAlternatives.length === 0" class="hint">
+            No alternatives in your equipment for this slot.
+          </p>
+          <ul v-else class="alts">
+            <li v-for="alt in swapAlternatives" :key="alt.id"
+                :class="{ disabled: swapBusy }" @click="applySwap(alt.id)">
+              <strong>{{ alt.name }}</strong>
+              <span class="tags">{{ alt.movement_pattern.replace('_', ' ') }} · {{ alt.primary_muscle }}</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+
       <Card v-else title="Workout complete" :subtitle="`${completedSetsCount} sets logged`">
         <p class="hint">
           Nicely done. Today's session is logged — you'll see the next-session
@@ -537,6 +617,32 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 .review-card .next { margin: 0.6rem 0 0; color: var(--text-soft); font-size: 0.88rem; }
 .review-card .cached { font-size: 0.7rem; color: var(--muted-2);
   margin-top: 0.4rem; font-family: 'Geist Mono', ui-monospace, monospace; }
+
+.swap-btn {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  margin-top: 0.4rem; padding: 0.3rem 0.6rem;
+  font-size: 0.75rem; color: var(--text-soft);
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 5px; cursor: pointer;
+}
+.swap-btn:hover { color: var(--text); border-color: var(--accent, #ef4444); }
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100;
+  display: flex; justify-content: flex-end; }
+.drawer.swap-drawer { width: min(420px, 100%); height: 100%;
+  overflow-y: auto; background: var(--bg-1);
+  border-left: 1px solid var(--line); padding: 1rem 1.2rem; }
+.alts { list-style: none; padding: 0; margin: 0.4rem 0 0;
+  display: flex; flex-direction: column; gap: 0.4rem; }
+.alts li {
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 0.6rem 0.85rem; cursor: pointer;
+  display: flex; flex-direction: column; gap: 0.2rem;
+}
+.alts li:hover { border-color: var(--accent, #ef4444); }
+.alts li.disabled { opacity: 0.5; pointer-events: none; }
+.alts li strong { color: var(--text); font-size: 0.92rem; }
+.alts li .tags { color: var(--muted); font-size: 0.74rem;
+  font-family: 'Geist Mono', ui-monospace, monospace; }
 
 button.primary, button.ghost {
   padding: 0.4rem 0.85rem; border-radius: 6px; font-size: 0.85rem;

@@ -587,6 +587,16 @@ export const api = {
     return data;
   },
 
+  async swapStrengthExercise(
+    workoutExerciseId: number, newExerciseId: string,
+  ): Promise<import("./types").StrengthWorkoutExercise> {
+    const { data } = await http.post(
+      `/workout/strength/workout-exercises/${workoutExerciseId}/swap`,
+      { exercise_id: newExerciseId },
+    );
+    return data;
+  },
+
   // ── Trails (RainoutLine status) ───────────────────────────
   async trails(): Promise<{
     count: number;

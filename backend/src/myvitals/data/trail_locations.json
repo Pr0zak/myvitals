@@ -3,106 +3,91 @@
     "latitude": 38.7572,
     "longitude": -95.0009,
     "city": "Edgerton",
-    "state": "KS",
-    "address_hint": "20425 Sunflower Rd, Edgerton, KS 66021 (main JCPRD parking lot, 1/2 mi north of I-35)"
+    "state": "KS"
   },
   "Blue River Park": {
     "latitude": 38.8901,
     "longitude": -94.5792,
     "city": "Kansas City",
-    "state": "MO",
-    "address_hint": "Blue River Rd & E Blue Ridge Blvd, KCMO (Blue River Parkway main trailhead)"
+    "state": "MO"
   },
   "Cedar Niles Park Trails": {
     "latitude": 38.8863,
     "longitude": -94.8997,
     "city": "Olathe",
-    "state": "KS",
-    "address_hint": "12650 S Clare Rd, Olathe, KS 66061 (135th St main trailhead is the singletrack hub)"
+    "state": "KS"
   },
   "Clinton Lake": {
     "latitude": 38.9606,
     "longitude": -95.3492,
     "city": "Lawrence",
-    "state": "KS",
-    "address_hint": "N 1402 Rd, Lawrence, KS 66049 (Clinton North Shore Trailhead, free side, NE of lake)"
+    "state": "KS"
   },
   "Fort Scott - Gunn Park": {
     "latitude": 37.8296,
     "longitude": -94.7194,
     "city": "Fort Scott",
-    "state": "KS",
-    "address_hint": "1010 Park Ave, Fort Scott, KS 66701 (main park entrance, Bleeding Kansas trailhead)"
+    "state": "KS"
   },
   "Hidden Valley Park": {
     "latitude": 39.1676,
     "longitude": -94.5044,
     "city": "Kansas City",
-    "state": "MO",
-    "address_hint": "4029 N Bellaire Ave, Kansas City, MO 64117 (KCMO Northland)"
+    "state": "MO"
   },
   "Hodge Park": {
     "latitude": 39.2609,
     "longitude": -94.5014,
     "city": "Kansas City",
-    "state": "MO",
-    "address_hint": "24 NE Reinking Rd, Kansas City, MO 64157 (north trailhead off NE 96th St)"
+    "state": "MO"
   },
   "Iola - Lehigh Portland Trails": {
     "latitude": 37.9101,
     "longitude": -95.4056,
     "city": "Iola",
-    "state": "KS",
-    "address_hint": "Western trailhead at Washington Ave, adjacent to Elm Creek Park South, Iola, KS 66749 (Allen County); eastern trailhead at 1600th & Nebraska Rd"
+    "state": "KS"
   },
   "Jacomo": {
     "latitude": 38.9559,
     "longitude": -94.3154,
     "city": "Blue Springs",
-    "state": "MO",
-    "address_hint": "Lake Jacomo / Fleming Park trail network; access off NE Colburn Rd south of I-70 via MO-7 (Larry Mattonen Memorial Trailhead)"
+    "state": "MO"
   },
   "Kessler Park": {
     "latitude": 39.1122,
     "longitude": -94.5482,
     "city": "Kansas City",
-    "state": "MO",
-    "address_hint": "59 Chestnut Trafficway, Kansas City, MO 64106 (west entrance at Paseo & Cliff Drive)"
+    "state": "MO"
   },
   "Kill Creek Park": {
-    "latitude": 38.9150,
-    "longitude": -94.9740,
+    "latitude": 38.915,
+    "longitude": -94.974,
     "city": "Olathe",
-    "state": "KS",
-    "address_hint": "11670 Homestead Ln, Olathe, KS 66061 (JCPRD; MTB trailhead near Shelter 1 parking lot)"
+    "state": "KS"
   },
   "Landahl Park": {
     "latitude": 39.0661,
     "longitude": -94.2319,
     "city": "Independence",
-    "state": "MO",
-    "address_hint": "E Argo Rd, Buckner/Independence, MO 64016 (north of Argo across from archery center; UTC lists Buckner 64016)"
+    "state": "MO"
   },
   "Lawrence River Trail": {
-    "latitude": 39.0010,
-    "longitude": -95.2230,
+    "latitude": 39.001,
+    "longitude": -95.223,
     "city": "Lawrence",
-    "state": "KS",
-    "address_hint": "8th & Oak St, North Lawrence, KS (LMBC-maintained 9-mi loop along the Kaw; main lot just off the levee)"
+    "state": "KS"
   },
   "Lawrence MTB": {
-    "latitude": 39.0010,
-    "longitude": -95.2230,
+    "latitude": 39.001,
+    "longitude": -95.223,
     "city": "Lawrence",
-    "state": "KS",
-    "address_hint": "Likely the Lawrence River Trails system - 8th & Oak in N Lawrence is the primary MTB lot; could alternately reference the Centennial Park bike features."
+    "state": "KS"
   },
   "Legacy Park Trail": {
-    "latitude": 38.9430,
-    "longitude": -94.3140,
+    "latitude": 38.943,
+    "longitude": -94.314,
     "city": "Lee's Summit",
-    "state": "MO",
-    "address_hint": "1401 NE Legacy Park Dr, Lee's Summit, MO 64086 (UTC trailhead off NE Blackwell Rd; 1014 Loop singletrack)"
+    "state": "MO"
   },
   "Lewis & Clark Trail": {
     "latitude": null,
@@ -110,74 +95,64 @@
     "note": "Ambiguous - no Lewis & Clark singletrack trail managed by UTC found. Could be Lewis & Clark State Park (MO, ~39.547, -95.064) or Kaw Point Park (KCK, ~39.1144, -94.6094); UTC's trail listing does not include a 'Lewis & Clark' entry as of this lookup."
   },
   "Lexington Lake Park": {
-    "latitude": 38.9710,
-    "longitude": -95.0060,
+    "latitude": 38.971,
+    "longitude": -95.006,
     "city": "De Soto",
-    "state": "KS",
-    "address_hint": "8850 Sunflower Rd, De Soto, KS 66018 (JCPRD; UTC lists this as Lexington Lake Park; ~10 mi MTB/hike + paved 1.6-mi loop)"
+    "state": "KS"
   },
   "Little Blue Trace": {
     "latitude": 39.1192,
     "longitude": -94.3548,
     "city": "Independence",
-    "state": "MO",
-    "address_hint": "21999 E Old Blue Mills Rd, Independence, MO 64058 (north trailhead; south trailhead at 19019 E 48th St)"
+    "state": "MO"
   },
   "Longview Lake": {
     "latitude": 38.9055,
     "longitude": -94.5108,
     "city": "Kansas City",
-    "state": "MO",
-    "address_hint": "9898 Longview Rd, KCMO 64134 (main trailhead, Shelter 14 by marina)"
+    "state": "MO"
   },
   "Mark McHenry Park": {
-    "latitude": 39.2580,
-    "longitude": -94.7200,
+    "latitude": 39.258,
+    "longitude": -94.72,
     "city": "Kansas City",
-    "state": "MO",
-    "address_hint": "8910 N Childress Ave, Kansas City, MO 64153 (KC Northland near KCI; gravel lot at N Childress & NW Old Tiffany Springs Rd)"
+    "state": "MO"
   },
   "Martin City Downhill": {
-    "latitude": 38.8810,
-    "longitude": -94.5800,
+    "latitude": 38.881,
+    "longitude": -94.58,
     "city": "Kansas City",
-    "state": "MO",
-    "address_hint": "Blue River Parkway south of 135th, Martin City neighborhood KCMO; park at Brown Athletic Field, no parking off Holmes; DH-only bike trails"
+    "state": "MO"
   },
   "Minor Park": {
     "latitude": 38.9312,
     "longitude": -94.5629,
     "city": "Kansas City",
-    "state": "MO",
-    "address_hint": "1601 E Red Bridge Rd, KCMO 64131 (Red Bridge / Locks of Love trailhead, north end of Blue River Pkwy singletrack)"
+    "state": "MO"
   },
   "MoPac Singletrack": {
-    "latitude": 38.7850,
-    "longitude": -94.2550,
+    "latitude": 38.785,
+    "longitude": -94.255,
     "city": "Pleasant Hill",
-    "state": "MO",
-    "address_hint": "16104 S Lake Rd, Pleasant Hill, MO 64080 (Pleasant Hill City Lake; volunteer-built singletrack around lake, opened 2020)"
+    "state": "MO"
   },
   "Nall Park": {
-    "latitude": 39.0270,
-    "longitude": -94.6330,
+    "latitude": 39.027,
+    "longitude": -94.633,
     "city": "Roeland Park",
-    "state": "KS",
-    "address_hint": "Nall Park, ~5100 Nall Ave, Roeland Park, KS 66205; start at Roeland Park community center lot (4850 Rosewood Dr) -> Beyond Thunderdome -> RoPo Flow"
+    "state": "KS"
   },
   "Penn Valley Park": {
     "latitude": 39.0757,
     "longitude": -94.5905,
     "city": "Kansas City",
-    "state": "MO",
-    "address_hint": "Pershing Rd & Main St, KCMO 64108 (near WWI Memorial / W 29th & Broadway)"
+    "state": "MO"
   },
   "Perry Lake": {
     "latitude": 39.1577,
     "longitude": -95.4682,
     "city": "Ozawkie",
-    "state": "KS",
-    "address_hint": "Perry State Park MTB trailhead, end of access road past Rock Creek Marina off KS-237 / West Lake Rd (a.k.a. Lake Henry trails)"
+    "state": "KS"
   },
   "Prairie Creek Trail": {
     "latitude": null,
@@ -185,157 +160,135 @@
     "note": "Could not positively locate. Not on UTC's main trail-listing page; no matching Prairie Creek mountain-bike singletrack found in KC metro / Lawrence search. May be a small/private/local feeder trail."
   },
   "Raymore-Hawk Ridge Trail": {
-    "latitude": 38.8150,
-    "longitude": -94.4770,
+    "latitude": 38.815,
+    "longitude": -94.477,
     "city": "Raymore",
-    "state": "MO",
-    "address_hint": "Hawk Ridge Park, 701 Johnston Pkwy, Raymore, MO 64083 (79-acre park with Johnston Lake; MTB singletrack added by Raymore P&R)"
+    "state": "MO"
   },
   "Rozarks": {
     "latitude": 39.0623,
     "longitude": -94.6002,
     "city": "Kansas City",
-    "state": "KS",
-    "address_hint": "Rosedale Park / Fisher Park area near 39th & Springfield, KCK; Beyond Thunderdome drops from the Roeland Park Dome lot"
+    "state": "KS"
   },
   "Shawnee Mission Park": {
     "latitude": 38.9881,
     "longitude": -94.8003,
     "city": "Shawnee",
-    "state": "KS",
-    "address_hint": "7900 Renner Rd, Shawnee, KS 66219 (marina lot off 79th St / Martha Dr - main MTB trailhead by tennis courts)"
+    "state": "KS"
   },
   "Shawnee Mission Park North Trails - Bike, Hike": {
-    "latitude": 38.9930,
-    "longitude": -94.7960,
+    "latitude": 38.993,
+    "longitude": -94.796,
     "city": "Shawnee",
-    "state": "KS",
-    "address_hint": "Shawnee Mission Park north shore lots off Renner Rd / 79th St (multi-use bike+hike singletrack on north side of lake; 7900 Renner Rd, Shawnee, KS 66219)"
+    "state": "KS"
   },
   "Shawnee Mission Park Skills Trail": {
     "latitude": 38.9921,
     "longitude": -94.7867,
     "city": "Shawnee",
-    "state": "KS",
-    "address_hint": "Shawnee Mission Park east entrance off Ogg Rd / Barkley Dr (skills area / east-side singletrack access)"
+    "state": "KS"
   },
   "Shawnee Mission Park South Hiking Trails": {
-    "latitude": 38.9810,
-    "longitude": -94.7960,
+    "latitude": 38.981,
+    "longitude": -94.796,
     "city": "Lenexa",
-    "state": "KS",
-    "address_hint": "South shore of SMP off 87th St Pkwy past the baseball fields (hike-only trails - no bikes); main park 7900 Renner Rd, Shawnee, KS 66219"
+    "state": "KS"
   },
   "SMP – East": {
     "latitude": 38.9921,
     "longitude": -94.7867,
     "city": "Shawnee",
-    "state": "KS",
-    "address_hint": "Shawnee Mission Park east entrance off Ogg Rd / Barkley Dr (Skills Area / east-side singletrack access)"
+    "state": "KS"
   },
   "SMP – Norse": {
     "latitude": 38.9851,
     "longitude": -94.7949,
     "city": "Shawnee",
-    "state": "KS",
-    "address_hint": "Shawnee Mission Park dam-area lot off 87th Pkwy (Norse trail / dam-end singletrack entrance)"
+    "state": "KS"
   },
   "St. Joseph Area Trails": {
-    "latitude": 39.7890,
-    "longitude": -94.8510,
+    "latitude": 39.789,
+    "longitude": -94.851,
     "city": "Saint Joseph",
-    "state": "MO",
-    "address_hint": "Krug Park, 3500 St Joseph Ave, St Joseph, MO 64505 (primary trailhead; ~7-mi singletrack system; also Northwest Pkwy hike/bike connector)"
+    "state": "MO"
   },
   "Stocksdale Park/Walnut Woods": {
-    "latitude": 39.2340,
-    "longitude": -94.3890,
+    "latitude": 39.234,
+    "longitude": -94.389,
     "city": "Liberty",
-    "state": "MO",
-    "address_hint": "901 S La Frenz Rd, Liberty, MO 64068 (Stocksdale Park; ~6 mi singletrack continuing into adjacent MDC Walnut Woods CA)"
+    "state": "MO"
   },
   "Swope Park": {
     "latitude": 38.9869,
     "longitude": -94.5145,
     "city": "Kansas City",
-    "state": "MO",
-    "address_hint": "Oldham Rd (Lodge sign), KCMO; SW of I-435 & Gregory"
+    "state": "MO"
   },
   "The Prairie Bike Park-Shawnee Mission Park": {
     "latitude": 38.9885,
-    "longitude": -94.7990,
+    "longitude": -94.799,
     "city": "Shawnee",
-    "state": "KS",
-    "address_hint": "Prairie Bike Park, just north of marina lot at SMP (former tennis courts hill across from marina); 7900 Renner Rd, Shawnee, KS 66219; renovated July 2025"
+    "state": "KS"
   },
   "Tomahawk Creek Park": {
     "latitude": 38.9136,
     "longitude": -94.6447,
     "city": "Leawood",
-    "state": "KS",
-    "address_hint": "3951 W 119th St, Leawood, KS 66209 (Tomahawk Park trailhead; College Blvd & Tomahawk Creek Pkwy is alt access)"
+    "state": "KS"
   },
   "Topeka - Kaw River State Park": {
-    "latitude": 39.0570,
-    "longitude": -95.7470,
+    "latitude": 39.057,
+    "longitude": -95.747,
     "city": "Topeka",
-    "state": "KS",
-    "address_hint": "300 SW Wanamaker Rd, Topeka, KS 66606 (entrance N of SW 6th St; Mansion lot up top or river lot below; ~3.5 mi Red Trail MTB loop)"
+    "state": "KS"
   },
   "Topeka - Skyline Park": {
     "latitude": 39.0099,
     "longitude": -95.7521,
     "city": "Topeka",
-    "state": "KS",
-    "address_hint": "3511 SW Skyline Pkwy, Topeka, KS 66614 (Burnett's Mound; Azura Trails)"
+    "state": "KS"
   },
   "Topeka - Dornwood Park": {
     "latitude": 39.0224,
     "longitude": -95.6392,
     "city": "Topeka",
-    "state": "KS",
-    "address_hint": "End of SE 25th St east of California Ave, Topeka (parking lot at street terminus)"
+    "state": "KS"
   },
   "Topeka - Felker Park": {
     "latitude": 39.0202,
     "longitude": -95.7211,
     "city": "Topeka",
-    "state": "KS",
-    "address_hint": "2540 SW Gage Blvd, Topeka, KS 66614 (SW 25th & Gage; main lot near tennis center)"
+    "state": "KS"
   },
   "Trinity Lutheran (private)": {
     "latitude": 38.9991,
     "longitude": -94.6589,
     "city": "Mission",
-    "state": "KS",
-    "address_hint": "5601 W 62nd St, Mission, KS 66202 (Trinity Lutheran Church campus - private trail; coords are the church property)"
+    "state": "KS"
   },
   "Wyandotte County Lake": {
     "latitude": 39.1646,
     "longitude": -94.7725,
     "city": "Kansas City",
-    "state": "KS",
-    "address_hint": "9100 Leavenworth Rd, KCK 66109 (main MTB trailhead near Shelter 9; west trailhead at Shelter 14)"
+    "state": "KS"
   },
   "Smithville Lake": {
-    "latitude": 39.4470,
+    "latitude": 39.447,
     "longitude": -94.5295,
     "city": "Smithville",
-    "state": "MO",
-    "address_hint": "Smoke N Davey Trailhead, W Highway east of Hwy 169, Smithville, MO 64089 (free paved lot just past lake bridge)"
+    "state": "MO"
   },
   "Watkins Mill State Park": {
     "latitude": 39.4063,
     "longitude": -94.2603,
     "city": "Lawson",
-    "state": "MO",
-    "address_hint": "26600 Park Rd N, Lawson, MO 64062 (paved 3.75-mi loop trail and equestrian/connector singletrack)"
+    "state": "MO"
   },
   "WaterWorks Park": {
     "latitude": 39.1578,
     "longitude": -94.5796,
     "city": "Kansas City",
-    "state": "MO",
-    "address_hint": "Waterworks Park Dr off N Oak Trafficway near NE 32nd St, KCMO 64116 (KC Northland disc golf / new singletrack)"
+    "state": "MO"
   }
 }

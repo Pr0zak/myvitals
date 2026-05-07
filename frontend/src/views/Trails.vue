@@ -318,6 +318,16 @@ function toggleMap(t: Trail) {
   expandedMaps.value = next;
 }
 
+function visitAgeClass(iso: string | null | undefined): string {
+  if (!iso) return "age-old";
+  const days = (Date.now() - new Date(iso).getTime()) / 86_400_000;
+  if (days < 7) return "age-fresh";
+  if (days < 30) return "age-recent";
+  if (days < 90) return "age-medium";
+  if (days < 180) return "age-old";
+  return "age-stale";
+}
+
 function fmtAge(iso: string | null): string {
   if (!iso) return "";
   const ms = tickNow.value - new Date(iso).getTime();
@@ -403,8 +413,12 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
               <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
               <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
               <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
-              <span v-if="t.visits_30d && t.visits_30d > 0" class="visits">
-                · 🚴 {{ t.visits_30d }} visit{{ t.visits_30d === 1 ? '' : 's' }} (30d)
+              <span v-if="(t.visits_total ?? 0) > 0" class="visits"
+                    :class="visitAgeClass(t.last_visit_at)">
+                · 🚴 {{ t.visits_total }} visit{{ t.visits_total === 1 ? '' : 's' }}
+                <span v-if="t.last_visit_at" class="last-visit">
+                  · last {{ fmtAge(t.last_visit_at) }}
+                </span>
               </span>
               <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
             </p>
@@ -449,8 +463,12 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
               <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
               <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
               <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
-              <span v-if="t.visits_30d && t.visits_30d > 0" class="visits">
-                · 🚴 {{ t.visits_30d }} visit{{ t.visits_30d === 1 ? '' : 's' }} (30d)
+              <span v-if="(t.visits_total ?? 0) > 0" class="visits"
+                    :class="visitAgeClass(t.last_visit_at)">
+                · 🚴 {{ t.visits_total }} visit{{ t.visits_total === 1 ? '' : 's' }}
+                <span v-if="t.last_visit_at" class="last-visit">
+                  · last {{ fmtAge(t.last_visit_at) }}
+                </span>
               </span>
               <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
             </p>
@@ -569,7 +587,12 @@ header h1 { margin: 0; }
 .nav-ic { color: var(--muted-2); margin-left: 0.4rem; vertical-align: middle; }
 .loc { color: var(--muted); }
 .loc.nopin { color: #f59e0b; }
-.visits { color: #22c55e; font-weight: 500; }
+.visits { font-weight: 500; }
+.visits.age-fresh   { color: #22c55e; }   /* < 7 days */
+.visits.age-recent  { color: #84cc16; }   /* 7-30 days */
+.visits.age-medium  { color: #f59e0b; }   /* 30-90 days */
+.visits.age-old     { color: #fb923c; }   /* 90-180 days */
+.visits.age-stale   { color: #94a3b8; }   /* > 180 days */
 .last-visit { color: var(--muted-2); font-weight: 400; font-size: 0.7rem; }
 .header-actions { display: flex; gap: 0.5rem; }
 .edit-pin { color: var(--muted-2); }

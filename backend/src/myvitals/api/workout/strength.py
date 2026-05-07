@@ -423,8 +423,10 @@ async def list_workouts(
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Workout history, newest first. Excludes 'regenerated' rows
-    (internal regen-count bookkeeping). No exercise/set hydration —
-    use GET /workouts/{id} for the full detail."""
+    (internal regen-count bookkeeping). For completed workouts, the
+    response includes lightweight aggregate stats (set count, total
+    volume, total reps, avg/max HR over the workout window) so the
+    web/phone activities feed can render them inline."""
     stmt = select(models.StrengthWorkout).order_by(
         models.StrengthWorkout.date.desc(),
         models.StrengthWorkout.generated_at.desc(),
@@ -434,6 +436,58 @@ async def list_workouts(
     else:
         stmt = stmt.where(models.StrengthWorkout.status != "regenerated")
     rows = (await db.execute(stmt)).scalars().all()
+
+    # Bulk pull set aggregates per workout
+    workout_ids = [w.id for w in rows if w.status == "completed"]
+    set_stats: dict[int, dict[str, Any]] = {}
+    if workout_ids:
+        agg = await db.execute(
+            select(
+                models.StrengthWorkoutExercise.workout_id.label("wid"),
+                func.count(models.StrengthSet.id).label("sets"),
+                func.coalesce(func.sum(models.StrengthSet.actual_reps), 0).label("reps"),
+                func.coalesce(
+                    func.sum(models.StrengthSet.actual_weight_lb *
+                             models.StrengthSet.actual_reps), 0
+                ).label("volume"),
+                func.avg(models.StrengthSet.rating).label("rpe_avg"),
+            )
+            .join(models.StrengthWorkoutExercise,
+                  models.StrengthSet.workout_exercise_id ==
+                  models.StrengthWorkoutExercise.id)
+            .where(models.StrengthWorkoutExercise.workout_id.in_(workout_ids))
+            .where(models.StrengthSet.actual_reps.is_not(None))
+            .where(models.StrengthSet.skipped.is_(False))
+            .group_by(models.StrengthWorkoutExercise.workout_id)
+        )
+        for wid, sets, reps, vol, rpe in agg.all():
+            set_stats[wid] = {
+                "set_count": int(sets or 0),
+                "total_reps": int(reps or 0),
+                "total_volume_lb": round(float(vol or 0), 1),
+                "rpe_avg": round(float(rpe), 2) if rpe is not None else None,
+            }
+
+    # HR window per workout (only when both started_at + completed_at present)
+    hr_stats: dict[int, dict[str, Any]] = {}
+    for w in rows:
+        if w.status != "completed" or w.started_at is None or w.completed_at is None:
+            continue
+        hr_q = await db.execute(
+            select(
+                func.avg(models.HeartRate.bpm).label("avg"),
+                func.max(models.HeartRate.bpm).label("max"),
+            )
+            .where(models.HeartRate.time >= w.started_at)
+            .where(models.HeartRate.time <= w.completed_at)
+        )
+        row = hr_q.first()
+        if row and row[0] is not None:
+            hr_stats[w.id] = {
+                "avg_hr": round(float(row[0]), 1),
+                "max_hr": round(float(row[1]), 1) if row[1] is not None else None,
+            }
+
     return {
         "count": len(rows),
         "workouts": [
@@ -445,6 +499,8 @@ async def list_workouts(
                 "started_at": w.started_at,
                 "completed_at": w.completed_at,
                 "generated_at": w.generated_at,
+                **set_stats.get(w.id, {}),
+                **hr_stats.get(w.id, {}),
             }
             for w in rows
         ],

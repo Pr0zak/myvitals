@@ -530,6 +530,12 @@ export const api = {
     workouts: Array<{
       id: number; date: string; split_focus: string; status: string;
       started_at: string | null; completed_at: string | null; generated_at: string;
+      set_count?: number;
+      total_reps?: number;
+      total_volume_lb?: number;
+      rpe_avg?: number | null;
+      avg_hr?: number | null;
+      max_hr?: number | null;
     }>;
   }> {
     const { data } = await http.get("/workout/strength/workouts", { params: opts });

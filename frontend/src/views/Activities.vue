@@ -71,14 +71,47 @@ async function load() {
       api.activitiesStats(statsDays),
       api.strengthWorkouts({ limit: 200 }).catch(() => ({ count: 0, workouts: [] })),
     ]);
-    activities.value = list;
     stats.value = st;
-    // Filter strength workouts to the same window
+
+    // Synthesize Activity-shaped rows from strength workouts so they
+    // sort, group, filter, and render alongside the rest of the feed.
     const sinceDate = params.since ?? new Date(0);
-    strengthWorkouts.value = sw.workouts
-      .filter((w) => w.status !== "regenerated")
+    const synthStrength: Activity[] = sw.workouts
+      .filter((w) => w.status !== "regenerated" && w.status !== "planned")
       .filter((w) => new Date(w.date + "T00:00:00") >= sinceDate)
-      .sort((a, b) => b.date.localeCompare(a.date));
+      .map((w) => {
+        const start = w.started_at ?? `${w.date}T17:00:00Z`;
+        const end = w.completed_at ?? null;
+        const duration = end
+          ? Math.max(0, Math.round((+new Date(end) - +new Date(start)) / 1000))
+          : 0;
+        // Stuff a one-line stats summary into `notes` so the row
+        // shows useful info even when the table doesn't have a sets
+        // column.
+        const noteParts: string[] = [];
+        if (w.set_count) noteParts.push(`${w.set_count} sets`);
+        if (w.total_reps) noteParts.push(`${w.total_reps} reps`);
+        if (w.total_volume_lb)
+          noteParts.push(`${Math.round(w.total_volume_lb).toLocaleString()} lb`);
+        if (w.rpe_avg) noteParts.push(`RPE ${w.rpe_avg.toFixed(1)}`);
+        return {
+          source: "strength",
+          source_id: String(w.id),
+          type: "strength",
+          name: `${w.split_focus.charAt(0).toUpperCase() + w.split_focus.slice(1)} day`,
+          start_at: start,
+          duration_s: duration,
+          distance_m: null, elevation_gain_m: null,
+          avg_hr: w.avg_hr ?? null,
+          max_hr: w.max_hr ?? null,
+          avg_power_w: null, max_power_w: null,
+          kcal: null, suffer_score: null, polyline: null,
+          notes: noteParts.length ? noteParts.join(" · ") : null,
+          // Backing data for the link target (clicking should open
+          // the strength day-view, not /activity/...).
+        } as Activity;
+      });
+    activities.value = [...list, ...synthStrength];
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -301,28 +334,6 @@ const monthLabel = (key: string) =>
     </Card>
 
     <!-- Activity heatmap -->
-    <Card v-if="strengthWorkouts.length" title="Strength workouts in period">
-      <ul class="strength-list">
-        <li v-for="w in strengthWorkouts" :key="w.id">
-          <RouterLink :to="{ name: 'workout-strength-day', params: { date: w.date } }">
-            <span class="date">{{
-              new Date(w.date + 'T00:00:00').toLocaleDateString(undefined, {
-                weekday: 'short', month: 'short', day: 'numeric',
-              })
-            }}</span>
-            <span class="focus">{{ w.split_focus.charAt(0).toUpperCase() + w.split_focus.slice(1) }}</span>
-            <span class="status" :class="w.status">{{
-              w.status === 'completed' ? 'Complete'
-              : w.status === 'in_progress' ? 'In progress'
-              : w.status === 'skipped' ? 'Skipped'
-              : w.status === 'planned' ? 'Planned'
-              : w.status
-            }}</span>
-          </RouterLink>
-        </li>
-      </ul>
-    </Card>
-
     <Card v-if="heatmapOption" title="Activity calendar">
       <div class="heat"><VChart :option="heatmapOption" autoresize/></div>
     </Card>
@@ -409,7 +420,9 @@ const monthLabel = (key: string) =>
           <h2 class="group-h">{{ monthLabel(key) }} <span class="group-n">{{ list.length }}</span></h2>
           <div :class="viewMode === 'grid' ? 'list' : 'rows'">
             <component :is="'RouterLink'" v-for="a in list" :key="`${a.source}-${a.source_id}`"
-                       :to="`/activity/${a.source}/${a.source_id}`"
+                       :to="a.source === 'strength'
+                              ? `/workout/strength/day/${a.start_at.slice(0, 10)}`
+                              : `/activity/${a.source}/${a.source_id}`"
                        :class="viewMode === 'grid' ? 'card' : 'row'">
               <template v-if="viewMode === 'grid'">
                 <PolylineThumbnail :polyline="a.polyline" :activityType="a.type" :size="100" class="thumb"/>

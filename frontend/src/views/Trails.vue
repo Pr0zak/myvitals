@@ -333,6 +333,11 @@ function toggleMap(t: Trail) {
   expandedMaps.value = next;
 }
 
+// Fullscreen map modal
+const fullMapTrail = ref<Trail | null>(null);
+function openFullMap(t: Trail) { fullMapTrail.value = t; }
+function closeFullMap() { fullMapTrail.value = null; }
+
 function visitAgeClass(iso: string | null | undefined): string {
   if (!iso) return "age-old";
   const days = (Date.now() - new Date(iso).getTime()) / 86_400_000;
@@ -446,6 +451,7 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
               :trail-id="t.id" :name="t.name"
               :latitude="t.latitude" :longitude="t.longitude"
               @click.stop
+              @expand="openFullMap(t)"
             />
           </article>
         </div>
@@ -496,6 +502,7 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
               :trail-id="t.id" :name="t.name"
               :latitude="t.latitude" :longitude="t.longitude"
               @click.stop
+              @expand="openFullMap(t)"
             />
           </article>
         </div>
@@ -518,6 +525,25 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
         </div>
       </section>
     </template>
+
+    <!-- Fullscreen map modal -->
+    <div v-if="fullMapTrail" class="full-map-overlay" @click.self="closeFullMap">
+      <div class="full-map-wrap">
+        <header class="full-map-head">
+          <strong>{{ fullMapTrail.name }}</strong>
+          <span v-if="fullMapTrail.city" class="muted-suffix">
+            · {{ fullMapTrail.city }}{{ fullMapTrail.state ? ', ' + fullMapTrail.state : '' }}
+          </span>
+          <button class="close" @click="closeFullMap">✕</button>
+        </header>
+        <TrailMap
+          v-if="fullMapTrail.latitude != null && fullMapTrail.longitude != null"
+          :trail-id="fullMapTrail.id" :name="fullMapTrail.name"
+          :latitude="fullMapTrail.latitude" :longitude="fullMapTrail.longitude"
+          :expandable="false" :fullscreen="true"
+        />
+      </div>
+    </div>
 
     <!-- Edit location modal -->
     <div v-if="editTrail" class="overlay" @click.self="closeEdit">
@@ -619,6 +645,30 @@ header h1 { margin: 0; }
 .map-toggle { color: var(--muted-2); }
 .map-toggle:hover { color: var(--accent, #ef4444); }
 .map-toggle.on { color: var(--accent, #ef4444); }
+
+.full-map-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 110;
+  display: flex; align-items: stretch; justify-content: center;
+  padding: 2vh 2vw;
+}
+.full-map-wrap {
+  flex: 1; max-width: 1400px; max-height: 96vh;
+  background: var(--bg-1); border: 1px solid var(--line);
+  border-radius: 12px; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.full-map-head {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.7rem 1rem; border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.full-map-head strong { color: var(--text); font-size: 1rem; }
+.full-map-head .muted-suffix { color: var(--muted); font-size: 0.85rem; flex: 1; }
+.full-map-head .close {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-size: 1.2rem; padding: 0.2rem 0.5rem;
+}
+.full-map-head .close:hover { color: var(--text); }
 
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100;
   display: flex; justify-content: flex-end; }

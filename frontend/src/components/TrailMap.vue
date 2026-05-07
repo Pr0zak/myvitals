@@ -16,12 +16,16 @@ import polylineDecoder from "@mapbox/polyline";
 import { api } from "@/api/client";
 import { effectiveTheme } from "@/theme";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   trailId: number;
   name: string;
   latitude: number;
   longitude: number;
-}>();
+  expandable?: boolean;     // show the "Open full map" button
+  fullscreen?: boolean;     // render full-height instead of 240px
+}>(), { expandable: true, fullscreen: false });
+
+const emit = defineEmits<{ (e: "expand"): void }>();
 
 const mapEl = ref<HTMLDivElement | null>(null);
 const visits = ref<Awaited<ReturnType<typeof api.trailVisits>>["visits"]>([]);
@@ -149,26 +153,38 @@ watch(effectiveTheme, () => setTimeout(render, 50));
 </script>
 
 <template>
-  <div class="trail-map-wrap">
-    <div ref="mapEl" class="trail-map" />
-    <p v-if="loading" class="hint">Loading visits…</p>
-    <p v-else-if="error" class="err">{{ error }}</p>
-    <p v-else-if="visits.length === 0" class="hint">
-      No linked rides yet — Strava activities within 2 km of the pin auto-link
-      via the "Link activities" button on the Trails page.
-    </p>
-    <p v-else class="hint">
-      <strong>{{ visits.length }}</strong> linked ride{{ visits.length === 1 ? '' : 's' }} on this trail
-    </p>
+  <div class="trail-map-wrap" :class="{ fullscreen }">
+    <div ref="mapEl" class="trail-map" :class="{ fullscreen }" />
+    <div class="map-foot">
+      <p v-if="loading" class="hint">Loading visits…</p>
+      <p v-else-if="error" class="err">{{ error }}</p>
+      <p v-else-if="visits.length === 0" class="hint">
+        No linked rides yet.
+      </p>
+      <p v-else class="hint">
+        <strong>{{ visits.length }}</strong> linked ride{{ visits.length === 1 ? '' : 's' }}
+      </p>
+      <button v-if="expandable" class="expand-btn" @click="emit('expand')">⤢ Open full map</button>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .trail-map-wrap { margin-top: 0.5rem; }
+.trail-map-wrap.fullscreen { margin-top: 0; height: 100%; display: flex; flex-direction: column; }
 .trail-map {
   height: 240px; border-radius: 8px; overflow: hidden;
   border: 1px solid var(--line);
 }
+.trail-map.fullscreen { flex: 1; height: auto; min-height: 0; border-radius: 0; border: none; }
+.map-foot { display: flex; justify-content: space-between; align-items: center;
+  gap: 0.6rem; flex-wrap: wrap; }
 .hint { color: var(--muted); font-size: 0.78rem; margin: 0.4rem 0 0; }
 .err { color: #f87171; font-size: 0.78rem; margin: 0.4rem 0 0; }
+.expand-btn {
+  margin-top: 0.4rem; padding: 0.3rem 0.7rem; font-size: 0.75rem;
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 5px; color: var(--text-soft); cursor: pointer;
+}
+.expand-btn:hover { color: var(--text); border-color: var(--accent, #ef4444); }
 </style>

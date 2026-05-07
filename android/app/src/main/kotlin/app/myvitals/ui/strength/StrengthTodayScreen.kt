@@ -88,6 +88,20 @@ fun StrengthTodayScreen(
     val scope = rememberCoroutineScope()
     val repo = remember(settings) { StrengthRepository(context, settings) }
 
+    // Keep the screen awake during the active workout — phones go to
+    // sleep mid-set otherwise. The flag is cleared on screen exit.
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val activity = context as? android.app.Activity
+        activity?.window?.addFlags(
+            android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        )
+        onDispose {
+            activity?.window?.clearFlags(
+                android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+        }
+    }
+
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var catalog by remember { mutableStateOf<Map<String, StrengthExerciseInfo>>(emptyMap()) }
     var recoveryReason by remember { mutableStateOf<String?>(null) }
@@ -684,9 +698,18 @@ private fun ExerciseCard(
                 if (logged != null) {
                     LoggedSetRow(n, logged.actualWeightLb, logged.actualReps ?: 0, logged.rating ?: 0)
                 } else if (n == nextSet) {
+                    // Inherit weight/reps from the most recently logged
+                    // set of THIS exercise so an edit on set 1 carries
+                    // forward to sets 2…N. Fall back to the planned
+                    // target on the very first set.
+                    val priorLogged = wex.sets
+                        .filter { it.actualReps != null }
+                        .maxByOrNull { it.setNumber }
                     val input = inputs.getOrPut(key) { SetInput(
-                        weight = wex.targetWeightLb?.toString().orEmpty(),
-                        reps = wex.targetRepsLow.toString(),
+                        weight = priorLogged?.actualWeightLb?.toString()
+                            ?: wex.targetWeightLb?.toString().orEmpty(),
+                        reps = (priorLogged?.actualReps
+                            ?: wex.targetRepsLow).toString(),
                     ) }
                     SetEntryRow(
                         n = n, input = input,

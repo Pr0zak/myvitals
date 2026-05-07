@@ -18,7 +18,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...analytics import strength as strength_algo
@@ -645,8 +645,18 @@ async def upcoming_workouts(
     )
 
     # Walk forward, advancing the rotation each time we land on a workout day.
+    # If the user just trained off-schedule, the day after gets demoted
+    # to rest so they don't hit two consecutive workout days.
     today = _date.today()
     last_split = await strength_algo.last_split_for_user(db)
+
+    # Last completed workout date — drives the "skip the day after" logic.
+    last_done_q = await db.execute(
+        select(func.max(models.StrengthWorkout.date))
+        .where(models.StrengthWorkout.status == "completed")
+    )
+    last_done = last_done_q.scalar()
+
     out: list[dict[str, Any]] = []
     cursor_split = last_split
     for offset in range(days + 1):
@@ -655,6 +665,20 @@ async def upcoming_workouts(
         mon_first = (d.weekday())  # Python's weekday(): Mon=0..Sun=6 ✓
         if mon_first not in workout_dows:
             continue
+        # Skip if the previous calendar day already had a completed workout.
+        if last_done is not None and (d - last_done).days == 1:
+            # Push this scheduled session back one day if possible.
+            shifted = d + _td(days=1)
+            shifted_mon = shifted.weekday()
+            if shifted_mon not in workout_dows:
+                # advance the rotation cursor as if we'd done it on `d`
+                cursor_split = strength_algo.select_split(dpw, pref, cursor_split)
+                # treat `d` as rest, inject `shifted` as the workout instead
+                d = shifted
+            else:
+                # next day is already a workout day — leave both alone
+                pass
+
         focus = strength_algo.select_split(dpw, pref, cursor_split)
         cursor_split = focus
         seed = strength_algo._seed(d, 0)  # noqa: SLF001
@@ -676,6 +700,7 @@ async def upcoming_workouts(
             "preview_exercises": names,
             "exercise_count": len(chosen),
         })
+        last_done = d  # treat this scheduled day as the new "last" for spacing
     return {"count": len(out), "upcoming": out}
 
 

@@ -23,7 +23,7 @@ from itertools import chain, combinations
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import models
@@ -814,6 +814,36 @@ async def generate_plan(
                     f"the regenerate button.",
                 ],
             )
+
+    # Day-spacing check: don't recommend back-to-back strength sessions.
+    # If a workout was completed yesterday OR earlier today (and we're
+    # generating for today), surface as rest. Override via force_no_rest.
+    if not force_no_rest:
+        recent_q = await db.execute(
+            select(func.max(models.StrengthWorkout.date))
+            .where(models.StrengthWorkout.status == "completed")
+            .where(models.StrengthWorkout.date < target_date)
+        )
+        last_completed = recent_q.scalar()
+        if last_completed is not None:
+            gap_days = (target_date - last_completed).days
+            if gap_days <= 1:
+                return GeneratedPlan(
+                    seed=seed,
+                    split_focus="rest",
+                    rest_day_recommended=True,
+                    rest_day_reason=(
+                        f"trained {last_completed.strftime('%a')} — "
+                        f"give the muscle group at least one off day"
+                    ),
+                    recovery=recovery,
+                    notes=[
+                        f"Last session was {last_completed.isoformat()}. "
+                        "Back-to-back strength days bypass the recovery "
+                        "your plan assumes — regenerate with force=true "
+                        "to override.",
+                    ],
+                )
 
     last_split = await last_split_for_user(db)
     focus = select_split(days_per_week, split_pref, last_split)

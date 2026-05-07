@@ -65,13 +65,13 @@ fun VitalsDetailScreen(
     vital: Vital,
     onBack: () -> Unit,
 ) {
-    if (vital == Vital.SLEEP) {
-        SleepDetailScreen(settings, onBack)
-        return
-    }
-    if (vital == Vital.STEPS) {
-        StepsDetailScreen(settings, onBack)
-        return
+    when (vital) {
+        Vital.SLEEP -> { SleepDetailScreen(settings, onBack); return }
+        Vital.STEPS -> { StepsDetailScreen(settings, onBack); return }
+        Vital.HR -> { HrDetailScreen(settings, onBack); return }
+        Vital.WEIGHT -> { WeightDetailScreen(settings, onBack); return }
+        Vital.BP -> { BpDetailScreen(settings, onBack); return }
+        else -> {}
     }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var range by remember { mutableStateOf(VitalRange.MONTH) }

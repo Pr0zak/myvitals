@@ -170,7 +170,7 @@ fun ActivityDetailScreen(
                         item { ActivityMap(a, trails) }
                     }
                     if (hrPoints.isNotEmpty()) {
-                        item { HrChart(hrPoints) }
+                        item { ActivityHrChart(hrPoints) }
                     }
                     item { TrailLinkCard(a, trails, onPick = { showPicker = true }) }
                     if (!a.notes.isNullOrBlank()) {
@@ -330,8 +330,9 @@ private fun ActivityMap(a: ActivityRow, trails: List<Trail>) {
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
 <style>$leafletCss
-html,body{margin:0;background:#0F1620;height:100vh;width:100vw;overflow:hidden;}
-#m{height:100vh;width:100vw;}</style>
+html,body{margin:0;background:#0F1620;overflow:hidden;}
+html,body{position:absolute;inset:0;}
+#m{position:absolute;inset:0;}</style>
 </head><body>
 <div id="m"></div>
 <script>$leafletJs</script>
@@ -368,11 +369,23 @@ try {
   if (bounds) bounds.extend([$trailLat,$trailLon]);
   else bounds = L.latLngBounds([$trailLat,$trailLon], [$trailLat,$trailLon]);
   """ else ""}
-  if (bounds) window.map.fitBounds(bounds.pad(0.1));
-  function fix() { try { window.map.invalidateSize(); } catch (e) {} }
-  setTimeout(fix, 50); setTimeout(fix, 250); setTimeout(fix, 600);
-  setTimeout(() => console.log('map ready', window.map.getSize().x, 'x',
-    window.map.getSize().y), 700);
+  function fix() {
+    try {
+      window.map.invalidateSize();
+      if (bounds && document.body.clientHeight > 0) {
+        try { window.map.fitBounds(bounds.pad(0.1)); } catch (e) {}
+      }
+    } catch (e) {}
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(fix).observe(document.body);
+  }
+  window.addEventListener('resize', fix);
+  setTimeout(fix, 50); setTimeout(fix, 250); setTimeout(fix, 800);
+  setTimeout(() => console.log(
+    'map size:', window.map.getSize().x, 'x', window.map.getSize().y,
+    'bodyH:', document.body.clientHeight,
+  ), 900);
 } catch (e) { console.error('map init failed:', e.toString()); }
 </script></body></html>"""
     AndroidView(

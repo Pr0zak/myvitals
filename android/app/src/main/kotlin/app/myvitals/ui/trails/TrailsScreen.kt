@@ -850,8 +850,9 @@ private fun MiniMap(lat: Double, lon: Double, name: String, osmGeoJson: String? 
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
 <style>$leafletCss
-html,body{margin:0;background:#0F1620;height:100vh;width:100vw;overflow:hidden;}
-#m{height:100vh;width:100vw;}</style>
+html,body{margin:0;background:#0F1620;overflow:hidden;}
+html,body{position:absolute;inset:0;}
+#m{position:absolute;inset:0;}</style>
 </head><body>
 <div id="m"></div>
 <script>$leafletJs</script>
@@ -863,19 +864,33 @@ try {
     {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(window.map);
   L.marker([$lat,$lon]).addTo(window.map).bindPopup('$nameEsc').openPopup();
   const osm = $osmLiteral;
+  let osmLayer = null;
   if (osm) {
-    const layer = L.geoJSON(osm, {
+    osmLayer = L.geoJSON(osm, {
       style: {color:'#94a3b8', weight:3, opacity:0.9, dashArray:'6,4'}
     }).addTo(window.map);
-    try { window.map.fitBounds(layer.getBounds().pad(0.1)); } catch (e) {}
   }
-  // Re-size after the WebView has actually been measured by Compose.
-  // 100vh resolves correctly only after layout — give it a few ticks
-  // and re-call invalidateSize so Leaflet re-reads the container.
-  function fix() { try { window.map.invalidateSize(); } catch (e) {} }
-  setTimeout(fix, 50); setTimeout(fix, 250); setTimeout(fix, 600);
-  setTimeout(() => console.log('map ready', window.map.getSize().x, 'x',
-    window.map.getSize().y), 700);
+  // The WebView often lays out AFTER initial render with size 0;
+  // listen for body-size changes and retell Leaflet whenever the
+  // container actually has dimensions, then fitBounds.
+  function fix() {
+    try {
+      window.map.invalidateSize();
+      if (osmLayer && document.body.clientHeight > 0) {
+        try { window.map.fitBounds(osmLayer.getBounds().pad(0.1)); }
+        catch (e) {}
+      }
+    } catch (e) {}
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(fix).observe(document.body);
+  }
+  window.addEventListener('resize', fix);
+  setTimeout(fix, 50); setTimeout(fix, 250); setTimeout(fix, 800);
+  setTimeout(() => console.log(
+    'map size:', window.map.getSize().x, 'x', window.map.getSize().y,
+    'innerH:', window.innerHeight, 'bodyH:', document.body.clientHeight,
+  ), 900);
 } catch (e) { console.error('map init failed:', e.toString()); }
 </script></body></html>"""
     AndroidView(

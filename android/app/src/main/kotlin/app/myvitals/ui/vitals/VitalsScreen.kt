@@ -108,7 +108,7 @@ fun VitalsScreen(
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val since30 = LocalDate.now().minusDays(29).toString()
-            val hrSince = Instant.now().minusSeconds(2 * 3600).toString()
+            val hrSince = Instant.now().minusSeconds(8 * 3600).toString()
             val weightSince = LocalDate.now().minusDays(60).toString()
             val bpSince = LocalDate.now().minusDays(30).toString()
             coroutineScope {
@@ -242,7 +242,8 @@ fun VitalsScreen(
             items(tiles, key = { it.name }) { v ->
                 when (v) {
                     Vital.SOBER -> SoberBadge(sober, onClick = onOpenSober)
-                    Vital.HR -> HrBadge(hr, nowMs, onClick = { onOpenVitalDetail(v) })
+                    Vital.HR -> HrBadge(hr, today, rows, nowMs,
+                        onClick = { onOpenVitalDetail(v) })
                     Vital.HRV -> HrvBadge(rows, nowMs, onClick = { onOpenVitalDetail(v) })
                     Vital.SLEEP -> SleepBadge(rows, nowMs, onClick = { onOpenVitalDetail(v) })
                     Vital.STEPS -> StepsBadge(
@@ -290,20 +291,48 @@ private fun BadgeFrame(v: Vital, lastUpdate: String?, onClick: () -> Unit, conte
 }
 
 @Composable
-private fun HrBadge(snap: HrSnapshot, nowMs: Long, onClick: () -> Unit) {
+private fun HrBadge(
+    snap: HrSnapshot,
+    today: DailySummary?,
+    rows: List<DailySummary>,
+    nowMs: Long,
+    onClick: () -> Unit,
+) {
     val v = Vital.HR
-    val lastUpdate = snap.lastIso?.let { fmtRelative(it, nowMs) }
+    // Prefer the latest live sample; fall back to today's resting HR.
+    val (value, label, lastUpdate) = when {
+        snap.latest != null && snap.lastIso != null ->
+            Triple("%.0f".format(snap.latest), "live", fmtRelative(snap.lastIso, nowMs))
+        today?.restingHr != null ->
+            Triple("%.0f".format(today.restingHr), "resting", "today")
+        rows.lastOrNull { it.restingHr != null } != null -> {
+            val r = rows.last { it.restingHr != null }
+            Triple("%.0f".format(r.restingHr), "resting", fmtRelativeDate(r.date, nowMs))
+        }
+        else -> Triple<String?, String?, String?>(null, null, null)
+    }
     BadgeFrame(v, lastUpdate, onClick) {
         Row(verticalAlignment = Alignment.Bottom) {
-            Text(snap.latest?.let { "%.0f".format(it) } ?: "—",
-                color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Text(value ?: "—", color = MV.OnSurface,
+                fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.width(4.dp))
             Text("bpm", color = MV.OnSurfaceDim, fontSize = 11.sp,
                 modifier = Modifier.padding(bottom = 4.dp))
+            if (label != null) {
+                Spacer(Modifier.width(6.dp))
+                Text(label, color = MV.OnSurfaceDim, fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 6.dp))
+            }
         }
         Spacer(Modifier.height(6.dp))
         Box(Modifier.fillMaxWidth().height(34.dp)) {
-            HrSparkline(snap.points, color = v.color, nowMs = nowMs)
+            if (snap.points.size >= 2) {
+                HrSparkline(snap.points, color = v.color, nowMs = nowMs)
+            } else {
+                // No live samples — show resting trend from daily summaries.
+                SparkLine(rows.map { it.restingHr?.toFloat() }, color = v.color)
+            }
         }
     }
 }

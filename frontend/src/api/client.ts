@@ -434,6 +434,17 @@ export const api = {
     return data;
   },
 
+  async concept2Sync(opts: { full?: boolean; type?: string | null } = {}): Promise<{
+    upserted: number;
+    last_sync_at: string | null;
+  }> {
+    const params: Record<string, string | boolean> = {};
+    if (opts.full) params.full = true;
+    if (opts.type !== undefined) params.type_filter = opts.type ?? "";
+    const { data } = await http.post("/integrations/concept2/sync", null, { params });
+    return data;
+  },
+
   async activities(opts: { since?: Date | string; type?: string; limit?: number } = {}): Promise<import("./types").Activity[]> {
     const params: Record<string, string | number> = {};
     if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;

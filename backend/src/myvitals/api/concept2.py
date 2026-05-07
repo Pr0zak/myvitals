@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
+from ..integrations import concept2 as concept2_int
 
 router = APIRouter(
     prefix="/integrations/concept2",
@@ -122,3 +123,22 @@ async def disconnect(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
         await db.delete(cred)
         await db.commit()
     return {"connected": False}
+
+
+@router.post("/sync")
+async def sync(
+    full: bool = False,
+    type_filter: str | None = "rower",
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Run an immediate sync. `full=true` ignores last_sync_at and pulls
+    every page (use for the first backfill); otherwise incremental."""
+    cred = await db.get(models.Concept2Credentials, 1)
+    if cred is None:
+        raise HTTPException(status_code=400, detail="Concept2 not connected")
+    upserted = await concept2_int.sync_results(
+        db, cred=cred,
+        type_filter=type_filter or None,
+        incremental=not full,
+    )
+    return {"upserted": upserted, "last_sync_at": cred.last_sync_at}

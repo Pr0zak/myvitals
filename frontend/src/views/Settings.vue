@@ -546,6 +546,18 @@ async function disconnectConcept2() {
   }
 }
 
+async function syncConcept2(full: boolean) {
+  concept2Saving.value = true;
+  concept2Result.value = "";
+  try {
+    const r = await api.concept2Sync({ full });
+    concept2Result.value = `Pulled ${r.upserted} session(s).`;
+    await loadConcept2();
+  } catch (e) {
+    concept2Error.value = e instanceof Error ? e.message : String(e);
+  } finally { concept2Saving.value = false; }
+}
+
 async function saveStravaCreds() {
   credsSaving.value = true;
   credsResult.value = "";
@@ -584,6 +596,8 @@ function fmt(ts: string | null): string {
 
 onMounted(() => {
   loadStrava();
+  loadConcept2();
+  loadTrailCfg();
   loadProfile();
   loadAiCfg();
   startJobPolling();
@@ -1051,6 +1065,12 @@ onUnmounted(stopJobPolling);
             <span class="muted" v-else>Last sync: never</span>
           </p>
           <div class="actions">
+            <button class="primary" :disabled="concept2Saving" @click="syncConcept2(false)">
+              {{ concept2Saving ? "Syncing…" : "Sync now" }}
+            </button>
+            <button class="ghost" :disabled="concept2Saving" @click="syncConcept2(true)">
+              Backfill all-time
+            </button>
             <button class="ghost danger" @click="disconnectConcept2">Disconnect</button>
           </div>
           <div v-if="concept2Result" class="hint">{{ concept2Result }}</div>

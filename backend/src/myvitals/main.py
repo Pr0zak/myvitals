@@ -110,6 +110,29 @@ async def lifespan(app: FastAPI):
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=20),
     )
     log.info("Trail status poll scheduled every 15 min")
+
+    # Concept2 incremental poll — no-op if credentials aren't set.
+    from .db import models as _c2_models
+    from .db.session import SessionLocal as _c2_session
+    from .integrations import concept2 as _concept2_int
+
+    async def _concept2_tick() -> None:
+        try:
+            async with _c2_session() as db:
+                cred = await db.get(_c2_models.Concept2Credentials, 1)
+                if cred is None:
+                    return
+                await _concept2_int.sync_results(db, cred=cred)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Concept2 poll failed: %s", e)
+
+    scheduler.add_job(
+        _concept2_tick,
+        trigger="interval", minutes=30,
+        id="concept2_poll", replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
+    )
+    log.info("Concept2 poll scheduled every 30 min (no-op until connected)")
     scheduler.start()
     log.info("scheduler started; daily_summary at 03:00 %s", settings.tz)
 

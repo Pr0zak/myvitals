@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
+from ..config import settings
 from ..schemas import TodaySummary
 
 router = APIRouter(dependencies=[Depends(require_any)])
@@ -18,7 +19,19 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     Returns the saved daily_summary row for today if the analytics job
     has run; otherwise computes a best-effort live snapshot.
     """
-    today_local = datetime.now(timezone.utc).date()
+    # Resolve "today" in the user's configured TZ rather than UTC.
+    # With TZ=UTC, on Central time the UTC day starts at 7pm CDT the
+    # previous evening, so 5 hours of yesterday's steps were leaking
+    # into today's count.
+    try:
+        from zoneinfo import ZoneInfo
+        local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        local_tz = timezone.utc
+    now_local = datetime.now(local_tz)
+    today_local = now_local.date()
+    midnight_local = datetime.combine(today_local, datetime.min.time(), tzinfo=local_tz)
+    end = datetime.now(timezone.utc)
 
     # 1. Try the persisted summary first.
     result = await db.execute(
@@ -27,13 +40,20 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     saved = result.scalar_one_or_none()
 
     # 2. Compute live values as a fallback / supplement.
-    midnight = datetime.combine(today_local, datetime.min.time(), tzinfo=timezone.utc)
-    end = datetime.now(timezone.utc)
-
-    steps_result = await db.execute(
-        select(func.coalesce(func.sum(models.Steps.count), 0))
-        .where(models.Steps.time >= midnight)
+    # Per-minute MAX dedupes cases where multiple HC sources (watch +
+    # phone pedometer + Google Fit aggregator) all report overlapping
+    # steps in the same minute. Without source tagging this is the best
+    # we can do at query time.
+    minute_col = func.date_trunc("minute", models.Steps.time)
+    per_min_subq = (
+        select(func.max(models.Steps.count).label("mx"))
+        .where(models.Steps.time >= midnight_local)
         .where(models.Steps.time <= end)
+        .group_by(minute_col)
+        .subquery()
+    )
+    steps_result = await db.execute(
+        select(func.coalesce(func.sum(per_min_subq.c.mx), 0))
     )
     steps_total = int(steps_result.scalar() or 0)
 

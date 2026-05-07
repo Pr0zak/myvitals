@@ -41,13 +41,27 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
         recovery = await recovery_score(db, target)
         sleep_pts, sleep_duration = await sleep_score(db, target)
 
-        # Steps total for the date (UTC day, simple v1).
-        day_start = datetime.combine(target, time.min, tzinfo=timezone.utc)
-        day_end = datetime.combine(target, time.max, tzinfo=timezone.utc)
-        steps_result = await db.execute(
-            select(func.coalesce(func.sum(models.Steps.count), 0))
+        # Steps total for the date — local-tz day, deduped per minute.
+        # See summary.py for rationale on both the TZ fix and the
+        # per-minute MAX (multi-source HC ingest dedupe).
+        try:
+            from zoneinfo import ZoneInfo
+            from ..config import settings as _settings
+            _local = ZoneInfo(_settings.tz) if _settings.tz != "UTC" else timezone.utc
+        except Exception:
+            _local = timezone.utc
+        day_start = datetime.combine(target, time.min, tzinfo=_local)
+        day_end = datetime.combine(target, time.max, tzinfo=_local)
+        minute_col = func.date_trunc("minute", models.Steps.time)
+        per_min_subq = (
+            select(func.max(models.Steps.count).label("mx"))
             .where(models.Steps.time >= day_start)
             .where(models.Steps.time <= day_end)
+            .group_by(minute_col)
+            .subquery()
+        )
+        steps_result = await db.execute(
+            select(func.coalesce(func.sum(per_min_subq.c.mx), 0))
         )
         steps_total = int(steps_result.scalar() or 0) or None
 

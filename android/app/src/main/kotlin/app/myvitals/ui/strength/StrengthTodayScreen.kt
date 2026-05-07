@@ -648,6 +648,16 @@ private fun ExerciseCard(
                             )
                             inputs.remove(key)
                         },
+                        onFailed = {
+                            // Shortcut: rating=1, log with whatever's in the input
+                            onLogSet(
+                                n,
+                                input.weight.toDoubleOrNull(),
+                                input.reps.toIntOrNull(),
+                                1,
+                            )
+                            inputs.remove(key)
+                        },
                     )
                 } else {
                     PendingSetRow(n)
@@ -690,7 +700,8 @@ private fun PendingSetRow(n: Int) {
 private fun SetEntryRow(
     n: Int, input: SetInput,
     onWeight: (String) -> Unit, onReps: (String) -> Unit,
-    onRating: (Int) -> Unit, canLog: Boolean, onLog: () -> Unit,
+    onRating: (Int) -> Unit, canLog: Boolean,
+    onLog: () -> Unit, onFailed: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -739,13 +750,22 @@ private fun SetEntryRow(
             color = MV.OnSurfaceDim, fontSize = 10.sp, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
         )
-        Button(
-            onClick = onLog, enabled = canLog,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MV.BrandRed, contentColor = MV.OnSurface,
-            ),
-        ) { Text("Log set $n") }
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                onClick = onLog, enabled = canLog,
+                modifier = Modifier.weight(2f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MV.BrandRed, contentColor = MV.OnSurface,
+                ),
+            ) { Text("Log set $n") }
+            OutlinedButton(
+                onClick = onFailed,
+                modifier = Modifier.weight(1f),
+            ) { Text("Failed") }
+        }
     }
 }
 

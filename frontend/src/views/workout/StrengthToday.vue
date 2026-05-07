@@ -365,6 +365,17 @@ const currentExercise = computed(() => {
   return workout.value.exercises.find((ex) => !isExerciseDone(ex)) ?? null;
 });
 
+async function logFailed(wex: StrengthWorkoutExercise, setNum: number) {
+  // Shortcut: mark the set as failed (rating=1) using whatever weight is
+  // already in the input. Reps default to whatever was entered (or the
+  // target if unset) — what matters is the rating, which drives the
+  // -7.5% deload on next session.
+  const e = entry(wex.id, setNum, wex.target_reps_low, wex.target_weight_lb);
+  if (!confirm("Mark set " + setNum + " as failed? Next session's weight will drop ~7.5%.")) return;
+  e.rating = 1;
+  await logSet(wex, setNum);
+}
+
 async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = false) {
   const e = entry(wex.id, setNum, wex.target_reps_low, wex.target_weight_lb);
   busy.value = `set-${wex.id}-${setNum}`;
@@ -602,11 +613,19 @@ onMounted(loadAll);
                     >{{ r }}</button>
                   </td>
                   <td>
-                    <button v-if="!isSetLogged(wex, n)" class="primary small"
-                            :disabled="busy === `set-${wex.id}-${n}` || entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).rating === null"
-                            @click="logSet(wex, n)">
-                      Log
-                    </button>
+                    <div v-if="!isSetLogged(wex, n)" class="row-actions">
+                      <button class="primary small"
+                              :disabled="busy === `set-${wex.id}-${n}` || entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).rating === null"
+                              @click="logSet(wex, n)">
+                        Log
+                      </button>
+                      <button class="ghost small fail"
+                              :disabled="busy === `set-${wex.id}-${n}`"
+                              title="Mark this set failed (rating 1 — auto-deload next session)"
+                              @click="logFailed(wex, n)">
+                        Failed
+                      </button>
+                    </div>
                     <span v-else class="ok">✓</span>
                   </td>
                 </tr>
@@ -769,6 +788,9 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 .rating.on[data-r="5"] { background: rgba(34,197,94,0.4); color: #fff; border-color: #22c55e; }
 
 .rating-legend { margin: 0.4rem 0 0; font-size: 0.7rem; color: var(--muted-2); }
+.row-actions { display: flex; gap: 0.3rem; align-items: center; }
+button.ghost.small.fail { color: #f87171; border-color: #b91c1c44; }
+button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: #ef4444; }
 
 .bottom { margin-top: 1rem; }
 .big-btn { font-size: 1rem; padding: 0.7rem 1.4rem; }

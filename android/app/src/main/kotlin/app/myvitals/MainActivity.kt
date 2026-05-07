@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Terrain
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -42,6 +43,7 @@ import app.myvitals.ui.SettingsScreen
 import app.myvitals.ui.SoberHomeScreen
 import app.myvitals.ui.strength.StrengthHistoryScreen
 import app.myvitals.ui.strength.StrengthTodayScreen
+import app.myvitals.ui.trails.TrailsScreen
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -51,6 +53,7 @@ private object Routes {
     const val SOBER = "sober"
     const val WORKOUT = "workout/today"
     const val WORKOUT_HISTORY = "workout/history"
+    const val TRAILS = "trails"
     const val SETTINGS = "settings"
 }
 
@@ -118,6 +121,9 @@ class MainActivity : ComponentActivity() {
                                 onBack = { nav.popBackStack() },
                             )
                         }
+                        composable(Routes.TRAILS) {
+                            TrailsScreen(settings = settings)
+                        }
                         composable(Routes.SETTINGS) {
                             SettingsScreen(
                                 settings = settings,
@@ -176,6 +182,7 @@ private fun BottomBar(nav: NavHostController) {
         Item(current, Routes.SOBER, "Sober", Icons.Filled.Refresh) { nav.navigateTab(Routes.SOBER) }
         Item(current, Routes.WORKOUT, "Workout", Icons.Filled.FitnessCenter,
             highlightAlsoFor = setOf(Routes.WORKOUT_HISTORY)) { nav.navigateTab(Routes.WORKOUT) }
+        Item(current, Routes.TRAILS, "Trails", Icons.Filled.Terrain) { nav.navigateTab(Routes.TRAILS) }
         Item(current, Routes.SETTINGS, "Settings", Icons.Filled.Settings) { nav.navigateTab(Routes.SETTINGS) }
     }
 }

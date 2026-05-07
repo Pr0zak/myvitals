@@ -68,9 +68,12 @@ Backend already produces structured alerts (`/ai/alerts`) via the
       as a hypertable, and exposes /trails endpoints. Frontend Trails
       view with subscribe-star. Phone-side TrailsScreen + push deferred
       to v0.7.1.
-- [ ] **Trail-status — phone surface** — TrailsScreen.kt, BackendClient
-      methods, new "trail_status" notification channel, WorkManager job
-      polling /trails/alerts every 30 min.
+- [x] **Trail-status — phone surface** — done in v0.7.2.
+      `ui/trails/TrailsScreen.kt`, BackendClient extended,
+      `Notifier.TRAIL_CHANNEL_ID` separate channel, TrailAlertWorker
+      polls every 30 min and posts a notification per unnotified
+      flip. Added as 4th bottom-nav tab (Sober / Workout / Trails /
+      Settings).
 - [ ] **iOS app** — currently Android-only. Same Health Connect
       analogue would be HealthKit on iOS.
 - [ ] **Multi-user** — single-user assumed throughout; no user_id

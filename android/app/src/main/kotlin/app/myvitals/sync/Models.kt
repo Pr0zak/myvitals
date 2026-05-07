@@ -292,6 +292,50 @@ data class StrengthReviewResponse(
     val cached: Boolean,
 )
 
+// ── Trails (RainoutLine status) ─────────────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class Trail(
+    val id: Long,
+    val extension: Int,
+    val name: String,
+    val slug: String,
+    @Json(name = "last_seen_at") val lastSeenAt: String,
+    val subscribed: Boolean = false,
+    @Json(name = "notify_on") val notifyOn: String? = null,
+    val status: String? = null,            // open | closed | pending | unknown
+    val comment: String? = null,
+    @Json(name = "source_ts") val sourceTs: String? = null,
+    @Json(name = "fetched_at") val fetchedAt: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class TrailsResponse(val count: Int, val trails: List<Trail> = emptyList())
+
+@JsonClass(generateAdapter = true)
+data class TrailSubscribeBody(@Json(name = "notify_on") val notifyOn: String = "any")
+
+@JsonClass(generateAdapter = true)
+data class TrailRefreshResponse(
+    val fetched: Int = 0, val snapshots: Int = 0, val alerts: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class TrailAlertRow(
+    val id: Long,
+    @Json(name = "trail_id") val trailId: Long,
+    @Json(name = "trail_name") val trailName: String?,
+    @Json(name = "from_status") val fromStatus: String?,
+    @Json(name = "to_status") val toStatus: String,
+    @Json(name = "source_ts") val sourceTs: String?,
+    @Json(name = "created_at") val createdAt: String,
+    @Json(name = "phone_notified_at") val phoneNotifiedAt: String?,
+    @Json(name = "acked_at") val ackedAt: String?,
+)
+
+@JsonClass(generateAdapter = true)
+data class MarkNotifiedBody(val ids: List<Long>)
+
 @JsonClass(generateAdapter = true)
 data class WorkoutPatchRequest(
     val status: String? = null,

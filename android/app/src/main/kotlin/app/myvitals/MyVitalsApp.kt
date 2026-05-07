@@ -11,6 +11,7 @@ import androidx.work.WorkManager
 import app.myvitals.debug.LogUploadWorker
 import app.myvitals.debug.RoomLogTree
 import app.myvitals.sync.SyncWorker
+import app.myvitals.trails.TrailAlertWorker
 import app.myvitals.update.Notifier
 import app.myvitals.update.UpdateCheckWorker
 import timber.log.Timber
@@ -29,6 +30,22 @@ class MyVitalsApp : Application() {
         schedulePeriodicSync()
         scheduleUpdateCheck()
         scheduleLogUpload()
+        scheduleTrailAlertPoll()
+    }
+
+    private fun scheduleTrailAlertPoll() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+        val request = PeriodicWorkRequestBuilder<TrailAlertWorker>(30, TimeUnit.MINUTES)
+            .setConstraints(constraints)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 60, TimeUnit.SECONDS)
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            TrailAlertWorker.UNIQUE_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
     }
 
     private fun scheduleLogUpload() {

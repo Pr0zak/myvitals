@@ -12,6 +12,8 @@ object Notifier {
 
     private const val CHANNEL_ID = "updates"
     private const val NOTIF_ID = 1001
+    const val TRAIL_CHANNEL_ID = "trail_status"
+    private const val TRAIL_NOTIF_BASE = 2000
 
     fun ensureChannel(context: Context) {
         val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -24,6 +26,42 @@ object Notifier {
                 ).apply { description = "New release available for sideload" }
             )
         }
+        if (mgr.getNotificationChannel(TRAIL_CHANNEL_ID) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    TRAIL_CHANNEL_ID,
+                    "Trail status",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply { description = "Subscribed trails opened or closed" }
+            )
+        }
+    }
+
+    /** Post a single trail-status flip notification. Stable per alert id
+     * so re-posting (rare) replaces rather than stacks. */
+    fun postTrailAlert(
+        context: Context, alertId: Long, trailName: String,
+        fromStatus: String?, toStatus: String, comment: String? = null,
+    ) {
+        ensureChannel(context)
+        val title = if (toStatus == "open") "$trailName is OPEN"
+                    else if (toStatus == "closed") "$trailName closed"
+                    else "$trailName: $toStatus"
+        val body = comment ?: when {
+            fromStatus == null -> "Status: $toStatus"
+            else -> "Was $fromStatus, now $toStatus"
+        }
+        val notif = NotificationCompat.Builder(context, TRAIL_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_notification_overlay)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(context)
+                .notify(TRAIL_NOTIF_BASE + alertId.toInt(), notif)
+        } catch (_: SecurityException) { /* permission revoked */ }
     }
 
     fun postUpdateAvailable(context: Context, release: GitHubRelease) {

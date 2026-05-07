@@ -56,6 +56,27 @@ interface BackendApi {
 
     @POST("ai/strength/review/{id}")
     suspend fun strengthReview(@Path("id") id: Long): StrengthReviewResponse
+
+    // ── Trails ────────────────────────────────────────────────
+    @GET("trails")
+    suspend fun trails(): TrailsResponse
+
+    @POST("trails/refresh")
+    suspend fun refreshTrails(): TrailRefreshResponse
+
+    @POST("trails/{id}/subscribe")
+    suspend fun subscribeTrail(@Path("id") id: Long, @Body body: TrailSubscribeBody): Map<String, Any>
+
+    @retrofit2.http.DELETE("trails/{id}/subscribe")
+    suspend fun unsubscribeTrail(@Path("id") id: Long): Response<Void>
+
+    @GET("trails/alerts")
+    suspend fun trailAlerts(
+        @retrofit2.http.Query("unacked_only") unackedOnly: Boolean = false,
+    ): List<TrailAlertRow>
+
+    @POST("trails/alerts/mark-notified")
+    suspend fun markTrailAlertsNotified(@Body body: MarkNotifiedBody): Map<String, Int>
 }
 
 object BackendClient {

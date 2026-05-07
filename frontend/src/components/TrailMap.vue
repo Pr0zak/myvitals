@@ -100,9 +100,30 @@ async function loadAndRenderPolylines() {
   }
   if (!map) return;
   const allPoints: L.LatLngTuple[] = [[props.latitude, props.longitude]];
+
+  // Cached OSM official paths first, drawn underneath
+  try {
+    const osm = await api.getTrailOsmPaths(props.trailId);
+    for (const f of osm.geojson.features) {
+      // GeoJSON is [lon, lat]; Leaflet wants [lat, lon]
+      const coords = (f.geometry.coordinates as [number, number][])
+        .map(([lon, lat]) => [lat, lon] as L.LatLngTuple);
+      if (coords.length < 2) continue;
+      const ln = L.polyline(coords, {
+        color: "#94a3b8", weight: 2, opacity: 0.55, dashArray: "4 4",
+      }).bindTooltip(
+        `<b>${(f.properties.name as string) || "OSM trail"}</b><br/>${(f.properties.highway as string) ?? ""}`,
+        { sticky: true },
+      );
+      ln.addTo(map);
+      overlays.push(ln);
+      coords.forEach((c) => allPoints.push(c));
+    }
+  } catch { /* no cached OSM paths yet — silent */ }
+
   for (const p of polys) {
     const ln = L.polyline(p.coords, {
-      color: colorFor(p.type), weight: 3, opacity: 0.75,
+      color: colorFor(p.type), weight: 3, opacity: 0.85,
     }).bindTooltip(
       `<b>${p.name}</b><br/>${new Date(p.date).toLocaleDateString()}`,
       { sticky: true },

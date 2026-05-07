@@ -209,6 +209,79 @@ async def link_activities(
     }
 
 
+@router.post("/{trail_id}/fetch-osm-paths")
+async def fetch_osm_paths(
+    trail_id: int, radius_m: float = 500,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Pull trail geometry from OpenStreetMap via Overpass for this
+    trail's pin. Caches the GeoJSON in trails.osm_paths_geojson so
+    we're not hitting Overpass repeatedly. Free, no API key."""
+    from ..integrations.osm import cache_paths_for_trail
+    try:
+        return await cache_paths_for_trail(trail_id, radius_m=radius_m)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"overpass failed: {e}") from e
+
+
+@router.get("/{trail_id}/osm-paths")
+async def get_osm_paths(
+    trail_id: int,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return the cached OSM path GeoJSON for a trail (404 if never
+    fetched). Used by the frontend map overlay."""
+    t = await db.get(models.Trail, trail_id)
+    if t is None:
+        raise HTTPException(status_code=404, detail="trail not found")
+    if t.osm_paths_geojson is None:
+        raise HTTPException(
+            status_code=404,
+            detail="no cached OSM paths — POST /fetch-osm-paths first",
+        )
+    return {
+        "trail_id": trail_id, "name": t.name,
+        "fetched_at": t.osm_paths_fetched_at,
+        "geojson": t.osm_paths_geojson,
+    }
+
+
+@router.post("/fetch-all-osm-paths")
+async def fetch_all_osm_paths(
+    radius_m: float = 500,
+    relink: bool = False,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Bulk pull OSM paths for every pinned trail. Skips trails that
+    already have cached paths unless relink=true. Sleeps ~1 s between
+    queries to be a polite Overpass citizen."""
+    import asyncio
+    from ..integrations.osm import cache_paths_for_trail
+
+    trails_with_pins = (await db.execute(
+        select(models.Trail).where(models.Trail.latitude.is_not(None))
+    )).scalars().all()
+    fetched = 0
+    skipped = 0
+    failed = 0
+    for t in trails_with_pins:
+        if t.osm_paths_geojson is not None and not relink:
+            skipped += 1
+            continue
+        try:
+            await cache_paths_for_trail(t.id, radius_m=radius_m)
+            fetched += 1
+            await asyncio.sleep(1.2)   # polite wait between Overpass calls
+        except Exception:  # noqa: BLE001
+            failed += 1
+    return {
+        "fetched": fetched, "skipped": skipped, "failed": failed,
+        "total_with_pins": len(trails_with_pins),
+    }
+
+
 @router.get("/{trail_id}/visits")
 async def trail_visits(
     trail_id: int, days: int = 365,

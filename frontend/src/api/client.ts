@@ -704,6 +704,32 @@ export const api = {
     return data;
   },
 
+  async fetchTrailOsmPaths(id: number, radiusM = 500): Promise<{
+    trail_id: number; name: string; feature_count: number; fetched_at: string;
+  }> {
+    const { data } = await http.post(`/trails/${id}/fetch-osm-paths`, null, {
+      params: { radius_m: radiusM },
+    });
+    return data;
+  },
+
+  async getTrailOsmPaths(id: number): Promise<{
+    trail_id: number; name: string; fetched_at: string;
+    geojson: { type: string; features: Array<{ type: string; geometry: { type: string; coordinates: [number, number][] }; properties: Record<string, unknown> }> };
+  }> {
+    const { data } = await http.get(`/trails/${id}/osm-paths`);
+    return data;
+  },
+
+  async fetchAllTrailOsmPaths(radiusM = 500, relink = false): Promise<{
+    fetched: number; skipped: number; failed: number; total_with_pins: number;
+  }> {
+    const { data } = await http.post("/trails/fetch-all-osm-paths", null, {
+      params: { radius_m: radiusM, relink },
+    });
+    return data;
+  },
+
   async trailVisits(id: number, days = 365): Promise<{
     trail_id: number; name: string; count: number;
     visits: Array<{

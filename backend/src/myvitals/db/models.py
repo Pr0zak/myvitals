@@ -434,6 +434,13 @@ class Trail(Base):
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     city: Mapped[str | None] = mapped_column(String(64), nullable=True)
     state: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # GeoJSON FeatureCollection of OSM-tagged paths within a small radius
+    # of the trail pin. Populated by POST /trails/{id}/fetch-osm-paths
+    # via integrations/osm.py. Cached because Overpass is rate-limited.
+    osm_paths_geojson: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    osm_paths_fetched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
 
 
 class TrailStatusSnapshot(Base):

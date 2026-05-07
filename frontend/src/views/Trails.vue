@@ -66,6 +66,21 @@ async function linkActivities() {
   }
 }
 
+const fetchingOsm = ref(false);
+async function fetchAllOsm() {
+  if (!confirm("Pull official trail geometry from OpenStreetMap for every pinned trail? Takes ~1s per trail (32 trails ≈ 40s).")) return;
+  fetchingOsm.value = true;
+  linkResult.value = "";
+  try {
+    const r = await api.fetchAllTrailOsmPaths(500, false);
+    linkResult.value = `OSM paths: ${r.fetched} fetched · ${r.skipped} cached · ${r.failed} failed`;
+  } catch (e) {
+    linkResult.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    fetchingOsm.value = false;
+  }
+}
+
 async function toggleSubscribe(t: Trail) {
   try {
     if (t.subscribed) {
@@ -365,6 +380,10 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
         <button class="refresh" :disabled="linking" @click="linkActivities"
                 title="Auto-link Strava / Garmin activities to trails by GPS proximity">
           🚴 {{ linking ? "Linking…" : "Link activities" }}
+        </button>
+        <button class="refresh" :disabled="fetchingOsm" @click="fetchAllOsm"
+                title="Pull official trail route geometry from OpenStreetMap (free, no key)">
+          🗺 {{ fetchingOsm ? "Fetching OSM…" : "OSM routes" }}
         </button>
       </div>
     </header>

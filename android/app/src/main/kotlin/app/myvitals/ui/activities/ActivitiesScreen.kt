@@ -73,6 +73,9 @@ fun ActivitiesScreen(
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             rows = withContext(Dispatchers.IO) { api.activities(limit = 80) }
             error = null
+            val withTrail = rows.count { it.trailId != null }
+            Timber.i("activities loaded: %d rows (%d linked to a trail)",
+                rows.size, withTrail)
         } catch (e: Exception) {
             Timber.w(e, "activities load failed")
             error = e.message?.take(160)

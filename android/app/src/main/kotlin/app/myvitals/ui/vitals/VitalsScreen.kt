@@ -96,6 +96,11 @@ fun VitalsScreen(
             rows = summaries
             sober = soberResp
             error = null
+            Timber.i(
+                "vitals loaded: %d daily rows; latest=%s sober_active=%s",
+                summaries.size, summaries.lastOrNull()?.date,
+                soberResp?.active != null,
+            )
         } catch (e: Exception) {
             Timber.w(e, "vitals load failed")
             error = e.message?.take(160)

@@ -82,8 +82,15 @@ fun ActivityDetailScreen(
             activity = a
             trails = ts.trails.sortedBy { it.name }
             error = null
+            Timber.i(
+                "activity loaded: %s/%s — type=%s avg_hr=%s polyline_len=%d trail_id=%s",
+                a.source, a.sourceId, a.type,
+                a.avgHr?.toString() ?: "null",
+                a.polyline?.length ?: 0,
+                a.trailId?.toString() ?: "null",
+            )
         } catch (e: Exception) {
-            Timber.w(e, "activity load failed")
+            Timber.w(e, "activity load failed for %s/%s", source, sourceId)
             error = e.message?.take(160)
         } finally { loading = false }
     }

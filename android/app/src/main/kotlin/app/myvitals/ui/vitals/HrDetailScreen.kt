@@ -60,11 +60,22 @@ private val ZONE_COLORS = listOf(
     Color(0xFFF97316), Color(0xFFEF4444),
 )
 
+/** A workout / activity that overlapped with the chart window. Drawn
+ *  as a translucent vertical band so the user can correlate HR spikes
+ *  with what they were doing. */
+data class HrEventBand(
+    val startMs: Long,
+    val endMs: Long,
+    val label: String,
+    val color: Color,
+)
+
 @Composable
 fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     var range by remember { mutableStateOf(VitalRange.DAY) }
     var live by remember { mutableStateOf<List<TimePoint>>(emptyList()) }
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
+    var bands by remember { mutableStateOf<List<HrEventBand>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var maxHr by remember { mutableStateOf(190) }
@@ -84,7 +95,42 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                             since = Instant.now().minusSeconds(86_400).toString(),
                         )
                     }
+                    val activitiesD = async(Dispatchers.IO) {
+                        runCatching { api.activities(limit = 30) }.getOrDefault(emptyList())
+                    }
+                    val workoutsD = async(Dispatchers.IO) {
+                        runCatching {
+                            api.strengthWorkouts().workouts.filter { it.startedAt != null }
+                        }.getOrDefault(emptyList())
+                    }
                     live = liveD.await().points
+
+                    // Build event bands for the 24h window.
+                    val windowStart = Instant.now().minusSeconds(86_400).toEpochMilli()
+                    val windowEnd = Instant.now().toEpochMilli()
+                    val list = mutableListOf<HrEventBand>()
+                    for (a in activitiesD.await()) {
+                        val s = runCatching { Instant.parse(a.startAt).toEpochMilli() }
+                            .getOrNull() ?: continue
+                        val e = s + a.durationS * 1000L
+                        if (e < windowStart || s > windowEnd) continue
+                        list += HrEventBand(s, e,
+                            label = a.name?.take(24) ?: a.type,
+                            // Strava-orange-ish for activities
+                            color = Color(0xFFF97316))
+                    }
+                    for (w in workoutsD.await()) {
+                        val s = runCatching { Instant.parse(w.startedAt!!).toEpochMilli() }
+                            .getOrNull() ?: continue
+                        val e = w.completedAt?.let {
+                            runCatching { Instant.parse(it).toEpochMilli() }.getOrNull()
+                        } ?: (s + 60 * 60_000L)  // assume 1h if not yet finished
+                        if (e < windowStart || s > windowEnd) continue
+                        list += HrEventBand(s, e,
+                            label = "${w.splitFocus} workout",
+                            color = Vital.WORKOUT.color)
+                    }
+                    bands = list
                     rows = emptyList()
                 } else {
                     val since = LocalDate.now().minusDays(range.days.toLong() - 1).toString()
@@ -135,7 +181,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (range == VitalRange.DAY) {
-                    item { LiveHrChart(live, maxHr) }
+                    item { LiveHrChart(live, maxHr, bands) }
                     item { TimeInZone(live, maxHr) }
                 } else {
                     item { RestingHrTrend(rows, range) }
@@ -146,7 +192,11 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
 }
 
 @Composable
-private fun LiveHrChart(points: List<TimePoint>, maxHr: Int) {
+private fun LiveHrChart(
+    points: List<TimePoint>,
+    maxHr: Int,
+    bands: List<HrEventBand> = emptyList(),
+) {
     Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
             Text("LAST 24H", color = MV.OnSurfaceVariant,
@@ -201,6 +251,27 @@ private fun LiveHrChart(points: List<TimePoint>, maxHr: Int) {
                             color = ZONE_COLORS[zi].copy(alpha = 0.08f),
                             topLeft = Offset(padX, y0),
                             size = Size(plotW, (y1 - y0).coerceAtLeast(0f)),
+                        )
+                    }
+                    // Workout / activity bands — vertical regions over the
+                    // full chart height.
+                    for (b in bands) {
+                        val s = b.startMs.coerceAtLeast(tStart)
+                        val e = b.endMs.coerceAtMost(tEnd)
+                        if (e <= s) continue
+                        val x0 = padX + ((s - tStart).toFloat() / tSpan) * plotW
+                        val x1 = padX + ((e - tStart).toFloat() / tSpan) * plotW
+                        drawRect(
+                            color = b.color.copy(alpha = 0.18f),
+                            topLeft = Offset(x0, padTop),
+                            size = Size((x1 - x0).coerceAtLeast(1f), plotH),
+                        )
+                        // Left edge stripe for emphasis
+                        drawLine(
+                            color = b.color.copy(alpha = 0.6f),
+                            start = Offset(x0, padTop),
+                            end = Offset(x0, padTop + plotH),
+                            strokeWidth = 1.5.dp.toPx(),
                         )
                     }
                     // Gridlines for easier reading

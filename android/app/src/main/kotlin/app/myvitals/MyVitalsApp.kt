@@ -26,6 +26,18 @@ class MyVitalsApp : Application() {
         Timber.plant(RoomLogTree(this))           // → Room "logs" table
         Timber.i("App start v=%s code=%d", BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
 
+        // Capture uncaught exceptions so crashes show up in the LogViewer
+        // on next sync, rather than disappearing into logcat-only.
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Timber.e(throwable, "UNCAUGHT in %s: %s",
+                thread.name, throwable.message ?: throwable::class.simpleName ?: "?")
+            // Block briefly so RoomLogTree's coroutine can flush the row
+            // before the process dies.
+            try { Thread.sleep(200) } catch (_: InterruptedException) {}
+            previousHandler?.uncaughtException(thread, throwable)
+        }
+
         Notifier.ensureChannel(this)
         schedulePeriodicSync()
         scheduleUpdateCheck()

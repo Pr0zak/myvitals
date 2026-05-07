@@ -414,18 +414,35 @@ private fun HrChart(points: List<app.myvitals.sync.TimePoint>) {
     }
     LaunchedEffect(points) {
         if (points.size < 2) return@LaunchedEffect
-        val origin = runCatching {
-            java.time.Instant.parse(points.first().time).toEpochMilli()
-        }.getOrDefault(0L)
-        val xs = points.map {
-            runCatching {
-                (java.time.Instant.parse(it.time).toEpochMilli() - origin) / 60_000.0
-            }.getOrDefault(0.0)
-        }
-        val ys = points.map { it.value }
-        producer.runTransaction {
-            lineSeries { series(x = xs, y = ys) }
-        }
+        runCatching {
+            // Parse + sort + dedupe by timestamp. Vico's series() expects
+            // strictly-increasing x values and can OOM/throw on huge or
+            // duplicate-x inputs — both common when watch HR is sampled
+            // at second-granularity for a multi-hour ride.
+            val pairs = points.mapNotNull { p ->
+                val ms = runCatching {
+                    java.time.Instant.parse(p.time).toEpochMilli()
+                }.getOrNull() ?: return@mapNotNull null
+                ms to p.value
+            }
+                .sortedBy { it.first }
+                .distinctBy { it.first }
+            if (pairs.size < 2) return@runCatching
+            // Cap to ~600 points so wide line layers stay performant.
+            val maxPoints = 600
+            val sampled = if (pairs.size > maxPoints) {
+                val stride = pairs.size.toDouble() / maxPoints
+                (0 until maxPoints).map { i ->
+                    pairs[(i * stride).toInt().coerceAtMost(pairs.lastIndex)]
+                }
+            } else pairs
+            val origin = sampled.first().first
+            val xs = sampled.map { (it.first - origin) / 60_000.0 }
+            val ys = sampled.map { it.second }
+            producer.runTransaction {
+                lineSeries { series(x = xs, y = ys) }
+            }
+        }.onFailure { Timber.w(it, "HrChart series build failed") }
     }
     Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
         Column(Modifier.padding(12.dp)) {

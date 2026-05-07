@@ -39,6 +39,7 @@ async function load() {
     const a = await api.activity(route.params.source as string, route.params.id as string);
     activity.value = a;
     notesInput.value = a.notes ?? "";
+    loadTrails();
     tags.value = a.tags ?? [];
     // Pull HR for the activity window plus a bit of padding
     const start = new Date(a.start_at);
@@ -290,6 +291,40 @@ function addTag() {
 function removeTag(t: string) {
   tags.value = tags.value.filter((x) => x !== t);
 }
+
+// Trail linking
+const trails = ref<Awaited<ReturnType<typeof api.trails>>["trails"]>([]);
+const trailSelection = ref<number | "" >("");
+const linkingTrail = ref(false);
+const linkedFlag = ref(false);
+
+async function loadTrails() {
+  try {
+    const r = await api.trails();
+    trails.value = r.trails;
+    trailSelection.value = activity.value?.trail_id ?? "";
+  } catch { trails.value = []; }
+}
+
+async function applyTrailLink() {
+  if (!activity.value) return;
+  linkingTrail.value = true;
+  linkedFlag.value = false;
+  try {
+    const tid = trailSelection.value === "" ? null : Number(trailSelection.value);
+    await api.linkActivityToTrail(activity.value.source, activity.value.source_id, tid);
+    // Update local view of the activity
+    if (activity.value) {
+      activity.value.trail_id = tid;
+      activity.value.trail_name = tid === null ? null
+        : trails.value.find((x) => x.id === tid)?.name ?? null;
+    }
+    linkedFlag.value = true;
+    setTimeout(() => { linkedFlag.value = false; }, 2000);
+  } finally {
+    linkingTrail.value = false;
+  }
+}
 </script>
 
 <template>
@@ -354,6 +389,30 @@ function removeTag(t: string) {
               <div class="zone-pct">{{ z.pct.toFixed(0) }}%</div>
             </div>
           </div>
+        </Card>
+
+        <Card title="Trail">
+          <p v-if="activity?.trail_name" class="hint">
+            Linked to <strong>{{ activity.trail_name }}</strong>
+            <RouterLink to="/trails" class="trail-link">· view trail</RouterLink>
+          </p>
+          <p v-else class="hint">Not linked to any trail yet.</p>
+          <div class="trail-pick">
+            <select v-model="trailSelection" class="trail-select">
+              <option value="">— None —</option>
+              <option v-for="t in trails" :key="t.id" :value="t.id">
+                {{ t.name }}{{ t.city ? ` (${t.city})` : '' }}
+              </option>
+            </select>
+            <button class="primary" :disabled="linkingTrail" @click="applyTrailLink">
+              {{ linkingTrail ? "Saving…" : "Update" }}
+            </button>
+            <span v-if="linkedFlag" class="saved">saved</span>
+          </div>
+          <p class="hint" style="font-size: 0.7rem; color: var(--muted-2)">
+            Activities auto-link to the closest trail within 2 km of the start
+            point. Use this to override or fill in cases the auto-link missed.
+          </p>
         </Card>
 
         <Card title="Notes & tags">
@@ -434,6 +493,16 @@ dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
   background: var(--surface); color: var(--text); border: 1px solid var(--border);
   border-radius: 100px; padding: 0.2rem 0.7rem; font-size: 0.8rem; min-width: 120px; font-family: inherit;
 }
+.trail-pick { display: flex; gap: 0.5rem; align-items: center; margin: 0.4rem 0; flex-wrap: wrap; }
+.trail-select {
+  flex: 1; min-width: 12rem;
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 0.4rem 0.55rem;
+  color: var(--text); font-family: inherit; font-size: 0.85rem;
+}
+.trail-link { color: var(--accent, #ef4444); text-decoration: none; margin-left: 0.4rem; }
+.trail-link:hover { text-decoration: underline; }
+
 .notes-area {
   background: var(--surface); color: var(--text); border: 1px solid var(--border);
   border-radius: 6px; padding: 0.5rem 0.7rem; width: 100%; font-family: inherit;

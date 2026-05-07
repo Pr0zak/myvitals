@@ -129,6 +129,8 @@ export interface Activity {
   polyline: string | null;
   notes?: string | null;
   tags?: string[] | null;
+  trail_id?: number | null;
+  trail_name?: string | null;
 }
 
 export interface StrengthEquipment {

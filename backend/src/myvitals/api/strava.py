@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -56,11 +57,17 @@ class ActivityOut(BaseModel):
     polyline: str | None
     notes: str | None = None
     tags: list[str] | None = None
+    trail_id: int | None = None
+    trail_name: str | None = None
 
 
 class ActivityNotesIn(BaseModel):
     notes: str | None = None
     tags: list[str] | None = None
+
+
+class ActivityLinkTrailIn(BaseModel):
+    trail_id: int | None = None
 
 
 class ActivityStatsOut(BaseModel):
@@ -179,7 +186,9 @@ async def strava_disconnect(db: AsyncSession = Depends(get_session)) -> dict[str
 
 # --- Read activities (any source) ---
 
-def _activity_to_out(a: models.Activity) -> ActivityOut:
+def _activity_to_out(
+    a: models.Activity, trail_name: str | None = None,
+) -> ActivityOut:
     return ActivityOut(
         source=a.source, source_id=a.source_id, type=a.type, name=a.name,
         start_at=a.start_at, duration_s=a.duration_s,
@@ -188,6 +197,7 @@ def _activity_to_out(a: models.Activity) -> ActivityOut:
         avg_power_w=a.avg_power_w, max_power_w=a.max_power_w,
         kcal=a.kcal, suffer_score=a.suffer_score, polyline=a.polyline,
         notes=a.notes, tags=a.tags,
+        trail_id=a.trail_id, trail_name=trail_name,
     )
 
 
@@ -286,7 +296,41 @@ async def get_activity(
     a = result.scalar_one_or_none()
     if a is None:
         raise HTTPException(404, "activity not found")
-    return _activity_to_out(a)
+    trail_name: str | None = None
+    if a.trail_id is not None:
+        t = await db.get(models.Trail, a.trail_id)
+        if t is not None:
+            trail_name = t.name
+    return _activity_to_out(a, trail_name=trail_name)
+
+
+@router.post("/activities/{source}/{source_id}/link-trail",
+             dependencies=[Depends(require_query)])
+async def link_activity_trail(
+    source: str,
+    source_id: str,
+    body: ActivityLinkTrailIn,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Manually set or clear an activity's trail_id. Pass trail_id=null
+    to unlink. Overrides the GPS-proximity auto-link."""
+    a = (await db.execute(
+        select(models.Activity)
+        .where(models.Activity.source == source)
+        .where(models.Activity.source_id == source_id)
+    )).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(404, "activity not found")
+    if body.trail_id is not None:
+        t = await db.get(models.Trail, body.trail_id)
+        if t is None:
+            raise HTTPException(400, f"trail {body.trail_id} not found")
+    a.trail_id = body.trail_id
+    await db.commit()
+    return {
+        "source": a.source, "source_id": a.source_id,
+        "trail_id": a.trail_id,
+    }
 
 
 @router.post("/activities/{source}/{source_id}/notes",

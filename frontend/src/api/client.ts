@@ -421,6 +421,15 @@ export const api = {
     return data;
   },
 
+  async linkActivityToTrail(source: string, sourceId: string, trailId: number | null): Promise<{
+    source: string; source_id: string; trail_id: number | null;
+  }> {
+    const { data } = await http.post(
+      `/activities/${source}/${sourceId}/link-trail`, { trail_id: trailId },
+    );
+    return data;
+  },
+
   async getProfile(): Promise<{
     id: number; birth_date: string | null; sex: string | null;
     height_cm: number | null; weight_goal_kg: number | null;

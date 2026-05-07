@@ -10,6 +10,7 @@ import { Play, Pause, RotateCw, Plus, SkipForward, Replace as SwapIcon } from "l
 import { api } from "@/api/client";
 import { apiBase, queryToken } from "@/config";
 import Card from "@/components/Card.vue";
+import WhyThisWorkout from "@/components/WhyThisWorkout.vue";
 import type { StrengthExercise, StrengthWorkoutDetail, StrengthWorkoutExercise } from "@/api/types";
 
 const router = useRouter();
@@ -519,6 +520,7 @@ onMounted(loadAll);
       </div>
       <div class="muscles">{{ muscleGroupsFor(workout.split_focus) }}</div>
     </Card>
+    <WhyThisWorkout v-if="workout" :workout-id="workout.id" />
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load today's plan.</p>
     <p v-else-if="loading" class="hint">Loading…</p>

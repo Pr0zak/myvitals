@@ -325,11 +325,19 @@ private fun ActivityMap(a: ActivityRow, trails: List<Trail>) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val leafletCss = remember { app.myvitals.ui.common.LeafletAssets.css(ctx) }
     val leafletJs = remember { app.myvitals.ui.common.LeafletAssets.js(ctx) }
-    val polylineEsc = a.polyline?.replace("'", "\\'") ?: ""
+    // Escape order matters: backslash FIRST, then quotes / control chars.
+    // Google's polyline encoding uses backslash heavily, and a raw '\u'
+    // in a JS string literal triggers a SyntaxError that aborts the page.
+    fun jsEsc(s: String?): String = s
+        ?.replace("\\", "\\\\")
+        ?.replace("'", "\\'")
+        ?.replace("\n", " ")
+        ?.replace("\r", "") ?: ""
+    val polylineEsc = jsEsc(a.polyline)
     val trail = a.trailId?.let { id -> trails.firstOrNull { it.id == id } }
     val trailLat = trail?.latitude
     val trailLon = trail?.longitude
-    val nameEsc = trail?.name?.replace("'", "\\'")?.replace("\n", " ") ?: ""
+    val nameEsc = jsEsc(trail?.name)
     val html = """<!DOCTYPE html>
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>

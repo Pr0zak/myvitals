@@ -841,7 +841,11 @@ private fun MiniMap(lat: Double, lon: Double, name: String, osmGeoJson: String? 
     val ctx = LocalContext.current
     val leafletCss = remember { app.myvitals.ui.common.LeafletAssets.css(ctx) }
     val leafletJs = remember { app.myvitals.ui.common.LeafletAssets.js(ctx) }
-    val nameEsc = name.replace("'", "\\'").replace("\n", " ")
+    val nameEsc = name
+        .replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace("\n", " ")
+        .replace("\r", "")
     val osmLiteral = osmGeoJson ?: "null"
     // Leaflet CSS + JS are inlined directly so the WebView has no
     // sub-resource fetches at all. Tiles still need network (CARTO CDN);

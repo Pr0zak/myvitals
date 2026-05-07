@@ -346,19 +346,34 @@ fun StrengthTodayScreen(
         }
 
         // Float incomplete exercises to the top so the active set card
-        // is always visible without scrolling. Within each group, keep
-        // the planner's original order. Done exercises drop to the
-        // bottom for reference.
+        // is always visible without scrolling. Within a superset, the
+        // partner with FEWER completed sets surfaces first — so after
+        // you log set 1 of A, set 1 of B floats up, then set 2 of A,
+        // and so on. Done exercises drop to the bottom for reference.
         val orderedExercises = remember(plan.exercises) {
-            plan.exercises.sortedWith(
-                compareBy(
-                    { wex -> (1..wex.targetSets).all { n ->
-                        wex.sets.any { it.setNumber == n &&
-                            (it.actualReps != null || it.skipped) }
-                    } },
-                    { it.orderIndex },
-                )
-            )
+            fun completedCount(w: app.myvitals.sync.StrengthWorkoutExerciseRow): Int =
+                w.sets.count { it.actualReps != null || it.skipped }
+            fun isDone(w: app.myvitals.sync.StrengthWorkoutExerciseRow): Boolean =
+                completedCount(w) >= w.targetSets
+
+            val incomplete = plan.exercises.filter { !isDone(it) }
+            val complete = plan.exercises.filter { isDone(it) }
+                .sortedBy { it.orderIndex }
+
+            // Group incomplete by superset id (null = singleton group),
+            // alternate within each group by completed-count, then sort
+            // groups by their lowest-orderIndex member.
+            val groupedIncomplete = incomplete
+                .groupBy { it.supersetId }
+                .map { (_, exs) ->
+                    exs.sortedWith(
+                        compareBy({ completedCount(it) }, { it.orderIndex }),
+                    )
+                }
+                .sortedBy { it.first().orderIndex }
+                .flatten()
+
+            groupedIncomplete + complete
         }
         LazyColumn(
             modifier = Modifier.weight(1f),

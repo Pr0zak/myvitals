@@ -26,6 +26,9 @@ const RANGES: { key: RangeKey; label: string; days: number | null }[] = [
 
 const activities = ref<Activity[]>([]);
 const stats = ref<ActivityStats | null>(null);
+const strengthWorkouts = ref<Array<{
+  id: number; date: string; split_focus: string; status: string;
+}>>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
@@ -63,12 +66,19 @@ async function load() {
     }
     // For "all" we ask for 10 years of stats so the period covers everything.
     const statsDays = days ?? 3650;
-    const [list, st] = await Promise.all([
+    const [list, st, sw] = await Promise.all([
       api.activities(params),
       api.activitiesStats(statsDays),
+      api.strengthWorkouts({ limit: 200 }).catch(() => ({ count: 0, workouts: [] })),
     ]);
     activities.value = list;
     stats.value = st;
+    // Filter strength workouts to the same window
+    const sinceDate = params.since ?? new Date(0);
+    strengthWorkouts.value = sw.workouts
+      .filter((w) => w.status !== "regenerated")
+      .filter((w) => new Date(w.date + "T00:00:00") >= sinceDate)
+      .sort((a, b) => b.date.localeCompare(a.date));
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -291,6 +301,28 @@ const monthLabel = (key: string) =>
     </Card>
 
     <!-- Activity heatmap -->
+    <Card v-if="strengthWorkouts.length" title="Strength workouts in period">
+      <ul class="strength-list">
+        <li v-for="w in strengthWorkouts" :key="w.id">
+          <RouterLink :to="{ name: 'workout-strength-day', params: { date: w.date } }">
+            <span class="date">{{
+              new Date(w.date + 'T00:00:00').toLocaleDateString(undefined, {
+                weekday: 'short', month: 'short', day: 'numeric',
+              })
+            }}</span>
+            <span class="focus">{{ w.split_focus.charAt(0).toUpperCase() + w.split_focus.slice(1) }}</span>
+            <span class="status" :class="w.status">{{
+              w.status === 'completed' ? 'Complete'
+              : w.status === 'in_progress' ? 'In progress'
+              : w.status === 'skipped' ? 'Skipped'
+              : w.status === 'planned' ? 'Planned'
+              : w.status
+            }}</span>
+          </RouterLink>
+        </li>
+      </ul>
+    </Card>
+
     <Card v-if="heatmapOption" title="Activity calendar">
       <div class="heat"><VChart :option="heatmapOption" autoresize/></div>
     </Card>
@@ -465,6 +497,24 @@ const monthLabel = (key: string) =>
 </template>
 
 <style scoped>
+.strength-list { list-style: none; padding: 0; margin: 0; }
+.strength-list li { border-bottom: 1px solid var(--line); }
+.strength-list li:last-child { border-bottom: none; }
+.strength-list a { display: flex; align-items: center; gap: 0.8rem;
+                   padding: 0.55rem 0.4rem; color: var(--text);
+                   text-decoration: none; }
+.strength-list a:hover { background: var(--bg-2); }
+.strength-list .date { color: var(--muted); font-size: 0.85rem;
+                       width: 9rem; flex: 0 0 auto;
+                       font-family: 'Geist Mono', ui-monospace, monospace; }
+.strength-list .focus { font-weight: 600; flex: 1; }
+.strength-list .status { font-size: 0.7rem; font-weight: 700;
+                         letter-spacing: 0.06em; text-transform: uppercase; }
+.strength-list .status.completed { color: #22c55e; }
+.strength-list .status.in_progress { color: #eab308; }
+.strength-list .status.skipped { color: var(--muted); }
+.strength-list .status.planned { color: var(--accent, #ef4444); }
+
 .head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
 h1 { margin: 0; }
 .controls { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }

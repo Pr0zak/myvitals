@@ -128,12 +128,21 @@ async def get_steps(
     until: datetime | None = Query(None),
     db: AsyncSession = Depends(get_session),
 ) -> StepsSeries:
+    """Per-minute step counts for the window. The total uses per-minute
+    MAX dedup across HC sources (watch + phone pedometer + Fitbit) so
+    the value matches /summary/today and the Vitals badge."""
     start, end = _resolve_range(since, until, timedelta(hours=24))
+    # Per-minute aggregation: sum across all rows in the same minute,
+    # then take that as the canonical bucket count. Dedupe across
+    # sources by keeping the MAX of any rows within the same minute.
+    minute_col = func.date_trunc("minute", models.Steps.time)
     result = await db.execute(
-        select(models.Steps.time, models.Steps.count)
+        select(minute_col.label("m"),
+               func.max(models.Steps.count).label("c"))
         .where(models.Steps.time >= start)
         .where(models.Steps.time <= end)
-        .order_by(models.Steps.time)
+        .group_by(minute_col)
+        .order_by(minute_col)
     )
     rows = result.all()
     points = [TimePoint(time=t, value=float(c)) for t, c in rows]

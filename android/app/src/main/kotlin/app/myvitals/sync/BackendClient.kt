@@ -117,6 +117,9 @@ interface BackendApi {
     @GET("profile")
     suspend fun profile(): ProfileResponse
 
+    @retrofit2.http.PUT("profile")
+    suspend fun putProfile(@Body body: ProfilePutBody): ProfileResponse
+
     @GET("summary/today")
     suspend fun summaryToday(): DailySummary
 

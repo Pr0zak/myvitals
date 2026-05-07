@@ -475,6 +475,19 @@ data class ProfileDerived(
 data class ProfileExtra(
     @Json(name = "steps_goal") val stepsGoal: Int? = null,
     @Json(name = "sleep_goal_h") val sleepGoalH: Double? = null,
+    @Json(name = "vitals_order") val vitalsOrder: List<String>? = null,
+    @Json(name = "vitals_hidden") val vitalsHidden: List<String>? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class ProfilePutBody(
+    @Json(name = "birth_date") val birthDate: String? = null,
+    val sex: String? = null,
+    @Json(name = "height_cm") val heightCm: Double? = null,
+    @Json(name = "weight_goal_kg") val weightGoalKg: Double? = null,
+    @Json(name = "resting_hr_baseline") val restingHrBaseline: Double? = null,
+    @Json(name = "activity_level") val activityLevel: String? = null,
+    val extra: Map<String, Any>? = null,
 )
 
 @JsonClass(generateAdapter = true)

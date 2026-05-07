@@ -32,6 +32,11 @@ import androidx.compose.material.icons.outlined.MonitorWeight
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.ArrowDropUp
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -241,13 +246,26 @@ fun VitalsScreen(
         while (true) { delay(1_000); nowMs = System.currentTimeMillis() }
     }
 
-    val tiles = remember {
+    // Default order — overridden by profile.extra.vitals_order if set.
+    val canonicalOrder = remember {
         listOf(
             Vital.HR, Vital.SLEEP, Vital.STEPS, Vital.HRV,
             Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS,
             Vital.WEIGHT, Vital.BP, Vital.SOBER,
         )
     }
+    val tiles = remember(profile) {
+        val savedOrder = profile?.extra?.vitalsOrder ?: emptyList()
+        val hidden = profile?.extra?.vitalsHidden?.toSet() ?: emptySet()
+        val sortedByPref: List<Vital> = if (savedOrder.isNotEmpty()) {
+            // Saved order wins; tile names not in saved-order tail-append.
+            val byName = canonicalOrder.associateBy { it.name }
+            (savedOrder.mapNotNull { byName[it] } +
+                canonicalOrder.filter { it.name !in savedOrder })
+        } else canonicalOrder
+        sortedByPref.filter { it.name !in hidden }
+    }
+    var manageOpen by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().background(MV.Bg).padding(horizontal = 12.dp)) {
         Row(
@@ -264,8 +282,14 @@ fun VitalsScreen(
                     color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
                 )
             }
-            IconButton(onClick = { scope.launch { loading = true; load() } }, enabled = !loading) {
-                Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = MV.OnSurface)
+            Row {
+                IconButton(onClick = { manageOpen = true }) {
+                    Icon(Icons.Outlined.Tune, contentDescription = "Manage badges",
+                        tint = MV.OnSurface)
+                }
+                IconButton(onClick = { scope.launch { loading = true; load() } }, enabled = !loading) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = MV.OnSurface)
+                }
             }
         }
 
@@ -282,6 +306,52 @@ fun VitalsScreen(
                     }
                 }
             }
+        }
+
+        // Manage-badges modal sheet
+        if (manageOpen) {
+            ManageBadgesSheet(
+                canonical = canonicalOrder,
+                profile = profile,
+                onDismiss = { manageOpen = false },
+                onSave = { orderedNames, hiddenSet ->
+                    scope.launch {
+                        try {
+                            val api = BackendClient.create(
+                                settings.backendUrl, settings.bearerToken,
+                            )
+                            val newExtra = mutableMapOf<String, Any>()
+                            // Preserve any unrelated extra fields the user might have set.
+                            profile?.extra?.let { ex ->
+                                ex.stepsGoal?.let { newExtra["steps_goal"] = it }
+                                ex.sleepGoalH?.let { newExtra["sleep_goal_h"] = it }
+                            }
+                            newExtra["vitals_order"] = orderedNames
+                            newExtra["vitals_hidden"] = hiddenSet.toList()
+                            withContext(Dispatchers.IO) {
+                                api.putProfile(
+                                    app.myvitals.sync.ProfilePutBody(
+                                        birthDate = profile?.birthDate,
+                                        sex = profile?.sex,
+                                        heightCm = profile?.heightCm,
+                                        weightGoalKg = profile?.weightGoalKg,
+                                        restingHrBaseline = profile?.restingHrBaseline,
+                                        activityLevel = profile?.activityLevel,
+                                        extra = newExtra,
+                                    ),
+                                )
+                            }
+                            manageOpen = false
+                            Timber.i("badges saved: order=%s hidden=%s",
+                                orderedNames, hiddenSet)
+                            load()
+                        } catch (e: Exception) {
+                            Timber.w(e, "save vitals layout failed")
+                            error = "Save failed: ${e.message?.take(80)}"
+                        }
+                    }
+                },
+            )
         }
 
         LazyVerticalGrid(
@@ -864,4 +934,109 @@ private fun fmtRelativeDate(date: String, nowMs: Long): String {
             else -> "${days}d"
         }
     } catch (_: Exception) { "" }
+}
+
+// ============================================================
+// Manage-badges sheet — reorder + hide
+// ============================================================
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun ManageBadgesSheet(
+    canonical: List<Vital>,
+    profile: app.myvitals.sync.ProfileResponse?,
+    onDismiss: () -> Unit,
+    onSave: (orderedNames: List<String>, hidden: Set<String>) -> Unit,
+) {
+    val savedOrder = profile?.extra?.vitalsOrder ?: emptyList()
+    val initialOrder = remember {
+        val byName = canonical.associateBy { it.name }
+        val front = savedOrder.mapNotNull { byName[it] }
+        val tail = canonical.filter { it.name !in savedOrder }
+        (front + tail).map { it.name }
+    }
+    var order by remember { mutableStateOf(initialOrder) }
+    var hidden by remember {
+        mutableStateOf(profile?.extra?.vitalsHidden?.toSet() ?: emptySet())
+    }
+
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MV.SurfaceContainer,
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text("Manage badges", color = MV.OnSurface,
+                fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("Use the arrows to reorder. Tap the eye to hide.",
+                color = MV.OnSurfaceVariant, fontSize = 11.sp)
+            Spacer(Modifier.height(8.dp))
+            val byName = canonical.associateBy { it.name }
+            for ((idx, name) in order.withIndex()) {
+                val v = byName[name] ?: continue
+                val isHidden = name in hidden
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(v.icon, contentDescription = null,
+                        tint = v.color, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(v.label, color = if (isHidden) MV.OnSurfaceDim else MV.OnSurface,
+                        fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    androidx.compose.material3.IconButton(
+                        onClick = {
+                            if (idx > 0) {
+                                order = order.toMutableList().also {
+                                    val tmp = it[idx]; it[idx] = it[idx - 1]; it[idx - 1] = tmp
+                                }
+                            }
+                        },
+                        enabled = idx > 0,
+                    ) {
+                        Icon(Icons.Outlined.ArrowDropUp, contentDescription = "Up",
+                            tint = if (idx > 0) MV.OnSurface else MV.OnSurfaceDim)
+                    }
+                    androidx.compose.material3.IconButton(
+                        onClick = {
+                            if (idx < order.lastIndex) {
+                                order = order.toMutableList().also {
+                                    val tmp = it[idx]; it[idx] = it[idx + 1]; it[idx + 1] = tmp
+                                }
+                            }
+                        },
+                        enabled = idx < order.lastIndex,
+                    ) {
+                        Icon(Icons.Outlined.ArrowDropDown, contentDescription = "Down",
+                            tint = if (idx < order.lastIndex) MV.OnSurface else MV.OnSurfaceDim)
+                    }
+                    androidx.compose.material3.IconButton(
+                        onClick = {
+                            hidden = if (isHidden) hidden - name else hidden + name
+                        },
+                    ) {
+                        Icon(
+                            if (isHidden) Icons.Outlined.VisibilityOff
+                            else Icons.Outlined.Visibility,
+                            contentDescription = if (isHidden) "Show" else "Hide",
+                            tint = if (isHidden) MV.OnSurfaceDim else MV.OnSurface,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Button(
+                    onClick = { onSave(order, hidden) },
+                    modifier = Modifier.weight(1f),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = MV.BrandRed, contentColor = MV.OnSurface,
+                    ),
+                ) { Text("Save") }
+                androidx.compose.material3.TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Cancel") }
+            }
+        }
+    }
 }

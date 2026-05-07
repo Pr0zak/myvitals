@@ -75,6 +75,25 @@ def map_result(result: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     hr = result.get("heart_rate") or {}
+    # Concept2's root-level heart_rate.{min,max,recovery} are often 0 even
+    # when the intervals each carry valid per-interval HR (their UI shows
+    # those fine). Roll up across intervals so the activity row has true
+    # max — falls back to the root value if intervals are empty.
+    intervals = (result.get("workout") or {}).get("intervals") or []
+    interval_max = max(
+        (
+            (iv.get("heart_rate") or {}).get("max") or 0
+            for iv in intervals
+            if isinstance(iv, dict)
+        ),
+        default=0,
+    )
+    interval_avg_vals = [
+        (iv.get("heart_rate") or {}).get("average")
+        for iv in intervals
+        if isinstance(iv, dict)
+        and (iv.get("heart_rate") or {}).get("average")
+    ]
     distance_m = result.get("distance")
     duration_s = int(time_tenths) // 10
 
@@ -114,8 +133,15 @@ def map_result(result: dict[str, Any]) -> dict[str, Any] | None:
         "start_at": start_at,
         "duration_s": duration_s,
         "distance_m": float(distance_m) if distance_m else None,
-        "avg_hr": float(hr.get("average")) if hr.get("average") else None,
-        "max_hr": float(hr.get("max")) if hr.get("max") else None,
+        "avg_hr": (
+            float(hr.get("average")) if hr.get("average")
+            else (float(sum(interval_avg_vals) / len(interval_avg_vals))
+                  if interval_avg_vals else None)
+        ),
+        "max_hr": (
+            float(hr.get("max")) if hr.get("max")
+            else (float(interval_max) if interval_max else None)
+        ),
         "avg_power_w": avg_power,
         "kcal": float(result.get("calories")) if result.get("calories") else None,
         "notes": notes,

@@ -4,7 +4,10 @@
  * network. Pull-to-refresh hits POST /trails/refresh; star toggle
  * subscribes for status-flip pings.
  */
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { effectiveTheme } from "@/theme";
 import { Star, RefreshCw, Navigation, Pencil, Map as MapIcon } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { queryToken } from "@/config";
@@ -90,6 +93,11 @@ const editState = ref<string>("");
 const editSaving = ref(false);
 const editError = ref<string>("");
 
+// Inline Leaflet map state
+const editMapEl = ref<HTMLDivElement | null>(null);
+let editMap: L.Map | null = null;
+let editPin: L.Marker | null = null;
+
 function openEdit(t: Trail) {
   editTrail.value = t;
   editLat.value = t.latitude?.toString() ?? "";
@@ -97,8 +105,68 @@ function openEdit(t: Trail) {
   editCity.value = t.city ?? "";
   editState.value = t.state ?? "";
   editError.value = "";
+  nextTick(() => initEditMap(t));
 }
-function closeEdit() { editTrail.value = null; }
+
+function closeEdit() {
+  if (editMap) { editMap.remove(); editMap = null; editPin = null; }
+  editTrail.value = null;
+}
+
+const KC_CENTER: [number, number] = [39.0997, -94.5786];
+function initEditMap(t: Trail) {
+  if (!editMapEl.value) return;
+  if (editMap) editMap.remove();
+  const start: [number, number] = (t.latitude != null && t.longitude != null)
+    ? [t.latitude, t.longitude]
+    : KC_CENTER;
+  editMap = L.map(editMapEl.value, { zoomControl: true })
+    .setView(start, t.latitude != null ? 14 : 9);
+  const tiles = effectiveTheme.value === "dark"
+    ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+    : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
+  L.tileLayer(tiles, {
+    attribution: "© OpenStreetMap, © CARTO",
+    subdomains: "abcd", maxZoom: 19,
+  }).addTo(editMap);
+
+  if (t.latitude != null && t.longitude != null) {
+    editPin = L.marker(start, { draggable: true }).addTo(editMap);
+    editPin.on("dragend", () => {
+      if (!editPin) return;
+      const ll = editPin.getLatLng();
+      editLat.value = ll.lat.toFixed(6);
+      editLon.value = ll.lng.toFixed(6);
+    });
+  }
+
+  editMap.on("click", (e: L.LeafletMouseEvent) => {
+    const { lat, lng } = e.latlng;
+    if (editPin) {
+      editPin.setLatLng([lat, lng]);
+    } else {
+      editPin = L.marker([lat, lng], { draggable: true }).addTo(editMap!);
+      editPin.on("dragend", () => {
+        if (!editPin) return;
+        const ll = editPin.getLatLng();
+        editLat.value = ll.lat.toFixed(6);
+        editLon.value = ll.lng.toFixed(6);
+      });
+    }
+    editLat.value = lat.toFixed(6);
+    editLon.value = lng.toFixed(6);
+  });
+}
+
+// Sync map → inputs (rare; mostly the other way) when user types coords manually
+watch([editLat, editLon], ([la, lo]) => {
+  if (!editMap) return;
+  const lat = parseFloat(la), lon = parseFloat(lo);
+  if (Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90) {
+    if (editPin) editPin.setLatLng([lat, lon]);
+    else editPin = L.marker([lat, lon], { draggable: true }).addTo(editMap);
+  }
+});
 
 function useMyLocation() {
   if (!navigator.geolocation) {
@@ -125,6 +193,39 @@ function openInMaps() {
     ? `https://www.google.com/maps/@${t.latitude},${t.longitude},15z`
     : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t.name)}`;
   window.open(url, "_blank", "noreferrer");
+}
+
+// Place-name search via OSM Nominatim (free, no key). Drops the pin
+// on the first hit; user can refine by dragging the pin or tapping
+// a different spot on the map.
+const placeQuery = ref<string>("");
+const searching = ref(false);
+async function searchPlace() {
+  const q = placeQuery.value.trim();
+  if (!q) return;
+  searching.value = true;
+  editError.value = "";
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json() as Array<{ lat: string; lon: string; display_name: string }>;
+    if (data.length === 0) {
+      editError.value = `No results for "${q}"`;
+      return;
+    }
+    const lat = parseFloat(data[0].lat);
+    const lon = parseFloat(data[0].lon);
+    editLat.value = lat.toFixed(6);
+    editLon.value = lon.toFixed(6);
+    if (editMap) editMap.setView([lat, lon], 15);
+  } catch (e) {
+    editError.value = `Search failed: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    searching.value = false;
+  }
 }
 
 async function saveEdit() {
@@ -336,17 +437,24 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
           <h2>Edit location · {{ editTrail.name }}</h2>
           <button class="close" @click="closeEdit">✕</button>
         </header>
-        <p class="hint">
-          Decimal degrees. Two quick ways to fill these in:
-        </p>
+        <p class="hint">Search a place name, click the map, or use your GPS. Drag the pin to fine-tune.</p>
+        <div class="search-row">
+          <input
+            v-model="placeQuery"
+            type="text"
+            placeholder='e.g. "Minor Park Pickleball Courts, Kansas City"'
+            @keydown.enter="searchPlace"
+          />
+          <button class="ghost" :disabled="searching || !placeQuery.trim()"
+                  @click="searchPlace">
+            {{ searching ? "Searching…" : "Find" }}
+          </button>
+        </div>
+        <div ref="editMapEl" class="edit-map" />
         <div class="quick-actions">
           <button class="ghost" @click="useMyLocation">📍 Use my location</button>
           <button class="ghost" @click="openInMaps">🗺 Open in Google Maps</button>
         </div>
-        <p class="hint" style="font-size: 0.7rem; color: var(--muted-2)">
-          Or right-click any spot in Google Maps and the lat/lon pair appears
-          at the top of the menu — paste below.
-        </p>
         <div class="form-grid">
           <label>Latitude<input type="number" step="0.0001" v-model="editLat" placeholder="e.g. 38.9881" /></label>
           <label>Longitude<input type="number" step="0.0001" v-model="editLon" placeholder="e.g. -94.7625" /></label>
@@ -430,6 +538,18 @@ header h1 { margin: 0; }
   border-radius: 6px; padding: 0.4rem 0.55rem; color: var(--text);
   font-family: inherit;
 }
+.edit-map {
+  height: 280px; border-radius: 8px; overflow: hidden;
+  border: 1px solid var(--line); margin: 0.5rem 0;
+}
+.search-row { display: flex; gap: 0.4rem; margin: 0.4rem 0; }
+.search-row input {
+  flex: 1; padding: 0.45rem 0.6rem; font-size: 0.85rem;
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 6px; color: var(--text); font-family: inherit;
+}
+.search-row .ghost { white-space: nowrap; padding: 0.45rem 0.85rem;
+  font-size: 0.85rem; }
 .quick-actions { display: flex; gap: 0.4rem; margin: 0.5rem 0 0.6rem; flex-wrap: wrap; }
 .quick-actions .ghost { padding: 0.4rem 0.7rem; font-size: 0.78rem; }
 

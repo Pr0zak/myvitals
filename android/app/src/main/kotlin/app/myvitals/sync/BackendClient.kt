@@ -109,6 +109,19 @@ interface BackendApi {
     suspend fun trailOsmPaths(@Path("id") id: Long): Response<okhttp3.ResponseBody>
 
     // ── Vitals dashboard ──────────────────────────────────────
+    @GET("summary/today")
+    suspend fun summaryToday(): DailySummary
+
+    @GET("query/weight")
+    suspend fun weightSeries(
+        @retrofit2.http.Query("since") since: String? = null,
+    ): okhttp3.ResponseBody
+
+    @GET("query/blood-pressure")
+    suspend fun bpSeries(
+        @retrofit2.http.Query("since") since: String? = null,
+    ): okhttp3.ResponseBody
+
     @GET("summary/range")
     suspend fun summaryRange(
         @retrofit2.http.Query("since") since: String,

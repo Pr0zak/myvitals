@@ -12,6 +12,7 @@ the user has subscribed to that trail.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -31,7 +32,19 @@ log = logging.getLogger(__name__)
 # If unset, the poller and fetch helpers no-op and log a warning so
 # the rest of the app still runs.
 SOURCE_URL = "https://rainoutline.com/search/dnis_refresh/{dnis}/updated/0"
+EXT_URL = "https://rainoutline.com/search/extension/{dnis}/{ext}"
 USER_AGENT = "myvitals-trail-poller/0.7 (+self-hosted)"
+
+# Per-trail message page format:
+#   <span class="status1">Delayed</span>&nbsp;-&nbsp;Few wet spots in the back, but the rest is ok.<br />
+#
+# We capture everything between the &nbsp;-&nbsp; and the closing <br />.
+_EXT_MSG_RE = re.compile(
+    r'<span class="status[0-3]">[^<]+</span>'
+    r'(?:&nbsp;|\s)*-(?:&nbsp;|\s)*'
+    r'(.*?)<br\s*/?>',
+    re.S,
+)
 
 # RainoutLine's CSS classes map to status codes
 # (status1 is labelled "Delayed" on rainoutline.com — typically means
@@ -152,6 +165,42 @@ async def fetch(dnis: str | None = None) -> str:
         return r.text
 
 
+def parse_extension_message(html: str) -> str | None:
+    """Pull the per-trail status message text from the extension page.
+    Returns the cleaned message string or None if no message is present."""
+    m = _EXT_MSG_RE.search(html)
+    if m is None:
+        return None
+    raw = m.group(1)
+    # Strip lingering tags + decode the few entities we expect.
+    cleaned = re.sub(r"<[^>]+>", " ", raw)
+    cleaned = (cleaned
+               .replace("&nbsp;", " ")
+               .replace("&amp;", "&")
+               .replace("&#039;", "'")
+               .replace("&quot;", '"'))
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or None
+
+
+async def fetch_extension_message(
+    client: httpx.AsyncClient, dnis: str, ext: int,
+) -> str | None:
+    """Fetch a single trail's extension page and extract its status
+    message, if any. Returns None on any failure (we don't want one
+    bad page to fail the whole poll)."""
+    try:
+        r = await client.get(
+            EXT_URL.format(dnis=dnis, ext=ext),
+            headers={"User-Agent": USER_AGENT},
+        )
+        r.raise_for_status()
+        return parse_extension_message(r.text)
+    except Exception as e:
+        log.debug("ext-msg fetch failed for ext=%s: %s", ext, e)
+        return None
+
+
 async def _ensure_trail(
     db: AsyncSession, dnis: str, reading: TrailReading, now: datetime,
 ) -> models.Trail:
@@ -222,6 +271,25 @@ async def poll_and_persist(dnis: str | None = None) -> dict:
     if not readings:
         log.warning("rainoutline: parsed 0 readings — site format may have changed")
         return {"fetched": 0, "snapshots": 0, "alerts": 0}
+
+    # The dnis_refresh fragment doesn't carry the per-trail message text
+    # (e.g. "Few wet spots in the back"). Hit each extension's detail page
+    # in parallel (capped concurrency) and merge the message back into the
+    # corresponding TrailReading.comment. Best-effort — a failed lookup
+    # doesn't fail the poll.
+    sema = asyncio.Semaphore(5)
+
+    async def _enrich(r: TrailReading) -> None:
+        async with sema:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                msg = await fetch_extension_message(client, dnis, r.extension)
+        if msg:
+            r.comment = msg
+
+    await asyncio.gather(*[_enrich(r) for r in readings])
+    enriched = sum(1 for r in readings if r.comment)
+    log.info("rainoutline: enriched %d/%d readings with messages",
+             enriched, len(readings))
 
     now = datetime.now(timezone.utc)
     snap_count = 0

@@ -1,5 +1,6 @@
 package app.myvitals.ui.vitals
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,8 +20,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
+import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.MonitorWeight
 import androidx.compose.material.icons.outlined.Refresh
@@ -30,6 +32,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -41,7 +44,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -50,15 +55,19 @@ import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.DailySummary
 import app.myvitals.sync.SoberCurrentResponse
+import app.myvitals.sync.TimePoint
 import app.myvitals.ui.MV
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import timber.log.Timber
+import java.time.Instant
 import java.time.LocalDate
 
-/** Identifier for each Vitals badge — used by the detail route + future preferences. */
 enum class Vital(val label: String, val icon: ImageVector, val color: Color) {
     HR("Heart rate", Icons.Outlined.FavoriteBorder, Color(0xFFEF4444)),
     HRV("HRV", Icons.Outlined.Speed, Color(0xFFA855F7)),
@@ -69,6 +78,11 @@ enum class Vital(val label: String, val icon: ImageVector, val color: Color) {
     SOBER("Sober", Icons.Outlined.Timer, Color(0xFF84CC16)),
 }
 
+/** Lightweight wrapper for the live HR points + their freshness. */
+data class HrSnapshot(val points: List<TimePoint>, val latest: Double?, val lastIso: String?)
+data class WeightSnapshot(val points: List<Pair<Long, Double>>, val latestKg: Double?, val lastIso: String?)
+data class BpSnapshot(val latestSys: Int?, val latestDia: Int?, val lastIso: String?)
+
 @Composable
 fun VitalsScreen(
     settings: SettingsRepository,
@@ -78,6 +92,10 @@ fun VitalsScreen(
 ) {
     val scope = rememberCoroutineScope()
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
+    var today by remember { mutableStateOf<DailySummary?>(null) }
+    var hr by remember { mutableStateOf(HrSnapshot(emptyList(), null, null)) }
+    var weight by remember { mutableStateOf(WeightSnapshot(emptyList(), null, null)) }
+    var bp by remember { mutableStateOf(BpSnapshot(null, null, null)) }
     var sober by remember { mutableStateOf<SoberCurrentResponse?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -89,17 +107,81 @@ fun VitalsScreen(
         }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-            val since = LocalDate.now().minusDays(29).toString()
-            val (summaries, soberResp) = withContext(Dispatchers.IO) {
-                Pair(api.summaryRange(since = since), runCatching { api.soberCurrent() }.getOrNull())
+            val since30 = LocalDate.now().minusDays(29).toString()
+            val hrSince = Instant.now().minusSeconds(2 * 3600).toString()
+            val weightSince = LocalDate.now().minusDays(60).toString()
+            val bpSince = LocalDate.now().minusDays(30).toString()
+            coroutineScope {
+                val rowsD = async(Dispatchers.IO) { api.summaryRange(since = since30) }
+                val todayD = async(Dispatchers.IO) {
+                    runCatching { api.summaryToday() }.getOrNull()
+                }
+                val hrD = async(Dispatchers.IO) {
+                    runCatching {
+                        val s = api.heartRateSeries(since = hrSince)
+                        HrSnapshot(
+                            points = s.points,
+                            latest = s.points.lastOrNull()?.value,
+                            lastIso = s.points.lastOrNull()?.time,
+                        )
+                    }.getOrDefault(HrSnapshot(emptyList(), null, null))
+                }
+                val weightD = async(Dispatchers.IO) {
+                    runCatching {
+                        val raw = api.weightSeries(since = weightSince).string()
+                        val obj = JSONObject(raw)
+                        val arr = obj.optJSONArray("points") ?: org.json.JSONArray()
+                        val pts = mutableListOf<Pair<Long, Double>>()
+                        var lastIso: String? = null
+                        for (i in 0 until arr.length()) {
+                            val p = arr.getJSONObject(i)
+                            val w = p.optDouble("weight_kg", Double.NaN)
+                            val t: String? = p.optString("time").takeIf { it.isNotBlank() }
+                            if (!w.isNaN() && t != null) {
+                                pts += runCatching {
+                                    Instant.parse(t).toEpochMilli() to w
+                                }.getOrNull() ?: continue
+                                lastIso = t
+                            }
+                        }
+                        WeightSnapshot(
+                            points = pts,
+                            latestKg = obj.optDouble("latest_kg").takeIf { !it.isNaN() },
+                            lastIso = lastIso,
+                        )
+                    }.getOrDefault(WeightSnapshot(emptyList(), null, null))
+                }
+                val bpD = async(Dispatchers.IO) {
+                    runCatching {
+                        val raw = api.bpSeries(since = bpSince).string()
+                        val obj = JSONObject(raw)
+                        val latest = obj.optJSONObject("latest")
+                        if (latest != null) {
+                            BpSnapshot(
+                                latestSys = latest.optInt("systolic"),
+                                latestDia = latest.optInt("diastolic"),
+                                lastIso = latest.optString("time").takeIf { it.isNotBlank() },
+                            )
+                        } else BpSnapshot(null, null, null)
+                    }.getOrDefault(BpSnapshot(null, null, null))
+                }
+                val soberD = async(Dispatchers.IO) {
+                    runCatching { api.soberCurrent() }.getOrNull()
+                }
+
+                rows = rowsD.await()
+                today = todayD.await()
+                hr = hrD.await()
+                weight = weightD.await()
+                bp = bpD.await()
+                sober = soberD.await()
             }
-            rows = summaries
-            sober = soberResp
             error = null
             Timber.i(
-                "vitals loaded: %d daily rows; latest=%s sober_active=%s",
-                summaries.size, summaries.lastOrNull()?.date,
-                soberResp?.active != null,
+                "vitals: %d daily rows, hr=%d pts, weight=%d pts, bp=%s, today=%s",
+                rows.size, hr.points.size, weight.points.size,
+                if (bp.latestSys != null) "y" else "n",
+                today?.date,
             )
         } catch (e: Exception) {
             Timber.w(e, "vitals load failed")
@@ -112,14 +194,8 @@ fun VitalsScreen(
         while (true) { delay(1_000); nowMs = System.currentTimeMillis() }
     }
 
-    val tiles by remember(rows) {
-        derivedStateOf {
-            // Default order — Stage 2 will make this user-configurable.
-            listOf(
-                Vital.HR, Vital.SLEEP, Vital.STEPS, Vital.HRV,
-                Vital.WEIGHT, Vital.BP, Vital.SOBER,
-            )
-        }
+    val tiles = remember {
+        listOf(Vital.HR, Vital.SLEEP, Vital.STEPS, Vital.HRV, Vital.WEIGHT, Vital.BP, Vital.SOBER)
     }
 
     Column(Modifier.fillMaxSize().background(MV.Bg).padding(horizontal = 12.dp)) {
@@ -150,7 +226,7 @@ fun VitalsScreen(
                 Row(Modifier.padding(12.dp)) {
                     Text(error!!, modifier = Modifier.weight(1f),
                         color = MV.Red, fontSize = 12.sp)
-                    androidx.compose.material3.TextButton(onClick = onOpenSettings) {
+                    TextButton(onClick = onOpenSettings) {
                         Text("Settings", color = MV.OnSurface, fontSize = 12.sp)
                     }
                 }
@@ -165,80 +241,32 @@ fun VitalsScreen(
         ) {
             items(tiles, key = { it.name }) { v ->
                 when (v) {
-                    Vital.SOBER -> SoberBadge(sober, nowMs, onClick = onOpenSober)
-                    Vital.HR -> Badge(
-                        v, valueOf(rows) { it.restingHr },
-                        unit = "bpm", series = seriesOf(rows) { it.restingHr },
+                    Vital.SOBER -> SoberBadge(sober, onClick = onOpenSober)
+                    Vital.HR -> HrBadge(hr, nowMs, onClick = { onOpenVitalDetail(v) })
+                    Vital.HRV -> HrvBadge(rows, nowMs, onClick = { onOpenVitalDetail(v) })
+                    Vital.SLEEP -> SleepBadge(rows, nowMs, onClick = { onOpenVitalDetail(v) })
+                    Vital.STEPS -> StepsBadge(
+                        todayCount = today?.stepsTotal ?: rows.lastOrNull()?.stepsTotal,
+                        goal = 10_000,
+                        lastDate = today?.date ?: rows.lastOrNull()?.date,
+                        nowMs = nowMs,
                         onClick = { onOpenVitalDetail(v) },
                     )
-                    Vital.HRV -> Badge(
-                        v, valueOf(rows) { it.hrvAvg },
-                        unit = "ms", series = seriesOf(rows) { it.hrvAvg },
-                        onClick = { onOpenVitalDetail(v) },
-                    )
-                    Vital.SLEEP -> Badge(
-                        v,
-                        rows.lastOrNull { it.sleepDurationS != null }?.sleepDurationS?.let {
-                            "%.1f h".format(it / 3600.0)
-                        },
-                        unit = null,
-                        series = seriesOf(rows) {
-                            it.sleepDurationS?.toDouble()?.div(3600.0)
-                        },
-                        onClick = { onOpenVitalDetail(v) },
-                    )
-                    Vital.STEPS -> Badge(
-                        v,
-                        rows.lastOrNull { it.stepsTotal != null }?.stepsTotal?.toString(),
-                        unit = "steps",
-                        series = seriesOf(rows) { it.stepsTotal?.toDouble() },
-                        onClick = { onOpenVitalDetail(v) },
-                    )
-                    Vital.WEIGHT -> Badge(
-                        v,
-                        rows.lastOrNull { it.weightKg != null }?.weightKg?.let {
-                            "%.1f lb".format(it * 2.20462)
-                        },
-                        unit = null,
-                        series = seriesOf(rows) { it.weightKg?.times(2.20462) },
-                        onClick = { onOpenVitalDetail(v) },
-                    )
-                    Vital.BP -> {
-                        val latest = rows.lastOrNull {
-                            it.bpSystolicAvg != null && it.bpDiastolicAvg != null
-                        }
-                        Badge(
-                            v,
-                            latest?.let {
-                                "%.0f/%.0f".format(it.bpSystolicAvg!!, it.bpDiastolicAvg!!)
-                            },
-                            unit = "mmHg",
-                            series = seriesOf(rows) { it.bpSystolicAvg },
-                            onClick = { onOpenVitalDetail(v) },
-                        )
-                    }
+                    Vital.WEIGHT -> WeightBadge(weight, nowMs,
+                        onClick = { onOpenVitalDetail(v) })
+                    Vital.BP -> BpBadge(bp, nowMs, onClick = { onOpenVitalDetail(v) })
                 }
             }
         }
     }
 }
 
-private fun valueOf(rows: List<DailySummary>, sel: (DailySummary) -> Double?): String? {
-    val v = rows.lastOrNull { sel(it) != null }?.let(sel) ?: return null
-    return "%.0f".format(v)
-}
-
-private fun seriesOf(rows: List<DailySummary>, sel: (DailySummary) -> Double?): List<Float?> =
-    rows.map { sel(it)?.toFloat() }
+// ============================================================
+// Badges
+// ============================================================
 
 @Composable
-private fun Badge(
-    v: Vital,
-    valueText: String?,
-    unit: String?,
-    series: List<Float?>,
-    onClick: () -> Unit,
-) {
+private fun BadgeFrame(v: Vital, lastUpdate: String?, onClick: () -> Unit, content: @Composable () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
         modifier = Modifier.fillMaxWidth().clickable { onClick() },
@@ -249,72 +277,355 @@ private fun Badge(
                     tint = v.color, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(v.label, color = MV.OnSurfaceVariant,
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+                    modifier = Modifier.weight(1f))
+                if (lastUpdate != null) {
+                    Text(lastUpdate, color = MV.OnSurfaceDim, fontSize = 9.sp)
+                }
             }
             Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun HrBadge(snap: HrSnapshot, nowMs: Long, onClick: () -> Unit) {
+    val v = Vital.HR
+    val lastUpdate = snap.lastIso?.let { fmtRelative(it, nowMs) }
+    BadgeFrame(v, lastUpdate, onClick) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(snap.latest?.let { "%.0f".format(it) } ?: "—",
+                color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(4.dp))
+            Text("bpm", color = MV.OnSurfaceDim, fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 4.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(Modifier.fillMaxWidth().height(34.dp)) {
+            HrSparkline(snap.points, color = v.color, nowMs = nowMs)
+        }
+    }
+}
+
+@Composable
+private fun HrvBadge(rows: List<DailySummary>, nowMs: Long, onClick: () -> Unit) {
+    val v = Vital.HRV
+    val lastRow = rows.lastOrNull { it.hrvAvg != null }
+    val series = rows.map { it.hrvAvg?.toFloat() }
+    BadgeFrame(v, lastRow?.date?.let { fmtRelativeDate(it, nowMs) }, onClick) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(lastRow?.hrvAvg?.let { "%.0f".format(it) } ?: "—",
+                color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(4.dp))
+            Text("ms", color = MV.OnSurfaceDim, fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 4.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(Modifier.fillMaxWidth().height(34.dp)) {
+            SparkLine(series, color = v.color)
+        }
+    }
+}
+
+@Composable
+private fun SleepBadge(rows: List<DailySummary>, nowMs: Long, onClick: () -> Unit) {
+    val v = Vital.SLEEP
+    val last7 = rows.takeLast(7)
+    val lastRow = last7.lastOrNull { it.sleepDurationS != null }
+    val hours = lastRow?.sleepDurationS?.toDouble()?.div(3600.0)
+    BadgeFrame(v, lastRow?.date?.let { fmtRelativeDate(it, nowMs) }, onClick) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(hours?.let { "%.1f".format(it) } ?: "—",
+                color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(4.dp))
+            Text("h", color = MV.OnSurfaceDim, fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 4.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(Modifier.fillMaxWidth().height(34.dp)) {
+            SleepBars(last7.map { it.sleepDurationS?.toFloat()?.div(3600f) }, color = v.color)
+        }
+    }
+}
+
+@Composable
+private fun StepsBadge(
+    todayCount: Int?, goal: Int, lastDate: String?, nowMs: Long, onClick: () -> Unit,
+) {
+    val v = Vital.STEPS
+    BadgeFrame(v, lastDate?.let { fmtRelativeDate(it, nowMs) }, onClick) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1.6f),
+            contentAlignment = Alignment.Center) {
+            StepsRing(
+                count = todayCount ?: 0,
+                goal = goal,
+                color = v.color,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    valueText ?: "—",
-                    color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
+                    todayCount?.let { "%,d".format(it) } ?: "—",
+                    color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
                 )
-                if (unit != null && valueText != null) {
-                    Spacer(Modifier.width(4.dp))
-                    Text(unit, color = MV.OnSurfaceDim, fontSize = 11.sp,
-                        modifier = Modifier.padding(bottom = 4.dp))
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            Box(Modifier.fillMaxWidth().height(34.dp)) {
-                SparkLine(series, color = v.color)
+                Text("/ ${"%,d".format(goal)}",
+                    color = MV.OnSurfaceDim, fontSize = 9.sp)
             }
         }
     }
 }
 
 @Composable
-private fun SoberBadge(
-    sober: SoberCurrentResponse?,
-    @Suppress("UNUSED_PARAMETER") nowMs: Long,
-    onClick: () -> Unit,
-) {
-    val v = Vital.SOBER
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
-        modifier = Modifier.fillMaxWidth().clickable { onClick() },
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(v.icon, contentDescription = v.label,
-                    tint = v.color, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(v.label, color = MV.OnSurfaceVariant,
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+private fun WeightBadge(snap: WeightSnapshot, nowMs: Long, onClick: () -> Unit) {
+    val v = Vital.WEIGHT
+    val lbs = snap.latestKg?.times(2.20462)
+    // Trend = current vs ~30d-ago value (average of oldest 3 points)
+    val trend: Double? = remember(snap.points) {
+        if (snap.points.size < 4) null else {
+            val cur = snap.points.last().second
+            val baseline = snap.points.take(3).map { it.second }.average()
+            (cur - baseline) * 2.20462
+        }
+    }
+    BadgeFrame(v, snap.lastIso?.let { fmtRelative(it, nowMs) }, onClick) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(lbs?.let { "%.1f".format(it) } ?: "—",
+                color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(4.dp))
+            Text("lb", color = MV.OnSurfaceDim, fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 4.dp))
+        }
+        if (trend != null) {
+            val arrow = if (trend > 0.05) "↑" else if (trend < -0.05) "↓" else "→"
+            val trendColor = when {
+                trend > 0.5 -> Color(0xFFFBBF24)
+                trend < -0.5 -> Color(0xFF60A5FA)
+                else -> MV.OnSurfaceDim
             }
-            Spacer(Modifier.height(8.dp))
-            val days = sober?.days
-            val hours = sober?.hours
-            if (days != null) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text("$days", color = MV.OnSurface,
-                        fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (days == 1) "day" else "days",
-                        color = MV.OnSurfaceDim, fontSize = 11.sp,
-                        modifier = Modifier.padding(bottom = 4.dp))
-                    if (hours != null) {
-                        Spacer(Modifier.width(8.dp))
-                        Text("${hours}h", color = MV.OnSurfaceVariant, fontSize = 12.sp,
-                            modifier = Modifier.padding(bottom = 4.dp))
-                    }
-                }
-            } else {
-                Text("—", color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Spacer(Modifier.height(6.dp))
+            Text("$arrow %+.1f lb (30d)".format(trend),
+                color = trendColor, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(Modifier.fillMaxWidth().height(34.dp)) {
+            SparkLine(snap.points.map { (it.second * 2.20462).toFloat() }, color = v.color)
+        }
+    }
+}
+
+@Composable
+private fun BpBadge(bp: BpSnapshot, nowMs: Long, onClick: () -> Unit) {
+    val v = Vital.BP
+    BadgeFrame(v, bp.lastIso?.let { fmtRelative(it, nowMs) }, onClick) {
+        Row(verticalAlignment = Alignment.Bottom) {
             Text(
-                "Tap to manage",
-                color = MV.OnSurfaceDim, fontSize = 10.sp,
+                if (bp.latestSys != null && bp.latestDia != null)
+                    "${bp.latestSys}/${bp.latestDia}"
+                else "—",
+                color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.width(4.dp))
+            Text("mmHg", color = MV.OnSurfaceDim, fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 4.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        // Category bar — map systolic into normal/elevated/high regions.
+        val catColor = when {
+            bp.latestSys == null -> MV.OnSurfaceDim
+            bp.latestSys < 120 -> Color(0xFF22C55E)   // normal
+            bp.latestSys < 130 -> Color(0xFFFBBF24)   // elevated
+            bp.latestSys < 140 -> Color(0xFFF97316)   // stage-1
+            else -> Color(0xFFEF4444)                 // stage-2+
+        }
+        Text(when {
+            bp.latestSys == null -> "no readings"
+            bp.latestSys < 120 -> "Normal"
+            bp.latestSys < 130 -> "Elevated"
+            bp.latestSys < 140 -> "Stage 1"
+            else -> "Stage 2"
+        }, color = catColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun SoberBadge(sober: SoberCurrentResponse?, onClick: () -> Unit) {
+    val v = Vital.SOBER
+    BadgeFrame(v, null, onClick) {
+        val days = sober?.days
+        val hours = sober?.hours
+        if (days != null) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text("$days", color = MV.OnSurface,
+                    fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(4.dp))
+                Text(if (days == 1) "day" else "days",
+                    color = MV.OnSurfaceDim, fontSize = 11.sp,
+                    modifier = Modifier.padding(bottom = 4.dp))
+                if (hours != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Text("${hours}h", color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 4.dp))
+                }
+            }
+        } else {
+            Text("—", color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text("Tap to manage", color = MV.OnSurfaceDim, fontSize = 10.sp)
+    }
+}
+
+// ============================================================
+// Visualisations
+// ============================================================
+
+@Composable
+private fun HrSparkline(
+    points: List<TimePoint>,
+    color: Color,
+    nowMs: Long,
+    modifier: Modifier = Modifier.fillMaxSize(),
+) {
+    Canvas(modifier = modifier) {
+        if (points.size < 2) return@Canvas
+        // Compute time domain — current end is "now"; span back 2h.
+        val end = nowMs
+        val start = end - 2 * 3600_000L
+        // Walk points and group into segments where consecutive samples
+        // are within 5 min of each other; otherwise leave a gap.
+        val segments = mutableListOf<MutableList<Pair<Long, Float>>>()
+        var current = mutableListOf<Pair<Long, Float>>()
+        var prevT: Long? = null
+        for (p in points) {
+            val t = runCatching { Instant.parse(p.time).toEpochMilli() }.getOrNull() ?: continue
+            if (t < start || t > end + 60_000) continue
+            if (prevT != null && (t - prevT) > 5 * 60_000) {
+                if (current.size >= 2) segments += current
+                current = mutableListOf()
+            }
+            current += t to p.value.toFloat()
+            prevT = t
+        }
+        if (current.size >= 2) segments += current
+        if (segments.isEmpty()) return@Canvas
+
+        val allY = segments.flatten().map { it.second }
+        val minY = allY.min()
+        val maxY = allY.max()
+        val span = (maxY - minY).coerceAtLeast(1f)
+        val padY = size.height * 0.12f
+        val plotH = size.height - 2 * padY
+
+        for (seg in segments) {
+            val path = androidx.compose.ui.graphics.Path()
+            seg.forEachIndexed { idx, (t, y) ->
+                val x = ((t - start).toFloat() / (end - start).toFloat()) * size.width
+                val py = size.height - padY - ((y - minY) / span) * plotH
+                if (idx == 0) path.moveTo(x, py) else path.lineTo(x, py)
+            }
+            drawPath(path, color = color, style = Stroke(width = 1.5.dp.toPx()))
+        }
+        // Latest sample dot
+        val (lt, ly) = segments.last().last()
+        val lx = ((lt - start).toFloat() / (end - start).toFloat()) * size.width
+        val ply = size.height - padY - ((ly - minY) / span) * plotH
+        drawCircle(color = color, radius = 2.5.dp.toPx(),
+            center = Offset(lx, ply))
+    }
+}
+
+@Composable
+private fun SleepBars(
+    nights: List<Float?>,
+    color: Color,
+    modifier: Modifier = Modifier.fillMaxSize(),
+) {
+    Canvas(modifier = modifier) {
+        if (nights.isEmpty()) return@Canvas
+        val maxV = (nights.filterNotNull().maxOrNull() ?: 8f).coerceAtLeast(8f)
+        val gapPx = 2.dp.toPx()
+        val barW = (size.width - gapPx * (nights.size - 1)) / nights.size
+        val target = 8f
+        for ((i, v) in nights.withIndex()) {
+            val x = i * (barW + gapPx)
+            val h = (v ?: 0f) / maxV * size.height
+            val barColor = when {
+                v == null -> color.copy(alpha = 0.2f)
+                v >= target -> color
+                v >= target * 0.85f -> color.copy(alpha = 0.75f)
+                else -> color.copy(alpha = 0.45f)
+            }
+            drawRect(
+                color = barColor,
+                topLeft = Offset(x, size.height - h),
+                size = androidx.compose.ui.geometry.Size(barW, h),
             )
         }
     }
+}
+
+@Composable
+private fun StepsRing(
+    count: Int, goal: Int, color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        val stroke = 6.dp.toPx()
+        val pad = stroke / 2 + 4.dp.toPx()
+        val rect = androidx.compose.ui.geometry.Rect(
+            left = pad, top = pad,
+            right = size.width - pad, bottom = size.height - pad,
+        )
+        val side = minOf(rect.width, rect.height)
+        val cx = rect.center.x
+        val cy = rect.center.y
+        val sq = androidx.compose.ui.geometry.Rect(
+            left = cx - side / 2, top = cy - side / 2,
+            right = cx + side / 2, bottom = cy + side / 2,
+        )
+        // Background ring
+        drawArc(
+            color = color.copy(alpha = 0.18f),
+            startAngle = -90f, sweepAngle = 360f, useCenter = false,
+            topLeft = sq.topLeft, size = androidx.compose.ui.geometry.Size(sq.width, sq.height),
+            style = Stroke(width = stroke),
+        )
+        val pct = (count.toFloat() / goal.toFloat()).coerceAtLeast(0f)
+        val sweep = (pct * 360f).coerceAtMost(360f)
+        drawArc(
+            color = color,
+            startAngle = -90f, sweepAngle = sweep, useCenter = false,
+            topLeft = sq.topLeft, size = androidx.compose.ui.geometry.Size(sq.width, sq.height),
+            style = Stroke(width = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+        )
+    }
+}
+
+// ============================================================
+// Time helpers
+// ============================================================
+
+private fun fmtRelative(iso: String, nowMs: Long): String {
+    return try {
+        val ms = nowMs - Instant.parse(iso).toEpochMilli()
+        val s = ms / 1000
+        when {
+            s < 60 -> "now"
+            s < 3600 -> "${s / 60}m"
+            s < 86400 -> "${s / 3600}h"
+            else -> "${s / 86400}d"
+        }
+    } catch (_: Exception) { "" }
+}
+
+private fun fmtRelativeDate(date: String, nowMs: Long): String {
+    return try {
+        val d = LocalDate.parse(date)
+        val today = LocalDate.now()
+        val days = today.toEpochDay() - d.toEpochDay()
+        when {
+            days <= 0L -> "today"
+            days == 1L -> "1d"
+            else -> "${days}d"
+        }
+    } catch (_: Exception) { "" }
 }

@@ -46,3 +46,6 @@ android/keystore.properties
 .idea/
 *.swp
 .DS_Store
+
+# project notes (kept local-only)
+CLAUDE.md

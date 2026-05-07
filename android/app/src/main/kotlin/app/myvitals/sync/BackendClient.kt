@@ -128,6 +128,21 @@ interface BackendApi {
         @retrofit2.http.Query("until") until: String? = null,
     ): List<DailySummary>
 
+    @GET("query/sleep/last")
+    suspend fun sleepLast(): Response<SleepNight>
+
+    @GET("query/sleep/range")
+    suspend fun sleepRange(
+        @retrofit2.http.Query("since") since: String,
+        @retrofit2.http.Query("until") until: String? = null,
+    ): List<SleepNight>
+
+    @GET("query/sleep/raw")
+    suspend fun sleepRaw(
+        @retrofit2.http.Query("since") since: String,
+        @retrofit2.http.Query("until") until: String? = null,
+    ): List<SleepRawSegment>
+
     @GET("query/heartrate")
     suspend fun heartRateSeries(
         @retrofit2.http.Query("since") since: String? = null,

@@ -465,6 +465,28 @@ data class TimePoint(
 )
 
 @JsonClass(generateAdapter = true)
+data class SleepStageBucket(
+    val stage: String,
+    @Json(name = "duration_s") val durationS: Int,
+)
+
+@JsonClass(generateAdapter = true)
+data class SleepNight(
+    val date: String,
+    val start: String? = null,
+    val end: String? = null,
+    @Json(name = "total_s") val totalS: Int,
+    val stages: List<SleepStageBucket> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class SleepRawSegment(
+    val time: String,
+    val stage: String,
+    @Json(name = "duration_s") val durationS: Int,
+)
+
+@JsonClass(generateAdapter = true)
 data class TimeSeries(
     val points: List<TimePoint> = emptyList(),
     val avg: Double? = null,

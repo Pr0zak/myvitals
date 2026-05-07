@@ -65,6 +65,14 @@ fun VitalsDetailScreen(
     vital: Vital,
     onBack: () -> Unit,
 ) {
+    if (vital == Vital.SLEEP) {
+        SleepDetailScreen(settings, onBack)
+        return
+    }
+    if (vital == Vital.STEPS) {
+        StepsDetailScreen(settings, onBack)
+        return
+    }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var range by remember { mutableStateOf(VitalRange.MONTH) }
     var loading by remember { mutableStateOf(true) }

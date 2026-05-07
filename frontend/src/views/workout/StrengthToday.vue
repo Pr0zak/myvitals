@@ -657,7 +657,20 @@ onMounted(loadAll);
           </span>
         </header>
 
-        <div class="ex-body" v-if="ex(wex.exercise_id)">
+        <!-- Completed state: collapse to chip summary instead of greyed-out inputs -->
+        <div v-if="isExerciseDone(wex)" class="done-summary">
+          <span v-for="s in [...wex.sets].sort((a, b) => a.set_number - b.set_number)"
+                :key="s.set_number"
+                class="set-chip"
+                :class="s.skipped ? 'fail' : 'ok'"
+                :title="`Set ${s.set_number} · RPE ${s.rating ?? '?'}`"
+                :data-r="s.rating ?? 0">
+            <template v-if="s.skipped">fail</template>
+            <template v-else>{{ s.actual_weight_lb ?? '—' }}×{{ s.actual_reps }}</template>
+          </span>
+        </div>
+
+        <div v-else class="ex-body" v-if="ex(wex.exercise_id)">
           <div class="media">
             <img v-if="imageUrl(wex.exercise_id, 0)" :src="imageUrl(wex.exercise_id, 0) || ''" :alt="exName(wex.exercise_id)" />
             <a class="yt" :href="youtubeUrl(wex.exercise_id)" target="_blank" rel="noreferrer">
@@ -916,6 +929,26 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 .row-actions { display: flex; gap: 0.3rem; align-items: center; }
 button.ghost.small.fail { color: #f87171; border-color: #b91c1c44; }
 button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: #ef4444; }
+
+/* Done-state chip summary — matches claude.ai/design workout bundle */
+.done-summary { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.7rem;
+                padding-top: 0.7rem; border-top: 1px solid var(--line); }
+.set-chip {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 0.72rem; font-weight: 500;
+  padding: 0.18rem 0.45rem; border-radius: 5px;
+  border: 1px solid var(--line); background: var(--bg-1);
+  color: var(--muted);
+}
+.set-chip.fail {
+  color: #fca5a5; border-color: rgba(239,68,68,0.35);
+  background: rgba(239,68,68,0.07);
+}
+.set-chip.ok[data-r="1"] { color: #fca5a5; border-color: rgba(239,68,68,0.35); }
+.set-chip.ok[data-r="2"] { color: #fdba74; border-color: rgba(249,115,22,0.35); }
+.set-chip.ok[data-r="3"] { color: #fcd34d; border-color: rgba(245,158,11,0.35); }
+.set-chip.ok[data-r="4"] { color: #bef264; border-color: rgba(132,204,22,0.35); }
+.set-chip.ok[data-r="5"] { color: #86efac; border-color: rgba(34,197,94,0.35); }
 
 .bottom { margin-top: 1rem; }
 .big-btn { font-size: 1rem; padding: 0.7rem 1.4rem; }

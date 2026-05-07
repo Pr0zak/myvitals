@@ -447,6 +447,7 @@ def select_exercises_for_split(
     level: str,
     rng: random.Random,
     exercise_prefs: dict[str, str] | None = None,
+    recent_ratings: dict[str, float] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """Pick exercises for the focus's slot list, in slot order.
 
@@ -466,7 +467,18 @@ def select_exercises_for_split(
     """
     notes: list[str] = []
     prefs = exercise_prefs or {}
+    ratings = recent_ratings or {}
     slots = SPLIT_SLOTS.get(focus) or SPLIT_SLOTS["full_body"]
+
+    # Auto-avoid: exercises the user has rated consistently low over the
+    # last few weeks (≤2 avg). Treated like a soft 'avoid' pref unless
+    # explicitly favorited. Lets the algo learn from feedback without
+    # the user having to manage a preferences list manually.
+    auto_avoid = {
+        eid for eid, avg in ratings.items()
+        if avg is not None and avg <= 2.0
+        and prefs.get(eid) != "favorite"
+    }
 
     # Pre-filter: drop disabled exercises entirely
     catalog = [e for e in catalog if prefs.get(e["id"]) != "disabled"]
@@ -492,14 +504,20 @@ def select_exercises_for_split(
         # Apply user prefs:
         #   - favorites: if any candidate is favorited, pick from favorites only
         #   - avoid: only consider these as a last resort (push to back)
-        if prefs and candidates:
+        if candidates:
             favs = [c for c in candidates if prefs.get(c["id"]) == "favorite"]
             if favs:
                 candidates = favs
             else:
-                avoids = [c for c in candidates if prefs.get(c["id"]) == "avoid"]
-                normal = [c for c in candidates if prefs.get(c["id"]) != "avoid"]
-                candidates = normal + avoids
+                # Combine explicit "avoid" prefs with auto-avoids (low
+                # recent ratings) — both pushed to the back.
+                def _avoid_score(e: dict[str, Any]) -> int:
+                    if prefs.get(e["id"]) == "avoid":
+                        return 2
+                    if e["id"] in auto_avoid:
+                        return 1
+                    return 0
+                candidates = sorted(candidates, key=_avoid_score)
 
         if not candidates:
             if pattern == "vertical_pull":
@@ -659,6 +677,45 @@ async def last_split_for_user(
     return row.split_focus if row else None
 
 
+async def recent_ratings_by_exercise(
+    db: AsyncSession, since_days: int = 14,
+) -> dict[str, float]:
+    """Average rating per exercise across the last `since_days` of completed
+    workouts. Used by the picker to auto-down-rank exercises the user has
+    been struggling with — they get pushed to the back of candidates the
+    same way a manual 'avoid' pref does.
+
+    Excludes skipped sets and sets without a rating.
+    """
+    from datetime import timedelta as _td
+    since = datetime.now(timezone.utc).date() - _td(days=since_days)
+
+    rows = (await db.execute(
+        select(
+            models.StrengthWorkoutExercise.exercise_id,
+            models.StrengthSet.rating,
+        )
+        .join(
+            models.StrengthWorkoutExercise,
+            models.StrengthSet.workout_exercise_id == models.StrengthWorkoutExercise.id,
+        )
+        .join(
+            models.StrengthWorkout,
+            models.StrengthWorkoutExercise.workout_id == models.StrengthWorkout.id,
+        )
+        .where(models.StrengthWorkout.date >= since)
+        .where(models.StrengthSet.skipped.is_(False))
+        .where(models.StrengthSet.rating.is_not(None))
+    )).all()
+
+    by_ex: dict[str, list[int]] = {}
+    for ex_id, rating in rows:
+        by_ex.setdefault(ex_id, []).append(rating)
+    return {
+        eid: sum(rs) / len(rs) for eid, rs in by_ex.items() if rs
+    }
+
+
 async def last_target_weight_for_exercise(
     db: AsyncSession, exercise_id: str
 ) -> tuple[float | None, float | None]:
@@ -774,10 +831,22 @@ async def generate_plan(
         equipment.get("exercise_prefs") or {}
         if isinstance(equipment, dict) else {}
     )
+    recent_ratings = await recent_ratings_by_exercise(db, since_days=14)
     chosen, chosen_slots, sel_notes = select_exercises_for_split(
-        catalog, focus, level, rng, exercise_prefs=exercise_prefs,
+        catalog, focus, level, rng,
+        exercise_prefs=exercise_prefs,
+        recent_ratings=recent_ratings,
     )
     notes.extend(sel_notes)
+    auto_avoid_count = sum(
+        1 for r in recent_ratings.values() if r is not None and r <= 2.0
+    )
+    if auto_avoid_count:
+        notes.append(
+            f"{auto_avoid_count} exercise(s) auto-avoided based on recent "
+            f"ratings ≤2 over the last 14 days. Override by marking them "
+            f"'favorite' in the catalog if you want them back."
+        )
 
     superset_map = pair_supersets(chosen, chosen_slots)
 

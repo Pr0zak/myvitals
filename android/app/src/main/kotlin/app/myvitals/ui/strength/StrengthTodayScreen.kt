@@ -328,8 +328,21 @@ fun StrengthTodayScreen(
                                 rating = rating,
                             ))
                             if (ok) {
-                                // Start rest timer locally
-                                restTotal = wex.targetRestS * 1000L
+                                // Within-round rest (35s) if this is a superset and
+                                // the partner hasn't completed this set yet; full
+                                // target_rest_s otherwise.
+                                var restMs = wex.targetRestS * 1000L
+                                val ssId = wex.supersetId
+                                if (ssId != null) {
+                                    val partner = workout?.exercises?.firstOrNull {
+                                        it.supersetId == ssId && it.id != wex.id
+                                    }
+                                    val partnerDone = partner?.sets?.any {
+                                        it.setNumber == setNum && it.actualReps != null && !it.skipped
+                                    } ?: false
+                                    if (!partnerDone) restMs = 35_000L
+                                }
+                                restTotal = restMs
                                 restEndsAt = System.currentTimeMillis() + restTotal
                             }
                             reload()
@@ -339,6 +352,10 @@ fun StrengthTodayScreen(
                         openYouTube(context, slug, name)
                     },
                     onSwap = { swapWexId = wex.id },
+                    partnerName = wex.supersetId?.let { ss ->
+                        plan.exercises.firstOrNull { it.supersetId == ss && it.id != wex.id }
+                            ?.let { catalog[it.exerciseId]?.name ?: it.exerciseId.replace('_', ' ') }
+                    },
                 )
             }
             item {
@@ -565,19 +582,38 @@ private fun ExerciseCard(
     onLogSet: (setNum: Int, weight: Double?, reps: Int?, rating: Int?) -> Unit,
     onYouTube: (slug: String, name: String) -> Unit,
     onSwap: () -> Unit,
+    partnerName: String? = null,
 ) {
     val name = info?.name ?: wex.exerciseId.replace('_', ' ')
     val nextSet = (1..wex.targetSets).firstOrNull { n ->
         wex.sets.none { it.setNumber == n && (it.actualReps != null || it.skipped) }
     }
     val done = nextSet == null
+    val supersetColor = wex.supersetId?.let {
+        // Stable hash → hue (HSL)
+        val h = it.fold(0) { acc, c -> (acc * 31 + c.code) % 360 }
+        Color(android.graphics.Color.HSVToColor(floatArrayOf(h.toFloat(), 0.55f, 0.85f)))
+    }
     Card(
         colors = CardDefaults.cardColors(
             containerColor = if (done) MV.SurfaceContainerLow else MV.SurfaceContainer
         ),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (supersetColor != null) Modifier.border(
+                width = 2.dp, color = supersetColor.copy(alpha = 0.5f),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            ) else Modifier),
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
+            if (wex.supersetId != null && partnerName != null) {
+                Text(
+                    "⇄ Superset ${wex.supersetId} — alternate with $partnerName",
+                    color = supersetColor ?: MV.OnSurfaceVariant,
+                    fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
             Row(verticalAlignment = Alignment.Top) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -588,8 +624,7 @@ private fun ExerciseCard(
                         "${wex.targetRepsLow}" else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
                     val w = wex.targetWeightLb?.let { " @ ${it}lb" } ?: ""
                     Text(
-                        "${wex.targetSets}×$rep$w  ·  ${wex.targetRestS}s rest" +
-                                (wex.supersetId?.let { " · superset $it" } ?: ""),
+                        "${wex.targetSets}×$rep$w  ·  ${wex.targetRestS}s rest",
                         color = MV.OnSurfaceVariant, fontSize = 12.sp,
                     )
                 }
@@ -730,23 +765,37 @@ private fun SetEntryRow(
         ) {
             for (r in 1..5) {
                 val on = input.rating == r
+                val color = ratingColor(r)
                 Box(
                     Modifier
                         .weight(1f)
-                        .height(40.dp)
+                        .height(48.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (on) ratingColor(r) else MV.SurfaceContainerLow)
-                        .border(1.dp, if (on) ratingColor(r) else MV.OutlineVariant, RoundedCornerShape(8.dp))
+                        .background(if (on) color else MV.SurfaceContainerLow)
+                        .border(1.dp,
+                            if (on) color else color.copy(alpha = 0.45f),
+                            RoundedCornerShape(8.dp))
                         .clickable { onRating(r) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("$r", color = if (on) MV.OnSurface else MV.OnSurfaceVariant,
-                        fontWeight = FontWeight.Bold)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("$r",
+                            color = if (on) MV.OnSurface else color,
+                            fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(
+                            when (r) {
+                                1 -> "fail"; 2 -> "0-1"; 3 -> "2-3"
+                                4 -> "4-5"; 5 -> "6+"; else -> ""
+                            },
+                            color = if (on) MV.OnSurface.copy(alpha = 0.85f) else MV.OnSurfaceDim,
+                            fontSize = 9.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        )
+                    }
                 }
             }
         }
         Text(
-            "1 Failed · 2 Very hard · 3 Hard · 4 Moderate · 5 Easy",
+            "Reps in reserve — how many more you could've done. 1 = failed, 5 = easy",
             color = MV.OnSurfaceDim, fontSize = 10.sp, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
         )

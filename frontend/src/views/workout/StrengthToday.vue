@@ -318,6 +318,21 @@ const weekStrip = computed<DayCell[]>(() => {
   return out;
 });
 
+// Rating helper text — Fitbod-style RIR (Reps In Reserve)
+function ratingShort(r: number): string {
+  return ["", "fail", "0-1", "2-3", "4-5", "6+"][r] ?? "";
+}
+function ratingTitle(r: number): string {
+  return [
+    "",
+    "1 — Failed: missed reps or had to rack early",
+    "2 — Very hard: 0–1 more reps possible (RIR 0–1)",
+    "3 — Hard: 2–3 reps in reserve (RIR 2–3)",
+    "4 — Moderate: 4–5 reps in reserve (RIR 4–5)",
+    "5 — Easy: 6+ reps in reserve, ready to bump weight (RIR 6+)",
+  ][r] ?? "";
+}
+
 function entryKey(wexId: number, setNum: number) { return `${wexId}-${setNum}`; }
 function entry(wexId: number, setNum: number, target: number, targetWeight: number | null): SetEntry {
   const key = entryKey(wexId, setNum);
@@ -391,8 +406,20 @@ async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = fa
       skipped,
     });
     if (!skipped) {
-      // Start rest timer
-      const rest = wex.target_rest_s;
+      // Pick rest duration: within-round (35s) when this is a superset
+      // and the partner hasn't completed this set number yet; full
+      // target_rest_s otherwise.
+      let rest = wex.target_rest_s;
+      if (wex.superset_id && workout.value) {
+        const partner = workout.value.exercises.find(
+          (x) => x.superset_id === wex.superset_id && x.id !== wex.id,
+        );
+        const partnerDone = partner?.sets.some(
+          (s) => s.set_number === setNum && s.actual_reps != null && !s.skipped,
+        );
+        // 35s within-round when partner still owes this round; otherwise full rest
+        rest = partnerDone ? wex.target_rest_s : 35;
+      }
       startRest(rest);
     }
     await loadAll();
@@ -401,6 +428,37 @@ async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = fa
   } finally {
     busy.value = "";
   }
+}
+
+// Lookup helpers for superset rendering
+function supersetPartnerName(superId: string | null, ownId: number): string | null {
+  if (!superId || !workout.value) return null;
+  const partner = workout.value.exercises.find(
+    (x) => x.superset_id === superId && x.id !== ownId,
+  );
+  return partner ? exName(partner.exercise_id) : null;
+}
+function supersetColor(superId: string | null): string {
+  if (!superId) return "transparent";
+  // Stable hash → hue
+  let h = 0;
+  for (let i = 0; i < superId.length; i++) h = (h * 31 + superId.charCodeAt(i)) % 360;
+  return `hsl(${h}, 65%, 55%)`;
+}
+function supersetNextUp(wex: StrengthWorkoutExercise): number | null {
+  // The set number the user should do next on THIS exercise based on partner state
+  if (!wex.superset_id || !workout.value) return null;
+  const partner = workout.value.exercises.find(
+    (x) => x.superset_id === wex.superset_id && x.id !== wex.id,
+  );
+  if (!partner) return null;
+  for (let n = 1; n <= wex.target_sets; n++) {
+    const ownDone = wex.sets.some(s => s.set_number === n && s.actual_reps != null);
+    const partnerDone = partner.sets.some(s => s.set_number === n && s.actual_reps != null);
+    if (!ownDone && partnerDone) return n;   // partner did set n; we're up
+    if (!ownDone && !partnerDone) return n;  // both haven't done set n; either can go
+  }
+  return null;
 }
 
 async function completeWorkout() {
@@ -551,11 +609,14 @@ onMounted(loadAll);
 
       <!-- Exercise list -->
       <div v-for="(wex, idx) in workout.exercises" :key="wex.id" class="ex-card"
-           :class="{ current: currentExercise?.id === wex.id, done: isExerciseDone(wex) }">
+           :class="{ current: currentExercise?.id === wex.id, done: isExerciseDone(wex), superset: !!wex.superset_id }"
+           :style="wex.superset_id ? { borderLeftColor: supersetColor(wex.superset_id) } : {}">
+        <div v-if="wex.superset_id" class="ss-banner" :style="{ color: supersetColor(wex.superset_id) }">
+          ⇄ Superset {{ wex.superset_id }} — alternate with <strong>{{ supersetPartnerName(wex.superset_id, wex.id) }}</strong>
+        </div>
         <header>
           <h3>
             {{ idx + 1 }}. {{ exName(wex.exercise_id) }}
-            <small v-if="wex.superset_id">· superset {{ wex.superset_id }}</small>
           </h3>
           <span class="prescription">
             {{ wex.target_sets }} ×
@@ -609,8 +670,12 @@ onMounted(loadAll);
                       class="rating" :data-r="r"
                       :class="{ on: entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).rating === r }"
                       :disabled="isSetLogged(wex, n)"
+                      :title="ratingTitle(r)"
                       @click="setRating(wex.id, n, r)"
-                    >{{ r }}</button>
+                    >
+                      <span class="num">{{ r }}</span>
+                      <span class="rir">{{ ratingShort(r) }}</span>
+                    </button>
                   </td>
                   <td>
                     <div v-if="!isSetLogged(wex, n)" class="row-actions">
@@ -632,7 +697,7 @@ onMounted(loadAll);
               </tbody>
             </table>
             <p class="rating-legend">
-              <span class="lbl">1 Failed · 2 Very hard · 3 Hard · 4 Moderate · 5 Easy</span>
+              <span class="lbl">RIR scale: how many more reps you could've done. 1 = failed → 5 = easy</span>
             </p>
           </div>
         </div>
@@ -738,6 +803,13 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 }
 .ex-card.current { border-color: var(--accent, #ef4444); }
 .ex-card.done { opacity: 0.6; }
+.ex-card.superset { border-left-width: 4px; }
+.ss-banner {
+  font-size: 0.75rem; padding: 0 0.4rem 0.4rem;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  letter-spacing: 0.02em;
+}
+.ss-banner strong { color: var(--text); font-weight: 600; }
 .ex-card header {
   display: flex; justify-content: space-between; align-items: baseline;
   flex-wrap: wrap; gap: 0.4rem;
@@ -774,18 +846,41 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 
 .rating-cell { display: flex; gap: 0.2rem; }
 .rating {
-  width: 1.6rem; height: 1.6rem; padding: 0; border-radius: 4px;
+  display: inline-flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 1px;
+  width: 2.6rem; min-height: 2.4rem; padding: 3px 0;
+  border-radius: 6px; cursor: pointer;
   border: 1px solid var(--line); background: var(--bg-2);
-  color: var(--muted); font-weight: 600; cursor: pointer;
-  font-family: ui-sans-serif, system-ui;
+  color: var(--muted); font-family: ui-sans-serif, system-ui;
 }
-.rating:hover:not(:disabled) { border-color: var(--accent, #ef4444); color: var(--text); }
+.rating .num { font-weight: 700; font-size: 0.9rem; line-height: 1; }
+.rating .rir { font-size: 0.6rem; color: var(--muted-2); line-height: 1;
+  font-family: 'Geist Mono', ui-monospace, monospace; }
+.rating:hover:not(:disabled) { transform: translateY(-1px); }
 .rating:disabled { opacity: 0.5; cursor: not-allowed; }
-.rating.on[data-r="1"] { background: rgba(239,68,68,0.4); color: #fff; border-color: #ef4444; }
-.rating.on[data-r="2"] { background: rgba(249,115,22,0.4); color: #fff; border-color: #f97316; }
-.rating.on[data-r="3"] { background: rgba(245,158,11,0.4); color: #fff; border-color: #f59e0b; }
-.rating.on[data-r="4"] { background: rgba(132,204,22,0.4); color: #fff; border-color: #84cc16; }
-.rating.on[data-r="5"] { background: rgba(34,197,94,0.4); color: #fff; border-color: #22c55e; }
+
+/* Color the number always; fill background when selected. */
+.rating[data-r="1"] { border-color: rgba(239,68,68,0.45); }
+.rating[data-r="1"] .num { color: #ef4444; }
+.rating[data-r="2"] { border-color: rgba(249,115,22,0.45); }
+.rating[data-r="2"] .num { color: #f97316; }
+.rating[data-r="3"] { border-color: rgba(245,158,11,0.45); }
+.rating[data-r="3"] .num { color: #f59e0b; }
+.rating[data-r="4"] { border-color: rgba(132,204,22,0.45); }
+.rating[data-r="4"] .num { color: #84cc16; }
+.rating[data-r="5"] { border-color: rgba(34,197,94,0.45); }
+.rating[data-r="5"] .num { color: #22c55e; }
+
+.rating.on[data-r="1"] { background: rgba(239,68,68,0.45); border-color: #ef4444; }
+.rating.on[data-r="1"] .num, .rating.on[data-r="1"] .rir { color: #fff; }
+.rating.on[data-r="2"] { background: rgba(249,115,22,0.45); border-color: #f97316; }
+.rating.on[data-r="2"] .num, .rating.on[data-r="2"] .rir { color: #fff; }
+.rating.on[data-r="3"] { background: rgba(245,158,11,0.5); border-color: #f59e0b; }
+.rating.on[data-r="3"] .num, .rating.on[data-r="3"] .rir { color: #fff; }
+.rating.on[data-r="4"] { background: rgba(132,204,22,0.5); border-color: #84cc16; }
+.rating.on[data-r="4"] .num, .rating.on[data-r="4"] .rir { color: #fff; }
+.rating.on[data-r="5"] { background: rgba(34,197,94,0.5); border-color: #22c55e; }
+.rating.on[data-r="5"] .num, .rating.on[data-r="5"] .rir { color: #fff; }
 
 .rating-legend { margin: 0.4rem 0 0; font-size: 0.7rem; color: var(--muted-2); }
 .row-actions { display: flex; gap: 0.3rem; align-items: center; }

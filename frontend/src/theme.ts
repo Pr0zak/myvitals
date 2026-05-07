@@ -57,6 +57,7 @@ export const chartTheme = computed(() => {
       steps: isDark ? "#38bdf8" : "#0284c7",
       accent: isDark ? "#38bdf8" : "#0284c7",
       activity: isDark ? "rgba(56, 189, 248, 0.18)" : "rgba(2, 132, 199, 0.15)",
+      workout: isDark ? "rgba(239, 68, 68, 0.20)" : "rgba(220, 38, 38, 0.15)",
       annotation: isDark ? "#eab308" : "#ca8a04",
     },
   };

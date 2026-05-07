@@ -40,23 +40,40 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     saved = result.scalar_one_or_none()
 
     # 2. Compute live values as a fallback / supplement.
-    # Per-minute MAX dedupes cases where multiple HC sources (watch +
-    # phone pedometer + Google Fit aggregator) all report overlapping
-    # steps in the same minute. Without source tagging this is the best
-    # we can do at query time.
-    # Prefer a single canonical step source (Wear / Pixel Watch package)
-    # if present; otherwise fall back to per-minute MAX dedup across all
-    # sources.
+    # Pick a single canonical step source so the dashboard matches the
+    # user's wrist. Pixel Watch 3 syncs via Fitbit, Wear OS via "wearable"
+    # apps, Samsung via "samsung.android.wearable" — match all three.
+    # Untagged ("unknown") rows are excluded outright; they're usually
+    # leftover backfill from before source tagging.
+    # If no watch-class source is present, fall back to the source with
+    # the highest total (closer to a single-device count than per-minute
+    # MAX across mixed sources, which over-counts when sources fire at
+    # different cadences).
     sources_q = await db.execute(
-        select(models.Steps.source).distinct()
+        select(
+            models.Steps.source,
+            func.coalesce(func.sum(models.Steps.count), 0).label("total"),
+        )
         .where(models.Steps.time >= midnight_local)
         .where(models.Steps.time <= end)
+        .where(models.Steps.source != "unknown")
+        .group_by(models.Steps.source)
     )
-    sources = [s for s, in sources_q.all()]
-    canonical = next(
-        (s for s in sources if "wearable" in (s or "").lower() or "fit.wearable" in (s or "").lower()),
-        None,
-    )
+    source_totals: list[tuple[str, int]] = [
+        (s, int(t)) for s, t in sources_q.all() if s
+    ]
+
+    def _is_watch(name: str) -> bool:
+        n = name.lower()
+        return any(
+            tag in n
+            for tag in ("wearable", "fit.wearable", "fitbit", "watch", "wear")
+        )
+
+    canonical = next((s for s, _ in source_totals if _is_watch(s)), None)
+    if canonical is None and source_totals:
+        canonical = max(source_totals, key=lambda x: x[1])[0]
+
     if canonical:
         single = await db.execute(
             select(func.coalesce(func.sum(models.Steps.count), 0))
@@ -66,18 +83,7 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
         )
         steps_total = int(single.scalar() or 0)
     else:
-        minute_col = func.date_trunc("minute", models.Steps.time)
-        per_min_subq = (
-            select(func.max(models.Steps.count).label("mx"))
-            .where(models.Steps.time >= midnight_local)
-            .where(models.Steps.time <= end)
-            .group_by(minute_col)
-            .subquery()
-        )
-        steps_result = await db.execute(
-            select(func.coalesce(func.sum(per_min_subq.c.mx), 0))
-        )
-        steps_total = int(steps_result.scalar() or 0)
+        steps_total = 0
 
     last_sync_result = await db.execute(select(func.max(models.HeartRate.time)))
     last_sync = last_sync_result.scalar()

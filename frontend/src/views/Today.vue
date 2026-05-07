@@ -398,7 +398,7 @@ async function load() {
     // Today's local midnight for the underlay sparkline + glance stats.
     const todayMidnight = new Date();
     todayMidnight.setHours(0, 0, 0, 0);
-    const [s, h, hv, sl, st, a, an, hToday, sToday, sb, sbHist] = await Promise.all([
+    const [s, h, hv, sl, st, a, an, hToday, sToday, sb, sbHist, sw] = await Promise.all([
       api.todaySummary(),
       api.heartRate({ since }),
       api.hrv({ since }),
@@ -410,13 +410,38 @@ async function load() {
       api.steps({ since: todayMidnight }),
       api.soberCurrent().catch(() => null),
       api.soberHistory(500).catch(() => []),
+      api.strengthWorkouts({ limit: 30 }).catch(() => ({ count: 0, workouts: [] })),
     ]);
     summary.value = s;
     hr.value = h;
     hrv.value = hv;
     sleep.value = sl;
     steps.value = st;
-    activities.value = a;
+    // Merge strength workouts into the activity feed as Activity-shaped
+    // rows so the HR chart's workoutMarkArea can show them as bands.
+    const sinceMs = since.getTime();
+    const strengthAsActivity: Activity[] = (sw.workouts ?? [])
+      .filter((w) => w.started_at && w.completed_at)
+      .map((w) => {
+        const start = new Date(w.started_at!).getTime();
+        const end = new Date(w.completed_at!).getTime();
+        return {
+          source: "strength",
+          source_id: String(w.id),
+          type: "strength",
+          name: `${w.split_focus.replace(/_/g, " ")} workout`,
+          start_at: w.started_at!,
+          duration_s: Math.max(0, Math.round((end - start) / 1000)),
+          distance_m: null,
+          elevation_gain_m: null,
+          avg_hr: w.avg_hr ?? null,
+          max_hr: w.max_hr ?? null,
+          avg_power_w: null, max_power_w: null, kcal: null,
+          suffer_score: null, polyline: null,
+        } as Activity;
+      })
+      .filter((a) => new Date(a.start_at).getTime() >= sinceMs);
+    activities.value = [...a, ...strengthAsActivity];
     annotations.value = an;
     todayHr.value = hToday;
     todayStepsLocal.value = sToday.total ?? 0;

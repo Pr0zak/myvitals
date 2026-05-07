@@ -128,15 +128,40 @@ async def get_steps(
     until: datetime | None = Query(None),
     db: AsyncSession = Depends(get_session),
 ) -> StepsSeries:
-    """Per-minute step counts for the window. The total uses per-minute
-    MAX dedup across HC sources (watch + phone pedometer + Fitbit) so
-    the value matches /summary/today and the Vitals badge."""
+    """Per-minute step counts for the window. Filters to a single
+    canonical source (Fitbit / Wear OS / watch package) so the chart
+    matches the user's wrist and `/summary/today`. Falls back to the
+    highest-total source if no watch-class source is present, ignoring
+    untagged ("unknown") rows."""
     start, end = _resolve_range(since, until, timedelta(hours=24))
-    # Per-minute aggregation: sum across all rows in the same minute,
-    # then take that as the canonical bucket count. Dedupe across
-    # sources by keeping the MAX of any rows within the same minute.
+
+    sources_q = await db.execute(
+        select(
+            models.Steps.source,
+            func.coalesce(func.sum(models.Steps.count), 0).label("total"),
+        )
+        .where(models.Steps.time >= start)
+        .where(models.Steps.time <= end)
+        .where(models.Steps.source != "unknown")
+        .group_by(models.Steps.source)
+    )
+    source_totals: list[tuple[str, int]] = [
+        (s, int(t)) for s, t in sources_q.all() if s
+    ]
+
+    def _is_watch(name: str) -> bool:
+        n = name.lower()
+        return any(
+            tag in n
+            for tag in ("wearable", "fit.wearable", "fitbit", "watch", "wear")
+        )
+
+    canonical = next((s for s, _ in source_totals if _is_watch(s)), None)
+    if canonical is None and source_totals:
+        canonical = max(source_totals, key=lambda x: x[1])[0]
+
     minute_col = func.date_trunc("minute", models.Steps.time)
-    result = await db.execute(
+    q = (
         select(minute_col.label("m"),
                func.max(models.Steps.count).label("c"))
         .where(models.Steps.time >= start)
@@ -144,6 +169,9 @@ async def get_steps(
         .group_by(minute_col)
         .order_by(minute_col)
     )
+    if canonical:
+        q = q.where(models.Steps.source == canonical)
+    result = await db.execute(q)
     rows = result.all()
     points = [TimePoint(time=t, value=float(c)) for t, c in rows]
     total = sum(int(p.value) for p in points)

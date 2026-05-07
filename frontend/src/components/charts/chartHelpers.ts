@@ -71,22 +71,28 @@ export function baseTimeOption() {
 /**
  * Convert a list of activities to a markArea series component.
  * Use as: { ...lineSeries, markArea: workoutMarkArea(activities) }.
+ * Strength sessions (type === "strength") are tinted with the workout
+ * palette colour so they're visually distinct from cardio activities.
  */
 export function workoutMarkArea(activities: Activity[]) {
   const t = chartTheme.value;
+  const strengthColor = t.palette.workout ?? t.palette.activity;
   return {
     silent: false,
     itemStyle: { color: t.palette.activity, borderColor: t.palette.activity },
-    data: activities.map((a) => [
-      {
-        xAxis: a.start_at,
-        name: a.name ?? a.type,
-        itemStyle: { color: t.palette.activity },
-      },
-      {
-        xAxis: new Date(new Date(a.start_at).getTime() + a.duration_s * 1000).toISOString(),
-      },
-    ]),
+    data: activities.map((a) => {
+      const color = a.type === "strength" ? strengthColor : t.palette.activity;
+      return [
+        {
+          xAxis: a.start_at,
+          name: a.name ?? a.type,
+          itemStyle: { color },
+        },
+        {
+          xAxis: new Date(new Date(a.start_at).getTime() + a.duration_s * 1000).toISOString(),
+        },
+      ];
+    }),
   };
 }
 

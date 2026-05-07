@@ -57,6 +57,22 @@ interface BackendApi {
     @POST("ai/strength/review/{id}")
     suspend fun strengthReview(@Path("id") id: Long): StrengthReviewResponse
 
+    @GET("workout/strength/equipment")
+    suspend fun strengthEquipment(): EquipmentResponse
+
+    @retrofit2.http.PUT("workout/strength/equipment")
+    suspend fun putStrengthEquipment(@Body body: EquipmentRequest): EquipmentResponse
+
+    @retrofit2.http.PUT("workout/strength/exercises/{id}/pref")
+    suspend fun setExercisePref(
+        @Path("id") exerciseId: String, @Body body: ExercisePrefBody,
+    ): Map<String, String>
+
+    @POST("workout/strength/workout-exercises/{wexId}/swap")
+    suspend fun swapStrengthExercise(
+        @Path("wexId") wexId: Long, @Body body: SwapBody,
+    ): StrengthWorkoutExerciseRow
+
     // ── Trails ────────────────────────────────────────────────
     @GET("trails")
     suspend fun trails(): TrailsResponse

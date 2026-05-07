@@ -104,6 +104,38 @@ class StrengthRepository(
     suspend fun aiReview(workoutId: Long): app.myvitals.sync.StrengthReviewResponse =
         withContext(Dispatchers.IO) { api().strengthReview(workoutId) }
 
+    suspend fun deferWorkout(workoutId: Long): StrengthWorkoutDetail =
+        withContext(Dispatchers.IO) {
+            api().patchStrengthWorkout(workoutId, app.myvitals.sync.WorkoutPatchRequest(status = "skipped"))
+        }
+
+    suspend fun equipment(): app.myvitals.sync.EquipmentResponse =
+        withContext(Dispatchers.IO) { api().strengthEquipment() }
+
+    suspend fun putEquipment(payload: app.myvitals.sync.EquipmentPayload):
+            app.myvitals.sync.EquipmentResponse = withContext(Dispatchers.IO) {
+        api().putStrengthEquipment(app.myvitals.sync.EquipmentRequest(payload = payload))
+    }
+
+    suspend fun setPref(exerciseId: String, pref: String) {
+        withContext(Dispatchers.IO) {
+            api().setExercisePref(exerciseId, app.myvitals.sync.ExercisePrefBody(pref))
+        }
+    }
+
+    suspend fun swapExercise(
+        wexId: Long, newExerciseId: String,
+    ): app.myvitals.sync.StrengthWorkoutExerciseRow = withContext(Dispatchers.IO) {
+        api().swapStrengthExercise(wexId, app.myvitals.sync.SwapBody(newExerciseId))
+    }
+
+    suspend fun listHistory(): List<app.myvitals.sync.StrengthWorkoutSummary> =
+        withContext(Dispatchers.IO) {
+            try { api().strengthWorkouts().workouts } catch (e: Exception) {
+                Timber.w(e, "listHistory failed"); emptyList()
+            }
+        }
+
     /**
      * Logs a set immediately if the network is up; otherwise queues it
      * to `buffered_strength_sets` (best-effort flush by SyncWorker).

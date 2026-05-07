@@ -292,6 +292,64 @@ data class StrengthReviewResponse(
     val cached: Boolean,
 )
 
+@JsonClass(generateAdapter = true)
+data class TrainingPreferences(
+    val level: String = "intermediate",                   // beginner | intermediate | advanced
+    @Json(name = "days_per_week") val daysPerWeek: Int = 3,
+    @Json(name = "split_preference") val splitPreference: String = "auto",
+    @Json(name = "workout_minutes") val workoutMinutes: Int = 50,
+)
+
+@JsonClass(generateAdapter = true)
+data class DumbbellSpec(
+    val type: String = "none",                           // fixed_pairs | adjustable | none
+    @Json(name = "pairs_lb") val pairsLb: List<Double> = emptyList(),
+    @Json(name = "min_lb") val minLb: Double? = null,
+    @Json(name = "max_lb") val maxLb: Double? = null,
+    @Json(name = "increment_lb") val incrementLb: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class BenchSpec(val flat: Boolean = false, val incline: Boolean = false, val decline: Boolean = false)
+
+@JsonClass(generateAdapter = true)
+data class EquipmentPayload(
+    val dumbbells: DumbbellSpec = DumbbellSpec(),
+    @Json(name = "wrist_weights_lb") val wristWeightsLb: List<Double> = emptyList(),
+    val bench: BenchSpec = BenchSpec(),
+    val barbell: Boolean = false,
+    @Json(name = "barbell_plates_lb") val barbellPlatesLb: List<Double> = emptyList(),
+    @Json(name = "squat_rack") val squatRack: Boolean = false,
+    @Json(name = "pull_up_bar") val pullUpBar: Boolean = false,
+    @Json(name = "cable_stack") val cableStack: Boolean = false,
+    @Json(name = "cable_increment_lb") val cableIncrementLb: Double? = null,
+    @Json(name = "kettlebells_lb") val kettlebellsLb: List<Double> = emptyList(),
+    @Json(name = "resistance_bands") val resistanceBands: Boolean = false,
+    val bodyweight: Boolean = true,
+    @Json(name = "exercise_prefs") val exercisePrefs: Map<String, String> = emptyMap(),
+    val training: TrainingPreferences = TrainingPreferences(),
+)
+
+@JsonClass(generateAdapter = true)
+data class EquipmentResponse(
+    val id: Int,
+    val payload: EquipmentPayload,
+    val unit: String,
+    @Json(name = "updated_at") val updatedAt: String?,
+)
+
+@JsonClass(generateAdapter = true)
+data class EquipmentRequest(
+    val payload: EquipmentPayload,
+    val unit: String = "lb",
+)
+
+@JsonClass(generateAdapter = true)
+data class ExercisePrefBody(val pref: String)         // neutral|disabled|favorite|avoid
+
+@JsonClass(generateAdapter = true)
+data class SwapBody(@Json(name = "exercise_id") val exerciseId: String)
+
 // ── Trails (RainoutLine status) ─────────────────────────────────
 
 @JsonClass(generateAdapter = true)

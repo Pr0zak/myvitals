@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -50,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -69,6 +72,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun StrengthTodayScreen(
     settings: SettingsRepository,
@@ -81,8 +85,13 @@ fun StrengthTodayScreen(
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var catalog by remember { mutableStateOf<Map<String, StrengthExerciseInfo>>(emptyMap()) }
     var recoveryReason by remember { mutableStateOf<String?>(null) }
+    var history by remember { mutableStateOf<List<app.myvitals.sync.StrengthWorkoutSummary>>(emptyList()) }
+    var daysPerWeek by remember { mutableStateOf(3) }
     var loading by remember { mutableStateOf(true) }
     var generating by remember { mutableStateOf(false) }
+    var deferring by remember { mutableStateOf(false) }
+    var swapWexId by remember { mutableStateOf<Long?>(null) }
+    var swapping by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     var review by remember { mutableStateOf<StrengthReviewBody?>(null) }
@@ -104,6 +113,8 @@ fun StrengthTodayScreen(
             workout = plan
             recoveryReason = rec?.restDayReason
             if (catalog.isEmpty()) catalog = repo.catalog()
+            history = repo.listHistory()
+            try { daysPerWeek = repo.equipment().payload.training.daysPerWeek } catch (_: Exception) {}
         } catch (e: Exception) {
             Timber.w(e, "today reload failed")
             error = e.message?.take(160)
@@ -215,10 +226,39 @@ fun StrengthTodayScreen(
             Spacer(Modifier.height(6.dp))
         }
 
+        // 7-day strip
+        WeekStrip(
+            history = history,
+            daysPerWeek = daysPerWeek,
+            todayStatus = plan.status,
+        )
+        Spacer(Modifier.height(8.dp))
+
         // Context line
         ContextRow(plan, plan.exercises.flatMap { it.sets }.size)
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
+
+        if (plan.status == "planned" || plan.status == "in_progress") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            deferring = true
+                            try { repo.deferWorkout(plan.id); reload() }
+                            catch (e: Exception) { error = e.message?.take(160) }
+                            finally { deferring = false }
+                        }
+                    },
+                    enabled = !deferring,
+                ) {
+                    Icon(Icons.Filled.SkipNext, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (deferring) "Deferring…" else "Defer to tomorrow")
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
 
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -226,10 +266,12 @@ fun StrengthTodayScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(plan.exercises, key = { it.id }) { wex ->
+                val canSwap = wex.sets.none { it.actualReps != null && !it.skipped }
                 ExerciseCard(
                     wex = wex,
                     info = catalog[wex.exerciseId],
                     inputs = setInputs,
+                    canSwap = canSwap,
                     onLogSet = { setNum, weight, reps, rating ->
                         scope.launch {
                             val ok = repo.logSet(LogSetRequest(
@@ -252,6 +294,7 @@ fun StrengthTodayScreen(
                     onYouTube = { slug, name ->
                         openYouTube(context, slug, name)
                     },
+                    onSwap = { swapWexId = wex.id },
                 )
             }
             item {
@@ -297,6 +340,78 @@ fun StrengthTodayScreen(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // Swap bottom sheet
+    if (swapWexId != null && workout != null) {
+        val wex = workout!!.exercises.firstOrNull { it.id == swapWexId }
+        val current = wex?.let { catalog[it.exerciseId] }
+        if (wex != null && current != null) {
+            val inWorkout = workout!!.exercises.map { it.exerciseId }.toSet()
+            val alternatives = catalog.values
+                .filter {
+                    it.id != wex.exerciseId
+                        && it.id !in inWorkout
+                        && (it.primaryMuscle == current.primaryMuscle
+                            || it.movementPattern == current.movementPattern)
+                }
+                .sortedWith(compareBy(
+                    { if (it.movementPattern == current.movementPattern) 0 else 1 },
+                    { it.name },
+                ))
+                .take(12)
+            androidx.compose.material3.ModalBottomSheet(
+                onDismissRequest = { swapWexId = null },
+                containerColor = MV.SurfaceContainer,
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(
+                        "Swap exercise",
+                        color = MV.OnSurface, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Currently: ${current.name}",
+                        color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+                    )
+                    if (alternatives.isEmpty()) {
+                        Text("No alternatives in your equipment for this slot.",
+                            color = MV.OnSurfaceVariant, fontSize = 13.sp)
+                    } else {
+                        alternatives.forEach { alt ->
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainerLow),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .clickable(enabled = !swapping) {
+                                        scope.launch {
+                                            swapping = true
+                                            try {
+                                                repo.swapExercise(wex.id, alt.id)
+                                                reload()
+                                                swapWexId = null
+                                            } catch (e: Exception) {
+                                                error = e.message?.take(160)
+                                            } finally { swapping = false }
+                                        }
+                                    },
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(alt.name, color = MV.OnSurface, fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        "${alt.movementPattern.replace('_', ' ')} · ${alt.primaryMuscle}",
+                                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
                 }
             }
         }
@@ -402,8 +517,10 @@ private fun ExerciseCard(
     wex: StrengthWorkoutExerciseRow,
     info: StrengthExerciseInfo?,
     inputs: androidx.compose.runtime.snapshots.SnapshotStateMap<String, SetInput>,
+    canSwap: Boolean,
     onLogSet: (setNum: Int, weight: Double?, reps: Int?, rating: Int?) -> Unit,
     onYouTube: (slug: String, name: String) -> Unit,
+    onSwap: () -> Unit,
 ) {
     val name = info?.name ?: wex.exerciseId.replace('_', ' ')
     val nextSet = (1..wex.targetSets).firstOrNull { n ->
@@ -449,10 +566,18 @@ private fun ExerciseCard(
             }
 
             Spacer(Modifier.height(6.dp))
-            TextButton(onClick = { onYouTube(wex.exerciseId, name) }) {
-                Text("Watch form video on YouTube ↗", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+            Row {
+                TextButton(onClick = { onYouTube(wex.exerciseId, name) }) {
+                    Text("YouTube ↗", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                }
+                if (canSwap) {
+                    TextButton(onClick = onSwap) {
+                        Icon(Icons.Filled.SwapHoriz, contentDescription = null,
+                            tint = MV.OnSurfaceVariant, modifier = Modifier.size(14.dp))
+                        Text(" Swap", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                    }
+                }
             }
-
             // Sets
             for (n in 1..wex.targetSets) {
                 val key = "${wex.id}-$n"
@@ -611,6 +736,80 @@ private fun ReviewBlock(
                 "Next session: ${review.nextSessionSuggestion}",
                 color = MV.OnSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium,
             )
+        }
+    }
+}
+
+@Composable
+private fun WeekStrip(
+    history: List<app.myvitals.sync.StrengthWorkoutSummary>,
+    daysPerWeek: Int,
+    todayStatus: String,
+) {
+    val today = java.time.LocalDate.now()
+    val statusByDate = history.associate { it.date to it.status }
+    // Mon-first weekday pattern; mirrors web strip
+    val pattern = when (daysPerWeek) {
+        2 -> setOf(0, 3); 3 -> setOf(0, 2, 4); 4 -> setOf(0, 1, 3, 4)
+        5 -> setOf(0, 1, 2, 3, 4); 6 -> setOf(0, 1, 2, 3, 4, 5)
+        else -> setOf(0, 2, 4)
+    }
+    fun monFirst(jsDow: Int) = (jsDow + 6) % 7
+
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        for (offset in -3..3) {
+            val d = today.plusDays(offset.toLong())
+            val isToday = offset == 0
+            val iso = d.toString()
+            val historyStatus = statusByDate[iso]
+            val effectiveStatus = if (isToday) todayStatus else historyStatus
+            val isPast = d.isBefore(today)
+            val projected = !isPast && effectiveStatus == null
+                && pattern.contains(monFirst(d.dayOfWeek.value % 7))
+
+            val dotColor = when {
+                effectiveStatus == "completed" -> Color(0xFF22C55E)
+                effectiveStatus == "in_progress" -> MV.Amber
+                effectiveStatus == "skipped" -> MV.OnSurfaceVariant
+                effectiveStatus == "planned" -> MV.BrandRed
+                projected -> Color.Transparent
+                else -> MV.OnSurfaceDim
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                    .border(
+                        1.dp,
+                        if (isToday) MV.BrandRed else MV.OutlineVariant,
+                        androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    )
+                    .background(MV.SurfaceContainerLow)
+                    .padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    if (isToday) "Today" else d.dayOfWeek.name.take(3),
+                    color = if (isToday) MV.OnSurface else MV.OnSurfaceVariant,
+                    fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
+                )
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(dotColor)
+                        .then(
+                            if (projected) Modifier.border(
+                                1.5.dp, MV.BrandRed, CircleShape,
+                            ) else Modifier
+                        ),
+                )
+            }
         }
     }
 }

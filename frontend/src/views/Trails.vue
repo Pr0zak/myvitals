@@ -5,10 +5,11 @@
  * subscribes for status-flip pings.
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Star, RefreshCw, Navigation, Pencil } from "lucide-vue-next";
+import { Star, RefreshCw, Navigation, Pencil, Map as MapIcon } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { queryToken } from "@/config";
 import Card from "@/components/Card.vue";
+import TrailMap from "@/components/TrailMap.vue";
 
 type Trail = Awaited<ReturnType<typeof api.trails>>["trails"][number];
 
@@ -155,6 +156,15 @@ async function saveEdit() {
   }
 }
 
+// Inline map expand state — set of trail IDs currently showing their map
+const expandedMaps = ref<Set<number>>(new Set());
+function toggleMap(t: Trail) {
+  const next = new Set(expandedMaps.value);
+  if (next.has(t.id)) next.delete(t.id);
+  else next.add(t.id);
+  expandedMaps.value = next;
+}
+
 function fmtAge(iso: string | null): string {
   if (!iso) return "";
   const ms = tickNow.value - new Date(iso).getTime();
@@ -223,6 +233,12 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
                       @click.stop="toggleSubscribe(t)">
                 <Star :size="16" />
               </button>
+              <button v-if="t.latitude != null" class="star map-toggle"
+                      :class="{ on: expandedMaps.has(t.id) }"
+                      title="Show map + linked rides"
+                      @click.stop="toggleMap(t)">
+                <MapIcon :size="14" />
+              </button>
               <button class="star edit-pin"
                       title="Edit pin location"
                       @click.stop="openEdit(t)">
@@ -239,6 +255,12 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
               </span>
               <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
             </p>
+            <TrailMap
+              v-if="expandedMaps.has(t.id) && t.latitude != null && t.longitude != null"
+              :trail-id="t.id" :name="t.name"
+              :latitude="t.latitude" :longitude="t.longitude"
+              @click.stop
+            />
           </article>
         </div>
       </section>
@@ -257,6 +279,12 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
                       @click.stop="toggleSubscribe(t)">
                 <Star :size="16" />
               </button>
+              <button v-if="t.latitude != null" class="star map-toggle"
+                      :class="{ on: expandedMaps.has(t.id) }"
+                      title="Show map + linked rides"
+                      @click.stop="toggleMap(t)">
+                <MapIcon :size="14" />
+              </button>
               <button class="star edit-pin"
                       title="Edit pin location"
                       @click.stop="openEdit(t)">
@@ -273,6 +301,12 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
               </span>
               <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
             </p>
+            <TrailMap
+              v-if="expandedMaps.has(t.id) && t.latitude != null && t.longitude != null"
+              :trail-id="t.id" :name="t.name"
+              :latitude="t.latitude" :longitude="t.longitude"
+              @click.stop
+            />
           </article>
         </div>
       </section>
@@ -375,6 +409,9 @@ header h1 { margin: 0; }
 .header-actions { display: flex; gap: 0.5rem; }
 .edit-pin { color: var(--muted-2); }
 .edit-pin:hover { color: var(--accent, #ef4444); }
+.map-toggle { color: var(--muted-2); }
+.map-toggle:hover { color: var(--accent, #ef4444); }
+.map-toggle.on { color: var(--accent, #ef4444); }
 
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100;
   display: flex; justify-content: flex-end; }

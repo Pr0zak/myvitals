@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FitnessCenter
+import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terrain
@@ -60,6 +61,9 @@ private object Routes {
     const val WORKOUT_HISTORY = "workout/history"
     const val WORKOUT_CATALOG = "workout/catalog"
     const val WORKOUT_TRAINING_PREFS = "workout/training-prefs"
+    const val ACTIVITIES = "activities"
+    const val ACTIVITY_DETAIL = "activity/{source}/{sourceId}"
+    fun activityDetail(source: String, sourceId: String) = "activity/$source/$sourceId"
     const val TRAILS = "trails"
     const val SETTINGS = "settings"
 }
@@ -143,6 +147,32 @@ class MainActivity : ComponentActivity() {
                                 onBack = { nav.popBackStack() },
                             )
                         }
+                        composable(Routes.ACTIVITIES) {
+                            app.myvitals.ui.activities.ActivitiesScreen(
+                                settings = settings,
+                                onOpenActivity = { source, sourceId ->
+                                    nav.navigate(Routes.activityDetail(source, sourceId))
+                                },
+                            )
+                        }
+                        composable(
+                            Routes.ACTIVITY_DETAIL,
+                            arguments = listOf(
+                                androidx.navigation.navArgument("source") {
+                                    type = androidx.navigation.NavType.StringType
+                                },
+                                androidx.navigation.navArgument("sourceId") {
+                                    type = androidx.navigation.NavType.StringType
+                                },
+                            ),
+                        ) { entry ->
+                            app.myvitals.ui.activities.ActivityDetailScreen(
+                                settings = settings,
+                                source = entry.arguments?.getString("source") ?: "",
+                                sourceId = entry.arguments?.getString("sourceId") ?: "",
+                                onBack = { nav.popBackStack() },
+                            )
+                        }
                         composable(Routes.TRAILS) {
                             TrailsScreen(settings = settings)
                         }
@@ -189,7 +219,9 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Top-level tab routes, ordered to match the bottom-bar layout. */
-private val TOP_TABS = listOf(Routes.SOBER, Routes.WORKOUT, Routes.TRAILS, Routes.SETTINGS)
+private val TOP_TABS = listOf(
+    Routes.SOBER, Routes.WORKOUT, Routes.ACTIVITIES, Routes.TRAILS, Routes.SETTINGS,
+)
 
 /**
  * Listen for horizontal flicks across the screen and navigate to the
@@ -241,6 +273,10 @@ private fun BottomBar(nav: NavHostController) {
                 Routes.WORKOUT_CATALOG,
                 Routes.WORKOUT_TRAINING_PREFS,
             )) { nav.navigateTab(Routes.WORKOUT) }
+        Item(current, Routes.ACTIVITIES, "Activities", Icons.AutoMirrored.Outlined.DirectionsBike,
+            highlightAlsoFor = setOf(Routes.ACTIVITY_DETAIL)) {
+            nav.navigateTab(Routes.ACTIVITIES)
+        }
         Item(current, Routes.TRAILS, "Trails", Icons.Outlined.Terrain) { nav.navigateTab(Routes.TRAILS) }
         Item(current, Routes.SETTINGS, "Settings", Icons.Outlined.Settings) { nav.navigateTab(Routes.SETTINGS) }
     }

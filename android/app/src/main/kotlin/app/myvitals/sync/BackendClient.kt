@@ -108,6 +108,12 @@ interface BackendApi {
     @GET("trails/{id}/osm-paths")
     suspend fun trailOsmPaths(@Path("id") id: Long): Response<okhttp3.ResponseBody>
 
+    @GET("activities/{source}/{sourceId}")
+    suspend fun activity(
+        @Path("source") source: String,
+        @Path("sourceId") sourceId: String,
+    ): ActivityRow
+
     @GET("activities")
     suspend fun activities(
         @retrofit2.http.Query("type") type: String? = null,

@@ -425,6 +425,13 @@ data class ActivityRow(
     @Json(name = "duration_s") val durationS: Int,
     @Json(name = "distance_m") val distanceM: Double?,
     @Json(name = "elevation_gain_m") val elevationGainM: Double?,
+    @Json(name = "avg_hr") val avgHr: Double? = null,
+    @Json(name = "max_hr") val maxHr: Double? = null,
+    @Json(name = "avg_power_w") val avgPowerW: Double? = null,
+    @Json(name = "kcal") val kcal: Double? = null,
+    val polyline: String? = null,
+    val notes: String? = null,
+    val tags: List<String>? = null,
     @Json(name = "trail_id") val trailId: Long? = null,
     @Json(name = "trail_name") val trailName: String? = null,
 )

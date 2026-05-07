@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.automirrored.outlined.DirectionsWalk
 import androidx.compose.material.icons.outlined.Hiking
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -48,19 +49,37 @@ import app.myvitals.sync.ActivityRow
 import app.myvitals.sync.BackendClient
 import app.myvitals.ui.MV
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.time.Instant
 
+// Combined feed entry — either a Strava-style activity or a strength
+// workout. Displayed sorted by most-recent date, with different rows.
+sealed class FeedEntry {
+    abstract val sortKey: String  // ISO datetime string, descending sort
+    data class Activity(val a: ActivityRow) : FeedEntry() {
+        override val sortKey = a.startAt
+    }
+    data class Strength(val w: app.myvitals.sync.StrengthWorkoutSummary) : FeedEntry() {
+        override val sortKey = w.startedAt ?: w.completedAt ?: (w.date + "T00:00:00Z")
+    }
+}
+
 @Composable
 fun ActivitiesScreen(
     settings: SettingsRepository,
     onOpenActivity: (source: String, sourceId: String) -> Unit,
+    onOpenStrengthDay: (dateIso: String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var rows by remember { mutableStateOf<List<ActivityRow>>(emptyList()) }
+    var workouts by remember {
+        mutableStateOf<List<app.myvitals.sync.StrengthWorkoutSummary>>(emptyList())
+    }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -71,15 +90,28 @@ fun ActivitiesScreen(
         }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-            rows = withContext(Dispatchers.IO) { api.activities(limit = 80) }
+            coroutineScope {
+                val actsD = async(Dispatchers.IO) { api.activities(limit = 80) }
+                val woD = async(Dispatchers.IO) {
+                    runCatching {
+                        api.strengthWorkouts().workouts.filter { it.status != "regenerated" }
+                    }.getOrDefault(emptyList())
+                }
+                rows = actsD.await()
+                workouts = woD.await()
+            }
             error = null
-            val withTrail = rows.count { it.trailId != null }
-            Timber.i("activities loaded: %d rows (%d linked to a trail)",
-                rows.size, withTrail)
+            Timber.i("activities loaded: %d strava + %d strength workouts",
+                rows.size, workouts.size)
         } catch (e: Exception) {
             Timber.w(e, "activities load failed")
             error = e.message?.take(160)
         } finally { loading = false }
+    }
+
+    val feed = remember(rows, workouts) {
+        (rows.map(FeedEntry::Activity) + workouts.map(FeedEntry::Strength))
+            .sortedByDescending { it.sortKey }
     }
 
     LaunchedEffect(Unit) { load() }
@@ -98,7 +130,8 @@ fun ActivitiesScreen(
                     color = MV.OnSurfaceVariant,
                     fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 Text(
-                    if (rows.isEmpty() && !loading) "—" else "${rows.size} recent",
+                    if (feed.isEmpty() && !loading) "—"
+                    else "${feed.size} recent",
                     color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
                 )
             }
@@ -108,14 +141,14 @@ fun ActivitiesScreen(
         }
 
         when {
-            loading && rows.isEmpty() -> Text("Loading…", color = MV.OnSurfaceVariant)
+            loading && feed.isEmpty() -> Text("Loading…", color = MV.OnSurfaceVariant)
             error != null -> Text(error!!, color = MV.Red)
-            rows.isEmpty() -> Card(
+            feed.isEmpty() -> Card(
                 colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    "No activities yet. Connect Strava in Settings to start syncing.",
+                    "No activities yet. Connect Strava in Settings or log a strength workout.",
                     Modifier.padding(14.dp), color = MV.OnSurfaceVariant,
                 )
             }
@@ -123,12 +156,102 @@ fun ActivitiesScreen(
                 contentPadding = PaddingValues(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(rows, key = { "${it.source}-${it.sourceId}" }) { a ->
-                    ActivityListRow(a, nowMs) { onOpenActivity(a.source, a.sourceId) }
+                items(
+                    feed,
+                    key = { entry ->
+                        when (entry) {
+                            is FeedEntry.Activity -> "act-${entry.a.source}-${entry.a.sourceId}"
+                            is FeedEntry.Strength -> "str-${entry.w.id}"
+                        }
+                    },
+                ) { entry ->
+                    when (entry) {
+                        is FeedEntry.Activity -> ActivityListRow(entry.a, nowMs) {
+                            onOpenActivity(entry.a.source, entry.a.sourceId)
+                        }
+                        is FeedEntry.Strength -> StrengthListRow(entry.w, nowMs) {
+                            onOpenStrengthDay(entry.w.date)
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun StrengthListRow(
+    w: app.myvitals.sync.StrengthWorkoutSummary,
+    nowMs: Long,
+    onClick: () -> Unit,
+) {
+    val whenStr = remember(nowMs, w.startedAt, w.date) {
+        fmtAge(w.startedAt ?: (w.date + "T00:00:00Z"), nowMs)
+    }
+    val statusColor = when (w.status) {
+        "completed" -> androidx.compose.ui.graphics.Color(0xFF22C55E)
+        "in_progress" -> androidx.compose.ui.graphics.Color(0xFFEAB308)
+        "skipped" -> MV.OnSurfaceDim
+        "planned" -> MV.BrandRed
+        else -> MV.OnSurfaceVariant
+    }
+    val statusLabel = when (w.status) {
+        "completed" -> "Complete"
+        "in_progress" -> "In progress"
+        "skipped" -> "Skipped"
+        "planned" -> "Planned"
+        else -> w.status
+    }
+    androidx.compose.material3.Card(
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MV.SurfaceContainer,
+        ),
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+    ) {
+        Row(
+            Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(32.dp).clip(CircleShape)
+                    .background(MV.SurfaceContainerLow),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    androidx.compose.material.icons.Icons.Outlined.FitnessCenter,
+                    contentDescription = "Strength",
+                    tint = MV.BrandRed, modifier = Modifier.size(18.dp),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "${w.splitFocus.replaceFirstChar { it.titlecase() }} day",
+                    color = MV.OnSurface, fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1,
+                )
+                Text(
+                    "$whenStr  ·  ${muscleGroupsForFocus(w.splitFocus)}",
+                    color = MV.OnSurfaceVariant, fontSize = 11.sp, maxLines = 1,
+                )
+            }
+            Text(
+                statusLabel, color = statusColor, fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+private fun muscleGroupsForFocus(focus: String): String = when (focus.lowercase()) {
+    "push" -> "Chest · Shoulders · Triceps"
+    "pull" -> "Back · Biceps"
+    "legs" -> "Quads · Hams · Glutes"
+    "upper" -> "Chest · Back · Arms"
+    "lower" -> "Quads · Hams · Glutes"
+    "full_body", "fullbody", "full" -> "Full body"
+    "rest" -> "Rest day"
+    else -> focus.replace('_', ' ')
 }
 
 @Composable

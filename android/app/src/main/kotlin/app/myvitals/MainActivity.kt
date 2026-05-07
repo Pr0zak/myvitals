@@ -215,6 +215,9 @@ class MainActivity : ComponentActivity() {
                                 onOpenActivity = { source, sourceId ->
                                     nav.navigate(Routes.activityDetail(source, sourceId))
                                 },
+                                onOpenStrengthDay = { date ->
+                                    nav.navigate(Routes.workoutDay(date))
+                                },
                             )
                         }
                         composable(

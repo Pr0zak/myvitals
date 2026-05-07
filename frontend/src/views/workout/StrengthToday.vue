@@ -13,6 +13,19 @@ import Card from "@/components/Card.vue";
 import type { StrengthExercise, StrengthWorkoutDetail, StrengthWorkoutExercise } from "@/api/types";
 
 const router = useRouter();
+
+function muscleGroupsFor(focus: string): string {
+  const m: Record<string, string> = {
+    push: "Chest · Shoulders · Triceps",
+    pull: "Back · Biceps",
+    legs: "Quads · Hamstrings · Glutes · Calves",
+    upper: "Chest · Back · Shoulders · Arms",
+    lower: "Quads · Hamstrings · Glutes · Calves",
+    full_body: "Full body — chest, back, legs",
+    rest: "Rest day",
+  };
+  return m[focus.toLowerCase()] ?? focus.replace(/_/g, " ");
+}
 const workout = ref<StrengthWorkoutDetail | null>(null);
 const recovery = ref<Awaited<ReturnType<typeof api.strengthRecovery>> | null>(null);
 const catalogById = ref<Record<string, StrengthExercise>>({});
@@ -489,10 +502,23 @@ onMounted(loadAll);
 
 <template>
   <main class="strength-today">
-    <h1>
-      Today's strength
-      <small v-if="workout">· {{ workout.split_focus.replace('_', ' ') }}</small>
-    </h1>
+    <header class="page-head">
+      <div class="title-block">
+        <h1>Workout</h1>
+        <div class="micro-label">
+          TODAY · <span class="mono">{{ new Date().toISOString().slice(0, 10) }}</span>
+        </div>
+      </div>
+    </header>
+
+    <Card v-if="workout" :flat="true" class="today-hero">
+      <div class="hero-top">
+        <div class="split">{{
+          workout.split_focus.charAt(0).toUpperCase() + workout.split_focus.slice(1).replace('_', ' ')
+        }} day</div>
+      </div>
+      <div class="muscles">{{ muscleGroupsFor(workout.split_focus) }}</div>
+    </Card>
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load today's plan.</p>
     <p v-else-if="loading" class="hint">Loading…</p>
@@ -943,6 +969,18 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
   display: flex; flex-direction: column; gap: 0.15rem;
 }
 .up-card .more { color: var(--muted-2); font-style: italic; }
+
+/* New design tokens — match claude.ai/design workout.html bundle */
+.page-head { display: flex; align-items: flex-end; justify-content: space-between;
+             padding: 0 0 0.6rem; margin-bottom: 0.6rem; }
+.page-head h1 { font-size: 1.2rem; margin: 0; line-height: 1; font-weight: 600; }
+.micro-label { font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase;
+               color: var(--muted); font-weight: 600; margin-top: 0.25rem; }
+.micro-label .mono { font-family: 'JetBrains Mono', 'Geist Mono', ui-monospace, monospace;
+                     letter-spacing: 0.1em; }
+.today-hero { padding: 1rem; border-radius: 14px; margin-bottom: 0.4rem; }
+.today-hero .split { font-size: 1.1rem; font-weight: 600; }
+.today-hero .muscles { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
 
 .week-strip {
   display: flex; gap: 0.4rem; margin: 0.4rem 0 0.8rem;

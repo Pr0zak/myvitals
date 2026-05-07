@@ -196,25 +196,77 @@ function openInMaps() {
   window.open(url, "_blank", "noreferrer");
 }
 
-// Place-name search via OSM Nominatim (free, no key). Drops the pin
-// on the first hit; user can refine by dragging the pin or tapping
-// a different spot on the map.
+// Place-name / Google-Maps-link search.
+// Accepts any of:
+//   - Google Maps place URL: ".../maps/place/X/@LAT,LON,17z/..."
+//   - Google Maps embed iframe URL: "...maps/embed?pb=!...!2dLON!3dLAT..."
+//   - Google Maps search URL: ".../maps/search/?api=1&query=LAT,LON"
+//   - Plain "lat, lon" pasted text
+//   - Short link "https://maps.app.goo.gl/XXXX" (resolves via fetch follow)
+//   - Anything else → falls through to Nominatim free-text geocode
 const placeQuery = ref<string>("");
 const searching = ref(false);
+
+// Pull lat/lon out of common Google Maps URL formats.
+function parseMapsCoords(input: string): { lat: number; lon: number } | null {
+  // 1. The @LAT,LON,zoom anchor in place / search URLs
+  const at = input.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+  if (at) return { lat: parseFloat(at[1]), lon: parseFloat(at[2]) };
+  // 2. Embed iframe pb-param: ...!2dLON!3dLAT
+  const embed = input.match(/!2d(-?\d+\.\d+)!3d(-?\d+\.\d+)/);
+  if (embed) return { lat: parseFloat(embed[2]), lon: parseFloat(embed[1]) };
+  // 3. Query-style: ?q=LAT,LON / ?query=LAT,LON / ?destination=LAT,LON
+  const q = input.match(/[?&](?:q|query|destination|center)=(-?\d+\.\d+),(-?\d+\.\d+)/);
+  if (q) return { lat: parseFloat(q[1]), lon: parseFloat(q[2]) };
+  // 4. Plain "LAT, LON" or "LAT,LON"
+  const plain = input.trim().match(/^(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)$/);
+  if (plain) return { lat: parseFloat(plain[1]), lon: parseFloat(plain[2]) };
+  return null;
+}
+
+async function expandShortLink(short: string): Promise<string | null> {
+  // maps.app.goo.gl short links 302 to the full URL. Browsers follow
+  // automatically when fetched with `redirect: "follow"` (default), but
+  // we can't read the resolved URL from a no-CORS response. Try a HEAD
+  // first; if blocked, fail gracefully and tell the user to expand it.
+  try {
+    const r = await fetch(short, { method: "HEAD", redirect: "follow" });
+    return r.url || null;
+  } catch {
+    return null;
+  }
+}
+
 async function searchPlace() {
-  const q = placeQuery.value.trim();
-  if (!q) return;
+  const raw = placeQuery.value.trim();
+  if (!raw) return;
   searching.value = true;
   editError.value = "";
   try {
+    let q = raw;
+    // Resolve maps.app.goo.gl short links first (no CORS on the goo.gl host
+    // for HEAD, but try anyway — many will fail and the user will be told).
+    if (q.includes("maps.app.goo.gl")) {
+      const expanded = await expandShortLink(q);
+      if (expanded) q = expanded;
+    }
+    // Try parsing as a Maps URL first
+    const parsed = parseMapsCoords(q);
+    if (parsed) {
+      editLat.value = parsed.lat.toFixed(6);
+      editLon.value = parsed.lon.toFixed(6);
+      if (editMap) editMap.setView([parsed.lat, parsed.lon], 16);
+      return;
+    }
+    // Fall through to Nominatim for free-text place names
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`,
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(raw)}`,
       { headers: { Accept: "application/json" } },
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json() as Array<{ lat: string; lon: string; display_name: string }>;
     if (data.length === 0) {
-      editError.value = `No results for "${q}"`;
+      editError.value = `No results for "${raw}". If you pasted a maps.app.goo.gl short link, open it once to expand.`;
       return;
     }
     const lat = parseFloat(data[0].lat);
@@ -443,7 +495,7 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
           <input
             v-model="placeQuery"
             type="text"
-            placeholder='e.g. "Minor Park Pickleball Courts, Kansas City"'
+            placeholder='Place name, "lat, lon", or paste any Google Maps URL'
             @keydown.enter="searchPlace"
           />
           <button class="ghost" :disabled="searching || !placeQuery.trim()"
@@ -451,6 +503,10 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
             {{ searching ? "Searching…" : "Find" }}
           </button>
         </div>
+        <p class="hint" style="font-size: 0.7rem; color: var(--muted-2); margin-top: 0">
+          Accepts place names, "38.92, -94.57", Maps share links, embed URLs,
+          and maps.app.goo.gl short links.
+        </p>
         <div ref="editMapEl" class="edit-map" />
         <div class="quick-actions">
           <button class="ghost" @click="useMyLocation">📍 Use my location</button>

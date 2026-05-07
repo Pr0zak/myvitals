@@ -64,6 +64,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
 import app.myvitals.strength.StrengthRepository
+import androidx.compose.material.icons.outlined.MoreVert
+import app.myvitals.sync.BackendClient
+import app.myvitals.sync.ExercisePrefBody
 import app.myvitals.sync.LogSetRequest
 import app.myvitals.sync.StrengthExerciseInfo
 import app.myvitals.sync.StrengthReviewBody
@@ -386,6 +389,28 @@ fun StrengthTodayScreen(
                         openYouTube(context, slug, name)
                     },
                     onSwap = { swapWexId = wex.id },
+                    onSetPref = { pref ->
+                        scope.launch {
+                            try {
+                                val api = BackendClient.create(
+                                    settings.backendUrl, settings.bearerToken,
+                                )
+                                kotlinx.coroutines.withContext(
+                                    kotlinx.coroutines.Dispatchers.IO
+                                ) {
+                                    api.setExercisePref(
+                                        wex.exerciseId, ExercisePrefBody(pref),
+                                    )
+                                }
+                                Timber.i("exercise pref set: %s = %s",
+                                    wex.exerciseId, pref)
+                                error = null
+                            } catch (e: Exception) {
+                                Timber.w(e, "set exercise pref failed")
+                                error = "Pref save failed: ${e.message?.take(80)}"
+                            }
+                        }
+                    },
                     partnerName = wex.supersetId?.let { ss ->
                         plan.exercises.firstOrNull { it.supersetId == ss && it.id != wex.id }
                             ?.let { catalog[it.exerciseId]?.name ?: it.exerciseId.replace('_', ' ') }
@@ -616,6 +641,7 @@ private fun ExerciseCard(
     onLogSet: (setNum: Int, weight: Double?, reps: Int?, rating: Int?) -> Unit,
     onYouTube: (slug: String, name: String) -> Unit,
     onSwap: () -> Unit,
+    onSetPref: (String) -> Unit = {},
     partnerName: String? = null,
 ) {
     val name = info?.name ?: wex.exerciseId.replace('_', ' ')
@@ -679,7 +705,7 @@ private fun ExerciseCard(
             }
 
             Spacer(Modifier.height(6.dp))
-            Row {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { onYouTube(wex.exerciseId, name) }) {
                     Text("YouTube ↗", color = MV.OnSurfaceVariant, fontSize = 12.sp)
                 }
@@ -690,6 +716,8 @@ private fun ExerciseCard(
                         Text(" Swap", color = MV.OnSurfaceVariant, fontSize = 12.sp)
                     }
                 }
+                Spacer(Modifier.weight(1f))
+                ExercisePrefMenu(onSetPref)
             }
             // Sets
             for (n in 1..wex.targetSets) {
@@ -977,6 +1005,41 @@ private fun ratingColor(r: Int) = when (r) {
     4 -> androidx.compose.ui.graphics.Color(0xFF84CC16)
     5 -> MV.Green
     else -> MV.OnSurfaceDim
+}
+
+@Composable
+private fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(
+                Icons.Outlined.MoreVert,
+                contentDescription = "Exercise preference",
+                tint = MV.OnSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        androidx.compose.material3.DropdownMenu(
+            expanded = open, onDismissRequest = { open = false },
+        ) {
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text("❤ Favorite — show more often") },
+                onClick = { open = false; onSetPref("favorite") },
+            )
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text("👎 Avoid — show less often") },
+                onClick = { open = false; onSetPref("avoid") },
+            )
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text("🚫 Disable — never include") },
+                onClick = { open = false; onSetPref("disabled") },
+            )
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text("Reset to neutral") },
+                onClick = { open = false; onSetPref("neutral") },
+            )
+        }
+    }
 }
 
 private fun openYouTube(context: android.content.Context, slug: String, name: String) {

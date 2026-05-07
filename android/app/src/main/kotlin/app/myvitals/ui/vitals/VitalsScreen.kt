@@ -1,8 +1,10 @@
 package app.myvitals.ui.vitals
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,7 +23,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
+import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
 import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.FitnessCenter
+import androidx.compose.material.icons.outlined.Terrain
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.MonitorWeight
 import androidx.compose.material.icons.outlined.Refresh
@@ -44,6 +49,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -77,6 +83,10 @@ enum class Vital(val label: String, val icon: ImageVector, val color: Color) {
     WEIGHT("Weight", Icons.Outlined.MonitorWeight, Color(0xFFF59E0B)),
     BP("Blood pressure", Icons.Outlined.FavoriteBorder, Color(0xFFEC4899)),
     SOBER("Sober", Icons.Outlined.Timer, Color(0xFF84CC16)),
+    WORKOUT("Workout", Icons.Outlined.FitnessCenter, Color(0xFFEF4444)),
+    ACTIVITY("Last activity", Icons.AutoMirrored.Outlined.DirectionsBike,
+        Color(0xFF38BDF8)),
+    TRAILS("Trails", Icons.Outlined.Terrain, Color(0xFF22C55E)),
 }
 
 /** Lightweight wrapper for the live HR points + their freshness. */
@@ -90,6 +100,9 @@ fun VitalsScreen(
     onOpenSettings: () -> Unit,
     onOpenSober: () -> Unit,
     onOpenVitalDetail: (Vital) -> Unit,
+    onOpenWorkout: () -> Unit = {},
+    onOpenActivity: (source: String, sourceId: String) -> Unit = { _, _ -> },
+    onOpenTrails: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
@@ -99,6 +112,11 @@ fun VitalsScreen(
     var bp by remember { mutableStateOf(BpSnapshot(null, null, null)) }
     var sober by remember { mutableStateOf<SoberCurrentResponse?>(null) }
     var profile by remember { mutableStateOf<ProfileResponse?>(null) }
+    var lastActivity by remember { mutableStateOf<app.myvitals.sync.ActivityRow?>(null) }
+    var trailCounts by remember { mutableStateOf(Triple(0, 0, 0)) }  // open/delayed/closed
+    var lastWorkout by remember {
+        mutableStateOf<app.myvitals.sync.StrengthWorkoutSummary?>(null)
+    }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -173,6 +191,26 @@ fun VitalsScreen(
                 val profileD = async(Dispatchers.IO) {
                     runCatching { api.profile() }.getOrNull()
                 }
+                val activityD = async(Dispatchers.IO) {
+                    runCatching {
+                        api.activities(limit = 1).firstOrNull()
+                    }.getOrNull()
+                }
+                val trailsD = async(Dispatchers.IO) {
+                    runCatching {
+                        val r = api.trails().trails
+                        Triple(
+                            r.count { it.status == "open" },
+                            r.count { it.status == "delayed" },
+                            r.count { it.status == "closed" },
+                        )
+                    }.getOrDefault(Triple(0, 0, 0))
+                }
+                val workoutD = async(Dispatchers.IO) {
+                    runCatching {
+                        api.strengthWorkouts().workouts.firstOrNull()
+                    }.getOrNull()
+                }
 
                 rows = rowsD.await()
                 today = todayD.await()
@@ -181,6 +219,9 @@ fun VitalsScreen(
                 bp = bpD.await()
                 sober = soberD.await()
                 profile = profileD.await()
+                lastActivity = activityD.await()
+                trailCounts = trailsD.await()
+                lastWorkout = workoutD.await()
             }
             error = null
             Timber.i(
@@ -201,7 +242,11 @@ fun VitalsScreen(
     }
 
     val tiles = remember {
-        listOf(Vital.HR, Vital.SLEEP, Vital.STEPS, Vital.HRV, Vital.WEIGHT, Vital.BP, Vital.SOBER)
+        listOf(
+            Vital.HR, Vital.SLEEP, Vital.STEPS, Vital.HRV,
+            Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS,
+            Vital.WEIGHT, Vital.BP, Vital.SOBER,
+        )
     }
 
     Column(Modifier.fillMaxSize().background(MV.Bg).padding(horizontal = 12.dp)) {
@@ -259,6 +304,19 @@ fun VitalsScreen(
                         nowMs = nowMs,
                         onClick = { onOpenVitalDetail(v) },
                     )
+                    Vital.WORKOUT -> WorkoutBadge(lastWorkout, nowMs, onClick = onOpenWorkout)
+                    Vital.ACTIVITY -> ActivityBadge(
+                        lastActivity, nowMs,
+                        onClick = {
+                            lastActivity?.let { onOpenActivity(it.source, it.sourceId) }
+                        },
+                    )
+                    Vital.TRAILS -> TrailsBadge(
+                        open = trailCounts.first,
+                        delayed = trailCounts.second,
+                        closed = trailCounts.third,
+                        onClick = onOpenTrails,
+                    )
                     Vital.WEIGHT -> WeightBadge(weight, nowMs,
                         onClick = { onOpenVitalDetail(v) })
                     Vital.BP -> BpBadge(bp, nowMs, onClick = { onOpenVitalDetail(v) })
@@ -272,25 +330,35 @@ fun VitalsScreen(
 // Badges
 // ============================================================
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BadgeFrame(v: Vital, lastUpdate: String?, onClick: () -> Unit, content: @Composable () -> Unit) {
+private fun BadgeFrame(
+    v: Vital, lastUpdate: String?,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
-        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        modifier = Modifier.fillMaxWidth().height(150.dp)
+            .combinedClickable(
+                onClick = { onClick() },
+                onLongClick = { onLongPress?.invoke() },
+            ),
     ) {
-        Column(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(12.dp).fillMaxSize()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(v.icon, contentDescription = v.label,
                     tint = v.color, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(v.label, color = MV.OnSurfaceVariant,
                     fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
-                    modifier = Modifier.weight(1f))
+                    modifier = Modifier.weight(1f), maxLines = 1)
                 if (lastUpdate != null) {
                     Text(lastUpdate, color = MV.OnSurfaceDim, fontSize = 9.sp)
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             content()
         }
     }
@@ -506,6 +574,139 @@ private fun SoberBadge(sober: SoberCurrentResponse?, onClick: () -> Unit) {
         }
         Spacer(Modifier.height(6.dp))
         Text("Tap to manage", color = MV.OnSurfaceDim, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun WorkoutBadge(
+    last: app.myvitals.sync.StrengthWorkoutSummary?,
+    nowMs: Long,
+    onClick: () -> Unit,
+) {
+    val v = Vital.WORKOUT
+    val freshness = last?.startedAt?.let { fmtRelative(it, nowMs) }
+        ?: last?.date?.let { fmtRelativeDate(it, nowMs) }
+    BadgeFrame(v, freshness, onClick) {
+        if (last == null) {
+            Text("—", color = MV.OnSurface, fontSize = 22.sp,
+                fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+            Text("No workouts yet", color = MV.OnSurfaceDim, fontSize = 11.sp)
+            return@BadgeFrame
+        }
+        Text(
+            last.splitFocus.replaceFirstChar { it.titlecase() },
+            color = MV.OnSurface, fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold, maxLines = 1,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            last.date, color = MV.OnSurfaceVariant, fontSize = 12.sp,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            when (last.status) {
+                "completed" -> "Complete"
+                "in_progress" -> "In progress"
+                "skipped" -> "Skipped"
+                else -> last.status ?: ""
+            },
+            color = when (last.status) {
+                "completed" -> Color(0xFF22C55E)
+                "in_progress" -> Color(0xFFFBBF24)
+                "skipped" -> MV.OnSurfaceDim
+                else -> MV.OnSurfaceVariant
+            },
+            fontSize = 10.sp, fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun ActivityBadge(
+    last: app.myvitals.sync.ActivityRow?,
+    nowMs: Long,
+    onClick: () -> Unit,
+) {
+    val v = Vital.ACTIVITY
+    val freshness = last?.startAt?.let { fmtRelative(it, nowMs) }
+    BadgeFrame(v, freshness, onClick) {
+        if (last == null) {
+            Text("—", color = MV.OnSurface, fontSize = 22.sp,
+                fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+            Text("No activities", color = MV.OnSurfaceDim, fontSize = 11.sp)
+            return@BadgeFrame
+        }
+        val miles = last.distanceM?.let { it / 1609.34 } ?: 0.0
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text("%.1f".format(miles),
+                color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(4.dp))
+            Text("mi", color = MV.OnSurfaceDim, fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 4.dp))
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            last.type.replace("Ride", " ride", ignoreCase = true).trim(),
+            color = MV.OnSurfaceVariant, fontSize = 11.sp, maxLines = 1,
+        )
+        if (!last.trailName.isNullOrBlank()) {
+            Text("@ ${last.trailName}", color = MV.OnSurfaceDim,
+                fontSize = 10.sp, maxLines = 1)
+        }
+        Spacer(Modifier.weight(1f))
+        val mins = last.durationS / 60
+        Text(
+            "${mins} min · ${last.avgHr?.let { "%.0f bpm".format(it) } ?: "—"}",
+            color = MV.OnSurfaceDim, fontSize = 10.sp,
+        )
+    }
+}
+
+@Composable
+private fun TrailsBadge(
+    open: Int, delayed: Int, closed: Int,
+    onClick: () -> Unit,
+) {
+    val v = Vital.TRAILS
+    BadgeFrame(v, null, onClick) {
+        val total = open + delayed + closed
+        if (total == 0) {
+            Text("—", color = MV.OnSurface, fontSize = 22.sp,
+                fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+            Text("No trails", color = MV.OnSurfaceDim, fontSize = 11.sp)
+            return@BadgeFrame
+        }
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text("$open", color = Color(0xFF22C55E),
+                fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(4.dp))
+            Text("open", color = MV.OnSurfaceDim, fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 4.dp))
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (delayed > 0) {
+                Text("$delayed delayed", color = Color(0xFFEAB308), fontSize = 11.sp)
+            }
+            if (closed > 0) {
+                Text("$closed closed", color = Color(0xFFEF4444), fontSize = 11.sp)
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        // Mini stacked bar showing proportions
+        Row(Modifier.fillMaxWidth().height(6.dp).clip(
+            androidx.compose.foundation.shape.RoundedCornerShape(3.dp)
+        )) {
+            if (open > 0) Box(Modifier.weight(open.toFloat()).fillMaxSize()
+                .background(Color(0xFF22C55E)))
+            if (delayed > 0) Box(Modifier.weight(delayed.toFloat()).fillMaxSize()
+                .background(Color(0xFFEAB308)))
+            if (closed > 0) Box(Modifier.weight(closed.toFloat()).fillMaxSize()
+                .background(Color(0xFFEF4444)))
+        }
     }
 }
 

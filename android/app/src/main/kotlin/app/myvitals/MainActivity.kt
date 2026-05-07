@@ -126,6 +126,11 @@ class MainActivity : ComponentActivity() {
                                 onOpenVitalDetail = { v ->
                                     nav.navigate(Routes.vitalDetail(v.name))
                                 },
+                                onOpenWorkout = { nav.navigateTab(Routes.WORKOUT) },
+                                onOpenActivity = { source, sourceId ->
+                                    nav.navigate(Routes.activityDetail(source, sourceId))
+                                },
+                                onOpenTrails = { nav.navigateTab(Routes.TRAILS) },
                             )
                         }
                         composable(

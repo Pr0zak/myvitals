@@ -5,7 +5,7 @@
  * subscribes for status-flip pings.
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Star, RefreshCw, Navigation } from "lucide-vue-next";
+import { Star, RefreshCw, Navigation, Pencil } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { queryToken } from "@/config";
 import Card from "@/components/Card.vue";
@@ -62,6 +62,54 @@ function openMaps(t: Trail) {
   if (t.latitude == null || t.longitude == null) return;
   const q = encodeURIComponent(`${t.latitude},${t.longitude} (${t.name})`);
   window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank", "noreferrer");
+}
+
+// Edit location modal state
+const editTrail = ref<Trail | null>(null);
+const editLat = ref<string>("");
+const editLon = ref<string>("");
+const editCity = ref<string>("");
+const editState = ref<string>("");
+const editSaving = ref(false);
+const editError = ref<string>("");
+
+function openEdit(t: Trail) {
+  editTrail.value = t;
+  editLat.value = t.latitude?.toString() ?? "";
+  editLon.value = t.longitude?.toString() ?? "";
+  editCity.value = t.city ?? "";
+  editState.value = t.state ?? "";
+  editError.value = "";
+}
+function closeEdit() { editTrail.value = null; }
+
+async function saveEdit() {
+  if (!editTrail.value) return;
+  const lat = parseFloat(editLat.value);
+  const lon = parseFloat(editLon.value);
+  if (editLat.value && (Number.isNaN(lat) || lat < -90 || lat > 90)) {
+    editError.value = "Latitude must be between -90 and 90";
+    return;
+  }
+  if (editLon.value && (Number.isNaN(lon) || lon < -180 || lon > 180)) {
+    editError.value = "Longitude must be between -180 and 180";
+    return;
+  }
+  editSaving.value = true;
+  try {
+    await api.editTrailLocation(editTrail.value.id, {
+      latitude: editLat.value ? lat : null,
+      longitude: editLon.value ? lon : null,
+      city: editCity.value || null,
+      state: editState.value || null,
+    });
+    await load();
+    closeEdit();
+  } catch (e) {
+    editError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    editSaving.value = false;
+  }
 }
 
 function fmtAge(iso: string | null): string {
@@ -125,11 +173,17 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
                       @click.stop="toggleSubscribe(t)">
                 <Star :size="16" />
               </button>
+              <button class="star edit-pin"
+                      title="Edit pin location"
+                      @click.stop="openEdit(t)">
+                <Pencil :size="14" />
+              </button>
             </header>
             <p v-if="t.comment" class="comment">{{ t.comment }}</p>
             <p class="meta">
               <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
               <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
+              <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
               <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
             </p>
           </article>
@@ -150,11 +204,17 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
                       @click.stop="toggleSubscribe(t)">
                 <Star :size="16" />
               </button>
+              <button class="star edit-pin"
+                      title="Edit pin location"
+                      @click.stop="openEdit(t)">
+                <Pencil :size="14" />
+              </button>
             </header>
             <p v-if="t.comment" class="comment">{{ t.comment }}</p>
             <p class="meta">
               <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
               <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
+              <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
               <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
             </p>
           </article>
@@ -178,6 +238,33 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
         </div>
       </section>
     </template>
+
+    <!-- Edit location modal -->
+    <div v-if="editTrail" class="overlay" @click.self="closeEdit">
+      <div class="edit-drawer">
+        <header>
+          <h2>Edit location · {{ editTrail.name }}</h2>
+          <button class="close" @click="closeEdit">✕</button>
+        </header>
+        <p class="hint">
+          Decimal degrees. Find a trail's coords by searching it on Google Maps,
+          right-clicking the trailhead, and copying the lat/lon pair.
+        </p>
+        <div class="form-grid">
+          <label>Latitude<input type="number" step="0.0001" v-model="editLat" placeholder="e.g. 38.9881" /></label>
+          <label>Longitude<input type="number" step="0.0001" v-model="editLon" placeholder="e.g. -94.7625" /></label>
+          <label>City<input v-model="editCity" placeholder="optional" /></label>
+          <label>State<input v-model="editState" placeholder="KS / MO / …" maxlength="8" /></label>
+        </div>
+        <p v-if="editError" class="err">{{ editError }}</p>
+        <div class="actions">
+          <button class="primary" :disabled="editSaving" @click="saveEdit">
+            {{ editSaving ? "Saving…" : "Save" }}
+          </button>
+          <button class="ghost" @click="closeEdit">Cancel</button>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -220,6 +307,37 @@ header h1 { margin: 0; }
 .card.has_loc:hover { border-color: var(--accent, #ef4444); }
 .nav-ic { color: var(--muted-2); margin-left: 0.4rem; vertical-align: middle; }
 .loc { color: var(--muted); }
+.loc.nopin { color: #f59e0b; }
+.edit-pin { color: var(--muted-2); }
+.edit-pin:hover { color: var(--accent, #ef4444); }
+
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100;
+  display: flex; justify-content: flex-end; }
+.edit-drawer {
+  width: min(420px, 100%); height: 100%; overflow-y: auto;
+  background: var(--bg-1); border-left: 1px solid var(--line);
+  padding: 1rem 1.2rem;
+}
+.edit-drawer header { display: flex; justify-content: space-between; align-items: center; }
+.edit-drawer header h2 { margin: 0; font-size: 1rem; color: var(--text); }
+.edit-drawer .close { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-top: 1rem; }
+.form-grid label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.78rem; color: var(--muted); }
+.form-grid input {
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 0.4rem 0.55rem; color: var(--text);
+  font-family: inherit;
+}
+.actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+.actions .primary {
+  background: var(--accent, #ef4444); color: #fff; border: none;
+  padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; cursor: pointer;
+}
+.actions .primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.actions .ghost {
+  background: transparent; color: var(--muted); border: 1px solid var(--line);
+  padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;
+}
 
 .card header {
   display: flex; align-items: center; gap: 0.5rem;

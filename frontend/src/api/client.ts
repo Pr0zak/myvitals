@@ -669,6 +669,14 @@ export const api = {
 
   async ackTrailAlert(id: number) { await http.post(`/trails/alerts/${id}/ack`); },
 
+  async editTrailLocation(id: number, body: {
+    latitude?: number | null; longitude?: number | null;
+    city?: string | null; state?: string | null;
+  }): Promise<unknown> {
+    const { data } = await http.put(`/trails/${id}/location`, body);
+    return data;
+  },
+
   async aiStrengthReview(workoutId: number): Promise<{
     review: {
       headline: string;

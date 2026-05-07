@@ -151,6 +151,40 @@ class SubscribeBody(BaseModel):
     notify_on: str = "any"   # any | open_only | close_only
 
 
+class TrailLocationBody(BaseModel):
+    latitude: float | None = None
+    longitude: float | None = None
+    city: str | None = None
+    state: str | None = None
+
+
+@router.put("/{trail_id}/location")
+async def put_trail_location(
+    trail_id: int, body: TrailLocationBody,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Manually edit a trail's coordinates. Useful for the two trails
+    the auto-curator couldn't pin (Lewis & Clark, Prairie Creek), or
+    when the autosourced point is wrong."""
+    t = await db.get(models.Trail, trail_id)
+    if t is None:
+        raise HTTPException(status_code=404, detail="trail not found")
+    if body.latitude is not None and not (-90.0 <= body.latitude <= 90.0):
+        raise HTTPException(status_code=400, detail="latitude out of range")
+    if body.longitude is not None and not (-180.0 <= body.longitude <= 180.0):
+        raise HTTPException(status_code=400, detail="longitude out of range")
+    t.latitude = body.latitude
+    t.longitude = body.longitude
+    if body.city is not None: t.city = body.city
+    if body.state is not None: t.state = body.state
+    await db.commit()
+    return {
+        "id": t.id, "name": t.name,
+        "latitude": t.latitude, "longitude": t.longitude,
+        "city": t.city, "state": t.state,
+    }
+
+
 @router.post("/{trail_id}/subscribe")
 async def subscribe(
     trail_id: int, body: SubscribeBody,

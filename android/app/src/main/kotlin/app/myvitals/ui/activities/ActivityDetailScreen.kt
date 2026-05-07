@@ -49,6 +49,9 @@ import app.myvitals.sync.ActivityRow
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.Trail
 import app.myvitals.ui.MV
+import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottom
+import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStart
+import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,6 +68,9 @@ fun ActivityDetailScreen(
     val scope = rememberCoroutineScope()
     var activity by remember { mutableStateOf<ActivityRow?>(null) }
     var trails by remember { mutableStateOf<List<Trail>>(emptyList()) }
+    var hrPoints by remember {
+        mutableStateOf<List<app.myvitals.sync.TimePoint>>(emptyList())
+    }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var showPicker by remember { mutableStateOf(false) }
@@ -89,6 +95,20 @@ fun ActivityDetailScreen(
                 a.polyline?.length ?: 0,
                 a.trailId?.toString() ?: "null",
             )
+            // Pull the HR samples covering the activity window so we can
+            // render an in-line series under the stats card.
+            try {
+                val start = java.time.Instant.parse(a.startAt)
+                val end = start.plusSeconds(a.durationS.toLong())
+                val series = withContext(Dispatchers.IO) {
+                    api.heartRateSeries(since = start.toString(), until = end.toString())
+                }
+                hrPoints = series.points
+                Timber.i("activity HR window: %d points", series.points.size)
+            } catch (e: Exception) {
+                Timber.w(e, "activity HR fetch failed")
+                hrPoints = emptyList()
+            }
         } catch (e: Exception) {
             Timber.w(e, "activity load failed for %s/%s", source, sourceId)
             error = e.message?.take(160)
@@ -148,6 +168,9 @@ fun ActivityDetailScreen(
                     if (!a.polyline.isNullOrBlank() ||
                         (a.trailId != null && trails.any { it.id == a.trailId && it.latitude != null })) {
                         item { ActivityMap(a, trails) }
+                    }
+                    if (hrPoints.isNotEmpty()) {
+                        item { HrChart(hrPoints) }
                     }
                     item { TrailLinkCard(a, trails, onPick = { showPicker = true }) }
                     if (!a.notes.isNullOrBlank()) {
@@ -295,20 +318,23 @@ private fun TrailLinkCard(a: ActivityRow, trails: List<Trail>, onPick: () -> Uni
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun ActivityMap(a: ActivityRow, trails: List<Trail>) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val leafletCss = remember { app.myvitals.ui.common.LeafletAssets.css(ctx) }
+    val leafletJs = remember { app.myvitals.ui.common.LeafletAssets.js(ctx) }
     val polylineEsc = a.polyline?.replace("'", "\\'") ?: ""
     val trail = a.trailId?.let { id -> trails.firstOrNull { it.id == id } }
     val trailLat = trail?.latitude
     val trailLon = trail?.longitude
-    val nameEsc = trail?.name?.replace("'", "\\'") ?: ""
+    val nameEsc = trail?.name?.replace("'", "\\'")?.replace("\n", " ") ?: ""
     val html = """<!DOCTYPE html>
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
-<link rel="stylesheet" href="leaflet.css"/>
-<style>html,body{height:100%;margin:0;background:#0F1620;}
+<style>$leafletCss
+html,body{height:100%;margin:0;background:#0F1620;}
 #m{position:absolute;top:0;left:0;right:0;bottom:0;}</style>
 </head><body>
 <div id="m"></div>
-<script src="leaflet.js"></script>
+<script>$leafletJs</script>
 <script>
 window.addEventListener('error', e => console.error('JS error:', e.message));
 function decodePolyline(str) {
@@ -367,22 +393,60 @@ try {
                     }
                 }
                 setBackgroundColor(android.graphics.Color.parseColor("#0F1620"))
-                loadDataWithBaseURL(
-                    "file:///android_asset/leaflet/", html, "text/html", "utf-8", null,
-                )
+                loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
                 tag = html
             }
         },
         update = { webview ->
             if (webview.tag != html) {
-                webview.loadDataWithBaseURL(
-                    "file:///android_asset/leaflet/", html, "text/html", "utf-8", null,
-                )
+                webview.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
                 webview.tag = html
             }
         },
         modifier = Modifier.fillMaxWidth().height(260.dp),
     )
+}
+
+@Composable
+private fun HrChart(points: List<app.myvitals.sync.TimePoint>) {
+    val producer = remember {
+        com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer()
+    }
+    LaunchedEffect(points) {
+        if (points.size < 2) return@LaunchedEffect
+        val origin = runCatching {
+            java.time.Instant.parse(points.first().time).toEpochMilli()
+        }.getOrDefault(0L)
+        val xs = points.map {
+            runCatching {
+                (java.time.Instant.parse(it.time).toEpochMilli() - origin) / 60_000.0
+            }.getOrDefault(0.0)
+        }
+        val ys = points.map { it.value }
+        producer.runTransaction {
+            lineSeries { series(x = xs, y = ys) }
+        }
+    }
+    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+        Column(Modifier.padding(12.dp)) {
+            Text("HEART RATE", color = MV.OnSurfaceVariant,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = 1.5.sp,
+                modifier = Modifier.padding(bottom = 8.dp))
+            com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost(
+                chart = com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart(
+                    com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer(),
+                    startAxis = com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis.rememberStart(),
+                    bottomAxis = com.patrykandpatrick.vico.core.cartesian.axis.HorizontalAxis.rememberBottom(),
+                    // imports above provide rememberStart/rememberBottom factories
+                ),
+                modelProducer = producer,
+                scrollState = com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState(),
+                zoomState = com.patrykandpatrick.vico.compose.cartesian.rememberVicoZoomState(),
+                modifier = Modifier.fillMaxWidth().height(180.dp),
+            )
+        }
+    }
 }
 
 private fun formatStartAt(iso: String): String =

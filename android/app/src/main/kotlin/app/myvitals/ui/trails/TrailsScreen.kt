@@ -838,20 +838,23 @@ private fun visitAgeColor(iso: String?, nowMs: Long): Color {
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun MiniMap(lat: Double, lon: Double, name: String, osmGeoJson: String? = null) {
-    val nameEsc = name.replace("'", "\\'")
+    val ctx = LocalContext.current
+    val leafletCss = remember { app.myvitals.ui.common.LeafletAssets.css(ctx) }
+    val leafletJs = remember { app.myvitals.ui.common.LeafletAssets.js(ctx) }
+    val nameEsc = name.replace("'", "\\'").replace("\n", " ")
     val osmLiteral = osmGeoJson ?: "null"
-    // Leaflet is bundled at app/src/main/assets/leaflet/ so the map renders
-    // without depending on unpkg.com. Tiles still need network (CARTO CDN);
-    // if offline the marker pin renders on a dark background.
+    // Leaflet CSS + JS are inlined directly so the WebView has no
+    // sub-resource fetches at all. Tiles still need network (CARTO CDN);
+    // offline → pin on a dark background.
     val html = """<!DOCTYPE html>
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
-<link rel="stylesheet" href="leaflet.css"/>
-<style>html,body{height:100%;margin:0;background:#0F1620;}
+<style>$leafletCss
+html,body{height:100%;margin:0;background:#0F1620;}
 #m{position:absolute;top:0;left:0;right:0;bottom:0;}</style>
 </head><body>
 <div id="m"></div>
-<script src="leaflet.js"></script>
+<script>$leafletJs</script>
 <script>
 window.addEventListener('error', e => console.error('JS error:', e.message));
 try {
@@ -871,14 +874,13 @@ try {
 } catch (e) { console.error('map init failed:', e.toString()); }
 </script></body></html>"""
     AndroidView(
-        factory = { ctx ->
-            WebView(ctx).apply {
+        factory = { wctx ->
+            WebView(wctx).apply {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.loadsImagesAutomatically = true
                 settings.mixedContentMode =
                     android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                settings.allowFileAccess = true
                 webViewClient = WebViewClient()
                 webChromeClient = object : android.webkit.WebChromeClient() {
                     override fun onConsoleMessage(
@@ -891,17 +893,13 @@ try {
                     }
                 }
                 setBackgroundColor(android.graphics.Color.parseColor("#0F1620"))
-                loadDataWithBaseURL(
-                    "file:///android_asset/leaflet/", html, "text/html", "utf-8", null,
-                )
+                loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
                 tag = html
             }
         },
         update = { webview ->
             if (webview.tag != html) {
-                webview.loadDataWithBaseURL(
-                    "file:///android_asset/leaflet/", html, "text/html", "utf-8", null,
-                )
+                webview.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
                 webview.tag = html
             }
         },

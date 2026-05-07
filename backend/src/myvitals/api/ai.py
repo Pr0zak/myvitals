@@ -587,6 +587,68 @@ async def activity_summary_endpoint(
             "generated_at": datetime.now(timezone.utc)}
 
 
+# ─────────────── Strength workout review ───────────────
+
+@router.post("/strength/review/{workout_id}")
+async def strength_review_endpoint(
+    workout_id: int, db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Structured post-workout review for a completed strength session.
+
+    Cached by payload_hash via the existing ai_summaries table — re-running
+    after the user logs another set updates the hash and re-bills; running
+    twice on the same finished workout is free."""
+    workout = await db.get(models.StrengthWorkout, workout_id)
+    if workout is None:
+        raise HTTPException(status_code=404, detail="workout not found")
+
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+
+    from ..integrations.claude import (
+        build_strength_review_payload, strength_review,
+    )
+    payload = await build_strength_review_payload(db, workout_id)
+    payload_hash = hash_payload(payload)
+    range_kind = f"strength_review:{workout_id}"
+    cached = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == range_kind)
+        .where(models.AiSummary.payload_hash == payload_hash)
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if cached is not None:
+        import json as _json
+        try: review = _json.loads(cached.content)
+        except Exception: review = {}  # noqa: BLE001
+        return {
+            "review": review, "generated_at": cached.generated_at,
+            "model": cached.model, "cached": True,
+            "input_tokens": cached.input_tokens, "output_tokens": cached.output_tokens,
+        }
+
+    result = await strength_review(db, workout_id, cfg)
+    cfg.calls_today += 1
+    summary = models.AiSummary(
+        generated_at=datetime.now(timezone.utc),
+        range_kind=range_kind, payload_hash=payload_hash,
+        model=result.model,
+        input_tokens=result.input_tokens, output_tokens=result.output_tokens,
+        content=result.content,
+    )
+    db.add(summary)
+    await db.commit()
+    import json as _json
+    try: review = _json.loads(result.content)
+    except Exception: review = {}  # noqa: BLE001
+    return {
+        "review": review, "generated_at": summary.generated_at,
+        "model": result.model, "cached": False,
+        "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
+    }
+
+
 # ─────────────── Batch mode ───────────────
 
 @router.post("/explain-all")

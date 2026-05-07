@@ -15,6 +15,7 @@ import { annotationMarkPoint, baseTimeOption, meanMarkLine, soberResetMarkLine, 
 
 import Card from "@/components/Card.vue";
 import RecoveryCard from "@/components/RecoveryCard.vue";
+import StrengthTodayCard from "@/components/StrengthTodayCard.vue";
 import SleepCard from "@/components/SleepCard.vue";
 import StepsCard from "@/components/StepsCard.vue";
 import TrendBadges from "@/components/TrendBadges.vue";
@@ -840,6 +841,7 @@ const subtitleHr = computed(() => {
         />
         <StepsCard :total="todayStepsLocal" />
         <SleepCard :sleep="sleep" />
+        <StrengthTodayCard />
       </div>
 
       <!-- HR chart with toggles -->

@@ -155,3 +155,147 @@ data class IngestResponse(
     @Json(name = "skin_temp") val skinTemp: Int = 0,
     @Json(name = "sleep_sessions") val sleepSessions: Int = 0,
 )
+
+// ── Strength training (Phase 5) ─────────────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class StrengthExerciseInfo(
+    val id: String,
+    val name: String,
+    @Json(name = "primary_muscle") val primaryMuscle: String,
+    @Json(name = "secondary_muscles") val secondaryMuscles: List<String> = emptyList(),
+    val equipment: List<String> = emptyList(),
+    @Json(name = "is_compound") val isCompound: Boolean = false,
+    @Json(name = "movement_pattern") val movementPattern: String,
+    val level: String = "intermediate",
+    val mechanic: String? = null,
+    val instructions: List<String> = emptyList(),
+    @Json(name = "image_front") val imageFront: String? = null,
+    @Json(name = "image_side") val imageSide: String? = null,
+    @Json(name = "youtube_query") val youtubeQuery: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthExercisesResponse(
+    val count: Int,
+    val exercises: List<StrengthExerciseInfo>,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthSetRow(
+    val id: Long,
+    @Json(name = "workout_exercise_id") val workoutExerciseId: Long,
+    @Json(name = "set_number") val setNumber: Int,
+    @Json(name = "target_weight_lb") val targetWeightLb: Double? = null,
+    @Json(name = "target_reps") val targetReps: Int,
+    @Json(name = "actual_weight_lb") val actualWeightLb: Double? = null,
+    @Json(name = "actual_reps") val actualReps: Int? = null,
+    val rating: Int? = null,
+    @Json(name = "rest_seconds_taken") val restSecondsTaken: Int? = null,
+    @Json(name = "logged_at") val loggedAt: String? = null,
+    val skipped: Boolean = false,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthWorkoutExerciseRow(
+    val id: Long,
+    @Json(name = "workout_id") val workoutId: Long,
+    @Json(name = "exercise_id") val exerciseId: String,
+    @Json(name = "order_index") val orderIndex: Int,
+    @Json(name = "superset_id") val supersetId: String? = null,
+    @Json(name = "target_sets") val targetSets: Int,
+    @Json(name = "target_reps_low") val targetRepsLow: Int,
+    @Json(name = "target_reps_high") val targetRepsHigh: Int,
+    @Json(name = "target_weight_lb") val targetWeightLb: Double? = null,
+    @Json(name = "target_rest_s") val targetRestS: Int = 90,
+    val notes: String? = null,
+    val sets: List<StrengthSetRow> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthWorkoutDetail(
+    val id: Long,
+    val date: String,
+    @Json(name = "generated_at") val generatedAt: String,
+    @Json(name = "split_focus") val splitFocus: String,
+    val status: String,
+    val seed: String,
+    @Json(name = "recovery_score_used") val recoveryScoreUsed: Double? = null,
+    @Json(name = "readiness_score_used") val readinessScoreUsed: Double? = null,
+    @Json(name = "sleep_h_used") val sleepHUsed: Double? = null,
+    @Json(name = "started_at") val startedAt: String? = null,
+    @Json(name = "completed_at") val completedAt: String? = null,
+    val notes: String? = null,
+    val exercises: List<StrengthWorkoutExerciseRow> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthWorkoutSummary(
+    val id: Long,
+    val date: String,
+    @Json(name = "split_focus") val splitFocus: String,
+    val status: String,
+    @Json(name = "started_at") val startedAt: String? = null,
+    @Json(name = "completed_at") val completedAt: String? = null,
+    @Json(name = "generated_at") val generatedAt: String,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthWorkoutsResponse(
+    val count: Int,
+    val workouts: List<StrengthWorkoutSummary>,
+)
+
+@JsonClass(generateAdapter = true)
+data class RegenerateRequest(val force: Boolean = false)
+
+@JsonClass(generateAdapter = true)
+data class StrengthRecoveryResponse(
+    val date: String,
+    @Json(name = "recovery_aware") val recoveryAware: Boolean,
+    @Json(name = "recovery_score") val recoveryScore: Double? = null,
+    @Json(name = "readiness_score") val readinessScore: Double? = null,
+    @Json(name = "sleep_h") val sleepH: Double? = null,
+    @Json(name = "deload_factor") val deloadFactor: Double = 1.0,
+    @Json(name = "rest_day_recommended") val restDayRecommended: Boolean = false,
+    @Json(name = "rest_day_reason") val restDayReason: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class LogSetRequest(
+    @Json(name = "workout_exercise_id") val workoutExerciseId: Long,
+    @Json(name = "set_number") val setNumber: Int,
+    @Json(name = "target_weight_lb") val targetWeightLb: Double? = null,
+    @Json(name = "target_reps") val targetReps: Int,
+    @Json(name = "actual_weight_lb") val actualWeightLb: Double? = null,
+    @Json(name = "actual_reps") val actualReps: Int? = null,
+    val rating: Int? = null,
+    @Json(name = "rest_seconds_taken") val restSecondsTaken: Int? = null,
+    val skipped: Boolean = false,
+    @Json(name = "logged_at") val loggedAt: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthReviewBody(
+    val headline: String,
+    val tone: String,
+    val highlights: List<String> = emptyList(),
+    val concerns: List<String> = emptyList(),
+    @Json(name = "next_session_suggestion") val nextSessionSuggestion: String,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthReviewResponse(
+    val review: StrengthReviewBody,
+    @Json(name = "generated_at") val generatedAt: String,
+    val model: String,
+    val cached: Boolean,
+)
+
+@JsonClass(generateAdapter = true)
+data class WorkoutPatchRequest(
+    val status: String? = null,
+    @Json(name = "started_at") val startedAt: String? = null,
+    @Json(name = "completed_at") val completedAt: String? = null,
+    val notes: String? = null,
+)

@@ -126,17 +126,17 @@ class SyncWorker(
 
         // 2. Read fresh data since last sync (default: last 6 hours on first run).
         //
-        // Safety floor: always re-check the past 12 hours even if our
+        // Safety floor: always re-check the past 48 hours even if our
         // checkpoint is more recent. The Pixel Watch batches HR/sleep
         // records and pushes them to Health Connect when bluetooth /
-        // wifi is stable — sometimes hours after the records' actual
-        // timestamps.
+        // wifi is stable — sometimes a day or more after the records'
+        // actual timestamps.
         //
-        // Plus once a day a 7-day deep sweep covers anything that fell
-        // through the 12h floor.
+        // Plus every 6h a 7-day deep sweep covers anything that fell
+        // through the 48h floor (e.g. samples that arrived 3+ days late).
         val checkpoint = settings.lastSyncInstant() ?: now.minusSeconds(6 * 3600)
-        val safetyFloor = now.minusSeconds(12 * 3600)
-        val needDeepSweep = (now.epochSecond - settings.lastDeepSweepEpochSeconds) > 24 * 3600
+        val safetyFloor = now.minusSeconds(48 * 3600)
+        val needDeepSweep = (now.epochSecond - settings.lastDeepSweepEpochSeconds) > 6 * 3600
         val since = when {
             needDeepSweep -> {
                 Timber.i("Deep sweep — pulling last 7 days of HC")

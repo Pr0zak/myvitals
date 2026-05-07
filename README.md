@@ -33,6 +33,7 @@ Pulls your **Pixel Watch / Wear OS** data out of **Health Connect** on the phone
 - **Sober time** — live `d/h/m/s` counter on the phone home screen with a 1.5s press-and-hold reset, full history with editable streaks, distribution + timeline charts on the web
 - **Goals** — set targets (weight, sober streak, sleep, steps, custom) with per-goal AI coaching checks
 - **Activities** — Strava sync + Garmin/Fitbit imports, GPS map view, side-by-side compare
+- **Workout / Strength** — Fitbod-style generated session per day, filtered to your actual gear (dumbbell pairs, wrist-weight micro-loaders, bench config, etc.); per-set logging with rest timer; recovery-aware deload (reads HRV / sleep / readiness from `daily_summary` and adjusts target weights); deterministic seed so today's plan is stable until you tap regenerate; full set/rep/RPE history. **Equipment editor** (Settings → Strength equipment) drives catalog filtering — adding a doorway pull-up bar later auto-expands the catalog with no code change.
 - **Log** — caffeine / alcohol / mood / food / meds, all editable inline (date/time included)
 - **Calendar** — year heatmap, any metric
 - **AI alerts banner** — anomaly detection cron flags z-score outliers; Claude phrases them, surfaces as colour-coded banners on every page until dismissed
@@ -51,6 +52,7 @@ Configured in Settings → AI (paste an Anthropic key, default model is Haiku 4.
 - **Goal coaching** — trajectory + leverage + ETA per goal
 - **Weekly digest** — cron-scheduled Sunday 22:00 narrative
 - **Anomaly cron** — every 6h, statistical detection → Claude phrasing → alerts banner
+- **Post-workout review** — structured 4-field card (headline, highlights, concerns, next-session suggestion) generated on demand from a completed strength session, comparing against a trailing 4-week tonnage / RPE baseline
 - **Tone** — Supportive / Blunt / Data-only
 
 Bounded payload only: aggregate daily summaries, top correlations, profile (age range / sex / activity), workout details (no GPS), sober streak shape (no history dates). Never sent: raw HR samples, GPS tracks, exact sleep timestamps, the user's name/email, or sober history. Tap **Preview payload** in Settings to audit exactly what would be sent before enabling.
@@ -128,7 +130,10 @@ See [`docs/operations.md`](docs/operations.md) for day-to-day commands and [`doc
 backend/                  FastAPI ingest + analytics + alembic migrations
   └─ src/myvitals/api/    ingest, query, summary, analytics,
                           ai (verdict / ask / explain-* / goals /
-                          alerts), sober, strava, profile, exports
+                          alerts / strength-review), sober, strava,
+                          profile, exports, workout/strength
+  └─ src/myvitals/data/   bundled exercise catalog (yuhonas/free-exercise-db,
+                          public domain) — JSON + JPGs served via StaticFiles
 frontend/                 Vue 3 dashboard
 android/                  Kotlin / Compose companion app
 deploy/                   ct-bootstrap.sh + upgrade.sh

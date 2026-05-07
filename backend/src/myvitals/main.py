@@ -3,12 +3,29 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
+from pathlib import Path
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from . import version as version_mod
 from .analytics.jobs import compute_daily_summary
-from .api import ai, analytics, annotations, debug, export, imports, ingest, profile, query, sober, strava, summary
+from .api import (
+    ai,
+    analytics,
+    annotations,
+    debug,
+    export,
+    imports,
+    ingest,
+    profile,
+    query,
+    sober,
+    strava,
+    summary,
+)
+from .api.workout import strength as workout_strength
 from .config import settings
 from .integrations import strava as strava_int
 from .integrations.home_assistant import pull_states as ha_pull_states
@@ -204,6 +221,15 @@ app.include_router(imports.router, tags=["import"])
 app.include_router(profile.router, tags=["profile"])
 app.include_router(sober.router, tags=["sober"])
 app.include_router(ai.router, tags=["ai"])
+app.include_router(workout_strength.router, tags=["workout-strength"])
+
+# Bundled exercise images (yuhonas/free-exercise-db, public domain).
+# Mounted off the package's data dir so the wheel ships them.
+_IMG_DIR = Path(__file__).resolve().parent / "data" / "img"
+if _IMG_DIR.is_dir():
+    app.mount(
+        "/exercises/img", StaticFiles(directory=_IMG_DIR), name="exercise-images"
+    )
 
 
 @app.get("/health")

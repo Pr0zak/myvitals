@@ -825,6 +825,234 @@ async def detect_anomalies(db: AsyncSession, z_threshold: float = 2.0) -> list[d
     return out
 
 
+STRENGTH_REVIEW_TOOL = {
+    "name": "give_strength_review",
+    "description": "Return a structured post-workout review for a single strength session.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "headline": {
+                "type": "string",
+                "description": "≤16 words. The single most important takeaway from this session.",
+            },
+            "tone": {"type": "string", "enum": ["good", "warn", "bad", "neutral"]},
+            "highlights": {
+                "type": "array", "items": {"type": "string"},
+                "description": "1-3 short bullets, ≤22 words each. What went well — cite specifics "
+                               "(weight × reps, rating, vs trailing 4w avg).",
+            },
+            "concerns": {
+                "type": "array", "items": {"type": "string"},
+                "description": "0-2 short bullets, ≤22 words each. Drift in rep quality, "
+                               "missed sets, recovery context worth flagging.",
+            },
+            "next_session_suggestion": {
+                "type": "string",
+                "description": "≤30 words. ONE concrete lever for the next session — "
+                               "e.g. 'add 2.5 lb to bench, keep RDL flat'.",
+            },
+        },
+        "required": ["headline", "tone", "highlights", "next_session_suggestion"],
+    },
+}
+
+
+def _strength_review_system(tone: str) -> str:
+    return f"""You are a brief strength coach reviewing a completed
+workout. The user logs sets in a self-hosted home-gym app and trains
+mostly with dumbbells + an adjustable bench.
+
+{_tone_line(tone)}
+
+Use the `give_strength_review` tool to return your response. Schema:
+- headline: ONE sentence, ≤ 16 words, the single most important read
+- tone: "good" | "warn" | "bad" | "neutral"
+- highlights: 1-3 bullets — cite weight × reps, RPE, vs prior session
+- concerns: 0-2 bullets — only include if there's something real
+- next_session_suggestion: ONE concrete lever (e.g. "add 2.5 lb to bench")
+
+Be specific. Reference actual numbers from the data. Never alarmist.
+If the session was unremarkable, say so honestly in the headline.
+Never make up exercises that aren't in the data.
+"""
+
+
+async def build_strength_review_payload(
+    db: AsyncSession, workout_id: int,
+) -> dict[str, Any]:
+    """Bounded payload for a single workout's review.
+
+    Includes the workout's exercises with target/actual sets/reps/rating,
+    the user's recovery context (already on the workout row), and a
+    trailing 4-week comparison (avg rating per exercise, frequency,
+    tonnage by primary muscle). NO raw set timestamps or per-second data.
+    """
+    workout = await db.get(models.StrengthWorkout, workout_id)
+    if workout is None:
+        return {}
+
+    # Hydrate exercises + sets
+    wex_rows = (await db.execute(
+        select(models.StrengthWorkoutExercise)
+        .where(models.StrengthWorkoutExercise.workout_id == workout_id)
+        .order_by(models.StrengthWorkoutExercise.order_index)
+    )).scalars().all()
+    wex_ids = [w.id for w in wex_rows]
+    sets_by_wex: dict[int, list[models.StrengthSet]] = {}
+    if wex_ids:
+        sets_rows = (await db.execute(
+            select(models.StrengthSet)
+            .where(models.StrengthSet.workout_exercise_id.in_(wex_ids))
+        )).scalars().all()
+        for s in sets_rows:
+            sets_by_wex.setdefault(s.workout_exercise_id, []).append(s)
+
+    # Catalog lookup so the payload uses human-readable names, not slugs
+    from ..analytics.strength import CATALOG_BY_ID
+
+    exercises_payload: list[dict[str, Any]] = []
+    for wex in wex_rows:
+        sets = sorted(sets_by_wex.get(wex.id, []), key=lambda s: s.set_number)
+        logged = [s for s in sets if s.actual_reps is not None and not s.skipped]
+        avg_rating = (
+            sum(s.rating for s in logged if s.rating is not None) /
+            max(1, sum(1 for s in logged if s.rating is not None))
+            if any(s.rating is not None for s in logged) else None
+        )
+        cat = CATALOG_BY_ID.get(wex.exercise_id)
+        exercises_payload.append({
+            "name": cat["name"] if cat else wex.exercise_id,
+            "primary_muscle": cat["primary_muscle"] if cat else None,
+            "is_compound": cat["is_compound"] if cat else False,
+            "target": f"{wex.target_sets}x{wex.target_reps_low}"
+                      f"{('-' + str(wex.target_reps_high)) if wex.target_reps_high != wex.target_reps_low else ''}"
+                      f"{(' @ ' + str(wex.target_weight_lb) + 'lb') if wex.target_weight_lb else ''}",
+            "logged_sets": [
+                {
+                    "set": s.set_number,
+                    "weight_lb": s.actual_weight_lb,
+                    "reps": s.actual_reps,
+                    "rating": s.rating,
+                }
+                for s in logged
+            ],
+            "avg_rating": round(avg_rating, 2) if avg_rating is not None else None,
+            "skipped_sets": sum(1 for s in sets if s.skipped),
+            "missed_sets": wex.target_sets - len(logged) - sum(1 for s in sets if s.skipped),
+        })
+
+    # Trailing 4-week comparison: per-exercise avg rating + tonnage by muscle
+    cutoff = workout.date - timedelta(days=28)
+    prior_workouts = (await db.execute(
+        select(models.StrengthWorkout)
+        .where(models.StrengthWorkout.date >= cutoff)
+        .where(models.StrengthWorkout.date < workout.date)
+        .where(models.StrengthWorkout.status == "completed")
+    )).scalars().all()
+    prior_wex_ids: list[int] = []
+    if prior_workouts:
+        prior_wex_rows = (await db.execute(
+            select(models.StrengthWorkoutExercise)
+            .where(models.StrengthWorkoutExercise.workout_id.in_(
+                [w.id for w in prior_workouts]
+            ))
+        )).scalars().all()
+        prior_wex_by_id = {w.id: w for w in prior_wex_rows}
+        prior_wex_ids = list(prior_wex_by_id.keys())
+
+    tonnage_by_muscle: dict[str, float] = {}
+    rating_by_exercise: dict[str, list[float]] = {}
+    if prior_wex_ids:
+        prior_sets = (await db.execute(
+            select(models.StrengthSet)
+            .where(models.StrengthSet.workout_exercise_id.in_(prior_wex_ids))
+            .where(models.StrengthSet.skipped.is_(False))
+        )).scalars().all()
+        for s in prior_sets:
+            wex = prior_wex_by_id.get(s.workout_exercise_id)
+            if wex is None:
+                continue
+            cat = CATALOG_BY_ID.get(wex.exercise_id)
+            primary = cat["primary_muscle"] if cat else "unknown"
+            if s.actual_weight_lb and s.actual_reps:
+                tonnage_by_muscle[primary] = round(
+                    tonnage_by_muscle.get(primary, 0.0)
+                    + s.actual_weight_lb * s.actual_reps, 1,
+                )
+            if s.rating is not None:
+                rating_by_exercise.setdefault(wex.exercise_id, []).append(s.rating)
+
+    avg_rating_by_exercise = {
+        eid: round(sum(rs) / len(rs), 2) for eid, rs in rating_by_exercise.items()
+    }
+
+    return {
+        "today": {
+            "date": str(workout.date),
+            "split": workout.split_focus,
+            "recovery_score": workout.recovery_score_used,
+            "readiness_score": workout.readiness_score_used,
+            "sleep_h": (round(workout.sleep_h_used, 1)
+                        if workout.sleep_h_used is not None else None),
+            "duration_min": (
+                int((workout.completed_at - workout.started_at).total_seconds() / 60)
+                if workout.completed_at and workout.started_at else None
+            ),
+            "exercises": exercises_payload,
+        },
+        "trailing_4w": {
+            "n_workouts": len(prior_workouts),
+            "tonnage_by_muscle_lb": tonnage_by_muscle,
+            "avg_rating_by_exercise": avg_rating_by_exercise,
+        },
+    }
+
+
+async def strength_review(
+    db: AsyncSession, workout_id: int, cfg: models.AiConfig,
+) -> AiResult:
+    """Generate a structured strength review for a completed workout."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    payload = await build_strength_review_payload(db, workout_id)
+    if not payload:
+        raise RuntimeError("workout not found")
+    user_text = (
+        f"Review this completed strength session, comparing it against "
+        f"the trailing 4 weeks of the user's history.\n\n"
+        f"Aggregate data:\n{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=600,
+        system=_cached_system(_strength_review_system(cfg.tone)),
+        tools=[STRENGTH_REVIEW_TOOL],
+        tool_choice={"type": "tool", "name": "give_strength_review"},
+        messages=[{"role": "user", "content": user_text}],
+    )
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use" and block.name == "give_strength_review":
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    if not tool_input:
+        text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+        tool_input = {
+            "headline": "Could not generate structured review",
+            "tone": "neutral",
+            "highlights": ["\n".join(text_parts).strip()[:300]],
+            "concerns": [],
+            "next_session_suggestion": "Try again or check the model picker in Settings.",
+        }
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
 async def phrase_anomaly(cfg: models.AiConfig, anomaly: dict[str, Any]) -> str:
     """Single-sentence push notification body for an anomaly. ~$0.0005/call."""
     if not cfg.enabled or not cfg.anthropic_api_key:

@@ -453,6 +453,148 @@ export const api = {
     return data;
   },
 
+  // ── Strength training ─────────────────────────────────────
+  async strengthEquipment(): Promise<{
+    id: number;
+    payload: import("./types").StrengthEquipment;
+    unit: "lb" | "kg";
+    updated_at: string | null;
+  }> {
+    const { data } = await http.get("/workout/strength/equipment");
+    return data;
+  },
+
+  async putStrengthEquipment(body: {
+    payload: import("./types").StrengthEquipment;
+    unit: "lb" | "kg";
+  }): Promise<unknown> {
+    const { data } = await http.put("/workout/strength/equipment", body);
+    return data;
+  },
+
+  async strengthToday(): Promise<import("./types").StrengthWorkoutDetail | null> {
+    const { data } = await http.get("/workout/strength/today");
+    return data;
+  },
+
+  async regenerateStrengthToday(force = false): Promise<import("./types").StrengthWorkoutDetail> {
+    const { data } = await http.post("/workout/strength/today/regenerate", { force });
+    return data;
+  },
+
+  async strengthRecovery(): Promise<{
+    date: string;
+    recovery_aware: boolean;
+    recovery_score: number | null;
+    readiness_score: number | null;
+    sleep_h: number | null;
+    deload_factor: number;
+    rest_day_recommended: boolean;
+    rest_day_reason: string | null;
+  }> {
+    const { data } = await http.get("/workout/strength/recovery");
+    return data;
+  },
+
+  async strengthExercises(opts: {
+    muscle?: string;
+    movement?: string;
+    equipment?: string;
+    level?: string;
+  } = {}): Promise<{ count: number; exercises: import("./types").StrengthExercise[] }> {
+    const { data } = await http.get("/workout/strength/exercises", { params: opts });
+    return data;
+  },
+
+  async strengthWorkouts(opts: { limit?: number; status?: string } = {}): Promise<{
+    count: number;
+    workouts: Array<{
+      id: number; date: string; split_focus: string; status: string;
+      started_at: string | null; completed_at: string | null; generated_at: string;
+    }>;
+  }> {
+    const { data } = await http.get("/workout/strength/workouts", { params: opts });
+    return data;
+  },
+
+  async strengthWorkout(id: number): Promise<import("./types").StrengthWorkoutDetail> {
+    const { data } = await http.get(`/workout/strength/workouts/${id}`);
+    return data;
+  },
+
+  async createStrengthWorkout(body: {
+    date: string;
+    split_focus: string;
+    seed?: string;
+    notes?: string;
+    exercises?: Array<{
+      exercise_id: string;
+      order_index: number;
+      superset_id?: string | null;
+      target_sets: number;
+      target_reps_low: number;
+      target_reps_high: number;
+      target_weight_lb?: number | null;
+      target_rest_s?: number;
+      notes?: string | null;
+    }>;
+  }): Promise<import("./types").StrengthWorkoutDetail> {
+    const { data } = await http.post("/workout/strength/workouts", body);
+    return data;
+  },
+
+  async patchStrengthWorkout(id: number, body: {
+    status?: "planned" | "in_progress" | "completed" | "skipped";
+    started_at?: string | null;
+    completed_at?: string | null;
+    notes?: string | null;
+  }): Promise<import("./types").StrengthWorkoutDetail> {
+    const { data } = await http.patch(`/workout/strength/workouts/${id}`, body);
+    return data;
+  },
+
+  async deleteStrengthWorkout(id: number): Promise<void> {
+    await http.delete(`/workout/strength/workouts/${id}`);
+  },
+
+  async logStrengthSet(body: {
+    workout_exercise_id: number;
+    set_number: number;
+    target_weight_lb?: number | null;
+    target_reps: number;
+    actual_weight_lb?: number | null;
+    actual_reps?: number | null;
+    rating?: number | null;
+    rest_seconds_taken?: number | null;
+    skipped?: boolean;
+    logged_at?: string;
+  }): Promise<unknown> {
+    const { data } = await http.post("/workout/strength/sets", body);
+    return data;
+  },
+
+  async deleteStrengthSet(id: number): Promise<void> {
+    await http.delete(`/workout/strength/sets/${id}`);
+  },
+
+  async aiStrengthReview(workoutId: number): Promise<{
+    review: {
+      headline: string;
+      tone: "good" | "warn" | "bad" | "neutral";
+      highlights: string[];
+      concerns?: string[];
+      next_session_suggestion: string;
+    };
+    generated_at: string;
+    model: string;
+    cached: boolean;
+    input_tokens: number;
+    output_tokens: number;
+  }> {
+    const { data } = await http.post(`/ai/strength/review/${workoutId}`);
+    return data;
+  },
+
   async importJobs(limit = 20): Promise<{
     id: number; kind: string; filename: string | null; size_bytes: number | null;
     status: string; started_at: string; finished_at: string | null;

@@ -130,3 +130,85 @@ export interface Activity {
   notes?: string | null;
   tags?: string[] | null;
 }
+
+export interface StrengthEquipment {
+  dumbbells: {
+    type: "fixed_pairs" | "adjustable" | "none";
+    pairs_lb: number[];
+    min_lb: number | null;
+    max_lb: number | null;
+    increment_lb: number | null;
+  };
+  wrist_weights_lb: number[];
+  bench: { flat: boolean; incline: boolean; decline: boolean };
+  barbell: boolean;
+  barbell_plates_lb: number[];
+  squat_rack: boolean;
+  pull_up_bar: boolean;
+  cable_stack: boolean;
+  cable_increment_lb: number | null;
+  kettlebells_lb: number[];
+  resistance_bands: boolean;
+  bodyweight: boolean;
+}
+
+export interface StrengthExercise {
+  id: string;
+  name: string;
+  primary_muscle: string;
+  secondary_muscles: string[];
+  equipment: string[];
+  is_compound: boolean;
+  movement_pattern: string;
+  level: string;
+  mechanic: string;
+  instructions: string[];
+  image_front: string | null;
+  image_side: string | null;
+  youtube_query: string;
+}
+
+export interface StrengthSet {
+  id: number;
+  workout_exercise_id: number;
+  set_number: number;
+  target_weight_lb: number | null;
+  target_reps: number;
+  actual_weight_lb: number | null;
+  actual_reps: number | null;
+  rating: number | null;
+  rest_seconds_taken: number | null;
+  logged_at: string | null;
+  skipped: boolean;
+}
+
+export interface StrengthWorkoutExercise {
+  id: number;
+  workout_id: number;
+  exercise_id: string;
+  order_index: number;
+  superset_id: string | null;
+  target_sets: number;
+  target_reps_low: number;
+  target_reps_high: number;
+  target_weight_lb: number | null;
+  target_rest_s: number;
+  notes: string | null;
+  sets: StrengthSet[];
+}
+
+export interface StrengthWorkoutDetail {
+  id: number;
+  date: string;
+  generated_at: string;
+  split_focus: string;
+  status: string;
+  seed: string;
+  recovery_score_used: number | null;
+  readiness_score_used: number | null;
+  sleep_h_used: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  notes: string | null;
+  exercises: StrengthWorkoutExercise[];
+}

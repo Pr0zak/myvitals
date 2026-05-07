@@ -82,14 +82,46 @@ interface LogDao {
     suspend fun clear()
 }
 
+/**
+ * One row per logged strength set that couldn't be POSTed (offline or
+ * backend down). Pushed best-effort by SyncWorker / a manual flush.
+ * Idempotent on (workout_exercise_id, set_number) at the backend.
+ */
+@Entity(tableName = "buffered_strength_sets")
+data class BufferedStrengthSet(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val jsonBody: String,
+    val createdAtEpochS: Long,
+    val attempts: Int = 0,
+)
+
+@Dao
+interface BufferedStrengthSetDao {
+    @Insert
+    suspend fun insert(row: BufferedStrengthSet)
+
+    @Query("SELECT * FROM buffered_strength_sets ORDER BY createdAtEpochS ASC LIMIT 100")
+    suspend fun oldest(): List<BufferedStrengthSet>
+
+    @Query("DELETE FROM buffered_strength_sets WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("UPDATE buffered_strength_sets SET attempts = attempts + 1 WHERE id = :id")
+    suspend fun bumpAttempts(id: Long)
+
+    @Query("SELECT COUNT(*) FROM buffered_strength_sets")
+    suspend fun count(): Int
+}
+
 @Database(
-    entities = [BufferedBatch::class, LogEntry::class],
-    version = 2,
+    entities = [BufferedBatch::class, LogEntry::class, BufferedStrengthSet::class],
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun buffered(): BufferedBatchDao
     abstract fun logs(): LogDao
+    abstract fun bufferedStrengthSets(): BufferedStrengthSetDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null

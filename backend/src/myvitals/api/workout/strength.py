@@ -1,0 +1,684 @@
+"""Strength training — equipment, exercise catalog, workouts, sets.
+
+This module is the data layer (Phase 1). Workout generation, recovery
+integration, and the /workout/strength/today endpoint live in
+analytics/strength.py + Phase 3 of the rollout.
+
+The exercise catalog is a static JSON asset shipped with the backend
+(data/exercises.json, derived from yuhonas/free-exercise-db, public
+domain). It's loaded into memory at module import — single-process
+backend, ~200 entries, no need to involve the DB.
+"""
+from __future__ import annotations
+
+import json
+from datetime import date, datetime, timezone
+from pathlib import Path
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ...analytics import strength as strength_algo
+from ...auth import require_any
+from ...db import models
+from ...db.session import get_session
+
+# Both phone and dashboard hit /workout/strength/* — phone for logging sets,
+# dashboard for plan management and history.
+router = APIRouter(prefix="/workout/strength", dependencies=[Depends(require_any)])
+
+
+# ------------------------------------------------------------------
+# Catalog (in-memory, loaded once at import)
+# ------------------------------------------------------------------
+
+_CATALOG_PATH = (
+    Path(__file__).resolve().parent.parent.parent / "data" / "exercises.json"
+)
+with open(_CATALOG_PATH, encoding="utf-8") as _f:
+    _CATALOG: list[dict[str, Any]] = json.load(_f)
+_CATALOG_BY_ID: dict[str, dict[str, Any]] = {e["id"]: e for e in _CATALOG}
+
+
+# ------------------------------------------------------------------
+# Equipment
+# ------------------------------------------------------------------
+
+class DumbbellSpec(BaseModel):
+    """Either a list of fixed pairs (most home setups) or an adjustable
+    range (PowerBlocks etc). Set type='none' if no dumbbells."""
+    type: Literal["fixed_pairs", "adjustable", "none"] = "none"
+    pairs_lb: list[float] = []
+    min_lb: float | None = None
+    max_lb: float | None = None
+    increment_lb: float | None = None
+
+
+class BenchSpec(BaseModel):
+    flat: bool = False
+    incline: bool = False
+    decline: bool = False
+
+
+class EquipmentPayload(BaseModel):
+    """The shape of user_equipment.payload. Adding new fields here
+    is enough — no migration required (column is JSON)."""
+    dumbbells: DumbbellSpec = Field(default_factory=DumbbellSpec)
+    wrist_weights_lb: list[float] = []
+    bench: BenchSpec = Field(default_factory=BenchSpec)
+    barbell: bool = False
+    barbell_plates_lb: list[float] = []
+    squat_rack: bool = False
+    pull_up_bar: bool = False
+    cable_stack: bool = False
+    cable_increment_lb: float | None = None
+    kettlebells_lb: list[float] = []
+    resistance_bands: bool = False
+    bodyweight: bool = True
+
+
+class EquipmentIn(BaseModel):
+    payload: EquipmentPayload
+    unit: Literal["lb", "kg"] = "lb"
+
+
+class EquipmentOut(BaseModel):
+    id: int
+    payload: EquipmentPayload
+    unit: str
+    updated_at: datetime | None
+
+
+# Default equipment used the first time the user hits GET /workout/strength/equipment
+# without a row in the table — bodyweight only, prompts them to fill it in.
+_DEFAULT_EQUIPMENT = EquipmentPayload(bodyweight=True)
+
+
+@router.get("/equipment", response_model=EquipmentOut)
+async def get_equipment(db: AsyncSession = Depends(get_session)) -> EquipmentOut:
+    row = await db.get(models.UserEquipment, 1)
+    if row is None:
+        return EquipmentOut(
+            id=1,
+            payload=_DEFAULT_EQUIPMENT,
+            unit="lb",
+            updated_at=None,
+        )
+    return EquipmentOut(
+        id=row.id,
+        payload=EquipmentPayload(**row.payload),
+        unit=row.unit,
+        updated_at=row.updated_at,
+    )
+
+
+@router.put("/equipment", response_model=EquipmentOut)
+async def put_equipment(
+    body: EquipmentIn,
+    db: AsyncSession = Depends(get_session),
+) -> EquipmentOut:
+    now = datetime.now(timezone.utc)
+    row = await db.get(models.UserEquipment, 1)
+    if row is None:
+        row = models.UserEquipment(
+            id=1,
+            payload=body.payload.model_dump(),
+            unit=body.unit,
+            updated_at=now,
+        )
+        db.add(row)
+    else:
+        row.payload = body.payload.model_dump()
+        row.unit = body.unit
+        row.updated_at = now
+    await db.commit()
+    await db.refresh(row)
+    return EquipmentOut(
+        id=row.id,
+        payload=EquipmentPayload(**row.payload),
+        unit=row.unit,
+        updated_at=row.updated_at,
+    )
+
+
+# ------------------------------------------------------------------
+# Catalog
+# ------------------------------------------------------------------
+
+@router.get("/exercises")
+async def list_exercises(
+    muscle: str | None = None,
+    movement: str | None = None,
+    equipment: str | None = None,
+    level: str | None = None,
+) -> dict[str, Any]:
+    """Full catalog (filtered to the user's available equipment is the
+    job of the workout generator, not this endpoint — this is the raw
+    list, ~200 entries, ~250 KB)."""
+    rows = _CATALOG
+    if muscle:
+        rows = [
+            e for e in rows
+            if e["primary_muscle"] == muscle or muscle in e["secondary_muscles"]
+        ]
+    if movement:
+        rows = [e for e in rows if e["movement_pattern"] == movement]
+    if equipment:
+        rows = [e for e in rows if equipment in e["equipment"]]
+    if level:
+        rows = [e for e in rows if e["level"] == level]
+    return {"count": len(rows), "exercises": rows}
+
+
+@router.get("/exercises/{exercise_id}")
+async def get_exercise(exercise_id: str) -> dict[str, Any]:
+    row = _CATALOG_BY_ID.get(exercise_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="exercise not found")
+    return row
+
+
+# ------------------------------------------------------------------
+# Workouts (history + manual creation; generation is Phase 3)
+# ------------------------------------------------------------------
+
+class SetIn(BaseModel):
+    """When the phone POSTs a logged set."""
+    workout_exercise_id: int
+    set_number: int
+    target_weight_lb: float | None = None
+    target_reps: int
+    actual_weight_lb: float | None = None
+    actual_reps: int | None = None
+    rating: int | None = None  # 1..5
+    rest_seconds_taken: int | None = None
+    skipped: bool = False
+    logged_at: datetime | None = None
+
+
+class SetOut(BaseModel):
+    id: int
+    workout_exercise_id: int
+    set_number: int
+    target_weight_lb: float | None
+    target_reps: int
+    actual_weight_lb: float | None
+    actual_reps: int | None
+    rating: int | None
+    rest_seconds_taken: int | None
+    logged_at: datetime | None
+    skipped: bool
+
+
+class WorkoutExerciseIn(BaseModel):
+    exercise_id: str
+    order_index: int
+    superset_id: str | None = None
+    target_sets: int
+    target_reps_low: int
+    target_reps_high: int
+    target_weight_lb: float | None = None
+    target_rest_s: int = 90
+    notes: str | None = None
+
+
+class WorkoutExerciseOut(BaseModel):
+    id: int
+    workout_id: int
+    exercise_id: str
+    order_index: int
+    superset_id: str | None
+    target_sets: int
+    target_reps_low: int
+    target_reps_high: int
+    target_weight_lb: float | None
+    target_rest_s: int
+    notes: str | None
+    sets: list[SetOut] = []
+
+
+class WorkoutIn(BaseModel):
+    """Manual workout creation (rarely used in v1 — the generator is the
+    primary creator). Useful for tests + ad-hoc 'log this session I just
+    did' from the dashboard."""
+    date: date
+    split_focus: str
+    seed: str | None = None
+    exercises: list[WorkoutExerciseIn] = []
+    notes: str | None = None
+
+
+class WorkoutOut(BaseModel):
+    id: int
+    date: date
+    generated_at: datetime
+    split_focus: str
+    status: str
+    seed: str
+    recovery_score_used: float | None
+    readiness_score_used: float | None
+    sleep_h_used: float | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    notes: str | None
+    exercises: list[WorkoutExerciseOut] = []
+
+
+class WorkoutPatch(BaseModel):
+    status: Literal["planned", "in_progress", "completed", "skipped"] | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    notes: str | None = None
+
+
+def _set_to_out(s: models.StrengthSet) -> SetOut:
+    return SetOut(
+        id=s.id,
+        workout_exercise_id=s.workout_exercise_id,
+        set_number=s.set_number,
+        target_weight_lb=s.target_weight_lb,
+        target_reps=s.target_reps,
+        actual_weight_lb=s.actual_weight_lb,
+        actual_reps=s.actual_reps,
+        rating=s.rating,
+        rest_seconds_taken=s.rest_seconds_taken,
+        logged_at=s.logged_at,
+        skipped=s.skipped,
+    )
+
+
+def _wex_to_out(
+    wex: models.StrengthWorkoutExercise, sets: list[models.StrengthSet]
+) -> WorkoutExerciseOut:
+    return WorkoutExerciseOut(
+        id=wex.id,
+        workout_id=wex.workout_id,
+        exercise_id=wex.exercise_id,
+        order_index=wex.order_index,
+        superset_id=wex.superset_id,
+        target_sets=wex.target_sets,
+        target_reps_low=wex.target_reps_low,
+        target_reps_high=wex.target_reps_high,
+        target_weight_lb=wex.target_weight_lb,
+        target_rest_s=wex.target_rest_s,
+        notes=wex.notes,
+        sets=[_set_to_out(s) for s in sorted(sets, key=lambda x: x.set_number)],
+    )
+
+
+async def _hydrate_workout(
+    db: AsyncSession, w: models.StrengthWorkout
+) -> WorkoutOut:
+    """Load exercises + sets for a workout in two queries and assemble."""
+    wex_rows = (await db.execute(
+        select(models.StrengthWorkoutExercise)
+        .where(models.StrengthWorkoutExercise.workout_id == w.id)
+        .order_by(models.StrengthWorkoutExercise.order_index)
+    )).scalars().all()
+    wex_ids = [w.id for w in wex_rows]
+    sets_rows: list[models.StrengthSet] = []
+    if wex_ids:
+        sets_rows = (await db.execute(
+            select(models.StrengthSet)
+            .where(models.StrengthSet.workout_exercise_id.in_(wex_ids))
+        )).scalars().all()
+    sets_by_wex: dict[int, list[models.StrengthSet]] = {}
+    for s in sets_rows:
+        sets_by_wex.setdefault(s.workout_exercise_id, []).append(s)
+    return WorkoutOut(
+        id=w.id,
+        date=w.date,
+        generated_at=w.generated_at,
+        split_focus=w.split_focus,
+        status=w.status,
+        seed=w.seed,
+        recovery_score_used=w.recovery_score_used,
+        readiness_score_used=w.readiness_score_used,
+        sleep_h_used=w.sleep_h_used,
+        started_at=w.started_at,
+        completed_at=w.completed_at,
+        notes=w.notes,
+        exercises=[
+            _wex_to_out(wex, sets_by_wex.get(wex.id, [])) for wex in wex_rows
+        ],
+    )
+
+
+@router.get("/workouts")
+async def list_workouts(
+    limit: int = 100,
+    status: str | None = None,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Workout history, newest first. Excludes 'regenerated' rows
+    (internal regen-count bookkeeping). No exercise/set hydration —
+    use GET /workouts/{id} for the full detail."""
+    stmt = select(models.StrengthWorkout).order_by(
+        models.StrengthWorkout.date.desc(),
+        models.StrengthWorkout.generated_at.desc(),
+    ).limit(limit)
+    if status is not None:
+        stmt = stmt.where(models.StrengthWorkout.status == status)
+    else:
+        stmt = stmt.where(models.StrengthWorkout.status != "regenerated")
+    rows = (await db.execute(stmt)).scalars().all()
+    return {
+        "count": len(rows),
+        "workouts": [
+            {
+                "id": w.id,
+                "date": w.date.isoformat(),
+                "split_focus": w.split_focus,
+                "status": w.status,
+                "started_at": w.started_at,
+                "completed_at": w.completed_at,
+                "generated_at": w.generated_at,
+            }
+            for w in rows
+        ],
+    }
+
+
+@router.get("/workouts/{workout_id}", response_model=WorkoutOut)
+async def get_workout(
+    workout_id: int, db: AsyncSession = Depends(get_session)
+) -> WorkoutOut:
+    w = await db.get(models.StrengthWorkout, workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="workout not found")
+    return await _hydrate_workout(db, w)
+
+
+@router.post("/workouts", response_model=WorkoutOut, status_code=201)
+async def create_workout(
+    body: WorkoutIn,
+    db: AsyncSession = Depends(get_session),
+) -> WorkoutOut:
+    """Create a workout manually (mainly for tests + ad-hoc 'I did this
+    session, log it'). The generator in Phase 3 also writes through this
+    table directly, not via this endpoint."""
+    # Validate every exercise_id is in the catalog
+    bad = [e.exercise_id for e in body.exercises if e.exercise_id not in _CATALOG_BY_ID]
+    if bad:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown exercise ids: {bad}",
+        )
+    now = datetime.now(timezone.utc)
+    w = models.StrengthWorkout(
+        date=body.date,
+        generated_at=now,
+        split_focus=body.split_focus,
+        status="planned",
+        seed=body.seed or body.date.isoformat(),
+        notes=body.notes,
+    )
+    db.add(w)
+    await db.flush()  # need w.id before children
+
+    for ex in body.exercises:
+        db.add(models.StrengthWorkoutExercise(
+            workout_id=w.id,
+            exercise_id=ex.exercise_id,
+            order_index=ex.order_index,
+            superset_id=ex.superset_id,
+            target_sets=ex.target_sets,
+            target_reps_low=ex.target_reps_low,
+            target_reps_high=ex.target_reps_high,
+            target_weight_lb=ex.target_weight_lb,
+            target_rest_s=ex.target_rest_s,
+            notes=ex.notes,
+        ))
+    await db.commit()
+    await db.refresh(w)
+    return await _hydrate_workout(db, w)
+
+
+@router.patch("/workouts/{workout_id}", response_model=WorkoutOut)
+async def patch_workout(
+    workout_id: int,
+    body: WorkoutPatch,
+    db: AsyncSession = Depends(get_session),
+) -> WorkoutOut:
+    w = await db.get(models.StrengthWorkout, workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="workout not found")
+    data = body.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(w, field, value)
+    await db.commit()
+    await db.refresh(w)
+    return await _hydrate_workout(db, w)
+
+
+@router.delete("/workouts/{workout_id}", status_code=204)
+async def delete_workout(
+    workout_id: int, db: AsyncSession = Depends(get_session)
+) -> None:
+    w = await db.get(models.StrengthWorkout, workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="workout not found")
+    # Cascade by hand — we don't model FKs in the schema (matches house style).
+    wex_ids = (await db.execute(
+        select(models.StrengthWorkoutExercise.id)
+        .where(models.StrengthWorkoutExercise.workout_id == workout_id)
+    )).scalars().all()
+    if wex_ids:
+        await db.execute(
+            delete(models.StrengthSet)
+            .where(models.StrengthSet.workout_exercise_id.in_(wex_ids))
+        )
+    await db.execute(
+        delete(models.StrengthWorkoutExercise)
+        .where(models.StrengthWorkoutExercise.workout_id == workout_id)
+    )
+    await db.delete(w)
+    await db.commit()
+
+
+# ------------------------------------------------------------------
+# Sets — POST one-at-a-time from the phone during the active workout
+# ------------------------------------------------------------------
+
+@router.post("/sets", response_model=SetOut, status_code=201)
+async def log_set(
+    body: SetIn,
+    db: AsyncSession = Depends(get_session),
+) -> SetOut:
+    """Idempotent on (workout_exercise_id, set_number). Re-POSTing the
+    same set updates the row in place — useful when the phone retries
+    after a flaky network."""
+    if body.rating is not None and not (1 <= body.rating <= 5):
+        raise HTTPException(status_code=400, detail="rating must be 1..5")
+    wex = await db.get(models.StrengthWorkoutExercise, body.workout_exercise_id)
+    if wex is None:
+        raise HTTPException(status_code=404, detail="workout_exercise not found")
+
+    existing = (await db.execute(
+        select(models.StrengthSet)
+        .where(models.StrengthSet.workout_exercise_id == body.workout_exercise_id)
+        .where(models.StrengthSet.set_number == body.set_number)
+        .limit(1)
+    )).scalar_one_or_none()
+
+    logged_at = body.logged_at or datetime.now(timezone.utc)
+    if existing is None:
+        s = models.StrengthSet(
+            workout_exercise_id=body.workout_exercise_id,
+            set_number=body.set_number,
+            target_weight_lb=body.target_weight_lb,
+            target_reps=body.target_reps,
+            actual_weight_lb=body.actual_weight_lb,
+            actual_reps=body.actual_reps,
+            rating=body.rating,
+            rest_seconds_taken=body.rest_seconds_taken,
+            logged_at=logged_at,
+            skipped=body.skipped,
+        )
+        db.add(s)
+    else:
+        s = existing
+        s.target_weight_lb = body.target_weight_lb
+        s.target_reps = body.target_reps
+        s.actual_weight_lb = body.actual_weight_lb
+        s.actual_reps = body.actual_reps
+        s.rating = body.rating
+        s.rest_seconds_taken = body.rest_seconds_taken
+        s.logged_at = logged_at
+        s.skipped = body.skipped
+
+    # Auto-advance the parent workout to in_progress on the first logged set
+    workout = await db.get(models.StrengthWorkout, wex.workout_id)
+    if workout is not None and workout.status == "planned":
+        workout.status = "in_progress"
+        if workout.started_at is None:
+            workout.started_at = logged_at
+
+    await db.commit()
+    await db.refresh(s)
+    return _set_to_out(s)
+
+
+@router.delete("/sets/{set_id}", status_code=204)
+async def delete_set(
+    set_id: int, db: AsyncSession = Depends(get_session)
+) -> None:
+    s = await db.get(models.StrengthSet, set_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail="set not found")
+    await db.delete(s)
+    await db.commit()
+
+
+# ------------------------------------------------------------------
+# Today's plan — generates if missing, returns existing otherwise
+# ------------------------------------------------------------------
+
+async def _equipment_payload(db: AsyncSession) -> dict[str, Any]:
+    row = await db.get(models.UserEquipment, 1)
+    if row is None:
+        return EquipmentPayload().model_dump()
+    return row.payload
+
+
+async def _existing_workout_for(
+    db: AsyncSession, target_date: date
+) -> models.StrengthWorkout | None:
+    """The most recent live workout for that date. Excludes 'regenerated'
+    rows (those are kept around only to bump the regen seed counter)."""
+    return (await db.execute(
+        select(models.StrengthWorkout)
+        .where(models.StrengthWorkout.date == target_date)
+        .where(models.StrengthWorkout.status != "regenerated")
+        .order_by(models.StrengthWorkout.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+
+@router.get("/today", response_model=WorkoutOut | None)
+async def get_today(
+    db: AsyncSession = Depends(get_session),
+) -> WorkoutOut | None:
+    """Today's planned workout. Generates a new one if none exists yet.
+
+    If a workout already exists for today (planned, in_progress, or
+    completed), returns it as-is — the caller uses POST /today/regenerate
+    to bump the seed and rebuild.
+    """
+    today = datetime.now(timezone.utc).date()
+    existing = await _existing_workout_for(db, today)
+    if existing is not None:
+        return await _hydrate_workout(db, existing)
+
+    equipment = await _equipment_payload(db)
+    profile = await db.get(models.UserProfile, 1)
+    plan = await strength_algo.generate_plan(db, today, equipment, profile)
+    if plan.rest_day_recommended:
+        # Don't persist a "rest" row — the absence of a planned workout
+        # plus the rest_day flag in the response tells the UI to render
+        # a rest-day card. Re-call regenerates if the user wants to push.
+        return None
+    workout = await strength_algo.persist_plan(db, plan, today)
+    return await _hydrate_workout(db, workout)
+
+
+class RegenerateBody(BaseModel):
+    force: bool = False  # bypass rest-day recommendation
+
+
+@router.post("/today/regenerate", response_model=WorkoutOut)
+async def regenerate_today(
+    body: RegenerateBody = RegenerateBody(),
+    db: AsyncSession = Depends(get_session),
+) -> WorkoutOut:
+    """Bump the seed and rebuild today's plan.
+
+    Refuses if a workout for today is already in_progress or completed
+    (don't blow away mid-session work). Pass force=true to override the
+    rest-day recommendation.
+    """
+    today = datetime.now(timezone.utc).date()
+    existing = await _existing_workout_for(db, today)
+    if existing is not None and existing.status in ("in_progress", "completed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"workout for {today} is already {existing.status}; "
+                   f"won't overwrite",
+        )
+
+    # Count prior plans for today → use as regen seed
+    regen = (await db.execute(
+        select(models.StrengthWorkout)
+        .where(models.StrengthWorkout.date == today)
+    )).scalars().all()
+    regen_count = len(regen)
+
+    equipment = await _equipment_payload(db)
+    profile = await db.get(models.UserProfile, 1)
+    plan = await strength_algo.generate_plan(
+        db, today, equipment, profile, regen_count=regen_count,
+        force_no_rest=body.force,
+    )
+
+    if plan.rest_day_recommended and not body.force:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "rest_day_recommended": True,
+                "reason": plan.rest_day_reason,
+                "notes": plan.notes,
+                "hint": "POST again with {'force': true} to generate anyway.",
+            },
+        )
+
+    workout = await strength_algo.persist_plan(db, plan, today)
+    return await _hydrate_workout(db, workout)
+
+
+@router.get("/recovery")
+async def get_recovery(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Today's per-day recovery context (the inputs the planner reads).
+
+    Useful for the UI to show "you're at recovery 42, that's why today's
+    targets are 8% lighter than last week" without the user having to
+    cross-reference daily_summary."""
+    today = datetime.now(timezone.utc).date()
+    profile = await db.get(models.UserProfile, 1)
+    aware = profile is None or profile.strength_recovery_aware
+    inputs = await strength_algo.read_recovery_inputs(db, today)
+    blocked, reason = inputs.is_blocking()
+    return {
+        "date": today.isoformat(),
+        "recovery_aware": aware,
+        "recovery_score": inputs.recovery_score,
+        "readiness_score": inputs.readiness_score,
+        "sleep_h": inputs.sleep_h,
+        "deload_factor": inputs.deload_factor() if aware else 1.0,
+        "rest_day_recommended": blocked,
+        "rest_day_reason": reason,
+    }

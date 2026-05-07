@@ -117,9 +117,18 @@ When adding a new AI surface:
 backend/                    FastAPI ingest + analytics + alembic
   src/myvitals/api/         ingest, query, summary, analytics, ai,
                             sober, profile, strava, exports, ...
+  src/myvitals/api/workout/ strength.py — generated workouts, sets,
+                            equipment, exercise catalog
+  src/myvitals/data/        bundled exercise catalog
+                            (free-exercise-db, public domain) +
+                            ~24 MB of exercise JPGs served via
+                            StaticFiles at /exercises/img/
   src/myvitals/integrations/  claude.py, strava.py, home_assistant.py
-  src/myvitals/analytics/   sleep.py, advanced.py, trends.py
-  alembic/versions/         migrations (current head: 0020)
+  src/myvitals/analytics/   sleep.py, advanced.py, trends.py,
+                            strength.py — split selector, recovery-
+                            aware adjustment, micro-loader-aware
+                            weight rounder, deterministic generator
+  alembic/versions/         migrations (current head: 0022)
 frontend/                   Vue 3 + Vite + ECharts dashboard
   src/views/                Today, Insights, Trends, Sober, Goals, ...
   src/components/           SideNav, TrendBadges, AppLogo, ...
@@ -128,6 +137,11 @@ frontend/                   Vue 3 + Vite + ECharts dashboard
 android/                    Kotlin / Compose companion app
   app/src/main/kotlin/app/myvitals/
     ui/                     SoberHomeScreen, SettingsScreen, BrandMark
+    ui/strength/            StrengthTodayScreen (preview + active
+                            workout + set logging + rest timer),
+                            StrengthHistoryScreen
+    strength/               StrengthRepository (API + offline buffer),
+                            StrengthPlanCache (encrypted-prefs cache)
     sync/                   SyncWorker, BackendClient, Models
     health/                 HealthConnectGateway, DataMapper
     update/                 UpdateChecker, Notifier (notif. channel)
@@ -140,10 +154,41 @@ TODO.md                     deferred work (incl. batch 3 phone alerts)
 
 ## Versioning convention
 
-Tags are `vMAJOR.MINOR.PATCH`. The current line is `v0.5.x`. Every
+Tags are `vMAJOR.MINOR.PATCH`. The current line is `v0.6.x` (jumped
+from `0.5.x` for the strength-training feature in v0.6.0). Every
 release tag triggers the Android release CI; backend changes are
 deployed manually via the rebuild flow above. Bump
 `backend/pyproject.toml` for every tag.
+
+## Strength training (v0.6.0+)
+
+A Fitbod-style generated workout per day, filtered to the user's
+actual home-gym equipment. The whole feature lives under the
+`/workout/strength/*` API namespace and a `Workout` SideNav group
+on the dashboard.
+
+- **Generation runs server-side** so phone + dashboard render the
+  same plan. Algorithm: `analytics/strength.py:generate_plan()`.
+- **Equipment shape** is JSON in `user_equipment.payload`; adding a
+  field doesn't need a migration. The Pydantic `EquipmentPayload`
+  in `api/workout/strength.py` is the source of truth.
+- **Recovery integration** is opt-in (`user_profile.strength_recovery_aware`).
+  When on, the planner reads `daily_summary.recovery_score`,
+  `sleep_duration_s`, `readiness_score` for today and applies a
+  deload factor (or recommends a rest day below thresholds).
+- **Micro-loader-aware weight rounder** — distinguishing feature.
+  Bridges the gap between dumbbell pairs using sub-5lb wrist
+  weights so prescriptions hit ~0.5lb resolution. No other strength
+  app I checked (Fitbod, Hevy, Strong, JEFIT) does this. Tested in
+  `backend/tests/test_strength_rounder.py`.
+- **Catalog**: `data/exercises.json` from yuhonas/free-exercise-db
+  (Unlicense / public domain), ~200 exercises filtered to
+  `{dumbbell, bench, bodyweight}`. Images served via FastAPI
+  `StaticFiles` at `/exercises/img/<slug>/{0,1}.jpg`.
+- **AI workout review** — `POST /ai/strength/review/{id}` returns a
+  structured 4-field card (headline, highlights, concerns,
+  next-session suggestion) for a completed session. Cached by
+  `ai_summaries.payload_hash` like other AI surfaces.
 
 ## Documentation map
 

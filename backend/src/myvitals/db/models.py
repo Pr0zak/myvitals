@@ -205,6 +205,9 @@ class UserProfile(Base):
     resting_hr_baseline: Mapped[float | None] = mapped_column(Float, nullable=True)
     activity_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     sleep_target_h: Mapped[float | None] = mapped_column(Float, nullable=True, default=8)
+    # When true, the strength workout generator reads recovery_score / sleep /
+    # readiness from daily_summary and adjusts intensity accordingly.
+    strength_recovery_aware: Mapped[bool] = mapped_column(Boolean, default=True)
     # Free-form JSON for conditions / medications / notes
     extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -316,7 +319,7 @@ class AiSummary(Base):
     __tablename__ = "ai_summaries"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    range_kind: Mapped[str] = mapped_column(String(16))   # 'week' | 'month'
+    range_kind: Mapped[str] = mapped_column(String(64))   # 'week' | 'month' | 'strength_review:<id>'
     payload_hash: Mapped[str] = mapped_column(String(64))
     model: Mapped[str] = mapped_column(String(64))
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -333,6 +336,81 @@ class SoberStreak(Base):
     start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class UserEquipment(Base):
+    """Single-row table (id=1) holding the user's available gear.
+
+    Payload is free-form JSON so adding new equipment categories
+    (kettlebells, bands, barbell + plates, ...) doesn't need a
+    migration. Pydantic in api/workout/strength.py is the source of truth
+    for the shape — see EquipmentPayload."""
+    __tablename__ = "user_equipment"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    payload: Mapped[dict] = mapped_column(JSON)
+    unit: Mapped[str] = mapped_column(String(4), default="lb")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class StrengthWorkout(Base):
+    """One row per scheduled / in-progress / completed strength session.
+
+    `seed` is the deterministic-generation seed (date string by default,
+    bumped by the regenerate button). `recovery_score_used` etc. capture
+    the daily_summary inputs at generation time so we can audit *why*
+    the algorithm picked a given plan."""
+    __tablename__ = "strength_workouts"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    split_focus: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), default="planned")
+    seed: Mapped[str] = mapped_column(String(64))
+    recovery_score_used: Mapped[float | None] = mapped_column(Float, nullable=True)
+    readiness_score_used: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sleep_h_used: Mapped[float | None] = mapped_column(Float, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class StrengthWorkoutExercise(Base):
+    """An exercise slot within a strength workout. exercise_id is the
+    slug from the bundled catalog (data/exercises.json) — not a foreign
+    key, since the catalog is a static asset, not a DB table.
+
+    `superset_id` groups two or more exercises performed back-to-back
+    in the isolation block (e.g. biceps curl + triceps extension)."""
+    __tablename__ = "strength_workout_exercises"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workout_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    exercise_id: Mapped[str] = mapped_column(String(128))
+    order_index: Mapped[int] = mapped_column(Integer)
+    superset_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    target_sets: Mapped[int] = mapped_column(Integer)
+    target_reps_low: Mapped[int] = mapped_column(Integer)
+    target_reps_high: Mapped[int] = mapped_column(Integer)
+    target_weight_lb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_rest_s: Mapped[int] = mapped_column(Integer, default=90)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class StrengthSet(Base):
+    """One logged set. `target_*` is what the generator prescribed,
+    `actual_*` is what the user did, `rating` is 1=Failed .. 5=Easy
+    and drives the next-session weight selection."""
+    __tablename__ = "strength_sets"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workout_exercise_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    set_number: Mapped[int] = mapped_column(Integer)
+    target_weight_lb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_reps: Mapped[int] = mapped_column(Integer)
+    actual_weight_lb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    actual_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rest_seconds_taken: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    logged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    skipped: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class SyncHeartbeat(Base):

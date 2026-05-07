@@ -47,9 +47,26 @@ Backend already produces structured alerts (`/ai/alerts`) via the
 
 ## Other deferred features
 
-- [ ] **Fitbod / strength importer** — get per-set workout data into
-      `strength_sets` (or fold into activities with type=strength).
-      See chat history for API-scrape vs CSV-export options.
+- [x] **Fitbod / strength importer** — done in v0.6.0 as a generator,
+      not an importer. `strength_workouts` + `strength_sets` populated
+      via the on-device logging UI; no third-party dependency.
+- [ ] **Strength v2 — catalog supplement** — add ~25 named exercises
+      Fitbod has that free-exercise-db doesn't (Incline Row, Kroc Row,
+      Bird Dog Row, Renegade Row, Tate Press, Single-Arm Floor Press,
+      B-Stance RDL, DB Hip Thrust, Cuban Rotation, Zottman Preacher,
+      Cross-Body Hammer, Plank Pull-Through, Pike / Archer / Hindu
+      push-ups, etc.) as a supplementary JSON merged at catalog load.
+- [ ] **Strength v2 — training preferences UI** — Settings →
+      Strength equipment currently hard-codes level/days-per-week/
+      split-preference defaults. Add a Training tab to edit these,
+      stored alongside equipment in `user_equipment.payload.training`.
+- [ ] **Strength v2 — exercise swap** — "swap this for another"
+      button on the active-workout screen (filtered to same primary
+      muscle + matching equipment).
+- [ ] **Trail-status integration** — pull rainoutline.com trail
+      open/close list into the web Activities + phone app. Per-trail
+      alert subscriptions on status change. Discovery phase first
+      (scraping vs API).
 - [ ] **iOS app** — currently Android-only. Same Health Connect
       analogue would be HealthKit on iOS.
 - [ ] **Multi-user** — single-user assumed throughout; no user_id

@@ -6,9 +6,12 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
+import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.Path
 import java.util.concurrent.TimeUnit
 
 interface BackendApi {
@@ -23,6 +26,36 @@ interface BackendApi {
 
     @POST("sober/reset")
     suspend fun soberReset(@Body body: SoberResetRequest): SoberResetResponse
+
+    // ── Strength training ─────────────────────────────────────
+    @GET("workout/strength/today")
+    suspend fun strengthToday(): Response<StrengthWorkoutDetail>
+
+    @POST("workout/strength/today/regenerate")
+    suspend fun regenerateStrengthToday(@Body body: RegenerateRequest): StrengthWorkoutDetail
+
+    @GET("workout/strength/recovery")
+    suspend fun strengthRecovery(): StrengthRecoveryResponse
+
+    @GET("workout/strength/exercises")
+    suspend fun strengthExercises(): StrengthExercisesResponse
+
+    @GET("workout/strength/workouts")
+    suspend fun strengthWorkouts(): StrengthWorkoutsResponse
+
+    @GET("workout/strength/workouts/{id}")
+    suspend fun strengthWorkout(@Path("id") id: Long): StrengthWorkoutDetail
+
+    @PATCH("workout/strength/workouts/{id}")
+    suspend fun patchStrengthWorkout(
+        @Path("id") id: Long, @Body body: WorkoutPatchRequest,
+    ): StrengthWorkoutDetail
+
+    @POST("workout/strength/sets")
+    suspend fun logStrengthSet(@Body body: LogSetRequest): StrengthSetRow
+
+    @POST("ai/strength/review/{id}")
+    suspend fun strengthReview(@Path("id") id: Long): StrengthReviewResponse
 }
 
 object BackendClient {

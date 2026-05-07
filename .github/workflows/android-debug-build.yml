@@ -1,0 +1,57 @@
+name: android debug build
+
+# Compile-check the Android app on every push (no release / signing).
+# Triggered on every push so we catch Compose / Kotlin errors before
+# tagging a v* release.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "android/**"
+      - ".github/workflows/android-debug-build.yml"
+  pull_request:
+    paths:
+      - "android/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Compile-check (assembleDebug)
+        working-directory: android
+        env:
+          BUILD_VERSION_NAME: 0.0.0-ci
+          BUILD_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          if [ -f ./gradlew ]; then
+            ./gradlew :app:assembleDebug --no-daemon --warning-mode=summary
+          else
+            gradle :app:assembleDebug --no-daemon --warning-mode=summary
+          fi
+
+      - name: Surface APK metadata
+        if: success()
+        run: |
+          APK=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -n1)
+          if [ -n "$APK" ]; then
+            ls -lh "$APK"
+            echo "Debug APK built successfully — Kotlin + Compose compile clean."
+          fi

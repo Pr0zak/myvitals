@@ -16,7 +16,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import {
   Activity, AlertTriangle, BarChart3, Bed, Calendar, ChevronDown,
-  ChevronRight, Droplets, Edit3, Footprints, Github, GitCompare,
+  ChevronRight, Droplets, Dumbbell, Edit3, Footprints, Github, GitCompare,
   Heart, Home, List, Map, Menu, RotateCcw, Scale, Search, Settings, Sparkles,
   Target, Terminal, Thermometer, TrendingUp, type LucideIcon,
 } from "lucide-vue-next";
@@ -198,6 +198,13 @@ const groups = computed<Group[]>(() => {
         { to: "/activities/map",     icon: Map,         label: "Map",      sub: distStr },
         { to: "/activities/compare", icon: GitCompare,  label: "Compare" },
         { to: "/calendar",           icon: Calendar,    label: "Calendar" },
+      ],
+    },
+    {
+      id: "workout", icon: Dumbbell, label: "Workout", children: [
+        { to: "/workout/strength/today",     icon: Home,     label: "Strength today" },
+        { to: "/workout/strength/history",   icon: List,     label: "Strength history" },
+        { to: "/workout/strength/equipment", icon: Settings, label: "Strength equipment" },
       ],
     },
     {

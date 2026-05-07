@@ -150,6 +150,7 @@ class MainActivity : ComponentActivity() {
                             SoberHomeScreen(
                                 settings = settings,
                                 onOpenSettings = { nav.navigateTab(Routes.SETTINGS) },
+                                onBack = { nav.popBackStack() },
                             )
                         }
                         composable(Routes.WORKOUT) {

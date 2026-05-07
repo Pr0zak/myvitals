@@ -1,6 +1,8 @@
 package app.myvitals.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -65,6 +67,7 @@ private const val HOLD_DURATION_MS = 1500L
 fun SoberHomeScreen(
     settings: SettingsRepository,
     onOpenSettings: () -> Unit,
+    onBack: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
 
@@ -167,13 +170,23 @@ fun SoberHomeScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                "myvitals",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.4.sp,
-                color = MV.OnSurfaceVariant,
-            )
+            if (onBack != null) {
+                androidx.compose.material3.IconButton(onClick = onBack) {
+                    androidx.compose.material3.Icon(
+                        Icons.AutoMirrored.Outlined.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MV.OnSurface,
+                    )
+                }
+            } else {
+                Text(
+                    "myvitals",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.4.sp,
+                    color = MV.OnSurfaceVariant,
+                )
+            }
             PagerDots(active = 0)
             Spacer(Modifier.width(48.dp))
         }

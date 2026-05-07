@@ -312,6 +312,34 @@ class TrailLocationBody(BaseModel):
     state: str | None = None
 
 
+@router.get("/resolve-link")
+async def resolve_link(url: str) -> dict[str, str]:
+    """Server-side HEAD-redirect resolver. Browsers can't follow
+    cross-origin redirects on goo.gl / maps.app.goo.gl (CORS strips
+    the Location header), so the frontend posts the short URL here
+    and we return the expanded form.
+
+    Restricted to known short-link hosts to avoid being a generic
+    SSRF vector."""
+    import httpx
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = (parsed.netloc or "").lower()
+    if host not in {
+        "maps.app.goo.gl", "goo.gl", "g.co", "g.page",
+        "www.google.com", "google.com",
+    }:
+        raise HTTPException(status_code=400, detail=f"host not allowed: {host}")
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as c:
+        try:
+            r = await c.head(url)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"fetch failed: {e}") from e
+    return {"resolved_url": str(r.url)}
+
+
 @router.put("/{trail_id}/location")
 async def put_trail_location(
     trail_id: int, body: TrailLocationBody,

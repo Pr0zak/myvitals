@@ -225,13 +225,12 @@ function parseMapsCoords(input: string): { lat: number; lon: number } | null {
 }
 
 async function expandShortLink(short: string): Promise<string | null> {
-  // maps.app.goo.gl short links 302 to the full URL. Browsers follow
-  // automatically when fetched with `redirect: "follow"` (default), but
-  // we can't read the resolved URL from a no-CORS response. Try a HEAD
-  // first; if blocked, fail gracefully and tell the user to expand it.
+  // maps.app.goo.gl 302s but Google strips Access-Control-Allow-Origin,
+  // so a client-side fetch can't read the redirect target. Round-trip
+  // through the backend, which follows the redirect server-side.
   try {
-    const r = await fetch(short, { method: "HEAD", redirect: "follow" });
-    return r.url || null;
+    const { resolved_url } = await api.resolveTrailLink(short);
+    return resolved_url || null;
   } catch {
     return null;
   }

@@ -671,6 +671,11 @@ export const api = {
 
   async ackTrailAlert(id: number) { await http.post(`/trails/alerts/${id}/ack`); },
 
+  async resolveTrailLink(url: string): Promise<{ resolved_url: string }> {
+    const { data } = await http.get("/trails/resolve-link", { params: { url } });
+    return data;
+  },
+
   async editTrailLocation(id: number, body: {
     latitude?: number | null; longitude?: number | null;
     city?: string | null; state?: string | null;

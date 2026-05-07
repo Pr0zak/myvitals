@@ -155,11 +155,28 @@ async def get_last_sleep(
         .limit(1)
     )).scalar_one_or_none()
     if sess is not None:
-        # Pull only stages that fall within this session window.
+        # Pixel Watch sometimes ends a SleepSession at the first long
+        # awake period (e.g. middle-of-night bathroom break) but keeps
+        # ingesting stage data for the rest of the night. Extend the
+        # window forward through any contiguous stages whose gap from
+        # the running end is within 90 min, capped at 4h past the
+        # original session end. This matches what the watch face shows.
+        forward = await db.execute(
+            select(models.SleepStage.time, models.SleepStage.stage, models.SleepStage.duration_s)
+            .where(models.SleepStage.time > sess.end_at)
+            .where(models.SleepStage.time <= sess.end_at + timedelta(hours=4))
+            .order_by(models.SleepStage.time)
+        )
+        eff_end = sess.end_at
+        for ts, stage, dur in forward.all():
+            if ts - eff_end > timedelta(minutes=90):
+                break
+            eff_end = max(eff_end, ts + timedelta(seconds=dur))
+        # Pull stages that fall within the (possibly extended) window.
         result = await db.execute(
             select(models.SleepStage.time, models.SleepStage.stage, models.SleepStage.duration_s)
             .where(models.SleepStage.time >= sess.start_at)
-            .where(models.SleepStage.time <= sess.end_at)
+            .where(models.SleepStage.time <= eff_end)
             .order_by(models.SleepStage.time)
         )
         session = result.all()
@@ -169,13 +186,13 @@ async def get_last_sleep(
             if i + 1 < len(session):
                 clamped = min(dur, max(0, int((session[i + 1][0] - ts).total_seconds())))
             else:
-                clamped = min(dur, max(0, int((sess.end_at - ts).total_seconds())))
+                clamped = min(dur, max(0, int((eff_end - ts).total_seconds())))
             by_stage[stage] = by_stage.get(stage, 0) + clamped
         return SleepNight(
             date=sess.start_at.date(),
             start=sess.start_at,
-            end=sess.end_at,
-            total_s=int((sess.end_at - sess.start_at).total_seconds()),
+            end=eff_end,
+            total_s=int((eff_end - sess.start_at).total_seconds()),
             stages=[SleepStageBucket(stage=k, duration_s=v) for k, v in by_stage.items()],
         )
 

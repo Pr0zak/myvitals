@@ -15,7 +15,7 @@ import type { StrengthEquipment } from "@/api/types";
 const ALL_DB_PAIRS_LB = [5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 27.5, 30, 32.5,
                          35, 37.5, 40, 42.5, 45, 47.5, 50, 55, 60, 65, 70, 75, 80,
                          85, 90, 95, 100];
-const ALL_WRIST_LB = [0.5, 0.75, 1, 1.5, 2, 2.5, 3, 5];
+const ALL_WRIST_LB = [0.5, 0.75, 1, 1.5, 2, 2.5, 3, 4, 5];
 
 const equip = ref<StrengthEquipment | null>(null);
 const unit = ref<"lb" | "kg">("lb");
@@ -102,6 +102,23 @@ function toggleWrist(lb: number) {
 function isWristOwned(lb: number): boolean {
   return equip.value?.wrist_weights_lb.includes(lb) ?? false;
 }
+const wristInput = ref<string>("");
+function addWristCustom() {
+  if (!equip.value) return;
+  const v = Number(wristInput.value);
+  if (!isFinite(v) || v <= 0) return;
+  const rounded = Math.round(v * 4) / 4;  // 0.25 lb resolution
+  if (!equip.value.wrist_weights_lb.includes(rounded)) {
+    equip.value.wrist_weights_lb.push(rounded);
+    equip.value.wrist_weights_lb.sort((a, b) => a - b);
+  }
+  wristInput.value = "";
+}
+function removeWrist(lb: number) {
+  if (!equip.value) return;
+  const i = equip.value.wrist_weights_lb.indexOf(lb);
+  if (i >= 0) equip.value.wrist_weights_lb.splice(i, 1);
+}
 
 const ownedSummary = computed(() => {
   if (!equip.value) return "";
@@ -184,11 +201,28 @@ onMounted(() => { equip.value = defaultEquip(); load(); });
       </p>
       <div class="chip-grid">
         <button
-          v-for="lb in ALL_WRIST_LB" :key="lb"
+          v-for="lb in ALL_WRIST_LB" :key="'preset-' + lb"
           class="chip small"
           :class="{ on: isWristOwned(lb) }"
           @click="toggleWrist(lb)"
         >{{ lb }} lb</button>
+        <button
+          v-for="lb in equip?.wrist_weights_lb.filter(x => !ALL_WRIST_LB.includes(x)) ?? []"
+          :key="'custom-' + lb"
+          class="chip small on"
+          @click="removeWrist(lb)"
+          title="Click to remove"
+        >{{ lb }} lb ×</button>
+      </div>
+      <div class="wrist-add">
+        <input
+          type="number" min="0.25" step="0.25"
+          v-model="wristInput" placeholder="custom lb"
+          @keydown.enter.prevent="addWristCustom"
+        />
+        <button class="ghost" @click="addWristCustom" :disabled="!wristInput">
+          Add custom
+        </button>
       </div>
 
       <h3 class="sub">Bench</h3>
@@ -287,6 +321,8 @@ h1 { margin: 0 0 0.6rem; }
   background: var(--accent, #ef4444); color: #fff;
   border-color: var(--accent, #ef4444); font-weight: 600;
 }
+.wrist-add { display: flex; gap: 0.4rem; align-items: center; margin: 0.4rem 0 0.8rem; }
+.wrist-add input { width: 6rem; padding: 0.3rem 0.5rem; font-size: 0.85rem; }
 .adj-grid { display: flex; gap: 0.8rem; flex-wrap: wrap; margin: 0.4rem 0 0.6rem; }
 .adj-grid label { font-size: 0.82rem; color: var(--muted); }
 .adj-grid input { width: 4.5rem; margin-left: 0.3rem; }

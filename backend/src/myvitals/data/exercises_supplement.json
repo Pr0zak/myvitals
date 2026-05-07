@@ -1,0 +1,621 @@
+[
+  {
+    "id": "Incline_Dumbbell_Row",
+    "name": "Incline Dumbbell Row",
+    "primary_muscle": "back",
+    "secondary_muscles": [
+      "lats",
+      "biceps",
+      "traps"
+    ],
+    "equipment": [
+      "dumbbell",
+      "bench"
+    ],
+    "is_compound": true,
+    "movement_pattern": "horizontal_pull",
+    "level": "beginner",
+    "mechanic": "compound",
+    "instructions": [
+      "Set an incline bench to roughly 30-45 degrees and lie chest-down with a dumbbell in each hand, arms hanging straight.",
+      "Brace your core and keep your chest pinned to the pad — the chest support is the whole point.",
+      "Drive your elbows up and back, squeezing your shoulder blades together at the top.",
+      "Lower the dumbbells under control until your arms are fully extended.",
+      "Avoid lifting your chest off the bench or jerking the weight up with your hips."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Incline Dumbbell Row form"
+  },
+  {
+    "id": "Kroc_Row",
+    "name": "Kroc Row",
+    "primary_muscle": "back",
+    "secondary_muscles": [
+      "lats",
+      "biceps",
+      "traps",
+      "forearms"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "horizontal_pull",
+    "level": "advanced",
+    "mechanic": "compound",
+    "instructions": [
+      "Stand next to a sturdy support, hinge at the hips, and brace one hand on the support — torso roughly parallel to the floor.",
+      "Grip a heavy dumbbell with the free hand, letting it hang straight down with a neutral grip; use a strap if grip is the limiter.",
+      "Drive the elbow up and back toward the hip in a powerful arc, allowing some controlled body english.",
+      "Lower under control to a full stretch, then explode the next rep — the goal is high reps with a heavy load.",
+      "Keep the lower back neutral; cheating from the hips is fine, but don't round your spine."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Kroc Row form"
+  },
+  {
+    "id": "Bird_Dog_Row",
+    "name": "Bird Dog Row",
+    "primary_muscle": "back",
+    "secondary_muscles": [
+      "lats",
+      "biceps",
+      "abdominals",
+      "glutes"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "horizontal_pull",
+    "level": "intermediate",
+    "mechanic": "compound",
+    "instructions": [
+      "Get on all fours, then extend the opposite leg straight back so your body forms a stable bird-dog plank.",
+      "Hold a dumbbell in the working hand with the arm hanging straight below the shoulder.",
+      "Without rotating your torso, row the dumbbell to your ribs — squeeze shoulder blade and pause briefly.",
+      "Lower under control and resist the urge to twist; the anti-rotation challenge is the point.",
+      "Keep hips square to the floor; if you wobble, drop the weight before adding load."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Bird Dog Row form"
+  },
+  {
+    "id": "Renegade_Row",
+    "name": "Renegade Row",
+    "primary_muscle": "back",
+    "secondary_muscles": [
+      "lats",
+      "chest",
+      "triceps",
+      "abdominals"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "horizontal_pull",
+    "level": "advanced",
+    "mechanic": "compound",
+    "instructions": [
+      "Start in a high plank with hands gripping two hex/flat-sided dumbbells directly under your shoulders, feet wide for stability.",
+      "Perform a strict push-up, keeping hips level and core braced — no piking, no sagging.",
+      "At the top, row one dumbbell to your ribs while the opposite arm presses hard into the floor.",
+      "Lower the dumbbell, then perform another push-up and row with the other arm — that's one rep.",
+      "Avoid hip rotation; widening the feet helps anti-rotation if you're new to the movement."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Renegade Row form"
+  },
+  {
+    "id": "Elbows_Out_Bent_Row",
+    "name": "Elbows-Out Bent Row",
+    "primary_muscle": "back",
+    "secondary_muscles": [
+      "traps",
+      "shoulders",
+      "biceps"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "horizontal_pull",
+    "level": "intermediate",
+    "mechanic": "compound",
+    "instructions": [
+      "Hinge at the hips with a neutral spine until your torso is roughly parallel to the floor, dumbbells hanging with a pronated (overhand) grip.",
+      "Row the dumbbells up and out — elbows flare wide to roughly 90 degrees from your torso.",
+      "Drive elbows toward the ceiling; squeeze upper back and rear delts at the top.",
+      "Lower under control, keeping the torso angle stable — don't stand up between reps.",
+      "Use a lighter load than a standard bent row; the wide elbow path biases upper back over lats."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Elbows-Out Bent Row form"
+  },
+  {
+    "id": "Single_Leg_Romanian_Deadlift",
+    "name": "Single-Leg Romanian Deadlift",
+    "primary_muscle": "hamstrings",
+    "secondary_muscles": [
+      "glutes",
+      "lower_back",
+      "abdominals"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "hinge",
+    "level": "intermediate",
+    "mechanic": "compound",
+    "instructions": [
+      "Hold a dumbbell in the hand opposite the standing leg; the other leg hovers off the floor.",
+      "Hinge at the hip, letting the free leg extend straight back as a counterweight, keeping a soft bend in the standing knee.",
+      "Lower the dumbbell along the standing shin until you feel a deep hamstring stretch — torso and trailing leg form one straight line.",
+      "Drive the standing-leg heel into the floor and squeeze the glute to return to standing.",
+      "Avoid letting the hips open — point the trailing-leg toes down to keep the pelvis square."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Single-Leg Romanian Deadlift form"
+  },
+  {
+    "id": "B_Stance_Romanian_Deadlift",
+    "name": "B-Stance Romanian Deadlift",
+    "primary_muscle": "hamstrings",
+    "secondary_muscles": [
+      "glutes",
+      "lower_back"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "hinge",
+    "level": "intermediate",
+    "mechanic": "compound",
+    "instructions": [
+      "Stand with feet hip-width, then slide one foot back so only the toes are down (kickstand) — about 60-70% of the load goes to the front leg.",
+      "Hold a dumbbell in each hand in front of your thighs; brace the core and set a neutral spine.",
+      "Hinge at the hips, pushing them back, lowering the dumbbells along the front shin until you feel a strong hamstring stretch.",
+      "Drive through the front-foot heel and squeeze the front glute to stand back up.",
+      "Use the kickstand foot only for balance — don't push off it."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "B-Stance Romanian Deadlift form"
+  },
+  {
+    "id": "Dumbbell_Hip_Thrust",
+    "name": "Dumbbell Hip Thrust",
+    "primary_muscle": "glutes",
+    "secondary_muscles": [
+      "hamstrings",
+      "lower_back"
+    ],
+    "equipment": [
+      "dumbbell",
+      "bench"
+    ],
+    "is_compound": true,
+    "movement_pattern": "hinge",
+    "level": "beginner",
+    "mechanic": "compound",
+    "instructions": [
+      "Sit on the floor with your upper back against a sturdy bench, knees bent, feet flat and roughly shoulder-width.",
+      "Place a dumbbell across the crease of your hips — a pad or folded towel makes this far more comfortable.",
+      "Drive through your heels and extend the hips up until the torso and thighs form a straight line; squeeze glutes hard at the top.",
+      "Lower under control without letting the hips fully rest on the floor between reps.",
+      "Keep the chin tucked and ribs down; don't hyperextend the lower back at lockout."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Dumbbell Hip Thrust form"
+  },
+  {
+    "id": "Dumbbell_Glute_Bridge",
+    "name": "Dumbbell Glute Bridge",
+    "primary_muscle": "glutes",
+    "secondary_muscles": [
+      "hamstrings",
+      "lower_back"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": false,
+    "movement_pattern": "hinge",
+    "level": "beginner",
+    "mechanic": "compound",
+    "instructions": [
+      "Lie on your back with knees bent, feet flat and hip-width apart, heels close to your glutes.",
+      "Set a dumbbell across the crease of your hips — hands lightly steady it.",
+      "Drive through your heels and extend the hips toward the ceiling; squeeze the glutes hard at lockout.",
+      "Lower under control until the hips just brush the floor, then go again.",
+      "Keep the ribs down — don't arch the lower back to fake more range."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Dumbbell Glute Bridge form"
+  },
+  {
+    "id": "Bulgarian_Split_Squat",
+    "name": "Bulgarian Split Squat",
+    "primary_muscle": "quadriceps",
+    "secondary_muscles": [
+      "glutes",
+      "hamstrings",
+      "calves"
+    ],
+    "equipment": [
+      "dumbbell",
+      "bench"
+    ],
+    "is_compound": true,
+    "movement_pattern": "lunge",
+    "level": "intermediate",
+    "mechanic": "compound",
+    "instructions": [
+      "Stand a long stride in front of a bench; place the top of one foot on the bench behind you.",
+      "Hold a dumbbell in each hand at your sides; chest tall, core braced.",
+      "Lower the back knee toward the floor by bending the front knee — front shin stays close to vertical for a quad bias, or lean forward slightly for more glute.",
+      "Drive through the front-foot heel and mid-foot to return to the top.",
+      "Don't push off the rear foot — it's only for balance. Finish all reps on one side before switching."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Bulgarian Split Squat form"
+  },
+  {
+    "id": "Goblet_Squat",
+    "name": "Goblet Squat",
+    "primary_muscle": "quadriceps",
+    "secondary_muscles": [
+      "glutes",
+      "hamstrings",
+      "abdominals"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "squat",
+    "level": "beginner",
+    "mechanic": "compound",
+    "instructions": [
+      "Hold a single dumbbell vertically against your chest, cupping the top end with both hands — elbows tucked under it.",
+      "Stand with feet shoulder-width, toes slightly out; brace the core.",
+      "Squat down between your legs, knees tracking over toes, until elbows brush the inside of your knees or you hit comfortable depth.",
+      "Drive through mid-foot to stand back up; keep the chest tall throughout.",
+      "Avoid letting the dumbbell pull you forward — keep it pinned tight to your chest."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Goblet Squat form"
+  },
+  {
+    "id": "Deficit_Reverse_Lunge",
+    "name": "Deficit Reverse Lunge",
+    "primary_muscle": "quadriceps",
+    "secondary_muscles": [
+      "glutes",
+      "hamstrings"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "lunge",
+    "level": "intermediate",
+    "mechanic": "compound",
+    "instructions": [
+      "Stand on a sturdy plate or low step (2-4 inches) with a dumbbell in each hand at your sides.",
+      "Step one foot back and down off the platform, lowering the rear knee toward the floor in a controlled lunge.",
+      "Front foot stays planted on the deficit — the elevation gives you extra range and a deeper glute/quad stretch.",
+      "Drive through the front-foot heel to step back up onto the platform.",
+      "Alternate legs or finish all reps on one side; keep the torso upright and ribs stacked."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Deficit Reverse Lunge form"
+  },
+  {
+    "id": "Seated_Single_Leg_Calf_Raise",
+    "name": "Seated Single-Leg Calf Raise",
+    "primary_muscle": "calves",
+    "secondary_muscles": [],
+    "equipment": [
+      "dumbbell",
+      "bench"
+    ],
+    "is_compound": false,
+    "movement_pattern": "isolation_leg",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Sit on a bench with the ball of one foot on a small block or plate so the heel can drop below toe level.",
+      "Rest a dumbbell vertically on top of the working knee, steadying it with one hand.",
+      "Let the heel drop fully for a deep stretch in the calf.",
+      "Drive the ball of the foot down to push the heel as high as possible; pause and squeeze.",
+      "Lower under control — quick bouncy reps cheat the soleus out of work."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Seated Single-Leg Calf Raise form"
+  },
+  {
+    "id": "Squeeze_Press",
+    "name": "Squeeze Press",
+    "primary_muscle": "chest",
+    "secondary_muscles": [
+      "triceps",
+      "shoulders"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "horizontal_push",
+    "level": "beginner",
+    "mechanic": "compound",
+    "instructions": [
+      "Lie on the floor (or a bench if available) with a dumbbell in each hand, neutral grip — palms facing each other.",
+      "Press the dumbbells together hard so the inner edges touch and stay in contact through every rep.",
+      "Press straight up, maintaining the squeeze — pecs should be screaming.",
+      "Lower the dumbbells under control to your chest, never breaking the squeeze.",
+      "Use lighter weight than a standard DB bench; the constant adduction is the stimulus, not the load."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Squeeze Press form"
+  },
+  {
+    "id": "Floor_Press",
+    "name": "Floor Press",
+    "primary_muscle": "chest",
+    "secondary_muscles": [
+      "triceps",
+      "shoulders"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "horizontal_push",
+    "level": "beginner",
+    "mechanic": "compound",
+    "instructions": [
+      "Lie on your back on the floor with knees bent or legs extended, a dumbbell in each hand at chest level.",
+      "Press the dumbbells straight up to lockout, palms facing forward (or neutral if shoulders prefer).",
+      "Lower under control until your triceps touch the floor; pause briefly — the floor caps your range and protects the shoulders.",
+      "Press back up explosively without bouncing the elbows.",
+      "Keep the lower back neutral — no excessive arching."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Floor Press form"
+  },
+  {
+    "id": "Single_Arm_Floor_Press",
+    "name": "Single-Arm Floor Press",
+    "primary_muscle": "chest",
+    "secondary_muscles": [
+      "triceps",
+      "shoulders",
+      "abdominals"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "horizontal_push",
+    "level": "intermediate",
+    "mechanic": "compound",
+    "instructions": [
+      "Lie on your back on the floor with a dumbbell in one hand at chest level; the free arm rests out for balance or holds the floor.",
+      "Brace the core hard — anti-rotation is half the work in a single-arm press.",
+      "Press the dumbbell straight up to lockout without rotating the torso.",
+      "Lower until the triceps touches the floor, pause, then press up again.",
+      "Finish all reps on one side before switching; keep hips and shoulders square throughout."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Single-Arm Floor Press form"
+  },
+  {
+    "id": "Dumbbell_Cuban_Rotation",
+    "name": "Dumbbell Cuban Rotation",
+    "primary_muscle": "shoulders",
+    "secondary_muscles": [
+      "traps"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": false,
+    "movement_pattern": "isolation_shoulder",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Stand tall with a light dumbbell in each hand, arms hanging in front with a pronated grip.",
+      "Perform an upright row, lifting the elbows up and out until upper arms are roughly parallel to the floor — the elbows lead.",
+      "Keeping the elbows fixed, externally rotate the forearms up and back until they point toward the ceiling.",
+      "Reverse the rotation back to elbow-high, then lower the dumbbells back to the start.",
+      "Use very light weight — this is rotator-cuff prehab, not a load lift."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Dumbbell Cuban Rotation form"
+  },
+  {
+    "id": "Arnold_Press",
+    "name": "Arnold Press",
+    "primary_muscle": "shoulders",
+    "secondary_muscles": [
+      "triceps",
+      "traps",
+      "chest"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "vertical_push",
+    "level": "intermediate",
+    "mechanic": "compound",
+    "instructions": [
+      "Stand tall with a dumbbell in each hand at shoulder height, palms facing your face (supinated), elbows tucked in front.",
+      "Press the dumbbells overhead while rotating the wrists outward — finishing with palms forward at lockout.",
+      "Lower by reversing the path — rotate palms back toward your face as the dumbbells come down to the front of the shoulders.",
+      "Keep the core braced and ribs down; don't let the lower back arch to cheat the press.",
+      "Use lighter load than a standard overhead press — the rotation eats into your top-end strength."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Arnold Press form"
+  },
+  {
+    "id": "Seated_Arnold_Press",
+    "name": "Seated Arnold Press",
+    "primary_muscle": "shoulders",
+    "secondary_muscles": [
+      "triceps",
+      "traps",
+      "chest"
+    ],
+    "equipment": [
+      "dumbbell",
+      "bench"
+    ],
+    "is_compound": true,
+    "movement_pattern": "vertical_push",
+    "level": "intermediate",
+    "mechanic": "compound",
+    "instructions": [
+      "Sit on an upright bench with back support; dumbbells at shoulder height, palms facing you, elbows in front.",
+      "Press the dumbbells overhead while rotating the wrists outward — palms finish facing forward at lockout.",
+      "Lower under control, reversing the rotation back to the supinated start position.",
+      "Press your back into the bench and keep the core tight — no lower-back arch.",
+      "Seated removes lower-body cheating, so expect to use less weight than the standing version."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Seated Arnold Press form"
+  },
+  {
+    "id": "Farmer_Walk",
+    "name": "Farmer Walk",
+    "primary_muscle": "forearms",
+    "secondary_muscles": [
+      "traps",
+      "abdominals",
+      "lower_back",
+      "glutes"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": true,
+    "movement_pattern": "isolation_core",
+    "level": "beginner",
+    "mechanic": "compound",
+    "instructions": [
+      "Stand between two heavy dumbbells, hinge to grip them, then stand up tall with chest proud and shoulders pulled back.",
+      "Brace the core and walk forward in short, controlled steps — don't waddle or let the dumbbells swing.",
+      "Keep the ribs stacked over the pelvis — no leaning to one side.",
+      "Walk for time or distance; common targets are 30-60 seconds or 30-50 yards per set.",
+      "Set the weights down with control — don't drop them from full height."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Farmer Walk form"
+  },
+  {
+    "id": "Hindu_Push_Up",
+    "name": "Hindu Push-Up",
+    "primary_muscle": "chest",
+    "secondary_muscles": [
+      "shoulders",
+      "triceps",
+      "abdominals",
+      "lower_back"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": true,
+    "movement_pattern": "horizontal_push",
+    "level": "intermediate",
+    "mechanic": "compound",
+    "instructions": [
+      "Start in a downward-dog position — hips high, hands and feet on the floor, arms and legs straight, butt pointing up.",
+      "Bend the elbows and sweep the chest down and forward in an arc, like diving under a low fence.",
+      "Continue the wave by extending the arms as your hips drop low and your chest comes up — finishing in an upward-dog position.",
+      "Reverse the motion or push back to downward-dog to start the next rep.",
+      "Move smoothly — jerky transitions hammer the lower back. Keep the core engaged throughout."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Hindu Push-Up form"
+  },
+  {
+    "id": "Archer_Push_Up",
+    "name": "Archer Push-Up",
+    "primary_muscle": "chest",
+    "secondary_muscles": [
+      "triceps",
+      "shoulders",
+      "abdominals"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": true,
+    "movement_pattern": "horizontal_push",
+    "level": "advanced",
+    "mechanic": "compound",
+    "instructions": [
+      "Start in a wide-hand push-up position, hands well outside the shoulders.",
+      "Lower toward one hand by bending that elbow while the opposite arm stays nearly straight — fingers of the straight arm can rotate outward.",
+      "The straight arm acts as a brace; almost all the load goes through the bending arm.",
+      "Press back up to the top, then lower toward the other side on the next rep.",
+      "Keep hips level — no piking. If too hard, do them on the knees first."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Archer Push-Up form"
+  },
+  {
+    "id": "Pike_Push_Up",
+    "name": "Pike Push-Up",
+    "primary_muscle": "shoulders",
+    "secondary_muscles": [
+      "triceps",
+      "traps",
+      "chest"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": true,
+    "movement_pattern": "vertical_push",
+    "level": "intermediate",
+    "mechanic": "compound",
+    "instructions": [
+      "Start in a push-up position, then walk your feet in toward your hands so your hips pike up high — body forms an inverted-V.",
+      "Hands shoulder-width, head positioned between the arms; the more vertical the torso, the more this loads the shoulders.",
+      "Bend the elbows to lower the crown of your head toward the floor between your hands.",
+      "Press back up to fully extended arms.",
+      "Avoid bending at the hips on the way up — keep the pike angle constant. Elevate the feet on a bench for a harder variation."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Pike Push-Up form"
+  }
+]

@@ -413,6 +413,54 @@ class StrengthSet(Base):
     skipped: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class Trail(Base):
+    """Single trail (one RainoutLine 'extension' under a DNIS).
+
+    Status history is in trail_status_snapshots; the user opts into
+    push notifications via trail_subscriptions."""
+    __tablename__ = "trails"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    dnis: Mapped[str] = mapped_column(String(16))
+    extension: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(255))
+    slug: Mapped[str] = mapped_column(String(64))
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TrailStatusSnapshot(Base):
+    """Append-only history of every trail status reading. Hypertable
+    on fetched_at; one row per (trail_id, fetched_at)."""
+    __tablename__ = "trail_status_snapshots"
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    trail_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    status: Mapped[str] = mapped_column(String(16))     # open|closed|pending|unknown
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_ts: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TrailSubscription(Base):
+    """One row per trail the user wants alerts for."""
+    __tablename__ = "trail_subscriptions"
+    trail_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    subscribed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    notify_on: Mapped[str] = mapped_column(String(16), default="any")
+    # any | open_only | close_only
+
+
+class TrailAlert(Base):
+    """Status-flip alert for a subscribed trail. Mirrors ai_alerts so
+    the existing ack/notify plumbing carries over."""
+    __tablename__ = "trail_alerts"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    trail_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    from_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(16))
+    source_ts: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    phone_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class SyncHeartbeat(Base):
     """Companion-app sync diagnostics — one row per doWork() invocation."""
     __tablename__ = "sync_heartbeat"

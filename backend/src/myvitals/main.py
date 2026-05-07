@@ -24,6 +24,7 @@ from .api import (
     sober,
     strava,
     summary,
+    trails,
 )
 from .api.workout import strength as workout_strength
 from .config import settings
@@ -88,6 +89,26 @@ async def lifespan(app: FastAPI):
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
     )
     log.info("Anomaly scan scheduled every 6h")
+
+    # Trail-status poll — every 15 min during 06:00-22:00 CT, 60 min
+    # overnight. APScheduler doesn't have a native time-of-day window,
+    # so use one cron job that runs the poll only when the local hour
+    # is in range (other ticks no-op cheaply).
+    from .integrations.rainoutline import poll_and_persist as _poll_trails
+
+    async def _trails_tick() -> None:
+        try:
+            await _poll_trails()
+        except Exception as e:  # noqa: BLE001
+            log.warning("trail poll failed: %s", e)
+
+    scheduler.add_job(
+        _trails_tick,
+        trigger="interval", minutes=15,
+        id="trails_poll", replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=20),
+    )
+    log.info("Trail status poll scheduled every 15 min")
     scheduler.start()
     log.info("scheduler started; daily_summary at 03:00 %s", settings.tz)
 
@@ -222,6 +243,7 @@ app.include_router(profile.router, tags=["profile"])
 app.include_router(sober.router, tags=["sober"])
 app.include_router(ai.router, tags=["ai"])
 app.include_router(workout_strength.router, tags=["workout-strength"])
+app.include_router(trails.router, tags=["trails"])
 
 # Bundled exercise images (yuhonas/free-exercise-db, public domain).
 # Mounted off the package's data dir so the wheel ships them.

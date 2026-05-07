@@ -128,7 +128,7 @@ backend/                    FastAPI ingest + analytics + alembic
                             strength.py — split selector, recovery-
                             aware adjustment, micro-loader-aware
                             weight rounder, deterministic generator
-  alembic/versions/         migrations (current head: 0022)
+  alembic/versions/         migrations (current head: 0023)
 frontend/                   Vue 3 + Vite + ECharts dashboard
   src/views/                Today, Insights, Trends, Sober, Goals, ...
   src/components/           SideNav, TrendBadges, AppLogo, ...

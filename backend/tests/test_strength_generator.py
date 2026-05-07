@@ -124,6 +124,31 @@ class TestPairSupersets:
         assert "Bench" not in pairs  # compound, doesn't superset
 
     def test_unpaired_isolation_returns_no_supersets(self):
+        """Single isolation has no partner — falls through both passes."""
         exs = [{"id": "Curl", "movement_pattern": "isolation_arm",
                 "primary_muscle": "biceps", "is_compound": False}]
+        assert pair_supersets(exs) == {}
+
+    def test_non_antagonist_isolations_still_pair(self):
+        """Pass 2: any 2 distinct-muscle isolations pair up so the
+        active-workout flow always uses superset cadence in the
+        isolation block."""
+        exs = [
+            {"id": "LateralRaise", "movement_pattern": "isolation_shoulder",
+             "primary_muscle": "shoulders", "is_compound": False},
+            {"id": "CalfRaise", "movement_pattern": "isolation_leg",
+             "primary_muscle": "calves", "is_compound": False},
+        ]
+        pairs = pair_supersets(exs)
+        assert pairs.get("LateralRaise") == pairs.get("CalfRaise") != None  # noqa: E711
+
+    def test_same_muscle_isolations_do_not_pair(self):
+        """Two biceps isolations shouldn't superset — defeats the rest-
+        while-the-other-muscle-works point."""
+        exs = [
+            {"id": "Curl",     "movement_pattern": "isolation_arm",
+             "primary_muscle": "biceps", "is_compound": False},
+            {"id": "Hammer",   "movement_pattern": "isolation_arm",
+             "primary_muscle": "biceps", "is_compound": False},
+        ]
         assert pair_supersets(exs) == {}

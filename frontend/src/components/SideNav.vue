@@ -17,7 +17,7 @@ import { RouterLink, useRoute } from "vue-router";
 import {
   Activity, AlertTriangle, BarChart3, Bed, Calendar, ChevronDown,
   ChevronRight, Droplets, Dumbbell, Edit3, Footprints, Github, GitCompare,
-  Heart, Home, List, Map, Menu, RotateCcw, Scale, Search, Settings, Sparkles,
+  Heart, Home, List, Map, Menu, Mountain, RotateCcw, Scale, Search, Settings, Sparkles,
   Target, Terminal, Thermometer, TrendingUp, type LucideIcon,
 } from "lucide-vue-next";
 import { api } from "@/api/client";
@@ -207,6 +207,7 @@ const groups = computed<Group[]>(() => {
         { to: "/workout/strength/equipment", icon: Settings, label: "Strength equipment" },
       ],
     },
+    { id: "trails", to: "/trails", icon: Mountain, label: "Trails" },
     {
       id: "insights", to: "/insights", icon: Sparkles, label: "Insights",
       badge: discoveriesCount.value && discoveriesCount.value > 0

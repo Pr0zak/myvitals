@@ -63,10 +63,14 @@ Backend already produces structured alerts (`/ai/alerts`) via the
 - [ ] **Strength v2 — exercise swap** — "swap this for another"
       button on the active-workout screen (filtered to same primary
       muscle + matching equipment).
-- [ ] **Trail-status integration** — pull rainoutline.com trail
-      open/close list into the web Activities + phone app. Per-trail
-      alert subscriptions on status change. Discovery phase first
-      (scraping vs API).
+- [x] **Trail-status integration** — done in v0.7.0 (web only). Backend
+      polls RainoutLine `/dnis_refresh` every 15 min, persists snapshots
+      as a hypertable, and exposes /trails endpoints. Frontend Trails
+      view with subscribe-star. Phone-side TrailsScreen + push deferred
+      to v0.7.1.
+- [ ] **Trail-status — phone surface** — TrailsScreen.kt, BackendClient
+      methods, new "trail_status" notification channel, WorkManager job
+      polling /trails/alerts every 30 min.
 - [ ] **iOS app** — currently Android-only. Same Health Connect
       analogue would be HealthKit on iOS.
 - [ ] **Multi-user** — single-user assumed throughout; no user_id

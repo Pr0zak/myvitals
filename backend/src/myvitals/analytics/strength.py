@@ -35,8 +35,16 @@ from ..db import models
 _CATALOG_PATH = (
     Path(__file__).resolve().parent.parent / "data" / "exercises.json"
 )
+_CATALOG_SUPPLEMENT_PATH = (
+    Path(__file__).resolve().parent.parent / "data" / "exercises_supplement.json"
+)
 with open(_CATALOG_PATH, encoding="utf-8") as _f:
     CATALOG: list[dict[str, Any]] = json.load(_f)
+# Supplement file fills gaps in yuhonas/free-exercise-db (e.g. dumbbell-only
+# home-gym exercises Fitbod uses but the source dataset is missing).
+if _CATALOG_SUPPLEMENT_PATH.exists():
+    with open(_CATALOG_SUPPLEMENT_PATH, encoding="utf-8") as _f:
+        CATALOG.extend(json.load(_f))
 CATALOG_BY_ID: dict[str, dict[str, Any]] = {e["id"]: e for e in CATALOG}
 
 
@@ -426,15 +434,25 @@ def select_exercises_for_split(
 # ------------------------------------------------------------------
 
 def pair_supersets(exercises: list[dict[str, Any]]) -> dict[str, str]:
-    """Return {exercise_id: superset_id} for antagonist pairs in the list.
+    """Return {exercise_id: superset_id} for the isolation block.
 
-    Only pairs *isolation* exercises — compounds always stand alone.
+    Two-pass strategy:
+    1. First fill antagonist pairs (biceps↔triceps, chest↔back, etc.) —
+       these are the textbook supersets.
+    2. Then sweep the remaining isolation exercises and pair them up
+       in encounter order so every isolation lift ends up partnered
+       (a "lower-quality" superset is still better than a stand-alone
+       isolation set for time efficiency, which is what supersets are
+       for in a self-paced home workout).
+
+    Compounds always stand alone — never paired.
     """
     iso = [e for e in exercises if e["movement_pattern"].startswith("isolation")]
     pairs: dict[str, str] = {}
     used: set[str] = set()
     sid = 0
 
+    # Pass 1: antagonist pairs
     for a, b in ANTAGONIST_PAIRS:
         ax = next((e for e in iso if e["primary_muscle"] == a and e["id"] not in used), None)
         bx = next((e for e in iso if e["primary_muscle"] == b and e["id"] not in used), None)
@@ -445,6 +463,25 @@ def pair_supersets(exercises: list[dict[str, Any]]) -> dict[str, str]:
             pairs[bx["id"]] = tag
             used.add(ax["id"])
             used.add(bx["id"])
+
+    # Pass 2: pair remaining isolations in encounter order. Skip pairs that
+    # share the SAME primary muscle (would defeat the rest-while-the-other-
+    # muscle-works point of a superset).
+    remaining = [e for e in iso if e["id"] not in used]
+    i = 0
+    while i + 1 < len(remaining):
+        a, b = remaining[i], remaining[i + 1]
+        if a["primary_muscle"] != b["primary_muscle"]:
+            sid += 1
+            tag = f"S{sid}"
+            pairs[a["id"]] = tag
+            pairs[b["id"]] = tag
+            used.add(a["id"])
+            used.add(b["id"])
+            i += 2
+        else:
+            # Skip this pairing; try the next combination.
+            i += 1
 
     return pairs
 

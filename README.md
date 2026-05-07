@@ -33,6 +33,7 @@ Pulls your **Pixel Watch / Wear OS** data out of **Health Connect** on the phone
 - **Sober time** — live `d/h/m/s` counter on the phone home screen with a 1.5s press-and-hold reset, full history with editable streaks, distribution + timeline charts on the web
 - **Goals** — set targets (weight, sober streak, sleep, steps, custom) with per-goal AI coaching checks
 - **Activities** — Strava sync + Garmin/Fitbit imports, GPS map view, side-by-side compare
+- **Trails** — open / closed status board for your local trail network. Polls a public RainoutLine DNIS every 15 min, persists status snapshots as a hypertable, and lets you star individual trails to get pinged on status flips. Pull-to-refresh on demand.
 - **Workout / Strength** — Fitbod-style generated session per day, filtered to your actual gear (dumbbell pairs, wrist-weight micro-loaders, bench config, etc.); per-set logging with rest timer; recovery-aware deload (reads HRV / sleep / readiness from `daily_summary` and adjusts target weights); deterministic seed so today's plan is stable until you tap regenerate; full set/rep/RPE history. **Equipment editor** (Settings → Strength equipment) drives catalog filtering — adding a doorway pull-up bar later auto-expands the catalog with no code change.
 - **Log** — caffeine / alcohol / mood / food / meds, all editable inline (date/time included)
 - **Calendar** — year heatmap, any metric

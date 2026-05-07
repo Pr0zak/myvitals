@@ -21,30 +21,42 @@ async def readiness_score(
     rhr: float | None, sleep_score: float | None,
     sleep_duration_s: int | None,
 ) -> float | None:
-    """Composite of HRV, RHR, sleep — all relative to 28-day baselines."""
+    """Composite of HRV, RHR, sleep — all relative to 28-day baselines.
+
+    Returns None (not 0) when the baseline is too thin to be meaningful
+    or when too few input branches contribute. Was returning a misleading
+    near-zero score for early-morning daily_summary rows where the watch
+    had only logged a single elevated RHR sample against a 2-day baseline."""
     # Pull 28-day baselines from daily_summary so we don't re-aggregate
-    # raw vitals here.
+    # raw vitals here. Also count non-null days — z-scoring against a 2-day
+    # baseline is statistically meaningless.
     cutoff = target - timedelta(days=28)
     bl = (await db.execute(
         select(
             func.avg(models.DailySummary.hrv_avg),
             func.stddev_pop(models.DailySummary.hrv_avg),
+            func.count(models.DailySummary.hrv_avg),
             func.avg(models.DailySummary.resting_hr),
             func.stddev_pop(models.DailySummary.resting_hr),
+            func.count(models.DailySummary.resting_hr),
         ).where(models.DailySummary.date >= cutoff)
          .where(models.DailySummary.date < target)
     )).first()
     if bl is None:
         return None
-    hrv_mu, hrv_sd, rhr_mu, rhr_sd = bl
+    hrv_mu, hrv_sd, hrv_n, rhr_mu, rhr_sd, rhr_n = bl
 
+    # Need at least a week of baseline data before z-scoring is meaningful.
+    MIN_BASELINE_DAYS = 7
     parts: list[tuple[float, float]] = []  # (weight, score 0-100)
 
-    if hrv is not None and hrv_mu and hrv_sd and hrv_sd > 0:
+    if (hrv is not None and hrv_mu and hrv_sd and hrv_sd > 0
+            and (hrv_n or 0) >= MIN_BASELINE_DAYS):
         # +1σ above baseline → 80, mean → 50, -1σ → 20.
         z = (hrv - float(hrv_mu)) / float(hrv_sd)
         parts.append((0.40, max(0.0, min(100.0, 50 + 30 * z))))
-    if rhr is not None and rhr_mu and rhr_sd and rhr_sd > 0:
+    if (rhr is not None and rhr_mu and rhr_sd and rhr_sd > 0
+            and (rhr_n or 0) >= MIN_BASELINE_DAYS):
         z = (rhr - float(rhr_mu)) / float(rhr_sd)  # lower is better → invert
         parts.append((0.30, max(0.0, min(100.0, 50 - 30 * z))))
     if sleep_score is not None:
@@ -54,9 +66,11 @@ async def readiness_score(
         h = sleep_duration_s / 3600.0
         parts.append((0.15, max(0.0, min(100.0, (h - 6.0) / 2.0 * 100))))
 
-    if not parts:
-        return None
+    # Require at least 0.45 total weight — otherwise the score is dominated
+    # by a single noisy input. Two of {HRV, RHR, sleep_score+duration} pass.
     w_total = sum(w for w, _ in parts)
+    if not parts or w_total < 0.45:
+        return None
     return round(sum(w * s for w, s in parts) / w_total, 1)
 
 

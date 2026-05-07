@@ -38,8 +38,16 @@ router = APIRouter(prefix="/workout/strength", dependencies=[Depends(require_any
 _CATALOG_PATH = (
     Path(__file__).resolve().parent.parent.parent / "data" / "exercises.json"
 )
+_CATALOG_SUPPLEMENT_PATH = (
+    Path(__file__).resolve().parent.parent.parent / "data" / "exercises_supplement.json"
+)
 with open(_CATALOG_PATH, encoding="utf-8") as _f:
     _CATALOG: list[dict[str, Any]] = json.load(_f)
+# Supplement file fills gaps in yuhonas/free-exercise-db (e.g. dumbbell-only
+# home-gym exercises Fitbod uses but the source dataset is missing).
+if _CATALOG_SUPPLEMENT_PATH.exists():
+    with open(_CATALOG_SUPPLEMENT_PATH, encoding="utf-8") as _f:
+        _CATALOG.extend(json.load(_f))
 _CATALOG_BY_ID: dict[str, dict[str, Any]] = {e["id"]: e for e in _CATALOG}
 
 

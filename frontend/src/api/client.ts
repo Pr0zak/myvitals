@@ -577,6 +577,60 @@ export const api = {
     await http.delete(`/workout/strength/sets/${id}`);
   },
 
+  // ── Trails (RainoutLine status) ───────────────────────────
+  async trails(): Promise<{
+    count: number;
+    trails: Array<{
+      id: number; extension: number; name: string; slug: string;
+      last_seen_at: string;
+      subscribed: boolean; notify_on: string | null;
+      status: "open" | "closed" | "pending" | "unknown" | null;
+      comment: string | null;
+      source_ts: string | null;
+      fetched_at: string | null;
+    }>;
+  }> {
+    const { data } = await http.get("/trails");
+    return data;
+  },
+
+  async trailHistory(id: number, days = 30): Promise<{
+    trail_id: number; name: string;
+    snapshots: Array<{
+      fetched_at: string; status: string;
+      comment: string | null; source_ts: string | null;
+    }>;
+  }> {
+    const { data } = await http.get(`/trails/${id}/history`, { params: { days } });
+    return data;
+  },
+
+  async subscribeTrail(id: number, notify_on: "any" | "open_only" | "close_only" = "any") {
+    const { data } = await http.post(`/trails/${id}/subscribe`, { notify_on });
+    return data;
+  },
+
+  async unsubscribeTrail(id: number): Promise<void> {
+    await http.delete(`/trails/${id}/subscribe`);
+  },
+
+  async refreshTrails(): Promise<{ fetched: number; snapshots: number; alerts: number }> {
+    const { data } = await http.post("/trails/refresh");
+    return data;
+  },
+
+  async trailAlerts(unackedOnly = false): Promise<Array<{
+    id: number; trail_id: number; trail_name: string | null;
+    from_status: string | null; to_status: string;
+    source_ts: string | null; created_at: string;
+    phone_notified_at: string | null; acked_at: string | null;
+  }>> {
+    const { data } = await http.get("/trails/alerts", { params: { unacked_only: unackedOnly } });
+    return data;
+  },
+
+  async ackTrailAlert(id: number) { await http.post(`/trails/alerts/${id}/ack`); },
+
   async aiStrengthReview(workoutId: number): Promise<{
     review: {
       headline: string;

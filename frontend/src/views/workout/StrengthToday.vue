@@ -6,7 +6,7 @@
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { Play, Pause, RotateCw, Plus, SkipForward, Replace as SwapIcon } from "lucide-vue-next";
+import { Play, Pause, RotateCw, Plus, SkipForward, Replace as SwapIcon, Timer, Check } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { apiBase, queryToken } from "@/config";
 import Card from "@/components/Card.vue";
@@ -629,12 +629,25 @@ onMounted(loadAll);
         </div>
       </Card>
 
-      <!-- Rest timer -->
+      <!-- Rest timer (redesigned per claude.ai/design workout bundle) -->
       <div v-if="restRemaining !== null" class="rest-timer" :class="{ done: restRemaining <= 0 }">
-        <strong>{{ fmtRest(Math.max(0, restRemaining)) }}</strong>
-        <span class="of">of {{ fmtRest(restTotal) }}</span>
-        <button class="ghost" @click="addRest(30)"><Plus :size="14" /> 30s</button>
-        <button class="ghost" @click="stopRest"><SkipForward :size="14" /> Skip</button>
+        <div class="icon-block">
+          <Timer v-if="restRemaining > 0" :size="18" />
+          <Check v-else :size="18" />
+        </div>
+        <div class="time-block">
+          <template v-if="restRemaining > 0">
+            <div class="big-time">{{ fmtRest(Math.max(0, restRemaining)) }}</div>
+            <div class="of">of <span class="mono">{{ restTotal }}s</span> rest</div>
+          </template>
+          <template v-else>
+            <div class="done-text">Rest done — go!</div>
+          </template>
+        </div>
+        <div v-if="restRemaining > 0" class="rt-actions">
+          <button class="rt-btn" @click="addRest(30)">+30s</button>
+          <button class="rt-btn ghost" @click="stopRest">Skip</button>
+        </div>
       </div>
 
       <!-- Exercise list -->
@@ -827,17 +840,48 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 .notes { margin-top: 0.4rem; color: var(--muted); font-size: 0.78rem; }
 .actions { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
 
+/* Rest timer — claude.ai/design bundle layout: icon block + mono digits + side actions */
 .rest-timer {
   position: sticky; top: 0; z-index: 10;
-  background: var(--bg-2); border: 1px solid var(--accent, #ef4444);
-  padding: 0.6rem 1rem; border-radius: 10px; margin: 0.6rem 0;
-  display: flex; gap: 0.8rem; align-items: center;
-  font-family: 'Geist Mono', ui-monospace, monospace;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  padding: 0.6rem 0.75rem; border-radius: 12px; margin: 0.6rem 0;
+  display: flex; gap: 0.7rem; align-items: center;
+  transition: background 150ms ease-in-out, border-color 150ms ease-in-out;
 }
-.rest-timer.done { border-color: #22c55e; }
-.rest-timer strong { font-size: 1.4rem; color: var(--accent, #ef4444); }
-.rest-timer.done strong { color: #22c55e; }
-.rest-timer .of { color: var(--muted); }
+.rest-timer.done {
+  background: rgba(34, 197, 94, 0.10);
+  border-color: rgba(34, 197, 94, 0.55);
+}
+.rest-timer .icon-block {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: var(--bg-1); border: 1px solid var(--line);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted); flex: 0 0 auto;
+}
+.rest-timer.done .icon-block {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.45);
+  color: #22c55e;
+}
+.rest-timer .time-block { flex: 1; min-width: 0; }
+.rest-timer .big-time {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.55rem; font-weight: 600; color: var(--text);
+  line-height: 1; letter-spacing: -0.02em;
+}
+.rest-timer .of { font-size: 0.7rem; color: var(--muted-2); margin-top: 2px; }
+.rest-timer .of .mono { font-family: 'Geist Mono', ui-monospace, monospace; }
+.rest-timer .done-text { font-size: 0.95rem; font-weight: 600; color: #22c55e; }
+.rest-timer .rt-actions { display: flex; gap: 0.35rem; flex: 0 0 auto; }
+.rest-timer .rt-btn {
+  padding: 0.32rem 0.6rem; border-radius: 7px;
+  background: var(--bg-1); border: 1px solid var(--line);
+  color: var(--text); font-size: 0.78rem; font-weight: 500; cursor: pointer;
+}
+.rest-timer .rt-btn.ghost { background: transparent; color: var(--muted); }
+.rest-timer .rt-btn:hover { color: var(--text); border-color: var(--accent, #ef4444); }
 
 .ex-card {
   border: 1px solid var(--line); border-radius: 10px;

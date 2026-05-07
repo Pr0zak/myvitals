@@ -64,6 +64,7 @@ private object Routes {
     const val WORKOUT_HISTORY = "workout/history"
     const val WORKOUT_DAY = "workout/day/{date}"
     fun workoutDay(date: String) = "workout/day/$date"
+    const val WORKOUT_CHARTS = "workout/charts"
     const val WORKOUT_CATALOG = "workout/catalog"
     const val WORKOUT_TRAINING_PREFS = "workout/training-prefs"
     const val ACTIVITIES = "activities"
@@ -167,10 +168,17 @@ class MainActivity : ComponentActivity() {
                                 onOpenCatalog = { nav.navigate(Routes.WORKOUT_CATALOG) },
                                 onOpenTrainingPrefs = { nav.navigate(Routes.WORKOUT_TRAINING_PREFS) },
                                 onOpenDay = { date -> nav.navigate(Routes.workoutDay(date)) },
+                                onOpenCharts = { nav.navigate(Routes.WORKOUT_CHARTS) },
                             )
                         }
                         composable(Routes.WORKOUT_HISTORY) {
                             StrengthHistoryScreen(
+                                settings = settings,
+                                onBack = { nav.popBackStack() },
+                            )
+                        }
+                        composable(Routes.WORKOUT_CHARTS) {
+                            app.myvitals.ui.strength.WorkoutChartsScreen(
                                 settings = settings,
                                 onBack = { nav.popBackStack() },
                             )

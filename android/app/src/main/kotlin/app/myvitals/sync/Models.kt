@@ -230,6 +230,48 @@ data class StrengthWorkoutDetail(
 )
 
 @JsonClass(generateAdapter = true)
+data class StrengthExplain(
+    @Json(name = "workout_id") val workoutId: Long,
+    @Json(name = "split_focus") val splitFocus: String,
+    @Json(name = "why_split") val whySplit: String,
+    @Json(name = "why_exercises") val whyExercises: String,
+    @Json(name = "why_targets") val whyTargets: String,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthDailyVolume(
+    val date: String,
+    @Json(name = "volume_lb") val volumeLb: Double,
+    val sets: Int,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthMuscleVolume(
+    val muscle: String,
+    @Json(name = "volume_lb") val volumeLb: Double,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthProgressionPoint(
+    val date: String,
+    @Json(name = "top_weight_lb") val topWeightLb: Double,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthStats(
+    val since: String,
+    val days: Int,
+    @Json(name = "n_workouts") val nWorkouts: Int,
+    @Json(name = "n_sets") val nSets: Int,
+    @Json(name = "total_volume_lb") val totalVolumeLb: Double,
+    @Json(name = "rpe_avg") val rpeAvg: Double? = null,
+    val daily: List<StrengthDailyVolume> = emptyList(),
+    @Json(name = "per_muscle") val perMuscle: List<StrengthMuscleVolume> = emptyList(),
+    val progression: Map<String, List<StrengthProgressionPoint>> = emptyMap(),
+    @Json(name = "progression_names") val progressionNames: Map<String, String> = emptyMap(),
+)
+
+@JsonClass(generateAdapter = true)
 data class StrengthWorkoutSummary(
     val id: Long,
     val date: String,

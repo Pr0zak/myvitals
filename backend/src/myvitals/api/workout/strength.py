@@ -813,6 +813,221 @@ async def get_today(
     return await _hydrate_workout(db, workout)
 
 
+@router.get("/stats")
+async def strength_stats(
+    days: int = 90,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Aggregate strength stats over the last `days` days. Used by phone
+    + web chart panels. No external deps beyond strength_sets."""
+    from datetime import date as _date, timedelta as _td
+    since = _date.today() - _td(days=days)
+
+    # Pull every logged set in window with its parent workout date + exercise id.
+    sets_q = await db.execute(
+        select(
+            models.StrengthWorkout.date,
+            models.StrengthWorkoutExercise.exercise_id,
+            models.StrengthSet.set_number,
+            models.StrengthSet.actual_weight_lb,
+            models.StrengthSet.actual_reps,
+            models.StrengthSet.rating,
+            models.StrengthSet.skipped,
+        )
+        .join(models.StrengthWorkoutExercise,
+              models.StrengthSet.workout_exercise_id ==
+              models.StrengthWorkoutExercise.id)
+        .join(models.StrengthWorkout,
+              models.StrengthWorkoutExercise.workout_id ==
+              models.StrengthWorkout.id)
+        .where(models.StrengthWorkout.date >= since)
+        .order_by(models.StrengthWorkout.date)
+    )
+    rows = sets_q.all()
+
+    # Daily volume + per-day set count.
+    daily_vol: dict[str, float] = {}
+    daily_sets: dict[str, int] = {}
+    rpe_vals: list[float] = []
+    per_muscle: dict[str, float] = {}
+    progression: dict[str, list[dict[str, Any]]] = {}
+    workout_dates: set[str] = set()
+
+    for d, ex_id, _setn, w_lb, reps, rating, skipped in rows:
+        if skipped or w_lb is None or reps is None:
+            continue
+        date_iso = d.isoformat()
+        workout_dates.add(date_iso)
+        vol = float(w_lb) * float(reps)
+        daily_vol[date_iso] = daily_vol.get(date_iso, 0.0) + vol
+        daily_sets[date_iso] = daily_sets.get(date_iso, 0) + 1
+        if rating is not None:
+            rpe_vals.append(float(rating))
+
+        # Muscle group from catalog
+        meta = strength_algo.CATALOG_BY_ID.get(ex_id, {})
+        muscle = meta.get("primary_muscle") or "other"
+        per_muscle[muscle] = per_muscle.get(muscle, 0.0) + vol
+
+        # Track top weight per (exercise, date) for weight-progression series
+        prog = progression.setdefault(ex_id, [])
+        existing = next((p for p in prog if p["date"] == date_iso), None)
+        if existing is None:
+            prog.append({"date": date_iso, "top_weight_lb": float(w_lb)})
+        elif float(w_lb) > existing["top_weight_lb"]:
+            existing["top_weight_lb"] = float(w_lb)
+
+    # Sort daily series by date for the line chart.
+    daily = sorted(
+        [{"date": k, "volume_lb": round(v, 1),
+          "sets": daily_sets.get(k, 0)}
+         for k, v in daily_vol.items()],
+        key=lambda r: r["date"],
+    )
+
+    # Weight progression — keep top 8 exercises by total set count for chart UX.
+    progression_by_count = sorted(
+        progression.items(),
+        key=lambda kv: -sum(1 for _ in kv[1]),
+    )[:8]
+    progression_out = {
+        ex_id: sorted(pts, key=lambda r: r["date"])
+        for ex_id, pts in progression_by_count
+    }
+    progression_names = {
+        ex_id: strength_algo.CATALOG_BY_ID.get(ex_id, {}).get("name", ex_id)
+        for ex_id in progression_out
+    }
+
+    return {
+        "since": since.isoformat(),
+        "days": days,
+        "n_workouts": len(workout_dates),
+        "n_sets": sum(daily_sets.values()),
+        "total_volume_lb": round(sum(daily_vol.values()), 1),
+        "rpe_avg": round(sum(rpe_vals) / len(rpe_vals), 2) if rpe_vals else None,
+        "daily": daily,
+        "per_muscle": [
+            {"muscle": k, "volume_lb": round(v, 1)}
+            for k, v in sorted(per_muscle.items(), key=lambda kv: -kv[1])
+        ],
+        "progression": progression_out,
+        "progression_names": progression_names,
+    }
+
+
+@router.get("/explain/{workout_id}")
+async def explain_workout(
+    workout_id: int,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Plain-English rationale for a generated workout. Pure rules-based —
+    no Claude call, no daily limit. Explains: why this split, why these
+    exercises, why these targets. The phone surfaces this behind a
+    'Why this workout?' button on the workout header."""
+    w = await db.get(models.StrengthWorkout, workout_id)
+    if w is None:
+        raise HTTPException(404, "workout not found")
+
+    equip = await _equipment_payload(db)
+    training = equip.get("training") or {}
+    dpw = int(training.get("days_per_week", strength_algo.DEFAULT_DAYS_PER_WEEK))
+    pref = training.get("split_preference", strength_algo.DEFAULT_SPLIT_PREFERENCE)
+    level = training.get("level", strength_algo.DEFAULT_LEVEL)
+
+    # Why this split?
+    why_split = (
+        f"Split: <strong>{w.split_focus}</strong>. "
+        f"You're on a {dpw}-day {pref} rotation"
+        f" ({level} progression). The selector picks today's focus to "
+        "balance recovery and rotate through your week."
+    )
+
+    # Why these exercises? Look at slots + recent variety. We use the
+    # planner's variety/anti-repeat heuristic — restate it conceptually.
+    exercises = (await db.execute(
+        select(models.StrengthWorkoutExercise)
+        .where(models.StrengthWorkoutExercise.workout_id == workout_id)
+        .order_by(models.StrengthWorkoutExercise.order_index)
+    )).scalars().all()
+    exercise_names = [
+        strength_algo.CATALOG_BY_ID.get(
+            e.exercise_id, {}).get("name", e.exercise_id) for e in exercises
+    ]
+    why_exercises = (
+        f"Today's {len(exercise_names)} exercises: "
+        + ", ".join(exercise_names[:5])
+        + (f" + {len(exercise_names) - 5} more" if len(exercise_names) > 5 else "")
+        + ". Picked from your equipment + favorites; sets 2 weeks of variety "
+        "so you're not repeating the same lifts every session."
+    )
+
+    # Why these targets? Pull last sets for these exercises; describe RPE-driven progression.
+    last_top_set: dict[str, dict[str, Any]] = {}
+    for ex in exercises:
+        last_q = await db.execute(
+            select(
+                models.StrengthSet.actual_weight_lb,
+                models.StrengthSet.actual_reps,
+                models.StrengthSet.rating,
+                models.StrengthWorkout.date,
+            )
+            .join(models.StrengthWorkoutExercise,
+                  models.StrengthSet.workout_exercise_id ==
+                  models.StrengthWorkoutExercise.id)
+            .join(models.StrengthWorkout,
+                  models.StrengthWorkoutExercise.workout_id ==
+                  models.StrengthWorkout.id)
+            .where(models.StrengthWorkoutExercise.exercise_id == ex.exercise_id)
+            .where(models.StrengthWorkout.id != workout_id)
+            .where(models.StrengthSet.actual_weight_lb.is_not(None))
+            .order_by(models.StrengthWorkout.date.desc(),
+                      models.StrengthSet.actual_weight_lb.desc())
+            .limit(1)
+        )
+        row = last_q.first()
+        if row is not None:
+            last_top_set[ex.exercise_id] = {
+                "weight_lb": row[0], "reps": row[1],
+                "rpe": row[2], "date": row[3].isoformat(),
+            }
+
+    # Walk through any progressed exercises.
+    bumps: list[str] = []
+    for ex in exercises:
+        prev = last_top_set.get(ex.exercise_id)
+        if prev is None:
+            continue
+        prev_w = float(prev["weight_lb"])
+        cur_w = float(ex.target_weight_lb or 0)
+        if cur_w > prev_w + 0.1:
+            rpe = prev["rpe"]
+            rpe_note = (
+                f" (last RPE {int(rpe)})" if rpe is not None else ""
+            )
+            name = strength_algo.CATALOG_BY_ID.get(
+                ex.exercise_id, {}).get("name", ex.exercise_id)
+            bumps.append(
+                f"{name}: {prev_w:g} → {cur_w:g} lb{rpe_note}"
+            )
+
+    why_targets = (
+        "Targets follow your RPE feedback: easy sessions (RPE ≤ 7) bump "
+        "weight via micro-loaders so the next prescription lands closer "
+        "to challenging-but-doable. Failed/RPE 9-10 sets pull back."
+    )
+    if bumps:
+        why_targets += " This session: " + "; ".join(bumps[:4]) + "."
+
+    return {
+        "workout_id": workout_id,
+        "split_focus": w.split_focus,
+        "why_split": why_split,
+        "why_exercises": why_exercises,
+        "why_targets": why_targets,
+    }
+
+
 @router.get("/by-date/{date_iso}")
 async def get_workout_by_date(
     date_iso: str,
@@ -870,7 +1085,8 @@ async def get_workout_by_date(
         "rest_day_recommended": False,
         "exercises": [
             {
-                "id": -1,
+                "id": -1 - idx,
+                "workout_id": -1,
                 "exercise_id": ex.exercise_id,
                 "order_index": idx,
                 "target_sets": ex.target_sets,

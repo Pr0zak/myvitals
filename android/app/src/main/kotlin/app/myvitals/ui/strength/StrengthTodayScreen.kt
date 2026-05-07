@@ -72,6 +72,8 @@ import androidx.compose.material.icons.outlined.ThumbDownOffAlt
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.ExercisePrefBody
 import app.myvitals.sync.LogSetRequest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import app.myvitals.sync.StrengthExerciseInfo
 import app.myvitals.sync.StrengthReviewBody
 import app.myvitals.sync.StrengthWorkoutDetail
@@ -91,6 +93,7 @@ fun StrengthTodayScreen(
     onOpenCatalog: () -> Unit = {},
     onOpenTrainingPrefs: () -> Unit = {},
     onOpenDay: (dateIso: String) -> Unit = {},
+    onOpenCharts: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -290,6 +293,18 @@ fun StrengthTodayScreen(
         // Context line
         ContextRow(plan, plan.exercises.flatMap { it.sets }.size)
 
+        Spacer(Modifier.height(6.dp))
+        WhyWorkoutCard(settings = settings, workoutId = plan.id)
+
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onOpenCharts) {
+                Text("Charts ↗", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+            }
+            TextButton(onClick = onOpenHistory) {
+                Text("History ↗", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+            }
+        }
         Spacer(Modifier.height(4.dp))
 
         if (plan.status == "planned" || plan.status == "in_progress") {
@@ -612,6 +627,72 @@ private fun ContextRow(plan: StrengthWorkoutDetail, totalSets: Int) {
             ContextChip("$completedSets/$target sets")
             plan.recoveryScoreUsed?.let { ContextChip("recovery ${it.toInt()}") }
             plan.sleepHUsed?.let { ContextChip("sleep ${"%.1f".format(it)}h") }
+        }
+    }
+}
+
+@Composable
+internal fun WhyWorkoutCard(
+    settings: SettingsRepository,
+    workoutId: Long,
+) {
+    var expanded by remember(workoutId) { mutableStateOf(false) }
+    var explain by remember(workoutId) { mutableStateOf<app.myvitals.sync.StrengthExplain?>(null) }
+    var loading by remember(workoutId) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainerLow),
+        modifier = Modifier.fillMaxWidth().clickable {
+            expanded = !expanded
+            if (expanded && explain == null && !loading && settings.isConfigured()) {
+                loading = true
+                scope.launch {
+                    try {
+                        val api = BackendClient.create(
+                            settings.backendUrl, settings.bearerToken,
+                        )
+                        explain = withContext(Dispatchers.IO) {
+                            api.strengthExplain(workoutId)
+                        }
+                    } catch (e: Exception) {
+                        Timber.w(e, "explain workout failed")
+                    } finally { loading = false }
+                }
+            }
+        },
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Why this workout?",
+                    color = MV.OnSurface, fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f))
+                Text(if (expanded) "▾" else "▸",
+                    color = MV.OnSurfaceVariant, fontSize = 14.sp)
+            }
+            if (expanded) {
+                Spacer(Modifier.height(6.dp))
+                if (loading && explain == null) {
+                    Text("…", color = MV.OnSurfaceDim, fontSize = 12.sp)
+                } else if (explain != null) {
+                    Spacer(Modifier.height(2.dp))
+                    val lines = listOf(
+                        explain!!.whySplit, explain!!.whyExercises, explain!!.whyTargets,
+                    )
+                    for ((i, line) in lines.withIndex()) {
+                        Text(
+                            // strip <strong> for plain phone display
+                            line.replace("<strong>", "").replace("</strong>", ""),
+                            color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                        )
+                        if (i < lines.lastIndex) Spacer(Modifier.height(4.dp))
+                    }
+                } else {
+                    Text("No rationale available.",
+                        color = MV.OnSurfaceDim, fontSize = 12.sp)
+                }
+            }
         }
     }
 }

@@ -62,6 +62,14 @@ interface BackendApi {
     @POST("ai/strength/review/{id}")
     suspend fun strengthReview(@Path("id") id: Long): StrengthReviewResponse
 
+    @GET("workout/strength/explain/{id}")
+    suspend fun strengthExplain(@Path("id") id: Long): StrengthExplain
+
+    @GET("workout/strength/stats")
+    suspend fun strengthStats(
+        @retrofit2.http.Query("days") days: Int = 90,
+    ): StrengthStats
+
     @GET("workout/strength/equipment")
     suspend fun strengthEquipment(): EquipmentResponse
 

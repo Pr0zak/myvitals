@@ -109,6 +109,11 @@ class StrengthRepository(
             api().patchStrengthWorkout(workoutId, app.myvitals.sync.WorkoutPatchRequest(status = "skipped"))
         }
 
+    suspend fun unskipWorkout(workoutId: Long): StrengthWorkoutDetail =
+        withContext(Dispatchers.IO) {
+            api().patchStrengthWorkout(workoutId, app.myvitals.sync.WorkoutPatchRequest(status = "planned"))
+        }
+
     suspend fun equipment(): app.myvitals.sync.EquipmentResponse =
         withContext(Dispatchers.IO) { api().strengthEquipment() }
 

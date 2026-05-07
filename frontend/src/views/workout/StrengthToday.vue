@@ -170,18 +170,20 @@ onUnmounted(stopRest);
 // Week-strip + training prefs (drives the projected workout-day pattern)
 const recentWorkouts = ref<Array<{ date: string; status: string }>>([]);
 const trainingPrefs = ref<{ days_per_week: number } | null>(null);
+const upcoming = ref<Awaited<ReturnType<typeof api.strengthUpcoming>>["upcoming"]>([]);
 
 async function loadAll() {
   if (!queryToken.value) { loading.value = false; return; }
   loading.value = true;
   error.value = "";
   try {
-    const [w, r, cat, hist, eq] = await Promise.all([
+    const [w, r, cat, hist, eq, up] = await Promise.all([
       api.strengthToday(),
       api.strengthRecovery().catch(() => null),
       api.strengthExercises().catch(() => ({ count: 0, exercises: [] as StrengthExercise[] })),
       api.strengthWorkouts({ limit: 30 }).catch(() => ({ count: 0, workouts: [] })),
       api.strengthEquipment().catch(() => null),
+      api.strengthUpcoming(7, 4).catch(() => ({ count: 0, upcoming: [] })),
     ]);
     workout.value = w;
     recovery.value = r;
@@ -189,6 +191,7 @@ async function loadAll() {
     recentWorkouts.value = hist.workouts.map((x) => ({ date: x.date, status: x.status }));
     trainingPrefs.value = (eq?.payload as unknown as { training?: { days_per_week: number } })
       ?.training ?? { days_per_week: 3 };
+    upcoming.value = up.upcoming;
     // Pre-fill set entries from any already-logged sets so the user can
     // resume without losing data
     if (w) {
@@ -240,10 +243,23 @@ async function regenerate(force = false) {
 
 async function deferToday() {
   if (!workout.value) return;
-  if (!confirm("Defer today's workout? It'll be marked as skipped and tomorrow generates fresh.")) return;
+  if (!confirm("Skip today's workout day? You can undo from the Skipped state if you tap by accident.")) return;
   busy.value = "defer";
   try {
     await api.patchStrengthWorkout(workout.value.id, { status: "skipped" });
+    await loadAll();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy.value = "";
+  }
+}
+
+async function undoSkip() {
+  if (!workout.value) return;
+  busy.value = "undo";
+  try {
+    await api.patchStrengthWorkout(workout.value.id, { status: "planned" });
     await loadAll();
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -442,6 +458,25 @@ onMounted(loadAll);
 
     <!-- Plan exists -->
     <template v-else>
+      <!-- Upcoming workouts (next scheduled days, exercise preview) -->
+      <div v-if="upcoming.filter(u => !u.is_today).length > 0" class="upcoming">
+        <h3>Next workouts</h3>
+        <div class="upcoming-grid">
+          <div v-for="u in upcoming.filter(x => !x.is_today).slice(0, 3)" :key="u.date" class="up-card">
+            <div class="up-head">
+              <strong>{{ new Date(u.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) }}</strong>
+              <span class="focus">{{ u.split_focus.replace('_', ' ') }}</span>
+            </div>
+            <ul>
+              <li v-for="(name, i) in u.preview_exercises" :key="i">{{ name }}</li>
+              <li v-if="u.exercise_count > u.preview_exercises.length" class="more">
+                + {{ u.exercise_count - u.preview_exercises.length }} more
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <!-- 7-day strip: past 3, today, projected 3 -->
       <div class="week-strip">
         <div v-for="d in weekStrip" :key="d.iso" class="day"
@@ -459,6 +494,18 @@ onMounted(loadAll);
           <div class="dot"></div>
         </div>
       </div>
+
+      <Card v-if="workout.status === 'skipped'" class="skip-banner" :flat="true">
+        <div class="skip-row">
+          <span>
+            <strong>Skipped today's workout day.</strong>
+            Tomorrow will generate fresh.
+          </span>
+          <button class="ghost" :disabled="busy === 'undo'" @click="undoSkip">
+            <RotateCw :size="14" /> {{ busy === 'undo' ? 'Restoring…' : 'Undo' }}
+          </button>
+        </div>
+      </Card>
 
       <Card class="ctx" :flat="true">
         <div class="ctx-row">
@@ -743,6 +790,40 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 .review-card .next { margin: 0.6rem 0 0; color: var(--text-soft); font-size: 0.88rem; }
 .review-card .cached { font-size: 0.7rem; color: var(--muted-2);
   margin-top: 0.4rem; font-family: 'Geist Mono', ui-monospace, monospace; }
+
+.skip-banner { border-left: 3px solid #94a3b8; }
+.skip-row { display: flex; justify-content: space-between; align-items: center;
+  gap: 1rem; flex-wrap: wrap; }
+
+.upcoming { margin-bottom: 1rem; }
+.upcoming h3 {
+  font-size: 0.75rem; color: var(--muted); letter-spacing: 0.08em;
+  text-transform: uppercase; margin: 0 0 0.5rem; font-weight: 600;
+}
+.upcoming-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.5rem;
+}
+.up-card {
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 0.6rem 0.7rem;
+  display: flex; flex-direction: column; gap: 0.3rem;
+}
+.up-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 0.4rem; font-size: 0.82rem;
+}
+.up-head strong { color: var(--text); }
+.up-head .focus {
+  color: var(--accent, #ef4444); text-transform: capitalize;
+  font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.72rem;
+}
+.up-card ul {
+  list-style: none; padding: 0; margin: 0;
+  font-size: 0.74rem; color: var(--text-soft);
+  display: flex; flex-direction: column; gap: 0.15rem;
+}
+.up-card .more { color: var(--muted-2); font-style: italic; }
 
 .week-strip {
   display: flex; gap: 0.4rem; margin: 0.4rem 0 0.8rem;

@@ -264,7 +264,41 @@ fun StrengthTodayScreen(
                 ) {
                     Icon(Icons.Filled.SkipNext, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
-                    Text(if (deferring) "Deferring…" else "Skip workout day")
+                    Text(if (deferring) "Skipping…" else "Skip workout day")
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        if (plan.status == "skipped") {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainerLow),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Skipped today's workout day.",
+                            color = MV.OnSurface, fontWeight = FontWeight.SemiBold)
+                        Text("Tomorrow will generate fresh.",
+                            color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                deferring = true
+                                try { repo.unskipWorkout(plan.id); reload() }
+                                catch (e: Exception) { error = e.message?.take(160) }
+                                finally { deferring = false }
+                            }
+                        },
+                        enabled = !deferring,
+                    ) {
+                        Icon(Icons.Filled.Refresh, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (deferring) "Restoring…" else "Undo")
+                    }
                 }
             }
             Spacer(Modifier.height(8.dp))

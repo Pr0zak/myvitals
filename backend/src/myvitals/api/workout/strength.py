@@ -615,6 +615,70 @@ class SwapBody(BaseModel):
     exercise_id: str
 
 
+@router.get("/upcoming")
+async def upcoming_workouts(
+    days: int = 7,
+    per_day_count: int = 4,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Project the next `days` calendar days. For each one that maps to a
+    workout day (per training.days_per_week), simulate the split + exercise
+    selection and return a preview. Does NOT persist anything; this is a
+    pure read-only forecast that lets the user see what's coming up."""
+    from datetime import date as _date, timedelta as _td
+    import random as _random
+
+    equip = await _equipment_payload(db)
+    training = equip.get("training") or {}
+    dpw = int(training.get("days_per_week", strength_algo.DEFAULT_DAYS_PER_WEEK))
+    pref = training.get("split_preference", strength_algo.DEFAULT_SPLIT_PREFERENCE)
+    level = training.get("level", strength_algo.DEFAULT_LEVEL)
+    exercise_prefs = equip.get("exercise_prefs") or {}
+
+    # Mon-first weekday pattern matching the web/Android strip
+    PATTERN = {2: {0, 3}, 3: {0, 2, 4}, 4: {0, 1, 3, 4},
+               5: {0, 1, 2, 3, 4}, 6: {0, 1, 2, 3, 4, 5}}
+    workout_dows = PATTERN.get(dpw, PATTERN[3])
+
+    catalog_filtered = strength_algo.filter_catalog_for_equipment(
+        strength_algo.CATALOG, equip,
+    )
+
+    # Walk forward, advancing the rotation each time we land on a workout day.
+    today = _date.today()
+    last_split = await strength_algo.last_split_for_user(db)
+    out: list[dict[str, Any]] = []
+    cursor_split = last_split
+    for offset in range(days + 1):
+        d = today + _td(days=offset)
+        # Mon-first index
+        mon_first = (d.weekday())  # Python's weekday(): Mon=0..Sun=6 ✓
+        if mon_first not in workout_dows:
+            continue
+        focus = strength_algo.select_split(dpw, pref, cursor_split)
+        cursor_split = focus
+        seed = strength_algo._seed(d, 0)  # noqa: SLF001
+        rng = _random.Random(seed)
+        try:
+            chosen, _slots, _notes = strength_algo.select_exercises_for_split(
+                catalog_filtered, focus, level, rng, exercise_prefs=exercise_prefs,
+            )
+        except Exception:
+            chosen = []
+        names = [
+            strength_algo.CATALOG_BY_ID.get(c["id"], {}).get("name", c["id"])
+            for c in chosen[:per_day_count]
+        ]
+        out.append({
+            "date": d.isoformat(),
+            "is_today": offset == 0,
+            "split_focus": focus,
+            "preview_exercises": names,
+            "exercise_count": len(chosen),
+        })
+    return {"count": len(out), "upcoming": out}
+
+
 @router.post("/workout-exercises/{wex_id}/swap", response_model=WorkoutExerciseOut)
 async def swap_exercise(
     wex_id: int, body: SwapBody,

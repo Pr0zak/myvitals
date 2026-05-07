@@ -597,6 +597,22 @@ export const api = {
     return data;
   },
 
+  async strengthUpcoming(days = 7, perDayCount = 4): Promise<{
+    count: number;
+    upcoming: Array<{
+      date: string;
+      is_today: boolean;
+      split_focus: string;
+      preview_exercises: string[];
+      exercise_count: number;
+    }>;
+  }> {
+    const { data } = await http.get("/workout/strength/upcoming", {
+      params: { days, per_day_count: perDayCount },
+    });
+    return data;
+  },
+
   // ── Trails (RainoutLine status) ───────────────────────────
   async trails(): Promise<{
     count: number;

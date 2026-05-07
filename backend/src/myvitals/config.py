@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     def ha_entity_list(self) -> list[str]:
         return [e.strip() for e in self.ha_entities.split(",") if e.strip()]
 
+    # --- RainoutLine trail-status integration (optional) ---
+    # 10-digit DNIS for the RainoutLine endpoint your trails are listed on.
+    # Without this, the trail-status poller is a no-op.
+    rainoutline_dnis: str | None = None
+
     # --- Strava integration ---
     strava_client_id: str | None = None
     strava_client_secret: str | None = None

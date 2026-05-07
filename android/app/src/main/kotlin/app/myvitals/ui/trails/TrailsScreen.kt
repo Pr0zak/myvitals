@@ -26,10 +26,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Navigation
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.outlined.Navigation
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -271,28 +274,29 @@ fun TrailsScreen(settings: SettingsRepository) {
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(
-                    onClick = { scope.launch { linkActivities() } },
-                    enabled = !linking,
-                ) {
-                    Text(
-                        if (linking) "Linking…" else "Link rides",
-                        color = MV.OnSurface, fontSize = 12.sp,
-                    )
+                IconButton(onClick = { scope.launch { refreshNow() } }, enabled = !refreshing) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = MV.OnSurface)
                 }
-                TextButton(
-                    onClick = { scope.launch { fetchOsmRoutes() } },
-                    enabled = !fetchingOsm,
-                ) {
-                    Text(
-                        if (fetchingOsm) "OSM…" else "OSM routes",
-                        color = MV.OnSurface, fontSize = 12.sp,
-                    )
-                }
-                TextButton(onClick = { scope.launch { refreshNow() } }, enabled = !refreshing) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh", tint = MV.OnSurface)
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (refreshing) "…" else "Refresh", color = MV.OnSurface)
+                var menuOpen by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Outlined.MoreVert, contentDescription = "More",
+                            tint = MV.OnSurface)
+                    }
+                    DropdownMenu(
+                        expanded = menuOpen, onDismissRequest = { menuOpen = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(if (linking) "Linking rides…" else "Link rides to trails") },
+                            enabled = !linking,
+                            onClick = { menuOpen = false; scope.launch { linkActivities() } },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (fetchingOsm) "Fetching OSM…" else "Fetch OSM routes") },
+                            enabled = !fetchingOsm,
+                            onClick = { menuOpen = false; scope.launch { fetchOsmRoutes() } },
+                        )
+                    }
                 }
             }
         }
@@ -638,7 +642,7 @@ private fun TrailRow(
                         if (hasLocation) {
                             Spacer(Modifier.width(6.dp))
                             Icon(
-                                Icons.Filled.Navigation,
+                                Icons.Outlined.Navigation,
                                 contentDescription = "Open mini map",
                                 tint = MV.OnSurfaceDim,
                                 modifier = Modifier.size(12.dp),
@@ -648,7 +652,7 @@ private fun TrailRow(
                 }
                 IconButton(onClick = onSubscribeToggle) {
                     Icon(
-                        if (t.subscribed) Icons.Filled.Star else Icons.Filled.StarBorder,
+                        if (t.subscribed) Icons.Outlined.Star else Icons.Outlined.StarBorder,
                         contentDescription = if (t.subscribed) "Unsubscribe" else "Subscribe",
                         tint = if (t.subscribed) MV.Amber else MV.OnSurfaceVariant,
                     )
@@ -687,7 +691,7 @@ private fun TrailRow(
                         ),
                         modifier = Modifier.weight(1f),
                     ) {
-                        Icon(Icons.Filled.Navigation, contentDescription = null,
+                        Icon(Icons.Outlined.Navigation, contentDescription = null,
                             modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Navigate")
@@ -796,12 +800,25 @@ if (osm) {
             WebView(ctx).apply {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
+                settings.loadsImagesAutomatically = true
+                // Allow Leaflet's https tile/script URLs from a localhost
+                // base context.
+                settings.mixedContentMode =
+                    android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                 webViewClient = WebViewClient()
                 setBackgroundColor(android.graphics.Color.parseColor("#0F1620"))
+                loadDataWithBaseURL("https://localhost/", html, "text/html", "utf-8", null)
+                tag = html
             }
         },
         update = { webview ->
-            webview.loadDataWithBaseURL("https://localhost/", html, "text/html", "utf-8", null)
+            // Only reload when the HTML actually changed (e.g., OSM
+            // GeoJSON arrived after first render). Avoids re-loading
+            // on every parent recomposition, which produces a blank map.
+            if (webview.tag != html) {
+                webview.loadDataWithBaseURL("https://localhost/", html, "text/html", "utf-8", null)
+                webview.tag = html
+            }
         },
         modifier = Modifier.fillMaxWidth().height(220.dp),
     )

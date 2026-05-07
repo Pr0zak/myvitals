@@ -367,6 +367,16 @@ export const api = {
     return data;
   },
 
+  async trailStatusConfig(): Promise<{ dnis: string | null; configured: boolean; updated_at: string | null }> {
+    const { data } = await http.get("/trails/config");
+    return data;
+  },
+
+  async saveTrailStatusConfig(dnis: string | null): Promise<{ dnis: string | null; configured: boolean }> {
+    const { data } = await http.post("/trails/config", { dnis });
+    return data;
+  },
+
   async stravaStatus(): Promise<import("./types").StravaStatus> {
     const { data } = await http.get<import("./types").StravaStatus>("/strava/status");
     return data;
@@ -664,7 +674,7 @@ export const api = {
     await http.delete(`/trails/${id}/subscribe`);
   },
 
-  async refreshTrails(): Promise<{ fetched: number; snapshots: number; alerts: number }> {
+  async refreshTrails(): Promise<{ fetched: number; snapshots: number; alerts: number; skipped?: boolean }> {
     const { data } = await http.post("/trails/refresh");
     return data;
   },

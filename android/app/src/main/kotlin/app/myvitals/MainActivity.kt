@@ -10,10 +10,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FitnessCenter
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Terrain
+import androidx.compose.material.icons.outlined.FitnessCenter
+import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Terrain
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -21,6 +21,9 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -105,7 +108,8 @@ class MainActivity : ComponentActivity() {
                     NavHost(
                         navController = nav,
                         startDestination = Routes.SOBER,
-                        modifier = Modifier.fillMaxSize().padding(padding),
+                        modifier = Modifier.fillMaxSize().padding(padding)
+                            .swipeBetweenTopTabs(nav),
                     ) {
                         composable(Routes.SOBER) {
                             SoberHomeScreen(
@@ -184,6 +188,39 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** Top-level tab routes, ordered to match the bottom-bar layout. */
+private val TOP_TABS = listOf(Routes.SOBER, Routes.WORKOUT, Routes.TRAILS, Routes.SETTINGS)
+
+/**
+ * Listen for horizontal flicks across the screen and navigate to the
+ * adjacent top-level tab. Only fires while the user is *on* a top-level
+ * tab — deep-link screens (workout history, catalog, etc.) keep their
+ * own back-swipe behaviour.
+ */
+@androidx.compose.runtime.Composable
+private fun Modifier.swipeBetweenTopTabs(nav: NavHostController): Modifier {
+    val backStack by nav.currentBackStackEntryAsState()
+    val current = backStack?.destination?.route
+    val idx = TOP_TABS.indexOf(current)
+    if (idx < 0) return this   // Not on a top-level tab — no-op
+    val threshold = with(androidx.compose.ui.platform.LocalDensity.current) { 80.dp.toPx() }
+    return this.pointerInput(current) {
+        var totalDx = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { totalDx = 0f },
+            onHorizontalDrag = { _, dx -> totalDx += dx },
+            onDragEnd = {
+                if (totalDx <= -threshold && idx < TOP_TABS.lastIndex) {
+                    nav.navigateTab(TOP_TABS[idx + 1])
+                } else if (totalDx >= threshold && idx > 0) {
+                    nav.navigateTab(TOP_TABS[idx - 1])
+                }
+            },
+            onDragCancel = {},
+        )
+    }
+}
+
 private fun NavHostController.navigateTab(route: String) {
     navigate(route) {
         popUpTo(graph.findStartDestination().id) { saveState = true }
@@ -197,15 +234,15 @@ private fun BottomBar(nav: NavHostController) {
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination?.route ?: Routes.SOBER
     NavigationBar(containerColor = MV.SurfaceContainerLow) {
-        Item(current, Routes.SOBER, "Sober", Icons.Filled.Refresh) { nav.navigateTab(Routes.SOBER) }
-        Item(current, Routes.WORKOUT, "Workout", Icons.Filled.FitnessCenter,
+        Item(current, Routes.SOBER, "Sober", Icons.Outlined.Bedtime) { nav.navigateTab(Routes.SOBER) }
+        Item(current, Routes.WORKOUT, "Workout", Icons.Outlined.FitnessCenter,
             highlightAlsoFor = setOf(
                 Routes.WORKOUT_HISTORY,
                 Routes.WORKOUT_CATALOG,
                 Routes.WORKOUT_TRAINING_PREFS,
             )) { nav.navigateTab(Routes.WORKOUT) }
-        Item(current, Routes.TRAILS, "Trails", Icons.Filled.Terrain) { nav.navigateTab(Routes.TRAILS) }
-        Item(current, Routes.SETTINGS, "Settings", Icons.Filled.Settings) { nav.navigateTab(Routes.SETTINGS) }
+        Item(current, Routes.TRAILS, "Trails", Icons.Outlined.Terrain) { nav.navigateTab(Routes.TRAILS) }
+        Item(current, Routes.SETTINGS, "Settings", Icons.Outlined.Settings) { nav.navigateTab(Routes.SETTINGS) }
     }
 }
 

@@ -22,13 +22,14 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import settings
 from ..db import models, session as _session
 
 log = logging.getLogger(__name__)
 
-# Maintainer's local trail set — KC area. If we ever want multi-DNIS
-# support, this becomes a config table; for now a single source.
-DEFAULT_DNIS = "9132040204"  # Urban Trail Company (urbantrailco.com)
+# DNIS is supplied per-deployment via the RAINOUTLINE_DNIS env var.
+# If unset, the poller and fetch helpers no-op and log a warning so
+# the rest of the app still runs.
 SOURCE_URL = "https://rainoutline.com/search/dnis_refresh/{dnis}/updated/0"
 USER_AGENT = "myvitals-trail-poller/0.7 (+self-hosted)"
 
@@ -121,7 +122,27 @@ def parse_dnis_refresh(html: str) -> list[TrailReading]:
 # Fetch + persist
 # ------------------------------------------------------------------
 
-async def fetch(dnis: str = DEFAULT_DNIS) -> str:
+async def _resolve_dnis(db: AsyncSession | None = None) -> str | None:
+    """Look up the DNIS in trail_status_config first; fall back to the
+    RAINOUTLINE_DNIS env var so fresh installs can boot before anyone
+    visits Settings."""
+    own = db is None
+    if own:
+        db = _session.SessionLocal()
+    try:
+        cfg = await db.get(models.TrailStatusConfig, 1)  # type: ignore[union-attr]
+        if cfg and cfg.dnis:
+            return cfg.dnis
+    finally:
+        if own:
+            await db.close()  # type: ignore[union-attr]
+    return settings.rainoutline_dnis
+
+
+async def fetch(dnis: str | None = None) -> str:
+    dnis = dnis or await _resolve_dnis()
+    if not dnis:
+        raise RuntimeError("RAINOUTLINE_DNIS not configured (set via Settings)")
     url = SOURCE_URL.format(dnis=dnis)
     async with httpx.AsyncClient(timeout=20.0) as client:
         r = await client.get(url, headers={"User-Agent": USER_AGENT})
@@ -188,8 +209,12 @@ def _should_alert(notify_on: str, prev: str | None, new: str) -> bool:
     return False
 
 
-async def poll_and_persist(dnis: str = DEFAULT_DNIS) -> dict:
+async def poll_and_persist(dnis: str | None = None) -> dict:
     """Run one fetch cycle. Returns a count summary suitable for logging."""
+    dnis = dnis or await _resolve_dnis()
+    if not dnis:
+        log.info("rainoutline: DNIS not configured — skipping poll")
+        return {"fetched": 0, "snapshots": 0, "alerts": 0, "skipped": True}
     html = await fetch(dnis)
     readings = parse_dnis_refresh(html)
     if not readings:

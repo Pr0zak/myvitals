@@ -73,6 +73,52 @@ router = APIRouter(prefix="/trails", dependencies=[Depends(require_any)])
 
 
 # ------------------------------------------------------------------
+# Status-board (RainoutLine DNIS) config — single-row table
+# ------------------------------------------------------------------
+
+class TrailStatusConfigBody(BaseModel):
+    dnis: str | None = None
+
+
+@router.get("/config")
+async def get_trail_status_config(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    cfg = await db.get(models.TrailStatusConfig, 1)
+    return {
+        "dnis": cfg.dnis if cfg else None,
+        "configured": bool(cfg and cfg.dnis),
+        "updated_at": cfg.updated_at if cfg else None,
+    }
+
+
+@router.post("/config")
+async def save_trail_status_config(
+    body: TrailStatusConfigBody,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    raw = (body.dnis or "").strip()
+    # Allow blank to clear
+    cleaned: str | None = None
+    if raw:
+        digits = "".join(c for c in raw if c.isdigit())
+        if len(digits) != 10:
+            raise HTTPException(400, "DNIS must be 10 digits")
+        cleaned = digits
+    cfg = await db.get(models.TrailStatusConfig, 1)
+    if cfg is None:
+        cfg = models.TrailStatusConfig(
+            id=1, dnis=cleaned, updated_at=datetime.now(timezone.utc),
+        )
+        db.add(cfg)
+    else:
+        cfg.dnis = cleaned
+        cfg.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"dnis": cfg.dnis, "configured": bool(cfg.dnis)}
+
+
+# ------------------------------------------------------------------
 # List + detail
 # ------------------------------------------------------------------
 
@@ -327,10 +373,17 @@ async def seed_locations(
     rows whose lat/lon are currently null OR differ from the file."""
     import json
     from pathlib import Path
-    p = Path(__file__).resolve().parent.parent / "data" / "trail_locations.json"
+    base = Path(__file__).resolve().parent.parent / "data"
+    p = base / "trail_locations.json"
     if not p.exists():
-        raise HTTPException(status_code=404, detail="trail_locations.json not found in data/")
-    data: dict[str, Any] = json.loads(p.read_text())
+        # Fresh checkouts get only the .example stub. Treat as empty seed.
+        p = base / "trail_locations.json.example"
+        if not p.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="trail_locations.json not found in data/",
+            )
+    data: dict[str, Any] = json.loads(p.read_text() or "{}")
     trails = (await db.execute(select(models.Trail))).scalars().all()
     updated = 0
     skipped = 0

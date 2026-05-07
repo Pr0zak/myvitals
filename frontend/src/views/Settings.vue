@@ -15,6 +15,13 @@ const apiBaseInput = ref(apiBase.value);
 const status = ref<"idle" | "ok" | "fail">("idle");
 const errorMsg = ref<string>("");
 
+const trailCfg = ref<{ dnis: string | null; configured: boolean; updated_at: string | null } | null>(null);
+const trailCfgError = ref<string | null>(null);
+const trailCfgSaving = ref(false);
+const trailTesting = ref(false);
+const trailDnisInput = ref("");
+const trailCfgResult = ref("");
+
 const strava = ref<StravaStatus | null>(null);
 const stravaConfig = ref<StravaAppConfigStatus | null>(null);
 const stravaError = ref<string | null>(null);
@@ -360,7 +367,7 @@ async function test() {
     await api.health();
     await api.lastSync();
     status.value = "ok";
-    await loadStrava();
+    await Promise.all([loadStrava(), loadTrailCfg()]);
   } catch (e: unknown) {
     status.value = "fail";
     if (e && typeof e === "object" && "response" in e) {
@@ -381,6 +388,46 @@ function clearAll() {
   errorMsg.value = "";
   strava.value = null;
   stravaConfig.value = null;
+}
+
+async function loadTrailCfg() {
+  if (!queryToken.value) return;
+  trailCfgError.value = null;
+  try {
+    trailCfg.value = await api.trailStatusConfig();
+    trailDnisInput.value = trailCfg.value.dnis ?? "";
+  } catch (e: unknown) {
+    trailCfgError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function saveTrailDnis() {
+  trailCfgSaving.value = true; trailCfgResult.value = "";
+  try {
+    const r = await api.saveTrailStatusConfig(trailDnisInput.value.trim() || null);
+    trailCfg.value = { ...r, updated_at: new Date().toISOString() };
+    trailDnisInput.value = r.dnis ?? "";
+    trailCfgResult.value = r.configured ? "Saved." : "Cleared.";
+  } catch (e: unknown) {
+    trailCfgResult.value = e instanceof Error ? e.message : String(e);
+  } finally { trailCfgSaving.value = false; }
+}
+
+async function clearTrailDnis() {
+  trailDnisInput.value = "";
+  await saveTrailDnis();
+}
+
+async function testTrailPoll() {
+  trailTesting.value = true; trailCfgResult.value = "";
+  try {
+    const r = await api.refreshTrails();
+    trailCfgResult.value = r.skipped
+      ? "Skipped (no DNIS configured)"
+      : `Polled: ${r.fetched} readings, ${r.snapshots} snapshots, ${r.alerts} alerts.`;
+  } catch (e: unknown) {
+    trailCfgResult.value = e instanceof Error ? e.message : String(e);
+  } finally { trailTesting.value = false; }
 }
 
 async function loadStrava() {
@@ -793,6 +840,41 @@ onUnmounted(stopJobPolling);
     </details>
 
     <details class="section" v-if="queryToken">
+      <summary><h2>Trail status (RainoutLine)</h2></summary>
+      <div v-if="trailCfgError" class="err">{{ trailCfgError }}</div>
+      <p class="hint">
+        myvitals polls
+        <a href="https://rainoutline.com/" target="_blank" rel="noreferrer">rainoutline.com</a>
+        every 15 minutes for trail-open / trail-closed status. Each
+        organisation that uses RainoutLine has a 10-digit DNIS (the
+        number callers dial to hear the recording). Paste yours below
+        and the trail board on the Trails page populates itself.
+      </p>
+      <div class="form">
+        <label>
+          <span>DNIS <em class="opt">(10 digits)</em></span>
+          <input
+            v-model="trailDnisInput" placeholder="e.g. 9132040204"
+            inputmode="numeric" autocomplete="off"
+            :disabled="trailCfgSaving"
+          />
+        </label>
+        <div class="actions">
+          <button class="primary" :disabled="trailCfgSaving" @click="saveTrailDnis">
+            {{ trailCfgSaving ? "Saving…" : (trailCfg?.configured ? "Update" : "Save") }}
+          </button>
+          <button v-if="trailCfg?.configured" class="ghost" :disabled="trailCfgSaving" @click="testTrailPoll">
+            {{ trailTesting ? "Polling…" : "Test poll now" }}
+          </button>
+          <button v-if="trailCfg?.configured" class="ghost danger" :disabled="trailCfgSaving" @click="clearTrailDnis">
+            Clear
+          </button>
+        </div>
+        <div v-if="trailCfgResult" class="hint">{{ trailCfgResult }}</div>
+      </div>
+    </details>
+
+    <details class="section">
       <summary><h2>Strava</h2></summary>
       <div v-if="stravaError" class="err">{{ stravaError }}</div>
 

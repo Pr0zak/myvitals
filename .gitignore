@@ -49,3 +49,9 @@ android/keystore.properties
 
 # project notes (kept local-only)
 CLAUDE.md
+
+# user-supplied seed data (not for the public repo)
+backend/src/myvitals/data/trail_locations.json
+
+# kotlin compiler session caches
+android/.kotlin/

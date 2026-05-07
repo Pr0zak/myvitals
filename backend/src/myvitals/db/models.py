@@ -227,6 +227,14 @@ class StravaCredentials(Base):
     connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class TrailStatusConfig(Base):
+    """Dashboard-editable RainoutLine DNIS. Single row (id=1)."""
+    __tablename__ = "trail_status_config"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    dnis: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class StravaAppConfig(Base):
     """Dashboard-editable Strava OAuth credentials. Single row (id=1) wins
     over the STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET env vars."""

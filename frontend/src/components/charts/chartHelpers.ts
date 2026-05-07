@@ -80,6 +80,19 @@ export function workoutMarkArea(activities: Activity[]) {
   return {
     silent: false,
     itemStyle: { color: t.palette.activity, borderColor: t.palette.activity },
+    // Pin the label *inside* the band near the top so it doesn't get
+    // clipped by the chart's top edge. ECharts' default position puts
+    // the label above the band where the chart container truncates it.
+    label: {
+      show: true,
+      position: "insideTop",
+      distance: 4,
+      color: t.axisLabel.color,
+      fontSize: 10,
+      fontWeight: 600,
+      overflow: "truncate",
+      width: 120,
+    },
     data: activities.map((a) => {
       const color = a.type === "strength" ? strengthColor : t.palette.activity;
       return [

@@ -394,6 +394,10 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
     <header>
       <h1>Trails</h1>
       <div class="header-actions">
+        <RouterLink to="/trails/map" class="refresh"
+                    title="View all trails on a map with status overlay">
+          <MapIcon :size="14" /> Map
+        </RouterLink>
         <a v-if="dnisUrl" :href="dnisUrl" target="_blank" rel="noreferrer"
            class="refresh dnis-link"
            title="Open the full RainoutLine status board">

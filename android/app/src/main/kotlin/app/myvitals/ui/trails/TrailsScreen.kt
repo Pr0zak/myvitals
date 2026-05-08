@@ -27,7 +27,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.MoreVert
@@ -89,6 +91,7 @@ fun TrailsScreen(settings: SettingsRepository) {
     val context = LocalContext.current
     var trails by remember { mutableStateOf<List<Trail>>(emptyList()) }
     var dnisUrl by remember { mutableStateOf<String?>(null) }
+    var showOverviewMap by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -342,6 +345,14 @@ fun TrailsScreen(settings: SettingsRepository) {
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Aggregate-map overlay — every pinned trail with status colour.
+                IconButton(onClick = { showOverviewMap = true }) {
+                    Icon(
+                        Icons.Outlined.Map,
+                        contentDescription = "Trail status map",
+                        tint = MV.OnSurfaceVariant,
+                    )
+                }
                 // RainoutLine status board shortcut — same as web header.
                 if (dnisUrl != null) {
                     val ctxLink = androidx.compose.ui.platform.LocalContext.current
@@ -664,6 +675,36 @@ fun TrailsScreen(settings: SettingsRepository) {
                         ) { Text("Cancel") }
                     }
                     Spacer(Modifier.height(16.dp))
+                }
+            }
+        }
+    }
+
+    // Fullscreen aggregate-map overlay — same UX as web /trails/map.
+    if (showOverviewMap) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showOverviewMap = false },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+            ),
+        ) {
+            Box(modifier = Modifier.fillMaxSize().background(MV.Bg)) {
+                TrailsOverviewMap(trails, nowMs)
+                IconButton(
+                    onClick = { showOverviewMap = false },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .background(
+                            color = androidx.compose.ui.graphics.Color(0xCC0F1620),
+                            shape = androidx.compose.foundation.shape.CircleShape,
+                        ),
+                ) {
+                    Icon(
+                        Icons.Outlined.Close,
+                        contentDescription = "Close map",
+                        tint = MV.OnSurface,
+                    )
                 }
             }
         }
@@ -1001,6 +1042,105 @@ try {
             }
         },
         modifier = Modifier.fillMaxWidth().height(220.dp),
+    )
+}
+
+/** Aggregate map: every pinned trail as a colored marker. Mirrors the
+ *  web /trails/map view. green=open, amber=delayed, red=closed,
+ *  slate=unknown. Click a pin → popup with name + status + age. */
+@Composable
+private fun TrailsOverviewMap(trails: List<Trail>, nowMs: Long) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val leafletCss = remember { app.myvitals.ui.common.LeafletAssets.css(ctx) }
+    val leafletJs = remember { app.myvitals.ui.common.LeafletAssets.js(ctx) }
+    val pinned = trails.filter { it.latitude != null && it.longitude != null }
+    val markersJs = buildString {
+        append("[")
+        for ((i, t) in pinned.withIndex()) {
+            if (i > 0) append(",")
+            val color = when (t.status) {
+                "open" -> "#22C55E"
+                "delayed" -> "#EAB308"
+                "closed" -> "#EF4444"
+                else -> "#94A3B8"
+            }
+            val nameEsc = (t.name).replace("\\", "\\\\").replace("'", "\\'")
+                .replace("\n", " ").replace("\r", "")
+            val statusEsc = (t.status ?: "unknown").replace("'", "\\'")
+            val age = fmtAge(t.sourceTs ?: t.fetchedAt, nowMs)
+                .replace("'", "\\'")
+            append(
+                "{lat:${t.latitude},lon:${t.longitude}," +
+                "color:'$color',name:'$nameEsc',status:'$statusEsc',age:'$age'}"
+            )
+        }
+        append("]")
+    }
+    val centerLat = pinned.firstOrNull()?.latitude ?: 39.0
+    val centerLon = pinned.firstOrNull()?.longitude ?: -94.6
+    val html = """<!DOCTYPE html>
+<html><head>
+<meta name="viewport" content="initial-scale=1.0,width=device-width"/>
+<style>$leafletCss
+html,body{margin:0;padding:0;background:#0F1620;overflow:hidden;}
+#m{display:block;}
+.lpop{font-family:sans-serif;min-width:180px;}
+.lpop .nm{font-weight:600;margin-bottom:3px;}
+.lpop .st{font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;}
+.lpop .ag{color:#64748b;font-size:0.78rem;margin-top:2px;}
+</style>
+</head><body>
+<div id="m"></div>
+<script>$leafletJs</script>
+<script>
+function applySize(){const w=window.innerWidth||360,h=window.innerHeight||400;
+  const m=document.getElementById('m');m.style.width=w+'px';m.style.height=h+'px';
+  document.body.style.height=h+'px';document.documentElement.style.height=h+'px';}
+applySize();
+try{
+  const map=L.map('m',{zoomControl:true,scrollWheelZoom:false}).setView([$centerLat,$centerLon],10);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(map);
+  const pins=$markersJs;
+  const bounds=L.latLngBounds([]);
+  pins.forEach(p=>{
+    const icon=L.divIcon({
+      html:'<div style="width:16px;height:16px;border-radius:50%;background:'+p.color
+          +';border:2px solid #FFFFFF;box-shadow:0 2px 4px rgba(0,0,0,0.5);"></div>',
+      className:'mvpin',iconSize:[16,16],iconAnchor:[8,8]});
+    L.marker([p.lat,p.lon],{icon}).addTo(map).bindPopup(
+      '<div class="lpop"><div class="nm">'+p.name+'</div>'
+      +'<div class="st" style="color:'+p.color+'">'+p.status+'</div>'
+      +'<div class="ag">updated '+p.age+'</div></div>');
+    bounds.extend([p.lat,p.lon]);
+  });
+  if(pins.length>0&&bounds.isValid()) map.fitBounds(bounds.pad(0.1));
+  function fix(){applySize();map.invalidateSize();}
+  window.addEventListener('resize',fix);
+  setTimeout(fix,50);setTimeout(fix,300);setTimeout(fix,800);
+}catch(e){console.error('overview map failed:',e.toString());}
+</script></body></html>"""
+    AndroidView(
+        factory = { wctx ->
+            WebView(wctx).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.loadsImagesAutomatically = true
+                settings.mixedContentMode =
+                    android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                webViewClient = WebViewClient()
+                setBackgroundColor(android.graphics.Color.parseColor("#0F1620"))
+                loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+                tag = html
+            }
+        },
+        update = { webview ->
+            if (webview.tag != html) {
+                webview.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+                webview.tag = html
+            }
+        },
+        modifier = Modifier.fillMaxSize(),
     )
 }
 

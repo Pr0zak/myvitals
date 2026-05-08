@@ -219,6 +219,21 @@ const stats = computed(() => {
   const max = Math.max(...totals);
   return { avg, min, max, count: nights.value.length };
 });
+
+// Last 10 nights, newest first — for the "Recent nights" list card.
+const recentNights = computed(() =>
+  [...nights.value]
+    .sort((a, b) => b.start.localeCompare(a.start))
+    .slice(0, 10),
+);
+
+function fmtNightDate(n: SleepNight): string {
+  // Show the *evening* the night belongs to (i.e. the day before
+  // the wake-up date) if the start is past midnight.
+  const startD = new Date(n.start);
+  const opts = { weekday: "short", month: "short", day: "numeric" } as const;
+  return startD.toLocaleDateString(undefined, opts);
+}
 </script>
 
 <template>
@@ -266,6 +281,22 @@ const stats = computed(() => {
         </div>
       </Card>
 
+      <Card title="Recent nights"
+            :subtitle="`bed → wake · total · last ${recentNights.length}`">
+        <ul class="recent-nights">
+          <li v-for="n in recentNights" :key="n.date">
+            <span class="rn-date">{{ fmtNightDate(n) }}</span>
+            <span class="rn-window mono">
+              {{ fmtTime(new Date(n.start)) }}
+              <span class="dim">→</span>
+              {{ fmtTime(new Date(n.end)) }}
+            </span>
+            <span class="rn-bar" :style="{ width: `${(n.total_s / Math.max(...recentNights.map(x => x.total_s))) * 100}%` }"></span>
+            <span class="rn-total mono">{{ fmtDur(n.total_s) }}</span>
+          </li>
+        </ul>
+      </Card>
+
       <Card title="Per-night stage breakdown">
         <div class="chart"><VChart :option="stackedNightsOption" autoresize/></div>
       </Card>
@@ -300,6 +331,37 @@ h1 { margin: 0; }
 .kv dd { margin: 0.2rem 0 0; color: var(--text); font-weight: 500; font-size: 1.4rem; }
 
 .empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
+
+.recent-nights {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 0.4rem;
+}
+.recent-nights li {
+  display: grid;
+  grid-template-columns: minmax(80px, auto) minmax(140px, auto) 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+.rn-date { color: var(--text); font-weight: 500; white-space: nowrap; }
+.rn-window {
+  color: var(--text); font-size: 0.78rem; white-space: nowrap;
+  font-feature-settings: "tnum";
+}
+.rn-window .dim { color: var(--muted); margin: 0 4px; }
+.rn-bar {
+  display: block; height: 6px; max-width: 200px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(167,139,250,0.3), rgba(167,139,250,0.7));
+  justify-self: stretch;
+}
+.rn-total {
+  color: var(--text); font-weight: 600; font-size: 0.88rem;
+  font-feature-settings: "tnum"; white-space: nowrap;
+}
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 
 .last-banner {

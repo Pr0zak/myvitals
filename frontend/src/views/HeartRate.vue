@@ -17,7 +17,7 @@ import type {
 } from "@/api/types";
 import { chartTheme } from "@/theme";
 import {
-  baseTimeOption, meanMarkLine, timeAxisFormatter,
+  meanMarkLine, timeAxisFormatter,
 } from "@/components/charts/chartHelpers";
 
 type RangeKey = "24h" | "7d" | "30d" | "90d" | "1y";
@@ -140,11 +140,23 @@ const traceOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
   if (!hr24.value || hr24.value.points.length === 0) return null;
-  const opt = baseTimeOption() as Record<string, any>;
-  opt.xAxis = { ...(opt.xAxis as object), min: xWindow24.value.min, max: xWindow24.value.max };
+  // Build the option fresh (no baseTimeOption spread): the dataZoom
+  // it ships with was conflicting with the explicit xAxis min/max and
+  // hiding the line series entirely.
   return {
-    ...opt,
-    tooltip: { ...t.tooltip, trigger: "axis" },
+    grid: { left: 40, right: 12, top: 12, bottom: 28 },
+    xAxis: {
+      type: "time",
+      min: xWindow24.value.min,
+      max: xWindow24.value.max,
+      axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: "value", scale: true,
+      axisLabel: t.axisLabel, splitLine: t.splitLine,
+    },
+    tooltip: { trigger: "axis", ...t.tooltip },
     series: [
       {
         type: "line", name: "HR", showSymbol: false, smooth: true,

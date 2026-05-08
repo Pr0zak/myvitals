@@ -361,6 +361,28 @@ fun StrengthCatalogScreen(
                             modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // Pose icon thumbnail for mobility entries
+                            if (ex.movementPattern == "mobility"
+                                && app.myvitals.ui.hasYogaPoseIcon(ex.id)) {
+                                Box(
+                                    Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(0x14A78BFA))
+                                        .border(
+                                            1.dp,
+                                            Color(0x40A78BFA),
+                                            RoundedCornerShape(6.dp),
+                                        ),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    app.myvitals.ui.YogaPoseIcon(
+                                        id = ex.id, size = 26.dp,
+                                        tint = Color(0xFFA78BFA),
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                            }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(ex.name, color = MV.OnSurface, fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold)

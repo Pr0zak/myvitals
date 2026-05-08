@@ -1006,6 +1006,28 @@ private fun ExerciseCard(
                                 .clip(RoundedCornerShape(8.dp)),
                         )
                     }
+                } else if (info?.movementPattern == "mobility"
+                    && app.myvitals.ui.hasYogaPoseIcon(wex.exerciseId)) {
+                    // Yoga poses ship without bundled images — render the
+                    // hand-drawn pose silhouette so each row is visually
+                    // identifiable rather than a name-only block.
+                    Box(
+                        Modifier
+                            .size(64.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0x14A78BFA))
+                            .border(
+                                1.dp,
+                                Color(0x40A78BFA),
+                                RoundedCornerShape(8.dp),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        app.myvitals.ui.YogaPoseIcon(
+                            id = wex.exerciseId, size = 44.dp,
+                            tint = Color(0xFFA78BFA),
+                        )
+                    }
                 }
             }
 

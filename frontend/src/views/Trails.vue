@@ -18,6 +18,7 @@ import TrailMap from "@/components/TrailMap.vue";
 type Trail = Awaited<ReturnType<typeof api.trails>>["trails"][number];
 
 const trails = ref<Trail[]>([]);
+const dnisUrl = ref<string | null>(null);
 const loading = ref(true);
 const refreshing = ref(false);
 const error = ref<string>("");
@@ -31,6 +32,7 @@ async function load() {
   try {
     const r = await api.trails();
     trails.value = r.trails;
+    dnisUrl.value = r.dnis_url ?? null;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -359,13 +361,24 @@ function fmtAge(iso: string | null): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function statusUpdateTs(t: Trail): number {
+  // Prefer source_ts (RainoutLine's own status-change time) so a trail
+  // that flipped today sorts above one that's been sitting in the same
+  // status for weeks. Fall back to fetched_at, then last_seen_at.
+  const v = t.source_ts ?? t.fetched_at ?? t.last_seen_at ?? null;
+  return v ? Date.parse(v) : 0;
+}
+function byStatusDesc(a: Trail, b: Trail): number {
+  return statusUpdateTs(b) - statusUpdateTs(a);
+}
+
 const grouped = computed(() => {
-  const open = trails.value.filter((t) => t.status === "open");
-  const closed = trails.value.filter((t) => t.status === "closed");
-  const delayed = trails.value.filter((t) => t.status === "delayed");
-  const other = trails.value.filter(
-    (t) => t.status !== "open" && t.status !== "closed" && t.status !== "delayed",
-  );
+  const open = trails.value.filter((t) => t.status === "open").sort(byStatusDesc);
+  const closed = trails.value.filter((t) => t.status === "closed").sort(byStatusDesc);
+  const delayed = trails.value.filter((t) => t.status === "delayed").sort(byStatusDesc);
+  const other = trails.value
+    .filter((t) => t.status !== "open" && t.status !== "closed" && t.status !== "delayed")
+    .sort(byStatusDesc);
   return { open, closed, delayed, other };
 });
 
@@ -381,6 +394,11 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
     <header>
       <h1>Trails</h1>
       <div class="header-actions">
+        <a v-if="dnisUrl" :href="dnisUrl" target="_blank" rel="noreferrer"
+           class="refresh dnis-link"
+           title="Open the full RainoutLine status board">
+          rainoutline ↗
+        </a>
         <button class="refresh" :disabled="refreshing" @click="refresh">
           <RefreshCw :size="16" :class="{ spinning: refreshing }" />
           {{ refreshing ? "Refreshing…" : "Refresh" }}
@@ -678,6 +696,8 @@ header h1 { margin: 0; }
 .card.has_loc { cursor: pointer; transition: border-color 0.12s; }
 .card.has_loc:hover { border-color: var(--accent, #ef4444); }
 .nav-ic { color: var(--muted-2); margin-left: 0.4rem; vertical-align: middle; }
+.rainout-link { color: var(--muted); text-decoration: none; margin-left: 0.3rem; }
+.rainout-link:hover { color: var(--accent); }
 .loc { color: var(--muted); }
 .loc.nopin { color: #f59e0b; }
 .visits { font-weight: 500; }

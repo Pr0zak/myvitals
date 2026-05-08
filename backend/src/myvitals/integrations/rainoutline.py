@@ -73,11 +73,22 @@ class TrailReading:
 # Each row contains a status span, a name link with the extension in
 # the href, an "Updated" cell with relative time, and a precise
 # timestamp in a `clue` span.
-_ROW_RE = re.compile(
-    r'<span class="(status[0-3])">([^<]+)</span>.*?'
+# RainoutLine wraps every trail row in `<div class="trigger" title="STATUS - ...">`
+# whose title's first word IS the canonical status. Per-trail name link
+# lives inside the trigger; the slidingDiv that follows has the
+# `<span class="statusN">` echo and the per-area details (these come
+# AFTER the link, which broke the prior status-span-first regex — every
+# trail was getting the status of the row above it in the document).
+_TRIGGER_ROW_RE = re.compile(
+    r'<div class="trigger"[^>]*?title="(\w+)\b[^"]*?"[^>]*?>'
+    r'.*?'
     r'href="[^"]*?/extension/\d+/(\d+)"[^>]*>([^<]+)</a>',
     re.S,
 )
+# Status-word → our canonical status (matches STATUS_FROM_CLASS values).
+_STATUS_WORD_TO_CANONICAL = {
+    "open": "open", "closed": "closed", "delayed": "delayed",
+}
 _CLUE_RE = re.compile(r'<span class="clue">([^<]+)</span>', re.S)
 _COMMENT_RE = re.compile(
     r'<span class="comment">([^<]*)</span>', re.S,
@@ -91,15 +102,22 @@ def _slugify(name: str) -> str:
 
 
 def _parse_source_ts(raw: str) -> datetime | None:
-    """RainoutLine ships timestamps as `5/6/26 6:52 pm` (Central time
-    implied). Best-effort parse; returns None on failure."""
+    """RainoutLine ships timestamps as `5/6/26 6:52 pm` (Central time,
+    no zone in the string). Localize to America/Chicago so DST-aware
+    UTC offsets are correct, then convert to UTC for storage. Prior
+    behavior labeled the naive Central time as UTC, which made all
+    `source_ts` values look 5-6 hours in the future / `last updated`
+    ages 5-6 hours too old."""
     raw = raw.strip()
+    try:
+        from zoneinfo import ZoneInfo
+        central = ZoneInfo("America/Chicago")
+    except Exception:
+        central = timezone.utc  # fallback; better than nothing
     for fmt in ("%m/%d/%y %I:%M %p", "%m/%d/%Y %I:%M %p"):
         try:
             naive = datetime.strptime(raw, fmt)
-            # Assume Central time; the slight DST ambiguity isn't worth
-            # solving for a self-hosted single-user app.
-            return naive.replace(tzinfo=timezone.utc)
+            return naive.replace(tzinfo=central).astimezone(timezone.utc)
         except ValueError:
             continue
     return None
@@ -111,14 +129,19 @@ def parse_dnis_refresh(html: str) -> list[TrailReading]:
     Tolerates missing comments, missing timestamps, and odd ordering.
     Re-runs over each row's substring rather than relying on global state."""
     readings: list[TrailReading] = []
-    # Split HTML into per-row chunks. The structure isn't strictly
-    # one row per <tr>, but the ROW_RE will match each (status, link)
-    # pair and we use the surrounding context for clue/comment.
-    matches = list(_ROW_RE.finditer(html))
+    seen_exts: set[int] = set()
+    # Each match gives: status word from the trigger's title, extension,
+    # name. Comment + clue come from the slidingDiv that follows in the
+    # window between this trigger and the next.
+    matches = list(_TRIGGER_ROW_RE.finditer(html))
     for i, m in enumerate(matches):
-        status_class, _, ext_str, name = m.groups()
+        status_word, ext_str, name = m.groups()
         ext = int(ext_str)
-        # Look for clue / comment spans between this match and the next
+        if ext in seen_exts:
+            continue
+        canonical = _STATUS_WORD_TO_CANONICAL.get(
+            status_word.lower(), "unknown",
+        )
         end = matches[i + 1].start() if i + 1 < len(matches) else len(html)
         chunk = html[m.start():end]
         clue = _CLUE_RE.search(chunk)
@@ -126,10 +149,11 @@ def parse_dnis_refresh(html: str) -> list[TrailReading]:
         readings.append(TrailReading(
             extension=ext,
             name=name.strip(),
-            status=STATUS_FROM_CLASS.get(status_class, "unknown"),
+            status=canonical,
             comment=comment.group(1).strip() if comment else None,
             source_ts=_parse_source_ts(clue.group(1)) if clue else None,
         ))
+        seen_exts.add(ext)
     return readings
 
 

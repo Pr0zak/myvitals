@@ -141,34 +141,52 @@ const mainOption = computed(() => {
   // Year-over-year overlay: split series into per-year curves aligned by
   // day-of-year so seasonal patterns become obvious.
   if (yoy.value) {
-    const byYear: Record<string, [string, number][]> = {};
+    // One series per calendar year. Each point is anchored to a fixed
+    // reference year (2000) so the x-axis spans Jan 1 → Dec 31 and
+    // every year's curve overlaps. Time axis (not category) — category
+    // mode treats unique strings as positional buckets in insertion
+    // order, which scrambled the axis when years had different sample
+    // sets.
+    const byYear: Record<string, [number, number][]> = {};
     for (const p of sorted.value) {
       const d = new Date(p.time);
       const y = d.getUTCFullYear();
-      // Pseudo-date in a fixed reference year so all series share the x-axis.
-      const ref = `2000-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-      (byYear[String(y)] ??= []).push([ref, weightVal(p.weight_kg) as number]);
+      const v = weightVal(p.weight_kg);
+      if (v == null) continue;
+      // UTC millis at the same MM-DD in year 2000 (leap year — covers Feb 29).
+      const ts = Date.UTC(2000, d.getUTCMonth(), d.getUTCDate());
+      (byYear[String(y)] ??= []).push([ts, v]);
     }
     const yrs = Object.keys(byYear).sort();
     const palette = ["#94a3b8", "#64748b", "#a78bfa", "#22c55e", "#eab308", "#f97316", "#ef4444", "#38bdf8", "#0ea5e9"];
     const series = yrs.map((y, i) => ({
       name: y, type: "line", smooth: true, symbol: "none",
-      data: byYear[y].sort((a, b) => a[0].localeCompare(b[0])),
+      data: byYear[y].sort((a, b) => a[0] - b[0]),
       lineStyle: {
         width: i === yrs.length - 1 ? 2.5 : 1.2,
         color: palette[i % palette.length],
         opacity: i === yrs.length - 1 ? 1 : 0.55,
       },
     }));
+    const monthLabel = (ms: number) => {
+      const d = new Date(ms);
+      return `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+    };
     return {
       grid: { left: 50, right: 12, top: 36, bottom: 28 },
       legend: { textStyle: t.axisLabel, top: 4 },
       tooltip: { trigger: "axis", ...t.tooltip,
-        formatter: (params: any[]) => {
-          const md = params[0].name.slice(5);  // strip "2000-"
-          return md + "<br/>" + params.map((p) => `${p.marker}${p.seriesName}: <b>${p.value[1]?.toFixed(1)}</b>`).join("<br/>");
-        }},
-      xAxis: { type: "category", axisLabel: { color: t.axisLabel.color, formatter: (v: string) => v.slice(5) }, splitLine: t.splitLine },
+        formatter: (params: any[]) =>
+          monthLabel(params[0].value[0]) + "<br/>"
+          + params.map((p) => `${p.marker}${p.seriesName}: <b>${p.value[1]?.toFixed(1)}</b>`).join("<br/>"),
+      },
+      xAxis: {
+        type: "time",
+        min: Date.UTC(2000, 0, 1),
+        max: Date.UTC(2000, 11, 31),
+        axisLabel: { color: t.axisLabel.color, formatter: monthLabel },
+        splitLine: t.splitLine,
+      },
       yAxis: { type: "value", name: weightUnit.value, scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
       series,
       dataZoom: [{ type: "inside" }],

@@ -514,10 +514,35 @@ fun StrengthTodayScreen(
                         modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                "✓ Workout complete — see you tomorrow",
-                                color = MV.Green, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "✓ Workout complete — see you tomorrow",
+                                    color = MV.Green, fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                // Replay: regenerate with force=true. Wipes
+                                // logged sets from today's row so the user
+                                // can run the same plan a second time.
+                                TextButton(
+                                    onClick = {
+                                        scope.launch {
+                                            try { workout = repo.regenerate(true); reload() }
+                                            catch (e: Exception) {
+                                                Timber.w(e, "redo workout failed")
+                                            }
+                                        }
+                                    },
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Refresh, contentDescription = null,
+                                        tint = MV.OnSurfaceVariant,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Redo", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                                }
+                            }
                             Spacer(Modifier.height(12.dp))
                             ReviewBlock(
                                 review = review,
@@ -1072,22 +1097,27 @@ private fun ExerciseCard(
                             Text("✓", color = MV.Green, fontWeight = FontWeight.Bold)
                         }
                     } else {
-                        LoggedSetRow(n, logged.actualWeightLb, logged.actualReps ?: 0, logged.rating ?: 0)
+                        LoggedSetRow(
+                            n, logged.actualWeightLb, logged.actualReps ?: 0,
+                            logged.rating ?: 0,
+                            sideLabel = bilateralSideLabel(n, wex.targetSets, info),
+                        )
                     }
                 } else if (timed && n == nextSet) {
                     TimedSetRow(
                         n = n, holdSeconds = wex.targetRepsLow,
-                        onComplete = {
-                            // Auto-log when the timer hits zero. RPE 4
-                            // ("smooth completion") since the user held
-                            // the configured time.
-                            onLogSet(n, null, wex.targetRepsLow, 4)
+                        sideLabel = bilateralSideLabel(n, wex.targetSets, info),
+                        onComplete = { elapsed, rating ->
+                            // Logs actual seconds held + the user's
+                            // rating (5 / 4 / 1). The next session's
+                            // generator reads this history and adjusts
+                            // the target via adjust_mobility_target().
+                            onLogSet(n, null, elapsed, rating)
                             inputs.remove(key)
                         },
                     )
                 } else if (timed) {
-                    // Pending later set — show the dim placeholder
-                    PendingSetRow(n)
+                    PendingSetRow(n, bilateralSideLabel(n, wex.targetSets, info))
                 } else if (n == nextSet) {
                     // Inherit weight/reps from the most recently logged
                     // set of THIS exercise so an edit on set 1 carries
@@ -1127,36 +1157,55 @@ private fun ExerciseCard(
                             )
                             inputs.remove(key)
                         },
+                        sideLabel = bilateralSideLabel(n, wex.targetSets, info),
                     )
                 } else {
-                    PendingSetRow(n)
+                    PendingSetRow(n, bilateralSideLabel(n, wex.targetSets, info))
                 }
             }
         }
     }
 }
 
-/** Time-based exercises (yoga / mobility) use a countdown instead of
- *  a weight/reps form. The catalog row's movement_pattern flags it;
- *  fallback heuristic: bodyweight + null target weight + reps >= 20. */
+/** Time-based exercises use a countdown instead of a weight/reps form.
+ *  Mobility entries declare it explicitly via the catalog `is_timed`
+ *  flag (rep-based mobility like Thread-the-Needle / Cat-Cow returns
+ *  false). Non-mobility falls through to the prior heuristic. */
 internal fun isTimedExercise(
     wex: StrengthWorkoutExerciseRow, info: StrengthExerciseInfo?,
 ): Boolean {
-    if (info?.movementPattern == "mobility") return true
+    if (info?.movementPattern == "mobility") return info.isTimed
     if (wex.targetWeightLb == null
         && wex.targetRepsLow == wex.targetRepsHigh
         && wex.targetRepsLow >= 20) return true
     return false
 }
 
+/** For bilateral mobility (sets=2: one per side), label the sets
+ *  Right / Left instead of 1 / 2. Returns null when the exercise isn't
+ *  bilateral or the set count doesn't match the expected R/L pattern. */
+internal fun bilateralSideLabel(
+    setNumber: Int, totalSets: Int, info: StrengthExerciseInfo?,
+): String? {
+    if (info?.isBilateral != true) return null
+    if (totalSets != 2) return null
+    return if (setNumber == 1) "R" else "L"
+}
+
 @Composable
 private fun TimedSetRow(
     n: Int,
     holdSeconds: Int,
-    onComplete: () -> Unit,
+    onComplete: (elapsedSeconds: Int, rating: Int) -> Unit,
+    sideLabel: String? = null,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var startedAt by remember { mutableLongStateOf(0L) }
     var endsAt by remember { mutableLongStateOf(0L) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    // Non-null = countdown finished (or user tapped Done early); show
+    // the rating prompt for this many seconds before logging.
+    var pendingElapsed by remember { mutableStateOf<Int?>(null) }
     val running = endsAt > 0L
     LaunchedEffect(endsAt) {
         if (endsAt == 0L) return@LaunchedEffect
@@ -1164,18 +1213,63 @@ private fun TimedSetRow(
             kotlinx.coroutines.delay(250L)
             nowMs = System.currentTimeMillis()
             if (nowMs >= endsAt) {
+                pendingElapsed = holdSeconds
                 endsAt = 0L
-                onComplete()
+                app.myvitals.update.Notifier.postHoldDone(context)
                 break
             }
         }
     }
     val remaining = if (running) ((endsAt - nowMs).coerceAtLeast(0L) / 1000L).toInt() else null
+
+    // Three-state row: rating prompt, running countdown, or idle Start button.
+    if (pendingElapsed != null) {
+        // Rate the set: 💪 easy = RPE 5, ✓ smooth = 4, ✗ failed = 1.
+        // Logs (elapsed, rating); the SetEntry on next render will be
+        // skipped because the parent moves to the next set.
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    sideLabel ?: "$n",
+                    color = if (sideLabel != null) Color(0xFFA78BFA) else MV.OnSurfaceVariant,
+                    fontWeight = if (sideLabel != null) FontWeight.SemiBold else FontWeight.Normal,
+                    modifier = Modifier.width(20.dp),
+                )
+                Text(
+                    "${pendingElapsed}s held — how was it?",
+                    color = MV.OnSurface, fontSize = 13.sp,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.padding(start = 20.dp),
+            ) {
+                RateButton("Easy", "💪", Color(0xFF22C55E)) {
+                    onComplete(pendingElapsed!!, 5); pendingElapsed = null
+                }
+                RateButton("Smooth", "✓", Color(0xFFA78BFA)) {
+                    onComplete(pendingElapsed!!, 4); pendingElapsed = null
+                }
+                RateButton("Failed", "✗", Color(0xFFEF4444)) {
+                    onComplete(pendingElapsed!!, 1); pendingElapsed = null
+                }
+            }
+        }
+        return
+    }
+
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("$n", color = MV.OnSurfaceVariant, modifier = Modifier.width(20.dp))
+        Text(
+            sideLabel ?: "$n",
+            color = if (sideLabel != null) Color(0xFFA78BFA) else MV.OnSurfaceVariant,
+            fontWeight = if (sideLabel != null) FontWeight.SemiBold else FontWeight.Normal,
+            modifier = Modifier.width(20.dp),
+        )
         if (remaining != null) {
             Box(
                 Modifier
@@ -1195,6 +1289,15 @@ private fun TimedSetRow(
             Text("of ${holdSeconds}s",
                 color = MV.OnSurfaceVariant, fontSize = 11.sp,
                 modifier = Modifier.weight(1f))
+            TextButton(onClick = {
+                // "Done" — end the hold early but still capture it.
+                val elapsed = ((nowMs - startedAt) / 1000L).coerceAtLeast(1L).toInt()
+                pendingElapsed = elapsed
+                endsAt = 0L
+            }) {
+                Text("Done", color = Color(0xFFA78BFA),
+                     fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
             TextButton(onClick = { endsAt = 0L }) {
                 Text("Cancel", color = MV.OnSurfaceVariant, fontSize = 12.sp)
             }
@@ -1203,7 +1306,10 @@ private fun TimedSetRow(
                 color = MV.OnSurfaceVariant, fontSize = 13.sp,
                 modifier = Modifier.weight(1f))
             Button(
-                onClick = { endsAt = System.currentTimeMillis() + holdSeconds * 1000L },
+                onClick = {
+                    startedAt = System.currentTimeMillis()
+                    endsAt = startedAt + holdSeconds * 1000L
+                },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFFA78BFA), contentColor = Color.White,
                 ),
@@ -1218,12 +1324,35 @@ private fun TimedSetRow(
 }
 
 @Composable
-private fun LoggedSetRow(n: Int, weightLb: Double?, reps: Int, rating: Int) {
+private fun RateButton(label: String, glyph: String, color: Color, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(color.copy(alpha = 0.14f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(glyph, fontSize = 13.sp)
+            Spacer(Modifier.width(4.dp))
+            Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun LoggedSetRow(n: Int, weightLb: Double?, reps: Int, rating: Int,
+                          sideLabel: String? = null) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("$n", color = MV.OnSurfaceVariant, modifier = Modifier.width(20.dp))
+        Text(
+            sideLabel ?: "$n",
+            color = if (sideLabel != null) Color(0xFFA78BFA) else MV.OnSurfaceVariant,
+            fontWeight = if (sideLabel != null) FontWeight.SemiBold else FontWeight.Normal,
+            modifier = Modifier.width(20.dp),
+        )
         Text(
             "${weightLb ?: "—"}lb × $reps",
             color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium,
@@ -1236,12 +1365,17 @@ private fun LoggedSetRow(n: Int, weightLb: Double?, reps: Int, rating: Int) {
 }
 
 @Composable
-private fun PendingSetRow(n: Int) {
+private fun PendingSetRow(n: Int, sideLabel: String? = null) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("$n", color = MV.OnSurfaceDim, modifier = Modifier.width(20.dp))
+        Text(
+            sideLabel ?: "$n",
+            color = MV.OnSurfaceDim,
+            fontWeight = if (sideLabel != null) FontWeight.SemiBold else FontWeight.Normal,
+            modifier = Modifier.width(20.dp),
+        )
         Text("waiting", color = MV.OnSurfaceDim, fontSize = 13.sp)
     }
 }
@@ -1252,11 +1386,16 @@ private fun SetEntryRow(
     onWeight: (String) -> Unit, onReps: (String) -> Unit,
     onRating: (Int) -> Unit, canLog: Boolean,
     onLog: () -> Unit, onFailed: () -> Unit,
+    sideLabel: String? = null,
 ) {
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Set $n", color = MV.OnSurface, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.width(56.dp))
+            Text(
+                if (sideLabel != null) "$sideLabel side" else "Set $n",
+                color = if (sideLabel != null) Color(0xFFA78BFA) else MV.OnSurface,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.width(72.dp),
+            )
             OutlinedTextField(
                 value = input.weight, onValueChange = onWeight,
                 label = { Text("lb", fontSize = 11.sp) },

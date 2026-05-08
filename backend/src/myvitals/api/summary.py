@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
@@ -11,6 +12,38 @@ from ..config import settings
 from ..schemas import TodaySummary
 
 router = APIRouter(dependencies=[Depends(require_any)])
+log = logging.getLogger(__name__)
+
+
+async def _today_row_is_stale(
+    db: AsyncSession, saved: "models.DailySummary | None",
+    today_local: date, day_start: datetime, day_end: datetime,
+) -> bool:
+    """A daily_summary row is stale when underlying data exists today
+    but the row hasn't picked it up yet — typically because the 03:00
+    cron ran before the user finished sleeping. Recomputing on read
+    closes that gap (the cron stays as a backstop for older dates)."""
+    # Sleep — most common reason for stale rows. User finishes sleep
+    # late morning; 03:00 cron computed before any sleep_stages landed.
+    if saved is None or saved.sleep_duration_s is None:
+        sleep_count = (await db.execute(
+            select(func.count())
+            .select_from(models.SleepStage)
+            .where(models.SleepStage.time >= day_start)
+            .where(models.SleepStage.time <= day_end)
+        )).scalar() or 0
+        if sleep_count > 0:
+            return True
+    # HRV — overnight metric, same story as sleep.
+    if saved is None or saved.hrv_avg is None:
+        hrv_count = (await db.execute(
+            select(func.count(models.Hrv.time))
+            .where(models.Hrv.time >= day_start)
+            .where(models.Hrv.time <= day_end)
+        )).scalar() or 0
+        if hrv_count > 0:
+            return True
+    return False
 
 
 @router.get("/today", response_model=TodaySummary)
@@ -33,11 +66,29 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     midnight_local = datetime.combine(today_local, datetime.min.time(), tzinfo=local_tz)
     end = datetime.now(timezone.utc)
 
+    day_end = datetime.combine(today_local, datetime.max.time(), tzinfo=local_tz)
+
     # 1. Try the persisted summary first.
     result = await db.execute(
         select(models.DailySummary).where(models.DailySummary.date == today_local)
     )
     saved = result.scalar_one_or_none()
+
+    # 1b. Stale-row repair: if today's row is missing sleep / HRV but the
+    # underlying tables have data, recompute on-demand. Replaces the
+    # cron-only model where a 03:00 row missed late-morning sleep data.
+    if await _today_row_is_stale(db, saved, today_local, midnight_local, day_end):
+        try:
+            from ..analytics.jobs import compute_daily_summary
+            await compute_daily_summary(today_local)
+            # Re-read the now-updated row.
+            saved = (await db.execute(
+                select(models.DailySummary)
+                .where(models.DailySummary.date == today_local)
+            )).scalar_one_or_none()
+            log.info("recomputed stale daily_summary for %s", today_local)
+        except Exception as e:  # noqa: BLE001
+            log.warning("on-demand daily_summary recompute failed: %s", e)
 
     # 2. Compute live values as a fallback / supplement.
     # Pick a single canonical step source so the dashboard matches the

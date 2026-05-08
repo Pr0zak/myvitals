@@ -465,7 +465,10 @@ const monthLabel = (key: string) =>
                        :to="a.source === 'strength'
                               ? `/workout/strength/day/${a.start_at.slice(0, 10)}`
                               : `/activity/${a.source}/${a.source_id}`"
-                       :class="viewMode === 'grid' ? 'card' : 'row'">
+                       :class="[
+                         viewMode === 'grid' ? 'card' : 'row',
+                         viewMode === 'list' && !a.polyline ? 'compact' : '',
+                       ]">
               <template v-if="viewMode === 'grid'">
                 <PolylineThumbnail :polyline="a.polyline" :activityType="a.type" :size="100" class="thumb"/>
                 <header class="card-head">
@@ -490,11 +493,12 @@ const monthLabel = (key: string) =>
                 </dl>
               </template>
               <template v-else>
-                <PolylineThumbnail :polyline="a.polyline" :activityType="a.type" :size="48"/>
+                <PolylineThumbnail v-if="a.polyline"
+                                   :polyline="a.polyline" :activityType="a.type" :size="48"/>
                 <span class="row-emoji"><ActivityIcon :type="a.type" :size="16"/></span>
                 <span class="row-when">{{ fmtDateTime(a.start_at) }}</span>
                 <span class="row-name">{{ a.name ?? "(untitled)" }}</span>
-                <span class="row-stat">{{ fmtKmShort(a.distance_m) }}</span>
+                <span class="row-stat" v-if="a.distance_m">{{ fmtKmShort(a.distance_m) }}</span>
                 <span class="row-stat">{{ fmtDuration(a.duration_s) }}</span>
                 <span class="row-stat" v-if="a.elevation_gain_m">{{ fmtElevation(a.elevation_gain_m) }}</span>
                 <span class="row-stat" v-if="a.avg_hr">{{ Math.round(a.avg_hr) }} bpm</span>
@@ -534,11 +538,12 @@ const monthLabel = (key: string) =>
               </dl>
             </template>
             <template v-else>
-              <PolylineThumbnail :polyline="a.polyline" :activityType="a.type" :size="48"/>
+              <PolylineThumbnail v-if="a.polyline"
+                                 :polyline="a.polyline" :activityType="a.type" :size="48"/>
               <span class="row-emoji"><ActivityIcon :type="a.type" :size="16"/></span>
               <span class="row-when">{{ fmtDateTime(a.start_at) }}</span>
               <span class="row-name">{{ a.name ?? "(untitled)" }}</span>
-              <span class="row-stat">{{ fmtKmShort(a.distance_m) }}</span>
+              <span class="row-stat" v-if="a.distance_m">{{ fmtKmShort(a.distance_m) }}</span>
               <span class="row-stat">{{ fmtDuration(a.duration_s) }}</span>
               <span class="row-stat" v-if="a.elevation_gain_m">{{ fmtElevation(a.elevation_gain_m) }}</span>
               <span class="row-stat" v-if="a.avg_hr">{{ Math.round(a.avg_hr) }} bpm</span>
@@ -665,6 +670,13 @@ dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
   padding: 0.4rem 0.7rem; text-decoration: none; color: inherit;
   font-size: 0.85rem;
+}
+/* Strength / yoga rows have no map, no distance, no elevation — drop
+   the polyline column and tighten padding so they don't waste space. */
+.row.compact {
+  grid-template-columns: 24px 140px 1fr repeat(5, auto);
+  padding: 0.25rem 0.7rem;
+  font-size: 0.82rem;
 }
 .row:hover { border-color: var(--accent); }
 .row-emoji { font-size: 1.2rem; }

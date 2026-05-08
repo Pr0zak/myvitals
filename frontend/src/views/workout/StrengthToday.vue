@@ -818,8 +818,16 @@ onMounted(loadAll);
 
         <div v-else class="ex-body" v-if="ex(wex.exercise_id)">
           <div class="media">
+            <!-- Real demo photo wins over the violet-tinted icon.
+                 Photos are .jpg from the base catalog; icons are .png
+                 (from the Noun Project mask treatment). -->
+            <img
+              v-if="imageUrl(wex.exercise_id, 0) && /\.jpe?g($|\?)/i.test(imageUrl(wex.exercise_id, 0)!)"
+              :src="imageUrl(wex.exercise_id, 0) || ''"
+              :alt="exName(wex.exercise_id)"
+            />
             <div
-              v-if="imageUrl(wex.exercise_id, 0)"
+              v-else-if="imageUrl(wex.exercise_id, 0)"
               class="ex-thumb"
               :style="`-webkit-mask-image: url('${imageUrl(wex.exercise_id, 0)}'); mask-image: url('${imageUrl(wex.exercise_id, 0)}')`"
               :title="exName(wex.exercise_id)"

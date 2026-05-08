@@ -76,6 +76,23 @@ SEARCH_TERMS: dict[str, list[str]] = {
     # strength overrides — add when name-based search returns nothing
     "Dumbbell_Skullcrusher":     ["lying tricep extension", "tricep extension exercise",
                                    "skull crusher", "lying triceps"],
+    # pilates — Noun Project's pilates coverage is thinner than yoga; use
+    # broader exercise/silhouette terms when needed
+    "Pilates_Hundred":           ["pilates hundred", "pilates exercise",
+                                   "ab crunch lying"],
+    "Pilates_Roll_Up":           ["pilates roll up", "sit up exercise",
+                                   "pilates"],
+    "Pilates_Single_Leg_Stretch":["single leg stretch pilates", "leg pull pilates",
+                                   "pilates stretch"],
+    "Pilates_Criss_Cross":       ["pilates criss cross", "bicycle crunch",
+                                   "twist crunch"],
+    "Pilates_Teaser":            ["pilates teaser", "v sit", "boat pose"],
+    "Pilates_Swan":              ["pilates swan", "back extension exercise",
+                                   "cobra exercise"],
+    "Pilates_Swimming":          ["pilates swimming", "superman exercise",
+                                   "back extension flutter"],
+    "Pilates_Rolling_Like_Ball": ["pilates rolling ball", "tuck rock",
+                                   "pilates"],
 }
 
 

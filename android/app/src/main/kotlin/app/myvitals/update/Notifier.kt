@@ -52,6 +52,38 @@ object Notifier {
         }
     }
 
+    /** Vibrate + chime when a yoga / mobility hold timer reaches 0.
+     *  No notification card — the user is looking at the timer in the
+     *  foreground, but their phone may be face-down on the mat so the
+     *  haptic + sound are what they actually need.  */
+    fun postHoldDone(context: Context) {
+        val vib = context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                vib?.vibrate(android.os.VibrationEffect.createWaveform(
+                    longArrayOf(0, 200, 80, 200), -1,
+                ))
+            } else {
+                @Suppress("DEPRECATION")
+                vib?.vibrate(longArrayOf(0, 200, 80, 200), -1)
+            }
+        } catch (_: SecurityException) { /* no haptic permission */ }
+        try {
+            val uri = android.media.RingtoneManager.getDefaultUri(
+                android.media.RingtoneManager.TYPE_NOTIFICATION
+            )
+            android.media.RingtoneManager.getRingtone(context, uri)?.also { rt ->
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    rt.audioAttributes = android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                }
+                rt.play()
+            }
+        } catch (_: Exception) { /* sound failed — non-critical */ }
+    }
+
     /** Briefly vibrate + post a heads-up notification when rest hits 0. */
     fun postRestTimerDone(context: Context, secondsRested: Int) {
         ensureChannel(context)

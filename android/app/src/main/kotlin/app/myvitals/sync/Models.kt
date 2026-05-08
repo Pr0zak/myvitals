@@ -174,6 +174,11 @@ data class StrengthExerciseInfo(
     @Json(name = "image_front") val imageFront: String? = null,
     @Json(name = "image_side") val imageSide: String? = null,
     @Json(name = "youtube_query") val youtubeQuery: String? = null,
+    // Mobility-only flags. Bilateral → 2 sets, one per side; UI labels
+    // them R / L. is_timed=false means the "reps" target is actual rep
+    // count (Thread-the-Needle, Cat-Cow), not seconds-to-hold.
+    @Json(name = "is_bilateral") val isBilateral: Boolean = false,
+    @Json(name = "is_timed") val isTimed: Boolean = true,
 )
 
 @JsonClass(generateAdapter = true)

@@ -716,6 +716,99 @@ async def recent_ratings_by_exercise(
     }
 
 
+async def recent_mobility_history(
+    db: AsyncSession, since_days: int = 14,
+) -> dict[str, dict[str, float | int]]:
+    """Per-exercise mobility performance over the last `since_days`. Used
+    by the yoga / mobility planners to nudge target hold-times or reps
+    based on how the user has actually been performing them.
+
+    Returns a dict: exercise_id → {
+        'avg_rating': float (1-5; mean of non-null ratings),
+        'max_actual': int  (longest hold or highest rep count),
+        'fail_count': int  (sets with rating=1 or skipped=True),
+        'sample_count': int  (total sets considered),
+    }
+    """
+    from datetime import timedelta as _td
+    since = datetime.now(timezone.utc).date() - _td(days=since_days)
+
+    rows = (await db.execute(
+        select(
+            models.StrengthWorkoutExercise.exercise_id,
+            models.StrengthSet.rating,
+            models.StrengthSet.actual_reps,
+            models.StrengthSet.skipped,
+        )
+        .join(
+            models.StrengthWorkoutExercise,
+            models.StrengthSet.workout_exercise_id == models.StrengthWorkoutExercise.id,
+        )
+        .join(
+            models.StrengthWorkout,
+            models.StrengthWorkoutExercise.workout_id == models.StrengthWorkout.id,
+        )
+        .where(models.StrengthWorkout.date >= since)
+    )).all()
+
+    by_ex: dict[str, dict[str, list[int] | int]] = {}
+    for ex_id, rating, actual_reps, skipped in rows:
+        b = by_ex.setdefault(ex_id, {"ratings": [], "actuals": [],
+                                       "fails": 0, "samples": 0})
+        b["samples"] += 1  # type: ignore[operator]
+        if skipped or rating == 1:
+            b["fails"] += 1  # type: ignore[operator]
+        if rating is not None and not skipped:
+            b["ratings"].append(rating)  # type: ignore[union-attr]
+        if actual_reps is not None and not skipped:
+            b["actuals"].append(actual_reps)  # type: ignore[union-attr]
+
+    out: dict[str, dict[str, float | int]] = {}
+    for ex_id, b in by_ex.items():
+        ratings = b["ratings"]
+        actuals = b["actuals"]
+        out[ex_id] = {
+            "avg_rating": sum(ratings) / len(ratings) if ratings else 0.0,  # type: ignore[arg-type,operator]
+            "max_actual": max(actuals) if actuals else 0,  # type: ignore[arg-type,type-var]
+            "fail_count": b["fails"],  # type: ignore[typeddict-item]
+            "sample_count": b["samples"],  # type: ignore[typeddict-item]
+        }
+    return out
+
+
+def adjust_mobility_target(
+    base_low: int, base_high: int, hist: dict[str, float | int] | None,
+    is_timed: bool,
+) -> tuple[int, int]:
+    """Nudge a mobility target up or down based on prior performance.
+
+    Rules (applied in order):
+    - 2+ recent fails → drop 1 step (−5 s / −1 rep)
+    - avg_rating ≥ 4.5 across ≥ 2 samples → bump 1 step (+5 s / +1 rep)
+    - max_actual > base_low (user has held longer than prescribed) →
+      raise base_low to that ceiling, capped at the max
+    - Otherwise: unchanged
+    Caps: 15-90 s for timed, 5-15 reps for rep-based.
+    """
+    if hist is None or hist.get("sample_count", 0) == 0:
+        return base_low, base_high
+    step = 5 if is_timed else 1
+    cap_lo, cap_hi = (15, 90) if is_timed else (5, 15)
+    low, high = base_low, base_high
+    if hist.get("fail_count", 0) >= 2:
+        low = max(cap_lo, low - step)
+        high = max(low, high - step)
+        return low, high
+    if hist.get("sample_count", 0) >= 2 and hist.get("avg_rating", 0) >= 4.5:
+        low = min(cap_hi, low + step)
+        high = min(cap_hi, high + step)
+    actual_max = int(hist.get("max_actual", 0))
+    if actual_max > low and actual_max <= cap_hi:
+        low = actual_max
+        high = max(low, high)
+    return low, high
+
+
 async def last_target_weight_for_exercise(
     db: AsyncSession, exercise_id: str
 ) -> tuple[float | None, float | None]:
@@ -799,9 +892,17 @@ def schedule_day_type(
     return "rest"
 
 
-def build_yoga_plan(target_date: date, regen_count: int = 0) -> GeneratedPlan:
+def build_yoga_plan(
+    target_date: date, regen_count: int = 0,
+    mobility_history: dict[str, dict[str, float | int]] | None = None,
+) -> GeneratedPlan:
     """Standalone yoga session — used when the user explicitly swaps
-    today to yoga via /today/swap-type. 5 poses, 45 s holds."""
+    today to yoga via /today/swap-type. 5 poses, 45 s holds.
+
+    `mobility_history` (optional) is the dict from
+    `recent_mobility_history`; when present, per-pose targets are
+    nudged up/down via `adjust_mobility_target`.
+    """
     seed = _seed(target_date, regen_count)
     rng = random.Random(seed)
     pool = [
@@ -811,14 +912,21 @@ def build_yoga_plan(target_date: date, regen_count: int = 0) -> GeneratedPlan:
     ]
     n = min(5, len(pool))
     picks = rng.sample(pool, k=n) if pool else []
-    exs = [
-        ExerciseInPlan(
+    exs = []
+    for i, ex in enumerate(picks):
+        bilateral = bool(ex.get("is_bilateral", False))
+        timed = ex.get("is_timed", True)
+        rl, rh = (45, 45) if timed else (8, 10)
+        if mobility_history is not None:
+            rl, rh = adjust_mobility_target(
+                rl, rh, mobility_history.get(ex["id"]), timed,
+            )
+        exs.append(ExerciseInPlan(
             exercise_id=ex["id"], order_index=i, superset_id=None,
-            target_sets=1, target_reps_low=45, target_reps_high=45,
+            target_sets=2 if bilateral else 1,
+            target_reps_low=rl, target_reps_high=rh,
             target_weight_lb=None, target_rest_s=15,
-        )
-        for i, ex in enumerate(picks)
-    ]
+        ))
     return GeneratedPlan(
         seed=seed, split_focus="yoga", exercises=exs,
         notes=["Yoga / mobility flow — 5 poses, ~45 s holds."],
@@ -884,7 +992,10 @@ async def generate_plan(
         if day_type == "cardio":
             return build_cardio_plan(target_date, regen_count=regen_count)
         if day_type == "yoga" and yoga_on_rest:
-            return build_yoga_plan(target_date, regen_count=regen_count)
+            return build_yoga_plan(
+                target_date, regen_count=regen_count,
+                mobility_history=await recent_mobility_history(db),
+            )
 
     def _yoga_session(_seed_str: str, n_poses: int = 5,
                       hold_s: int = 45) -> list[ExerciseInPlan]:
@@ -1071,20 +1182,24 @@ async def generate_plan(
             if e.get("movement_pattern") == "mobility"
             and "bodyweight" in (e.get("equipment") or [])
         ]
+        mobility_history = await recent_mobility_history(db)
         if mobility_pool:
             picks = rng.sample(mobility_pool, k=min(2, len(mobility_pool)))
             for j, ex in enumerate(picks):
+                bilateral = bool(ex.get("is_bilateral", False))
+                timed = ex.get("is_timed", True)
+                rl, rh = (30, 30) if timed else (8, 10)
+                if mobility_history is not None:
+                    rl, rh = adjust_mobility_target(
+                        rl, rh, mobility_history.get(ex["id"]), timed,
+                    )
                 plan_exs.append(ExerciseInPlan(
                     exercise_id=ex["id"],
                     order_index=len(chosen) + j,
                     superset_id=None,
-                    target_sets=1,
-                    # 30 sec hold — UI shows "30" in the reps slot; the
-                    # exercise's own instructions clarify it's seconds.
-                    target_reps_low=30,
-                    target_reps_high=30,
-                    target_weight_lb=None,
-                    target_rest_s=15,
+                    target_sets=2 if bilateral else 1,
+                    target_reps_low=rl, target_reps_high=rh,
+                    target_weight_lb=None, target_rest_s=15,
                 ))
             notes.append(
                 "Mobility block appended — 2 yoga poses, ~30 s hold each."

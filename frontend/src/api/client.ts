@@ -763,7 +763,9 @@ export const api = {
       visits_30d?: number;
       visits_total?: number;
       last_visit_at?: string | null;
+      rainout_url?: string | null;
     }>;
+    dnis_url?: string | null;
   }> {
     const { data } = await http.get("/trails");
     return data;

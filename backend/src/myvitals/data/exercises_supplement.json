@@ -640,7 +640,7 @@
       "Drive back to the start by extending the elbows; squeeze the triceps at lockout without flaring the elbows out.",
       "If the dumbbells start drifting back over the chest you've turned this into a press — keep elbows stacked over shoulders."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Dumbbell_Skullcrusher/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell skullcrusher form"
   },
@@ -1264,7 +1264,9 @@
     ],
     "image_front": "/exercises/img/Downward_Dog/0.png",
     "image_side": null,
-    "youtube_query": "Downward dog yoga form"
+    "youtube_query": "Downward dog yoga form",
+    "is_bilateral": false,
+    "is_timed": true
   },
   {
     "id": "Childs_Pose",
@@ -1291,7 +1293,9 @@
     ],
     "image_front": "/exercises/img/Childs_Pose/0.png",
     "image_side": null,
-    "youtube_query": "Child's pose yoga"
+    "youtube_query": "Child's pose yoga",
+    "is_bilateral": false,
+    "is_timed": true
   },
   {
     "id": "Cat_Cow",
@@ -1318,7 +1322,9 @@
     ],
     "image_front": "/exercises/img/Cat_Cow/0.png",
     "image_side": null,
-    "youtube_query": "Cat cow yoga flow"
+    "youtube_query": "Cat cow yoga flow",
+    "is_bilateral": false,
+    "is_timed": false
   },
   {
     "id": "Cobra_Pose",
@@ -1345,7 +1351,9 @@
     ],
     "image_front": "/exercises/img/Cobra_Pose/0.png",
     "image_side": null,
-    "youtube_query": "Cobra pose yoga"
+    "youtube_query": "Cobra pose yoga",
+    "is_bilateral": false,
+    "is_timed": true
   },
   {
     "id": "Pigeon_Pose",
@@ -1372,7 +1380,9 @@
     ],
     "image_front": "/exercises/img/Pigeon_Pose/0.png",
     "image_side": null,
-    "youtube_query": "Pigeon pose yoga form"
+    "youtube_query": "Pigeon pose yoga form",
+    "is_bilateral": true,
+    "is_timed": true
   },
   {
     "id": "Forward_Fold",
@@ -1399,7 +1409,9 @@
     ],
     "image_front": "/exercises/img/Forward_Fold/0.png",
     "image_side": null,
-    "youtube_query": "Standing forward fold yoga"
+    "youtube_query": "Standing forward fold yoga",
+    "is_bilateral": false,
+    "is_timed": true
   },
   {
     "id": "Warrior_2",
@@ -1427,7 +1439,9 @@
     ],
     "image_front": "/exercises/img/Warrior_2/0.png",
     "image_side": null,
-    "youtube_query": "Warrior 2 yoga pose"
+    "youtube_query": "Warrior 2 yoga pose",
+    "is_bilateral": true,
+    "is_timed": true
   },
   {
     "id": "Triangle_Pose",
@@ -1454,7 +1468,9 @@
     ],
     "image_front": "/exercises/img/Triangle_Pose/0.png",
     "image_side": null,
-    "youtube_query": "Triangle pose yoga form"
+    "youtube_query": "Triangle pose yoga form",
+    "is_bilateral": true,
+    "is_timed": true
   },
   {
     "id": "Seated_Forward_Bend",
@@ -1481,7 +1497,9 @@
     ],
     "image_front": "/exercises/img/Seated_Forward_Bend/0.png",
     "image_side": null,
-    "youtube_query": "Seated forward bend yoga"
+    "youtube_query": "Seated forward bend yoga",
+    "is_bilateral": false,
+    "is_timed": true
   },
   {
     "id": "Reclined_Spinal_Twist",
@@ -1508,7 +1526,9 @@
     ],
     "image_front": "/exercises/img/Reclined_Spinal_Twist/0.png",
     "image_side": null,
-    "youtube_query": "Reclined spinal twist yoga"
+    "youtube_query": "Reclined spinal twist yoga",
+    "is_bilateral": true,
+    "is_timed": true
   },
   {
     "id": "Bridge_Pose",
@@ -1536,7 +1556,9 @@
     ],
     "image_front": "/exercises/img/Bridge_Pose/0.png",
     "image_side": null,
-    "youtube_query": "Bridge pose yoga form"
+    "youtube_query": "Bridge pose yoga form",
+    "is_bilateral": false,
+    "is_timed": true
   },
   {
     "id": "Lizard_Pose",
@@ -1563,7 +1585,9 @@
     ],
     "image_front": "/exercises/img/Lizard_Pose/0.png",
     "image_side": null,
-    "youtube_query": "Lizard pose yoga form"
+    "youtube_query": "Lizard pose yoga form",
+    "is_bilateral": true,
+    "is_timed": true
   },
   {
     "id": "Half_Pigeon_Forward_Fold",
@@ -1590,7 +1614,9 @@
     ],
     "image_front": "/exercises/img/Half_Pigeon_Forward_Fold/0.png",
     "image_side": null,
-    "youtube_query": "Half pigeon forward fold yoga"
+    "youtube_query": "Half pigeon forward fold yoga",
+    "is_bilateral": true,
+    "is_timed": true
   },
   {
     "id": "Thread_The_Needle",
@@ -1617,7 +1643,9 @@
     ],
     "image_front": "/exercises/img/Thread_The_Needle/0.png",
     "image_side": null,
-    "youtube_query": "Thread the needle yoga"
+    "youtube_query": "Thread the needle yoga",
+    "is_bilateral": true,
+    "is_timed": false
   },
   {
     "id": "Happy_Baby",
@@ -1644,6 +1672,235 @@
     ],
     "image_front": "/exercises/img/Happy_Baby/0.png",
     "image_side": null,
-    "youtube_query": "Happy baby pose yoga"
+    "youtube_query": "Happy baby pose yoga",
+    "is_bilateral": false,
+    "is_timed": true
+  },
+  {
+    "id": "Pilates_Hundred",
+    "name": "Pilates Hundred",
+    "primary_muscle": "core",
+    "secondary_muscles": [
+      "abs",
+      "shoulders"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "pilates",
+    "instructions": [
+      "Lie on your back, knees in tabletop. Lift head, neck, shoulders off the mat.",
+      "Extend arms long by the sides, hovering just above the mat.",
+      "Pump arms vigorously up and down. Inhale for 5 pumps, exhale for 5 pumps.",
+      "Repeat 10 cycles for 100 pumps total.",
+      "If neck strains, lower the head — keep the core engaged."
+    ],
+    "image_front": "/exercises/img/Pilates_Hundred/0.png",
+    "image_side": null,
+    "youtube_query": "Pilates Hundred pilates form",
+    "is_bilateral": false,
+    "is_timed": true
+  },
+  {
+    "id": "Pilates_Roll_Up",
+    "name": "Pilates Roll-Up",
+    "primary_muscle": "core",
+    "secondary_muscles": [
+      "spine",
+      "abs",
+      "hamstrings"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "pilates",
+    "instructions": [
+      "Lie flat on your back, arms overhead, legs together and straight.",
+      "Inhale, raise arms toward the ceiling.",
+      "Exhale, peel the spine off the mat one vertebra at a time, reaching forward over the legs.",
+      "Inhale at the top, exhale to roll back down with control.",
+      "8 slow reps. Focus on articulation, not speed."
+    ],
+    "image_front": "/exercises/img/Pilates_Roll_Up/0.png",
+    "image_side": null,
+    "youtube_query": "Pilates Roll-Up pilates form",
+    "is_bilateral": false,
+    "is_timed": false
+  },
+  {
+    "id": "Pilates_Single_Leg_Stretch",
+    "name": "Single-Leg Stretch",
+    "primary_muscle": "core",
+    "secondary_muscles": [
+      "abs",
+      "hip_flexors"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "pilates",
+    "instructions": [
+      "Lie on your back, knees in tabletop, head and shoulders curled up.",
+      "Hug the right knee to the chest while extending the left leg out at 45°.",
+      "Switch — hug left, extend right. That's 1 rep per side.",
+      "8 reps per side, controlled tempo, core hollowed.",
+      "Keep the lower back pressed to the mat throughout."
+    ],
+    "image_front": "/exercises/img/Pilates_Single_Leg_Stretch/0.png",
+    "image_side": null,
+    "youtube_query": "Single-Leg Stretch pilates form",
+    "is_bilateral": true,
+    "is_timed": false
+  },
+  {
+    "id": "Pilates_Criss_Cross",
+    "name": "Criss-Cross",
+    "primary_muscle": "core",
+    "secondary_muscles": [
+      "obliques",
+      "abs"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "pilates",
+    "instructions": [
+      "Lie on your back, hands behind the head, knees in tabletop, shoulders curled up.",
+      "Rotate the torso bringing right elbow toward left knee while extending right leg.",
+      "Switch sides. Twist comes from the rib cage, not the elbows.",
+      "8 reps per side, slow and controlled.",
+      "Don't pull on the neck — guide the rotation, don't yank."
+    ],
+    "image_front": "/exercises/img/Pilates_Criss_Cross/0.png",
+    "image_side": null,
+    "youtube_query": "Criss-Cross pilates form",
+    "is_bilateral": true,
+    "is_timed": false
+  },
+  {
+    "id": "Pilates_Teaser",
+    "name": "Pilates Teaser",
+    "primary_muscle": "core",
+    "secondary_muscles": [
+      "abs",
+      "hip_flexors"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "intermediate",
+    "mechanic": "pilates",
+    "instructions": [
+      "Lie on your back, arms overhead, legs straight at 45°.",
+      "Inhale to swing arms forward; exhale to roll up into a V-sit, balancing on the sit bones.",
+      "Reach long through the fingertips toward the toes.",
+      "Inhale, hold; exhale, roll back down with control.",
+      "5-8 reps. Modify by bending the knees if the lower back rounds."
+    ],
+    "image_front": "/exercises/img/Pilates_Teaser/0.png",
+    "image_side": null,
+    "youtube_query": "Pilates Teaser pilates form",
+    "is_bilateral": false,
+    "is_timed": false
+  },
+  {
+    "id": "Pilates_Swan",
+    "name": "Pilates Swan",
+    "primary_muscle": "back",
+    "secondary_muscles": [
+      "spine",
+      "glutes",
+      "shoulders"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "pilates",
+    "instructions": [
+      "Lie face down, hands under the shoulders, legs together.",
+      "Press the floor away, lifting chest and head — extend through the upper back.",
+      "Keep the pubic bone heavy on the mat; legs zip together actively.",
+      "Hold the lifted position 5-8 breaths.",
+      "Stop if the lower back pinches — go only as high as is comfortable."
+    ],
+    "image_front": "/exercises/img/Pilates_Swan/0.png",
+    "image_side": null,
+    "youtube_query": "Pilates Swan pilates form",
+    "is_bilateral": false,
+    "is_timed": true
+  },
+  {
+    "id": "Pilates_Swimming",
+    "name": "Pilates Swimming",
+    "primary_muscle": "back",
+    "secondary_muscles": [
+      "glutes",
+      "shoulders",
+      "hamstrings"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "pilates",
+    "instructions": [
+      "Lie face down, arms extended overhead, legs straight.",
+      "Lift opposite arm and leg simultaneously, then switch in a flutter pattern.",
+      "Inhale for 5 counts, exhale for 5 counts; total 30-60 s of continuous swim.",
+      "Keep the gaze down to protect the neck.",
+      "If the lower back fatigues, lower into rest pose between sets."
+    ],
+    "image_front": "/exercises/img/Pilates_Swimming/0.png",
+    "image_side": null,
+    "youtube_query": "Pilates Swimming pilates form",
+    "is_bilateral": false,
+    "is_timed": true
+  },
+  {
+    "id": "Pilates_Rolling_Like_Ball",
+    "name": "Rolling Like a Ball",
+    "primary_muscle": "core",
+    "secondary_muscles": [
+      "spine",
+      "balance"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "pilates",
+    "instructions": [
+      "Sit balanced on the sit bones, knees hugged to the chest, feet off the floor.",
+      "Inhale, roll back to the shoulder blades — don't roll onto the neck.",
+      "Exhale, roll back up to balance without putting feet down.",
+      "8-10 reps. Keep the shape compact like a ball.",
+      "Brand-new to it? Practice the balance first; add the roll once stable."
+    ],
+    "image_front": "/exercises/img/Pilates_Rolling_Like_Ball/0.png",
+    "image_side": null,
+    "youtube_query": "Rolling Like a Ball pilates form",
+    "is_bilateral": false,
+    "is_timed": false
   }
 ]

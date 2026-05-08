@@ -1440,7 +1440,10 @@ async def swap_today_type(
             override_split=body.split,
         )
     elif body.type == "yoga":
-        plan = strength_algo.build_yoga_plan(today, regen_count=regen_count)
+        mob_hist = await strength_algo.recent_mobility_history(db)
+        plan = strength_algo.build_yoga_plan(
+            today, regen_count=regen_count, mobility_history=mob_hist,
+        )
     else:  # cardio
         plan = strength_algo.build_cardio_plan(today, regen_count=regen_count)
 

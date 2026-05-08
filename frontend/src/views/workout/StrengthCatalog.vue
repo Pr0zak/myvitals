@@ -18,6 +18,7 @@ import YogaPoseIcon from "@/components/YogaPoseIcon.vue";
 import { api } from "@/api/client";
 import { apiBase, queryToken } from "@/config";
 import Card from "@/components/Card.vue";
+import { muscleIcon, muscleLabel } from "@/utils/muscleIcon";
 import type { StrengthEquipment, StrengthExercise } from "@/api/types";
 
 const exercises = ref<StrengthExercise[]>([]);
@@ -373,7 +374,13 @@ onMounted(load);
           unavailable: !isAvailable(ex),
         }">
           <button class="row-tap" @click="openDetail(ex)">
-            <img v-if="image(ex)" :src="image(ex) ?? ''" :alt="ex.name" />
+            <!-- Real demo photo (jpg) → render directly. Generated icon
+                 (png from Noun Project) → mask-tint to violet. -->
+            <img v-if="image(ex) && /\.jpe?g($|\?)/i.test(image(ex)!)"
+                 :src="image(ex) ?? ''" :alt="ex.name" />
+            <div v-else-if="image(ex)" class="thumb-mask"
+                 :style="`-webkit-mask-image: url('${image(ex)}'); mask-image: url('${image(ex)}')`"
+                 :title="ex.name"/>
             <div v-else class="ph"
                  :class="{ 'yoga-ph': ex.movement_pattern === 'mobility' }">
               <YogaPoseIcon v-if="ex.movement_pattern === 'mobility'"
@@ -384,7 +391,13 @@ onMounted(load);
             <div class="meta">
               <strong>{{ ex.name }}</strong>
               <span class="tags">
-                {{ ex.movement_pattern.replace('_', ' ') }}
+                <span v-if="muscleIcon(ex.primary_muscle)" class="muscle-chip"
+                      :title="muscleLabel(ex.primary_muscle)">
+                  <span class="muscle-mask"
+                        :style="`-webkit-mask-image: url('${muscleIcon(ex.primary_muscle)}'); mask-image: url('${muscleIcon(ex.primary_muscle)}')`"/>
+                  {{ muscleLabel(ex.primary_muscle) }}
+                </span>
+                <span v-else>{{ ex.primary_muscle }}</span>
                 · {{ ex.equipment.join(' + ') }}
                 · {{ ex.level }}
               </span>
@@ -418,7 +431,11 @@ onMounted(load);
       <div class="detail-panel" @click.stop>
         <button class="detail-close" @click="closeDetail" aria-label="Close">×</button>
         <div class="detail-head">
-          <img v-if="image(detailEx)" :src="image(detailEx) ?? ''" :alt="detailEx.name"/>
+          <img v-if="image(detailEx) && /\.jpe?g($|\?)/i.test(image(detailEx)!)"
+               :src="image(detailEx) ?? ''" :alt="detailEx.name"/>
+          <div v-else-if="image(detailEx)" class="thumb-mask big"
+               :style="`-webkit-mask-image: url('${image(detailEx)}'); mask-image: url('${image(detailEx)}')`"
+               :title="detailEx.name"/>
           <div v-else class="ph big"
                :class="{ 'yoga-ph': detailEx.movement_pattern === 'mobility' }">
             <YogaPoseIcon v-if="detailEx.movement_pattern === 'mobility'"
@@ -434,7 +451,11 @@ onMounted(load);
               · {{ detailEx.level }}
             </div>
             <div class="detail-muscles">
-              <strong>{{ detailEx.primary_muscle }}</strong>
+              <span v-if="muscleIcon(detailEx.primary_muscle)"
+                    class="muscle-mask big"
+                    :title="muscleLabel(detailEx.primary_muscle)"
+                    :style="`-webkit-mask-image: url('${muscleIcon(detailEx.primary_muscle)}'); mask-image: url('${muscleIcon(detailEx.primary_muscle)}')`"/>
+              <strong>{{ muscleLabel(detailEx.primary_muscle) || detailEx.primary_muscle }}</strong>
               <span v-if="detailEx.secondary_muscles?.length">
                 ·
                 {{ detailEx.secondary_muscles.join(", ") }}
@@ -585,6 +606,24 @@ header h1 { margin: 0; }
   width: 56px; height: 56px; border-radius: 6px;
   background: #111; object-fit: cover;
 }
+.list .thumb-mask {
+  width: 56px; height: 56px; border-radius: 6px;
+  background: var(--accent, #a78bfa);
+  -webkit-mask-size: 70%; mask-size: 70%;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  box-shadow: inset 0 0 0 999px rgba(167, 139, 250, 0.10);
+  flex-shrink: 0;
+}
+.detail-head .thumb-mask.big {
+  width: 96px; height: 96px; border-radius: 8px;
+  background: var(--accent, #a78bfa);
+  -webkit-mask-size: 70%; mask-size: 70%;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  box-shadow: inset 0 0 0 999px rgba(167, 139, 250, 0.10);
+  flex-shrink: 0;
+}
 .list .ph {
   background: var(--bg-1); border: 1px dashed var(--line);
   display: flex; align-items: center; justify-content: center;
@@ -594,6 +633,25 @@ header h1 { margin: 0; }
   background: rgba(167, 139, 250, 0.08);
   border: 1px solid rgba(167, 139, 250, 0.25);
   border-radius: 6px;
+}
+/* Muscle anatomy chip — small violet glyph next to row's muscle label.
+   Uses CSS mask-image so the same black PNG renders in any accent. */
+.muscle-chip {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  vertical-align: middle;
+}
+.muscle-mask {
+  display: inline-block;
+  width: 14px; height: 14px;
+  background: var(--accent, #a78bfa);
+  -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  vertical-align: middle;
+}
+.muscle-mask.big {
+  width: 28px; height: 28px;
+  margin-right: 0.4rem;
 }
 .detail-head .ph.big.yoga-ph {
   background: rgba(167, 139, 250, 0.08);

@@ -131,6 +131,15 @@ async def list_trails(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
     if not trails:
         return {"count": 0, "trails": []}
 
+    # DNIS — composes a top-of-page link to RainoutLine's full status
+    # board. (Per-trail permalinks are still emitted in case the UI
+    # ever wants them, but the dashboard shows a single shortcut.)
+    cfg = await db.get(models.TrailStatusConfig, 1)
+    dnis = cfg.dnis if cfg and cfg.dnis else None
+    dnis_url = (
+        f"https://rainoutline.com/search/dnis/{dnis}/updated" if dnis else None
+    )
+
     # Most recent snapshot per trail in a single round-trip via DISTINCT ON.
     # SQLAlchemy 2.x: use a subquery + window function or rely on PG's
     # DISTINCT ON (PostgreSQL-specific). Stick to a simple per-trail query
@@ -198,8 +207,12 @@ async def list_trails(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
             "visits_30d": v_30d,
             "visits_total": v_total,
             "last_visit_at": v_last,
+            "rainout_url": (
+                f"https://rainoutline.com/search/extension/{dnis}/{t.extension}"
+                if dnis else None
+            ),
         })
-    return {"count": len(out), "trails": out}
+    return {"count": len(out), "trails": out, "dnis_url": dnis_url}
 
 
 # ------------------------------------------------------------------

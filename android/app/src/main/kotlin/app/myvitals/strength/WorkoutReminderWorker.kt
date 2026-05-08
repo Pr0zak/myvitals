@@ -39,7 +39,11 @@ class WorkoutReminderWorker(
 
             val targetHour = (profile.extra?.workoutReminderHour ?: 8).coerceIn(0, 23)
             val now = java.time.LocalDateTime.now(ZoneId.systemDefault())
-            if (now.hour != targetHour) return Result.success()
+            // Fire at the first hourly check at or AFTER the target hour
+            // (was: exact-hour match — too brittle since WorkManager
+            // periodic jobs drift, and a missed 8 AM window meant no
+            // notification at all that day).
+            if (now.hour < targetHour) return Result.success()
 
             val today = LocalDate.now(ZoneId.systemDefault()).toString()
             val prefs = applicationContext.getSharedPreferences(
@@ -89,6 +93,15 @@ class WorkoutReminderWorker(
                 Timber.i("Posted workout reminder: %s (%d ex)", split, plan.exercises.size)
             } catch (_: SecurityException) { /* notification permission revoked */ }
 
+            Result.success()
+        } catch (e: java.net.SocketTimeoutException) {
+            // Backend unreachable (off-Tailscale, cellular without VPN,
+            // CT down). Don't retry-storm; let the next hourly fire try
+            // again — by then we may be back on Wi-Fi / Tailscale.
+            Timber.i("WorkoutReminderWorker: backend unreachable, will try next hour")
+            Result.success()
+        } catch (e: java.net.UnknownHostException) {
+            Timber.i("WorkoutReminderWorker: DNS / no network, will try next hour")
             Result.success()
         } catch (e: Exception) {
             Timber.w(e, "WorkoutReminderWorker failed")

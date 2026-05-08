@@ -65,6 +65,11 @@ const stats = computed(() => {
 function pretty(s: string): string {
   return s.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
+
+const muscleNames = [
+  "chest", "back", "shoulders", "abs", "biceps", "triceps",
+  "forearms", "glutes", "quads", "hamstrings", "calves",
+];
 function imgUrl(rel: string | null | undefined): string {
   if (!rel) return "";
   // Same-origin: Caddy proxies /exercises/img/* to the backend.
@@ -119,6 +124,29 @@ function imgUrl(rel: string | null | undefined): string {
           <div class="meta">
             <div class="name">{{ ex.name }}</div>
             <div class="id">{{ ex.id }}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2>Muscle groups <span class="ct">(11)</span></h2>
+      <p class="hint" style="margin: 0 0 0.7rem;">
+        Anatomical icons (Rafiico Creative Studio + Hafiz Nur Lutfianto for hamstrings)
+        served at <code>/exercises/img/muscle/&lt;name&gt;/0.png</code>. Resolver in
+        <code>utils/muscleIcon.ts</code> consolidates the catalog's 17
+        primary_muscle synonyms onto these 11 buckets.
+      </p>
+      <div class="grid">
+        <div v-for="m in muscleNames" :key="m" class="cell">
+          <div class="thumb">
+            <div class="masked"
+                 :style="`-webkit-mask-image: url('/exercises/img/muscle/${m}/0.png'); mask-image: url('/exercises/img/muscle/${m}/0.png')`"
+                 :title="m"/>
+          </div>
+          <div class="meta">
+            <div class="name">{{ m.charAt(0).toUpperCase() + m.slice(1) }}</div>
+            <div class="id">muscle/{{ m }}</div>
           </div>
         </div>
       </div>

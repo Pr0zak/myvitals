@@ -14,6 +14,7 @@ import {
   Star, Ban, ThumbsDown, Play,
   User, Dumbbell, PersonStanding, Activity as ActivityIcon,
 } from "lucide-vue-next";
+import YogaPoseIcon from "@/components/YogaPoseIcon.vue";
 import { api } from "@/api/client";
 import { apiBase, queryToken } from "@/config";
 import Card from "@/components/Card.vue";
@@ -373,8 +374,12 @@ onMounted(load);
         }">
           <button class="row-tap" @click="openDetail(ex)">
             <img v-if="image(ex)" :src="image(ex) ?? ''" :alt="ex.name" />
-            <div v-else class="ph">
-              <component :is="placeholderIcon(ex)" :size="22"/>
+            <div v-else class="ph"
+                 :class="{ 'yoga-ph': ex.movement_pattern === 'mobility' }">
+              <YogaPoseIcon v-if="ex.movement_pattern === 'mobility'"
+                            :id="ex.id" :size="32"
+                            :stroke="'#a78bfa'"/>
+              <component v-else :is="placeholderIcon(ex)" :size="22"/>
             </div>
             <div class="meta">
               <strong>{{ ex.name }}</strong>
@@ -414,8 +419,12 @@ onMounted(load);
         <button class="detail-close" @click="closeDetail" aria-label="Close">×</button>
         <div class="detail-head">
           <img v-if="image(detailEx)" :src="image(detailEx) ?? ''" :alt="detailEx.name"/>
-          <div v-else class="ph big">
-            <component :is="placeholderIcon(detailEx)" :size="40"/>
+          <div v-else class="ph big"
+               :class="{ 'yoga-ph': detailEx.movement_pattern === 'mobility' }">
+            <YogaPoseIcon v-if="detailEx.movement_pattern === 'mobility'"
+                          :id="detailEx.id" :size="58"
+                          :stroke="'#a78bfa'"/>
+            <component v-else :is="placeholderIcon(detailEx)" :size="40"/>
           </div>
           <div class="detail-title">
             <h2>{{ detailEx.name }}</h2>
@@ -580,6 +589,15 @@ header h1 { margin: 0; }
   background: var(--bg-1); border: 1px dashed var(--line);
   display: flex; align-items: center; justify-content: center;
   color: var(--muted);
+}
+.list .ph.yoga-ph {
+  background: rgba(167, 139, 250, 0.08);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  border-radius: 6px;
+}
+.detail-head .ph.big.yoga-ph {
+  background: rgba(167, 139, 250, 0.08);
+  border: 1px solid rgba(167, 139, 250, 0.25);
 }
 .meta { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .meta strong { color: var(--text); font-size: 0.92rem;

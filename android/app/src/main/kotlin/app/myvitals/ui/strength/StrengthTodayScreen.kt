@@ -82,6 +82,7 @@ import app.myvitals.sync.StrengthWorkoutExerciseRow
 import app.myvitals.ui.MV
 import app.myvitals.update.Notifier
 import coil.compose.AsyncImage
+import androidx.compose.ui.graphics.ColorFilter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -998,13 +999,24 @@ private fun ExerciseCard(
                         .getSharedPreferences("myvitals_prefs", android.content.Context.MODE_PRIVATE)
                         .getString("backend_url", "")?.trimEnd('/') ?: ""
                     if (baseUrl.isNotEmpty()) {
-                        AsyncImage(
-                            model = baseUrl + info.imageFront,
-                            contentDescription = name,
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(RoundedCornerShape(8.dp)),
-                        )
+                        // Tint the black-on-transparent Noun Project PNGs to
+                        // the violet accent — same effect as CSS mask-image
+                        // on web. Smaller (40dp) than the prior 64dp box so
+                        // the row chrome doesn't dominate the screen.
+                        Box(
+                            Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x14A78BFA)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            AsyncImage(
+                                model = baseUrl + info.imageFront,
+                                contentDescription = name,
+                                modifier = Modifier.size(32.dp),
+                                colorFilter = ColorFilter.tint(Color(0xFFA78BFA)),
+                            )
+                        }
                     }
                 } else if (info?.movementPattern == "mobility"
                     && app.myvitals.ui.hasYogaPoseIcon(wex.exerciseId)) {
@@ -1013,18 +1025,13 @@ private fun ExerciseCard(
                     // identifiable rather than a name-only block.
                     Box(
                         Modifier
-                            .size(64.dp)
+                            .size(40.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0x14A78BFA))
-                            .border(
-                                1.dp,
-                                Color(0x40A78BFA),
-                                RoundedCornerShape(8.dp),
-                            ),
+                            .background(Color(0x14A78BFA)),
                         contentAlignment = Alignment.Center,
                     ) {
                         app.myvitals.ui.YogaPoseIcon(
-                            id = wex.exerciseId, size = 44.dp,
+                            id = wex.exerciseId, size = 28.dp,
                             tint = Color(0xFFA78BFA),
                         )
                     }

@@ -48,6 +48,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.platform.LocalContext
+import coil.compose.AsyncImage
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -361,19 +364,39 @@ fun StrengthCatalogScreen(
                             modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // Pose icon thumbnail for mobility entries
-                            if (ex.movementPattern == "mobility"
+                            // Thumbnail: prefer Noun Project image_front
+                            // (tinted violet), fall back to hand-drawn yoga
+                            // silhouette for mobility entries.
+                            val ctx = LocalContext.current
+                            val baseUrl = remember {
+                                ctx.getSharedPreferences(
+                                    "myvitals_prefs",
+                                    android.content.Context.MODE_PRIVATE,
+                                ).getString("backend_url", "")?.trimEnd('/') ?: ""
+                            }
+                            if (ex.imageFront != null && baseUrl.isNotEmpty()) {
+                                Box(
+                                    Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(0x14A78BFA)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    AsyncImage(
+                                        model = baseUrl + ex.imageFront,
+                                        contentDescription = ex.name,
+                                        modifier = Modifier.size(28.dp),
+                                        colorFilter = ColorFilter.tint(Color(0xFFA78BFA)),
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                            } else if (ex.movementPattern == "mobility"
                                 && app.myvitals.ui.hasYogaPoseIcon(ex.id)) {
                                 Box(
                                     Modifier
                                         .size(36.dp)
                                         .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0x14A78BFA))
-                                        .border(
-                                            1.dp,
-                                            Color(0x40A78BFA),
-                                            RoundedCornerShape(6.dp),
-                                        ),
+                                        .background(Color(0x14A78BFA)),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     app.myvitals.ui.YogaPoseIcon(

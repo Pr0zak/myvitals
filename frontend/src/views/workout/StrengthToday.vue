@@ -818,7 +818,12 @@ onMounted(loadAll);
 
         <div v-else class="ex-body" v-if="ex(wex.exercise_id)">
           <div class="media">
-            <img v-if="imageUrl(wex.exercise_id, 0)" :src="imageUrl(wex.exercise_id, 0) || ''" :alt="exName(wex.exercise_id)" />
+            <div
+              v-if="imageUrl(wex.exercise_id, 0)"
+              class="ex-thumb"
+              :style="`-webkit-mask-image: url('${imageUrl(wex.exercise_id, 0)}'); mask-image: url('${imageUrl(wex.exercise_id, 0)}')`"
+              :title="exName(wex.exercise_id)"
+            />
             <a class="yt" :href="youtubeUrl(wex.exercise_id)" target="_blank" rel="noreferrer">
               Watch form video on YouTube ↗
             </a>
@@ -1118,10 +1123,20 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 }
 .prescription .rest { color: var(--muted-2); }
 
-.ex-body { display: grid; grid-template-columns: 200px 1fr; gap: 1rem;
-  margin-top: 0.6rem; }
-@media (max-width: 600px) { .ex-body { grid-template-columns: 1fr; } }
+.ex-body { display: grid; grid-template-columns: 96px 1fr; gap: 0.9rem;
+  margin-top: 0.6rem; align-items: start; }
+@media (max-width: 600px) { .ex-body { grid-template-columns: 80px 1fr; } }
 .media img { width: 100%; border-radius: 8px; background: #111; }
+.media .ex-thumb {
+  width: 100%; aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  background: var(--accent, #a78bfa);
+  -webkit-mask-size: 70%; mask-size: 70%;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  /* faint violet wash so the silhouette sits in a card not on bare bg */
+  box-shadow: inset 0 0 0 999px rgba(167, 139, 250, 0.10);
+}
 .yt { display: inline-block; margin-top: 0.4rem; font-size: 0.78rem;
   color: var(--muted); text-decoration: none; }
 .yt:hover { color: var(--accent, #ef4444); }

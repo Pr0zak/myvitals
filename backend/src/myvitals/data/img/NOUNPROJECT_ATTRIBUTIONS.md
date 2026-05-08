@@ -1,0 +1,50 @@
+# Yoga icon attributions
+
+Icons used under CC-BY from The Noun Project.
+
+- **Incline Dumbbell Row** — treadmill by Azam Ishaq from Noun Project
+- **Kroc Row** — Pull-Up by archer7 from Noun Project
+- **Bird Dog Row** — dog hunter by Azam Ishaq from Noun Project
+- **Renegade Row** — Pull-Up by archer7 from Noun Project
+- **Elbows-Out Bent Row** — Pull-Up by archer7 from Noun Project
+- **Single-Leg Romanian Deadlift** — Deadlift by SAM Designs from Noun Project
+- **B-Stance Romanian Deadlift** — Deadlift by SAM Designs from Noun Project
+- **Dumbbell Hip Thrust** — hip thrust by Izwar Muis from Noun Project
+- **Dumbbell Glute Bridge** — high plank by Izwar Muis from Noun Project
+- **Bulgarian Split Squat** — lunge by Izwar Muis from Noun Project
+- **Goblet Squat** — Squat by Izwar Muis from Noun Project
+- **Deficit Reverse Lunge** — lunge by Izwar Muis from Noun Project
+- **Seated Single-Leg Calf Raise** — Calf Raise by SAM Designs from Noun Project
+- **Squeeze Press** — press by Izwar Muis from Noun Project
+- **Floor Press** — press by Izwar Muis from Noun Project
+- **Single-Arm Floor Press** — press by Izwar Muis from Noun Project
+- **Dumbbell Cuban Rotation** — pilates disk by Amethyst Studio from Noun Project
+- **Arnold Press** — press by Izwar Muis from Noun Project
+- **Seated Arnold Press** — press by Izwar Muis from Noun Project
+- **Farmer Walk** — Walk by Izwar Muis from Noun Project
+- **Hindu Push-Up** — push up by Izwar Muis from Noun Project
+- **Archer Push-Up** — push up by Izwar Muis from Noun Project
+- **Pike Push-Up** — push up by Izwar Muis from Noun Project
+- **Single-Arm Skullcrusher** — armchair by Arthur Shlain from Noun Project
+- **Tricep Kickback** — high plank by Izwar Muis from Noun Project
+- **Seated Dumbbell French Press** — french press coffee by Izwar Muis from Noun Project
+- **Spider Curl** — Leg Curl by SAM Designs from Noun Project
+- **Pinwheel Curl** — Leg Curl by SAM Designs from Noun Project
+- **Dumbbell Drag Curl** — bicep curl by SAM Designs from Noun Project
+- **Dumbbell Pullover** — Dumbbell Fly by SAM Designs from Noun Project
+- **Dumbbell Push Press** — press by Izwar Muis from Noun Project
+- **Dumbbell Thruster** — thruster by Iconsden@gmail.com from Noun Project
+- **Single-Arm Dumbbell Press** — press by Izwar Muis from Noun Project
+- **Decline Push-Up** — push up by Izwar Muis from Noun Project
+- **Diamond Push-Up** — push up by Izwar Muis from Noun Project
+- **Cossack Squat** — lateral squat by Izwar Muis from Noun Project
+- **Dumbbell Step-Up** — step up by Izwar Muis from Noun Project
+- **Dumbbell Walking Lunge** — jump by Izwar Muis from Noun Project
+- **Dumbbell Lateral Lunge** — jump by Izwar Muis from Noun Project
+- **Single-Arm Romanian Deadlift** — Deadlift by SAM Designs from Noun Project
+- **Dumbbell Sumo Squat** — Squat by Izwar Muis from Noun Project
+- **Single-Leg Dumbbell Hip Thrust** — hip thrust by Izwar Muis from Noun Project
+- **Glute March** — high plank by Izwar Muis from Noun Project
+- **Hollow Body Hold** — hold by Izwar Muis from Noun Project
+- **Dumbbell Plank Pull-Through** — Fitness by Misbahul Munir from Noun Project
+- **Downward-Facing Dog** — downward-facing dog by sachan from Noun Project

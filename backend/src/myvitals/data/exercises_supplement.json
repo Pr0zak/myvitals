@@ -23,7 +23,7 @@
       "Lower the dumbbells under control until your arms are fully extended.",
       "Avoid lifting your chest off the bench or jerking the weight up with your hips."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Incline_Dumbbell_Row/0.png",
     "image_side": null,
     "youtube_query": "Incline Dumbbell Row form"
   },
@@ -51,7 +51,7 @@
       "Lower under control to a full stretch, then explode the next rep — the goal is high reps with a heavy load.",
       "Keep the lower back neutral; cheating from the hips is fine, but don't round your spine."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Kroc_Row/0.png",
     "image_side": null,
     "youtube_query": "Kroc Row form"
   },
@@ -79,7 +79,7 @@
       "Lower under control and resist the urge to twist; the anti-rotation challenge is the point.",
       "Keep hips square to the floor; if you wobble, drop the weight before adding load."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Bird_Dog_Row/0.png",
     "image_side": null,
     "youtube_query": "Bird Dog Row form"
   },
@@ -107,7 +107,7 @@
       "Lower the dumbbell, then perform another push-up and row with the other arm — that's one rep.",
       "Avoid hip rotation; widening the feet helps anti-rotation if you're new to the movement."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Renegade_Row/0.png",
     "image_side": null,
     "youtube_query": "Renegade Row form"
   },
@@ -134,7 +134,7 @@
       "Lower under control, keeping the torso angle stable — don't stand up between reps.",
       "Use a lighter load than a standard bent row; the wide elbow path biases upper back over lats."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Elbows_Out_Bent_Row/0.png",
     "image_side": null,
     "youtube_query": "Elbows-Out Bent Row form"
   },
@@ -161,7 +161,7 @@
       "Drive the standing-leg heel into the floor and squeeze the glute to return to standing.",
       "Avoid letting the hips open — point the trailing-leg toes down to keep the pelvis square."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Single_Leg_Romanian_Deadlift/0.png",
     "image_side": null,
     "youtube_query": "Single-Leg Romanian Deadlift form"
   },
@@ -187,7 +187,7 @@
       "Drive through the front-foot heel and squeeze the front glute to stand back up.",
       "Use the kickstand foot only for balance — don't push off it."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/B_Stance_Romanian_Deadlift/0.png",
     "image_side": null,
     "youtube_query": "B-Stance Romanian Deadlift form"
   },
@@ -214,7 +214,7 @@
       "Lower under control without letting the hips fully rest on the floor between reps.",
       "Keep the chin tucked and ribs down; don't hyperextend the lower back at lockout."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Dumbbell_Hip_Thrust/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell Hip Thrust form"
   },
@@ -240,7 +240,7 @@
       "Lower under control until the hips just brush the floor, then go again.",
       "Keep the ribs down — don't arch the lower back to fake more range."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Dumbbell_Glute_Bridge/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell Glute Bridge form"
   },
@@ -268,7 +268,7 @@
       "Drive through the front-foot heel and mid-foot to return to the top.",
       "Don't push off the rear foot — it's only for balance. Finish all reps on one side before switching."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Bulgarian_Split_Squat/0.png",
     "image_side": null,
     "youtube_query": "Bulgarian Split Squat form"
   },
@@ -295,7 +295,7 @@
       "Drive through mid-foot to stand back up; keep the chest tall throughout.",
       "Avoid letting the dumbbell pull you forward — keep it pinned tight to your chest."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Goblet_Squat/0.png",
     "image_side": null,
     "youtube_query": "Goblet Squat form"
   },
@@ -321,7 +321,7 @@
       "Drive through the front-foot heel to step back up onto the platform.",
       "Alternate legs or finish all reps on one side; keep the torso upright and ribs stacked."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Deficit_Reverse_Lunge/0.png",
     "image_side": null,
     "youtube_query": "Deficit Reverse Lunge form"
   },
@@ -345,7 +345,7 @@
       "Drive the ball of the foot down to push the heel as high as possible; pause and squeeze.",
       "Lower under control — quick bouncy reps cheat the soleus out of work."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Seated_Single_Leg_Calf_Raise/0.png",
     "image_side": null,
     "youtube_query": "Seated Single-Leg Calf Raise form"
   },
@@ -371,7 +371,7 @@
       "Lower the dumbbells under control to your chest, never breaking the squeeze.",
       "Use lighter weight than a standard DB bench; the constant adduction is the stimulus, not the load."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Squeeze_Press/0.png",
     "image_side": null,
     "youtube_query": "Squeeze Press form"
   },
@@ -397,7 +397,7 @@
       "Press back up explosively without bouncing the elbows.",
       "Keep the lower back neutral — no excessive arching."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Floor_Press/0.png",
     "image_side": null,
     "youtube_query": "Floor Press form"
   },
@@ -424,7 +424,7 @@
       "Lower until the triceps touches the floor, pause, then press up again.",
       "Finish all reps on one side before switching; keep hips and shoulders square throughout."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Single_Arm_Floor_Press/0.png",
     "image_side": null,
     "youtube_query": "Single-Arm Floor Press form"
   },
@@ -449,7 +449,7 @@
       "Reverse the rotation back to elbow-high, then lower the dumbbells back to the start.",
       "Use very light weight — this is rotator-cuff prehab, not a load lift."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Dumbbell_Cuban_Rotation/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell Cuban Rotation form"
   },
@@ -476,7 +476,7 @@
       "Keep the core braced and ribs down; don't let the lower back arch to cheat the press.",
       "Use lighter load than a standard overhead press — the rotation eats into your top-end strength."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Arnold_Press/0.png",
     "image_side": null,
     "youtube_query": "Arnold Press form"
   },
@@ -504,7 +504,7 @@
       "Press your back into the bench and keep the core tight — no lower-back arch.",
       "Seated removes lower-body cheating, so expect to use less weight than the standing version."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Seated_Arnold_Press/0.png",
     "image_side": null,
     "youtube_query": "Seated Arnold Press form"
   },
@@ -532,7 +532,7 @@
       "Walk for time or distance; common targets are 30-60 seconds or 30-50 yards per set.",
       "Set the weights down with control — don't drop them from full height."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Farmer_Walk/0.png",
     "image_side": null,
     "youtube_query": "Farmer Walk form"
   },
@@ -560,7 +560,7 @@
       "Reverse the motion or push back to downward-dog to start the next rep.",
       "Move smoothly — jerky transitions hammer the lower back. Keep the core engaged throughout."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Hindu_Push_Up/0.png",
     "image_side": null,
     "youtube_query": "Hindu Push-Up form"
   },
@@ -587,7 +587,7 @@
       "Press back up to the top, then lower toward the other side on the next rep.",
       "Keep hips level — no piking. If too hard, do them on the knees first."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Archer_Push_Up/0.png",
     "image_side": null,
     "youtube_query": "Archer Push-Up form"
   },
@@ -614,7 +614,7 @@
       "Press back up to fully extended arms.",
       "Avoid bending at the hips on the way up — keep the pike angle constant. Elevate the feet on a bench for a harder variation."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Pike_Push_Up/0.png",
     "image_side": null,
     "youtube_query": "Pike Push-Up form"
   },
@@ -667,7 +667,7 @@
       "Extend back up under control and squeeze.",
       "Keep reps strict; ego loads turn this into a shoulder injury."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Single_Arm_Skullcrusher/0.png",
     "image_side": null,
     "youtube_query": "Single arm dumbbell skullcrusher"
   },
@@ -692,7 +692,7 @@
       "Pause at lockout and squeeze the triceps for a beat.",
       "Lower under control. Picking weights light enough to avoid the upper arm swinging is the whole game."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Tricep_Kickback/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell tricep kickback form"
   },
@@ -719,7 +719,7 @@
       "Drive back up to lockout without letting the elbows flare wide.",
       "The behind-the-head position emphasises the long head — use moderate weight, the leverage is brutal."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Dumbbell_French_Press/0.png",
     "image_side": null,
     "youtube_query": "Seated dumbbell French press"
   },
@@ -745,7 +745,7 @@
       "Squeeze hard at the top, with the biceps fully shortened.",
       "Lower under control to a full stretch. Strict form here builds the peak."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Spider_Curl/0.png",
     "image_side": null,
     "youtube_query": "Spider curl form"
   },
@@ -771,7 +771,7 @@
       "Lower under control and alternate arms.",
       "Treat it as a strict, slow movement; the brachialis grows on time-under-tension, not speed."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Pinwheel_Curl/0.png",
     "image_side": null,
     "youtube_query": "Pinwheel curl"
   },
@@ -796,7 +796,7 @@
       "Stop at chest level and squeeze — the front delt stays out of it.",
       "Lower under control. Expect to use lighter weight than a strict curl; the leverage is harder."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Drag_Curl/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell drag curl form"
   },
@@ -824,7 +824,7 @@
       "Pull back to the start by squeezing the lats and chest together, not by extending the elbows.",
       "Don't let the hips rise to compensate; the bench pressure should stay on your upper back the whole rep."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Dumbbell_Pullover/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell pullover form"
   },
@@ -852,7 +852,7 @@
       "Lower under control back to the shoulders, reset, and repeat.",
       "The leg drive is what lets you load heavier than a strict press; keep the core braced or the back will arch."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Dumbbell_Push_Press/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell push press form"
   },
@@ -880,7 +880,7 @@
       "Lock the dumbbells out at the top; lower back to the shoulders as you descend into the next rep.",
       "It's one continuous fluid movement, not a squat plus a press; pace yourself, this is conditioning as much as strength."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Dumbbell_Thruster/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell thruster form"
   },
@@ -908,7 +908,7 @@
       "Press straight up to lockout without letting the bench tilt.",
       "The anti-rotation demand makes the core do as much work as the chest. Use moderate weight at first."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Single_Arm_Dumbbell_Press/0.png",
     "image_side": null,
     "youtube_query": "Single arm dumbbell bench press"
   },
@@ -936,7 +936,7 @@
       "Press back up to lockout, keeping the core braced so the hips don't sag.",
       "If a full set feels easy, add a slow eccentric (3-second descent) before adding weight via a vest or plate."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Decline_Push_Up/0.png",
     "image_side": null,
     "youtube_query": "Decline push-up form"
   },
@@ -963,7 +963,7 @@
       "Press back up to a strong lockout, squeezing the triceps.",
       "The narrow hand position emphasises the triceps; if your wrists complain, widen the hands slightly to a close-grip push-up."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Diamond_Push_Up/0.png",
     "image_side": null,
     "youtube_query": "Diamond push-up form"
   },
@@ -991,7 +991,7 @@
       "Drive back up to standing and shift to the other side.",
       "Move slowly; the bottom position requires hip mobility. Build depth gradually rather than forcing range."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Cossack_Squat/0.png",
     "image_side": null,
     "youtube_query": "Cossack squat form"
   },
@@ -1019,7 +1019,7 @@
       "Step back down under control with the trailing leg, then the working leg.",
       "Complete all reps on one side before switching, or alternate. Choose a bench height that lets you start with the working knee at ~90 degrees."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Dumbbell_Step_Up/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell step up form"
   },
@@ -1047,7 +1047,7 @@
       "Keep the torso upright and avoid letting the back knee crash into the floor.",
       "Walk in a straight line for the prescribed reps per side. Reset if balance breaks down — quality over distance."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Walking_Lunge/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell walking lunge"
   },
@@ -1075,7 +1075,7 @@
       "Drive off the working leg to push back to standing.",
       "Alternate sides or complete reps per side. The frontal-plane work is brutal for hip stability; expect humbling weights."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Lateral_Lunge/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell lateral lunge"
   },
@@ -1102,7 +1102,7 @@
       "Hinge until the hamstring of the working side reaches a strong stretch (around mid-shin for most people).",
       "Drive the hips forward to stand tall, squeezing the glute. The single-arm load makes this an anti-rotation drill — resist the twist."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Single_Arm_Romanian_Deadlift/0.png",
     "image_side": null,
     "youtube_query": "Single arm dumbbell Romanian deadlift"
   },
@@ -1129,7 +1129,7 @@
       "Drive back up by pushing the floor apart with the feet — this fires the adductors and glutes.",
       "If knees cave inward, narrow the stance or lighten the load."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Dumbbell_Sumo_Squat/0.png",
     "image_side": null,
     "youtube_query": "Dumbbell sumo squat"
   },
@@ -1156,7 +1156,7 @@
       "Squeeze the glute hard at the top, ribs down, no lumbar over-extension.",
       "Lower under control. The unilateral load exposes glute weakness; use lighter weight than a two-leg version."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Single_Leg_Hip_Thrust/0.png",
     "image_side": null,
     "youtube_query": "Single leg dumbbell hip thrust"
   },
@@ -1183,7 +1183,7 @@
       "Lower the marching foot back to the floor and switch sides without letting your hips drop.",
       "The challenge is keeping the hips level under the offset load — single-leg glute and core work without ever lowering."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Glute_March/0.png",
     "image_side": null,
     "youtube_query": "Glute march hip thrust"
   },
@@ -1208,7 +1208,7 @@
       "Hold the position with the lower back glued to the floor. Breathe.",
       "If your back arches, pull the legs up higher or bend at the knees until you can keep the back pinned. Time is the load — start with 20 s sets."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Hollow_Body_Hold/0.png",
     "image_side": null,
     "youtube_query": "Hollow body hold form"
   },
@@ -1234,7 +1234,7 @@
       "The core is fighting rotation the entire set; that's the point.",
       "Pace each rep deliberately. Quality of the anti-rotation hold beats speed."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Plank_Pull_Through/0.png",
     "image_side": null,
     "youtube_query": "Plank pull through dumbbell"
   },
@@ -1262,7 +1262,7 @@
       "Hold for 5-10 deep breaths. Soften the shoulders away from the ears.",
       "If the hamstrings cramp, micro-bend the knees — depth matters less than the spine staying long."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Downward_Dog/0.png",
     "image_side": null,
     "youtube_query": "Downward dog yoga form"
   },
@@ -1289,7 +1289,7 @@
       "Hold for 8-12 breaths. Use it as a recovery pose any time during a session.",
       "Knees can be together if it's more comfortable for the lower back."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Childs_Pose/0.png",
     "image_side": null,
     "youtube_query": "Child's pose yoga"
   },
@@ -1316,7 +1316,7 @@
       "Move with breath, one full cycle per inhale-exhale. Aim for 8-12 cycles.",
       "Move slowly — this is a spine-warming drill, not a stretch."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Cat_Cow/0.png",
     "image_side": null,
     "youtube_query": "Cat cow yoga flow"
   },
@@ -1343,7 +1343,7 @@
       "Hold 5-8 breaths, keeping the shoulders down away from the ears.",
       "Exhale to release back to the floor."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Cobra_Pose/0.png",
     "image_side": null,
     "youtube_query": "Cobra pose yoga"
   },
@@ -1370,7 +1370,7 @@
       "Hold 8-12 breaths. Switch sides.",
       "If the front hip lifts off the floor, prop it on a folded blanket — chasing depth at the cost of alignment risks the knee."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Pigeon_Pose/0.png",
     "image_side": null,
     "youtube_query": "Pigeon pose yoga form"
   },
@@ -1397,7 +1397,7 @@
       "Hold 8-15 breaths, gently shifting weight side to side to release the lower back.",
       "Bend the knees deeper if the hamstrings cramp — the goal is a long spine, not straight legs."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Forward_Fold/0.png",
     "image_side": null,
     "youtube_query": "Standing forward fold yoga"
   },
@@ -1425,7 +1425,7 @@
       "Hold 5-8 breaths. Switch sides.",
       "Press through the outer edge of the back foot to keep the back leg active — this is a hip-opener, not just a leg pose."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Warrior_2/0.png",
     "image_side": null,
     "youtube_query": "Warrior 2 yoga pose"
   },
@@ -1452,7 +1452,7 @@
       "Gaze up at the top hand. Hold 5-8 breaths and switch sides.",
       "If the back rounds, raise the bottom hand higher — keep the spine long."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Triangle_Pose/0.png",
     "image_side": null,
     "youtube_query": "Triangle pose yoga form"
   },
@@ -1479,7 +1479,7 @@
       "Hold 10-15 breaths, releasing further on each exhale.",
       "Sit on a folded blanket if the hips can't tilt forward."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Seated_Forward_Bend/0.png",
     "image_side": null,
     "youtube_query": "Seated forward bend yoga"
   },
@@ -1506,7 +1506,7 @@
       "Hold 8-12 breaths. Switch sides.",
       "Stack a pillow between the knees if the hip cramps in the twist."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Reclined_Spinal_Twist/0.png",
     "image_side": null,
     "youtube_query": "Reclined spinal twist yoga"
   },
@@ -1534,7 +1534,7 @@
       "Hold 6-10 breaths, then roll down vertebra by vertebra.",
       "Different from a hip-thrust: this is mobility, not a glute strength drill — lift only as high as the lower back stays comfortable."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Bridge_Pose/0.png",
     "image_side": null,
     "youtube_query": "Bridge pose yoga form"
   },
@@ -1561,7 +1561,7 @@
       "Hold 8-15 breaths. Switch sides.",
       "Wonderful for deep hip openers, especially after squat or lunge work."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Lizard_Pose/0.png",
     "image_side": null,
     "youtube_query": "Lizard pose yoga form"
   },
@@ -1588,7 +1588,7 @@
       "Hold 10-20 breaths per side. Switch.",
       "Critical for runners and lifters with tight glutes / piriformis."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Half_Pigeon_Forward_Fold/0.png",
     "image_side": null,
     "youtube_query": "Half pigeon forward fold yoga"
   },
@@ -1615,7 +1615,7 @@
       "Hold 8-12 breaths. Switch sides.",
       "Targets the area lifters chronically lose mobility in from bench-pressing."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Thread_The_Needle/0.png",
     "image_side": null,
     "youtube_query": "Thread the needle yoga"
   },
@@ -1642,7 +1642,7 @@
       "Rock side to side gently to massage the lower back.",
       "Hold 8-12 breaths. Often used as a closing pose — releases the whole posterior chain."
     ],
-    "image_front": null,
+    "image_front": "/exercises/img/Happy_Baby/0.png",
     "image_side": null,
     "youtube_query": "Happy baby pose yoga"
   }

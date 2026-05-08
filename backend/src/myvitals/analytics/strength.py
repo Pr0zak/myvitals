@@ -793,8 +793,10 @@ async def generate_plan(
     level = training.get("level", DEFAULT_LEVEL)
     days_per_week = int(training.get("days_per_week", DEFAULT_DAYS_PER_WEEK))
     split_pref = training.get("split_preference", DEFAULT_SPLIT_PREFERENCE)
-    include_mobility = bool(training.get("include_mobility", False))
-    yoga_on_rest = bool(training.get("yoga_on_rest_days", False))
+    # Match the Pydantic default in TrainingPreferences — when the
+    # stored payload predates these fields, treat them as enabled.
+    include_mobility = bool(training.get("include_mobility", True))
+    yoga_on_rest = bool(training.get("yoga_on_rest_days", True))
 
     def _yoga_session(_seed_str: str, n_poses: int = 5,
                       hold_s: int = 45) -> list[ExerciseInPlan]:

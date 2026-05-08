@@ -10,7 +10,7 @@
  *   PUT  /workout/strength/exercises/{id}/pref  — toggle a pref
  */
 import { computed, onMounted, ref } from "vue";
-import { Star, Ban, ThumbsDown } from "lucide-vue-next";
+import { Star, Ban, ThumbsDown, Play } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { apiBase, queryToken } from "@/config";
 import Card from "@/components/Card.vue";
@@ -158,13 +158,24 @@ function image(ex: StrengthExercise): string | null {
   return `${base}${ex.image_front}`;
 }
 
+function videoUrl(query: string): string {
+  return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+}
+
+const GROUP_RENAME: Record<string, string> = {
+  flexibility: "Yoga & Mobility",
+};
+function groupLabel(muscle: string): string {
+  return GROUP_RENAME[muscle] ?? muscle.replace("_", " ");
+}
+
 onMounted(load);
 </script>
 
 <template>
   <main class="catalog">
     <header>
-      <h1>Strength catalog</h1>
+      <h1>Workout catalog</h1>
       <div class="filter">
         <label><input type="radio" value="available" v-model="filter"/> Available ({{ counts.total }})</label>
         <label><input type="radio" value="all" v-model="filter"/> All</label>
@@ -198,7 +209,7 @@ onMounted(load);
     </Card>
 
     <section v-for="[muscle, list] in groupedByMuscle" :key="muscle" class="group">
-      <h2>{{ muscle.replace('_', ' ') }} · {{ list.length }}</h2>
+      <h2>{{ groupLabel(muscle) }} · {{ list.length }}</h2>
       <ul class="list">
         <li v-for="ex in list" :key="ex.id" :class="{
           fav: prefs[ex.id] === 'favorite',
@@ -217,6 +228,11 @@ onMounted(load);
             </span>
           </div>
           <div class="actions">
+            <a v-if="ex.youtube_query"
+               class="act vid" :href="videoUrl(ex.youtube_query)"
+               target="_blank" rel="noreferrer" title="Watch on YouTube">
+              <Play :size="14"/>
+            </a>
             <button class="act fav" :class="{ on: prefs[ex.id] === 'favorite' }"
                     @click="setPref(ex.id, 'favorite')" title="Favorite">
               <Star :size="16" />
@@ -300,6 +316,8 @@ header h1 { margin: 0; }
   display: inline-flex; align-items: center; justify-content: center;
 }
 .act:hover { color: var(--text); }
+.act.vid { text-decoration: none; }
+.act.vid:hover { color: #ef4444; border-color: #ef444466; }
 .act.fav.on  { background: rgba(245, 158, 11, 0.18); color: #f59e0b; border-color: #f59e0b66; }
 .act.avoid.on { background: rgba(148, 163, 184, 0.2); color: #94a3b8; border-color: #94a3b855; }
 .act.dis.on  { background: rgba(239, 68, 68, 0.18); color: #ef4444; border-color: #ef444466; }

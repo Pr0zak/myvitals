@@ -89,7 +89,7 @@ onMounted(() => { loadList(); loadCatalog(); });
 
 <template>
   <main class="strength-history">
-    <h1>Strength history</h1>
+    <h1>Workout history</h1>
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load history.</p>
     <p v-else-if="loading" class="hint">Loading…</p>

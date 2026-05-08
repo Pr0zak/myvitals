@@ -153,7 +153,7 @@ onMounted(() => { equip.value = defaultEquip(); load(); });
 
 <template>
   <main class="strength-equipment">
-    <h1>Strength equipment</h1>
+    <h1>Workout equipment</h1>
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load equipment.</p>
 

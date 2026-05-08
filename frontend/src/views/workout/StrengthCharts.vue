@@ -138,7 +138,7 @@ const progressionOption = computed(() => {
 <template>
   <section class="charts">
     <header>
-      <h1>Strength charts</h1>
+      <h1>Workout charts</h1>
       <div class="ranges">
         <button v-for="d in [7, 30, 90, 365]" :key="d"
                 class="range" :class="{ on: days === d }"

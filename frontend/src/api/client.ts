@@ -540,6 +540,23 @@ export const api = {
     return data;
   },
 
+  async strengthExerciseStats(exerciseId: string): Promise<{
+    exercise_id: string;
+    times_performed: number;
+    total_sets: number;
+    total_reps: number;
+    total_volume_lb: number;
+    last_weight_lb: number | null;
+    max_weight_lb: number | null;
+    last_performed_date: string | null;
+    avg_rating: number | null;
+  }> {
+    const { data } = await http.get(
+      `/workout/strength/exercises/${encodeURIComponent(exerciseId)}/stats`,
+    );
+    return data;
+  },
+
   async swapTodayType(
     type: "strength" | "yoga" | "cardio",
     split: string | null = null,

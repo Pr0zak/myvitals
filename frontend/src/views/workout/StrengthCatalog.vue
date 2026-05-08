@@ -217,6 +217,34 @@ function videoUrl(query: string): string {
   return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
 }
 
+// Click-to-open detail panel
+const detailEx = ref<StrengthExercise | null>(null);
+const detailStats = ref<Awaited<ReturnType<typeof api.strengthExerciseStats>> | null>(null);
+const detailStatsLoading = ref(false);
+
+async function openDetail(ex: StrengthExercise) {
+  detailEx.value = ex;
+  detailStats.value = null;
+  detailStatsLoading.value = true;
+  try {
+    detailStats.value = await api.strengthExerciseStats(ex.id);
+  } catch { /* ignore — stats are non-critical */ }
+  finally { detailStatsLoading.value = false; }
+}
+function closeDetail() {
+  detailEx.value = null;
+  detailStats.value = null;
+}
+function fmtRelativeDate(iso: string | null): string {
+  if (!iso) return "—";
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / (24 * 3600_000));
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}
+
 const GROUP_RENAME: Record<string, string> = {
   flexibility: "Yoga & Mobility",
 };
@@ -290,16 +318,18 @@ onMounted(load);
           avoid: prefs[ex.id] === 'avoid',
           unavailable: !isAvailable(ex),
         }">
-          <img v-if="image(ex)" :src="image(ex) ?? ''" :alt="ex.name" />
-          <div v-else class="ph"></div>
-          <div class="meta">
-            <strong>{{ ex.name }}</strong>
-            <span class="tags">
-              {{ ex.movement_pattern.replace('_', ' ') }}
-              · {{ ex.equipment.join(' + ') }}
-              · {{ ex.level }}
-            </span>
-          </div>
+          <button class="row-tap" @click="openDetail(ex)">
+            <img v-if="image(ex)" :src="image(ex) ?? ''" :alt="ex.name" />
+            <div v-else class="ph"></div>
+            <div class="meta">
+              <strong>{{ ex.name }}</strong>
+              <span class="tags">
+                {{ ex.movement_pattern.replace('_', ' ') }}
+                · {{ ex.equipment.join(' + ') }}
+                · {{ ex.level }}
+              </span>
+            </div>
+          </button>
           <div class="actions">
             <a v-if="ex.youtube_query"
                class="act vid" :href="videoUrl(ex.youtube_query)"
@@ -322,6 +352,86 @@ onMounted(load);
         </li>
       </ul>
     </section>
+
+    <!-- Exercise detail overlay -->
+    <div v-if="detailEx" class="detail-overlay" @click="closeDetail">
+      <div class="detail-panel" @click.stop>
+        <button class="detail-close" @click="closeDetail" aria-label="Close">×</button>
+        <div class="detail-head">
+          <img v-if="image(detailEx)" :src="image(detailEx) ?? ''" :alt="detailEx.name"/>
+          <div v-else class="ph big"></div>
+          <div class="detail-title">
+            <h2>{{ detailEx.name }}</h2>
+            <div class="detail-tags">
+              {{ detailEx.movement_pattern.replace('_', ' ') }}
+              · {{ detailEx.equipment.join(' + ') }}
+              · {{ detailEx.level }}
+            </div>
+            <div class="detail-muscles">
+              <strong>{{ detailEx.primary_muscle }}</strong>
+              <span v-if="detailEx.secondary_muscles?.length">
+                ·
+                {{ detailEx.secondary_muscles.join(", ") }}
+              </span>
+            </div>
+            <div class="detail-actions">
+              <a v-if="detailEx.youtube_query"
+                 :href="videoUrl(detailEx.youtube_query)"
+                 target="_blank" rel="noreferrer" class="link-btn">
+                <Play :size="13"/> Watch on YouTube
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stats -->
+        <section class="detail-section">
+          <h3>Your history</h3>
+          <p v-if="detailStatsLoading" class="dim">Loading…</p>
+          <p v-else-if="!detailStats || detailStats.times_performed === 0" class="dim">
+            Not performed yet.
+          </p>
+          <div v-else class="stats-grid">
+            <div class="stat">
+              <span class="stat-label">Sessions</span>
+              <span class="stat-val mono">{{ detailStats.times_performed }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Last seen</span>
+              <span class="stat-val mono">{{ fmtRelativeDate(detailStats.last_performed_date) }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Last weight</span>
+              <span class="stat-val mono">{{ detailStats.last_weight_lb ?? "—" }}<span class="unit-s" v-if="detailStats.last_weight_lb"> lb</span></span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Max weight</span>
+              <span class="stat-val mono">{{ detailStats.max_weight_lb ?? "—" }}<span class="unit-s" v-if="detailStats.max_weight_lb"> lb</span></span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Total reps</span>
+              <span class="stat-val mono">{{ detailStats.total_reps.toLocaleString() }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Volume</span>
+              <span class="stat-val mono">{{ Math.round(detailStats.total_volume_lb).toLocaleString() }}<span class="unit-s"> lb</span></span>
+            </div>
+            <div class="stat" v-if="detailStats.avg_rating != null">
+              <span class="stat-label">Avg RPE</span>
+              <span class="stat-val mono">{{ detailStats.avg_rating.toFixed(1) }}</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Instructions -->
+        <section v-if="detailEx.instructions?.length" class="detail-section">
+          <h3>How to do it</h3>
+          <ol class="instructions">
+            <li v-for="(line, i) in detailEx.instructions" :key="i">{{ line }}</li>
+          </ol>
+        </section>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -384,12 +494,22 @@ header h1 { margin: 0; }
   gap: 0.3rem; }
 .list li {
   display: grid;
-  grid-template-columns: 56px 1fr auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 0.7rem;
   padding: 0.5rem 0.7rem;
   background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
 }
+.row-tap {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  align-items: center;
+  gap: 0.7rem;
+  background: transparent; border: none; padding: 0;
+  text-align: left; cursor: pointer; color: inherit;
+  font: inherit; min-width: 0;
+}
+.row-tap:hover .meta strong { color: var(--accent, #ef4444); }
 .list li.fav { border-left: 3px solid #f59e0b; }
 .list li.disabled { opacity: 0.5; border-left: 3px solid #ef4444; }
 .list li.avoid { opacity: 0.7; border-left: 3px solid #94a3b8; }
@@ -419,4 +539,71 @@ header h1 { margin: 0; }
 .act.fav.on  { background: rgba(245, 158, 11, 0.18); color: #f59e0b; border-color: #f59e0b66; }
 .act.avoid.on { background: rgba(148, 163, 184, 0.2); color: #94a3b8; border-color: #94a3b855; }
 .act.dis.on  { background: rgba(239, 68, 68, 0.18); color: #ef4444; border-color: #ef444466; }
+
+/* Detail overlay */
+.detail-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(15, 22, 32, 0.7); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 1rem;
+}
+.detail-panel {
+  background: var(--surface, #1B2331);
+  border: 1px solid var(--line); border-radius: 12px;
+  padding: 1.4rem 1.4rem 1.6rem;
+  max-width: 640px; width: 100%;
+  max-height: 88vh; overflow-y: auto;
+  position: relative;
+}
+.detail-close {
+  position: absolute; top: 0.7rem; right: 0.8rem;
+  background: transparent; border: none; color: var(--muted);
+  font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 0.2rem 0.5rem;
+}
+.detail-close:hover { color: var(--text); }
+.detail-head { display: flex; gap: 1rem; align-items: flex-start; margin-bottom: 1rem; }
+.detail-head img, .detail-head .ph.big {
+  width: 96px; height: 96px; border-radius: 8px;
+  background: #111; object-fit: cover; flex: 0 0 auto;
+}
+.detail-head .ph.big { background: var(--bg-1); border: 1px dashed var(--line); }
+.detail-title { flex: 1; min-width: 0; }
+.detail-title h2 { margin: 0 0 0.25rem; font-size: 1.15rem; }
+.detail-tags {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 0.78rem; color: var(--muted);
+}
+.detail-muscles { font-size: 0.85rem; margin-top: 0.3rem; }
+.detail-muscles strong { color: var(--text); text-transform: capitalize; }
+.detail-actions { margin-top: 0.6rem; }
+.link-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--bg-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 0.32rem 0.6rem; font-size: 0.8rem;
+  text-decoration: none; cursor: pointer;
+}
+.link-btn:hover { color: #ef4444; border-color: #ef444466; }
+.detail-section { margin-top: 1rem; }
+.detail-section h3 {
+  font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600; margin: 0 0 0.6rem;
+}
+.stats-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem;
+}
+.stat { display: flex; flex-direction: column; gap: 0.2rem;
+        padding: 0.6rem 0.7rem;
+        background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; }
+.stat-label { font-size: 0.7rem; letter-spacing: 0.06em;
+              text-transform: uppercase; color: var(--muted); }
+.stat-val { font-size: 1.1rem; font-weight: 500; }
+.unit-s { font-size: 0.75em; color: var(--muted); margin-left: 2px; }
+.dim { color: var(--muted); font-size: 0.85rem; }
+.instructions { padding-left: 1.2rem; margin: 0; display: flex;
+                flex-direction: column; gap: 0.45rem; }
+.instructions li { font-size: 0.88rem; line-height: 1.5; color: var(--text); }
+@media (max-width: 540px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
 </style>

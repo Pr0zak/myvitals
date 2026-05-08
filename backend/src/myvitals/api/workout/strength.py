@@ -243,6 +243,84 @@ async def get_exercise(exercise_id: str) -> dict[str, Any]:
     return row
 
 
+@router.get("/exercises/{exercise_id}/stats")
+async def get_exercise_stats(
+    exercise_id: str, db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Aggregate the user's history for one exercise — times performed,
+    total volume, max + last weight, avg RPE. Used by the catalog detail
+    panel so the user sees their own progression on each entry."""
+    if exercise_id not in _CATALOG_BY_ID:
+        raise HTTPException(status_code=404, detail="exercise not found")
+
+    sets_q = await db.execute(
+        select(
+            models.StrengthWorkout.id,
+            models.StrengthWorkout.date,
+            models.StrengthSet.actual_weight_lb,
+            models.StrengthSet.actual_reps,
+            models.StrengthSet.rating,
+            models.StrengthSet.skipped,
+        )
+        .join(
+            models.StrengthWorkoutExercise,
+            models.StrengthSet.workout_exercise_id ==
+            models.StrengthWorkoutExercise.id,
+        )
+        .join(
+            models.StrengthWorkout,
+            models.StrengthWorkout.id ==
+            models.StrengthWorkoutExercise.workout_id,
+        )
+        .where(models.StrengthWorkoutExercise.exercise_id == exercise_id)
+        .where(models.StrengthSet.skipped.is_(False))
+        .where(models.StrengthSet.actual_reps.is_not(None))
+    )
+    rows = sets_q.all()
+    if not rows:
+        return {
+            "exercise_id": exercise_id,
+            "times_performed": 0,
+            "total_sets": 0, "total_reps": 0, "total_volume_lb": 0.0,
+            "last_weight_lb": None, "max_weight_lb": None,
+            "last_performed_date": None,
+            "avg_rating": None,
+        }
+
+    workout_ids = {r.id for r in rows}
+    last_date = max(r.date for r in rows)
+    last_workout_id = next(
+        (r.id for r in rows if r.date == last_date), None,
+    )
+    last_weight = max(
+        (r.actual_weight_lb for r in rows
+         if r.id == last_workout_id and r.actual_weight_lb is not None),
+        default=None,
+    )
+    max_weight = max(
+        (r.actual_weight_lb for r in rows if r.actual_weight_lb is not None),
+        default=None,
+    )
+    total_reps = sum(r.actual_reps or 0 for r in rows)
+    total_volume = sum(
+        (r.actual_weight_lb or 0) * (r.actual_reps or 0) for r in rows
+    )
+    ratings = [r.rating for r in rows if r.rating is not None]
+    avg_rating = (sum(ratings) / len(ratings)) if ratings else None
+
+    return {
+        "exercise_id": exercise_id,
+        "times_performed": len(workout_ids),
+        "total_sets": len(rows),
+        "total_reps": total_reps,
+        "total_volume_lb": round(total_volume, 1),
+        "last_weight_lb": last_weight,
+        "max_weight_lb": max_weight,
+        "last_performed_date": last_date.isoformat() if last_date else None,
+        "avg_rating": round(avg_rating, 2) if avg_rating is not None else None,
+    }
+
+
 class ExercisePrefBody(BaseModel):
     pref: Literal["neutral", "disabled", "favorite", "avoid"]
 

@@ -97,6 +97,17 @@ class TrainingPreferences(BaseModel):
     # Target session length in minutes (informational; not yet used by
     # the generator — placeholder for v0.8 progressive shortening logic)
     workout_minutes: int = 50
+    # Append a 2-pose mobility cool-down at the end of each strength
+    # workout. Defaults on — the post-exercise window is when stretching
+    # yields the most flexibility benefit (Behm 2011 SR), and 2 poses
+    # at the end of an existing session is a no-friction add.
+    include_mobility: bool = True
+    # On recommended-rest days, generate a 5-pose yoga flow with longer
+    # 45 s holds instead of leaving the day empty. This is the actual
+    # flexibility-development engine (Cramer 2013 SR shows 1-2x/week of
+    # yoga measurably improves passive ROM); the cool-down above is the
+    # consistency floor. Defaults on to make active recovery the default.
+    yoga_on_rest_days: bool = True
 
 
 class EquipmentPayload(BaseModel):

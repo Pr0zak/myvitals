@@ -1237,5 +1237,413 @@
     "image_front": null,
     "image_side": null,
     "youtube_query": "Plank pull through dumbbell"
+  },
+  {
+    "id": "Downward_Dog",
+    "name": "Downward-Facing Dog",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "hamstrings",
+      "calves",
+      "shoulders",
+      "back"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": true,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Start on hands and knees. Hands shoulder-width, knees hip-width.",
+      "Tuck the toes and lift the hips up and back, straightening the legs without locking the knees.",
+      "Press into the floor with the hands, lengthen the spine, and let the heels descend toward the floor (they don't need to touch).",
+      "Hold for 5-10 deep breaths. Soften the shoulders away from the ears.",
+      "If the hamstrings cramp, micro-bend the knees — depth matters less than the spine staying long."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Downward dog yoga form"
+  },
+  {
+    "id": "Childs_Pose",
+    "name": "Child's Pose",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "hips",
+      "back",
+      "shoulders"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Kneel on the floor with the big toes touching, knees apart wide enough to be comfortable.",
+      "Sit back on the heels and fold forward, walking the hands out in front of you.",
+      "Rest the forehead on the mat or a block; let the chest soften toward the floor.",
+      "Hold for 8-12 breaths. Use it as a recovery pose any time during a session.",
+      "Knees can be together if it's more comfortable for the lower back."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Child's pose yoga"
+  },
+  {
+    "id": "Cat_Cow",
+    "name": "Cat-Cow Flow",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "back",
+      "core",
+      "shoulders"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Start on hands and knees in tabletop. Hands under shoulders, knees under hips.",
+      "Inhale into Cow: drop the belly, lift the chest and tailbone, look up gently.",
+      "Exhale into Cat: round the spine, tuck the tailbone, drop the head between the arms.",
+      "Move with breath, one full cycle per inhale-exhale. Aim for 8-12 cycles.",
+      "Move slowly — this is a spine-warming drill, not a stretch."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Cat cow yoga flow"
+  },
+  {
+    "id": "Cobra_Pose",
+    "name": "Cobra Pose",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "back",
+      "chest",
+      "shoulders"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Lie face down with the hands under the shoulders, elbows tucked close to the ribs.",
+      "Press the tops of the feet into the floor and engage the legs.",
+      "Inhale and lift the chest using the back muscles, with light support from the hands — don't push up to a deep arch.",
+      "Hold 5-8 breaths, keeping the shoulders down away from the ears.",
+      "Exhale to release back to the floor."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Cobra pose yoga"
+  },
+  {
+    "id": "Pigeon_Pose",
+    "name": "Pigeon Pose",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "hips",
+      "glutes",
+      "lower_back"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "intermediate",
+    "mechanic": "isolation",
+    "instructions": [
+      "From tabletop, bring the right knee forward toward the right wrist; angle the shin so the foot is across the body.",
+      "Slide the left leg straight back, top of the foot on the floor; square the hips toward the front.",
+      "Walk the hands forward and fold over the front leg, resting the forehead on the mat or a block.",
+      "Hold 8-12 breaths. Switch sides.",
+      "If the front hip lifts off the floor, prop it on a folded blanket — chasing depth at the cost of alignment risks the knee."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Pigeon pose yoga form"
+  },
+  {
+    "id": "Forward_Fold",
+    "name": "Standing Forward Fold",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "hamstrings",
+      "calves",
+      "back"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Stand with feet hip-width apart, soft knees.",
+      "Hinge at the hips and fold forward, letting the head and arms hang heavy.",
+      "Hold opposite elbows for a 'rag doll' variation, or rest the hands on the floor / shins / blocks.",
+      "Hold 8-15 breaths, gently shifting weight side to side to release the lower back.",
+      "Bend the knees deeper if the hamstrings cramp — the goal is a long spine, not straight legs."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Standing forward fold yoga"
+  },
+  {
+    "id": "Warrior_2",
+    "name": "Warrior II",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "hips",
+      "quads",
+      "shoulders",
+      "core"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": true,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "compound",
+    "instructions": [
+      "Stand with the feet about 4 ft apart. Turn the right foot 90° out, the left foot in slightly.",
+      "Bend the right knee until the thigh is roughly parallel to the floor; the knee tracks over the ankle.",
+      "Extend the arms parallel to the floor at shoulder height; gaze over the right fingertips.",
+      "Hold 5-8 breaths. Switch sides.",
+      "Press through the outer edge of the back foot to keep the back leg active — this is a hip-opener, not just a leg pose."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Warrior 2 yoga pose"
+  },
+  {
+    "id": "Triangle_Pose",
+    "name": "Triangle Pose",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "hamstrings",
+      "obliques",
+      "shoulders"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "intermediate",
+    "mechanic": "isolation",
+    "instructions": [
+      "Stand with the feet ~3.5 ft apart. Turn the right foot 90° out, the left foot in slightly.",
+      "Reach the right arm forward, then hinge at the right hip and lower the right hand to the shin / a block / the floor.",
+      "Extend the left arm straight up; stack the shoulders.",
+      "Gaze up at the top hand. Hold 5-8 breaths and switch sides.",
+      "If the back rounds, raise the bottom hand higher — keep the spine long."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Triangle pose yoga form"
+  },
+  {
+    "id": "Seated_Forward_Bend",
+    "name": "Seated Forward Bend",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "hamstrings",
+      "back",
+      "calves"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Sit on the floor with the legs straight in front, feet flexed.",
+      "Lengthen the spine, then hinge forward from the hips — not the lower back.",
+      "Reach for the shins, ankles, or feet, only as far as the spine stays long.",
+      "Hold 10-15 breaths, releasing further on each exhale.",
+      "Sit on a folded blanket if the hips can't tilt forward."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Seated forward bend yoga"
+  },
+  {
+    "id": "Reclined_Spinal_Twist",
+    "name": "Reclined Spinal Twist",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "back",
+      "obliques",
+      "hips"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Lie on the back, arms out to the sides like a T.",
+      "Hug the right knee into the chest, then guide it across the body to the left.",
+      "Turn the head to the right and let the shoulders melt toward the floor.",
+      "Hold 8-12 breaths. Switch sides.",
+      "Stack a pillow between the knees if the hip cramps in the twist."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Reclined spinal twist yoga"
+  },
+  {
+    "id": "Bridge_Pose",
+    "name": "Bridge Pose",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "glutes",
+      "hamstrings",
+      "back",
+      "chest"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": true,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "compound",
+    "instructions": [
+      "Lie on the back, knees bent, feet flat on the floor about hip-width, heels close to the glutes.",
+      "Press through the feet and lift the hips toward the ceiling, rolling up through the spine.",
+      "Optionally clasp the hands under the back and shimmy the shoulders together.",
+      "Hold 6-10 breaths, then roll down vertebra by vertebra.",
+      "Different from a hip-thrust: this is mobility, not a glute strength drill — lift only as high as the lower back stays comfortable."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Bridge pose yoga form"
+  },
+  {
+    "id": "Lizard_Pose",
+    "name": "Low Lizard Pose",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "hips",
+      "hip_flexors",
+      "groin"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "intermediate",
+    "mechanic": "isolation",
+    "instructions": [
+      "From tabletop, step the right foot to the outside of the right hand into a low lunge.",
+      "Lower the back knee to the floor (or keep it lifted for a deeper version).",
+      "Walk the hands inside the front foot and lower onto the forearms or blocks if available.",
+      "Hold 8-15 breaths. Switch sides.",
+      "Wonderful for deep hip openers, especially after squat or lunge work."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Lizard pose yoga form"
+  },
+  {
+    "id": "Half_Pigeon_Forward_Fold",
+    "name": "Half-Pigeon Forward Fold",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "glutes",
+      "hips",
+      "lower_back"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "intermediate",
+    "mechanic": "isolation",
+    "instructions": [
+      "From Pigeon, walk the hands forward as far as comfortable.",
+      "Rest the forehead on the mat, a block, or stacked fists.",
+      "Let the breath be slow and deep; release deeper on each exhale.",
+      "Hold 10-20 breaths per side. Switch.",
+      "Critical for runners and lifters with tight glutes / piriformis."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Half pigeon forward fold yoga"
+  },
+  {
+    "id": "Thread_The_Needle",
+    "name": "Thread-The-Needle",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "shoulders",
+      "upper_back",
+      "neck"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Start on hands and knees in tabletop.",
+      "Slide the right arm under the body to the left, palm up, lowering the right shoulder and ear to the mat.",
+      "Walk the left hand forward to deepen the stretch through the right shoulder blade.",
+      "Hold 8-12 breaths. Switch sides.",
+      "Targets the area lifters chronically lose mobility in from bench-pressing."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Thread the needle yoga"
+  },
+  {
+    "id": "Happy_Baby",
+    "name": "Happy Baby",
+    "primary_muscle": "flexibility",
+    "secondary_muscles": [
+      "hips",
+      "lower_back",
+      "groin"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "mobility",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Lie on the back, knees pulled toward the armpits.",
+      "Hold the outer edges of the feet (or shins / behind the knees if reach is tight).",
+      "Push the soles of the feet up into the hands while pulling down with the hands — feet stack over knees.",
+      "Rock side to side gently to massage the lower back.",
+      "Hold 8-12 breaths. Often used as a closing pose — releases the whole posterior chain."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Happy baby pose yoga"
   }
 ]

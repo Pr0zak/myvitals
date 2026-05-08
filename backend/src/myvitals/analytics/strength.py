@@ -793,6 +793,32 @@ async def generate_plan(
     level = training.get("level", DEFAULT_LEVEL)
     days_per_week = int(training.get("days_per_week", DEFAULT_DAYS_PER_WEEK))
     split_pref = training.get("split_preference", DEFAULT_SPLIT_PREFERENCE)
+    include_mobility = bool(training.get("include_mobility", False))
+    yoga_on_rest = bool(training.get("yoga_on_rest_days", False))
+
+    def _yoga_session(_seed_str: str, n_poses: int = 5,
+                      hold_s: int = 45) -> list[ExerciseInPlan]:
+        """Pick `n_poses` mobility poses from the catalog, deterministic
+        on the seed string, returning an ExerciseInPlan list shaped
+        for an active-recovery flow (1×hold_s seconds, no weight)."""
+        local_rng = random.Random(_seed_str)
+        pool = [
+            e for e in CATALOG
+            if e.get("movement_pattern") == "mobility"
+            and "bodyweight" in (e.get("equipment") or [])
+        ]
+        if not pool:
+            return []
+        n = min(n_poses, len(pool))
+        picks = local_rng.sample(pool, k=n)
+        return [
+            ExerciseInPlan(
+                exercise_id=ex["id"], order_index=i, superset_id=None,
+                target_sets=1, target_reps_low=hold_s, target_reps_high=hold_s,
+                target_weight_lb=None, target_rest_s=15,
+            )
+            for i, ex in enumerate(picks)
+        ]
 
     # Recovery integration
     recovery: RecoveryInputs | None = None
@@ -803,15 +829,22 @@ async def generate_plan(
     if recovery is not None and not force_no_rest:
         blocked, reason = recovery.is_blocking()
         if blocked:
+            yoga_exs = _yoga_session(seed, n_poses=5, hold_s=45) if yoga_on_rest else []
             return GeneratedPlan(
                 seed=seed,
-                split_focus="rest",
-                rest_day_recommended=True,
-                rest_day_reason=reason,
+                split_focus="yoga" if yoga_exs else "rest",
+                rest_day_recommended=not yoga_exs,
+                rest_day_reason=reason if not yoga_exs else None,
+                exercises=yoga_exs,
                 recovery=recovery,
                 notes=[
-                    f"Rest day recommended — {reason}. You can override via "
-                    f"the regenerate button.",
+                    (
+                        f"Active-recovery yoga flow generated — "
+                        f"{reason} suggested rest day. 5 poses, ~45 s holds."
+                        if yoga_exs else
+                        f"Rest day recommended — {reason}. You can override "
+                        f"via the regenerate button."
+                    ),
                 ],
             )
 
@@ -828,20 +861,29 @@ async def generate_plan(
         if last_completed is not None:
             gap_days = (target_date - last_completed).days
             if gap_days <= 1:
+                yoga_exs = _yoga_session(seed, n_poses=5, hold_s=45) if yoga_on_rest else []
+                rest_reason = (
+                    f"trained {last_completed.strftime('%a')} — "
+                    f"give the muscle group at least one off day"
+                )
                 return GeneratedPlan(
                     seed=seed,
-                    split_focus="rest",
-                    rest_day_recommended=True,
-                    rest_day_reason=(
-                        f"trained {last_completed.strftime('%a')} — "
-                        f"give the muscle group at least one off day"
-                    ),
+                    split_focus="yoga" if yoga_exs else "rest",
+                    rest_day_recommended=not yoga_exs,
+                    rest_day_reason=rest_reason if not yoga_exs else None,
+                    exercises=yoga_exs,
                     recovery=recovery,
                     notes=[
-                        f"Last session was {last_completed.isoformat()}. "
-                        "Back-to-back strength days bypass the recovery "
-                        "your plan assumes — regenerate with force=true "
-                        "to override.",
+                        (
+                            f"Active-recovery yoga flow generated — "
+                            f"trained {last_completed.isoformat()}, no "
+                            f"back-to-back strength. 5 poses, ~45 s holds."
+                            if yoga_exs else
+                            f"Last session was {last_completed.isoformat()}. "
+                            "Back-to-back strength days bypass the recovery "
+                            "your plan assumes — regenerate with force=true "
+                            "to override."
+                        ),
                     ],
                 )
 
@@ -929,6 +971,34 @@ async def generate_plan(
                 DEFAULT_REST_S_SUPERSET_AFTER if ex["id"] in superset_map else rest_s
             ),
         ))
+
+    # Mobility / yoga block — append 2 poses tagged movement_pattern=mobility
+    # to the end of the plan when the user has opted in. Reps are interpreted
+    # as seconds-to-hold by the UI; sets=1, weight=null, rest=15.
+    if include_mobility:
+        mobility_pool = [
+            e for e in CATALOG
+            if e.get("movement_pattern") == "mobility"
+            and "bodyweight" in (e.get("equipment") or [])
+        ]
+        if mobility_pool:
+            picks = rng.sample(mobility_pool, k=min(2, len(mobility_pool)))
+            for j, ex in enumerate(picks):
+                plan_exs.append(ExerciseInPlan(
+                    exercise_id=ex["id"],
+                    order_index=len(chosen) + j,
+                    superset_id=None,
+                    target_sets=1,
+                    # 30 sec hold — UI shows "30" in the reps slot; the
+                    # exercise's own instructions clarify it's seconds.
+                    target_reps_low=30,
+                    target_reps_high=30,
+                    target_weight_lb=None,
+                    target_rest_s=15,
+                ))
+            notes.append(
+                "Mobility block appended — 2 yoga poses, ~30 s hold each."
+            )
 
     return GeneratedPlan(
         seed=seed,

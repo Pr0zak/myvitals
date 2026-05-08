@@ -267,11 +267,12 @@ const heroScores = computed(() => {
 const heroReadiness = computed(() => Math.round(summary.value?.readiness_score ?? 0));
 const heroReadinessTone = computed(() => tone(summary.value?.readiness_score ?? null));
 
-// ── Live vitals — downsample to N buckets so the sparkline gets
-// enough detail to read but doesn't blow the canvas ──
+// Downsample 24h points into N equal-width buckets. Empty buckets
+// are emitted as nulls so the sparkline draws genuine gaps rather
+// than carrying the previous value forward.
 function downsample(
   points: Array<{ time: string; value: number }>, buckets: number,
-): number[] {
+): Array<number | null> {
   if (points.length === 0) return [];
   const start = Date.now() - 24 * 3600_000;
   const span = 24 * 3600_000;
@@ -284,18 +285,9 @@ function downsample(
     sums[idx] += p.value;
     counts[idx] += 1;
   }
-  // Carry-forward for empty buckets so the line stays continuous.
-  const out: number[] = [];
-  let last = 0;
+  const out: Array<number | null> = [];
   for (let i = 0; i < buckets; i++) {
-    if (counts[i] > 0) {
-      last = sums[i] / counts[i];
-      out.push(last);
-    } else if (last > 0) {
-      out.push(last);
-    } else {
-      // before the first sample — skip
-    }
+    out.push(counts[i] > 0 ? sums[i] / counts[i] : null);
   }
   return out;
 }
@@ -325,6 +317,8 @@ const liveHr = computed(() => {
     ageLabel,
     series,
     mean: hr24.value?.avg ?? null,
+    min: hr24.value?.min_bpm ?? null,
+    max: hr24.value?.max_bpm ?? null,
   };
 });
 
@@ -335,11 +329,15 @@ const liveHrv = computed(() => {
   const baseline = baseline7d.value.hrv;
   const delta = (last && baseline != null)
     ? Math.round(last.value - baseline) : null;
+  const vals = pts.map((p) => p.value);
+  const min = vals.length ? Math.min(...vals) : null;
+  const max = vals.length ? Math.max(...vals) : null;
   return {
     latest: last?.value ?? null,
     series,
     mean: baseline,
     deltaVsBaseline: delta,
+    min, max,
   };
 });
 
@@ -496,7 +494,8 @@ function openLog() { router.push("/log"); }
 
 <template>
   <div class="today-redesign today">
-    <PageHeader :date="headerDate" :loading="loading" @refresh="loadCore"/>
+    <PageHeader :date="headerDate" :loading="loading" :last-sync-iso="lastSync"
+                @refresh="loadCore"/>
 
     <p v-if="error" class="err">{{ error }}</p>
 
@@ -553,7 +552,7 @@ function openLog() { router.push("/log"); }
       />
     </div>
 
-    <Footer :version="version" :last-sync-iso="lastSync"/>
+    <Footer :version="version"/>
   </div>
 </template>
 

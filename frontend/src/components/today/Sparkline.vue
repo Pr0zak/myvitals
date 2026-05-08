@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import * as echarts from "echarts/core";
 
 const props = withDefaults(defineProps<{
-  data: number[];
+  data: Array<number | null>;
   color?: string;
   mean?: number | null;
   height?: number;
@@ -15,10 +15,12 @@ const props = withDefaults(defineProps<{
   mode?: "line" | "bar";
   showSymbol?: boolean;
   symbolSize?: number;
+  connectNulls?: boolean;
 }>(), {
   color: "#22C55E", mean: null, height: 40, areaOpacity: 0.18,
   smooth: true, strokeWidth: 1.6, dashedMean: true, padTop: 4,
   mode: "line", showSymbol: false, symbolSize: 3,
+  connectNulls: false,
 });
 
 function hexA(hex: string, a: number) {
@@ -65,6 +67,7 @@ function render() {
       smooth: props.smooth && !isBar,
       showSymbol: props.showSymbol,
       symbolSize: props.symbolSize,
+      connectNulls: props.connectNulls,
       barWidth: isBar ? "62%" : undefined,
       itemStyle: isBar
         ? { color: props.color, borderRadius: [2, 2, 0, 0] }
@@ -108,7 +111,7 @@ onBeforeUnmount(() => {
 watch(() => [
   props.data, props.color, props.mean, props.areaOpacity,
   props.smooth, props.strokeWidth, props.dashedMean, props.padTop,
-  props.mode, props.showSymbol, props.symbolSize,
+  props.mode, props.showSymbol, props.symbolSize, props.connectNulls,
 ], () => render(), { deep: true });
 </script>
 

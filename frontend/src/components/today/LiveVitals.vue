@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * Live vitals row — HR, HRV, Steps. Each cell is a RouterLink.
- * Props: pre-bucketed 24h hourly arrays + headline numbers.
+ * Series may include nulls for empty buckets — the sparkline draws
+ * gaps rather than carrying the previous value forward.
  */
 import { RouterLink } from "vue-router";
 import { Heart, Activity, Footprints } from "lucide-vue-next";
@@ -10,13 +11,23 @@ import HourlyBuckets from "./HourlyBuckets.vue";
 import Delta from "./Delta.vue";
 
 withDefaults(defineProps<{
-  hr: { latest: number | null; rest: number | null; ageLabel: string | null;
-        series: number[]; mean?: number | null };
-  hrv: { latest: number | null; series: number[]; mean?: number | null;
-         deltaVsBaseline: number | null };
+  hr: {
+    latest: number | null; rest: number | null; ageLabel: string | null;
+    series: Array<number | null>; mean?: number | null;
+    min?: number | null; max?: number | null;
+  };
+  hrv: {
+    latest: number | null; series: Array<number | null>;
+    mean?: number | null; deltaVsBaseline: number | null;
+    min?: number | null; max?: number | null;
+  };
   steps: { total: number; goal: number; hourly: number[]; currentHour: number };
   mobile?: boolean;
 }>(), { mobile: false });
+
+function hasAny(s: Array<number | null>): boolean {
+  return s.some((v) => v != null);
+}
 </script>
 
 <template>
@@ -36,10 +47,15 @@ withDefaults(defineProps<{
           <span class="unit">bpm</span>
         </span>
         <span v-if="hr.rest != null" class="dim small">rest {{ Math.round(hr.rest) }}</span>
+        <span v-if="hr.min != null && hr.max != null" class="mono dim range">
+          {{ Math.round(hr.min) }}–{{ Math.round(hr.max) }}
+        </span>
       </div>
       <div class="spark">
-        <Sparkline v-if="hr.series.length" :data="hr.series" color="#EF4444"
-                   :mean="hr.mean ?? null" :height="28" :area-opacity="0.18" :pad-top="4"/>
+        <Sparkline v-if="hasAny(hr.series)" :data="hr.series" color="#EF4444"
+                   :mean="hr.mean ?? null" :height="40" :area-opacity="0.18" :pad-top="4"
+                   :connect-nulls="false"/>
+        <span v-else class="dim no-data">No HR data in window</span>
       </div>
     </RouterLink>
 
@@ -58,10 +74,15 @@ withDefaults(defineProps<{
           <span class="unit">ms</span>
         </span>
         <Delta :value="hrv.deltaVsBaseline" :size="11"/>
+        <span v-if="hrv.min != null && hrv.max != null" class="mono dim range">
+          {{ Math.round(hrv.min) }}–{{ Math.round(hrv.max) }}
+        </span>
       </div>
       <div class="spark">
-        <Sparkline v-if="hrv.series.length" :data="hrv.series" color="#22C55E"
-                   :mean="hrv.mean ?? null" :height="28" :area-opacity="0.16" :pad-top="4"/>
+        <Sparkline v-if="hasAny(hrv.series)" :data="hrv.series" color="#22C55E"
+                   :mean="hrv.mean ?? null" :height="40" :area-opacity="0.16" :pad-top="4"
+                   :connect-nulls="false"/>
+        <span v-else class="dim no-data">No HRV data in window</span>
       </div>
     </RouterLink>
 
@@ -83,7 +104,7 @@ withDefaults(defineProps<{
       <div class="steps-bar-wrap">
         <div class="hourly-bg">
           <HourlyBuckets :data="steps.hourly" color="#94A3B8"
-                         :height="24" :current-hour="steps.currentHour"/>
+                         :height="32" :current-hour="steps.currentHour"/>
         </div>
         <div class="prog-track">
           <div class="prog-fill"
@@ -113,9 +134,7 @@ withDefaults(defineProps<{
   border-right: none; border-bottom: 1px solid var(--outline);
 }
 .live-row.mobile .cell.last { border-bottom: none; }
-.cell.hr {
-  border-radius: 12px 0 0 12px;
-}
+.cell.hr { border-radius: 12px 0 0 12px; }
 .live-row.mobile .cell.hr { border-radius: 12px 12px 0 0; }
 .cell.last { border-radius: 0 12px 12px 0; }
 .live-row.mobile .cell.last { border-radius: 0 0 12px 12px; }
@@ -128,11 +147,13 @@ withDefaults(defineProps<{
 .age { font-size: 11px; }
 .val-row { display: flex; align-items: baseline; gap: 8px; margin-top: 2px; }
 .small { font-size: 11px; }
-.spark { height: 28px; margin-top: 4px; }
+.range { font-size: 10px; margin-left: auto; }
+.spark { height: 40px; margin-top: 4px; position: relative; }
+.no-data { font-size: 11px; }
 .steps-bar-wrap { position: relative; margin-top: 6px; }
 .hourly-bg { position: absolute; inset: 0; opacity: 0.6; }
 .prog-track {
-  position: relative; height: 6px; margin-top: 18px;
+  position: relative; height: 6px; margin-top: 26px;
   border-radius: 999px; background: var(--outline);
 }
 .prog-fill {

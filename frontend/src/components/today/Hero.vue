@@ -140,14 +140,16 @@ function toneColor(t: Score["tone"]) {
 .hero.mobile .middle { border-left: none; padding-left: 0; gap: 16px; }
 .anchor-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 56px;
+  /* fixed-width value column so text right-aligns to the same x
+   * across rows regardless of unit length (bpm vs ms vs / 10k) */
+  grid-template-columns: minmax(0, 1fr) 130px 50px;
   align-items: baseline;
   gap: 12px;
 }
 .anchor-val {
   font-size: 16px; font-weight: 500;
   text-align: right;
-  white-space: nowrap;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
 .anchor-delta {

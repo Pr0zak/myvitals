@@ -165,6 +165,48 @@ export function soberResetMarkLine(
   };
 }
 
+/**
+ * Convert a sleep night into a markArea series component representing
+ * the in-bed window. Pass the result as the markArea of a (possibly
+ * empty) series to render a translucent band on a time-axis chart.
+ */
+export function sleepMarkArea(
+  sleep: { start?: string | null; end?: string | null } | null,
+  windowMinMs: number,
+  windowMaxMs: number,
+) {
+  if (!sleep || !sleep.start || !sleep.end) return undefined;
+  const start = new Date(sleep.start).getTime();
+  const end = new Date(sleep.end).getTime();
+  if (!isFinite(start) || !isFinite(end) || end <= start) return undefined;
+  // Clamp to the chart's visible window so the band doesn't drag the
+  // chart off-axis when it precedes the window.
+  const lo = Math.max(start, windowMinMs);
+  const hi = Math.min(end, windowMaxMs);
+  if (hi <= lo) return undefined;
+  return {
+    silent: true,
+    itemStyle: {
+      color: "rgba(167, 139, 250, 0.13)",   // violet — same family as sleep palette
+      borderColor: "rgba(167, 139, 250, 0.35)",
+      borderWidth: 1,
+    },
+    label: {
+      show: true,
+      formatter: "💤 sleep",
+      position: "insideTop" as const,
+      color: "#a78bfa",
+      fontSize: 10,
+      fontWeight: 600,
+      distance: 4,
+    },
+    data: [[
+      { xAxis: new Date(lo).toISOString(), name: "sleep" },
+      { xAxis: new Date(hi).toISOString() },
+    ]],
+  };
+}
+
 /** A horizontal "mean" line for any axis. */
 export function meanMarkLine(value: number | null, label = "avg") {
   if (value === null) return undefined;

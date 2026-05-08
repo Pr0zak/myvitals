@@ -17,8 +17,10 @@ import type {
 } from "@/api/types";
 import { chartTheme } from "@/theme";
 import {
-  meanMarkLine, timeAxisFormatter,
+  meanMarkLine, sleepMarkArea, soberResetMarkLine, timeAxisFormatter,
+  workoutMarkArea,
 } from "@/components/charts/chartHelpers";
+import type { SleepNight } from "@/api/types";
 
 type RangeKey = "24h" | "7d" | "30d" | "90d" | "1y";
 const RANGES: Array<{ key: RangeKey; label: string; days: number }> = [
@@ -37,6 +39,10 @@ const dailyRows = ref<TodaySummary[]>([]);
 const priorRows = ref<TodaySummary[]>([]);
 const yearAgoRows = ref<TodaySummary[]>([]);
 const activities = ref<Activity[]>([]);
+// 24h overlays: activities (cardio + strength), sober resets, last sleep
+const activities24 = ref<Activity[]>([]);
+const soberResets24 = ref<Array<{ start_at: string }>>([]);
+const lastSleep = ref<SleepNight | null>(null);
 const profile = ref<{
   max_hr_estimated?: number | null;
   resting_hr_baseline?: number | null;
@@ -49,12 +55,56 @@ async function loadTrace() {
   if (traceLoaded.value) return;
   try {
     const since = new Date(Date.now() - 24 * 3600 * 1000);
-    const [liveHr, liveHrv] = await Promise.all([
+    const sinceMs = since.getTime();
+    const [liveHr, liveHrv, acts, sleep, swo, sbHist] = await Promise.all([
       api.heartRate({ since }),
       api.hrv({ since }),
+      api.activities({ since, limit: 30 }),
+      api.lastSleep().catch(() => null),
+      api.strengthWorkouts({ limit: 5 }).catch(() => ({ count: 0, workouts: [] })),
+      api.soberHistory(50).catch(() => []),
     ]);
     hr24.value = liveHr;
     hrv24.value = liveHrv;
+
+    // Merge strength workouts that overlap the 24h window into the
+    // activity list as Activity-shaped rows, so workoutMarkArea can
+    // render them as bands alongside cardio activities.
+    const strengthAsActivity: Activity[] = (swo.workouts ?? [])
+      .filter((w) => w.started_at && w.completed_at)
+      .map((w) => {
+        const start = new Date(w.started_at!).getTime();
+        const end = new Date(w.completed_at!).getTime();
+        return {
+          source: "strength", source_id: String(w.id),
+          type: "strength",
+          name: `${w.split_focus.replace(/_/g, " ")} workout`,
+          start_at: w.started_at!,
+          duration_s: Math.max(0, Math.round((end - start) / 1000)),
+          distance_m: null, elevation_gain_m: null,
+          avg_hr: w.avg_hr ?? null, max_hr: w.max_hr ?? null,
+          avg_power_w: null, max_power_w: null, kcal: null,
+          suffer_score: null, polyline: null,
+        } as Activity;
+      })
+      .filter((a) => new Date(a.start_at).getTime() >= sinceMs);
+    activities24.value = [...acts, ...strengthAsActivity]
+      .filter((a) => new Date(a.start_at).getTime() >= sinceMs);
+
+    // Sober resets in window — same 1st-row drop convention as Today.vue
+    // (the chronological first row is the start-of-tracking, not a reset).
+    if (Array.isArray(sbHist) && sbHist.length > 0) {
+      const sortedAsc = [...sbHist].sort(
+        (a, b) => a.start_at.localeCompare(b.start_at),
+      );
+      soberResets24.value = sortedAsc.slice(1)
+        .filter((r) => new Date(r.start_at).getTime() >= sinceMs)
+        .map((r) => ({ start_at: r.start_at }));
+    } else {
+      soberResets24.value = [];
+    }
+
+    lastSleep.value = sleep;
     traceLoaded.value = true;
   } catch {
     /* trace is non-critical; aggregates still render */
@@ -140,9 +190,53 @@ const traceOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
   if (!hr24.value || hr24.value.points.length === 0) return null;
-  // Build the option fresh (no baseTimeOption spread): the dataZoom
-  // it ships with was conflicting with the explicit xAxis min/max and
-  // hiding the line series entirely.
+
+  // Stack the mean line + sober-reset verticals into a single markLine
+  // (ECharts allows only one markLine per series). Workout bands and
+  // sleep band are separate markAreas — we use one host series each
+  // since markArea is also one-per-series.
+  const markLineData: any[] = [];
+  let markLineConfig: any = null;
+  if (hr24.value.avg != null) {
+    markLineData.push({
+      yAxis: hr24.value.avg,
+      lineStyle: { color: t.palette.steps, type: "dashed" as const, opacity: 0.6 },
+      label: { show: true, formatter: `avg ${hr24.value.avg.toFixed(0)}`,
+               color: t.axisLabel.color, fontSize: 9 },
+    });
+    markLineConfig = { silent: true, symbol: "none" };
+  }
+  const resetLine = soberResetMarkLine(soberResets24.value);
+  if (resetLine) {
+    for (const d of (resetLine.data as any[])) markLineData.push(d);
+    markLineConfig = markLineConfig ?? { symbol: ["none", "none"] };
+  }
+
+  const series: any[] = [
+    {
+      type: "line", name: "HR", showSymbol: false, smooth: true,
+      lineStyle: { color: t.palette.hr, width: 1.5 },
+      areaStyle: { color: `${t.palette.hr}22` },
+      data: hr24.value.points.map((p) => [p.time, p.value]),
+      ...(markLineConfig
+        ? { markLine: { ...markLineConfig, data: markLineData } } : {}),
+      ...(activities24.value.length > 0
+        ? { markArea: workoutMarkArea(activities24.value) } : {}),
+    },
+  ];
+
+  // Second host series for the sleep band (markArea is one-per-series).
+  const sleepArea = sleepMarkArea(
+    lastSleep.value, xWindow24.value.min, xWindow24.value.max,
+  );
+  if (sleepArea) {
+    series.push({
+      type: "line", name: "Sleep window",
+      data: [], showSymbol: false, silent: true,
+      markArea: sleepArea,
+    });
+  }
+
   return {
     grid: { left: 40, right: 12, top: 12, bottom: 28 },
     xAxis: {
@@ -157,15 +251,7 @@ const traceOption = computed(() => {
       axisLabel: t.axisLabel, splitLine: t.splitLine,
     },
     tooltip: { trigger: "axis", ...t.tooltip },
-    series: [
-      {
-        type: "line", name: "HR", showSymbol: false, smooth: true,
-        lineStyle: { color: t.palette.hr, width: 1.5 },
-        areaStyle: { color: `${t.palette.hr}22` },
-        data: hr24.value.points.map((p) => [p.time, p.value]),
-        markLine: meanMarkLine(hr24.value.avg ?? null, "avg"),
-      },
-    ],
+    series,
   };
 });
 

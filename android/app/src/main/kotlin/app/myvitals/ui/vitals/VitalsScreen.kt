@@ -508,11 +508,8 @@ private fun HrBadge(
         }
         Spacer(Modifier.height(6.dp))
         Box(Modifier.fillMaxWidth().height(34.dp)) {
-            if (snap.points.size >= 5) {
-                // Mini distribution histogram beats the sparkline at this
-                // size — the sparkline was windowed to the last 2h and
-                // would render blank when the most recent sample was older.
-                HrMiniHistogram(snap.points, color = v.color)
+            if (snap.points.size >= 2) {
+                HrSparkline(snap.points, color = v.color, nowMs = nowMs)
             } else {
                 // No live samples — show resting trend from daily summaries.
                 SparkLine(rows.map { it.restingHr?.toFloat() }, color = v.color)
@@ -867,22 +864,27 @@ private fun HrSparkline(
 ) {
     Canvas(modifier = modifier) {
         if (points.size < 2) return@Canvas
-        // Compute time domain — current end is "now"; span back 2h.
-        val end = nowMs
-        val start = end - 2 * 3600_000L
+        // Use the data's own time domain (8h fetch window typically),
+        // not a hardcoded 2h tail — otherwise the badge goes blank
+        // whenever the most-recent sample is older than 2h.
+        val parsed = points.mapNotNull { p ->
+            runCatching { Instant.parse(p.time).toEpochMilli() }.getOrNull()
+                ?.let { it to p.value.toFloat() }
+        }.sortedBy { it.first }
+        if (parsed.size < 2) return@Canvas
+        val start = parsed.first().first
+        val end = (parsed.last().first.coerceAtLeast(nowMs - 1)).coerceAtLeast(start + 1)
         // Walk points and group into segments where consecutive samples
-        // are within 5 min of each other; otherwise leave a gap.
+        // are within 8 min of each other; otherwise leave a gap.
         val segments = mutableListOf<MutableList<Pair<Long, Float>>>()
         var current = mutableListOf<Pair<Long, Float>>()
         var prevT: Long? = null
-        for (p in points) {
-            val t = runCatching { Instant.parse(p.time).toEpochMilli() }.getOrNull() ?: continue
-            if (t < start || t > end + 60_000) continue
-            if (prevT != null && (t - prevT) > 5 * 60_000) {
+        for ((t, v) in parsed) {
+            if (prevT != null && (t - prevT) > 8 * 60_000) {
                 if (current.size >= 2) segments += current
                 current = mutableListOf()
             }
-            current += t to p.value.toFloat()
+            current += t to v
             prevT = t
         }
         if (current.size >= 2) segments += current

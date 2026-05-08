@@ -1,0 +1,128 @@
+/* myvitals — Today-redesign tokens
+ * Imported only by views/Today.vue (and its child components in
+ * components/today/). Keeps the rest of the app on its existing
+ * theme until we decide to migrate site-wide.
+ */
+.today-redesign {
+  /* surfaces */
+  --bg: #0F1620;
+  --surface-low: #121925;
+  --surface: #1B2331;
+  --outline: #243042;
+  --outline-strong: #2F3D52;
+
+  /* text */
+  --on-surface: #E5E7EB;
+  --on-surface-2: #94A3B8;
+  --dim: #6B7689;
+
+  /* accent + status */
+  --brand: #EF4444;
+  --good: #22C55E;
+  --warn: #EAB308;
+  --bad: #EF4444;
+  --neutral: #94A3B8;
+
+  /* HR zones */
+  --z1: #38BDF8;
+  --z2: #22C55E;
+  --z3: #EAB308;
+  --z4: #F97316;
+  --z5: #EF4444;
+
+  /* type */
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: "Geist Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* radius */
+  --r-card: 12px;
+  --r-pill: 999px;
+  --r-chip: 8px;
+  --pad: 16px;
+
+  font-family: var(--sans);
+  color: var(--on-surface);
+  background: var(--bg);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.today-redesign .mono { font-family: var(--mono); font-feature-settings: "tnum" 1, "ss01" 1; }
+.today-redesign .eyebrow {
+  font-size: 11px; font-weight: 500; letter-spacing: 1.5px;
+  text-transform: uppercase; color: var(--on-surface-2);
+}
+.today-redesign .card {
+  background: var(--surface); border: 1px solid var(--outline);
+  border-radius: var(--r-card); padding: var(--pad); position: relative;
+}
+.today-redesign .card-low { background: var(--surface-low); }
+.today-redesign .linkable { cursor: pointer; transition: border-color .15s ease, background-color .15s ease; }
+.today-redesign .linkable:hover { border-color: var(--brand); }
+.today-redesign .btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px;
+  border-radius: 8px; border: 1px solid var(--outline-strong);
+  background: transparent; color: var(--on-surface);
+  font: 500 12px/1 var(--sans); letter-spacing: 0.2px;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.today-redesign .btn:hover { border-color: var(--on-surface-2); color: var(--on-surface); }
+.today-redesign .btn-icon { width: 28px; height: 28px; padding: 0; justify-content: center; }
+.today-redesign .btn-tiny { height: 22px; padding: 0 8px; font-size: 11px; border-radius: 6px; }
+.today-redesign .chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--outline); background: var(--surface-low);
+  color: var(--on-surface-2); font-size: 12px; white-space: nowrap;
+}
+.today-redesign .delta {
+  font-family: var(--mono); font-size: 11px;
+  display: inline-flex; align-items: center; gap: 2px;
+}
+.today-redesign .delta-up { color: var(--good); }
+.today-redesign .delta-down { color: var(--bad); }
+.today-redesign .delta-flat { color: var(--neutral); }
+.today-redesign .dot {
+  width: 6px; height: 6px; border-radius: 999px; display: inline-block;
+}
+.today-redesign .dot-good    { background: var(--good); box-shadow: 0 0 0 2px rgba(34,197,94,.18); }
+.today-redesign .dot-warn    { background: var(--warn); box-shadow: 0 0 0 2px rgba(234,179,8,.18); }
+.today-redesign .dot-bad     { background: var(--bad);  box-shadow: 0 0 0 2px rgba(239,68,68,.18); }
+.today-redesign .dot-neutral { background: var(--neutral); }
+@keyframes today-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.today-redesign .skeleton {
+  background: linear-gradient(90deg, #1B2331 0%, #25304A 50%, #1B2331 100%);
+  background-size: 200% 100%;
+  animation: today-shimmer 1.5s linear infinite;
+  border-radius: var(--r-card);
+}
+.today-redesign .unit { color: var(--dim); font-size: 0.78em; margin-left: 4px; font-weight: 400; }
+.today-redesign .no-scrollbar { scrollbar-width: none; }
+.today-redesign .no-scrollbar::-webkit-scrollbar { display: none; }
+.today-redesign .row { display: flex; }
+.today-redesign .col { display: flex; flex-direction: column; }
+.today-redesign .gap-4 { gap: 4px; }
+.today-redesign .gap-6 { gap: 6px; }
+.today-redesign .gap-8 { gap: 8px; }
+.today-redesign .gap-12 { gap: 12px; }
+.today-redesign .gap-16 { gap: 16px; }
+.today-redesign .muted { color: var(--on-surface-2); }
+.today-redesign .dim { color: var(--dim); }
+.today-redesign .tnum { font-variant-numeric: tabular-nums; }
+.today-redesign .card-title {
+  font-size: 11px; font-weight: 500; letter-spacing: 1.5px;
+  text-transform: uppercase; color: var(--on-surface-2);
+  margin: 0 0 16px 0;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.today-redesign .num-xxl { font-size: 36px; line-height: 1; font-weight: 500; letter-spacing: -0.5px; }
+.today-redesign .num-xl  { font-size: 28px; line-height: 1; font-weight: 500; letter-spacing: -0.3px; }
+.today-redesign .num-l   { font-size: 24px; line-height: 1; font-weight: 500; }
+.today-redesign .num-m   { font-size: 16px; line-height: 1; font-weight: 500; }
+.today-redesign .num-s   { font-size: 14px; line-height: 1; font-weight: 500; }

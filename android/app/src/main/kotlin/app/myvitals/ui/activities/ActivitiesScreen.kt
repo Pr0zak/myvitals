@@ -26,6 +26,8 @@ import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Rowing
+import androidx.compose.material.icons.outlined.SelfImprovement
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -256,21 +258,27 @@ private fun StrengthListRow(
             Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val isYoga = w.splitFocus == "yoga"
             Box(
                 Modifier.size(32.dp).clip(CircleShape)
                     .background(MV.SurfaceContainerLow),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    androidx.compose.material.icons.Icons.Outlined.FitnessCenter,
-                    contentDescription = "Strength",
-                    tint = MV.BrandRed, modifier = Modifier.size(18.dp),
+                    if (isYoga)
+                        androidx.compose.material.icons.Icons.Outlined.SelfImprovement
+                    else
+                        androidx.compose.material.icons.Icons.Outlined.FitnessCenter,
+                    contentDescription = if (isYoga) "Yoga" else "Strength",
+                    tint = if (isYoga) Color(0xFFA78BFA) else MV.BrandRed,
+                    modifier = Modifier.size(18.dp),
                 )
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    "${w.splitFocus.replaceFirstChar { it.titlecase() }} day",
+                    if (isYoga) "Yoga flow"
+                    else "${w.splitFocus.replaceFirstChar { it.titlecase() }} day",
                     color = MV.OnSurface, fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold, maxLines = 1,
                 )

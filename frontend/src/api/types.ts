@@ -158,6 +158,8 @@ export interface StrengthEquipment {
     days_per_week: number;
     split_preference: "auto" | "full_body" | "upper_lower" | "ppl";
     workout_minutes: number;
+    include_mobility?: boolean;
+    yoga_on_rest_days?: boolean;
   };
 }
 

@@ -388,7 +388,9 @@ const strengthCell = computed(() => {
     ? `Today · ${start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
     : start.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
   return {
-    title: `${w.split_focus.replace(/_/g, " ")}${w.split_focus !== "rest" ? " · session" : ""}`,
+    title: w.split_focus === "yoga"
+      ? "Yoga flow"
+      : `${w.split_focus.replace(/_/g, " ")}${w.split_focus !== "rest" ? " · session" : ""}`,
     whenLabel,
     setCount: (w as any).set_count ?? null,
     avgRpe: (w as any).rpe_avg ?? null,

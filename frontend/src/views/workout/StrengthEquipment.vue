@@ -48,8 +48,11 @@ function defaultEquip(): StrengthEquipment {
 
 function ensureTraining(e: StrengthEquipment): NonNullable<StrengthEquipment["training"]> {
   if (!e.training) {
-    e.training = { level: "intermediate", days_per_week: 3,
-                   split_preference: "auto", workout_minutes: 50 };
+    e.training = {
+      level: "intermediate", days_per_week: 3,
+      split_preference: "auto", workout_minutes: 50,
+      include_mobility: true, yoga_on_rest_days: true,
+    };
   }
   return e.training;
 }
@@ -285,6 +288,26 @@ onMounted(() => { equip.value = defaultEquip(); load(); });
                  style="width: 5rem"/>
           <span class="muted-suffix">min</span>
         </label>
+
+        <label class="train-row toggle">
+          <input type="checkbox"
+                 :checked="ensureTraining(equip).include_mobility !== false"
+                 @change="ensureTraining(equip).include_mobility = ($event.target as HTMLInputElement).checked"/>
+          <span class="toggle-text">
+            <strong>Mobility cool-down</strong>
+            <span class="hint">Adds 2 yoga poses (~30 s holds) to the end of each strength workout.</span>
+          </span>
+        </label>
+
+        <label class="train-row toggle">
+          <input type="checkbox"
+                 :checked="ensureTraining(equip).yoga_on_rest_days !== false"
+                 @change="ensureTraining(equip).yoga_on_rest_days = ($event.target as HTMLInputElement).checked"/>
+          <span class="toggle-text">
+            <strong>Yoga on rest days</strong>
+            <span class="hint">Generates a 5-pose yoga flow (~45 s holds) instead of leaving recovery days empty.</span>
+          </span>
+        </label>
       </div>
 
       <div class="actions">
@@ -342,6 +365,18 @@ h1 { margin: 0 0 0.6rem; }
   font-size: 0.85rem; color: var(--text);
 }
 .train-row > span:first-child { min-width: 11rem; color: var(--muted); }
+.train-row.toggle { align-items: flex-start; }
+.train-row.toggle > input[type="checkbox"] { margin-top: 0.25rem; }
+.train-row.toggle .toggle-text {
+  display: flex; flex-direction: column; gap: 0.2rem;
+  min-width: 0;
+}
+.train-row.toggle .toggle-text strong {
+  color: var(--text); font-weight: 600; font-size: 0.9rem;
+}
+.train-row.toggle .toggle-text .hint {
+  margin: 0; font-size: 0.78rem; color: var(--muted);
+}
 .muted-suffix { color: var(--muted); font-size: 0.8rem; }
 .seg { display: inline-flex; gap: 0.25rem; flex-wrap: wrap; }
 .seg button {

@@ -26,7 +26,13 @@ defineProps<{ title?: string; subtitle?: string; flat?: boolean }>();
   min-height: 140px;
   margin-bottom: 0.85rem;
 }
-.card.flat { background: var(--bg-1); }
+.card.flat {
+  background: var(--bg-1);
+  /* Flat = compact context card. Drop the global 140-px min-height
+   * so collapsed expand-cards (Why / Variety nudge / etc.) hug their
+   * actual content height instead of leaving ~80 px of dead space. */
+  min-height: 0;
+}
 header {
   display: flex; justify-content: space-between; align-items: baseline;
   margin-bottom: 0.6rem; gap: 0.6rem;

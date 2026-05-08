@@ -128,11 +128,16 @@ const visibleSwaps = (() => {
 </template>
 
 <style scoped>
-.vn-card { margin-top: 0.5rem; }
+/* Compact override: Card.vue's flat default still has 1-rem padding;
+ * we want a tighter pill when collapsed. */
+.vn-card { margin: 0; padding: 0.45rem 0.7rem !important;
+           border-radius: 10px !important; }
+.vn-card :deep(header) { display: none; }
+.vn-card :deep(.body) { display: block; }
 .vn-toggle {
-  width: 100%; display: flex; align-items: center; gap: 0.5rem;
-  background: transparent; border: none; padding: 0.4rem 0; cursor: pointer;
-  color: var(--text); text-align: left;
+  width: 100%; display: flex; align-items: center; gap: 0.45rem;
+  background: transparent; border: none; padding: 0; cursor: pointer;
+  color: var(--text); text-align: left; min-height: 28px;
 }
 .vn-icon { color: #a78bfa; font-size: 0.95rem; }
 .vn-title { font-weight: 600; font-size: 0.95rem; }

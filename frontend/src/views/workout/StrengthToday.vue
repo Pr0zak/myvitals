@@ -835,7 +835,7 @@ onMounted(loadAll);
         </div>
       </div>
 
-      <Card v-else title="Workout complete" :subtitle="`${completedSetsCount} sets logged`">
+      <Card v-else title="Workout complete" :subtitle="`${completedSetsCount} sets logged`" :flat="true">
         <p class="hint">
           Nicely done. Today's session is logged — you'll see the next-session
           weight progression baked in tomorrow.
@@ -1074,7 +1074,7 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
 .big-btn small { color: rgba(255,255,255,0.7); margin-left: 0.4rem; font-weight: 400; }
 .ok { color: #22c55e; font-weight: 600; }
 
-.ai-review { margin-top: 1rem; }
+.ai-review { margin-top: 0.5rem; }
 .review-card {
   margin-top: 0.6rem; padding: 0.9rem 1rem;
   border-radius: 10px; border: 1px solid var(--line);
@@ -1183,8 +1183,8 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
   color: var(--muted); margin: 0.4rem 0 0.6rem;
 }
 .bottom-helpers {
-  display: flex; flex-direction: column; gap: 0.4rem;
-  margin-top: 1.2rem; padding-top: 1rem;
+  display: flex; flex-direction: column; gap: 0.35rem;
+  margin-top: 1rem; padding-top: 0.7rem;
   border-top: 1px solid var(--line);
 }
 

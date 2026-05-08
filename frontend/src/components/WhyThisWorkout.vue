@@ -61,13 +61,13 @@ const sections = (e: typeof explain.value) => {
 .why-card {
   background: var(--bg-2);
   border: 1px solid var(--line);
-  border-radius: 12px;
-  margin: 0.4rem 0 0.6rem;
+  border-radius: 10px;
+  margin: 0;
 }
 .head {
   width: 100%;
-  display: flex; align-items: center; gap: 0.5rem;
-  padding: 0.7rem 0.85rem;
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.45rem 0.7rem;
   background: transparent; border: none; cursor: pointer;
   color: var(--text); font-size: 0.85rem; font-weight: 500;
   text-align: left;

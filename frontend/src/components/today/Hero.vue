@@ -106,7 +106,10 @@ function toneColor(t: Score["tone"]) {
 .hero {
   padding: 20px;
   display: grid;
-  grid-template-columns: 40% 30% 30%;
+  /* fractional units so the gap is absorbed inside the card; the
+   * `minmax(0, …)` prevents children from forcing overflow when their
+   * intrinsic min-width exceeds the column width. */
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.1fr);
   gap: 20px;
   min-height: 220px;
 }
@@ -136,15 +139,18 @@ function toneColor(t: Score["tone"]) {
   display: flex; flex-direction: column;
   justify-content: space-between; gap: 12px;
   padding-left: 12px; border-left: 1px solid var(--outline);
+  min-width: 0;   /* let children shrink below their intrinsic min */
 }
 .hero.mobile .middle { border-left: none; padding-left: 0; gap: 16px; }
 .anchor-row {
   display: grid;
   /* fixed-width value column so text right-aligns to the same x
-   * across rows regardless of unit length (bpm vs ms vs / 10k) */
-  grid-template-columns: minmax(0, 1fr) 130px 50px;
+   * across rows regardless of unit length (bpm vs ms vs / 10k).
+   * eyebrow can shrink to nothing if the column gets narrow. */
+  grid-template-columns: minmax(0, 1fr) minmax(70px, 130px) minmax(40px, 50px);
   align-items: baseline;
-  gap: 12px;
+  gap: 8px;
+  min-width: 0;
 }
 .anchor-val {
   font-size: 16px; font-weight: 500;
@@ -159,8 +165,11 @@ function toneColor(t: Score["tone"]) {
 .sub { margin-left: 6px; font-size: 13px; }
 
 .right {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
   padding-left: 8px; border-left: 1px solid var(--outline);
+  min-width: 0;
 }
 .hero.mobile .right { border-left: none; padding-left: 0; }
 .score-card {

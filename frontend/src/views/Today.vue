@@ -516,23 +516,6 @@ function openLog() { router.push("/log"); }
       :steps="liveSteps"
     />
 
-    <div class="two-col mid">
-      <AIInsights
-        :enabled="!!aiCfg?.enabled"
-        :active="activeTopic"
-        :busy="aiBusy"
-        :result="aiTopicResult"
-        :error="aiError"
-        @select="selectTopic"
-        @refresh="refreshTopic"
-      />
-      <ActivityRow
-        :cardio="cardioCell"
-        :strength="strengthCell"
-        :erg="ergCell"
-      />
-    </div>
-
     <div class="two-col body-row">
       <BodyMetrics
         :latest-lb="latestLb"
@@ -549,6 +532,23 @@ function openLog() { router.push("/log"); }
         :dia="bpDiaSeries"
         :as-of-label="bpAsOfLabel"
         @log="openBp"
+      />
+    </div>
+
+    <div class="two-col mid">
+      <AIInsights
+        :enabled="!!aiCfg?.enabled"
+        :active="activeTopic"
+        :busy="aiBusy"
+        :result="aiTopicResult"
+        :error="aiError"
+        @select="selectTopic"
+        @refresh="refreshTopic"
+      />
+      <ActivityRow
+        :cardio="cardioCell"
+        :strength="strengthCell"
+        :erg="ergCell"
       />
     </div>
 

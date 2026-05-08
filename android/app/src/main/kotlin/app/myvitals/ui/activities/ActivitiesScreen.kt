@@ -20,10 +20,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.automirrored.outlined.DirectionsWalk
+import androidx.compose.material.icons.outlined.DownhillSkiing
 import androidx.compose.material.icons.outlined.Hiking
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Rowing
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -343,6 +345,8 @@ internal fun iconForType(type: String): ImageVector = when {
     type.contains("Run", ignoreCase = true) -> Icons.AutoMirrored.Outlined.DirectionsRun
     type.contains("Hike", ignoreCase = true) -> Icons.Outlined.Hiking
     type.contains("Walk", ignoreCase = true) -> Icons.AutoMirrored.Outlined.DirectionsWalk
+    type.contains("Row", ignoreCase = true) -> Icons.Outlined.Rowing
+    type.contains("Ski", ignoreCase = true) -> Icons.Outlined.DownhillSkiing
     else -> Icons.AutoMirrored.Outlined.DirectionsBike
 }
 

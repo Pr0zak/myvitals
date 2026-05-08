@@ -185,11 +185,11 @@ const groups = computed<Group[]>(() => {
     { id: "trends",  to: "/trends",  icon: TrendingUp,  label: "Trends" },
     {
       id: "vitals", icon: Heart, label: "Vitals", children: [
-        { to: "/sleep",          icon: Bed,         label: "Sleep",          sub: sleepStr,   subColor: "#a78bfa" },
-        { to: "/blood-pressure", icon: Droplets,    label: "Blood pressure", sub: bpStr,      subColor: "#fb923c" },
-        { to: "/weight",         icon: Scale,       label: "Weight",         sub: weightStr,  subColor: "#38bdf8" },
-        { to: "/trends#rhr",       icon: Heart,       label: "Resting HR", sub: hrStr,   subColor: "#ef4444" },
-        { to: "/trends#skin-temp", icon: Thermometer, label: "Skin Δ",     sub: tempStr, subColor: "#94a3b8" },
+        { to: "/heart-rate",     icon: Heart,       label: "Heart rate",     sub: hrStr,     subColor: "#ef4444" },
+        { to: "/sleep",          icon: Bed,         label: "Sleep",          sub: sleepStr,  subColor: "#a78bfa" },
+        { to: "/blood-pressure", icon: Droplets,    label: "Blood pressure", sub: bpStr,     subColor: "#fb923c" },
+        { to: "/weight",         icon: Scale,       label: "Weight",         sub: weightStr, subColor: "#38bdf8" },
+        { to: "/trends#skin-temp", icon: Thermometer, label: "Skin Δ",       sub: tempStr,   subColor: "#94a3b8" },
       ],
     },
     {

@@ -23,6 +23,7 @@ const router = createRouter({
     { path: "/", name: "today", component: () => import("./views/Today.vue") },
     { path: "/trends", name: "trends", component: () => import("./views/Trends.vue") },
     { path: "/sleep", name: "sleep", component: () => import("./views/Sleep.vue") },
+    { path: "/heart-rate", name: "heart-rate", component: () => import("./views/HeartRate.vue") },
     { path: "/weight", name: "weight", component: () => import("./views/Weight.vue") },
     { path: "/blood-pressure", name: "blood-pressure", component: () => import("./views/BloodPressure.vue") },
     { path: "/log", name: "log", component: () => import("./views/Log.vue") },

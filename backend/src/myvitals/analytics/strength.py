@@ -766,6 +766,81 @@ def _seed(target_date: date, regen_count: int) -> str:
     return hashlib.sha256(s.encode()).hexdigest()[:16]
 
 
+_STRENGTH_WEEKDAYS_BY_COUNT: dict[int, set[int]] = {
+    # Anchor to Mon/Wed/Fri-style spacing — Monday is weekday 0.
+    2: {0, 4},                 # M, F
+    3: {0, 2, 4},              # M, W, F
+    4: {0, 1, 3, 4},           # M, T, Th, F
+    5: {0, 1, 2, 3, 4},        # M-F
+    6: {0, 1, 2, 3, 4, 5},     # M-Sat
+}
+
+
+def schedule_day_type(
+    target_date: date, strength_per_week: int, cardio_per_week: int,
+) -> str:
+    """Returns 'strength', 'cardio', 'yoga', or 'rest' for the given
+    date based on a deterministic weekly pattern. Strength days are
+    spaced for recovery; cardio fills the next-most-rested non-strength
+    days; one yoga day absorbs whatever remains; the last non-yoga
+    non-cardio non-strength day is rest."""
+    weekday = target_date.weekday()
+    s_days = _STRENGTH_WEEKDAYS_BY_COUNT.get(strength_per_week, {0, 2, 4})
+    if weekday in s_days:
+        return "strength"
+    # Non-strength weekdays in fixed order; cardio fills the first N.
+    non_s = [d for d in range(7) if d not in s_days]
+    cardio_slots = set(non_s[:max(0, cardio_per_week)])
+    if weekday in cardio_slots:
+        return "cardio"
+    yoga_slots = set(non_s[len(cardio_slots):len(cardio_slots) + 1])
+    if weekday in yoga_slots:
+        return "yoga"
+    return "rest"
+
+
+def build_yoga_plan(target_date: date, regen_count: int = 0) -> GeneratedPlan:
+    """Standalone yoga session — used when the user explicitly swaps
+    today to yoga via /today/swap-type. 5 poses, 45 s holds."""
+    seed = _seed(target_date, regen_count)
+    rng = random.Random(seed)
+    pool = [
+        e for e in CATALOG
+        if e.get("movement_pattern") == "mobility"
+        and "bodyweight" in (e.get("equipment") or [])
+    ]
+    n = min(5, len(pool))
+    picks = rng.sample(pool, k=n) if pool else []
+    exs = [
+        ExerciseInPlan(
+            exercise_id=ex["id"], order_index=i, superset_id=None,
+            target_sets=1, target_reps_low=45, target_reps_high=45,
+            target_weight_lb=None, target_rest_s=15,
+        )
+        for i, ex in enumerate(picks)
+    ]
+    return GeneratedPlan(
+        seed=seed, split_focus="yoga", exercises=exs,
+        notes=["Yoga / mobility flow — 5 poses, ~45 s holds."],
+    )
+
+
+def build_cardio_plan(target_date: date, regen_count: int = 0) -> GeneratedPlan:
+    """Standalone cardio recommendation — surfaces as a notes-only
+    workout. The Today screen renders the prescription text rather
+    than an exercise list."""
+    seed = _seed(target_date, regen_count)
+    return GeneratedPlan(
+        seed=seed, split_focus="cardio", exercises=[],
+        notes=[
+            "Cardio recommendation: 30-45 min Z2 effort. "
+            "Target HR ~125-135 bpm (conversational pace). Rower, "
+            "bike, walk, or trail at easy intensity. Builds aerobic "
+            "base without blunting strength gains.",
+        ],
+    )
+
+
 async def generate_plan(
     db: AsyncSession,
     target_date: date,
@@ -773,6 +848,7 @@ async def generate_plan(
     profile: models.UserProfile | None,
     regen_count: int = 0,
     force_no_rest: bool = False,
+    override_split: str | None = None,
 ) -> GeneratedPlan:
     """Build (but don't persist) a strength plan for the given date.
 
@@ -797,6 +873,18 @@ async def generate_plan(
     # stored payload predates these fields, treat them as enabled.
     include_mobility = bool(training.get("include_mobility", True))
     yoga_on_rest = bool(training.get("yoga_on_rest_days", True))
+    cardio_per_week = int(training.get("cardio_days_per_week", 2))
+
+    # Day-type allocation by weekday — runs before recovery / rest
+    # checks. If today's slot is cardio or yoga (auto), we short-circuit
+    # to that plan instead of building a strength session. Override
+    # via /today/swap-type or force_no_rest=true (which skips this).
+    if not force_no_rest and not override_split:
+        day_type = schedule_day_type(target_date, days_per_week, cardio_per_week)
+        if day_type == "cardio":
+            return build_cardio_plan(target_date, regen_count=regen_count)
+        if day_type == "yoga" and yoga_on_rest:
+            return build_yoga_plan(target_date, regen_count=regen_count)
 
     def _yoga_session(_seed_str: str, n_poses: int = 5,
                       hold_s: int = 45) -> list[ExerciseInPlan]:
@@ -890,7 +978,7 @@ async def generate_plan(
                 )
 
     last_split = await last_split_for_user(db)
-    focus = select_split(days_per_week, split_pref, last_split)
+    focus = override_split or select_split(days_per_week, split_pref, last_split)
 
     catalog = filter_catalog_for_equipment(CATALOG, equipment)
     if not catalog:

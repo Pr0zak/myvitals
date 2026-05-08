@@ -540,6 +540,17 @@ export const api = {
     return data;
   },
 
+  async swapTodayType(
+    type: "strength" | "yoga" | "cardio",
+    split: string | null = null,
+  ): Promise<import("./types").StrengthWorkoutDetail> {
+    const { data } = await http.post(
+      "/workout/strength/today/swap-type",
+      { type, split },
+    );
+    return data;
+  },
+
   async strengthRecovery(): Promise<{
     date: string;
     recovery_aware: boolean;

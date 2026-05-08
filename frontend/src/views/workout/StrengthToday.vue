@@ -273,6 +273,27 @@ async function regenerate(force = false) {
   }
 }
 
+const swapMenuOpen = ref(false);
+const swapBusyType = ref<"strength" | "yoga" | "cardio" | null>(null);
+async function doSwap(t: "strength" | "yoga" | "cardio") {
+  swapMenuOpen.value = false;
+  swapBusyType.value = t;
+  error.value = "";
+  try {
+    workout.value = await api.swapTodayType(t);
+    await loadAll();
+  } catch (e: unknown) {
+    if (e && typeof e === "object" && "response" in e) {
+      const resp = (e as { response?: { data?: { detail?: string } } }).response;
+      error.value = resp?.data?.detail ?? (e instanceof Error ? e.message : String(e));
+    } else {
+      error.value = e instanceof Error ? e.message : String(e);
+    }
+  } finally {
+    swapBusyType.value = null;
+  }
+}
+
 async function deferToday() {
   if (!workout.value) return;
   if (!confirm("Skip today's workout day? You can undo from the Skipped state if you tap by accident.")) return;
@@ -526,6 +547,26 @@ onMounted(loadAll);
         <h1>Workout</h1>
         <div class="micro-label">
           TODAY · <span class="mono">{{ new Date().toISOString().slice(0, 10) }}</span>
+        </div>
+      </div>
+      <div class="head-actions">
+        <button class="ghost" :disabled="swapBusyType !== null"
+                @click="swapMenuOpen = !swapMenuOpen">
+          {{ swapBusyType ? `Switching to ${swapBusyType}…` : "Swap day ▾" }}
+        </button>
+        <div v-if="swapMenuOpen" class="swap-menu">
+          <button class="swap-item" @click="doSwap('strength')">
+            <strong>Strength</strong>
+            <span class="dim">auto-pick today's split</span>
+          </button>
+          <button class="swap-item" @click="doSwap('yoga')">
+            <strong>Yoga / mobility</strong>
+            <span class="dim">5 poses, 45 s holds</span>
+          </button>
+          <button class="swap-item" @click="doSwap('cardio')">
+            <strong>Cardio</strong>
+            <span class="dim">30-45 min Z2 effort</span>
+          </button>
         </div>
       </div>
     </header>
@@ -1073,6 +1114,32 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
 /* New design tokens — match claude.ai/design workout.html bundle */
 .page-head { display: flex; align-items: flex-end; justify-content: space-between;
              padding: 0 0 0.6rem; margin-bottom: 0.6rem; }
+.head-actions { position: relative; }
+.head-actions .ghost {
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 0.4rem 0.7rem; font-size: 0.82rem; cursor: pointer;
+  font-family: inherit;
+}
+.head-actions .ghost:hover { color: var(--text); border-color: var(--accent, #ef4444); }
+.head-actions .ghost:disabled { opacity: 0.5; cursor: wait; }
+.swap-menu {
+  position: absolute; top: 36px; right: 0; z-index: 20;
+  background: var(--surface, #1B2331);
+  border: 1px solid var(--line); border-radius: 10px; padding: 4px;
+  min-width: 220px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.swap-item {
+  display: flex; flex-direction: column; align-items: flex-start;
+  background: transparent; border: none; padding: 8px 10px;
+  border-radius: 6px; cursor: pointer; color: var(--text);
+  font-family: inherit; text-align: left;
+}
+.swap-item:hover { background: var(--bg-2, rgba(255,255,255,0.04)); }
+.swap-item strong { font-weight: 600; font-size: 0.9rem; }
+.swap-item .dim { font-size: 0.78rem; color: var(--muted); margin-top: 0.1rem; }
 .page-head h1 { font-size: 1.2rem; margin: 0; line-height: 1; font-weight: 600; }
 .micro-label { font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase;
                color: var(--muted); font-weight: 600; margin-top: 0.25rem; }

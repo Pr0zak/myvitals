@@ -108,6 +108,11 @@ class TrainingPreferences(BaseModel):
     # yoga measurably improves passive ROM); the cool-down above is the
     # consistency floor. Defaults on to make active recovery the default.
     yoga_on_rest_days: bool = True
+    # 0-3 dedicated Z2 cardio days per week — auto-allocated to the
+    # gaps between strength days. With strength=3 + cardio=2, you get
+    # M/W/F strength, T/Th cardio, Sat yoga, Sun rest. Set to 0 to
+    # keep cardio purely manual via the swap-day menu.
+    cardio_days_per_week: int = 2
 
 
 class EquipmentPayload(BaseModel):
@@ -1255,6 +1260,60 @@ async def regenerate_today(
                 "hint": "POST again with {'force': true} to generate anyway.",
             },
         )
+
+    workout = await strength_algo.persist_plan(db, plan, today)
+    return await _hydrate_workout(db, workout)
+
+
+class SwapTypeBody(BaseModel):
+    """Override today's plan as a different workout type."""
+    type: Literal["strength", "yoga", "cardio"]
+    # Optional split override for strength: push / pull / legs / etc.
+    split: str | None = None
+
+
+@router.post("/today/swap-type", response_model=WorkoutOut)
+async def swap_today_type(
+    body: SwapTypeBody, db: AsyncSession = Depends(get_session),
+) -> WorkoutOut:
+    """Replace today's plan with a different workout type. Marks any
+    prior plan for today as regenerated (preserving sets that were
+    already logged), then persists the new plan.
+
+    - type=strength: re-runs the normal generator (auto-pick split or
+      use `split`). Same shape as POST /today/regenerate force=true.
+    - type=yoga: 5-pose mobility flow, 45 s holds, no weight.
+    - type=cardio: a recommendation-card workout — no exercises, just a
+      Z2 cardio prescription in the notes field that the UI surfaces.
+    """
+    today = _local_today()
+    existing = await _existing_workout_for(db, today)
+    if existing is not None and existing.status == "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"today's workout already completed — finish or wait "
+                   f"for tomorrow",
+        )
+
+    regen = (await db.execute(
+        select(models.StrengthWorkout)
+        .where(models.StrengthWorkout.date == today)
+    )).scalars().all()
+    regen_count = len(regen)
+
+    equipment = await _equipment_payload(db)
+    profile = await db.get(models.UserProfile, 1)
+
+    if body.type == "strength":
+        plan = await strength_algo.generate_plan(
+            db, today, equipment, profile,
+            regen_count=regen_count, force_no_rest=True,
+            override_split=body.split,
+        )
+    elif body.type == "yoga":
+        plan = strength_algo.build_yoga_plan(today, regen_count=regen_count)
+    else:  # cardio
+        plan = strength_algo.build_cardio_plan(today, regen_count=regen_count)
 
     workout = await strength_algo.persist_plan(db, plan, today)
     return await _hydrate_workout(db, workout)

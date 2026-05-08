@@ -402,7 +402,7 @@ fun VitalsScreen(
                     Vital.HR -> HrBadge(hr, today, rows, nowMs,
                         onClick = { onOpenVitalDetail(v) })
                     Vital.HRV -> HrvBadge(rows, nowMs, onClick = { onOpenVitalDetail(v) })
-                    Vital.SLEEP -> SleepBadge(rows, nowMs, onClick = { onOpenVitalDetail(v) })
+                    Vital.SLEEP -> SleepBadge(today, rows, nowMs, onClick = { onOpenVitalDetail(v) })
                     Vital.STEPS -> StepsBadge(
                         todayCount = today?.stepsTotal ?: rows.lastOrNull()?.stepsTotal,
                         goal = profile?.stepsGoal() ?: 10_000,
@@ -573,12 +573,27 @@ private fun HrvBadge(rows: List<DailySummary>, nowMs: Long, onClick: () -> Unit)
 }
 
 @Composable
-private fun SleepBadge(rows: List<DailySummary>, nowMs: Long, onClick: () -> Unit) {
+private fun SleepBadge(
+    today: DailySummary?, rows: List<DailySummary>, nowMs: Long,
+    onClick: () -> Unit,
+) {
     val v = Vital.SLEEP
     val last7 = rows.takeLast(7)
-    val lastRow = last7.lastOrNull { it.sleepDurationS != null }
-    val hours = lastRow?.sleepDurationS?.toDouble()?.div(3600.0)
-    BadgeFrame(v, lastRow?.date?.let { fmtRelativeDate(it, nowMs) }, onClick) {
+    // Prefer today's live /summary/today value over the persisted daily-
+    // summary row — the daily_summary cron runs at 03:00 local, before
+    // the user has typically finished sleeping, so the persisted row
+    // for today lags until the next cron pass. The live endpoint
+    // re-computes from sleep_stages on every request.
+    val headline = today?.takeIf { it.sleepDurationS != null }
+        ?: last7.lastOrNull { it.sleepDurationS != null }
+    val hours = headline?.sleepDurationS?.toDouble()?.div(3600.0)
+    // Build the 7-bar history with today's value swapped in if the
+    // last row is missing or stale.
+    val barRows = last7.map { row ->
+        if (today != null && row.date == today.date && today.sleepDurationS != null) today
+        else row
+    }
+    BadgeFrame(v, headline?.date?.let { fmtRelativeDate(it, nowMs) }, onClick) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(hours?.let { "%.1f".format(it) } ?: "—",
                 color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
@@ -588,7 +603,7 @@ private fun SleepBadge(rows: List<DailySummary>, nowMs: Long, onClick: () -> Uni
         }
         Spacer(Modifier.height(6.dp))
         Box(Modifier.fillMaxWidth().height(34.dp)) {
-            SleepBars(last7.map { it.sleepDurationS?.toFloat()?.div(3600f) }, color = v.color)
+            SleepBars(barRows.map { it.sleepDurationS?.toFloat()?.div(3600f) }, color = v.color)
         }
     }
 }

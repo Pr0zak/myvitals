@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ThumbDown
 import androidx.compose.material.icons.outlined.Close
@@ -166,7 +167,7 @@ fun StrengthCatalogScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MV.OnSurface)
             }
             Text(
-                "Strength catalog",
+                "Workout catalog",
                 color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
             )
         }
@@ -244,6 +245,34 @@ fun StrengthCatalogScreen(
                                 Text(
                                     "${ex.movementPattern.replace('_', ' ')} · ${ex.primaryMuscle} · ${ex.level}",
                                     color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                                )
+                            }
+                            // YouTube link — yoga poses ship without
+                            // images, so this is the documentation surface.
+                            IconButton(
+                                onClick = {
+                                    val q = java.net.URLEncoder.encode(
+                                        ex.youtubeQuery ?: ex.name, "UTF-8",
+                                    )
+                                    val app = android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse(
+                                            "vnd.youtube://results?search_query=$q"),
+                                    ).setPackage("com.google.android.youtube")
+                                    val web = android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse(
+                                            "https://www.youtube.com/results?search_query=$q"),
+                                    )
+                                    runCatching { context.startActivity(app) }
+                                        .recoverCatching { context.startActivity(web) }
+                                },
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.PlayArrow,
+                                    contentDescription = "Watch on YouTube",
+                                    tint = MV.OnSurfaceVariant,
                                 )
                             }
                             ActIcon(

@@ -86,7 +86,7 @@ fun StrengthHistoryScreen(
             Text(
                 if (detail != null)
                     "${fmtDate(detail!!.date)} · ${detail!!.splitFocus.replace('_', ' ')}"
-                else "Strength history",
+                else "Workout history",
                 color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
             )
         }

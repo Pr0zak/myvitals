@@ -186,7 +186,7 @@ fun StrengthTodayScreen(
         ) {
             Column {
                 Text(
-                    "STRENGTH",
+                    "WORKOUT",
                     color = MV.OnSurfaceVariant,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,

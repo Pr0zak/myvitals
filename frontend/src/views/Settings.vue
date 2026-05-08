@@ -35,6 +35,9 @@ const concept2Error = ref<string | null>(null);
 const concept2TokenInput = ref("");
 const concept2Saving = ref(false);
 const concept2Result = ref<string>("");
+const webhookBase = computed(
+  () => apiBase.value || window.location.origin,
+);
 
 // Strava OAuth credential fields (dashboard-editable)
 const cidInput = ref("");
@@ -1063,6 +1066,14 @@ onUnmounted(stopJobPolling);
               Last sync: {{ fmt(concept2.last_sync_at) }}
             </span>
             <span class="muted" v-else>Last sync: never</span>
+          </p>
+          <p v-if="concept2.webhook_path" class="hint">
+            Optional — register this URL as a webhook in
+            <a href="https://log.concept2.com/developers" target="_blank" rel="noreferrer">
+              log.concept2.com/developers</a>
+            to push results live (otherwise the cron poll picks them up
+            within 30 min).<br/>
+            <code>{{ webhookBase }}{{ concept2.webhook_path }}</code>
           </p>
           <div class="actions">
             <button class="primary" :disabled="concept2Saving" @click="syncConcept2(false)">

@@ -336,6 +336,26 @@ data class StrengthReviewResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class StrengthSwapSuggestion(
+    @Json(name = "target_exercise_id") val targetExerciseId: String,
+    @Json(name = "replacement_exercise_id") val replacementExerciseId: String,
+    val reason: String,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthNudgeBody(
+    val swaps: List<StrengthSwapSuggestion> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthNudgeResponse(
+    val nudge: StrengthNudgeBody,
+    @Json(name = "generated_at") val generatedAt: String,
+    val model: String,
+    val cached: Boolean,
+)
+
+@JsonClass(generateAdapter = true)
 data class TrainingPreferences(
     val level: String = "intermediate",                   // beginner | intermediate | advanced
     @Json(name = "days_per_week") val daysPerWeek: Int = 3,

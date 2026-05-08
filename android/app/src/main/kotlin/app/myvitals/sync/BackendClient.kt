@@ -62,6 +62,9 @@ interface BackendApi {
     @POST("ai/strength/review/{id}")
     suspend fun strengthReview(@Path("id") id: Long): StrengthReviewResponse
 
+    @POST("ai/strength/nudge/{id}")
+    suspend fun strengthNudge(@Path("id") id: Long): StrengthNudgeResponse
+
     @GET("workout/strength/explain/{id}")
     suspend fun strengthExplain(@Path("id") id: Long): StrengthExplain
 

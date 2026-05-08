@@ -245,6 +245,10 @@ class Concept2Credentials(Base):
     scope: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Random per-user secret embedded in the webhook URL path so random
+    # POST traffic can't be processed. Concept2 doesn't publicly document
+    # its signature scheme, so a path-secret is the simplest viable gate.
+    webhook_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class TrailStatusConfig(Base):

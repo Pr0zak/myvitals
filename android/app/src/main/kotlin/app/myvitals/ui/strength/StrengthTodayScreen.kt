@@ -296,6 +296,35 @@ fun StrengthTodayScreen(
         Spacer(Modifier.height(6.dp))
         WhyWorkoutCard(settings = settings, workoutId = plan.id)
 
+        if (plan.status == "planned" || plan.status == "in_progress") {
+            Spacer(Modifier.height(6.dp))
+            VarietyNudgeCard(
+                settings = settings,
+                workoutId = plan.id,
+                onAccept = { targetExId, replacementExId ->
+                    val wex = plan.exercises.firstOrNull { it.exerciseId == targetExId }
+                    if (wex != null) {
+                        scope.launch {
+                            try {
+                                val api = BackendClient.create(
+                                    settings.backendUrl, settings.bearerToken,
+                                )
+                                withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    api.swapStrengthExercise(
+                                        wex.id, app.myvitals.sync.SwapBody(replacementExId),
+                                    )
+                                }
+                                reload()
+                            } catch (e: Exception) {
+                                Timber.w(e, "nudge swap failed")
+                                error = "Swap failed: ${e.message?.take(80)}"
+                            }
+                        }
+                    }
+                },
+            )
+        }
+
         Spacer(Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = onOpenCharts) {
@@ -696,6 +725,117 @@ internal fun WhyWorkoutCard(
                 } else {
                     Text("No rationale available.",
                         color = MV.OnSurfaceDim, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun VarietyNudgeCard(
+    settings: SettingsRepository,
+    workoutId: Long,
+    onAccept: (targetExerciseId: String, replacementExerciseId: String) -> Unit,
+) {
+    var expanded by remember(workoutId) { mutableStateOf(false) }
+    var swaps by remember(workoutId) {
+        mutableStateOf<List<app.myvitals.sync.StrengthSwapSuggestion>?>(null)
+    }
+    var loading by remember(workoutId) { mutableStateOf(false) }
+    var failed by remember(workoutId) { mutableStateOf(false) }
+    val dismissed = remember(workoutId) { mutableStateMapOf<String, Boolean>() }
+    val scope = rememberCoroutineScope()
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainerLow),
+        modifier = Modifier.fillMaxWidth().clickable {
+            expanded = !expanded
+            if (expanded && swaps == null && !loading && settings.isConfigured()) {
+                loading = true
+                failed = false
+                scope.launch {
+                    try {
+                        val api = BackendClient.create(
+                            settings.backendUrl, settings.bearerToken,
+                        )
+                        val resp = withContext(Dispatchers.IO) {
+                            api.strengthNudge(workoutId)
+                        }
+                        swaps = resp.nudge.swaps
+                    } catch (e: Exception) {
+                        Timber.w(e, "variety nudge failed")
+                        failed = true
+                        swaps = emptyList()
+                    } finally { loading = false }
+                }
+            }
+        },
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("✦ Variety nudge",
+                    color = MV.OnSurface, fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f))
+                val visibleCount = swaps?.count { dismissed[it.targetExerciseId] != true } ?: 0
+                if (!expanded && visibleCount > 0) {
+                    Text("$visibleCount", color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                        modifier = Modifier.padding(end = 6.dp))
+                }
+                Text(if (expanded) "▾" else "▸",
+                    color = MV.OnSurfaceVariant, fontSize = 14.sp)
+            }
+            if (expanded) {
+                Spacer(Modifier.height(6.dp))
+                when {
+                    loading -> Text("Thinking…", color = MV.OnSurfaceDim, fontSize = 12.sp)
+                    failed -> Text("AI nudge unavailable. Check Settings → AI.",
+                        color = MV.OnSurfaceDim, fontSize = 12.sp)
+                    swaps == null -> {}
+                    swaps!!.isEmpty() -> Text("Plan looks balanced — no swaps suggested.",
+                        color = MV.OnSurfaceDim, fontSize = 12.sp)
+                    else -> {
+                        for (s in swaps!!) {
+                            if (dismissed[s.targetExerciseId] == true) continue
+                            Spacer(Modifier.height(4.dp))
+                            Column(
+                                Modifier.fillMaxWidth()
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MV.SurfaceContainer)
+                                    .padding(10.dp),
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(s.targetExerciseId.replace('_', ' ')
+                                            .replaceFirstChar(Char::titlecase),
+                                        color = MV.OnSurface, fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold)
+                                    Text(" → ", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                                    Text(s.replacementExerciseId.replace('_', ' ')
+                                            .replaceFirstChar(Char::titlecase),
+                                        color = MV.Green, fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold)
+                                }
+                                Spacer(Modifier.height(2.dp))
+                                Text(s.reason, color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                                Spacer(Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Button(
+                                        onClick = {
+                                            onAccept(s.targetExerciseId, s.replacementExerciseId)
+                                            dismissed[s.targetExerciseId] = true
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MV.BrandRed,
+                                            contentColor = MV.OnSurface,
+                                        ),
+                                    ) { Text("Accept", fontSize = 11.sp) }
+                                    OutlinedButton(
+                                        onClick = { dismissed[s.targetExerciseId] = true },
+                                    ) { Text("Dismiss", fontSize = 11.sp) }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

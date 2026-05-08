@@ -414,6 +414,7 @@ export const api = {
     token_masked?: string | null;
     last_sync_at?: string | null;
     connected_at?: string | null;
+    webhook_path?: string | null;
   }> {
     const { data } = await http.get("/integrations/concept2/status");
     return data;

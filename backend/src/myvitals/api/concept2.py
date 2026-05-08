@@ -10,11 +10,13 @@ show "connected as {name}".
 """
 from __future__ import annotations
 
+import logging
+import secrets
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +24,14 @@ from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
 from ..integrations import concept2 as concept2_int
+
+log = logging.getLogger(__name__)
+
+
+def _ensure_webhook_secret(cred: models.Concept2Credentials) -> str:
+    if not cred.webhook_secret:
+        cred.webhook_secret = secrets.token_urlsafe(32)
+    return cred.webhook_secret
 
 router = APIRouter(
     prefix="/integrations/concept2",
@@ -64,6 +74,8 @@ async def get_status(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     cred = await db.get(models.Concept2Credentials, 1)
     if cred is None:
         return {"connected": False}
+    secret = _ensure_webhook_secret(cred)
+    await db.commit()
     return {
         "connected": True,
         "user_id": cred.user_id,
@@ -71,6 +83,7 @@ async def get_status(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
         "token_masked": _mask(cred.access_token),
         "last_sync_at": cred.last_sync_at,
         "connected_at": cred.connected_at,
+        "webhook_path": f"/integrations/concept2/webhook/{secret}",
     }
 
 
@@ -123,6 +136,70 @@ async def disconnect(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
         await db.delete(cred)
         await db.commit()
     return {"connected": False}
+
+
+# Webhook endpoint — no auth dependency; gate is the secret in the URL.
+_webhook_router = APIRouter(prefix="/integrations/concept2", tags=["concept2"])
+
+
+@_webhook_router.post("/webhook/{secret}")
+async def concept2_webhook(
+    secret: str,
+    body: dict[str, Any] = Body(...),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Concept2 Logbook webhook receiver. Concept2's signature scheme
+    isn't publicly documented; this endpoint gates by a per-user secret
+    embedded in the path. Register `https://<your-host>/integrations/
+    concept2/webhook/{secret}` in your Concept2 dev portal.
+
+    Documented event types: result-added, result-updated, result-deleted.
+    """
+    cred = await db.get(models.Concept2Credentials, 1)
+    if cred is None or not cred.webhook_secret:
+        raise HTTPException(status_code=403, detail="webhook not configured")
+    if not secrets.compare_digest(secret, cred.webhook_secret):
+        raise HTTPException(status_code=403, detail="bad secret")
+
+    data = body.get("data") or body
+    event = data.get("type") or "unknown"
+
+    if event in ("result-added", "result-updated"):
+        result = data.get("result") or {}
+        mapped = concept2_int.map_result(result)
+        if mapped is None:
+            log.info("concept2 webhook %s: unmappable result", event)
+            return {"ok": True, "event": event, "action": "ignored"}
+        existing = await db.get(
+            models.Activity, (mapped["source"], mapped["source_id"]),
+        )
+        if existing is None:
+            db.add(models.Activity(**mapped))
+        else:
+            for k, v in mapped.items():
+                if k in ("source", "source_id"):
+                    continue
+                setattr(existing, k, v)
+        await db.commit()
+        log.info("concept2 webhook %s: upserted source_id=%s", event, mapped["source_id"])
+        return {"ok": True, "event": event, "action": "upserted",
+                "source_id": mapped["source_id"]}
+
+    if event == "result-deleted":
+        result_id = str(data.get("result_id") or "")
+        if not result_id:
+            return {"ok": True, "event": event, "action": "no-id"}
+        existing = await db.get(models.Activity, ("concept2", result_id))
+        if existing is not None:
+            await db.delete(existing)
+            await db.commit()
+            log.info("concept2 webhook %s: deleted source_id=%s", event, result_id)
+            return {"ok": True, "event": event, "action": "deleted",
+                    "source_id": result_id}
+        return {"ok": True, "event": event, "action": "not-found"}
+
+    log.info("concept2 webhook unknown event=%s", event)
+    return {"ok": True, "event": event, "action": "ignored"}
 
 
 @router.post("/sync")

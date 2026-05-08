@@ -542,12 +542,20 @@ onMounted(loadAll);
 
 <template>
   <main class="strength-today">
-    <header class="page-head">
+    <header class="page-head compact">
       <div class="title-block">
-        <h1>Workout</h1>
-        <div class="micro-label">
-          TODAY · <span class="mono">{{ new Date().toISOString().slice(0, 10) }}</span>
-        </div>
+        <span class="eyebrow">WORKOUT</span>
+        <h1 v-if="workout">{{
+          workout.split_focus.charAt(0).toUpperCase() + workout.split_focus.slice(1).replace('_', ' ')
+        }} day</h1>
+        <h1 v-else>Today</h1>
+        <span v-if="workout" class="head-pip mono">
+          {{ completedSetsCount }}/{{ totalSetsCount }} sets
+        </span>
+        <span v-if="workout && workout.status !== 'planned' && workout.status !== 'in_progress'"
+              class="status-pip" :class="`s-${workout.status}`">
+          {{ workout.status.replace("_", " ") }}
+        </span>
       </div>
       <div class="head-actions">
         <button class="ghost" :disabled="swapBusyType !== null"
@@ -567,22 +575,28 @@ onMounted(loadAll);
             <strong>Cardio</strong>
             <span class="dim">30-45 min Z2 effort</span>
           </button>
+          <div class="swap-divider"></div>
+          <button class="swap-item"
+                  v-if="workout && workout.status === 'planned'"
+                  :disabled="busy === 'regen'"
+                  @click="swapMenuOpen = false; regenerate(true)">
+            <strong>Regenerate plan</strong>
+            <span class="dim">re-pick exercises with same split</span>
+          </button>
+          <button class="swap-item"
+                  v-if="workout && (workout.status === 'planned' || workout.status === 'in_progress')"
+                  :disabled="busy === 'defer'"
+                  @click="swapMenuOpen = false; deferToday()">
+            <strong>Skip workout day</strong>
+            <span class="dim">undoable from the skipped banner</span>
+          </button>
         </div>
       </div>
     </header>
 
-    <Card v-if="workout" :flat="true" class="today-hero">
-      <div class="hero-top">
-        <div class="split">{{
-          workout.split_focus.charAt(0).toUpperCase() + workout.split_focus.slice(1).replace('_', ' ')
-        }} day</div>
-      </div>
-      <div class="muscles">{{ muscleGroupsFor(workout.split_focus) }}</div>
-    </Card>
-    <WhyThisWorkout v-if="workout" :workout-id="workout.id" />
-    <VarietyNudge v-if="workout && (workout.status === 'planned' || workout.status === 'in_progress')"
-                  :workout-id="workout.id"
-                  @accept="acceptNudge" />
+    <p v-if="workout?.notes" class="hint subtle">{{ workout.notes }}</p>
+    <!-- Why + Variety nudge moved below the exercise list. -->
+
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load today's plan.</p>
     <p v-else-if="loading" class="hint">Loading…</p>
@@ -617,25 +631,6 @@ onMounted(loadAll);
 
     <!-- Plan exists -->
     <template v-else>
-      <!-- Upcoming workouts (next scheduled days, exercise preview) -->
-      <div v-if="upcoming.filter(u => !u.is_today).length > 0" class="upcoming">
-        <h3>Next workouts</h3>
-        <div class="upcoming-grid">
-          <div v-for="u in upcoming.filter(x => !x.is_today).slice(0, 3)" :key="u.date" class="up-card">
-            <div class="up-head">
-              <strong>{{ new Date(u.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) }}</strong>
-              <span class="focus">{{ u.split_focus.replace('_', ' ') }}</span>
-            </div>
-            <ul>
-              <li v-for="(name, i) in u.preview_exercises" :key="i">{{ name }}</li>
-              <li v-if="u.exercise_count > u.preview_exercises.length" class="more">
-                + {{ u.exercise_count - u.preview_exercises.length }} more
-              </li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
       <!-- 7-day strip: past 3, today, projected 3 -->
       <div class="week-strip">
         <RouterLink v-for="d in weekStrip" :key="d.iso"
@@ -668,28 +663,18 @@ onMounted(loadAll);
         </div>
       </Card>
 
-      <Card class="ctx" :flat="true">
-        <div class="ctx-row">
-          <span><strong>{{ completedSetsCount }}</strong> / {{ totalSetsCount }} sets</span>
-          <span v-if="workout.recovery_score_used != null">
-            recovery <strong>{{ Math.round(workout.recovery_score_used) }}</strong>
-          </span>
-          <span v-if="workout.sleep_h_used != null">
-            sleep <strong>{{ workout.sleep_h_used.toFixed(1) }}h</strong>
-          </span>
-          <span class="status">{{ workout.status.replace('_', ' ') }}</span>
-        </div>
-        <p v-if="workout.notes" class="notes">{{ workout.notes }}</p>
-        <div class="actions" v-if="workout.status === 'planned' || workout.status === 'in_progress'">
-          <button class="ghost" v-if="workout.status === 'planned'"
-                  :disabled="busy === 'regen'" @click="regenerate(true)">
-            <RotateCw :size="14" /> Regenerate
-          </button>
-          <button class="ghost" :disabled="busy === 'defer'" @click="deferToday">
-            <SkipForward :size="14" /> Skip workout day
-          </button>
-        </div>
-      </Card>
+      <!-- ctx Card removed: sets count → header pip, status → header
+           pip, regenerate / skip → swap-day overflow menu, recovery /
+           sleep → workout.notes line above (rendered before WhyCard). -->
+      <div v-if="workout.recovery_score_used != null || workout.sleep_h_used != null"
+           class="ctx-meta dim">
+        <span v-if="workout.recovery_score_used != null">
+          recovery {{ Math.round(workout.recovery_score_used) }}
+        </span>
+        <span v-if="workout.sleep_h_used != null">
+          · sleep {{ workout.sleep_h_used.toFixed(1) }}h
+        </span>
+      </div>
 
       <!-- Rest timer (redesigned per claude.ai/design workout bundle) -->
       <div v-if="restRemaining !== null" class="rest-timer" :class="{ done: restRemaining <= 0 }">
@@ -877,6 +862,34 @@ onMounted(loadAll);
           </div>
         </div>
       </Card>
+
+      <!-- Bottom-of-screen helpers — collapsed by default, no longer
+           persistent top chrome. -->
+      <div class="bottom-helpers">
+        <WhyThisWorkout :workout-id="workout.id" />
+        <VarietyNudge v-if="workout.status === 'planned' || workout.status === 'in_progress'"
+                      :workout-id="workout.id"
+                      @accept="acceptNudge" />
+      </div>
+
+      <!-- Next workouts moved to bottom — "look ahead" not "do now" -->
+      <div v-if="upcoming.filter(u => !u.is_today).length > 0" class="upcoming">
+        <h3>Next workouts</h3>
+        <div class="upcoming-grid">
+          <div v-for="u in upcoming.filter(x => !x.is_today).slice(0, 3)" :key="u.date" class="up-card">
+            <div class="up-head">
+              <strong>{{ new Date(u.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) }}</strong>
+              <span class="focus">{{ u.split_focus.replace('_', ' ') }}</span>
+            </div>
+            <ul>
+              <li v-for="(name, i) in u.preview_exercises" :key="i">{{ name }}</li>
+              <li v-if="u.exercise_count > u.preview_exercises.length" class="more">
+                + {{ u.exercise_count - u.preview_exercises.length }} more
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </template>
   </main>
 </template>
@@ -1141,13 +1154,39 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
 .swap-item strong { font-weight: 600; font-size: 0.9rem; }
 .swap-item .dim { font-size: 0.78rem; color: var(--muted); margin-top: 0.1rem; }
 .page-head h1 { font-size: 1.2rem; margin: 0; line-height: 1; font-weight: 600; }
-.micro-label { font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase;
-               color: var(--muted); font-weight: 600; margin-top: 0.25rem; }
-.micro-label .mono { font-family: 'JetBrains Mono', 'Geist Mono', ui-monospace, monospace;
-                     letter-spacing: 0.1em; }
-.today-hero { padding: 1rem; border-radius: 14px; margin-bottom: 0.4rem; }
-.today-hero .split { font-size: 1.1rem; font-weight: 600; }
-.today-hero .muscles { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
+.page-head.compact .title-block {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+}
+.page-head.compact .eyebrow {
+  font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600;
+}
+.head-pip {
+  background: var(--bg-2); color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 0.2rem 0.55rem; font-size: 0.78rem;
+  font-feature-settings: "tnum";
+}
+.status-pip {
+  background: var(--bg-2); color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 0.18rem 0.55rem; font-size: 0.7rem;
+  text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
+}
+.status-pip.s-completed { color: #22c55e; border-color: rgba(34,197,94,0.3); }
+.status-pip.s-skipped { color: #94a3b8; border-color: rgba(148,163,184,0.3); }
+.status-pip.s-in_progress { color: #f59e0b; border-color: rgba(245,158,11,0.3); }
+.swap-divider { height: 1px; background: var(--line); margin: 4px 2px; }
+.hint.subtle { font-size: 0.78rem; color: var(--muted); margin: 0 0 0.5rem; }
+.ctx-meta {
+  display: flex; gap: 0.6rem; font-size: 0.78rem;
+  color: var(--muted); margin: 0.4rem 0 0.6rem;
+}
+.bottom-helpers {
+  display: flex; flex-direction: column; gap: 0.4rem;
+  margin-top: 1.2rem; padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
 
 .week-strip {
   display: flex; gap: 0.4rem; margin: 0.4rem 0 0.8rem;

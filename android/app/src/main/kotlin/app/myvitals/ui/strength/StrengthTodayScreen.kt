@@ -342,43 +342,11 @@ fun StrengthTodayScreen(
         )
         Spacer(Modifier.height(6.dp))
 
-        // ContextRow removed — sets count moved into the header pip;
-        // muscle-group context still appears in the workout-day-view.
+        // ContextRow / Why / Variety-nudge / Charts / History / Skip
+        // were all removed from the top. Why + Variety nudge are now
+        // appended *below* the exercise list (search "// Bottom-of-screen
+        // helpers"); the rest moved into the header overflow menu.
 
-        WhyWorkoutCard(settings = settings, workoutId = plan.id)
-
-        if (plan.status == "planned" || plan.status == "in_progress") {
-            Spacer(Modifier.height(4.dp))
-            VarietyNudgeCard(
-                settings = settings,
-                workoutId = plan.id,
-                onAccept = { targetExId, replacementExId ->
-                    val wex = plan.exercises.firstOrNull { it.exerciseId == targetExId }
-                    if (wex != null) {
-                        scope.launch {
-                            try {
-                                val api = BackendClient.create(
-                                    settings.backendUrl, settings.bearerToken,
-                                )
-                                withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    api.swapStrengthExercise(
-                                        wex.id, app.myvitals.sync.SwapBody(replacementExId),
-                                    )
-                                }
-                                reload()
-                            } catch (e: Exception) {
-                                Timber.w(e, "nudge swap failed")
-                                error = "Swap failed: ${e.message?.take(80)}"
-                            }
-                        }
-                    }
-                },
-            )
-        }
-
-        // Charts/History moved into the header overflow menu;
-        // Skip-workout-day moved there too. Removes ~120dp of vertical
-        // top-of-screen real estate before the first exercise card.
         if (plan.status == "skipped") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainerLow),
@@ -562,6 +530,54 @@ fun StrengthTodayScreen(
                                         catch (e: Exception) {
                                             reviewError = e.message?.take(160)
                                         } finally { reviewLoading = false }
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            // Bottom-of-screen helpers — Why + Variety nudge live here
+            // (collapsed by default) instead of as persistent top chrome.
+            if (plan.status == "planned" || plan.status == "in_progress") {
+                item {
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(Modifier.weight(1f)) {
+                            WhyWorkoutCard(settings = settings, workoutId = plan.id)
+                        }
+                        Box(Modifier.weight(1f)) {
+                            VarietyNudgeCard(
+                                settings = settings,
+                                workoutId = plan.id,
+                                onAccept = { targetExId, replacementExId ->
+                                    val wex2 = plan.exercises.firstOrNull {
+                                        it.exerciseId == targetExId
+                                    }
+                                    if (wex2 != null) {
+                                        scope.launch {
+                                            try {
+                                                val api = BackendClient.create(
+                                                    settings.backendUrl,
+                                                    settings.bearerToken,
+                                                )
+                                                kotlinx.coroutines.withContext(
+                                                    kotlinx.coroutines.Dispatchers.IO,
+                                                ) {
+                                                    api.swapStrengthExercise(
+                                                        wex2.id,
+                                                        app.myvitals.sync.SwapBody(
+                                                            replacementExId,
+                                                        ),
+                                                    )
+                                                }
+                                                reload()
+                                            } catch (e: Exception) {
+                                                Timber.w(e, "nudge swap failed")
+                                                error = "Swap failed: " +
+                                                    "${e.message?.take(80)}"
+                                            }
+                                        }
                                     }
                                 },
                             )

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SkipNext
@@ -176,48 +177,99 @@ fun StrengthTodayScreen(
             .background(MV.Bg)
             .padding(horizontal = 16.dp),
     ) {
-        // Header
+        // Compact header — single 36dp row, eyebrow + title inline,
+        // overflow menu replaces the three icon buttons + Charts/Skip row.
+        var headerMenuOpen by remember { mutableStateOf(false) }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp, bottom = 8.dp),
+                .padding(top = 8.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Column {
-                Text(
-                    "WORKOUT",
-                    color = MV.OnSurfaceVariant,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp,
-                )
-                Text(
-                    workout?.splitFocus?.replace('_', ' ')?.replaceFirstChar(Char::titlecase)
-                        ?: "Today",
-                    color = MV.OnSurface,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
+            Text(
+                "WORKOUT",
+                color = MV.OnSurfaceVariant,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.6.sp,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                workout?.splitFocus?.replace('_', ' ')?.replaceFirstChar(Char::titlecase)
+                    ?: "Today",
+                color = MV.OnSurface,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            // Quick stats pip when a plan exists
+            workout?.let { p ->
+                val total = p.exercises.sumOf { it.targetSets }
+                val done = p.exercises.flatMap { it.sets }
+                    .count { it.actualReps != null || it.skipped }
+                Box(
+                    Modifier.clip(RoundedCornerShape(50))
+                        .background(MV.SurfaceContainerLow)
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) {
+                    Text("$done/$total sets",
+                        color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                }
+                Spacer(Modifier.width(4.dp))
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onOpenCatalog) {
+            Box {
+                IconButton(onClick = { headerMenuOpen = true }) {
                     Icon(
-                        Icons.Filled.MenuBook,
-                        contentDescription = "Catalog", tint = MV.OnSurfaceVariant,
-                    )
-                }
-                IconButton(onClick = onOpenTrainingPrefs) {
-                    Icon(
-                        Icons.Filled.Tune,
-                        contentDescription = "Training prefs", tint = MV.OnSurfaceVariant,
-                    )
-                }
-                IconButton(onClick = onOpenHistory) {
-                    Icon(
-                        Icons.Filled.History, contentDescription = "History",
+                        Icons.Outlined.MoreVert,
+                        contentDescription = "More",
                         tint = MV.OnSurfaceVariant,
                     )
+                }
+                androidx.compose.material3.DropdownMenu(
+                    expanded = headerMenuOpen,
+                    onDismissRequest = { headerMenuOpen = false },
+                ) {
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Catalog") },
+                        leadingIcon = { Icon(Icons.Filled.MenuBook, null,
+                            modifier = Modifier.size(16.dp)) },
+                        onClick = { headerMenuOpen = false; onOpenCatalog() },
+                    )
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Charts") },
+                        leadingIcon = { Icon(Icons.Filled.QueryStats, null,
+                            modifier = Modifier.size(16.dp)) },
+                        onClick = { headerMenuOpen = false; onOpenCharts() },
+                    )
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("History") },
+                        leadingIcon = { Icon(Icons.Filled.History, null,
+                            modifier = Modifier.size(16.dp)) },
+                        onClick = { headerMenuOpen = false; onOpenHistory() },
+                    )
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Training prefs") },
+                        leadingIcon = { Icon(Icons.Filled.Tune, null,
+                            modifier = Modifier.size(16.dp)) },
+                        onClick = { headerMenuOpen = false; onOpenTrainingPrefs() },
+                    )
+                    if (workout?.status == "planned" || workout?.status == "in_progress") {
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("Skip workout day",
+                                color = MV.BrandRed) },
+                            leadingIcon = { Icon(Icons.Filled.SkipNext, null,
+                                modifier = Modifier.size(16.dp), tint = MV.BrandRed) },
+                            onClick = {
+                                headerMenuOpen = false
+                                scope.launch {
+                                    deferring = true
+                                    try { repo.deferWorkout(workout!!.id); reload() }
+                                    catch (e: Exception) { error = e.message?.take(160) }
+                                    finally { deferring = false }
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -288,16 +340,15 @@ fun StrengthTodayScreen(
             todayStatus = plan.status,
             onDayClick = { dateIso -> onOpenDay(dateIso) },
         )
-        Spacer(Modifier.height(8.dp))
-
-        // Context line
-        ContextRow(plan, plan.exercises.flatMap { it.sets }.size)
-
         Spacer(Modifier.height(6.dp))
+
+        // ContextRow removed — sets count moved into the header pip;
+        // muscle-group context still appears in the workout-day-view.
+
         WhyWorkoutCard(settings = settings, workoutId = plan.id)
 
         if (plan.status == "planned" || plan.status == "in_progress") {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(4.dp))
             VarietyNudgeCard(
                 settings = settings,
                 workoutId = plan.id,
@@ -325,37 +376,9 @@ fun StrengthTodayScreen(
             )
         }
 
-        Spacer(Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onOpenCharts) {
-                Text("Charts ↗", color = MV.OnSurfaceVariant, fontSize = 12.sp)
-            }
-            TextButton(onClick = onOpenHistory) {
-                Text("History ↗", color = MV.OnSurfaceVariant, fontSize = 12.sp)
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-
-        if (plan.status == "planned" || plan.status == "in_progress") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = {
-                        scope.launch {
-                            deferring = true
-                            try { repo.deferWorkout(plan.id); reload() }
-                            catch (e: Exception) { error = e.message?.take(160) }
-                            finally { deferring = false }
-                        }
-                    },
-                    enabled = !deferring,
-                ) {
-                    Icon(Icons.Filled.SkipNext, contentDescription = null)
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (deferring) "Skipping…" else "Skip workout day")
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-        }
+        // Charts/History moved into the header overflow menu;
+        // Skip-workout-day moved there too. Removes ~120dp of vertical
+        // top-of-screen real estate before the first exercise card.
         if (plan.status == "skipped") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainerLow),

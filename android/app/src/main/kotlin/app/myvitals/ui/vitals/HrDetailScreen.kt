@@ -183,8 +183,10 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                 if (range == VitalRange.DAY) {
                     item { LiveHrChart(live, maxHr, bands) }
                     item { TimeInZone(live, maxHr) }
+                    item { HrHistogram(live) }
                 } else {
                     item { RestingHrTrend(rows, range) }
+                    item { WeekdayPattern(rows) }
                 }
             }
         }
@@ -468,5 +470,116 @@ private fun Stat(label: String, value: String) {
         Text(label, color = MV.OnSurfaceDim, fontSize = 10.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         Text(value, color = MV.OnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun HrHistogram(points: List<TimePoint>) {
+    if (points.isEmpty()) return
+    // 5-bpm bins so the chart isn't too jagged. The lo/hi range is
+    // derived from the data itself rather than fixed (40-200 bpm) so
+    // a tight resting cluster still gets meaningful bar height.
+    val bins = remember(points) {
+        val bin = 5
+        val byBin = HashMap<Int, Int>()
+        var lo = Int.MAX_VALUE; var hi = Int.MIN_VALUE
+        for (p in points) {
+            val b = (p.value / bin).toInt() * bin
+            byBin[b] = (byBin[b] ?: 0) + 1
+            if (b < lo) lo = b
+            if (b > hi) hi = b
+        }
+        if (lo == Int.MAX_VALUE) emptyList()
+        else (lo..hi step bin).map { it to (byBin[it] ?: 0) }
+    }
+    if (bins.isEmpty()) return
+    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("HR DISTRIBUTION — 24H", color = MV.OnSurfaceVariant,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(2.dp))
+            Text("5-bpm bins · ${points.size} samples",
+                color = MV.OnSurfaceDim, fontSize = 10.sp)
+            Spacer(Modifier.height(8.dp))
+            val maxCount = (bins.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
+            Box(Modifier.fillMaxWidth().height(120.dp)) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val gapPx = 2f
+                    val barW = (size.width - gapPx * (bins.size - 1)) / bins.size
+                    bins.forEachIndexed { i, (_, c) ->
+                        val h = (c.toFloat() / maxCount) * size.height
+                        val x = i * (barW + gapPx)
+                        drawRect(
+                            color = Vital.HR.color,
+                            topLeft = androidx.compose.ui.geometry.Offset(x, size.height - h),
+                            size = androidx.compose.ui.geometry.Size(barW, h),
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("${bins.first().first}", color = MV.OnSurfaceDim, fontSize = 9.sp)
+                Text("${bins.last().first + 5}", color = MV.OnSurfaceDim, fontSize = 9.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeekdayPattern(rows: List<DailySummary>) {
+    if (rows.isEmpty()) return
+    val byDow = remember(rows) {
+        val sums = DoubleArray(7)
+        val cnts = IntArray(7)
+        val cal = java.util.Calendar.getInstance()
+        for (r in rows) {
+            val v = r.restingHr ?: continue
+            val d = runCatching {
+                java.time.LocalDate.parse(r.date).atStartOfDay(java.time.ZoneId.systemDefault())
+                    .toInstant().toEpochMilli()
+            }.getOrNull() ?: continue
+            cal.timeInMillis = d
+            // Calendar.SUNDAY = 1 → index 0
+            val dow = (cal.get(java.util.Calendar.DAY_OF_WEEK) - 1).coerceIn(0, 6)
+            sums[dow] += v
+            cnts[dow] += 1
+        }
+        (0..6).map { i -> if (cnts[i] > 0) sums[i] / cnts[i] else null }
+    }
+    if (byDow.all { it == null }) return
+    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("RESTING HR · BY WEEKDAY", color = MV.OnSurfaceVariant,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(8.dp))
+            val nonNull = byDow.filterNotNull()
+            val lo = nonNull.min()
+            val hi = nonNull.max()
+            val span = (hi - lo).coerceAtLeast(1.0)
+            val labels = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+            Row(Modifier.fillMaxWidth().height(110.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                byDow.forEachIndexed { i, v ->
+                    Column(Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(if (v != null) "${v.toInt()}" else "—",
+                            color = MV.OnSurface, fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(2.dp))
+                        val frac = if (v != null) ((v - lo) / span).toFloat() else 0f
+                        // Always render at least a sliver so a value isn't invisible
+                        val height = (16f + frac * 70f).dp
+                        Box(Modifier.fillMaxWidth().height(height)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Vital.HR.color.copy(alpha = if (v == null) 0.15f else 0.85f)))
+                        Spacer(Modifier.height(2.dp))
+                        Text(labels[i], color = MV.OnSurfaceDim, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
     }
 }

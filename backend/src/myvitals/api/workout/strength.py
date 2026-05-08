@@ -23,8 +23,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...analytics import strength as strength_algo
 from ...auth import require_any
+from ...config import settings
 from ...db import models
 from ...db.session import get_session
+
+
+def _local_today() -> date:
+    """Today's date in the user's configured timezone — not UTC. The
+    server runs in UTC; using utcnow().date() flips the day at 7 PM
+    local in CDT and would hide a planned/completed workout for hours."""
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        tz = timezone.utc
+    return datetime.now(tz).date()
 
 # Both phone and dashboard hit /workout/strength/* — phone for logging sets,
 # dashboard for plan management and history.
@@ -877,7 +890,7 @@ async def get_today(
     completed), returns it as-is — the caller uses POST /today/regenerate
     to bump the seed and rebuild.
     """
-    today = datetime.now(timezone.utc).date()
+    today = _local_today()
     existing = await _existing_workout_for(db, today)
     if existing is not None:
         return await _hydrate_workout(db, existing)
@@ -1198,7 +1211,7 @@ async def regenerate_today(
     (don't blow away mid-session work). Pass force=true to override the
     rest-day recommendation.
     """
-    today = datetime.now(timezone.utc).date()
+    today = _local_today()
     existing = await _existing_workout_for(db, today)
     if existing is not None and existing.status in ("in_progress", "completed"):
         raise HTTPException(
@@ -1245,7 +1258,7 @@ async def get_recovery(
     Useful for the UI to show "you're at recovery 42, that's why today's
     targets are 8% lighter than last week" without the user having to
     cross-reference daily_summary."""
-    today = datetime.now(timezone.utc).date()
+    today = _local_today()
     profile = await db.get(models.UserProfile, 1)
     aware = profile is None or profile.strength_recovery_aware
     inputs = await strength_algo.read_recovery_inputs(db, today)

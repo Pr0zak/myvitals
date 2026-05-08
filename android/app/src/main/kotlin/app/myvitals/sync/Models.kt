@@ -336,6 +336,19 @@ data class StrengthReviewResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class StrengthExerciseStats(
+    @Json(name = "exercise_id") val exerciseId: String,
+    @Json(name = "times_performed") val timesPerformed: Int,
+    @Json(name = "total_sets") val totalSets: Int,
+    @Json(name = "total_reps") val totalReps: Int,
+    @Json(name = "total_volume_lb") val totalVolumeLb: Double,
+    @Json(name = "last_weight_lb") val lastWeightLb: Double? = null,
+    @Json(name = "max_weight_lb") val maxWeightLb: Double? = null,
+    @Json(name = "last_performed_date") val lastPerformedDate: String? = null,
+    @Json(name = "avg_rating") val avgRating: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
 data class StrengthSwapSuggestion(
     @Json(name = "target_exercise_id") val targetExerciseId: String,
     @Json(name = "replacement_exercise_id") val replacementExerciseId: String,

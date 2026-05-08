@@ -243,6 +243,57 @@ async def get_exercise(exercise_id: str) -> dict[str, Any]:
     return row
 
 
+@router.get("/exercises-stats-summary")
+async def exercises_stats_summary(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, dict[str, Any]]:
+    """Bulk version of /exercises/{id}/stats — one SQL query, returns
+    a dict keyed by exercise_id. Used by the catalog page to enable
+    sort-by-stats without N round-trips.
+    Exercises the user has never performed are simply absent."""
+    rows = (await db.execute(
+        select(
+            models.StrengthWorkoutExercise.exercise_id.label("ex"),
+            func.count(func.distinct(models.StrengthWorkout.id)).label("sessions"),
+            func.count(models.StrengthSet.id).label("sets"),
+            func.coalesce(func.sum(models.StrengthSet.actual_reps), 0).label("reps"),
+            func.coalesce(
+                func.sum(
+                    models.StrengthSet.actual_weight_lb *
+                    models.StrengthSet.actual_reps,
+                ), 0,
+            ).label("volume"),
+            func.max(models.StrengthSet.actual_weight_lb).label("max_w"),
+            func.max(models.StrengthWorkout.date).label("last_d"),
+        )
+        .join(
+            models.StrengthSet,
+            models.StrengthSet.workout_exercise_id ==
+            models.StrengthWorkoutExercise.id,
+        )
+        .join(
+            models.StrengthWorkout,
+            models.StrengthWorkout.id ==
+            models.StrengthWorkoutExercise.workout_id,
+        )
+        .where(models.StrengthSet.skipped.is_(False))
+        .where(models.StrengthSet.actual_reps.is_not(None))
+        .group_by(models.StrengthWorkoutExercise.exercise_id)
+    )).all()
+
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        out[r.ex] = {
+            "times_performed": int(r.sessions or 0),
+            "total_sets": int(r.sets or 0),
+            "total_reps": int(r.reps or 0),
+            "total_volume_lb": round(float(r.volume or 0), 1),
+            "max_weight_lb": float(r.max_w) if r.max_w is not None else None,
+            "last_performed_date": r.last_d.isoformat() if r.last_d else None,
+        }
+    return out
+
+
 @router.get("/exercises/{exercise_id}/stats")
 async def get_exercise_stats(
     exercise_id: str, db: AsyncSession = Depends(get_session),

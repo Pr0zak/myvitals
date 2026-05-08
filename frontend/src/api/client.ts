@@ -540,6 +540,18 @@ export const api = {
     return data;
   },
 
+  async strengthExercisesStatsSummary(): Promise<Record<string, {
+    times_performed: number;
+    total_sets: number;
+    total_reps: number;
+    total_volume_lb: number;
+    max_weight_lb: number | null;
+    last_performed_date: string | null;
+  }>> {
+    const { data } = await http.get("/workout/strength/exercises-stats-summary");
+    return data;
+  },
+
   async strengthExerciseStats(exerciseId: string): Promise<{
     exercise_id: string;
     times_performed: number;

@@ -10,7 +10,10 @@
  *   PUT  /workout/strength/exercises/{id}/pref  — toggle a pref
  */
 import { computed, onMounted, ref } from "vue";
-import { Star, Ban, ThumbsDown, Play } from "lucide-vue-next";
+import {
+  Star, Ban, ThumbsDown, Play,
+  User, Dumbbell, PersonStanding, Activity as ActivityIcon,
+} from "lucide-vue-next";
 import { api } from "@/api/client";
 import { apiBase, queryToken } from "@/config";
 import Card from "@/components/Card.vue";
@@ -19,10 +22,19 @@ import type { StrengthEquipment, StrengthExercise } from "@/api/types";
 const exercises = ref<StrengthExercise[]>([]);
 const equipment = ref<StrengthEquipment | null>(null);
 const prefs = ref<Record<string, string>>({});
+const statsSummary = ref<Record<string, {
+  times_performed: number;
+  total_sets: number;
+  total_reps: number;
+  total_volume_lb: number;
+  max_weight_lb: number | null;
+  last_performed_date: string | null;
+}>>({});
 const loading = ref(true);
 const error = ref<string>("");
 const filter = ref<"available" | "all">("available");
 const search = ref("");
+const sortBy = ref<"name" | "most_done" | "recent" | "heaviest" | "volume">("name");
 
 // Category filter chips. Multi-select; combine with AND. Empty set = no filter.
 type Category =
@@ -114,14 +126,16 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [catRes, eqRes] = await Promise.all([
+    const [catRes, eqRes, stats] = await Promise.all([
       api.strengthExercises(),
       api.strengthEquipment(),
+      api.strengthExercisesStatsSummary().catch(() => ({})),
     ]);
     exercises.value = catRes.exercises;
     equipment.value = eqRes.payload;
     prefs.value = (eqRes.payload as unknown as { exercise_prefs?: Record<string, string> })
       .exercise_prefs ?? {};
+    statsSummary.value = stats;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -170,7 +184,30 @@ const visible = computed<StrengthExercise[]>(() => {
   return scored.map((s) => s.ex);
 });
 
+function statSortKey(ex: StrengthExercise): number {
+  const s = statsSummary.value[ex.id];
+  if (!s) return 0;
+  switch (sortBy.value) {
+    case "most_done":  return s.times_performed;
+    case "recent":     return s.last_performed_date
+                         ? new Date(s.last_performed_date).getTime() : 0;
+    case "heaviest":   return s.max_weight_lb ?? 0;
+    case "volume":     return s.total_volume_lb;
+    default:           return 0;
+  }
+}
+
 const groupedByMuscle = computed(() => {
+  // When sorting by a stat, return a single flat group so the user
+  // sees the global top across all muscles. When sorting by name,
+  // keep the per-muscle grouping (the catalog's default rhythm).
+  if (sortBy.value !== "name") {
+    const sorted = [...visible.value].sort((a, b) => {
+      const ka = statSortKey(a), kb = statSortKey(b);
+      return kb - ka || a.name.localeCompare(b.name);
+    });
+    return [["All exercises", sorted]] as Array<[string, StrengthExercise[]]>;
+  }
   const groups: Record<string, StrengthExercise[]> = {};
   for (const ex of visible.value) {
     (groups[ex.primary_muscle] ??= []).push(ex);
@@ -211,6 +248,15 @@ function image(ex: StrengthExercise): string | null {
   if (!ex.image_front) return null;
   const base = (apiBase.value || "/api").replace(/\/$/, "");
   return `${base}${ex.image_front}`;
+}
+
+function placeholderIcon(ex: StrengthExercise) {
+  if (ex.movement_pattern === "mobility") return User;
+  if (ex.equipment.includes("dumbbell")) return Dumbbell;
+  if (ex.equipment.length === 1 && ex.equipment[0] === "bodyweight") {
+    return PersonStanding;
+  }
+  return ActivityIcon;
 }
 
 function videoUrl(query: string): string {
@@ -288,6 +334,13 @@ onMounted(load);
           {{ m === "flexibility" ? "yoga / mobility" : m.replace("_", " ") }}
         </option>
       </select>
+      <select v-model="sortBy" class="muscle-select">
+        <option value="name">Sort: A-Z by muscle</option>
+        <option value="most_done">Sort: most done</option>
+        <option value="recent">Sort: recently done</option>
+        <option value="heaviest">Sort: heaviest weight</option>
+        <option value="volume">Sort: total volume</option>
+      </select>
     </div>
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load the catalog.</p>
@@ -320,7 +373,9 @@ onMounted(load);
         }">
           <button class="row-tap" @click="openDetail(ex)">
             <img v-if="image(ex)" :src="image(ex) ?? ''" :alt="ex.name" />
-            <div v-else class="ph"></div>
+            <div v-else class="ph">
+              <component :is="placeholderIcon(ex)" :size="22"/>
+            </div>
             <div class="meta">
               <strong>{{ ex.name }}</strong>
               <span class="tags">
@@ -359,7 +414,9 @@ onMounted(load);
         <button class="detail-close" @click="closeDetail" aria-label="Close">×</button>
         <div class="detail-head">
           <img v-if="image(detailEx)" :src="image(detailEx) ?? ''" :alt="detailEx.name"/>
-          <div v-else class="ph big"></div>
+          <div v-else class="ph big">
+            <component :is="placeholderIcon(detailEx)" :size="40"/>
+          </div>
           <div class="detail-title">
             <h2>{{ detailEx.name }}</h2>
             <div class="detail-tags">
@@ -519,7 +576,11 @@ header h1 { margin: 0; }
   width: 56px; height: 56px; border-radius: 6px;
   background: #111; object-fit: cover;
 }
-.list .ph { background: var(--bg-1); border: 1px dashed var(--line); }
+.list .ph {
+  background: var(--bg-1); border: 1px dashed var(--line);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted);
+}
 .meta { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .meta strong { color: var(--text); font-size: 0.92rem;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -566,7 +627,11 @@ header h1 { margin: 0; }
   width: 96px; height: 96px; border-radius: 8px;
   background: #111; object-fit: cover; flex: 0 0 auto;
 }
-.detail-head .ph.big { background: var(--bg-1); border: 1px dashed var(--line); }
+.detail-head .ph.big {
+  background: var(--bg-1); border: 1px dashed var(--line);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted);
+}
 .detail-title { flex: 1; min-width: 0; }
 .detail-title h2 { margin: 0 0 0.25rem; font-size: 1.15rem; }
 .detail-tags {

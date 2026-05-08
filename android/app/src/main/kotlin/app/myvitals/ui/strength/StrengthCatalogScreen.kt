@@ -56,9 +56,12 @@ import app.myvitals.strength.StrengthRepository
 import app.myvitals.sync.EquipmentPayload
 import app.myvitals.sync.StrengthExerciseInfo
 import app.myvitals.ui.MV
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun StrengthCatalogScreen(
     settings: SettingsRepository,
@@ -76,6 +79,9 @@ fun StrengthCatalogScreen(
     val prefs = remember { mutableStateMapOf<String, String>() }
     val activeCategories = remember { mutableStateMapOf<String, Boolean>() }
     var muscleFilter by remember { mutableStateOf("") }
+    var detailEx by remember { mutableStateOf<StrengthExerciseInfo?>(null) }
+    var detailStats by remember { mutableStateOf<app.myvitals.sync.StrengthExerciseStats?>(null) }
+    var detailStatsLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         try {
@@ -332,7 +338,24 @@ fun StrengthCatalogScreen(
                                     else -> Color.Transparent
                                 },
                                 shape = RoundedCornerShape(12.dp),
-                            ),
+                            )
+                            .clickable {
+                                detailEx = ex
+                                detailStats = null
+                                detailStatsLoading = true
+                                scope.launch {
+                                    try {
+                                        val api = app.myvitals.sync.BackendClient.create(
+                                            settings.backendUrl, settings.bearerToken,
+                                        )
+                                        detailStats = withContext(Dispatchers.IO) {
+                                            api.strengthExerciseStats(ex.id)
+                                        }
+                                    } catch (e: Exception) {
+                                        Timber.w(e, "exercise stats failed")
+                                    } finally { detailStatsLoading = false }
+                                }
+                            },
                     ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
@@ -389,6 +412,108 @@ fun StrengthCatalogScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // Detail bottom sheet
+    if (detailEx != null) {
+        val ex = detailEx!!
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { detailEx = null; detailStats = null },
+            containerColor = MV.SurfaceContainer,
+        ) {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                Text(ex.name, color = MV.OnSurface, fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${ex.movementPattern.replace('_', ' ')} · ${ex.equipment.joinToString(" + ")} · ${ex.level}",
+                    color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+                Text(ex.primaryMuscle, color = MV.OnSurface, fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 6.dp))
+                if (ex.secondaryMuscles.isNotEmpty()) {
+                    Text("also: ${ex.secondaryMuscles.joinToString(", ")}",
+                        color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp))
+                }
+                Spacer(Modifier.height(10.dp))
+                androidx.compose.material3.OutlinedButton(
+                    onClick = {
+                        val q = java.net.URLEncoder.encode(
+                            ex.youtubeQuery ?: ex.name, "UTF-8",
+                        )
+                        val app = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(
+                                "vnd.youtube://results?search_query=$q"),
+                        ).setPackage("com.google.android.youtube")
+                        val web = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(
+                                "https://www.youtube.com/results?search_query=$q"),
+                        )
+                        runCatching { context.startActivity(app) }
+                            .recoverCatching { context.startActivity(web) }
+                    },
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null,
+                        modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Watch on YouTube", fontSize = 12.sp)
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Text("YOUR HISTORY", color = MV.OnSurfaceVariant,
+                    fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp)
+                Spacer(Modifier.height(6.dp))
+                when {
+                    detailStatsLoading -> Text("Loading…",
+                        color = MV.OnSurfaceDim, fontSize = 12.sp)
+                    detailStats == null || detailStats!!.timesPerformed == 0 ->
+                        Text("Not performed yet.",
+                            color = MV.OnSurfaceDim, fontSize = 12.sp)
+                    else -> {
+                        val s = detailStats!!
+                        @Composable
+                        fun statRow(label: String, value: String) {
+                            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                                Text(label, color = MV.OnSurfaceVariant,
+                                    fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                Text(value, color = MV.OnSurface,
+                                    fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                        statRow("Sessions", "${s.timesPerformed}")
+                        statRow("Last seen", s.lastPerformedDate ?: "—")
+                        statRow("Last weight", s.lastWeightLb?.let { "$it lb" } ?: "—")
+                        statRow("Max weight", s.maxWeightLb?.let { "$it lb" } ?: "—")
+                        statRow("Total reps", "${s.totalReps}")
+                        statRow("Volume",
+                            "${s.totalVolumeLb.toInt().toString()} lb")
+                        s.avgRating?.let { statRow("Avg RPE", "%.1f".format(it)) }
+                    }
+                }
+
+                if (ex.instructions.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    Text("HOW TO DO IT", color = MV.OnSurfaceVariant,
+                        fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.5.sp)
+                    Spacer(Modifier.height(6.dp))
+                    for ((i, line) in ex.instructions.withIndex()) {
+                        Row(Modifier.padding(vertical = 3.dp)) {
+                            Text("${i + 1}.", color = MV.OnSurfaceVariant,
+                                fontSize = 12.sp, modifier = Modifier.width(20.dp))
+                            Text(line, color = MV.OnSurface, fontSize = 12.sp,
+                                lineHeight = 18.sp)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
             }
         }
     }

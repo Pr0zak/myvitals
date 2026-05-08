@@ -3,6 +3,8 @@ package app.myvitals.ui.strength
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +30,8 @@ import androidx.compose.material.icons.filled.ThumbDown
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -70,6 +74,8 @@ fun StrengthCatalogScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var search by remember { mutableStateOf("") }
     val prefs = remember { mutableStateMapOf<String, String>() }
+    val activeCategories = remember { mutableStateMapOf<String, Boolean>() }
+    var muscleFilter by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         try {
@@ -132,9 +138,30 @@ fun StrengthCatalogScreen(
         return score
     }
 
-    val visible by remember(catalog, equipment, search) {
+    fun matchesCategory(ex: StrengthExerciseInfo, key: String): Boolean = when (key) {
+        "yoga"       -> ex.movementPattern == "mobility"
+        "bodyweight" -> ex.equipment.size == 1 && ex.equipment[0] == "bodyweight"
+        "dumbbell"   -> ex.equipment.contains("dumbbell")
+        "bench"      -> ex.equipment.contains("bench")
+        "compound"   -> ex.isCompound
+        "isolation"  -> !ex.isCompound && ex.movementPattern != "mobility"
+        else         -> true
+    }
+
+    val muscleOptions by remember(catalog) {
+        derivedStateOf { catalog.map { it.primaryMuscle }.distinct().sorted() }
+    }
+
+    val visible by remember(catalog, equipment, search, activeCategories.toMap(), muscleFilter) {
         derivedStateOf {
-            val base = catalog.filter { isAvailable(it) }
+            var base = catalog.filter { isAvailable(it) }
+            val activeKeys = activeCategories.filterValues { it }.keys
+            if (activeKeys.isNotEmpty()) {
+                base = base.filter { ex -> activeKeys.all { matchesCategory(ex, it) } }
+            }
+            if (muscleFilter.isNotEmpty()) {
+                base = base.filter { it.primaryMuscle == muscleFilter }
+            }
             val q = search.trim()
             if (q.isEmpty()) base
             else base.mapNotNull { ex ->
@@ -196,6 +223,78 @@ fun StrengthCatalogScreen(
                 color = MV.OnSurface, fontSize = 14.sp,
             ),
         )
+
+        // Category filter chips (Yoga / Bodyweight only / Dumbbell / Bench
+        // / Compound / Isolation). Multi-select; combine with AND.
+        val categoryDefs = listOf(
+            "yoga" to "Yoga / mobility",
+            "bodyweight" to "Bodyweight",
+            "dumbbell" to "Dumbbell",
+            "bench" to "Bench",
+            "compound" to "Compound",
+            "isolation" to "Isolation",
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            for ((key, label) in categoryDefs) {
+                val on = activeCategories[key] == true
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(if (on) MV.BrandRed.copy(alpha = 0.18f) else MV.SurfaceContainer)
+                        .border(1.dp,
+                            if (on) MV.BrandRed.copy(alpha = 0.5f) else MV.OutlineVariant,
+                            RoundedCornerShape(50))
+                        .clickable {
+                            activeCategories[key] = !(activeCategories[key] ?: false)
+                        }
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text(label,
+                        color = if (on) MV.BrandRed else MV.OnSurfaceVariant,
+                        fontSize = 11.sp)
+                }
+            }
+        }
+
+        // Muscle-group dropdown (single-select).
+        var muscleMenuOpen by remember { mutableStateOf(false) }
+        Box(modifier = Modifier.padding(bottom = 8.dp)) {
+            androidx.compose.material3.OutlinedButton(
+                onClick = { muscleMenuOpen = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    if (muscleFilter.isEmpty()) "All muscle groups"
+                    else if (muscleFilter == "flexibility") "yoga / mobility"
+                    else muscleFilter.replace('_', ' '),
+                    color = MV.OnSurface, fontSize = 13.sp,
+                )
+            }
+            DropdownMenu(
+                expanded = muscleMenuOpen,
+                onDismissRequest = { muscleMenuOpen = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("All muscle groups") },
+                    onClick = { muscleFilter = ""; muscleMenuOpen = false },
+                )
+                for (m in muscleOptions) {
+                    DropdownMenuItem(
+                        text = { Text(
+                            if (m == "flexibility") "yoga / mobility"
+                            else m.replace('_', ' ')
+                        ) },
+                        onClick = { muscleFilter = m; muscleMenuOpen = false },
+                    )
+                }
+            }
+        }
 
         when {
             loading -> Text("Loading…", color = MV.OnSurfaceVariant)

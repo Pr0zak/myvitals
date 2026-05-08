@@ -24,6 +24,51 @@ const error = ref<string>("");
 const filter = ref<"available" | "all">("available");
 const search = ref("");
 
+// Category filter chips. Multi-select; combine with AND. Empty set = no filter.
+type Category =
+  | "yoga"
+  | "bodyweight"
+  | "dumbbell"
+  | "bench"
+  | "compound"
+  | "isolation";
+const activeCategories = ref<Set<Category>>(new Set());
+
+const CATEGORIES: Array<{ key: Category; label: string; matches: (e: StrengthExercise) => boolean }> = [
+  { key: "yoga",       label: "Yoga / mobility",
+    matches: (e) => e.movement_pattern === "mobility" },
+  { key: "bodyweight", label: "Bodyweight only",
+    matches: (e) => e.equipment.length === 1 && e.equipment[0] === "bodyweight" },
+  { key: "dumbbell",   label: "Dumbbell",
+    matches: (e) => e.equipment.includes("dumbbell") },
+  { key: "bench",      label: "Bench",
+    matches: (e) => e.equipment.includes("bench") },
+  { key: "compound",   label: "Compound",
+    matches: (e) => !!e.is_compound },
+  { key: "isolation",  label: "Isolation",
+    matches: (e) => !e.is_compound && e.movement_pattern !== "mobility" },
+];
+
+function toggleCategory(c: Category) {
+  const s = new Set(activeCategories.value);
+  if (s.has(c)) s.delete(c); else s.add(c);
+  activeCategories.value = s;
+}
+function categoryActive(c: Category): boolean {
+  return activeCategories.value.has(c);
+}
+
+// Muscle-group filter — single-select dropdown derived from the
+// catalog's distinct primary_muscle values.
+const muscleFilter = ref<string>("");
+const muscleOptions = computed<string[]>(() => {
+  const set = new Set<string>();
+  for (const e of exercises.value) {
+    if (e.primary_muscle) set.add(e.primary_muscle);
+  }
+  return Array.from(set).sort();
+});
+
 // Lightweight fuzzy match — accepts loose ordering of substrings,
 // matches across name/muscle/movement_pattern/equipment fields, and
 // scores higher when the query hits the start of the name. Returns
@@ -100,8 +145,18 @@ function isAvailable(ex: StrengthExercise): boolean {
 }
 
 const visible = computed<StrengthExercise[]>(() => {
-  const base = filter.value === "all" ? exercises.value
+  let base = filter.value === "all" ? exercises.value
     : exercises.value.filter(isAvailable);
+  // Category chips combine with AND.
+  if (activeCategories.value.size > 0) {
+    const matchers = CATEGORIES
+      .filter((c) => activeCategories.value.has(c.key))
+      .map((c) => c.matches);
+    base = base.filter((e) => matchers.every((m) => m(e)));
+  }
+  if (muscleFilter.value) {
+    base = base.filter((e) => e.primary_muscle === muscleFilter.value);
+  }
   const q = search.value.trim();
   if (!q) return base;
   // Fuzzy filter + sort by score so the best matches surface first
@@ -189,6 +244,24 @@ onMounted(load);
       <button v-if="search" class="clear-btn" @click="search = ''" title="Clear search">×</button>
     </div>
 
+    <div class="filter-row">
+      <div class="cat-chips">
+        <button v-for="c in CATEGORIES" :key="c.key"
+                class="cat-chip" :class="{ on: categoryActive(c.key) }"
+                @click="toggleCategory(c.key)">{{ c.label }}</button>
+        <button v-if="activeCategories.size > 0"
+                class="cat-chip clear" @click="activeCategories = new Set()">
+          clear
+        </button>
+      </div>
+      <select v-model="muscleFilter" class="muscle-select">
+        <option value="">All muscles</option>
+        <option v-for="m in muscleOptions" :key="m" :value="m">
+          {{ m === "flexibility" ? "yoga / mobility" : m.replace("_", " ") }}
+        </option>
+      </select>
+    </div>
+
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load the catalog.</p>
     <p v-else-if="loading" class="hint">Loading…</p>
     <p v-else-if="error" class="err">{{ error }}</p>
@@ -259,7 +332,32 @@ header { display: flex; justify-content: space-between; align-items: center;
 header h1 { margin: 0; }
 .filter label { margin-left: 0.6rem; font-size: 0.85rem; color: var(--muted); }
 
-.search-row { display: flex; gap: 0.4rem; align-items: stretch; margin-bottom: 0.8rem; }
+.search-row { display: flex; gap: 0.4rem; align-items: stretch; margin-bottom: 0.6rem; }
+
+.filter-row {
+  display: flex; gap: 0.6rem; align-items: center;
+  flex-wrap: wrap; margin-bottom: 0.8rem;
+}
+.cat-chips { display: flex; gap: 0.3rem; flex-wrap: wrap; flex: 1; min-width: 0; }
+.cat-chip {
+  background: var(--bg-2); color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 0.25rem 0.7rem; font-size: 0.78rem; cursor: pointer;
+  font-family: inherit; white-space: nowrap;
+}
+.cat-chip:hover { color: var(--text); border-color: var(--accent, #ef4444); }
+.cat-chip.on {
+  background: rgba(239, 68, 68, 0.18); color: var(--accent, #ef4444);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+.cat-chip.clear { color: var(--muted); border-style: dashed; }
+.muscle-select {
+  background: var(--bg-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 0.32rem 0.55rem; font-size: 0.82rem; font-family: inherit;
+  text-transform: capitalize; cursor: pointer;
+}
+.muscle-select:focus { outline: none; border-color: var(--accent, #ef4444); }
 .search-input {
   flex: 1; background: var(--bg-2); color: var(--text);
   border: 1px solid var(--line); border-radius: 8px;

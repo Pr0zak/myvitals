@@ -11,6 +11,7 @@ import { api } from "@/api/client";
 import { apiBase, queryToken } from "@/config";
 import Card from "@/components/Card.vue";
 import WhyThisWorkout from "@/components/WhyThisWorkout.vue";
+import VarietyNudge from "@/components/VarietyNudge.vue";
 import type { StrengthExercise, StrengthWorkoutDetail, StrengthWorkoutExercise } from "@/api/types";
 
 const router = useRouter();
@@ -94,6 +95,23 @@ async function applySwap(newExId: string) {
     }
   } finally {
     swapBusy.value = false;
+  }
+}
+
+// Variety-nudge accept: AI returns target/replacement by exercise_id;
+// we map target_exercise_id back to the matching workout_exercise row.
+async function acceptNudge(p: { targetExerciseId: string; replacementExerciseId: string }) {
+  if (!workout.value) return;
+  const wex = workout.value.exercises.find(
+    (x) => x.exercise_id === p.targetExerciseId,
+  );
+  if (!wex) return;
+  try {
+    await api.swapStrengthExercise(wex.id, p.replacementExerciseId);
+    await loadAll();
+  } catch (e: unknown) {
+    /* surface via existing swapError if you want; silent for now */
+    console.warn("nudge swap failed", e);
   }
 }
 
@@ -521,6 +539,9 @@ onMounted(loadAll);
       <div class="muscles">{{ muscleGroupsFor(workout.split_focus) }}</div>
     </Card>
     <WhyThisWorkout v-if="workout" :workout-id="workout.id" />
+    <VarietyNudge v-if="workout && (workout.status === 'planned' || workout.status === 'in_progress')"
+                  :workout-id="workout.id"
+                  @accept="acceptNudge" />
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load today's plan.</p>
     <p v-else-if="loading" class="hint">Loading…</p>

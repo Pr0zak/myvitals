@@ -1008,6 +1008,191 @@ async def build_strength_review_payload(
     }
 
 
+STRENGTH_NUDGE_TOOL = {
+    "name": "give_variety_nudge",
+    "description": (
+        "Return 0-2 exercise swaps that increase variety without changing "
+        "the workout's intent. Each swap replaces a target exercise from "
+        "today's plan with a different exercise of similar muscle / "
+        "movement pattern that the user has done less recently. Return "
+        "an empty `swaps` array if the plan already provides enough "
+        "variety — better silence than a low-quality suggestion."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "swaps": {
+                "type": "array",
+                "maxItems": 2,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "target_exercise_id": {
+                            "type": "string",
+                            "description": "exercise_id of one of today's "
+                                           "exercises that should be swapped.",
+                        },
+                        "replacement_exercise_id": {
+                            "type": "string",
+                            "description": "exercise_id of the replacement, "
+                                           "must come from `available_catalog`.",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "≤24 words. Why this swap is worth "
+                                           "doing — cite recency, repetition, "
+                                           "or a meaningful pattern shift.",
+                        },
+                    },
+                    "required": ["target_exercise_id", "replacement_exercise_id", "reason"],
+                },
+            },
+        },
+        "required": ["swaps"],
+    },
+}
+
+
+def _strength_nudge_system(tone: str) -> str:
+    return f"""You are a strength coach reviewing a single planned workout
+the deterministic generator just produced. The user trains mostly with
+dumbbells + an adjustable bench at home.
+
+{_tone_line(tone)}
+
+Use the `give_variety_nudge` tool. Suggest 0-2 swaps. Rules:
+- A swap MUST keep the SAME primary muscle group as the target exercise
+  (look at `primary_muscle` in both lists).
+- The replacement MUST come from `available_catalog`. Don't invent ids.
+- Don't replace an exercise the user has logged in `recent_history`
+  with one they've ALSO done a lot recently — pick something less worn.
+- Return an empty `swaps` array if no swap is meaningfully better than
+  the current plan. Quality > quantity.
+- The `reason` cites concrete history (e.g. "Bulgarian Split Squat done
+  3 of last 4 leg sessions; Cossack Squat untouched in 4 weeks") in
+  ≤24 words.
+"""
+
+
+async def build_strength_nudge_payload(
+    db: AsyncSession, workout_id: int, catalog_by_id: dict[str, dict],
+) -> dict[str, Any]:
+    """Bounded payload for variety nudge.
+
+    Sends today's plan, last-4-week per-exercise frequency + last-seen
+    date, and the catalog (id + name + primary_muscle + movement_pattern)
+    of all exercises the user can do given current equipment + prefs."""
+    workout = await db.get(models.StrengthWorkout, workout_id)
+    if workout is None:
+        return {}
+
+    wex_rows = (await db.execute(
+        select(models.StrengthWorkoutExercise)
+        .where(models.StrengthWorkoutExercise.workout_id == workout_id)
+        .order_by(models.StrengthWorkoutExercise.order_index)
+    )).scalars().all()
+    today_plan = []
+    for wex in wex_rows:
+        info = catalog_by_id.get(wex.exercise_id, {})
+        today_plan.append({
+            "exercise_id": wex.exercise_id,
+            "name": info.get("name", wex.exercise_id),
+            "primary_muscle": info.get("primary_muscle"),
+            "movement_pattern": info.get("movement_pattern"),
+            "target_sets": wex.target_sets,
+            "target_reps_low": wex.target_reps_low,
+            "target_reps_high": wex.target_reps_high,
+        })
+
+    # Last 4 weeks of completed/in-progress workouts on this user.
+    cutoff = (workout.date - timedelta(days=28))
+    prior_workouts = (await db.execute(
+        select(models.StrengthWorkout)
+        .where(models.StrengthWorkout.date >= cutoff)
+        .where(models.StrengthWorkout.date < workout.date)
+        .where(models.StrengthWorkout.status.in_(("completed", "in_progress")))
+    )).scalars().all()
+    prior_ids = [w.id for w in prior_workouts]
+
+    recent_history: dict[str, dict[str, Any]] = {}
+    if prior_ids:
+        prior_wex = (await db.execute(
+            select(models.StrengthWorkoutExercise.exercise_id,
+                   models.StrengthWorkout.date)
+            .join(models.StrengthWorkout,
+                  models.StrengthWorkout.id ==
+                  models.StrengthWorkoutExercise.workout_id)
+            .where(models.StrengthWorkoutExercise.workout_id.in_(prior_ids))
+        )).all()
+        for ex_id, dt in prior_wex:
+            entry = recent_history.setdefault(ex_id, {"count": 0, "last_seen": None})
+            entry["count"] += 1
+            iso = str(dt)
+            if entry["last_seen"] is None or iso > entry["last_seen"]:
+                entry["last_seen"] = iso
+
+    # Catalog filtered by today's plan's primary-muscle universe + the
+    # available equipment (already represented by what the generator
+    # picked from). Cap at 60 entries to keep the payload small.
+    today_muscles = {p["primary_muscle"] for p in today_plan if p.get("primary_muscle")}
+    available_catalog = []
+    for cid, info in catalog_by_id.items():
+        if info.get("primary_muscle") in today_muscles:
+            available_catalog.append({
+                "exercise_id": cid,
+                "name": info.get("name", cid),
+                "primary_muscle": info.get("primary_muscle"),
+                "movement_pattern": info.get("movement_pattern"),
+            })
+    available_catalog = available_catalog[:60]
+
+    return {
+        "today": {
+            "date": str(workout.date),
+            "split": workout.split_focus,
+            "exercises": today_plan,
+        },
+        "recent_history": recent_history,  # exercise_id -> {count, last_seen}
+        "available_catalog": available_catalog,
+    }
+
+
+async def strength_nudge(
+    db: AsyncSession, workout_id: int, cfg: models.AiConfig,
+    catalog_by_id: dict[str, dict],
+) -> AiResult:
+    """Generate up to 2 variety-swap suggestions for today's plan."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    payload = await build_strength_nudge_payload(db, workout_id, catalog_by_id)
+    if not payload:
+        raise RuntimeError("workout not found")
+    user_text = (
+        f"Today's plan and the user's recent strength history:\n\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=400,
+        system=_cached_system(_strength_nudge_system(cfg.tone)),
+        tools=[STRENGTH_NUDGE_TOOL],
+        tool_choice={"type": "tool", "name": "give_variety_nudge"},
+        messages=[{"role": "user", "content": user_text}],
+    )
+    tool_input: dict[str, Any] = {"swaps": []}
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use" and block.name == "give_variety_nudge":
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
 async def strength_review(
     db: AsyncSession, workout_id: int, cfg: models.AiConfig,
 ) -> AiResult:

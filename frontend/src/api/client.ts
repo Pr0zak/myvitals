@@ -844,6 +844,22 @@ export const api = {
     return data;
   },
 
+  async aiStrengthNudge(workoutId: number): Promise<{
+    nudge: {
+      swaps: Array<{
+        target_exercise_id: string;
+        replacement_exercise_id: string;
+        reason: string;
+      }>;
+    };
+    generated_at: string;
+    model: string;
+    cached: boolean;
+  }> {
+    const { data } = await http.post(`/ai/strength/nudge/${workoutId}`);
+    return data;
+  },
+
   async importJobs(limit = 20): Promise<{
     id: number; kind: string; filename: string | null; size_bytes: number | null;
     status: string; started_at: string; finished_at: string | null;

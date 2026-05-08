@@ -244,20 +244,22 @@ const heroScores = computed(() => {
   return [
     {
       label: "Recovery", value: s.recovery_score != null ? Math.round(s.recovery_score) : null,
-      tone: tone(s.recovery_score) as any, spark: recoverySpark,
+      tone: tone(s.recovery_score) as any, spark: recoverySpark, mode: "line" as const,
     },
     {
       label: "Readiness", value: s.readiness_score != null ? Math.round(s.readiness_score) : null,
-      tone: tone(s.readiness_score) as any, spark: readinessSpark,
+      tone: tone(s.readiness_score) as any, spark: readinessSpark, mode: "line" as const,
     },
     {
+      // Each value is a discrete per-night score — bars communicate
+      // that better than a smoothed line.
       label: "Sleep", value: s.sleep_score != null ? Math.round(s.sleep_score) : null,
-      tone: tone(s.sleep_score) as any, spark: sleepSparkScore,
+      tone: tone(s.sleep_score) as any, spark: sleepSparkScore, mode: "bar" as const,
     },
     {
       label: "TSB", value: s.tsb != null ? Math.round(s.tsb) : null,
       tone: (s.tsb != null && s.tsb < -10 ? "warn" : "good") as any,
-      spark: tsbSpark,
+      spark: tsbSpark, mode: "line" as const,
     },
   ];
 });
@@ -265,16 +267,37 @@ const heroScores = computed(() => {
 const heroReadiness = computed(() => Math.round(summary.value?.readiness_score ?? 0));
 const heroReadinessTone = computed(() => tone(summary.value?.readiness_score ?? null));
 
-// ── Live vitals (24h hourly buckets) ──
-function bucketByHour(points: Array<{ time: string; value: number }>): number[] {
-  const buckets: number[][] = Array(24).fill(null).map(() => []);
-  const now = Date.now();
+// ── Live vitals — downsample to N buckets so the sparkline gets
+// enough detail to read but doesn't blow the canvas ──
+function downsample(
+  points: Array<{ time: string; value: number }>, buckets: number,
+): number[] {
+  if (points.length === 0) return [];
+  const start = Date.now() - 24 * 3600_000;
+  const span = 24 * 3600_000;
+  const sums = new Array(buckets).fill(0);
+  const counts = new Array(buckets).fill(0);
   for (const p of points) {
-    const ageH = Math.floor((now - new Date(p.time).getTime()) / 3600_000);
-    if (ageH < 0 || ageH >= 24) continue;
-    buckets[23 - ageH].push(p.value);
+    const t = new Date(p.time).getTime();
+    if (t < start) continue;
+    const idx = Math.min(buckets - 1, Math.floor(((t - start) / span) * buckets));
+    sums[idx] += p.value;
+    counts[idx] += 1;
   }
-  return buckets.map((b) => b.length ? b.reduce((s, v) => s + v, 0) / b.length : 0);
+  // Carry-forward for empty buckets so the line stays continuous.
+  const out: number[] = [];
+  let last = 0;
+  for (let i = 0; i < buckets; i++) {
+    if (counts[i] > 0) {
+      last = sums[i] / counts[i];
+      out.push(last);
+    } else if (last > 0) {
+      out.push(last);
+    } else {
+      // before the first sample — skip
+    }
+  }
+  return out;
 }
 function bucketSumByHour(points: Array<{ time: string; value: number }>): number[] {
   const buckets: number[] = Array(24).fill(0);
@@ -289,7 +312,7 @@ function bucketSumByHour(points: Array<{ time: string; value: number }>): number
 
 const liveHr = computed(() => {
   const pts = hr24.value?.points ?? [];
-  const series = bucketByHour(pts).filter((v) => v > 0);
+  const series = downsample(pts, 96);   // 24h ÷ 15-min buckets = 96 points
   const last = pts[pts.length - 1] ?? null;
   const ageMs = last ? Date.now() - new Date(last.time).getTime() : null;
   const ageLabel = ageMs == null ? null
@@ -307,7 +330,7 @@ const liveHr = computed(() => {
 
 const liveHrv = computed(() => {
   const pts = hrv24.value?.points ?? [];
-  const series = bucketByHour(pts).filter((v) => v > 0);
+  const series = downsample(pts, 48);   // HRV is noisier; 48 buckets is plenty
   const last = pts[pts.length - 1] ?? null;
   const baseline = baseline7d.value.hrv;
   const delta = (last && baseline != null)

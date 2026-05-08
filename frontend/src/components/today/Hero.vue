@@ -24,6 +24,7 @@ type Score = {
   value: number | null;
   tone: "good" | "warn" | "bad" | "neutral";
   spark: number[];
+  mode?: "line" | "bar";
 };
 
 const props = withDefaults(defineProps<{
@@ -90,8 +91,11 @@ function toneColor(t: Score["tone"]) {
         <div class="mono score-value">{{ s.value ?? "—" }}</div>
         <div class="score-spark">
           <Sparkline :data="s.spark" :color="toneColor(s.tone)"
-                     :height="18" :area-opacity="0.22"
-                     :dashed-mean="false" :pad-top="2"/>
+                     :height="28" :area-opacity="0.22"
+                     :dashed-mean="false" :pad-top="2"
+                     :mode="s.mode ?? 'line'"
+                     :show-symbol="(s.mode ?? 'line') === 'line' && s.spark.length <= 14"
+                     :symbol-size="3"/>
         </div>
       </div>
     </div>
@@ -173,5 +177,6 @@ function toneColor(t: Score["tone"]) {
   font-size: 22px; font-weight: 500;
   color: var(--on-surface); letter-spacing: -0.3px;
 }
-.score-spark { height: 18px; margin-top: 2px; }
+.score-spark { height: 28px; margin-top: 2px; }
+.score-card { min-height: 108px; }
 </style>

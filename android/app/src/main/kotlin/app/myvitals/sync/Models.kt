@@ -470,7 +470,11 @@ data class TrailOsmFetchAllResponse(
 )
 
 @JsonClass(generateAdapter = true)
-data class TrailsResponse(val count: Int, val trails: List<Trail> = emptyList())
+data class TrailsResponse(
+    val count: Int,
+    val trails: List<Trail> = emptyList(),
+    @Json(name = "dnis_url") val dnisUrl: String? = null,
+)
 
 @JsonClass(generateAdapter = true)
 data class TrailSubscribeBody(@Json(name = "notify_on") val notifyOn: String = "any")

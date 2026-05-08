@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Navigation
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Star
@@ -87,6 +88,7 @@ fun TrailsScreen(settings: SettingsRepository) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var trails by remember { mutableStateOf<List<Trail>>(emptyList()) }
+    var dnisUrl by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -147,6 +149,7 @@ fun TrailsScreen(settings: SettingsRepository) {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val r = withContext(Dispatchers.IO) { api.trails() }
             trails = r.trails.sortedBy { it.name }
+            dnisUrl = r.dnisUrl
             app.myvitals.data.JsonCache.write(
                 context, "trails_list",
                 app.myvitals.data.JsonCache.listType(Trail::class.java),
@@ -284,13 +287,23 @@ fun TrailsScreen(settings: SettingsRepository) {
 
     val grouped by remember(trails) {
         derivedStateOf {
+            // Sort each status bucket newest-first by source_ts (when the
+            // source flipped), falling back to fetched_at then
+            // last_seen_at. Mirrors the web Trails view.
+            fun keyOf(t: Trail): Long {
+                val v = t.sourceTs ?: t.fetchedAt ?: t.lastSeenAt
+                return runCatching {
+                    java.time.OffsetDateTime.parse(v).toInstant().toEpochMilli()
+                }.getOrDefault(0L)
+            }
+            val cmp = compareByDescending<Trail> { keyOf(it) }
             TrailGroups(
-                open = trails.filter { it.status == "open" },
-                closed = trails.filter { it.status == "closed" },
-                delayed = trails.filter { it.status == "delayed" },
+                open = trails.filter { it.status == "open" }.sortedWith(cmp),
+                closed = trails.filter { it.status == "closed" }.sortedWith(cmp),
+                delayed = trails.filter { it.status == "delayed" }.sortedWith(cmp),
                 other = trails.filter {
                     it.status != "open" && it.status != "closed" && it.status != "delayed"
-                },
+                }.sortedWith(cmp),
             )
         }
     }
@@ -329,6 +342,25 @@ fun TrailsScreen(settings: SettingsRepository) {
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // RainoutLine status board shortcut — same as web header.
+                if (dnisUrl != null) {
+                    val ctxLink = androidx.compose.ui.platform.LocalContext.current
+                    IconButton(
+                        onClick = {
+                            val intent = android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse(dnisUrl),
+                            )
+                            ctxLink.startActivity(intent)
+                        },
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Outlined.OpenInNew,
+                            contentDescription = "Open RainoutLine status board",
+                            tint = MV.OnSurfaceVariant,
+                        )
+                    }
+                }
                 IconButton(onClick = { scope.launch { refreshNow() } }, enabled = !refreshing) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = MV.OnSurface)
                 }

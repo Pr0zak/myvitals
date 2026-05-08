@@ -1024,10 +1024,12 @@ private fun ExerciseCard(
                         .getSharedPreferences("myvitals_prefs", android.content.Context.MODE_PRIVATE)
                         .getString("backend_url", "")?.trimEnd('/') ?: ""
                     if (baseUrl.isNotEmpty()) {
-                        // Tint the black-on-transparent Noun Project PNGs to
-                        // the violet accent — same effect as CSS mask-image
-                        // on web. Smaller (40dp) than the prior 64dp box so
-                        // the row chrome doesn't dominate the screen.
+                        // Photo (.jpg from base catalog) → render as-is.
+                        // Icon (.png from Noun Project) → tint violet so the
+                        // black-on-transparent silhouette becomes legible.
+                        // Mirrors web's image() vs thumb-mask split.
+                        val isPhoto = info.imageFront!!
+                            .lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") }
                         Box(
                             Modifier
                                 .size(40.dp)
@@ -1038,8 +1040,10 @@ private fun ExerciseCard(
                             AsyncImage(
                                 model = baseUrl + info.imageFront,
                                 contentDescription = name,
-                                modifier = Modifier.size(32.dp),
-                                colorFilter = ColorFilter.tint(Color(0xFFA78BFA)),
+                                modifier = if (isPhoto) Modifier.size(40.dp)
+                                           else Modifier.size(32.dp),
+                                colorFilter = if (isPhoto) null
+                                              else ColorFilter.tint(Color(0xFFA78BFA)),
                             )
                         }
                     }

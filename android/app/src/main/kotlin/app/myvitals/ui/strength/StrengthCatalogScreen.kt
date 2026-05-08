@@ -375,6 +375,11 @@ fun StrengthCatalogScreen(
                                 ).getString("backend_url", "")?.trimEnd('/') ?: ""
                             }
                             if (ex.imageFront != null && baseUrl.isNotEmpty()) {
+                                // Photo (.jpg from base catalog) → render as-is.
+                                // Icon (.png from Noun Project) → tint violet.
+                                // Mirrors web's image() vs thumb-mask split.
+                                val isPhoto = ex.imageFront!!
+                                    .lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") }
                                 Box(
                                     Modifier
                                         .size(36.dp)
@@ -385,8 +390,10 @@ fun StrengthCatalogScreen(
                                     AsyncImage(
                                         model = baseUrl + ex.imageFront,
                                         contentDescription = ex.name,
-                                        modifier = Modifier.size(28.dp),
-                                        colorFilter = ColorFilter.tint(Color(0xFFA78BFA)),
+                                        modifier = if (isPhoto) Modifier.size(36.dp)
+                                                   else Modifier.size(28.dp),
+                                        colorFilter = if (isPhoto) null
+                                                      else ColorFilter.tint(Color(0xFFA78BFA)),
                                     )
                                 }
                                 Spacer(Modifier.width(8.dp))
@@ -409,10 +416,24 @@ fun StrengthCatalogScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(ex.name, color = MV.OnSurface, fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    "${ex.movementPattern.replace('_', ' ')} · ${ex.primaryMuscle} · ${ex.level}",
-                                    color = MV.OnSurfaceVariant, fontSize = 11.sp,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val musclePath = muscleIconPath(ex.primaryMuscle)
+                                    if (musclePath != null && baseUrl.isNotEmpty()) {
+                                        AsyncImage(
+                                            model = baseUrl + musclePath,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(12.dp),
+                                            colorFilter = ColorFilter.tint(Color(0xFFA78BFA)),
+                                        )
+                                        Spacer(Modifier.width(3.dp))
+                                    }
+                                    Text(
+                                        "${ex.movementPattern.replace('_', ' ')} · " +
+                                          "${muscleIconLabel(ex.primaryMuscle).ifEmpty { ex.primaryMuscle }} · " +
+                                          ex.level,
+                                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                                    )
+                                }
                             }
                             // YouTube link — yoga poses ship without
                             // images, so this is the documentation surface.

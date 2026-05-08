@@ -26,28 +26,33 @@ ROOT = Path(__file__).resolve().parent.parent
 IMG_BASE = ROOT / "backend/src/myvitals/data/img/muscle"
 ATTRIB_PATH = IMG_BASE / "ATTRIBUTIONS.md"
 
-# Per-muscle search terms — anatomical qualifiers ("anatomy", "muscle")
-# disambiguate from random tattoo / character art results.
+# Per-muscle search terms. Order matters: list the most-specific term
+# first so we anchor to a labeled-correctly icon vs the artist's
+# generic "anatomy figure" (which gets returned for any muscle query
+# and was causing 5 muscles to all use the same PNG).
 SEARCH_TERMS: dict[str, list[str]] = {
-    "chest":      ["chest muscle anatomy", "pectoral muscle"],
-    "back":       ["back muscle anatomy", "latissimus muscle", "upper back"],
-    "shoulders":  ["shoulder muscle anatomy", "deltoid muscle"],
-    "abs":        ["abs muscle anatomy", "abdominal muscle", "six pack"],
-    "biceps":     ["biceps muscle anatomy", "biceps"],
-    "triceps":    ["triceps muscle anatomy", "triceps"],
-    "forearms":   ["forearm muscle anatomy", "forearm"],
-    "glutes":     ["glute muscle anatomy", "buttocks muscle"],
-    "quads":      ["quadriceps muscle", "thigh muscle anatomy"],
-    "hamstrings": ["hamstring muscle", "back of thigh muscle"],
-    "calves":     ["calf muscle anatomy", "gastrocnemius"],
+    "chest":      ["pectoral muscle", "chest muscle"],
+    "back":       ["latissimus dorsi", "lats muscle", "back muscle"],
+    "shoulders":  ["deltoid muscle", "shoulder muscle"],
+    "abs":        ["abdominal muscle", "rectus abdominis", "six pack abs"],
+    "biceps":     ["biceps brachii", "biceps muscle"],
+    "triceps":    ["triceps brachii", "triceps muscle"],
+    "forearms":   ["forearm muscle", "brachioradialis"],
+    "glutes":     ["gluteus muscle", "glute muscle"],
+    "quads":      ["quadriceps muscle", "rectus femoris"],
+    "hamstrings": ["hamstring muscle", "biceps femoris"],
+    "calves":     ["gastrocnemius", "calf muscle"],
 }
 
-# Priority list — chanut-is (10/11) covers everything except hamstrings;
-# hafizcreative.id (10/11) covers everything except biceps. Together:
-# 11/11 with a near-uniform line-art style.
+# Priority list — hafizcreative.id (10/11) has visually distinct icons
+# per muscle and is rotated to the front. chanut-is's "anatomy" set
+# returned the SAME generic glyph for 5 different muscle queries, so it
+# drops to fallback. The puller now also enforces icon-id uniqueness
+# across the run as a guardrail.
 PREFER_CREATORS = [
-    "chanut-is", "hafizcreative.id",
+    "hafizcreative.id", "chanut-is",
     "foxytigerson", "imginationlol", "hiddemaru", "kmgdesignid",
+    "shmai.com",
 ]
 
 
@@ -81,6 +86,7 @@ def main() -> None:
     pref = [c.lower() for c in PREFER_CREATORS]
     attributions: list[str] = []
     matched = 0
+    used_icon_ids: set[int] = set()  # uniqueness guardrail
 
     for muscle, terms in SEARCH_TERMS.items():
         chosen = None
@@ -96,9 +102,12 @@ def main() -> None:
                 continue
             if not results:
                 continue
-            if fallback is None:
-                fallback = results[0]
             for hit in results:
+                hit_id = int(hit.get("id") or hit.get("icon_id") or 0)
+                if hit_id in used_icon_ids:
+                    continue  # already-used by another muscle this run
+                if fallback is None:
+                    fallback = hit
                 u = ((hit.get("creator") or {}).get("username") or "").lower()
                 if u in pref:
                     idx = pref.index(u)
@@ -120,6 +129,7 @@ def main() -> None:
             used_term = f"<fallback to {creator}>"
 
         icon_id = chosen.get("id") or chosen.get("icon_id")
+        used_icon_ids.add(int(icon_id))
         creator_name = (chosen.get("creator") or {}).get("name") or "unknown"
         attribution = chosen.get("attribution") or \
             f"Icon by {creator_name} from The Noun Project"

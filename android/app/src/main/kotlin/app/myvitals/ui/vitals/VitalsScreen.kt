@@ -508,12 +508,49 @@ private fun HrBadge(
         }
         Spacer(Modifier.height(6.dp))
         Box(Modifier.fillMaxWidth().height(34.dp)) {
-            if (snap.points.size >= 2) {
-                HrSparkline(snap.points, color = v.color, nowMs = nowMs)
+            if (snap.points.size >= 5) {
+                // Mini distribution histogram beats the sparkline at this
+                // size — the sparkline was windowed to the last 2h and
+                // would render blank when the most recent sample was older.
+                HrMiniHistogram(snap.points, color = v.color)
             } else {
                 // No live samples — show resting trend from daily summaries.
                 SparkLine(rows.map { it.restingHr?.toFloat() }, color = v.color)
             }
+        }
+    }
+}
+
+@Composable
+private fun HrMiniHistogram(points: List<TimePoint>, color: Color) {
+    // 5-bpm bins computed from the available samples (whatever window
+    // the caller pulled — typically the last 8h on the Vitals tab).
+    Canvas(Modifier.fillMaxSize()) {
+        if (points.isEmpty()) return@Canvas
+        val bin = 5
+        val byBin = HashMap<Int, Int>()
+        var lo = Int.MAX_VALUE; var hi = Int.MIN_VALUE
+        for (p in points) {
+            val b = (p.value / bin).toInt() * bin
+            byBin[b] = (byBin[b] ?: 0) + 1
+            if (b < lo) lo = b
+            if (b > hi) hi = b
+        }
+        if (lo == Int.MAX_VALUE) return@Canvas
+        val bins = (lo..hi step bin).toList()
+        if (bins.isEmpty()) return@Canvas
+        val maxCount = (byBin.values.maxOrNull() ?: 1).coerceAtLeast(1)
+        val gap = 1.5f
+        val barW = (size.width - gap * (bins.size - 1)) / bins.size
+        bins.forEachIndexed { i, b ->
+            val c = byBin[b] ?: 0
+            val h = (c.toFloat() / maxCount) * size.height
+            val x = i * (barW + gap)
+            drawRect(
+                color = color,
+                topLeft = androidx.compose.ui.geometry.Offset(x, size.height - h),
+                size = androidx.compose.ui.geometry.Size(barW, h),
+            )
         }
     }
 }

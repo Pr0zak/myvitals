@@ -1,14 +1,20 @@
 <script setup lang="ts">
 /**
- * Hero band — readiness gauge + 4 anchor numbers + 2x2 score mini-cards.
- * Props are derived from /summary/today + 7d trailing summary upstream
- * so this component stays presentational.
+ * Slim hero — single-row strip (~84px) per the v2 design bundle:
+ * tiny readiness ring + status pip · 4 inline anchor cells with
+ * vertical dividers · inline AI verdict on the right.
+ *
+ * Score cards (Recovery / Readiness / Sleep / TSB) from the original
+ * variant are dropped here — the design intentionally trades them for
+ * a much shorter top of viewport. Re-add them in a separate module
+ * downstream if you want them back.
+ *
+ * Props are preserved from the previous Hero so Today.vue's data
+ * wiring works unchanged. `scores` is accepted but ignored.
  */
 import { computed } from "vue";
 import { Sparkles, RefreshCw } from "lucide-vue-next";
-import Gauge from "./Gauge.vue";
 import Delta from "./Delta.vue";
-import Sparkline from "./Sparkline.vue";
 
 type Anchor = {
   label: string;
@@ -28,166 +34,170 @@ type Score = {
 };
 
 const props = withDefaults(defineProps<{
-  readiness: number;            // 0-100
+  readiness: number;
   readinessTone?: "good" | "warn" | "bad";
-  verdict?: string | null;       // AI-generated; null when AI off / not yet
+  verdict?: string | null;
   aiEnabled?: boolean;
   onVerdictRefresh?: () => void;
   anchors: Anchor[];
-  scores: Score[];
+  scores?: Score[];   // accepted for API parity; not rendered in slim
   mobile?: boolean;
-}>(), { aiEnabled: true, mobile: false, readinessTone: "good", verdict: null });
+}>(), {
+  aiEnabled: true, mobile: false, readinessTone: "good",
+  verdict: null, scores: () => [],
+});
 
 const readinessColor = computed(() => {
   if (props.readinessTone === "warn") return "#EAB308";
   if (props.readinessTone === "bad") return "#EF4444";
   return "#22C55E";
 });
+const readinessLabel = computed(() => {
+  if (props.readinessTone === "warn") return "caution";
+  if (props.readinessTone === "bad") return "tanking";
+  return "primed";
+});
 
-function toneColor(t: Score["tone"]) {
-  if (t === "good") return "#22C55E";
-  if (t === "warn") return "#EAB308";
-  if (t === "bad") return "#EF4444";
-  return "#94A3B8";
-}
+// Tiny ring SVG geometry (44 px, 4 px stroke)
+const RING_SIZE = 44;
+const RING_THICK = 4;
+const ringR = (RING_SIZE - RING_THICK) / 2;
+const ringC = 2 * Math.PI * ringR;
+const ringDash = computed(() => {
+  const pct = Math.max(0, Math.min(1, (props.readiness ?? 0) / 100));
+  return `${ringC * pct} ${ringC * (1 - pct)}`;
+});
 </script>
 
 <template>
-  <div class="card linkable hero" :class="{ mobile }">
-    <!-- LEFT: gauge + verdict -->
-    <div class="left">
-      <Gauge :value="readiness" :color="readinessColor" :size="mobile ? 132 : 140"/>
-      <div class="verdict" :class="{ disabled: !aiEnabled }">
-        <Sparkles :size="13" class="verdict-icon" :class="{ off: !aiEnabled }"/>
-        <span class="verdict-text">{{ aiEnabled ? (verdict ?? "—") : "—" }}</span>
-        <button class="btn btn-icon mini" title="Regenerate"
-                @click="onVerdictRefresh && onVerdictRefresh()">
-          <RefreshCw :size="11"/>
-        </button>
+  <div class="card linkable hero-slim" :class="{ mobile }">
+    <!-- LEFT: mini ring + readiness status -->
+    <div class="ring-block">
+      <div class="ring-wrap">
+        <svg :width="RING_SIZE" :height="RING_SIZE">
+          <circle :cx="RING_SIZE / 2" :cy="RING_SIZE / 2" :r="ringR"
+                  stroke="#243042" :stroke-width="RING_THICK" fill="none"/>
+          <circle :cx="RING_SIZE / 2" :cy="RING_SIZE / 2" :r="ringR"
+                  :stroke="readinessColor" :stroke-width="RING_THICK" fill="none"
+                  stroke-linecap="round"
+                  :stroke-dasharray="ringDash"
+                  :transform="`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`"/>
+        </svg>
+        <span class="ring-num mono">{{ Math.round(readiness) }}</span>
       </div>
-    </div>
-
-    <!-- MIDDLE: anchor rows — grid so columns line up across rows -->
-    <div class="middle">
-      <div v-for="(a, i) in anchors" :key="i" class="anchor-row">
-        <span class="eyebrow">{{ a.label }}</span>
-        <span class="anchor-val mono">
-          {{ a.value }}<span v-if="a.unit" class="unit">{{ a.unit }}</span>
-          <span v-if="a.sub" class="dim sub">{{ a.sub }}</span>
-        </span>
-        <span class="anchor-delta">
-          <Delta :value="a.delta" :invert="a.invert" :suffix="a.suffix" :size="11"/>
+      <div class="ring-text">
+        <span class="eyebrow">Readiness</span>
+        <span class="ring-status" :class="`tone-${readinessTone}`">
+          <span :class="['dot', `dot-${readinessTone}`]"/>
+          {{ readinessLabel }}
         </span>
       </div>
     </div>
 
-    <!-- RIGHT: score grid -->
-    <div class="right">
-      <div v-for="(s, i) in scores" :key="i" class="score-card">
-        <div class="score-head">
-          <span class="score-label">{{ s.label }}</span>
-          <span :class="['dot', `dot-${s.tone}`]"/>
+    <div class="vdiv"/>
+
+    <!-- MIDDLE: 4 inline anchors with thin vertical dividers between -->
+    <div class="anchors">
+      <template v-for="(a, i) in anchors" :key="i">
+        <div v-if="i > 0" class="vdiv pad"/>
+        <div class="anchor">
+          <span class="eyebrow">{{ a.label }}</span>
+          <div class="anchor-val-row">
+            <span class="mono anchor-val">
+              {{ a.value }}<span v-if="a.unit" class="unit">{{ a.unit }}</span>
+              <span v-if="a.sub" class="dim sub">{{ a.sub }}</span>
+            </span>
+            <Delta :value="a.delta" :invert="a.invert" :suffix="a.suffix" :size="10"/>
+          </div>
         </div>
-        <div class="mono score-value">{{ s.value ?? "—" }}</div>
-        <div class="score-spark">
-          <Sparkline :data="s.spark" :color="toneColor(s.tone)"
-                     :height="28" :area-opacity="0.22"
-                     :dashed-mean="false" :pad-top="2"
-                     :mode="s.mode ?? 'line'"
-                     :show-symbol="(s.mode ?? 'line') === 'line' && s.spark.length <= 14"
-                     :symbol-size="3"/>
-        </div>
-      </div>
+      </template>
+    </div>
+
+    <div v-if="aiEnabled" class="vdiv"/>
+
+    <!-- RIGHT: verdict inline -->
+    <div v-if="aiEnabled" class="verdict-block">
+      <Sparkles :size="13" class="verdict-icon"/>
+      <span class="verdict-text">{{ verdict ?? "—" }}</span>
+      <button class="btn btn-icon mini" title="Regenerate"
+              @click="onVerdictRefresh && onVerdictRefresh()">
+        <RefreshCw :size="11"/>
+      </button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.hero {
-  padding: 20px;
-  display: grid;
-  /* fractional units so the gap is absorbed inside the card; the
-   * `minmax(0, …)` prevents children from forcing overflow when their
-   * intrinsic min-width exceeds the column width. */
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.1fr);
-  gap: 20px;
-  min-height: 220px;
+.hero-slim {
+  padding: 14px 18px;
+  display: flex; align-items: center; gap: 18px;
+  min-height: 84px;
 }
-.hero.mobile {
-  grid-template-columns: 1fr;
-  gap: 24px;
-  min-height: auto;
+.hero-slim.mobile {
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 14px;
+  padding: 14px 16px;
 }
-.left {
-  display: flex; flex-direction: column;
-  align-items: flex-start; gap: 16px;
-  justify-content: space-between; padding-right: 8px;
-}
-.hero.mobile .left { align-items: center; padding-right: 0; }
-.verdict {
-  display: flex; align-items: flex-start; gap: 8px;
-  font-size: 12px; color: var(--on-surface-2); line-height: 1.5;
-  padding-right: 6px;
-}
-.verdict.disabled .verdict-text { color: var(--dim); }
-.verdict-icon { color: var(--on-surface-2); margin-top: 1px; flex-shrink: 0; }
-.verdict-icon.off { opacity: 0.4; }
-.verdict-text { flex: 1; color: var(--on-surface); }
-.btn.mini { width: 22px; height: 22px; border-color: transparent; }
 
-.middle {
-  display: flex; flex-direction: column;
-  justify-content: space-between; gap: 12px;
-  padding-left: 12px; border-left: 1px solid var(--outline);
-  min-width: 0;   /* let children shrink below their intrinsic min */
+.ring-block {
+  display: flex; align-items: center; gap: 10px;
+  flex: 0 0 auto;
 }
-.hero.mobile .middle { border-left: none; padding-left: 0; gap: 16px; }
-.anchor-row {
-  display: grid;
-  /* fixed-width value column so text right-aligns to the same x
-   * across rows regardless of unit length (bpm vs ms vs / 10k).
-   * eyebrow can shrink to nothing if the column gets narrow. */
-  grid-template-columns: minmax(0, 1fr) minmax(70px, 130px) minmax(40px, 50px);
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
+.ring-wrap { position: relative; width: 44px; height: 44px; flex: 0 0 auto; }
+.ring-num {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 500; line-height: 1;
+}
+.ring-text { display: flex; flex-direction: column; }
+.ring-status {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; margin-top: 2px;
+}
+.ring-status.tone-good { color: var(--good); }
+.ring-status.tone-warn { color: var(--warn); }
+.ring-status.tone-bad  { color: var(--bad); }
+
+.vdiv {
+  width: 1px; align-self: stretch;
+  background: var(--outline);
+}
+.vdiv.pad { margin: 6px 0; }
+
+.anchors {
+  display: flex; flex: 1; gap: 14px;
+  align-items: center; min-width: 0;
+}
+.anchor {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+  flex: 1;
+}
+.anchor-val-row {
+  display: flex; align-items: baseline; gap: 6px;
+  white-space: nowrap;
 }
 .anchor-val {
-  font-size: 16px; font-weight: 500;
-  text-align: right;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 15px; font-weight: 500; line-height: 1;
   font-variant-numeric: tabular-nums;
 }
-.anchor-delta {
-  text-align: right; white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.sub { margin-left: 6px; font-size: 13px; }
+.sub { margin-left: 4px; font-size: 11px; color: var(--on-surface-2); }
 
-.right {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
-  padding-left: 8px; border-left: 1px solid var(--outline);
-  min-width: 0;
+.verdict-block {
+  display: flex; align-items: center; gap: 8px;
+  flex: 0 0 320px; max-width: 360px;
+  min-width: 240px;
 }
-.hero.mobile .right { border-left: none; padding-left: 0; }
-.score-card {
-  background: var(--surface-low);
-  border: 1px solid var(--outline);
-  border-radius: 10px; padding: 10px;
-  display: flex; flex-direction: column; justify-content: space-between;
-  min-height: 96px;
+.verdict-icon { color: var(--on-surface-2); flex: 0 0 auto; }
+.verdict-text {
+  flex: 1; font-size: 12px; color: var(--on-surface);
+  line-height: 1.45; text-wrap: pretty;
 }
-.score-head { display: flex; align-items: center; justify-content: space-between; }
-.score-label {
-  font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
-  color: var(--on-surface-2);
+.btn.mini {
+  width: 22px; height: 22px;
+  border-color: transparent; flex: 0 0 auto;
 }
-.score-value {
-  font-size: 22px; font-weight: 500;
-  color: var(--on-surface); letter-spacing: -0.3px;
-}
-.score-spark { height: 28px; margin-top: 2px; }
-.score-card { min-height: 108px; }
+
+.hero-slim.mobile .anchors { width: 100%; flex-wrap: wrap; }
+.hero-slim.mobile .verdict-block { flex: 1 1 100%; max-width: none; padding-top: 6px; border-top: 1px solid var(--outline); }
 </style>

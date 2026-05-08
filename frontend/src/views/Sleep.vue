@@ -220,11 +220,16 @@ const stats = computed(() => {
   return { avg, min, max, count: nights.value.length };
 });
 
-// Last 10 nights, newest first — for the "Recent nights" list card.
+// Most-recent-first, capped at the visible window (default 7 nights;
+// expandable up to whatever the range pull returned).
+const expandedRecent = ref(false);
+const allRecentNights = computed(() =>
+  [...nights.value].sort((a, b) => b.start.localeCompare(a.start)),
+);
 const recentNights = computed(() =>
-  [...nights.value]
-    .sort((a, b) => b.start.localeCompare(a.start))
-    .slice(0, 10),
+  expandedRecent.value
+    ? allRecentNights.value
+    : allRecentNights.value.slice(0, 7),
 );
 
 function fmtNightDate(n: SleepNight): string {
@@ -272,17 +277,28 @@ function fmtNightDate(n: SleepNight): string {
         </div>
       </Card>
 
-      <Card v-if="stats" title="Range stats"
-            :subtitle="`${stats.count} nights`">
-        <div class="kv">
-          <div><dt>Avg</dt><dd>{{ fmtDur(stats.avg) }}</dd></div>
-          <div><dt>Min</dt><dd>{{ fmtDur(stats.min) }}</dd></div>
-          <div><dt>Max</dt><dd>{{ fmtDur(stats.max) }}</dd></div>
-        </div>
-      </Card>
-
       <Card title="Recent nights"
-            :subtitle="`bed → wake · total · last ${recentNights.length}`">
+            :subtitle="`${expandedRecent ? allRecentNights.length : Math.min(7, allRecentNights.length)} of ${allRecentNights.length} · bed → wake → total`">
+        <!-- Range stats — moved into this card per the redesign -->
+        <div v-if="stats" class="rn-stats">
+          <div class="rn-stat">
+            <span class="rn-stat-label">Avg</span>
+            <span class="rn-stat-val mono">{{ fmtDur(stats.avg) }}</span>
+          </div>
+          <div class="rn-stat">
+            <span class="rn-stat-label">Min</span>
+            <span class="rn-stat-val mono">{{ fmtDur(stats.min) }}</span>
+          </div>
+          <div class="rn-stat">
+            <span class="rn-stat-label">Max</span>
+            <span class="rn-stat-val mono">{{ fmtDur(stats.max) }}</span>
+          </div>
+          <div class="rn-stat">
+            <span class="rn-stat-label">Nights</span>
+            <span class="rn-stat-val mono">{{ stats.count }}</span>
+          </div>
+        </div>
+
         <ul class="recent-nights">
           <li v-for="n in recentNights" :key="n.date">
             <span class="rn-date">{{ fmtNightDate(n) }}</span>
@@ -295,6 +311,14 @@ function fmtNightDate(n: SleepNight): string {
             <span class="rn-total mono">{{ fmtDur(n.total_s) }}</span>
           </li>
         </ul>
+
+        <button v-if="allRecentNights.length > 7"
+                class="rn-toggle"
+                @click="expandedRecent = !expandedRecent">
+          {{ expandedRecent
+              ? `Show last 7 only`
+              : `Show all ${allRecentNights.length} nights →` }}
+        </button>
       </Card>
 
       <Card title="Per-night stage breakdown">
@@ -331,6 +355,30 @@ h1 { margin: 0; }
 .kv dd { margin: 0.2rem 0 0; color: var(--text); font-weight: 500; font-size: 1.4rem; }
 
 .empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
+
+.rn-stats {
+  display: flex; gap: 1.4rem;
+  padding: 0 0.4rem 0.85rem;
+  margin-bottom: 0.85rem;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.rn-stat { display: flex; flex-direction: column; gap: 0.15rem; }
+.rn-stat-label {
+  font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600;
+}
+.rn-stat-val {
+  color: var(--text); font-size: 1.15rem; font-weight: 500;
+  font-feature-settings: "tnum";
+}
+.rn-toggle {
+  margin-top: 0.7rem; align-self: flex-start;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--accent, #ef4444); font-size: 0.82rem;
+  padding: 0.3rem 0; font-family: inherit;
+}
+.rn-toggle:hover { text-decoration: underline; }
 
 .recent-nights {
   list-style: none; padding: 0; margin: 0;

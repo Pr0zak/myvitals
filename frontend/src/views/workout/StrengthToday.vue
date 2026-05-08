@@ -248,6 +248,92 @@ function ex(slug: string): StrengthExercise | undefined { return catalogById.val
 function exName(slug: string): string {
   return ex(slug)?.name ?? slug.replace(/_/g, " ");
 }
+
+// Time-based exercises (yoga / mobility) use a countdown timer instead
+// of weight/reps inputs. The catalog row's movement_pattern flags it;
+// fallback heuristic: bodyweight + null target weight + reps >= 20 (a
+// rep count that high is almost always seconds-as-hold).
+function isTimedExercise(wex: StrengthWorkoutExercise): boolean {
+  const c = ex(wex.exercise_id);
+  if (c?.movement_pattern === "mobility") return true;
+  if (
+    wex.target_weight_lb == null &&
+    wex.target_reps_low === wex.target_reps_high &&
+    wex.target_reps_low >= 20
+  ) return true;
+  return false;
+}
+
+// Per-set countdown state — keyed by `${wexId}-${setNum}` so each row
+// has independent timing. `endsAt` is the wall-clock instant when the
+// timer hits zero; the UI reads `tickNow` so it re-renders each second.
+type TimerState = {
+  endsAt: number;          // ms epoch
+  totalS: number;          // configured hold (the target_reps as seconds)
+  finished: boolean;
+};
+const timers = ref<Record<string, TimerState>>({});
+const tickNow = ref(Date.now());
+let tickHandle: number | null = null;
+
+function timerKey(wexId: number, n: number) { return `${wexId}-${n}`; }
+function startTimer(wex: StrengthWorkoutExercise, n: number) {
+  const seconds = wex.target_reps_low;
+  const k = timerKey(wex.id, n);
+  timers.value = {
+    ...timers.value,
+    [k]: { endsAt: Date.now() + seconds * 1000, totalS: seconds, finished: false },
+  };
+  if (tickHandle == null) {
+    tickHandle = window.setInterval(() => {
+      tickNow.value = Date.now();
+      // Auto-log any expired timers exactly once.
+      for (const [key, st] of Object.entries(timers.value)) {
+        if (st.finished) continue;
+        if (tickNow.value >= st.endsAt) {
+          st.finished = true;
+          const [wexIdStr, setStr] = key.split("-");
+          const wexId = Number(wexIdStr);
+          const setN = Number(setStr);
+          const targetWex = workout.value?.exercises.find((x) => x.id === wexId);
+          if (targetWex) {
+            // Fire haptic if the browser supports it.
+            try { navigator.vibrate?.(200); } catch { /* no-op */ }
+            // Auto-log: full hold completed, no weight, rating=4 (smooth).
+            const e = entry(wexId, setN, targetWex.target_reps_low, null);
+            e.weight = "";
+            e.reps = String(targetWex.target_reps_low);
+            e.rating = 4;
+            logSet(targetWex, setN).catch((err) => console.warn(err));
+          }
+        }
+      }
+      // Stop ticking when no active timers remain.
+      if (Object.values(timers.value).every((s) => s.finished)) {
+        if (tickHandle != null) {
+          clearInterval(tickHandle);
+          tickHandle = null;
+        }
+      }
+    }, 250);
+  }
+}
+function stopTimer(wexId: number, n: number) {
+  const k = timerKey(wexId, n);
+  const copy = { ...timers.value };
+  delete copy[k];
+  timers.value = copy;
+}
+function timerRemaining(wexId: number, n: number): number | null {
+  const st = timers.value[timerKey(wexId, n)];
+  if (!st) return null;
+  if (st.finished) return 0;
+  return Math.max(0, Math.ceil((st.endsAt - tickNow.value) / 1000));
+}
+function fmtCountdown(s: number): string {
+  if (s >= 60) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  return `${s}s`;
+}
 function imageUrl(slug: string, side: 0 | 1 = 0): string | null {
   const cat = ex(slug);
   if (!cat) return null;
@@ -745,10 +831,17 @@ onMounted(loadAll);
           <div class="sets">
             <table>
               <thead>
-                <tr><th>#</th><th>Weight (lb)</th><th>Reps</th><th>Rating</th><th></th></tr>
+                <tr v-if="!isTimedExercise(wex)">
+                  <th>#</th><th>Weight (lb)</th><th>Reps</th><th>Rating</th><th></th>
+                </tr>
+                <tr v-else>
+                  <th>#</th><th colspan="3">Hold</th><th></th>
+                </tr>
               </thead>
               <tbody>
+                <!-- Standard rep-based row -->
                 <tr v-for="n in wex.target_sets" :key="n"
+                    v-if="!isTimedExercise(wex)"
                     :class="{ logged: isSetLogged(wex, n) }">
                   <td>{{ n }}</td>
                   <td>
@@ -797,10 +890,51 @@ onMounted(loadAll);
                     <span v-else class="ok">✓</span>
                   </td>
                 </tr>
+
+                <!-- Timed (yoga / mobility) row -->
+                <tr v-for="n in wex.target_sets" :key="`t-${n}`"
+                    v-if="isTimedExercise(wex)"
+                    :class="{ logged: isSetLogged(wex, n) }">
+                  <td>{{ n }}</td>
+                  <td colspan="3" class="timer-cell">
+                    <template v-if="isSetLogged(wex, n)">
+                      <span class="dim">Held {{ wex.target_reps_low }}s ✓</span>
+                    </template>
+                    <template v-else-if="timerRemaining(wex.id, n) !== null">
+                      <div class="countdown-block">
+                        <span class="countdown mono">
+                          {{ fmtCountdown(timerRemaining(wex.id, n) ?? 0) }}
+                        </span>
+                        <span class="dim small">of {{ wex.target_reps_low }}s</span>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <span class="dim">{{ wex.target_reps_low }}s hold</span>
+                    </template>
+                  </td>
+                  <td>
+                    <div v-if="!isSetLogged(wex, n)" class="row-actions">
+                      <button v-if="timerRemaining(wex.id, n) === null"
+                              class="primary small"
+                              @click="startTimer(wex, n)">
+                        ▶ Start
+                      </button>
+                      <button v-else
+                              class="ghost small"
+                              @click="stopTimer(wex.id, n)">
+                        Cancel
+                      </button>
+                    </div>
+                    <span v-else class="ok">✓</span>
+                  </td>
+                </tr>
               </tbody>
             </table>
-            <p class="rating-legend">
+            <p v-if="!isTimedExercise(wex)" class="rating-legend">
               <span class="lbl">RIR scale: how many more reps you could've done. 1 = failed → 5 = easy</span>
+            </p>
+            <p v-else class="rating-legend">
+              <span class="lbl">Hold each pose for the configured time. Tap Start; auto-logs at zero.</span>
             </p>
           </div>
         </div>
@@ -1187,6 +1321,18 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
   margin-top: 1rem; padding-top: 0.7rem;
   border-top: 1px solid var(--line);
 }
+
+.timer-cell { text-align: center; }
+.countdown-block {
+  display: inline-flex; align-items: baseline; gap: 0.4rem;
+  padding: 0.3rem 0.8rem;
+  background: rgba(167, 139, 250, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  border-radius: 8px;
+}
+.countdown { font-size: 1.2rem; font-weight: 600; color: #a78bfa;
+             font-feature-settings: "tnum"; }
+.dim.small { font-size: 0.78rem; color: var(--muted); }
 
 .week-strip {
   display: flex; gap: 0.4rem; margin: 0.4rem 0 0.8rem;

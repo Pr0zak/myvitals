@@ -1025,11 +1025,40 @@ private fun ExerciseCard(
                 ExercisePrefMenu(onSetPref)
             }
             // Sets
+            val timed = isTimedExercise(wex, info)
             for (n in 1..wex.targetSets) {
                 val key = "${wex.id}-$n"
                 val logged = wex.sets.firstOrNull { it.setNumber == n && it.actualReps != null }
                 if (logged != null) {
-                    LoggedSetRow(n, logged.actualWeightLb, logged.actualReps ?: 0, logged.rating ?: 0)
+                    if (timed) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("$n", color = MV.OnSurfaceVariant,
+                                modifier = Modifier.width(20.dp))
+                            Text("Held ${logged.actualReps ?: 0}s",
+                                color = MV.OnSurface, fontSize = 14.sp,
+                                modifier = Modifier.weight(1f))
+                            Text("✓", color = MV.Green, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        LoggedSetRow(n, logged.actualWeightLb, logged.actualReps ?: 0, logged.rating ?: 0)
+                    }
+                } else if (timed && n == nextSet) {
+                    TimedSetRow(
+                        n = n, holdSeconds = wex.targetRepsLow,
+                        onComplete = {
+                            // Auto-log when the timer hits zero. RPE 4
+                            // ("smooth completion") since the user held
+                            // the configured time.
+                            onLogSet(n, null, wex.targetRepsLow, 4)
+                            inputs.remove(key)
+                        },
+                    )
+                } else if (timed) {
+                    // Pending later set — show the dim placeholder
+                    PendingSetRow(n)
                 } else if (n == nextSet) {
                     // Inherit weight/reps from the most recently logged
                     // set of THIS exercise so an edit on set 1 carries
@@ -1073,6 +1102,87 @@ private fun ExerciseCard(
                 } else {
                     PendingSetRow(n)
                 }
+            }
+        }
+    }
+}
+
+/** Time-based exercises (yoga / mobility) use a countdown instead of
+ *  a weight/reps form. The catalog row's movement_pattern flags it;
+ *  fallback heuristic: bodyweight + null target weight + reps >= 20. */
+internal fun isTimedExercise(
+    wex: StrengthWorkoutExerciseRow, info: StrengthExerciseInfo?,
+): Boolean {
+    if (info?.movementPattern == "mobility") return true
+    if (wex.targetWeightLb == null
+        && wex.targetRepsLow == wex.targetRepsHigh
+        && wex.targetRepsLow >= 20) return true
+    return false
+}
+
+@Composable
+private fun TimedSetRow(
+    n: Int,
+    holdSeconds: Int,
+    onComplete: () -> Unit,
+) {
+    var endsAt by remember { mutableLongStateOf(0L) }
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val running = endsAt > 0L
+    LaunchedEffect(endsAt) {
+        if (endsAt == 0L) return@LaunchedEffect
+        while (true) {
+            kotlinx.coroutines.delay(250L)
+            nowMs = System.currentTimeMillis()
+            if (nowMs >= endsAt) {
+                endsAt = 0L
+                onComplete()
+                break
+            }
+        }
+    }
+    val remaining = if (running) ((endsAt - nowMs).coerceAtLeast(0L) / 1000L).toInt() else null
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("$n", color = MV.OnSurfaceVariant, modifier = Modifier.width(20.dp))
+        if (remaining != null) {
+            Box(
+                Modifier
+                    .padding(horizontal = 8.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0x21A78BFA))
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    if (remaining >= 60)
+                        "${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}"
+                    else "${remaining}s",
+                    color = Color(0xFFA78BFA), fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Text("of ${holdSeconds}s",
+                color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                modifier = Modifier.weight(1f))
+            TextButton(onClick = { endsAt = 0L }) {
+                Text("Cancel", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+            }
+        } else {
+            Text("${holdSeconds}s hold",
+                color = MV.OnSurfaceVariant, fontSize = 13.sp,
+                modifier = Modifier.weight(1f))
+            Button(
+                onClick = { endsAt = System.currentTimeMillis() + holdSeconds * 1000L },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFA78BFA), contentColor = Color.White,
+                ),
+            ) {
+                Icon(Icons.Filled.PlayArrow, contentDescription = null,
+                    modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Start", fontSize = 13.sp)
             }
         }
     }

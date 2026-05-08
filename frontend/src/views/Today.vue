@@ -27,7 +27,6 @@ import AIInsights, {
 import ActivityRow from "@/components/today/ActivityRow.vue";
 import BodyMetrics from "@/components/today/BodyMetrics.vue";
 import BloodPressure from "@/components/today/BloodPressure.vue";
-import AnnotationLog from "@/components/today/AnnotationLog.vue";
 import Footer from "@/components/today/Footer.vue";
 
 const loading = ref(true);
@@ -531,7 +530,6 @@ function openLog() { router.push("/log"); }
       />
     </div>
 
-    <AnnotationLog :chips="annotationChips" @log="openLog"/>
     <Footer :version="version" :last-sync-iso="lastSync"/>
   </div>
 </template>

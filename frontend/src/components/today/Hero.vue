@@ -66,17 +66,17 @@ function toneColor(t: Score["tone"]) {
       </div>
     </div>
 
-    <!-- MIDDLE: anchor rows -->
+    <!-- MIDDLE: anchor rows — grid so columns line up across rows -->
     <div class="middle">
       <div v-for="(a, i) in anchors" :key="i" class="anchor-row">
         <span class="eyebrow">{{ a.label }}</span>
-        <div class="anchor-vals">
-          <span class="mono num-m">
-            {{ a.value }}<span v-if="a.unit" class="unit">{{ a.unit }}</span>
-            <span v-if="a.sub" class="dim sub">{{ a.sub }}</span>
-          </span>
+        <span class="anchor-val mono">
+          {{ a.value }}<span v-if="a.unit" class="unit">{{ a.unit }}</span>
+          <span v-if="a.sub" class="dim sub">{{ a.sub }}</span>
+        </span>
+        <span class="anchor-delta">
           <Delta :value="a.delta" :invert="a.invert" :suffix="a.suffix" :size="11"/>
-        </div>
+        </span>
       </div>
     </div>
 
@@ -131,11 +131,25 @@ function toneColor(t: Score["tone"]) {
 .middle {
   display: flex; flex-direction: column;
   justify-content: space-between; gap: 12px;
-  padding-left: 8px; border-left: 1px solid var(--outline);
+  padding-left: 12px; border-left: 1px solid var(--outline);
 }
 .hero.mobile .middle { border-left: none; padding-left: 0; gap: 16px; }
-.anchor-row { display: flex; align-items: baseline; justify-content: space-between; }
-.anchor-vals { display: flex; align-items: baseline; gap: 8px; }
+.anchor-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 56px;
+  align-items: baseline;
+  gap: 12px;
+}
+.anchor-val {
+  font-size: 16px; font-weight: 500;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.anchor-delta {
+  text-align: right; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .sub { margin-left: 6px; font-size: 13px; }
 
 .right {

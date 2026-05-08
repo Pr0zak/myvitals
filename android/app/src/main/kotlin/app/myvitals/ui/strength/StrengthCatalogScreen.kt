@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ThumbDown
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -66,6 +67,7 @@ fun StrengthCatalogScreen(
     var equipment by remember { mutableStateOf<EquipmentPayload?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var search by remember { mutableStateOf("") }
     val prefs = remember { mutableStateMapOf<String, String>() }
 
     LaunchedEffect(Unit) {
@@ -98,9 +100,47 @@ fun StrengthCatalogScreen(
         return true
     }
 
-    val visible by remember(catalog, equipment) {
+    fun fuzzyScore(ex: StrengthExerciseInfo, q: String): Int? {
+        if (q.isBlank()) return 0
+        val needle = q.lowercase().trim()
+        val name = ex.name.lowercase()
+        val haystack = buildString {
+            append(name); append(' ')
+            append(ex.primaryMuscle.lowercase()); append(' ')
+            append(ex.movementPattern.lowercase().replace('_', ' ')); append(' ')
+            append(ex.equipment.joinToString(" ").lowercase()); append(' ')
+            append(ex.secondaryMuscles.joinToString(" ").lowercase())
+        }
+        var score = 0
+        for (tok in needle.split(Regex("\\s+")).filter { it.isNotEmpty() }) {
+            val idx = haystack.indexOf(tok)
+            if (idx < 0) {
+                // Subsequence fallback ("rdl" → Romanian Deadlift)
+                var h = 0
+                for (ch in tok) {
+                    val found = haystack.indexOf(ch, h)
+                    if (found < 0) return null
+                    h = found + 1
+                }
+                score += 1
+            } else {
+                score += 10
+                if (name.startsWith(tok)) score += 30 else if (name.contains(tok)) score += 20
+            }
+        }
+        return score
+    }
+
+    val visible by remember(catalog, equipment, search) {
         derivedStateOf {
-            catalog.filter { isAvailable(it) }
+            val base = catalog.filter { isAvailable(it) }
+            val q = search.trim()
+            if (q.isEmpty()) base
+            else base.mapNotNull { ex ->
+                fuzzyScore(ex, q)?.let { s -> ex to s }
+            }.sortedWith(compareByDescending<Pair<StrengthExerciseInfo, Int>> { it.second }
+                .thenBy { it.first.name })
+                .map { it.first }
         }
     }
 
@@ -136,9 +176,33 @@ fun StrengthCatalogScreen(
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
         )
 
+        androidx.compose.material3.OutlinedTextField(
+            value = search,
+            onValueChange = { search = it },
+            placeholder = { Text("Search by name, muscle, equipment…",
+                fontSize = 13.sp, color = MV.OnSurfaceVariant) },
+            singleLine = true,
+            trailingIcon = if (search.isNotEmpty()) {
+                {
+                    IconButton(onClick = { search = "" }) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Clear",
+                            tint = MV.OnSurfaceVariant)
+                    }
+                }
+            } else null,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            textStyle = androidx.compose.ui.text.TextStyle(
+                color = MV.OnSurface, fontSize = 14.sp,
+            ),
+        )
+
         when {
             loading -> Text("Loading…", color = MV.OnSurfaceVariant)
             error != null -> Text(error!!, color = MV.Red)
+            visible.isEmpty() && search.isNotBlank() -> Text(
+                "No matches for \"$search\".",
+                color = MV.OnSurfaceVariant,
+            )
             visible.isEmpty() -> Text(
                 "No available exercises — check your equipment in Settings.",
                 color = MV.OnSurfaceVariant,

@@ -1,6 +1,8 @@
 FROM node:22-alpine AS build
 WORKDIR /app
-RUN corepack enable
+# Pin pnpm 9 — pnpm 10 fails the build on ignored build scripts
+# (esbuild, vue-demi). Sticking with 9 keeps `pnpm install` non-interactive.
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 COPY package.json ./
 RUN pnpm install
 COPY . .

@@ -22,6 +22,47 @@ const prefs = ref<Record<string, string>>({});
 const loading = ref(true);
 const error = ref<string>("");
 const filter = ref<"available" | "all">("available");
+const search = ref("");
+
+// Lightweight fuzzy match — accepts loose ordering of substrings,
+// matches across name/muscle/movement_pattern/equipment fields, and
+// scores higher when the query hits the start of the name. Returns
+// null when there's no match so the caller can drop the row.
+function fuzzyScore(ex: StrengthExercise, q: string): number | null {
+  if (!q) return 0;
+  const needle = q.toLowerCase().trim();
+  if (!needle) return 0;
+  const name = ex.name.toLowerCase();
+  const haystack = [
+    name,
+    (ex.primary_muscle ?? "").toLowerCase(),
+    (ex.movement_pattern ?? "").toLowerCase().replace(/_/g, " "),
+    ex.equipment.join(" ").toLowerCase(),
+    (ex.secondary_muscles ?? []).join(" ").toLowerCase(),
+  ].join("");
+
+  // Tokenise on whitespace so "incline db" matches "Incline Dumbbell …"
+  const tokens = needle.split(/\s+/).filter(Boolean);
+  let score = 0;
+  for (const tok of tokens) {
+    const idx = haystack.indexOf(tok);
+    if (idx < 0) {
+      // Subsequence fallback — e.g. "rdl" matches "Romanian Deadlift" via r…d…l
+      let h = 0;
+      for (const ch of tok) {
+        const found = haystack.indexOf(ch, h);
+        if (found < 0) return null;
+        h = found + 1;
+      }
+      score += 1;
+    } else {
+      score += 10;
+      if (name.startsWith(tok)) score += 30;
+      else if (name.includes(tok)) score += 20;
+    }
+  }
+  return score;
+}
 
 async function load() {
   if (!queryToken.value) { loading.value = false; return; }
@@ -59,8 +100,19 @@ function isAvailable(ex: StrengthExercise): boolean {
 }
 
 const visible = computed<StrengthExercise[]>(() => {
-  if (filter.value === "all") return exercises.value;
-  return exercises.value.filter(isAvailable);
+  const base = filter.value === "all" ? exercises.value
+    : exercises.value.filter(isAvailable);
+  const q = search.value.trim();
+  if (!q) return base;
+  // Fuzzy filter + sort by score so the best matches surface first
+  // regardless of muscle group.
+  const scored: Array<{ ex: StrengthExercise; score: number }> = [];
+  for (const ex of base) {
+    const s = fuzzyScore(ex, q);
+    if (s != null) scored.push({ ex, score: s });
+  }
+  scored.sort((a, b) => b.score - a.score || a.ex.name.localeCompare(b.ex.name));
+  return scored.map((s) => s.ex);
 });
 
 const groupedByMuscle = computed(() => {
@@ -118,6 +170,13 @@ onMounted(load);
         <label><input type="radio" value="all" v-model="filter"/> All</label>
       </div>
     </header>
+
+    <div class="search-row">
+      <input class="search-input" v-model="search" type="search"
+             placeholder="Search exercises (name, muscle, pattern, equipment)…"
+             autocomplete="off" />
+      <button v-if="search" class="clear-btn" @click="search = ''" title="Clear search">×</button>
+    </div>
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load the catalog.</p>
     <p v-else-if="loading" class="hint">Loading…</p>
@@ -183,6 +242,20 @@ header { display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 1rem; flex-wrap: wrap; gap: 0.6rem; }
 header h1 { margin: 0; }
 .filter label { margin-left: 0.6rem; font-size: 0.85rem; color: var(--muted); }
+
+.search-row { display: flex; gap: 0.4rem; align-items: stretch; margin-bottom: 0.8rem; }
+.search-input {
+  flex: 1; background: var(--bg-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 0.55rem 0.8rem; font-size: 0.9rem; font-family: inherit;
+}
+.search-input::placeholder { color: var(--muted); }
+.search-input:focus { outline: none; border-color: var(--accent, #38bdf8); }
+.clear-btn {
+  background: var(--bg-2); color: var(--muted); border: 1px solid var(--line);
+  border-radius: 8px; padding: 0 0.85rem; font-size: 1.1rem; cursor: pointer;
+}
+.clear-btn:hover { color: var(--text); }
 .hint { color: var(--muted); font-size: 0.85rem; margin: 0.3rem 0; }
 .hint strong { color: var(--text); }
 .err { color: #f87171; }

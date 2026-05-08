@@ -163,7 +163,7 @@ const traceOption = computed(() => {
         lineStyle: { color: t.palette.hr, width: 1.5 },
         areaStyle: { color: `${t.palette.hr}22` },
         data: hr24.value.points.map((p) => [p.time, p.value]),
-        ...(meanMarkLine(hr24.value.avg ?? null, "avg") ?? {}),
+        markLine: meanMarkLine(hr24.value.avg ?? null, "avg"),
       },
     ],
   };
@@ -190,9 +190,9 @@ function dailyLineOption(rows: TodaySummary[], color: string) {
       itemStyle: { color },
       areaStyle: { color: `${color}1f` },
       data,
-      ...(profile.value?.resting_hr_baseline
-        ? (meanMarkLine(profile.value.resting_hr_baseline, "baseline") ?? {})
-        : {}),
+      markLine: profile.value?.resting_hr_baseline
+        ? meanMarkLine(profile.value.resting_hr_baseline, "baseline")
+        : undefined,
     }],
   };
 }

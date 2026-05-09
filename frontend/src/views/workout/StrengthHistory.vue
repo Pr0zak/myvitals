@@ -6,9 +6,11 @@
  * Phase 2: read-only. Active-workout / set-logging UI lands in Phase 4.
  */
 import { computed, onMounted, ref } from "vue";
+import VChart from "vue-echarts";
 import { api } from "@/api/client";
 import { queryToken } from "@/config";
 import Card from "@/components/Card.vue";
+import { chartTheme } from "@/theme";
 import type { StrengthExercise, StrengthWorkoutDetail } from "@/api/types";
 
 interface ListItem {
@@ -85,6 +87,94 @@ const grouped = computed(() => {
 });
 
 onMounted(() => { loadList(); loadCatalog(); });
+
+// Year-strip heatmap of completed workouts by day. Color encodes the
+// session's split_focus: strength=red, yoga=violet, cardio=blue. Days
+// without a completed workout render as empty cells. Same year-strip
+// pattern as Activities.vue's calendar.
+const FOCUS_COLOR: Record<string, string> = {
+  yoga: "#a78bfa",
+  cardio: "#38bdf8",
+};
+function focusColor(focus: string): string {
+  if (focus.toLowerCase() === "yoga") return FOCUS_COLOR.yoga;
+  if (focus.toLowerCase() === "cardio") return FOCUS_COLOR.cardio;
+  return "#ef4444"; // strength split
+}
+
+const calendarOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  const completed = items.value.filter((it) => it.status === "completed");
+  if (completed.length === 0) return null;
+  // Encode a small numeric offset per day so the visualMap can map it
+  // to the focus color. We split focus into 1=strength, 2=yoga, 3=cardio.
+  const focusBucket: Record<string, number> = {};
+  for (const it of completed) {
+    const f = it.split_focus.toLowerCase();
+    const idx = f === "yoga" ? 2 : f === "cardio" ? 3 : 1;
+    focusBucket[it.date] = idx;
+  }
+  const years = Array.from(
+    new Set(Object.keys(focusBucket).map((d) => d.slice(0, 4)))
+  ).sort((a, b) => b.localeCompare(a));
+  const TOP_PAD = 24;
+  const STRIP_H = 110;
+  const calendars = years.map((y, i) => ({
+    top: TOP_PAD + i * STRIP_H,
+    left: 30, right: 12,
+    cellSize: ["auto", 14] as [string, number],
+    range: y,
+    itemStyle: {
+      color: "#1a2332",
+      borderColor: "rgba(148, 163, 184, 0.12)", borderWidth: 1,
+    },
+    splitLine: { show: false },
+    yearLabel: { show: true, color: t.axisLabel.color, fontSize: 11,
+                 fontWeight: 600, margin: 14 },
+    monthLabel: { color: t.axisLabel.color, fontSize: 10 },
+    dayLabel: { color: t.axisLabel.color, fontSize: 9 },
+  }));
+  const series = years.map((y, i) => ({
+    type: "heatmap" as const,
+    coordinateSystem: "calendar" as const,
+    calendarIndex: i,
+    data: Object.entries(focusBucket)
+      .filter(([d]) => d.startsWith(y))
+      .map(([d, v]) => [d, v]),
+  }));
+  return {
+    tooltip: {
+      ...t.tooltip,
+      formatter: (p: any) => {
+        const labels = ["", "Strength", "Yoga", "Cardio"];
+        return `${p.value[0]}: ${labels[p.value[1]] ?? "?"}`;
+      },
+    },
+    visualMap: {
+      type: "piecewise" as const,
+      pieces: [
+        { value: 1, color: "#ef4444", label: "Strength" },
+        { value: 2, color: "#a78bfa", label: "Yoga" },
+        { value: 3, color: "#38bdf8", label: "Cardio" },
+      ],
+      orient: "horizontal", show: true, top: 0, right: 12,
+      textStyle: { color: t.axisLabel.color, fontSize: 11 },
+      itemWidth: 12, itemHeight: 12,
+    },
+    calendar: calendars,
+    series,
+  };
+});
+
+const calendarHeight = computed(() => {
+  const years = new Set<string>();
+  for (const it of items.value) {
+    if (it.status === "completed") years.add(it.date.slice(0, 4));
+  }
+  if (years.size === 0) return 140;
+  return 24 + years.size * 110 + 16;
+});
 </script>
 
 <template>
@@ -102,6 +192,12 @@ onMounted(() => { loadList(); loadCatalog(); });
     </Card>
 
     <template v-else>
+      <Card v-if="calendarOption" title="Workout calendar">
+        <div class="cal" :style="{ height: calendarHeight + 'px' }">
+          <VChart :option="calendarOption" autoresize/>
+        </div>
+      </Card>
+
       <div v-for="[ym, group] in grouped" :key="ym" class="group">
         <h2>{{ new Date(`${ym}-01`).toLocaleString(undefined, { month: 'long', year: 'numeric' }) }}</h2>
         <ul class="list">
@@ -176,6 +272,7 @@ onMounted(() => { loadList(); loadCatalog(); });
 
 <style scoped>
 .strength-history { max-width: 720px; }
+.cal { width: 100%; }
 h1 { margin: 0 0 0.6rem; }
 h2 { margin: 1.2rem 0 0.6rem; font-size: 0.85rem;
   letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }

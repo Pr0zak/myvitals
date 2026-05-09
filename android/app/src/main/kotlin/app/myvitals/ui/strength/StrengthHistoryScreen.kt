@@ -103,6 +103,7 @@ fun StrengthHistoryScreen(
                 contentPadding = PaddingValues(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                item { WorkoutCalendar(rows) }
                 items(rows, key = { it.id }) { r ->
                     HistoryRow(r) {
                         scope.launch {
@@ -113,6 +114,117 @@ fun StrengthHistoryScreen(
                 }
             }
         }
+    }
+}
+
+/** Year-strip calendar of completed workouts. Each cell is a day;
+ *  color encodes split_focus (strength=red, yoga=violet, cardio=blue).
+ *  Mirrors the web Workout-history calendar. */
+@Composable
+private fun WorkoutCalendar(rows: List<StrengthWorkoutSummary>) {
+    val completed = remember(rows) {
+        rows.filter { it.status == "completed" }
+    }
+    if (completed.isEmpty()) return
+    val byDate = remember(completed) {
+        completed.associateBy({ it.date }, { it.splitFocus.lowercase() })
+    }
+    val years = remember(byDate) {
+        byDate.keys.map { it.take(4) }.distinct().sortedDescending()
+    }
+    androidx.compose.material3.Card(
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MV.SurfaceContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "WORKOUT CALENDAR",
+                    color = MV.OnSurfaceVariant,
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
+                )
+                Spacer(Modifier.width(8.dp))
+                LegendDot(color = androidx.compose.ui.graphics.Color(0xFFEF4444), label = "Strength")
+                Spacer(Modifier.width(6.dp))
+                LegendDot(color = androidx.compose.ui.graphics.Color(0xFFA78BFA), label = "Yoga")
+                Spacer(Modifier.width(6.dp))
+                LegendDot(color = androidx.compose.ui.graphics.Color(0xFF38BDF8), label = "Cardio")
+            }
+            Spacer(Modifier.height(8.dp))
+            for (y in years) {
+                YearStrip(year = y, byDate = byDate)
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.foundation.layout.Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(color, androidx.compose.foundation.shape.CircleShape),
+        )
+        Spacer(Modifier.width(3.dp))
+        Text(label, color = MV.OnSurfaceVariant, fontSize = 9.sp)
+    }
+}
+
+@Composable
+private fun YearStrip(year: String, byDate: Map<String, String>) {
+    // Build a 53-column × 7-row grid for the year. Walk every day from
+    // Jan 1 → Dec 31 and place cells by ISO week + day-of-week.
+    val firstDay = remember(year) {
+        java.time.LocalDate.of(year.toInt(), 1, 1)
+    }
+    val daysInYear = remember(year) { firstDay.lengthOfYear() }
+    val cellSize = 10.dp
+    val cellGap = 2.dp
+    androidx.compose.foundation.layout.Box {
+        androidx.compose.foundation.Canvas(
+            modifier = Modifier
+                .height((cellSize.value * 7 + cellGap.value * 6).dp)
+                .fillMaxWidth(),
+        ) {
+            val cellPx = cellSize.toPx()
+            val gapPx = cellGap.toPx()
+            val totalCols = 53
+            val originX = 0f
+            // Origin Jan 1 might not be a Sunday, so first column is partial.
+            val startDow = firstDay.dayOfWeek.value % 7  // ISO Mon=1..Sun=7 → Sun=0
+            for (i in 0 until daysInYear) {
+                val date = firstDay.plusDays(i.toLong())
+                val col = (i + startDow) / 7
+                val row = (i + startDow) % 7
+                if (col >= totalCols) break
+                val isoDate = date.toString()
+                val focus = byDate[isoDate]
+                val color = when (focus) {
+                    null -> androidx.compose.ui.graphics.Color(0x141A2332)
+                    "yoga" -> androidx.compose.ui.graphics.Color(0xFFA78BFA)
+                    "cardio" -> androidx.compose.ui.graphics.Color(0xFF38BDF8)
+                    else -> androidx.compose.ui.graphics.Color(0xFFEF4444)
+                }
+                val x = originX + col * (cellPx + gapPx)
+                val y = row * (cellPx + gapPx)
+                drawRect(
+                    color = color,
+                    topLeft = androidx.compose.ui.geometry.Offset(x, y),
+                    size = androidx.compose.ui.geometry.Size(cellPx, cellPx),
+                )
+            }
+        }
+        Text(
+            year,
+            color = MV.OnSurfaceDim, fontSize = 9.sp,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(end = 4.dp),
+        )
     }
 }
 

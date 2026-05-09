@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import VChart from "vue-echarts";
 import Card from "@/components/Card.vue";
+import Skeleton from "@/components/Skeleton.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import type { SleepNight } from "@/api/types";
@@ -255,7 +256,11 @@ function fmtNightDate(n: SleepNight): string {
     </header>
 
     <div v-if="error" class="err">{{ error }}</div>
-    <div v-if="loading" class="empty">Loading…</div>
+    <div v-if="loading" class="sleep-skel">
+      <Skeleton width="100%" height="180px" radius="12px"/>
+      <Skeleton width="100%" height="60px" radius="12px"/>
+      <Skeleton width="100%" height="60px" radius="12px"/>
+    </div>
     <div v-else-if="nights.length === 0" class="empty">
       No sleep sessions in this range. Make sure your watch is logging sleep + Fitbit is sharing it with Health Connect.
     </div>
@@ -356,6 +361,7 @@ h1 { margin: 0; }
 .kv dd { margin: 0.2rem 0 0; color: var(--text); font-weight: 500; font-size: 1.4rem; }
 
 .empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
+.sleep-skel { display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
 
 .rn-stats {
   display: flex; gap: 1.4rem;

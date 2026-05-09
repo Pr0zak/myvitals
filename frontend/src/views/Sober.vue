@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import VChart from "vue-echarts";
 import { Pencil, Trash2, X, Check, RotateCcw, Award, Calendar as CalIcon, TrendingUp } from "lucide-vue-next";
 import Card from "@/components/Card.vue";
+import Skeleton from "@/components/Skeleton.vue";
 import { api } from "@/api/client";
 import { fmtDateTime } from "@/format";
 import { chartTheme } from "@/theme";
@@ -222,7 +223,10 @@ const timelineOption = computed(() => {
     <p class="hint">Tap reset whenever a slip happens. Past streaks stay in your history so you can see progress over time.</p>
 
     <div v-if="error" class="err">{{ error }}</div>
-    <div v-if="loading" class="loading">Loading…</div>
+    <div v-if="loading" class="skel-stack">
+      <Skeleton width="100%" height="120px" radius="12px"/>
+      <Skeleton width="100%" height="80px" radius="12px"/>
+    </div>
 
     <template v-else>
       <!-- ────── Big live counter ────── -->
@@ -364,6 +368,7 @@ const timelineOption = computed(() => {
 h1 { margin: 0 0 0.4rem; }
 .hint { color: var(--muted); font-size: 0.9rem; margin: 0 0 1.2rem; }
 .loading { color: var(--muted); padding: 2rem 0; text-align: center; }
+.skel-stack { display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
 .err {
   color: var(--bad); padding: 0.6rem 0.8rem;
   background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad);

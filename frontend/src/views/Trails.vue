@@ -14,6 +14,7 @@ import { Star, RefreshCw, Navigation, Pencil, Map as MapIcon, Bike } from "lucid
 import { api } from "@/api/client";
 import { queryToken } from "@/config";
 import Card from "@/components/Card.vue";
+import Skeleton from "@/components/Skeleton.vue";
 import TrailMap from "@/components/TrailMap.vue";
 
 type Trail = Awaited<ReturnType<typeof api.trails>>["trails"][number];
@@ -445,7 +446,11 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
     <p v-if="linkResult" class="hint" style="text-align: right">{{ linkResult }}</p>
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load trails.</p>
-    <p v-else-if="loading" class="hint">Loading…</p>
+    <div v-else-if="loading" class="skeleton-trails">
+      <div v-for="n in 6" :key="n" class="skel-row">
+        <Skeleton width="100%" height="58px" radius="8px"/>
+      </div>
+    </div>
     <p v-else-if="error" class="err">{{ error }}</p>
     <Card v-else-if="trails.length === 0" title="No trails seeded yet">
       <p class="hint">
@@ -747,6 +752,7 @@ header h1 { margin: 0; }
 .nav-ic { color: var(--muted-2); margin-left: 0.4rem; vertical-align: middle; }
 .rainout-link { color: var(--muted); text-decoration: none; margin-left: 0.3rem; }
 .rainout-link:hover { color: var(--accent); }
+.skeleton-trails { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 1rem; }
 .loc { color: var(--muted); }
 .loc.nopin { color: #f59e0b; }
 .visits { font-weight: 500; }

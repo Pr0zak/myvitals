@@ -6,8 +6,10 @@ Tracking deferred work. Move items to commit messages as they ship.
 
 ### Phone-side alert notifications
 
-Backend already produces structured alerts (`/ai/alerts`) via the
-6-hour anomaly cron. The companion app needs to surface them.
+Backend already produces structured alerts (`/ai/alerts`); since
+v0.7.128 these are generated lazily on read (when the most recent
+alert is >6h old) instead of by a fixed-cadence cron. The companion
+app needs to surface them.
 
 - [ ] Add `aiAlerts()` + `markAlertsNotified()` to `BackendClient.kt`
 - [ ] Inside `SyncWorker.doWork()`, after a successful sync, fetch

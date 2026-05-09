@@ -37,6 +37,8 @@ class StrengthRepository(
     private val moshi: Moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val logSetAdapter: JsonAdapter<LogSetRequest> =
         moshi.adapter(LogSetRequest::class.java)
+    private val patchAdapter: JsonAdapter<WorkoutPatchRequest> =
+        moshi.adapter(WorkoutPatchRequest::class.java)
 
     private fun api() = BackendClient.create(settings.backendUrl, settings.bearerToken)
 
@@ -93,21 +95,53 @@ class StrengthRepository(
             }
         }
 
+    /** Patch the workout status. On network failure: buffer the request,
+     *  mutate the local cache so the UI reflects the new state, and
+     *  return the locally-mutated plan. SyncWorker / the foreground
+     *  flush replay buffered patches in oldest-first order. */
+    private suspend fun patchWithBuffer(
+        workoutId: Long, body: WorkoutPatchRequest,
+    ): StrengthWorkoutDetail = withContext(Dispatchers.IO) {
+        try {
+            val updated = api().patchStrengthWorkout(workoutId, body)
+            planCache.savePlan(updated)
+            updated
+        } catch (e: Exception) {
+            Timber.w(e, "patchStrengthWorkout %s buffered: %s", workoutId, body)
+            AppDatabase.get(context).bufferedWorkoutWrites().insert(
+                app.myvitals.data.BufferedWorkoutWrite(
+                    kind = "patch_workout",
+                    path = workoutId.toString(),
+                    jsonBody = patchAdapter.toJson(body),
+                    createdAtEpochS = System.currentTimeMillis() / 1000,
+                ),
+            )
+            // Optimistic local update so the screen flips status without
+            // waiting for the next online sync.
+            val cached = planCache.loadPlan() ?: return@withContext throw e
+            val mutated = cached.copy(
+                status = body.status ?: cached.status,
+                completedAt = body.completedAt ?: cached.completedAt,
+            )
+            planCache.savePlan(mutated)
+            mutated
+        }
+    }
+
     suspend fun completeWorkout(workoutId: Long): StrengthWorkoutDetail =
-        withContext(Dispatchers.IO) {
-            api().patchStrengthWorkout(workoutId, WorkoutPatchRequest(
+        patchWithBuffer(
+            workoutId,
+            WorkoutPatchRequest(
                 status = "completed",
                 completedAt = java.time.Instant.now().toString(),
-            ))
-        }
+            ),
+        )
 
     suspend fun aiReview(workoutId: Long): app.myvitals.sync.StrengthReviewResponse =
         withContext(Dispatchers.IO) { api().strengthReview(workoutId) }
 
     suspend fun deferWorkout(workoutId: Long): StrengthWorkoutDetail =
-        withContext(Dispatchers.IO) {
-            api().patchStrengthWorkout(workoutId, app.myvitals.sync.WorkoutPatchRequest(status = "skipped"))
-        }
+        patchWithBuffer(workoutId, WorkoutPatchRequest(status = "skipped"))
 
     /** Discard an ad-hoc workout (e.g. one created via Custom workout
      *  that the user changed their mind about). Marks it `regenerated`
@@ -116,17 +150,10 @@ class StrengthRepository(
      *  workout's logged sets stay in the DB but it's no longer the
      *  "current" plan. */
     suspend fun discardWorkout(workoutId: Long): StrengthWorkoutDetail =
-        withContext(Dispatchers.IO) {
-            api().patchStrengthWorkout(
-                workoutId,
-                app.myvitals.sync.WorkoutPatchRequest(status = "regenerated"),
-            )
-        }
+        patchWithBuffer(workoutId, WorkoutPatchRequest(status = "regenerated"))
 
     suspend fun unskipWorkout(workoutId: Long): StrengthWorkoutDetail =
-        withContext(Dispatchers.IO) {
-            api().patchStrengthWorkout(workoutId, app.myvitals.sync.WorkoutPatchRequest(status = "planned"))
-        }
+        patchWithBuffer(workoutId, WorkoutPatchRequest(status = "planned"))
 
     suspend fun equipment(): app.myvitals.sync.EquipmentResponse =
         withContext(Dispatchers.IO) { api().strengthEquipment() }
@@ -138,7 +165,19 @@ class StrengthRepository(
 
     suspend fun setPref(exerciseId: String, pref: String) {
         withContext(Dispatchers.IO) {
-            api().setExercisePref(exerciseId, app.myvitals.sync.ExercisePrefBody(pref))
+            try {
+                api().setExercisePref(exerciseId, app.myvitals.sync.ExercisePrefBody(pref))
+            } catch (e: Exception) {
+                Timber.w(e, "setPref network error — buffering")
+                AppDatabase.get(context).bufferedWorkoutWrites().insert(
+                    app.myvitals.data.BufferedWorkoutWrite(
+                        kind = "set_pref",
+                        path = exerciseId,
+                        jsonBody = "\"$pref\"",
+                        createdAtEpochS = System.currentTimeMillis() / 1000,
+                    ),
+                )
+            }
         }
     }
 
@@ -197,7 +236,44 @@ class StrengthRepository(
         flushed
     }
 
+    /** Replay buffered workout-mutation writes (status patches +
+     *  exercise-pref toggles). Oldest-first to preserve user intent
+     *  when multiple writes happened to the same workout. */
+    suspend fun flushBufferedWorkoutWrites(): Int = withContext(Dispatchers.IO) {
+        val dao = AppDatabase.get(context).bufferedWorkoutWrites()
+        var flushed = 0
+        for (row in dao.oldest()) {
+            try {
+                when (row.kind) {
+                    "patch_workout" -> {
+                        val body = patchAdapter.fromJson(row.jsonBody) ?: continue
+                        api().patchStrengthWorkout(row.path.toLong(), body)
+                    }
+                    "set_pref" -> {
+                        // jsonBody = pref string ("favorite" | "avoid" | "disabled" | "")
+                        api().setExercisePref(
+                            row.path,
+                            app.myvitals.sync.ExercisePrefBody(row.jsonBody.trim('"')),
+                        )
+                    }
+                    else -> {
+                        Timber.w("Unknown buffered kind: %s", row.kind)
+                    }
+                }
+                dao.delete(row.id)
+                flushed++
+            } catch (e: Exception) {
+                Timber.w(e, "flushBufferedWorkoutWrites failed at id=${row.id}")
+                dao.bumpAttempts(row.id)
+                break
+            }
+        }
+        flushed
+    }
+
+    /** Combined count: set logs + workout writes (status / pref). */
     suspend fun bufferedCount(): Int = withContext(Dispatchers.IO) {
-        AppDatabase.get(context).bufferedStrengthSets().count()
+        AppDatabase.get(context).bufferedStrengthSets().count() +
+            AppDatabase.get(context).bufferedWorkoutWrites().count()
     }
 }

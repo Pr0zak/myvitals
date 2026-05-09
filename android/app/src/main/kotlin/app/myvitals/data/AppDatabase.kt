@@ -113,15 +113,54 @@ interface BufferedStrengthSetDao {
     suspend fun count(): Int
 }
 
+/**
+ * One row per workout-mutation write (complete / skip / discard / pref)
+ * that couldn't be sent. Replayed in oldest-first order. The `kind`
+ * field tags the call so the dispatcher knows which Retrofit method
+ * to invoke; `path` is the resource id (workout id, exercise id) the
+ * call targets; `jsonBody` is the serialized body if any.
+ */
+@Entity(tableName = "buffered_workout_writes")
+data class BufferedWorkoutWrite(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val kind: String,            // patch_workout | set_pref
+    val path: String,            // e.g. "42" or "Goblet_Squat"
+    val jsonBody: String,
+    val createdAtEpochS: Long,
+    val attempts: Int = 0,
+)
+
+@Dao
+interface BufferedWorkoutWriteDao {
+    @Insert
+    suspend fun insert(row: BufferedWorkoutWrite)
+
+    @Query("SELECT * FROM buffered_workout_writes ORDER BY createdAtEpochS ASC LIMIT 100")
+    suspend fun oldest(): List<BufferedWorkoutWrite>
+
+    @Query("DELETE FROM buffered_workout_writes WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("UPDATE buffered_workout_writes SET attempts = attempts + 1 WHERE id = :id")
+    suspend fun bumpAttempts(id: Long)
+
+    @Query("SELECT COUNT(*) FROM buffered_workout_writes")
+    suspend fun count(): Int
+}
+
 @Database(
-    entities = [BufferedBatch::class, LogEntry::class, BufferedStrengthSet::class],
-    version = 3,
+    entities = [
+        BufferedBatch::class, LogEntry::class,
+        BufferedStrengthSet::class, BufferedWorkoutWrite::class,
+    ],
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun buffered(): BufferedBatchDao
     abstract fun logs(): LogDao
     abstract fun bufferedStrengthSets(): BufferedStrengthSetDao
+    abstract fun bufferedWorkoutWrites(): BufferedWorkoutWriteDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null

@@ -177,15 +177,15 @@ fun StrengthTodayScreen(
 
     LaunchedEffect(Unit) { reload(); refreshBuffered() }
     app.myvitals.ui.common.LifecycleResumeEffect { scope.launch { reload() } }
-    // Auto-flush buffered set logs when network comes back online. The
-    // user logs while offline → buffer fills → connectivity returns →
-    // this LaunchedEffect kicks the flush within ~1 s of the network
-    // callback firing.
+    // Auto-flush both buffers (set logs + workout-status patches) when
+    // network returns. Sets first so the workout's logged-set list is
+    // current before the patch applies; then status patches.
     LaunchedEffect(online) {
         if (online && bufferedSets > 0) {
             flushing = true
             try {
                 repo.flushBufferedSets()
+                repo.flushBufferedWorkoutWrites()
                 refreshBuffered()
                 if (bufferedSets == 0) reload()
             } finally { flushing = false }
@@ -359,6 +359,7 @@ fun StrengthTodayScreen(
                         flushing = true
                         try {
                             repo.flushBufferedSets()
+                            repo.flushBufferedWorkoutWrites()
                             refreshBuffered()
                             if (bufferedSets == 0) reload()
                         } finally { flushing = false }

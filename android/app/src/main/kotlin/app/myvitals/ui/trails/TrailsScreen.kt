@@ -1012,36 +1012,8 @@ try {
   ), 900);
 } catch (e) { console.error('map init failed:', e.toString()); }
 </script></body></html>"""
-    AndroidView(
-        factory = { wctx ->
-            WebView(wctx).apply {
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.loadsImagesAutomatically = true
-                settings.mixedContentMode =
-                    android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                webViewClient = WebViewClient()
-                webChromeClient = object : android.webkit.WebChromeClient() {
-                    override fun onConsoleMessage(
-                        m: android.webkit.ConsoleMessage,
-                    ): Boolean {
-                        Timber.tag("MiniMap").i(
-                            "[${m.messageLevel()}] ${m.message()} (${m.sourceId()}:${m.lineNumber()})",
-                        )
-                        return true
-                    }
-                }
-                setBackgroundColor(android.graphics.Color.parseColor("#0F1620"))
-                loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
-                tag = html
-            }
-        },
-        update = { webview ->
-            if (webview.tag != html) {
-                webview.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
-                webview.tag = html
-            }
-        },
+    app.myvitals.ui.common.LeafletWebView(
+        html = html,
         modifier = Modifier.fillMaxWidth().height(220.dp),
     )
 }
@@ -1121,27 +1093,8 @@ try{
   setTimeout(fix,50);setTimeout(fix,300);setTimeout(fix,800);
 }catch(e){console.error('overview map failed:',e.toString());}
 </script></body></html>"""
-    AndroidView(
-        factory = { wctx ->
-            WebView(wctx).apply {
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.loadsImagesAutomatically = true
-                settings.mixedContentMode =
-                    android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                webViewClient = WebViewClient()
-                setBackgroundColor(android.graphics.Color.parseColor("#0F1620"))
-                loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
-                tag = html
-            }
-        },
-        update = { webview ->
-            if (webview.tag != html) {
-                webview.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
-                webview.tag = html
-            }
-        },
-        modifier = Modifier.fillMaxSize(),
+    app.myvitals.ui.common.LeafletWebView(
+        html = html, modifier = Modifier.fillMaxSize(),
     )
 }
 

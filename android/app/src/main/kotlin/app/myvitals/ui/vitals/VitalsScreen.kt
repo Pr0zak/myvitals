@@ -2,6 +2,7 @@ package app.myvitals.ui.vitals
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -444,8 +445,28 @@ private fun BadgeFrame(
     v: Vital, lastUpdate: String?,
     onClick: () -> Unit,
     onLongPress: (() -> Unit)? = null,
+    pulseBpm: Double? = null,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
+    // When pulseBpm is set, the eyebrow icon scales rhythmically at
+    // the user's actual heart rate (60_000 / BPM ms per cycle). HR
+    // badge uses this for live samples; everything else stays static.
+    val pulseScale = if (pulseBpm != null && pulseBpm > 0) {
+        val durationMs = (60_000.0 / pulseBpm).coerceIn(400.0, 2_000.0).toInt()
+        val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "hr-pulse")
+        transition.animateFloat(
+            initialValue = 1.0f, targetValue = 1.25f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                animation = androidx.compose.animation.core.tween(
+                    durationMillis = durationMs / 2,
+                    easing = androidx.compose.animation.core.EaseInOut,
+                ),
+                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+            ),
+            label = "hr-pulse-scale",
+        ).value
+    } else 1.0f
+
     Card(
         colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
         modifier = Modifier.fillMaxWidth().height(150.dp)
@@ -456,8 +477,14 @@ private fun BadgeFrame(
     ) {
         Column(Modifier.padding(12.dp).fillMaxSize()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(v.icon, contentDescription = v.label,
-                    tint = v.color, modifier = Modifier.size(14.dp))
+                Icon(
+                    v.icon, contentDescription = v.label, tint = v.color,
+                    modifier = Modifier.size(14.dp).then(
+                        if (pulseScale != 1.0f)
+                            Modifier.graphicsLayer(scaleX = pulseScale, scaleY = pulseScale)
+                        else Modifier,
+                    ),
+                )
                 Spacer(Modifier.width(6.dp))
                 Text(v.label, color = MV.OnSurfaceVariant,
                     fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
@@ -493,7 +520,8 @@ private fun HrBadge(
         }
         else -> Triple<String?, String?, String?>(null, null, null)
     }
-    BadgeFrame(v, lastUpdate, onClick) {
+    val livePulseBpm = if (label == "live" && snap.latest != null) snap.latest else null
+    BadgeFrame(v, lastUpdate, onClick, pulseBpm = livePulseBpm) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(value ?: "—", color = MV.OnSurface,
                 fontSize = 22.sp, fontWeight = FontWeight.SemiBold)

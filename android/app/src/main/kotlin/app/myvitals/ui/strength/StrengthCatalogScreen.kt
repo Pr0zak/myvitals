@@ -366,13 +366,11 @@ fun StrengthCatalogScreen(
                         ) {
                             // Thumbnail: prefer Noun Project image_front
                             // (tinted violet), fall back to hand-drawn yoga
-                            // silhouette for mobility entries.
-                            val ctx = LocalContext.current
-                            val baseUrl = remember {
-                                ctx.getSharedPreferences(
-                                    "myvitals_prefs",
-                                    android.content.Context.MODE_PRIVATE,
-                                ).getString("backend_url", "")?.trimEnd('/') ?: ""
+                            // silhouette for mobility entries. Use the
+                            // SettingsRepository passed into the screen
+                            // instead of re-reading SharedPreferences.
+                            val baseUrl = remember(settings) {
+                                settings.backendUrl.trimEnd('/')
                             }
                             if (ex.imageFront != null && baseUrl.isNotEmpty()) {
                                 // Photo (.jpg from base catalog) → render as-is.

@@ -36,7 +36,14 @@ function hasAny(s: Array<number | null>): boolean {
     <RouterLink to="/heart-rate" class="cell linkable hr">
       <div class="head">
         <div class="title hr-title">
-          <Heart :size="14"/>
+          <!-- Pulses at the user's current BPM when the latest sample
+               is < 2 min old; static otherwise. CSS animation duration
+               is set inline as 60s/BPM via :style. -->
+          <Heart :size="14"
+                 :class="{ pulsing: hr.ageLabel === 'live' && hr.latest != null }"
+                 :style="hr.ageLabel === 'live' && hr.latest != null
+                   ? `animation-duration: ${Math.max(0.4, Math.min(2, 60 / hr.latest))}s`
+                   : undefined"/>
           <span class="eyebrow brand">Heart Rate</span>
         </div>
         <span class="dim age">{{ hr.ageLabel ?? "—" }}</span>
@@ -141,6 +148,22 @@ function hasAny(s: Array<number | null>): boolean {
 .head { display: flex; align-items: center; justify-content: space-between; }
 .title { display: flex; align-items: center; gap: 6px; }
 .title.hr-title { color: var(--brand); }
+/* Heart-icon live pulse — animation-duration is set per-render via
+   :style based on the user's actual BPM (60s ÷ BPM). Falls back to
+   static when ageLabel != "live". */
+.title.hr-title :deep(.lucide-heart.pulsing) {
+  animation-name: heart-pulse;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+  transform-origin: center;
+}
+@keyframes heart-pulse {
+  0%   { transform: scale(1.0); }
+  20%  { transform: scale(1.25); }
+  40%  { transform: scale(1.0); }
+  60%  { transform: scale(1.12); }
+  100% { transform: scale(1.0); }
+}
 .brand { color: var(--brand); }
 .good  { color: var(--good); }
 .muted { color: var(--on-surface-2); }

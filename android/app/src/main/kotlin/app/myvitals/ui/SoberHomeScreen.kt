@@ -223,26 +223,78 @@ fun SoberHomeScreen(
                     letterSpacing = 3.6.sp,
                     color = MV.OnSurfaceVariant,
                 )
-                Spacer(Modifier.height(36.dp))
+                Spacer(Modifier.height(24.dp))
 
-                Text(
-                    text = "$d",
-                    fontSize = 132.sp,
-                    fontWeight = FontWeight.Light,
-                    color = MV.OnSurface,
-                    style = androidx.compose.ui.text.TextStyle(
-                        fontFeatureSettings = "tnum",
-                        letterSpacing = (-4).sp,
-                    ),
-                )
-                Text(
-                    text = if (d == 1) "day" else "days",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Normal,
-                    color = MV.OnSurface.copy(alpha = 0.92f),
-                    letterSpacing = 0.2.sp,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
+                // Milestone ring — wraps the day count. Stroke arc
+                // sweeps clockwise from 12 o'clock to the fraction of
+                // the next milestone reached. Mirrors web Sober.vue.
+                val (mTarget, mFraction, mRemaining) = remember(d, h, m) {
+                    val elapsedDays = d + h / 24.0 + m / 1440.0
+                    val milestones = listOf(7, 14, 30, 60, 90, 180, 365, 730)
+                    val next = milestones.firstOrNull { it > elapsedDays }
+                    if (next == null) {
+                        Triple(730, 1.0, 0.0)
+                    } else {
+                        val prev = milestones.reversed().firstOrNull { it <= elapsedDays } ?: 0
+                        val frac = ((elapsedDays - prev) / (next - prev))
+                            .coerceIn(0.0, 1.0)
+                        Triple(next, frac, (next - elapsedDays).coerceAtLeast(0.0))
+                    }
+                }
+                Box(
+                    modifier = Modifier.size(280.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                        val stroke = androidx.compose.ui.graphics.drawscope
+                            .Stroke(width = 6.dp.toPx(),
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                        val ringColor = androidx.compose.ui.graphics.Color(0xFF22C55E)
+                        val bgColor = ringColor.copy(alpha = 0.10f)
+                        val padding = stroke.width / 2f
+                        val arcSize = androidx.compose.ui.geometry.Size(
+                            size.width - padding * 2, size.height - padding * 2,
+                        )
+                        val topLeft = androidx.compose.ui.geometry.Offset(padding, padding)
+                        drawArc(
+                            color = bgColor,
+                            startAngle = 0f, sweepAngle = 360f, useCenter = false,
+                            topLeft = topLeft, size = arcSize, style = stroke,
+                        )
+                        drawArc(
+                            color = ringColor,
+                            startAngle = -90f,
+                            sweepAngle = (360f * mFraction).toFloat(),
+                            useCenter = false,
+                            topLeft = topLeft, size = arcSize, style = stroke,
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "$d",
+                            fontSize = 96.sp,
+                            fontWeight = FontWeight.Light,
+                            color = MV.OnSurface,
+                            style = androidx.compose.ui.text.TextStyle(
+                                fontFeatureSettings = "tnum",
+                                letterSpacing = (-3).sp,
+                            ),
+                        )
+                        Text(
+                            text = if (d == 1) "day" else "days",
+                            fontSize = 18.sp,
+                            color = MV.OnSurface.copy(alpha = 0.92f),
+                        )
+                        Text(
+                            text = if (mRemaining > 0)
+                                "%.1f d to ${mTarget}d".format(mRemaining)
+                            else "All milestones cleared",
+                            fontSize = 11.sp,
+                            color = MV.OnSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
 
                 Spacer(Modifier.height(28.dp))
                 Row(

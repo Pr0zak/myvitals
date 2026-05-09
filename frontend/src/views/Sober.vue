@@ -45,6 +45,29 @@ const startedAtLabel = computed(() => {
   return fmtDateTime(current.value.active.start_at);
 });
 
+// Milestone ring: progress to the next round-number milestone. Caps
+// once the user passes the last milestone (730d) — the ring fills.
+const MILESTONES = [7, 14, 30, 60, 90, 180, 365, 730];
+const milestone = computed(() => {
+  if (!liveCounter.value) return null;
+  const elapsedDays = liveCounter.value.d
+    + liveCounter.value.h / 24
+    + liveCounter.value.m / 1440;
+  const next = MILESTONES.find((m) => m > elapsedDays);
+  if (next == null) {
+    return { current: elapsedDays, target: 730, fraction: 1, label: "All milestones cleared", remaining: 0 };
+  }
+  const prev = [...MILESTONES].reverse().find((m) => m <= elapsedDays) ?? 0;
+  const fraction = Math.max(0, Math.min(1, (elapsedDays - prev) / (next - prev)));
+  return {
+    current: elapsedDays,
+    target: next,
+    fraction,
+    label: `Next: ${next}-day milestone`,
+    remaining: Math.max(0, next - elapsedDays),
+  };
+});
+
 async function load() {
   loading.value = true;
   error.value = null;
@@ -206,11 +229,29 @@ const timelineOption = computed(() => {
       <Card flat>
         <div class="counter-card">
           <div v-if="liveCounter" class="counter">
-            <div class="counter-num">
-              <span class="d">{{ liveCounter.d }}</span><span class="lbl">d</span>
-              <span class="h">{{ String(liveCounter.h).padStart(2, '0') }}</span><span class="lbl">h</span>
-              <span class="m">{{ String(liveCounter.m).padStart(2, '0') }}</span><span class="lbl">m</span>
-              <span class="s mono">{{ String(liveCounter.s).padStart(2, '0') }}</span>
+            <!-- Milestone ring wraps the counter; SVG circle stroke
+                 advances clockwise from 12 o'clock to the next
+                 milestone target. -->
+            <div class="ring-wrap">
+              <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+                <circle class="ring-bg" cx="60" cy="60" r="54"/>
+                <circle class="ring-fg" cx="60" cy="60" r="54"
+                        :stroke-dasharray="2 * Math.PI * 54"
+                        :stroke-dashoffset="(2 * Math.PI * 54) * (1 - (milestone?.fraction ?? 0))"/>
+              </svg>
+              <div class="ring-content">
+                <div class="counter-num">
+                  <span class="d">{{ liveCounter.d }}</span><span class="lbl">d</span>
+                  <span class="h">{{ String(liveCounter.h).padStart(2, '0') }}</span><span class="lbl">h</span>
+                  <span class="m">{{ String(liveCounter.m).padStart(2, '0') }}</span><span class="lbl">m</span>
+                  <span class="s mono">{{ String(liveCounter.s).padStart(2, '0') }}</span>
+                </div>
+                <div v-if="milestone" class="counter-milestone">
+                  {{ milestone.remaining > 0
+                     ? `${milestone.remaining.toFixed(1)} d to ${milestone.target}d milestone`
+                     : milestone.label }}
+                </div>
+              </div>
             </div>
             <div class="counter-since">since {{ startedAtLabel }}</div>
           </div>
@@ -350,6 +391,34 @@ h1 { margin: 0 0 0.4rem; }
   font-weight: 500; margin: 0 0.5rem 0 0.05rem; align-self: center;
 }
 .counter-since { color: var(--muted); font-size: 0.85rem; }
+.counter-milestone { color: var(--muted); font-size: 0.78rem; margin-top: 0.2rem; }
+/* Milestone ring: SVG circle whose stroke advances clockwise toward
+   the next round-number milestone (7/14/30/60/90/180/365/730 days). */
+.ring-wrap {
+  position: relative;
+  width: 240px; height: 240px;
+  display: flex; align-items: center; justify-content: center;
+}
+.ring {
+  position: absolute; inset: 0;
+  transform: rotate(-90deg);  /* start arc at 12 o'clock */
+}
+.ring-bg {
+  fill: none; stroke: rgba(34, 197, 94, 0.10); stroke-width: 6;
+}
+.ring-fg {
+  fill: none; stroke: #22c55e; stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.6s ease-out;
+}
+.ring-content {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 0.3rem;
+  text-align: center;
+}
+.ring-content .counter-num { font-size: 1.8rem; }
+.ring-content .counter-num .s { font-size: 1.1rem; }
 .counter-empty p { margin: 0; color: var(--muted); }
 .reset-btn {
   background: rgba(239, 68, 68, 0.08); color: #ef4444;

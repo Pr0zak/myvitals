@@ -1021,9 +1021,7 @@ private fun ExerciseCard(
                     )
                 }
                 if (info?.imageFront != null) {
-                    val baseUrl = LocalContext.current
-                        .getSharedPreferences("myvitals_prefs", android.content.Context.MODE_PRIVATE)
-                        .getString("backend_url", "")?.trimEnd('/') ?: ""
+                    val baseUrl = remember(settings) { settings.backendUrl.trimEnd('/') }
                     if (baseUrl.isNotEmpty()) {
                         // Photo (.jpg from base catalog) → render as-is.
                         // Icon (.png from Noun Project) → tint violet so the

@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
@@ -125,6 +126,8 @@ fun StrengthTodayScreen(
     var deferring by remember { mutableStateOf(false) }
     var swapWexId by remember { mutableStateOf<Long?>(null) }
     var swapping by remember { mutableStateOf(false) }
+    var customSheetOpen by remember { mutableStateOf(false) }
+    var customGenerating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     var review by remember { mutableStateOf<StrengthReviewBody?>(null) }
@@ -254,6 +257,15 @@ fun StrengthTodayScreen(
                         leadingIcon = { Icon(Icons.Filled.Tune, null,
                             modifier = Modifier.size(16.dp)) },
                         onClick = { headerMenuOpen = false; onOpenTrainingPrefs() },
+                    )
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Custom workout") },
+                        leadingIcon = { Icon(Icons.Filled.AddCircle, null,
+                            modifier = Modifier.size(16.dp)) },
+                        onClick = {
+                            headerMenuOpen = false
+                            customSheetOpen = true
+                        },
                     )
                     if (workout?.status == "planned" || workout?.status == "in_progress") {
                         androidx.compose.material3.DropdownMenuItem(
@@ -687,6 +699,158 @@ fun StrengthTodayScreen(
                 }
             }
         }
+    }
+
+    // ── Custom workout sheet ────────────────────────────────────
+    if (customSheetOpen) {
+        CustomWorkoutSheet(
+            generating = customGenerating,
+            onDismiss = { customSheetOpen = false },
+            onGenerate = { type, durationMin, difficulty ->
+                scope.launch {
+                    customGenerating = true
+                    try {
+                        val api = BackendClient.create(
+                            settings.backendUrl, settings.bearerToken,
+                        )
+                        api.swapStrengthTodayType(
+                            app.myvitals.sync.SwapTodayTypeRequest(
+                                type = type,
+                                durationMinutes = durationMin,
+                                difficulty = difficulty,
+                            ),
+                        )
+                        customSheetOpen = false
+                        reload()
+                    } catch (e: Exception) {
+                        Timber.w(e, "custom workout generate failed")
+                        error = e.message?.take(160)
+                    } finally {
+                        customGenerating = false
+                    }
+                }
+            },
+        )
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun CustomWorkoutSheet(
+    generating: Boolean,
+    onDismiss: () -> Unit,
+    onGenerate: (type: String, durationMin: Int, difficulty: String) -> Unit,
+) {
+    var type by remember { mutableStateOf("strength") }
+    var difficulty by remember { mutableStateOf("normal") }
+    var durationMin by remember { mutableIntStateOf(45) }
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MV.SurfaceContainer,
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+            Text(
+                "Custom workout",
+                color = MV.OnSurface, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "Generate a one-off session — the planner picks exercises sized to "
+                + "your duration + difficulty.",
+                color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
+            )
+
+            // Type picker — three pills
+            SectionLabel("Type")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("strength", "yoga", "cardio").forEach { t ->
+                    PillChip(
+                        label = t.replaceFirstChar { it.uppercase() },
+                        selected = type == t,
+                        onClick = { type = t },
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+
+            // Duration picker — preset buttons
+            SectionLabel("Duration")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(15, 30, 45, 60, 90).forEach { mins ->
+                    PillChip(
+                        label = "${mins}m",
+                        selected = durationMin == mins,
+                        onClick = { durationMin = mins },
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+
+            // Difficulty picker
+            SectionLabel("Difficulty")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    "easy" to "Easy",
+                    "normal" to "Normal",
+                    "hard" to "Hard",
+                ).forEach { (key, label) ->
+                    PillChip(
+                        label = label,
+                        selected = difficulty == key,
+                        onClick = { difficulty = key },
+                    )
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+
+            androidx.compose.material3.Button(
+                onClick = { onGenerate(type, durationMin, difficulty) },
+                enabled = !generating,
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFA78BFA),
+                    contentColor = Color.White,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (generating) "Generating…" else "Generate workout")
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+        fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
+        modifier = Modifier.padding(bottom = 6.dp),
+    )
+}
+
+@Composable
+private fun PillChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    androidx.compose.foundation.layout.Box(
+        modifier = Modifier
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(999.dp))
+            .background(
+                if (selected) Color(0x33A78BFA) else Color(0x141A2332),
+            )
+            .border(
+                width = 1.dp,
+                color = if (selected) Color(0xFFA78BFA) else Color(0x40A78BFA),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(999.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Text(
+            label,
+            color = if (selected) Color(0xFFA78BFA) else MV.OnSurfaceVariant,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        )
     }
 }
 

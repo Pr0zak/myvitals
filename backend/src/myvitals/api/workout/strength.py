@@ -1395,10 +1395,18 @@ async def regenerate_today(
 
 
 class SwapTypeBody(BaseModel):
-    """Override today's plan as a different workout type."""
+    """Override today's plan as a different workout type.
+
+    Used by /today/swap-type and the phone "ad-hoc workout" picker.
+    `duration_minutes` and `difficulty` are honored when the user wants
+    a one-off session (longer / shorter / harder) instead of the
+    profile-default plan."""
     type: Literal["strength", "yoga", "cardio"]
     # Optional split override for strength: push / pull / legs / etc.
     split: str | None = None
+    # Optional length / intensity overrides for ad-hoc sessions.
+    duration_minutes: int | None = None  # clamped 10-120 by the handler
+    difficulty: Literal["easy", "normal", "hard"] | None = None
 
 
 @router.post("/today/swap-type", response_model=WorkoutOut)
@@ -1433,19 +1441,31 @@ async def swap_today_type(
     equipment = await _equipment_payload(db)
     profile = await db.get(models.UserProfile, 1)
 
+    duration = (
+        max(10, min(120, body.duration_minutes))
+        if body.duration_minutes is not None else None
+    )
     if body.type == "strength":
         plan = await strength_algo.generate_plan(
             db, today, equipment, profile,
             regen_count=regen_count, force_no_rest=True,
             override_split=body.split,
+            duration_minutes=duration,
+            difficulty=body.difficulty,
         )
     elif body.type == "yoga":
         mob_hist = await strength_algo.recent_mobility_history(db)
         plan = strength_algo.build_yoga_plan(
             today, regen_count=regen_count, mobility_history=mob_hist,
+            duration_minutes=duration,
+            difficulty=body.difficulty,
         )
     else:  # cardio
-        plan = strength_algo.build_cardio_plan(today, regen_count=regen_count)
+        plan = strength_algo.build_cardio_plan(
+            today, regen_count=regen_count,
+            duration_minutes=duration,
+            difficulty=body.difficulty,
+        )
 
     workout = await strength_algo.persist_plan(db, plan, today)
     return await _hydrate_workout(db, workout)

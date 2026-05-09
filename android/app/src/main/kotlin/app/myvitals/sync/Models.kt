@@ -298,6 +298,14 @@ data class StrengthWorkoutsResponse(
 data class RegenerateRequest(val force: Boolean = false)
 
 @JsonClass(generateAdapter = true)
+data class SwapTodayTypeRequest(
+    val type: String,                                  // "strength" | "yoga" | "cardio"
+    val split: String? = null,
+    @Json(name = "duration_minutes") val durationMinutes: Int? = null,
+    val difficulty: String? = null,                    // "easy" | "normal" | "hard"
+)
+
+@JsonClass(generateAdapter = true)
 data class StrengthRecoveryResponse(
     val date: String,
     @Json(name = "recovery_aware") val recoveryAware: Boolean,

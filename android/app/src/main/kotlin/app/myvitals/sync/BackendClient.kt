@@ -43,6 +43,11 @@ interface BackendApi {
     @POST("workout/strength/today/regenerate")
     suspend fun regenerateStrengthToday(@Body body: RegenerateRequest): StrengthWorkoutDetail
 
+    @POST("workout/strength/today/swap-type")
+    suspend fun swapStrengthTodayType(
+        @Body body: SwapTodayTypeRequest,
+    ): StrengthWorkoutDetail
+
     @GET("workout/strength/recovery")
     suspend fun strengthRecovery(): StrengthRecoveryResponse
 

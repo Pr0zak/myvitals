@@ -895,13 +895,14 @@ def schedule_day_type(
 def build_yoga_plan(
     target_date: date, regen_count: int = 0,
     mobility_history: dict[str, dict[str, float | int]] | None = None,
+    duration_minutes: int | None = None,
+    difficulty: str | None = None,
 ) -> GeneratedPlan:
-    """Standalone yoga session — used when the user explicitly swaps
-    today to yoga via /today/swap-type. 5 poses, 45 s holds.
+    """Standalone yoga session.
 
-    `mobility_history` (optional) is the dict from
-    `recent_mobility_history`; when present, per-pose targets are
-    nudged up/down via `adjust_mobility_target`.
+    `duration_minutes` (10-120) sizes the pose count: ~5 min per pose,
+    so 30 min → 6 poses, 60 min → 12 poses. Defaults to 5 poses.
+    `difficulty` shifts hold-time: easy=30 s, normal=45 s, hard=60 s.
     """
     seed = _seed(target_date, regen_count)
     rng = random.Random(seed)
@@ -910,13 +911,18 @@ def build_yoga_plan(
         if e.get("movement_pattern") == "mobility"
         and "bodyweight" in (e.get("equipment") or [])
     ]
-    n = min(5, len(pool))
+    if duration_minutes is None:
+        n_target = 5
+    else:
+        n_target = max(3, min(15, duration_minutes // 5))
+    n = min(n_target, len(pool))
     picks = rng.sample(pool, k=n) if pool else []
+    base_hold = {"easy": 30, "hard": 60}.get(difficulty or "", 45)
     exs = []
     for i, ex in enumerate(picks):
         bilateral = bool(ex.get("is_bilateral", False))
         timed = ex.get("is_timed", True)
-        rl, rh = (45, 45) if timed else (8, 10)
+        rl, rh = (base_hold, base_hold) if timed else (8, 10)
         if mobility_history is not None:
             rl, rh = adjust_mobility_target(
                 rl, rh, mobility_history.get(ex["id"]), timed,
@@ -929,22 +935,37 @@ def build_yoga_plan(
         ))
     return GeneratedPlan(
         seed=seed, split_focus="yoga", exercises=exs,
-        notes=["Yoga / mobility flow — 5 poses, ~45 s holds."],
+        notes=[
+            f"Yoga / mobility flow — {n} poses, "
+            f"~{base_hold} s holds."
+            + (f" ({difficulty})" if difficulty and difficulty != "normal" else ""),
+        ],
     )
 
 
-def build_cardio_plan(target_date: date, regen_count: int = 0) -> GeneratedPlan:
+def build_cardio_plan(
+    target_date: date, regen_count: int = 0,
+    duration_minutes: int | None = None,
+    difficulty: str | None = None,
+) -> GeneratedPlan:
     """Standalone cardio recommendation — surfaces as a notes-only
     workout. The Today screen renders the prescription text rather
-    than an exercise list."""
+    than an exercise list. `duration_minutes` and `difficulty` shift
+    the prescribed length and HR target."""
     seed = _seed(target_date, regen_count)
+    minutes = duration_minutes or 35
+    hr_low, hr_high = {
+        "easy": (115, 125),
+        "hard": (145, 160),
+    }.get(difficulty or "", (125, 135))
+    zone = {"easy": "Z2", "hard": "Z3-Z4"}.get(difficulty or "", "Z2")
     return GeneratedPlan(
         seed=seed, split_focus="cardio", exercises=[],
         notes=[
-            "Cardio recommendation: 30-45 min Z2 effort. "
-            "Target HR ~125-135 bpm (conversational pace). Rower, "
-            "bike, walk, or trail at easy intensity. Builds aerobic "
-            "base without blunting strength gains.",
+            f"Cardio: {minutes} min {zone} effort. "
+            f"Target HR ~{hr_low}-{hr_high} bpm "
+            f"({'conversational' if zone == 'Z2' else 'comfortably hard'} pace). "
+            "Rower, bike, walk, or trail.",
         ],
     )
 
@@ -957,6 +978,8 @@ async def generate_plan(
     regen_count: int = 0,
     force_no_rest: bool = False,
     override_split: str | None = None,
+    duration_minutes: int | None = None,
+    difficulty: str | None = None,
 ) -> GeneratedPlan:
     """Build (but don't persist) a strength plan for the given date.
 
@@ -1125,12 +1148,29 @@ async def generate_plan(
 
     # Compute target weights for each exercise, applying history + deload
     deload = recovery.deload_factor() if recovery else 1.0
+    # Ad-hoc difficulty knob: easy -10% on top of deload, hard +5%.
+    if difficulty == "easy":
+        deload *= 0.90
+    elif difficulty == "hard":
+        deload *= 1.05
     if deload < 1.0:
         notes.append(
             f"Targets reduced by {round((1 - deload) * 100)}% based on today's "
             f"recovery / sleep / readiness. Toggle this off in Settings if you "
             f"prefer the algorithm to ignore those signals."
         )
+    if difficulty and difficulty != "normal":
+        notes.append(f"Ad-hoc session — difficulty: {difficulty}.")
+    # Ad-hoc duration: rough rule = 8 min per exercise (incl. rest).
+    # Trim or extend the chosen list. Default plans run 5-6 exercises.
+    if duration_minutes is not None:
+        target_count = max(3, min(10, duration_minutes // 8))
+        if len(chosen) > target_count:
+            chosen = chosen[:target_count]
+            chosen_slots = chosen_slots[:target_count]
+            notes.append(
+                f"Trimmed to {target_count} exercises for ~{duration_minutes} min session."
+            )
 
     plan_exs: list[ExerciseInPlan] = []
     pairs_lb = (equipment.get("dumbbells") or {}).get("pairs_lb") or []

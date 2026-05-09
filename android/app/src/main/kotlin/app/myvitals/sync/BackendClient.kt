@@ -207,6 +207,7 @@ interface BackendApi {
     suspend fun activities(
         @retrofit2.http.Query("type") type: String? = null,
         @retrofit2.http.Query("limit") limit: Int = 50,
+        @retrofit2.http.Query("since") since: String? = null,
     ): List<ActivityRow>
 
     @POST("activities/{source}/{sourceId}/link-trail")

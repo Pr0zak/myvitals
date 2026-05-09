@@ -10,7 +10,7 @@
  * /query/weight, /query/blood-pressure, /annotations, /profile,
  * /ai/config + /ai/verdict + /ai/explain-topic.
  */
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import type {
@@ -142,7 +142,32 @@ async function refreshTopic() {
   if (activeTopic.value) await selectTopic(activeTopic.value);
 }
 
-onMounted(() => { loadCore(); loadAi(); });
+// Live polling — every 30s while the tab is visible, refresh just the
+// rapidly-changing data (HR, HRV, steps, summary). Heavy queries
+// (activities, BP/weight 30d, annotations) stay on the loadCore path
+// — they don't change minute-to-minute. Pause when tab is hidden so
+// background tabs don't burn requests.
+let liveTickHandle: number | null = null;
+async function loadLive() {
+  if (document.visibilityState !== "visible") return;
+  const dayAgo = new Date(Date.now() - 24 * 3600 * 1000);
+  const [s, h, hv, st] = await Promise.all([
+    api.todaySummary().catch(() => null),
+    api.heartRate({ since: dayAgo }).catch(() => null),
+    api.hrv({ since: dayAgo }).catch(() => null),
+    api.steps({ since: dayAgo }).catch(() => null),
+  ]);
+  if (s) { summary.value = s; lastSync.value = s.last_sync ?? null; }
+  if (h) hr24.value = h;
+  if (hv) hrv24.value = hv;
+  if (st) steps24.value = st;
+}
+
+onMounted(() => {
+  loadCore(); loadAi();
+  liveTickHandle = window.setInterval(loadLive, 30_000);
+});
+onBeforeUnmount(() => { if (liveTickHandle) clearInterval(liveTickHandle); });
 useVisibilityRefresh(() => { loadCore(); loadAi(); });
 
 // ── Derived: hero anchors ──

@@ -41,6 +41,11 @@ class HealthConnectGateway(private val context: Context) {
         HealthPermission.getReadPermission(BodyFatRecord::class),
         HealthPermission.getReadPermission(LeanBodyMassRecord::class),
         HealthPermission.getReadPermission(BloodPressureRecord::class),
+        // Background reads — WorkManager fires the sync every 15 min
+        // while the phone is asleep. Without this, every record-type
+        // request throws SecurityException despite per-record perms
+        // being granted. Required on Android 14+ / HC 1.1+.
+        HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND,
     )
 
     fun isAvailable(): Boolean =

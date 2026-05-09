@@ -359,7 +359,10 @@ async def update_activity_notes(
 async def list_activities(
     since: datetime | None = Query(None),
     type: str | None = Query(None),
-    limit: int = Query(50, ge=1, le=500),
+    # Single-user app — bumped cap from 500 → 5000 so the YTD/YoY card
+    # on the Activities page can pull 18 months of history in one call
+    # without truncating. Anything larger would still cap server-side.
+    limit: int = Query(50, ge=1, le=5000),
     db: AsyncSession = Depends(get_session),
 ) -> list[ActivityOut]:
     stmt = (

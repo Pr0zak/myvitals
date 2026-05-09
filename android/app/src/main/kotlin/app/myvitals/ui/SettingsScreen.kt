@@ -303,6 +303,61 @@ fun SettingsScreen(
                             },
                         )
                     }
+                    // When HC denies reads despite the app showing all
+                    // permissions granted (the "permission ghost" state),
+                    // the recovery path is in the Health Connect app —
+                    // not myvitals' grant-prompt. Surface a deep-link
+                    // button so the user can fix it without hunting.
+                    if (settings.permissionsLost) {
+                        Divider()
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        ) {
+                            Text(
+                                "Health Connect is denying reads. The app shows all "
+                                    + "permissions granted but HC itself is blocking — "
+                                    + "open the Health Connect app, tap myvitals, and "
+                                    + "toggle each permission off then back on.",
+                                fontSize = 12.sp,
+                                color = MV.OnSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 10.dp),
+                            )
+                            FilledPill(
+                                label = "Open Health Connect",
+                                enabled = true,
+                                onClick = {
+                                    runCatching {
+                                        // Settings → Health Connect app permissions
+                                        // (works when the HC app is installed; the
+                                        // Settings activity is the official entry
+                                        // point for permission management).
+                                        val intent = android.content.Intent(
+                                            "android.health.connect.action.HEALTH_HOME_SETTINGS",
+                                        ).apply {
+                                            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                                        }
+                                        context.startActivity(intent)
+                                    }.recoverCatching {
+                                        // Fallback: open the HC app directly
+                                        val pkg = "com.google.android.apps.healthdata"
+                                        val intent = context.packageManager
+                                            .getLaunchIntentForPackage(pkg)
+                                        if (intent != null) {
+                                            intent.flags =
+                                                android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                                            context.startActivity(intent)
+                                        } else {
+                                            Toast.makeText(
+                                                context,
+                                                "Health Connect app not found",
+                                                Toast.LENGTH_LONG,
+                                            ).show()
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
                     Divider()
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                         Text(

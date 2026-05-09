@@ -14,12 +14,22 @@ import { fmtDateTime } from "@/format";
 
 type SortKey = "date" | "distance" | "duration" | "avg_hr" | "suffer" | "kcal" | "elevation";
 type ViewMode = "grid" | "list";
-type RangeKey = "7d" | "30d" | "90d" | "365d" | "all";
+type RangeKey = "7d" | "30d" | "90d" | "ytd" | "365d" | "all";
+
+// YTD is dynamic — `daysInYearToDate()` returns the number of days
+// elapsed since Jan 1 of the current year. Read at the call site so
+// the value stays correct across the date boundary.
+function daysInYearToDate(): number {
+  const now = new Date();
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  return Math.floor((now.getTime() - startOfYear.getTime()) / 86_400_000) + 1;
+}
 
 const RANGES: { key: RangeKey; label: string; days: number | null }[] = [
   { key: "7d", label: "7d", days: 7 },
   { key: "30d", label: "30d", days: 30 },
   { key: "90d", label: "90d", days: 90 },
+  { key: "ytd", label: "YTD", days: -1 },  // -1 sentinel — resolved at fetch time
   { key: "365d", label: "1y", days: 365 },
   { key: "all", label: "all", days: null },
 ];
@@ -32,7 +42,12 @@ const strengthWorkouts = ref<Array<{
 const loading = ref(false);
 const error = ref<string | null>(null);
 
-const range = ref<RangeKey>(loadPref("range", "30d") as RangeKey);
+// YTD + same-period-last-year — independent of the range selector so
+// "year-over-year" stays available even when the user is filtering 30d.
+const ytdActivities = ref<Activity[]>([]);
+const ytdLoading = ref(false);
+
+const range = ref<RangeKey>(loadPref("range", "ytd") as RangeKey);
 const sortKey = ref<SortKey>(loadPref("sort", "date") as SortKey);
 const sortDesc = ref<boolean>(loadPref("sortDesc", "true") === "true");
 const typesActive = ref<Set<string>>(new Set(loadPref("types", "").split(",").filter(Boolean)));
@@ -57,7 +72,10 @@ async function load() {
   loading.value = true;
   error.value = null;
   try {
-    const days = RANGES.find((r) => r.key === range.value)!.days;
+    const rangeCfg = RANGES.find((r) => r.key === range.value)!;
+    // -1 sentinel = YTD; resolve to "days since Jan 1" at fetch time so
+    // the window stays correct across day boundaries.
+    const days = rangeCfg.days === -1 ? daysInYearToDate() : rangeCfg.days;
     const params: { since?: Date; limit: number } = { limit: 500 };
     if (days !== null) {
       const since = new Date();
@@ -123,8 +141,73 @@ async function load() {
   }
 }
 
-onMounted(load);
+onMounted(() => { load(); loadYtd(); });
 watch(range, load);
+
+// Pull activities from Jan 1 of last year so we have both the current
+// YTD window and the equivalent same-period-last-year window in one
+// dataset for the YoY card.
+async function loadYtd() {
+  ytdLoading.value = true;
+  try {
+    const now = new Date();
+    const startOfLastYear = new Date(now.getFullYear() - 1, 0, 1);
+    const r = await api.activities({ since: startOfLastYear, limit: 2000 });
+    ytdActivities.value = r;
+  } catch {
+    ytdActivities.value = [];
+  } finally {
+    ytdLoading.value = false;
+  }
+}
+
+// === YTD + YoY comparison ===
+// Buckets activities into "this year YTD" and "same period last year".
+// Same-period = Jan 1 last year through MM-DD of today (inclusive).
+const ytdStats = computed(() => {
+  const now = new Date();
+  const thisYear = now.getFullYear();
+  const lastYear = thisYear - 1;
+  const startOfThisYear = new Date(thisYear, 0, 1);
+  const startOfLastYear = new Date(lastYear, 0, 1);
+  // End-of-same-period last year = today's MM-DD in last year.
+  const endOfLastYear = new Date(lastYear, now.getMonth(), now.getDate(),
+    23, 59, 59);
+
+  const empty = () => ({ n: 0, distance: 0, duration: 0, elevation: 0, kcal: 0 });
+  const ytd = empty();
+  const lyr = empty();
+
+  for (const a of ytdActivities.value) {
+    const d = new Date(a.start_at);
+    const target = (() => {
+      if (d >= startOfThisYear && d <= now) return ytd;
+      if (d >= startOfLastYear && d <= endOfLastYear) return lyr;
+      return null;
+    })();
+    if (!target) continue;
+    target.n += 1;
+    target.distance += a.distance_m ?? 0;
+    target.duration += a.duration_s ?? 0;
+    target.elevation += a.elevation_gain_m ?? 0;
+    target.kcal += a.kcal ?? 0;
+  }
+  function pct(now: number, prev: number): number {
+    if (prev === 0) return now === 0 ? 0 : 100;
+    return ((now - prev) / prev) * 100;
+  }
+  return {
+    thisYear, lastYear,
+    ytd, lyr,
+    pct: {
+      n: pct(ytd.n, lyr.n),
+      distance: pct(ytd.distance, lyr.distance),
+      duration: pct(ytd.duration, lyr.duration),
+      elevation: pct(ytd.elevation, lyr.elevation),
+      kcal: pct(ytd.kcal, lyr.kcal),
+    },
+  };
+});
 
 const allTypes = computed(() =>
   Array.from(new Set(activities.value.map((a) => a.type))).sort()
@@ -202,10 +285,29 @@ function isPR(a: Activity): PRBadge[] {
 const heatmapOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
-  // Bucket minutes-per-day, keyed by ISO date.
+  // Compute the inclusive lower bound of the heatmap window. For
+  // YTD we anchor to Jan 1 of the current year (rather than 365d ago)
+  // so a single late-Dec activity from last year doesn't trigger a
+  // second calendar strip — that was the "still show 2 cals" report.
+  const rangeCfg = RANGES.find((r) => r.key === range.value);
+  let minDate: string | null = null;
+  if (rangeCfg) {
+    if (rangeCfg.key === "ytd") {
+      const y = new Date().getFullYear();
+      minDate = `${y}-01-01`;
+    } else if (rangeCfg.days != null && rangeCfg.days > 0) {
+      const d = new Date();
+      d.setDate(d.getDate() - rangeCfg.days);
+      minDate = d.toISOString().slice(0, 10);
+    }
+  }
+  // Bucket minutes-per-day, keyed by ISO date. Drop anything outside
+  // the active range so calendar strips only render years that the
+  // user actually selected.
   const bucket: Record<string, number> = {};
   for (const a of activities.value) {
     const d = a.start_at.slice(0, 10);
+    if (minDate !== null && d < minDate) continue;
     bucket[d] = (bucket[d] ?? 0) + a.duration_s / 60;
   }
   if (Object.keys(bucket).length === 0) return null;
@@ -216,13 +318,17 @@ const heatmapOption = computed(() => {
     new Set(Object.keys(bucket).map((d) => d.slice(0, 4)))
   ).sort((a, b) => b.localeCompare(a));
 
-  const STRIP_H = 110;     // px reserved per year
-  const TOP_PAD = 24;
+  // Tighter strip height — cells are 12 px so 7 rows = 84 px; plus the
+  // month labels above add ~14 px, leaving ~6 px breathing room at
+  // 104 px per year. Was 110 with 14-px cells which left a big empty
+  // band below when only one strip rendered.
+  const STRIP_H = 100;
+  const TOP_PAD = 14;
   const calendars = years.map((y, i) => ({
     top: TOP_PAD + i * STRIP_H,
     left: 30,
     right: 12,
-    cellSize: ["auto", 14] as [string, number],
+    cellSize: ["auto", 12] as [string, number],
     range: y,
     itemStyle: {
       color: "#1a2332",
@@ -263,12 +369,30 @@ const heatmapOption = computed(() => {
 });
 
 // Reserve enough chart height for one strip per year so all calendars
-// render without overflow.
+// render without overflow. Matches STRIP_H + TOP_PAD above so the
+// container hugs the rendered strips.
 const heatmapHeight = computed(() => {
   const years = new Set<string>();
-  for (const a of activities.value) years.add(a.start_at.slice(0, 4));
-  if (years.size === 0) return 140;
-  return 24 + years.size * 110 + 16;
+  // Mirror the heatmap's range filter — only count years that will
+  // actually render so the height stays correct for YTD vs all.
+  const rangeCfg = RANGES.find((r) => r.key === range.value);
+  let minDate: string | null = null;
+  if (rangeCfg) {
+    if (rangeCfg.key === "ytd") {
+      minDate = `${new Date().getFullYear()}-01-01`;
+    } else if (rangeCfg.days != null && rangeCfg.days > 0) {
+      const d = new Date();
+      d.setDate(d.getDate() - rangeCfg.days);
+      minDate = d.toISOString().slice(0, 10);
+    }
+  }
+  for (const a of activities.value) {
+    const d = a.start_at.slice(0, 10);
+    if (minDate !== null && d < minDate) continue;
+    years.add(d.slice(0, 4));
+  }
+  if (years.size === 0) return 110;
+  return 14 + years.size * 100 + 6;
 });
 
 // === Formatters ===
@@ -369,6 +493,78 @@ const monthLabel = (key: string) =>
         <div class="stat">
           <div class="num">{{ stats.streak_days }} <span class="unit">d</span></div>
           <div class="lbl">streak</div>
+        </div>
+      </div>
+    </Card>
+
+    <!-- YTD + YoY -->
+    <Card v-if="!ytdLoading && ytdActivities.length > 0"
+          :title="`${ytdStats.thisYear} year-to-date · vs ${ytdStats.lastYear}`">
+      <div class="ytd-grid">
+        <div class="ytd-cell">
+          <div class="ytd-num">{{ ytdStats.ytd.n }}</div>
+          <div class="ytd-lbl">activities</div>
+          <div class="ytd-cmp">
+            <span class="ytd-prev">{{ ytdStats.lyr.n }} last year</span>
+            <span :class="pctClass(ytdStats.pct.n)">
+              {{ ytdStats.pct.n >= 0 ? "↑" : "↓" }}
+              {{ Math.abs(ytdStats.pct.n).toFixed(0) }}%
+            </span>
+          </div>
+        </div>
+        <div class="ytd-cell">
+          <div class="ytd-num">
+            {{ distanceVal(ytdStats.ytd.distance)?.toFixed(0) }}
+            <span class="unit">{{ distanceUnit }}</span>
+          </div>
+          <div class="ytd-lbl">distance</div>
+          <div class="ytd-cmp">
+            <span class="ytd-prev">{{ distanceVal(ytdStats.lyr.distance)?.toFixed(0) }}{{ distanceUnit }} last year</span>
+            <span :class="pctClass(ytdStats.pct.distance)">
+              {{ ytdStats.pct.distance >= 0 ? "↑" : "↓" }}
+              {{ Math.abs(ytdStats.pct.distance).toFixed(0) }}%
+            </span>
+          </div>
+        </div>
+        <div class="ytd-cell">
+          <div class="ytd-num">
+            {{ Math.round(ytdStats.ytd.duration / 3600) }} <span class="unit">h</span>
+          </div>
+          <div class="ytd-lbl">moving time</div>
+          <div class="ytd-cmp">
+            <span class="ytd-prev">{{ Math.round(ytdStats.lyr.duration / 3600) }}h last year</span>
+            <span :class="pctClass(ytdStats.pct.duration)">
+              {{ ytdStats.pct.duration >= 0 ? "↑" : "↓" }}
+              {{ Math.abs(ytdStats.pct.duration).toFixed(0) }}%
+            </span>
+          </div>
+        </div>
+        <div class="ytd-cell" v-if="ytdStats.ytd.elevation > 0 || ytdStats.lyr.elevation > 0">
+          <div class="ytd-num">
+            {{ Math.round(ytdStats.ytd.elevation).toLocaleString() }}
+            <span class="unit">m</span>
+          </div>
+          <div class="ytd-lbl">climbed</div>
+          <div class="ytd-cmp">
+            <span class="ytd-prev">{{ Math.round(ytdStats.lyr.elevation).toLocaleString() }}m last year</span>
+            <span :class="pctClass(ytdStats.pct.elevation)">
+              {{ ytdStats.pct.elevation >= 0 ? "↑" : "↓" }}
+              {{ Math.abs(ytdStats.pct.elevation).toFixed(0) }}%
+            </span>
+          </div>
+        </div>
+        <div class="ytd-cell" v-if="ytdStats.ytd.kcal > 0 || ytdStats.lyr.kcal > 0">
+          <div class="ytd-num">
+            {{ Math.round(ytdStats.ytd.kcal).toLocaleString() }}
+          </div>
+          <div class="ytd-lbl">kcal</div>
+          <div class="ytd-cmp">
+            <span class="ytd-prev">{{ Math.round(ytdStats.lyr.kcal).toLocaleString() }} last year</span>
+            <span :class="pctClass(ytdStats.pct.kcal)">
+              {{ ytdStats.pct.kcal >= 0 ? "↑" : "↓" }}
+              {{ Math.abs(ytdStats.pct.kcal).toFixed(0) }}%
+            </span>
+          </div>
         </div>
       </div>
     </Card>
@@ -592,6 +788,27 @@ h1 { margin: 0; }
 .stat .up { color: var(--good); margin-left: 0.3rem; }
 .stat .down { color: var(--bad); margin-left: 0.3rem; }
 .stat .same { color: var(--muted-2); margin-left: 0.3rem; }
+
+/* YTD + YoY */
+.ytd-grid {
+  display: grid; gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+.ytd-cell {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0.8rem 0.9rem;
+}
+.ytd-num { font-size: 1.5rem; font-weight: 300; color: var(--text); line-height: 1; }
+.ytd-num .unit { font-size: 0.8rem; color: var(--muted); margin-left: 0.15rem; }
+.ytd-lbl { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.3rem; }
+.ytd-cmp {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-top: 0.5rem; font-size: 0.78rem;
+}
+.ytd-prev { color: var(--muted-2); }
+.ytd-cmp .up { color: var(--good); }
+.ytd-cmp .down { color: var(--bad); }
+.ytd-cmp .same { color: var(--muted-2); }
 
 /* Heatmap */
 .heat { width: 100%; }

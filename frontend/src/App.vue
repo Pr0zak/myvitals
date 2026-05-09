@@ -52,9 +52,14 @@ onMounted(() => { refreshSyncHealth(); setInterval(refreshSyncHealth, 60_000); }
         ⚠ No query token set — go to Settings to paste your QUERY_TOKEN.
       </RouterLink>
       <div v-else-if="permsLost" class="banner banner-perms">
-        ⚠ Health Connect permissions lost on the phone — open the myvitals app and re-grant
-        <span v-if="permsMissing.length" class="muted-mono"> ({{ permsMissing.join(', ') }})</span>.
-        Sync attempts are firing but every read is denied.
+        ⚠ Health Connect is denying reads on the phone. Sync attempts are firing but every record type is rejected.
+        <span v-if="permsMissing && permsMissing.length" class="muted-mono">
+          Missing: {{ permsMissing.join(', ') }}.
+        </span>
+        <span v-else class="muted-mono">
+          The app shows all permissions granted, but Health Connect itself is blocking — usually after an HC update or account change. Fix:
+          open the <strong>Health Connect</strong> app (not myvitals), tap <em>App permissions</em> → <em>myvitals</em>, and toggle each permission off then back on.
+        </span>
       </div>
       <div v-for="a in alerts" :key="a.id" class="banner banner-alert"
            :class="`severity-${a.severity}`">

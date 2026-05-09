@@ -26,6 +26,13 @@
     <uses-permission android:name="android.permission.health.READ_LEAN_BODY_MASS" />
     <uses-permission android:name="android.permission.health.READ_BLOOD_PRESSURE" />
 
+    <!-- Required so WorkManager (15-min background sync) can read HC.
+         Without this, every sync fired while the phone is asleep
+         throws SecurityException despite per-record perms being
+         granted — exactly the "permission ghost" symptom. Android 14+
+         / HC 1.1+. -->
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+
     <!-- Required to detect the Health Connect provider on devices < Android 14 -->
     <queries>
         <package android:name="com.google.android.apps.healthdata" />

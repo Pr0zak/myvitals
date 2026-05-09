@@ -276,6 +276,7 @@ fun TrailsScreen(settings: SettingsRepository) {
     }
 
     LaunchedEffect(Unit) { load() }
+    app.myvitals.ui.common.LifecycleResumeEffect { scope.launch { load() } }
     LaunchedEffect(Unit) { loadRecentRides() }
     LaunchedEffect(Unit) {
         while (true) { delay(60_000); nowMs = System.currentTimeMillis() }

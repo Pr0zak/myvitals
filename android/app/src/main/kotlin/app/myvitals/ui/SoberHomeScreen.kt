@@ -72,6 +72,8 @@ fun SoberHomeScreen(
     val scope = rememberCoroutineScope()
 
     var current by remember { mutableStateOf<SoberCurrentResponse?>(null) }
+    var history by remember { mutableStateOf<List<app.myvitals.sync.SoberStreak>>(emptyList()) }
+    var historyOpen by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     var resetting by remember { mutableStateOf(false) }
@@ -103,6 +105,14 @@ fun SoberHomeScreen(
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             current = withContext(Dispatchers.IO) { api.soberCurrent() }
+            // History is non-critical — log + continue if it fails so the
+            // counter still renders.
+            history = runCatching {
+                withContext(Dispatchers.IO) { api.soberHistory(limit = 100) }
+            }.getOrElse {
+                Timber.w(it, "soberHistory failed")
+                emptyList()
+            }
         } catch (e: Exception) {
             Timber.w(e, "soberCurrent failed")
             loadError = e.message?.take(160) ?: "Network error"
@@ -112,6 +122,9 @@ fun SoberHomeScreen(
     }
 
     LaunchedEffect(Unit) { fetch() }
+    app.myvitals.ui.common.LifecycleResumeEffect {
+        scope.launch { fetch() }
+    }
     LaunchedEffect(Unit) {
         while (true) {
             delay(1000)
@@ -258,6 +271,49 @@ fun SoberHomeScreen(
             }
         }
 
+        // ── Past streaks (collapsed by default) ──
+        // The active streak is included in history; filter it out so this
+        // panel only lists CLOSED past attempts. Shows the top 5 longest
+        // by default plus a button to expand the rest.
+        val pastStreaks = remember(history) {
+            history.filter { it.endAt != null }
+                .sortedByDescending { it.days }
+        }
+        if (pastStreaks.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                TextButton(onClick = { historyOpen = !historyOpen }) {
+                    Text(
+                        text = if (historyOpen)
+                            "Hide past streaks"
+                        else
+                            "Past streaks (${pastStreaks.size}) ›",
+                        color = MV.OnSurfaceVariant,
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    )
+                }
+                AnimatedVisibility(visible = historyOpen) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        val show = pastStreaks.take(20)
+                        for (st in show) {
+                            StreakRow(streak = st)
+                        }
+                        if (pastStreaks.size > show.size) {
+                            Text(
+                                text = "+${pastStreaks.size - show.size} older",
+                                color = MV.OnSurfaceDim, fontSize = 11.sp,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // ── Reset button ──
         Box(modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 18.dp)) {
             ResetButton(
@@ -321,6 +377,40 @@ fun SoberHomeScreen(
     }   // Close watermark Box wrapper
 
     // (Hold-to-reset is now the home button itself — no popup.)
+}
+
+@Composable
+private fun StreakRow(streak: app.myvitals.sync.SoberStreak) {
+    val df = remember { DateTimeFormatter.ofPattern("MMM d, yyyy") }
+    val startStr = remember(streak.startAt) {
+        runCatching {
+            Instant.parse(streak.startAt).atZone(ZoneId.systemDefault()).format(df)
+        }.getOrDefault(streak.startAt.take(10))
+    }
+    val endStr = remember(streak.endAt) {
+        streak.endAt?.let {
+            runCatching {
+                Instant.parse(it).atZone(ZoneId.systemDefault()).format(df)
+            }.getOrDefault(it.take(10))
+        }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "${"%.1f".format(streak.days)} day${if (streak.days >= 2) "s" else ""}",
+                color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = if (endStr != null) "$startStr → $endStr" else startStr,
+                color = MV.OnSurfaceDim, fontSize = 11.sp,
+            )
+        }
+    }
 }
 
 @Composable

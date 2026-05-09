@@ -10,7 +10,6 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from . import version as version_mod
-from .analytics.jobs import compute_daily_summary
 from .api import (
     ai,
     analytics,
@@ -29,8 +28,6 @@ from .api import (
 )
 from .api.workout import strength as workout_strength
 from .config import settings
-from .integrations import strava as strava_int
-from .integrations.home_assistant import pull_states as ha_pull_states
 
 log = logging.getLogger(__name__)
 
@@ -38,103 +35,10 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler(timezone=settings.tz)
-    scheduler.add_job(
-        compute_daily_summary,
-        trigger="cron",
-        hour=3, minute=0,
-        id="daily_summary",
-        replace_existing=True,
-    )
-    if settings.ha_url and settings.ha_token and settings.ha_entity_list:
-        scheduler.add_job(
-            ha_pull_states,
-            trigger="interval",
-            minutes=5,
-            id="ha_pull",
-            replace_existing=True,
-            next_run_time=None,  # let interval kick in naturally
-        )
-        log.info("HA poll scheduled every 5 min for %d entities", len(settings.ha_entity_list))
-    # Always schedule — sync_recent is a no-op if credentials aren't set yet,
-    # so the user can configure Strava in the dashboard without restarting.
-    scheduler.add_job(
-        strava_int.sync_recent,
-        trigger="interval",
-        hours=6,
-        id="strava_sync",
-        replace_existing=True,
-    )
-    log.info("Strava poll scheduled every 6h (no-op until configured)")
-
-    # Weekly AI digest — Sunday 22:00 local. No-op if the user hasn't
-    # enabled it / hasn't configured an API key.
-    scheduler.add_job(
-        _weekly_ai_digest,
-        trigger="cron",
-        day_of_week="sun",
-        hour=22, minute=0,
-        id="ai_weekly_digest",
-        replace_existing=True,
-    )
-    log.info("Weekly AI digest scheduled for Sun 22:00 %s", settings.tz)
-
-    # Anomaly scan — every 6h. Stats-side detection is no-LLM; the LLM
-    # only phrases new (unseen) anomalies into a notification body, so
-    # quiet days cost nothing.
-    scheduler.add_job(
-        _anomaly_scan,
-        trigger="interval",
-        hours=6,
-        id="ai_anomaly_scan",
-        replace_existing=True,
-        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
-    )
-    log.info("Anomaly scan scheduled every 6h")
-
-    # Trail-status poll — every 15 min during 06:00-22:00 CT, 60 min
-    # overnight. APScheduler doesn't have a native time-of-day window,
-    # so use one cron job that runs the poll only when the local hour
-    # is in range (other ticks no-op cheaply).
-    from .integrations.rainoutline import poll_and_persist as _poll_trails
-
-    async def _trails_tick() -> None:
-        try:
-            await _poll_trails()
-        except Exception as e:  # noqa: BLE001
-            log.warning("trail poll failed: %s", e)
-
-    scheduler.add_job(
-        _trails_tick,
-        trigger="interval", minutes=15,
-        id="trails_poll", replace_existing=True,
-        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=20),
-    )
-    log.info("Trail status poll scheduled every 15 min")
-
-    # Concept2 incremental poll — no-op if credentials aren't set.
-    from .db import models as _c2_models
-    from .db.session import SessionLocal as _c2_session
-    from .integrations import concept2 as _concept2_int
-
-    async def _concept2_tick() -> None:
-        try:
-            async with _c2_session() as db:
-                cred = await db.get(_c2_models.Concept2Credentials, 1)
-                if cred is None:
-                    return
-                await _concept2_int.sync_results(db, cred=cred)
-        except Exception as e:  # noqa: BLE001
-            log.warning("Concept2 poll failed: %s", e)
-
-    scheduler.add_job(
-        _concept2_tick,
-        trigger="interval", minutes=30,
-        id="concept2_poll", replace_existing=True,
-        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
-    )
-    log.info("Concept2 poll scheduled every 30 min (no-op until connected)")
+    from .tasks.scheduled import register_jobs
+    register_jobs(scheduler)
     scheduler.start()
-    log.info("scheduler started; daily_summary at 03:00 %s", settings.tz)
+    log.info("scheduler started; daily_summary + anomaly_scan on-demand via API endpoints")
 
     # Best-effort: compute an initial summary on startup so /summary/today is
     # populated immediately. Don't block app startup if it fails.
@@ -145,6 +49,7 @@ async def lifespan(app: FastAPI):
 
 
 async def _safe_initial_summary() -> None:
+    from .analytics.jobs import compute_daily_summary
     try:
         await compute_daily_summary()
     except Exception as e:  # noqa: BLE001

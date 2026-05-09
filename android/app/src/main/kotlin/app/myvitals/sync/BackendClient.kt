@@ -12,6 +12,7 @@ import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 
 interface BackendApi {
@@ -23,6 +24,9 @@ interface BackendApi {
 
     @GET("sober/current")
     suspend fun soberCurrent(): SoberCurrentResponse
+
+    @GET("sober/history")
+    suspend fun soberHistory(@Query("limit") limit: Int = 100): List<SoberStreak>
 
     @POST("sober/reset")
     suspend fun soberReset(@Body body: SoberResetRequest): SoberResetResponse

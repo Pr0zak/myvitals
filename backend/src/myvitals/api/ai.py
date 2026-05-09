@@ -413,6 +413,12 @@ async def list_alerts(
     unacked_only: bool = True, limit: int = 20,
     db: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
+    # Lazy-trigger anomaly scan when the most recent run is &gt; 6h old.
+    # Replaces the standalone APScheduler job — phone + web both poll
+    # /ai/alerts, so the scan piggybacks on actual demand instead of
+    # firing on a fixed cadence regardless of whether anyone's looking.
+    await _maybe_run_anomaly_scan(db)
+
     stmt = (
         select(models.AiAlert)
         .order_by(models.AiAlert.created_at.desc())
@@ -427,6 +433,36 @@ async def list_alerts(
          "metric": r.metric, "z_score": r.z_score, "acked_at": r.acked_at}
         for r in rows
     ]
+
+
+# Lock so concurrent /ai/alerts calls don't double-scan. asyncio Lock is
+# sufficient since we're single-process (uvicorn worker count = 1 in
+# the deployment).
+_anomaly_scan_lock = __import__("asyncio").Lock()
+
+
+async def _maybe_run_anomaly_scan(db: AsyncSession) -> None:
+    """Run the anomaly scan if the latest persisted alert is &gt; 6h old.
+    Idempotent — repeated calls within the cooldown are no-ops."""
+    from datetime import datetime, timezone, timedelta
+    from ..db import models as _models
+    last = (await db.execute(
+        select(_models.AiAlert.created_at)
+        .order_by(_models.AiAlert.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+    if last is not None and last >= cutoff:
+        return
+    if _anomaly_scan_lock.locked():
+        return  # another caller is already running it
+    async with _anomaly_scan_lock:
+        from ..main import _anomaly_scan
+        try:
+            await _anomaly_scan()
+        except Exception:  # noqa: BLE001
+            # Don't block /ai/alerts on scan failure
+            pass
 
 
 @router.post("/alerts/{alert_id}/ack")

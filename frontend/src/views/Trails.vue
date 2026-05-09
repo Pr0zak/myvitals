@@ -5,6 +5,7 @@
  * subscribes for status-flip pings.
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "@/leaflet-icons";   // side-effect: fixes default marker URLs under Vite
@@ -25,14 +26,37 @@ const error = ref<string>("");
 const tickNow = ref(Date.now());
 let tickHandle: number | null = null;
 
+// Trails whose status flipped since the previous load. Cleared 2.5s
+// after detection so the CSS animation has time to play.
+const flipped = ref<Set<number>>(new Set());
+
 async function load() {
   if (!queryToken.value) { loading.value = false; return; }
   loading.value = trails.value.length === 0;
   error.value = "";
   try {
     const r = await api.trails();
+    // Detect status flips before swapping refs.
+    const prevStatus = new Map(trails.value.map((t) => [t.id, t.status]));
+    const newlyFlipped: number[] = [];
+    for (const t of r.trails) {
+      const prev = prevStatus.get(t.id);
+      if (prev !== undefined && prev !== t.status) {
+        newlyFlipped.push(t.id);
+      }
+    }
     trails.value = r.trails;
     dnisUrl.value = r.dnis_url ?? null;
+    if (newlyFlipped.length > 0) {
+      const next = new Set(flipped.value);
+      newlyFlipped.forEach((id) => next.add(id));
+      flipped.value = next;
+      window.setTimeout(() => {
+        const cleared = new Set(flipped.value);
+        newlyFlipped.forEach((id) => cleared.delete(id));
+        flipped.value = cleared;
+      }, 2500);
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -386,6 +410,7 @@ onMounted(() => {
   load();
   tickHandle = window.setInterval(() => { tickNow.value = Date.now(); }, 60000);
 });
+useVisibilityRefresh(() => { load(); });
 onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
 </script>
 
@@ -435,7 +460,7 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
         <h2>Open · {{ grouped.open.length }}</h2>
         <div class="grid">
           <article v-for="t in grouped.open" :key="t.id" class="card status-open"
-                   :class="{ has_loc: t.latitude != null }"
+                   :class="{ has_loc: t.latitude != null, flip: flipped.has(t.id) }"
                    @click="openMaps(t)">
             <header>
               <span class="dot"></span>
@@ -486,7 +511,7 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
         <h2>Delayed · {{ grouped.delayed.length }}</h2>
         <div class="grid">
           <article v-for="t in grouped.delayed" :key="t.id" class="card status-delayed"
-                   :class="{ has_loc: t.latitude != null }"
+                   :class="{ has_loc: t.latitude != null, flip: flipped.has(t.id) }"
                    @click="openMaps(t)">
             <header>
               <span class="dot"></span>
@@ -530,7 +555,7 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
         <h2>Closed · {{ grouped.closed.length }}</h2>
         <div class="grid">
           <article v-for="t in grouped.closed" :key="t.id" class="card status-closed"
-                   :class="{ has_loc: t.latitude != null }"
+                   :class="{ has_loc: t.latitude != null, flip: flipped.has(t.id) }"
                    @click="openMaps(t)">
             <header>
               <span class="dot"></span>
@@ -697,6 +722,26 @@ header h1 { margin: 0; }
 .card.status-open { border-left: 3px solid #22c55e; }
 .card.status-closed { border-left: 3px solid #ef4444; opacity: 0.85; }
 .card.status-delayed { border-left: 3px solid #eab308; }
+/* Status-flip animation — 2.5s flash in the new status color when a
+   trail's status changes between two refreshes. */
+@keyframes status-flip-open {
+  0% { background: rgba(34, 197, 94, 0.0); }
+  20% { background: rgba(34, 197, 94, 0.28); }
+  100% { background: rgba(34, 197, 94, 0.0); }
+}
+@keyframes status-flip-closed {
+  0% { background: rgba(239, 68, 68, 0.0); }
+  20% { background: rgba(239, 68, 68, 0.28); }
+  100% { background: rgba(239, 68, 68, 0.0); }
+}
+@keyframes status-flip-delayed {
+  0% { background: rgba(234, 179, 8, 0.0); }
+  20% { background: rgba(234, 179, 8, 0.28); }
+  100% { background: rgba(234, 179, 8, 0.0); }
+}
+.card.status-open.flip { animation: status-flip-open 2.5s ease-out; }
+.card.status-closed.flip { animation: status-flip-closed 2.5s ease-out; }
+.card.status-delayed.flip { animation: status-flip-delayed 2.5s ease-out; }
 .card.has_loc { cursor: pointer; transition: border-color 0.12s; }
 .card.has_loc:hover { border-color: var(--accent, #ef4444); }
 .nav-ic { color: var(--muted-2); margin-left: 0.4rem; vertical-align: middle; }

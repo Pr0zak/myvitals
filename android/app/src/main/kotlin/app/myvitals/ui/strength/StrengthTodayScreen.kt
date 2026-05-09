@@ -155,6 +155,7 @@ fun StrengthTodayScreen(
     }
 
     LaunchedEffect(Unit) { reload() }
+    app.myvitals.ui.common.LifecycleResumeEffect { scope.launch { reload() } }
     LaunchedEffect(Unit) {
         while (true) { delay(1000); nowMs = System.currentTimeMillis() }
     }

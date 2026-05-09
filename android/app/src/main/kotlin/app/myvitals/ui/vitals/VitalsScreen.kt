@@ -265,6 +265,7 @@ fun VitalsScreen(
     }
 
     LaunchedEffect(Unit) { load() }
+    app.myvitals.ui.common.LifecycleResumeEffect { scope.launch { load() } }
     LaunchedEffect(Unit) {
         while (true) { delay(1_000); nowMs = System.currentTimeMillis() }
     }

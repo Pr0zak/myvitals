@@ -8,6 +8,9 @@ import { onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import "leaflet.markercluster";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import "@/leaflet-icons";
 import { api } from "@/api/client";
 import { effectiveTheme } from "@/theme";
@@ -23,6 +26,7 @@ const trails = ref<Trail[]>([]);
 const counts = ref({ open: 0, delayed: 0, closed: 0, other: 0, unpinned: 0 });
 
 let map: L.Map | null = null;
+let cluster: L.MarkerClusterGroup | null = null;
 let markers: L.CircleMarker[] = [];
 
 const STATUS_COLOR: Record<string, string> = {
@@ -62,7 +66,32 @@ function ensureMap() {
 
 function plot() {
   if (!map) return;
-  for (const m of markers) m.remove();
+  if (cluster) { cluster.clearLayers(); }
+  else {
+    cluster = L.markerClusterGroup({
+      chunkedLoading: true,
+      showCoverageOnHover: false,
+      spiderfyOnMaxZoom: true,
+      // Color each cluster bubble by majority status of children.
+      iconCreateFunction: (c) => {
+        const counts: Record<string, number> = {};
+        for (const m of c.getAllChildMarkers() as any[]) {
+          const k = (m.options as any)._mvStatus ?? "unknown";
+          counts[k] = (counts[k] ?? 0) + 1;
+        }
+        const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "unknown";
+        const color = STATUS_COLOR[dominant] ?? STATUS_COLOR.unknown;
+        const total = c.getChildCount();
+        return L.divIcon({
+          html: `<div style="background:${color};border:2px solid #fff;border-radius:50%;`
+              + `width:34px;height:34px;display:flex;align-items:center;justify-content:center;`
+              + `color:#0f172a;font-weight:700;font-size:13px;`
+              + `box-shadow:0 2px 6px rgba(0,0,0,0.4);">${total}</div>`,
+          className: "mv-cluster", iconSize: [34, 34],
+        });
+      },
+    }).addTo(map);
+  }
   markers = [];
   const pinned = trails.value.filter((t) => t.latitude != null && t.longitude != null);
   if (pinned.length === 0) return;
@@ -76,7 +105,11 @@ function plot() {
       weight: 1.5,
       fillColor: color,
       fillOpacity: 0.9,
-    }).addTo(map!);
+      // Tag each marker with its status so the cluster icon-creator
+      // can read it via getAllChildMarkers (Leaflet has no native
+      // metadata channel for circleMarker options).
+      ...({ _mvStatus: t.status ?? "unknown" } as any),
+    });
     const ts = t.source_ts ?? t.fetched_at ?? null;
     const popup = `
       <div style="font-family: inherit; min-width: 180px;">
@@ -91,6 +124,7 @@ function plot() {
       </div>
     `;
     marker.bindPopup(popup);
+    cluster!.addLayer(marker);
     markers.push(marker);
     bounds.extend([t.latitude!, t.longitude!]);
   }

@@ -12,6 +12,7 @@
  */
 import { computed, onMounted, ref, watch } from "vue";
 import { api } from "@/api/client";
+import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import type {
   Activity, Annotation, HeartRateSeries, HrvSeries,
   SleepNight, StepsSeries, TodaySummary,
@@ -142,6 +143,7 @@ async function refreshTopic() {
 }
 
 onMounted(() => { loadCore(); loadAi(); });
+useVisibilityRefresh(() => { loadCore(); loadAi(); });
 
 // ── Derived: hero anchors ──
 const headerDate = computed(() => {

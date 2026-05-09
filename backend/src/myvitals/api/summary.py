@@ -195,8 +195,56 @@ async def summary_range(
     until: date | None = Query(None),
     db: AsyncSession = Depends(get_session),
 ) -> list[TodaySummary]:
-    """Daily summaries between two dates (inclusive)."""
-    end = until or datetime.now(timezone.utc).date()
+    """Daily summaries between two dates (inclusive). Recomputes any
+    date in the range whose row is missing OR whose underlying sleep /
+    HRV data is newer than the row — same on-demand recompute logic as
+    /summary/today, applied to the full window. Replaces the 03:00
+    daily_summary cron (which would silently miss days when ingest
+    landed late)."""
+    try:
+        from zoneinfo import ZoneInfo
+        local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        local_tz = timezone.utc
+    end = until or datetime.now(local_tz).date()
+
+    # Load existing rows in the window (one query).
+    existing_rows = (await db.execute(
+        select(models.DailySummary)
+        .where(models.DailySummary.date >= since)
+        .where(models.DailySummary.date <= end)
+    )).scalars().all()
+    by_date = {r.date: r for r in existing_rows}
+
+    # Identify dates needing a recompute. For each date in the range:
+    #   - missing row → recompute
+    #   - row's sleep_duration_s is null but sleep_stages has data → recompute
+    #   - row's hrv_avg is null but vitals_hrv has data → recompute
+    #   (same heuristic as _today_row_is_stale, applied per date)
+    from datetime import timedelta as _td
+    cur = since
+    needs_recompute: list[date] = []
+    while cur <= end:
+        row = by_date.get(cur)
+        day_start = datetime.combine(cur, datetime.min.time(), tzinfo=local_tz)
+        day_end = datetime.combine(cur, datetime.max.time(), tzinfo=local_tz)
+        if await _today_row_is_stale(db, row, cur, day_start, day_end):
+            needs_recompute.append(cur)
+        cur = cur + _td(days=1)
+
+    if needs_recompute:
+        try:
+            from ..analytics.jobs import compute_daily_summary
+            for d in needs_recompute:
+                try:
+                    await compute_daily_summary(d)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("recompute %s failed: %s", d, e)
+            log.info("/summary/range recomputed %d stale days",
+                     len(needs_recompute))
+        except Exception as e:  # noqa: BLE001
+            log.warning("on-demand summary_range recompute failed: %s", e)
+
     result = await db.execute(
         select(models.DailySummary)
         .where(models.DailySummary.date >= since)

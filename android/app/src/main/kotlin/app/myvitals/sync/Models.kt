@@ -303,6 +303,7 @@ data class SwapTodayTypeRequest(
     val split: String? = null,
     @Json(name = "duration_minutes") val durationMinutes: Int? = null,
     val difficulty: String? = null,                    // "easy" | "normal" | "hard"
+    @Json(name = "replace_completed") val replaceCompleted: Boolean = false,
 )
 
 @JsonClass(generateAdapter = true)

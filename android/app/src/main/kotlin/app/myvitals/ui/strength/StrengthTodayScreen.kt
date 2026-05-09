@@ -719,6 +719,10 @@ fun StrengthTodayScreen(
                                 type = type,
                                 durationMinutes = durationMin,
                                 difficulty = difficulty,
+                                // Custom workout always opts in — user
+                                // explicitly chose to stack a second
+                                // session on top of whatever's there.
+                                replaceCompleted = true,
                             ),
                         )
                         customSheetOpen = false

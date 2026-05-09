@@ -1400,13 +1400,17 @@ class SwapTypeBody(BaseModel):
     Used by /today/swap-type and the phone "ad-hoc workout" picker.
     `duration_minutes` and `difficulty` are honored when the user wants
     a one-off session (longer / shorter / harder) instead of the
-    profile-default plan."""
+    profile-default plan. `replace_completed` lets the caller stack a
+    second session on top of an already-completed day (legs in the
+    morning + yoga in the evening) — without it, the handler 409s to
+    avoid clobbering a finished workout by accident."""
     type: Literal["strength", "yoga", "cardio"]
     # Optional split override for strength: push / pull / legs / etc.
     split: str | None = None
     # Optional length / intensity overrides for ad-hoc sessions.
     duration_minutes: int | None = None  # clamped 10-120 by the handler
     difficulty: Literal["easy", "normal", "hard"] | None = None
+    replace_completed: bool = False
 
 
 @router.post("/today/swap-type", response_model=WorkoutOut)
@@ -1425,7 +1429,8 @@ async def swap_today_type(
     """
     today = _local_today()
     existing = await _existing_workout_for(db, today)
-    if existing is not None and existing.status == "completed":
+    if (existing is not None and existing.status == "completed"
+            and not body.replace_completed):
         raise HTTPException(
             status_code=409,
             detail=f"today's workout already completed — finish or wait "

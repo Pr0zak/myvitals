@@ -492,6 +492,7 @@ fun StrengthTodayScreen(
                         plan.exercises.firstOrNull { it.supersetId == ss && it.id != wex.id }
                             ?.let { catalog[it.exerciseId]?.name ?: it.exerciseId.replace('_', ' ') }
                     },
+                    backendBaseUrl = settings.backendUrl.trimEnd('/'),
                 )
             }
             item {
@@ -975,6 +976,7 @@ private fun ExerciseCard(
     onSwap: () -> Unit,
     onSetPref: (String) -> Unit = {},
     partnerName: String? = null,
+    backendBaseUrl: String = "",
 ) {
     val name = info?.name ?: wex.exerciseId.replace('_', ' ')
     val nextSet = (1..wex.targetSets).firstOrNull { n ->
@@ -1021,7 +1023,7 @@ private fun ExerciseCard(
                     )
                 }
                 if (info?.imageFront != null) {
-                    val baseUrl = remember(settings) { settings.backendUrl.trimEnd('/') }
+                    val baseUrl = backendBaseUrl
                     if (baseUrl.isNotEmpty()) {
                         // Photo (.jpg from base catalog) → render as-is.
                         // Icon (.png from Noun Project) → tint violet so the

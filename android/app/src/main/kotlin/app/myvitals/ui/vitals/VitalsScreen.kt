@@ -1,5 +1,11 @@
 package app.myvitals.ui.vitals
 
+import androidx.compose.animation.core.EaseInOut
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.graphics.graphicsLayer
@@ -453,15 +459,14 @@ private fun BadgeFrame(
     // badge uses this for live samples; everything else stays static.
     val pulseScale = if (pulseBpm != null && pulseBpm > 0) {
         val durationMs = (60_000.0 / pulseBpm).coerceIn(400.0, 2_000.0).toInt()
-        val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "hr-pulse")
+        val transition = rememberInfiniteTransition(label = "hr-pulse")
         transition.animateFloat(
             initialValue = 1.0f, targetValue = 1.25f,
-            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                animation = androidx.compose.animation.core.tween(
-                    durationMillis = durationMs / 2,
-                    easing = androidx.compose.animation.core.EaseInOut,
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = durationMs / 2, easing = EaseInOut,
                 ),
-                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+                repeatMode = RepeatMode.Reverse,
             ),
             label = "hr-pulse-scale",
         ).value

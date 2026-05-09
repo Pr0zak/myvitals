@@ -495,7 +495,12 @@ class WorkoutOut(BaseModel):
 
 
 class WorkoutPatch(BaseModel):
-    status: Literal["planned", "in_progress", "completed", "skipped"] | None = None
+    # `regenerated` is the discard target — keeps the row for history
+    # but takes it out of the "today's current workout" query so the
+    # screen falls through to whatever was previously today's plan.
+    status: Literal[
+        "planned", "in_progress", "completed", "skipped", "regenerated",
+    ] | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
     notes: str | None = None

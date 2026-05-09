@@ -131,6 +131,22 @@ fun StrengthTodayScreen(
     var customSheetOpen by remember { mutableStateOf(false) }
     var customGenerating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Offline plumbing — banner above the workout shows "offline" when
+    // network is down or "N pending sync" when set logs are buffered.
+    val online by app.myvitals.ui.common.rememberOnlineState()
+    var bufferedSets by remember { mutableIntStateOf(0) }
+    var flushing by remember { mutableStateOf(false) }
+    suspend fun refreshBuffered() {
+        bufferedSets = runCatching { repo.bufferedCount() }.getOrDefault(0)
+    }
+    // After every onLogSet result, refresh the buffered-count so the
+    // banner updates if the call hit the network buffer fallback.
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(5_000)
+            refreshBuffered()
+        }
+    }
 
     var review by remember { mutableStateOf<StrengthReviewBody?>(null) }
     var reviewLoading by remember { mutableStateOf(false) }
@@ -159,8 +175,22 @@ fun StrengthTodayScreen(
         } finally { loading = false }
     }
 
-    LaunchedEffect(Unit) { reload() }
+    LaunchedEffect(Unit) { reload(); refreshBuffered() }
     app.myvitals.ui.common.LifecycleResumeEffect { scope.launch { reload() } }
+    // Auto-flush buffered set logs when network comes back online. The
+    // user logs while offline → buffer fills → connectivity returns →
+    // this LaunchedEffect kicks the flush within ~1 s of the network
+    // callback firing.
+    LaunchedEffect(online) {
+        if (online && bufferedSets > 0) {
+            flushing = true
+            try {
+                repo.flushBufferedSets()
+                refreshBuffered()
+                if (bufferedSets == 0) reload()
+            } finally { flushing = false }
+        }
+    }
     LaunchedEffect(Unit) {
         while (true) { delay(1000); nowMs = System.currentTimeMillis() }
     }
@@ -314,6 +344,27 @@ fun StrengthTodayScreen(
                     }
                 }
             }
+        }
+
+        // Offline + buffered-sync banner. Visible when:
+        //   - network is down (cached plan still loads from local prefs)
+        //   - or buffered set logs are pending the next flush
+        if (!online || bufferedSets > 0) {
+            OfflineBanner(
+                online = online,
+                pending = bufferedSets,
+                flushing = flushing,
+                onSyncNow = {
+                    scope.launch {
+                        flushing = true
+                        try {
+                            repo.flushBufferedSets()
+                            refreshBuffered()
+                            if (bufferedSets == 0) reload()
+                        } finally { flushing = false }
+                    }
+                },
+            )
         }
 
         if (loading) {
@@ -847,6 +898,47 @@ private fun CustomWorkoutSheet(
                 Text(if (generating) "Generating…" else "Generate workout")
             }
             Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun OfflineBanner(
+    online: Boolean, pending: Int, flushing: Boolean, onSyncNow: () -> Unit,
+) {
+    val bg = if (!online) Color(0x33EAB308) else Color(0x33A78BFA)
+    val fg = if (!online) Color(0xFFEAB308) else Color(0xFFA78BFA)
+    val msg = when {
+        !online && pending > 0 -> "Offline · $pending set${if (pending == 1) "" else "s"} buffered"
+        !online -> "Offline · using cached workout"
+        pending > 0 -> "$pending set${if (pending == 1) "" else "s"} pending sync"
+        else -> ""
+    }
+    if (msg.isEmpty()) return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+            .background(bg)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            msg,
+            color = fg, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+        )
+        if (online && pending > 0) {
+            TextButton(
+                onClick = onSyncNow,
+                enabled = !flushing,
+            ) {
+                Text(
+                    if (flushing) "Syncing…" else "Sync now",
+                    color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }

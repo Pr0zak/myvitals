@@ -109,6 +109,20 @@ class StrengthRepository(
             api().patchStrengthWorkout(workoutId, app.myvitals.sync.WorkoutPatchRequest(status = "skipped"))
         }
 
+    /** Discard an ad-hoc workout (e.g. one created via Custom workout
+     *  that the user changed their mind about). Marks it `regenerated`
+     *  so the next /today query falls through to whatever was previous
+     *  (the morning's completed strength session, or nothing). The
+     *  workout's logged sets stay in the DB but it's no longer the
+     *  "current" plan. */
+    suspend fun discardWorkout(workoutId: Long): StrengthWorkoutDetail =
+        withContext(Dispatchers.IO) {
+            api().patchStrengthWorkout(
+                workoutId,
+                app.myvitals.sync.WorkoutPatchRequest(status = "regenerated"),
+            )
+        }
+
     suspend fun unskipWorkout(workoutId: Long): StrengthWorkoutDetail =
         withContext(Dispatchers.IO) {
             api().patchStrengthWorkout(workoutId, app.myvitals.sync.WorkoutPatchRequest(status = "planned"))

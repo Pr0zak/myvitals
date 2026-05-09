@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
 import app.myvitals.strength.StrengthRepository
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Restore
@@ -269,6 +270,32 @@ fun StrengthTodayScreen(
                         },
                     )
                     if (workout?.status == "planned" || workout?.status == "in_progress") {
+                        // Discard — only meaningful when the workout has
+                        // no logged sets yet. After a "Custom workout"
+                        // generation this falls through to whatever was
+                        // previously today's plan (e.g. the completed
+                        // morning session) instead of leaving an empty
+                        // skipped row.
+                        val anyLogged = workout?.exercises?.any { ex ->
+                            ex.sets.any { it.actualReps != null }
+                        } == true
+                        if (!anyLogged) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("Discard workout",
+                                    color = MV.OnSurface) },
+                                leadingIcon = { Icon(Icons.Outlined.Close, null,
+                                    modifier = Modifier.size(16.dp), tint = MV.OnSurface) },
+                                onClick = {
+                                    headerMenuOpen = false
+                                    scope.launch {
+                                        deferring = true
+                                        try { repo.discardWorkout(workout!!.id); reload() }
+                                        catch (e: Exception) { error = e.message?.take(160) }
+                                        finally { deferring = false }
+                                    }
+                                },
+                            )
+                        }
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text("Skip workout day",
                                 color = MV.BrandRed) },

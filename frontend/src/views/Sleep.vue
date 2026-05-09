@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import VChart from "vue-echarts";
 import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
+import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import type { SleepNight } from "@/api/types";
 import { chartTheme } from "@/theme";
 import { fmtTime, fmtDateTime } from "@/format";

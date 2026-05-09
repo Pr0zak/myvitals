@@ -12,6 +12,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import VChart from "vue-echarts";
 import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
+import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import type {
   Activity, HeartRateSeries, HrvSeries, TodaySummary,
 } from "@/api/types";
@@ -154,6 +155,7 @@ onMounted(() => {
   loadHistory();
   loadTrace();
 });
+useVisibilityRefresh(() => { loadHistory(); loadTrace(); });
 watch(range, loadHistory);
 
 const dayMs = 24 * 3600 * 1000;

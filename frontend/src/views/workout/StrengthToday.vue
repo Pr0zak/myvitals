@@ -9,6 +9,7 @@ import { useRouter } from "vue-router";
 import { Play, Pause, RotateCw, Plus, SkipForward, Replace as SwapIcon, Timer, Check } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { apiBase, queryToken } from "@/config";
+import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import Card from "@/components/Card.vue";
 import WhyThisWorkout from "@/components/WhyThisWorkout.vue";
 import VarietyNudge from "@/components/VarietyNudge.vue";
@@ -624,6 +625,7 @@ function fmtRest(s: number): string {
 }
 
 onMounted(loadAll);
+useVisibilityRefresh(loadAll);
 </script>
 
 <template>

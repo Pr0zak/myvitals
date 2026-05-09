@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import VChart from "vue-echarts";
 import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
+import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import { chartTheme } from "@/theme";
 import { weightVal, weightUnit, fmtWeight, isImperial } from "@/units";
 
@@ -50,6 +51,7 @@ async function load() {
 }
 watch(yoy, load);
 onMounted(() => { loadProfile(); load(); });
+useVisibilityRefresh(() => { load(); });
 watch(range, load);
 
 // === Sorted, filtered series ===

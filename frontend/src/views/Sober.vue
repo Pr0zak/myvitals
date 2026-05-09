@@ -6,6 +6,7 @@ import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import { fmtDateTime } from "@/format";
 import { chartTheme } from "@/theme";
+import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 
 interface Streak {
   id: number;
@@ -60,6 +61,7 @@ async function load() {
   }
 }
 
+useVisibilityRefresh(() => { load(); });
 onMounted(() => {
   load();
   tickHandle = setInterval(() => { tick.value = Date.now(); }, 1000);

@@ -869,10 +869,17 @@ async def upcoming_workouts(
     today = _date.today()
     last_split = await strength_algo.last_split_for_user(db)
 
-    # Last completed workout date — drives the "skip the day after" logic.
+    # Last completed STRENGTH workout date — drives the "don't schedule
+    # two strength sessions back-to-back" spacing rule. Yoga + cardio
+    # are intentionally NOT counted; finishing a 30-min yoga flow
+    # yesterday isn't a reason to push tomorrow's strength day to the
+    # day after. Before this filter, a daily yoga habit would walk the
+    # strength rotation forward indefinitely (Mon→Tue→Thu→Sat) and the
+    # WeekStrip preview disagreed with the real schedule.
     last_done_q = await db.execute(
         select(func.max(models.StrengthWorkout.date))
         .where(models.StrengthWorkout.status == "completed")
+        .where(models.StrengthWorkout.split_focus.notin_(["yoga", "cardio"]))
     )
     last_done = last_done_q.scalar()
 

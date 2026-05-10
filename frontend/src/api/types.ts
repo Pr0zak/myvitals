@@ -177,6 +177,12 @@ export interface StrengthExercise {
   image_front: string | null;
   image_side: string | null;
   youtube_query: string;
+  // Mobility-only flags (mirrors backend supplement). Bilateral means
+  // sets=2 with R/L semantics; is_timed=false means rep-based mobility
+  // (Thread-the-Needle, Cat-Cow, Pilates rep work) and the UI shows
+  // the rep-entry row instead of a hold timer.
+  is_bilateral?: boolean;
+  is_timed?: boolean;
 }
 
 export interface StrengthSet {

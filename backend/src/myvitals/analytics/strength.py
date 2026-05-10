@@ -1023,8 +1023,9 @@ async def generate_plan(
     def _yoga_session(_seed_str: str, n_poses: int = 5,
                       hold_s: int = 45) -> list[ExerciseInPlan]:
         """Pick `n_poses` mobility poses from the catalog, deterministic
-        on the seed string, returning an ExerciseInPlan list shaped
-        for an active-recovery flow (1×hold_s seconds, no weight)."""
+        on the seed string. Honors per-pose `is_bilateral` (2 sets so
+        the phone can label them R / L) and `is_timed` (false → 8-10
+        slow controlled reps instead of a hold)."""
         local_rng = random.Random(_seed_str)
         pool = [
             e for e in CATALOG
@@ -1035,14 +1036,18 @@ async def generate_plan(
             return []
         n = min(n_poses, len(pool))
         picks = local_rng.sample(pool, k=n)
-        return [
-            ExerciseInPlan(
+        out: list[ExerciseInPlan] = []
+        for i, ex in enumerate(picks):
+            bilateral = bool(ex.get("is_bilateral", False))
+            timed = ex.get("is_timed", True)
+            rl, rh = (hold_s, hold_s) if timed else (8, 10)
+            out.append(ExerciseInPlan(
                 exercise_id=ex["id"], order_index=i, superset_id=None,
-                target_sets=1, target_reps_low=hold_s, target_reps_high=hold_s,
+                target_sets=2 if bilateral else 1,
+                target_reps_low=rl, target_reps_high=rh,
                 target_weight_lb=None, target_rest_s=15,
-            )
-            for i, ex in enumerate(picks)
-        ]
+            ))
+        return out
 
     # Recovery integration
     recovery: RecoveryInputs | None = None

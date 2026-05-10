@@ -251,18 +251,26 @@ function exName(slug: string): string {
 }
 
 // Time-based exercises (yoga / mobility) use a countdown timer instead
-// of weight/reps inputs. The catalog row's movement_pattern flags it;
-// fallback heuristic: bodyweight + null target weight + reps >= 20 (a
-// rep count that high is almost always seconds-as-hold).
+// of weight/reps inputs. Mobility entries declare it via the catalog
+// `is_timed` flag (rep-based mobility like Thread-the-Needle / Cat-Cow
+// returns false). Non-mobility falls through to the prior heuristic.
 function isTimedExercise(wex: StrengthWorkoutExercise): boolean {
   const c = ex(wex.exercise_id);
-  if (c?.movement_pattern === "mobility") return true;
+  if (c?.movement_pattern === "mobility") return c.is_timed !== false;
   if (
     wex.target_weight_lb == null &&
     wex.target_reps_low === wex.target_reps_high &&
     wex.target_reps_low >= 20
   ) return true;
   return false;
+}
+
+// For bilateral mobility (sets=2, one per side), label the sets R / L
+// instead of 1 / 2 — mirrors the phone TimedSetRow treatment.
+function bilateralSideLabel(wex: StrengthWorkoutExercise, n: number): string {
+  const c = ex(wex.exercise_id);
+  if (!c?.is_bilateral || wex.target_sets !== 2) return String(n);
+  return n === 1 ? "R" : "L";
 }
 
 // Per-set countdown state — keyed by `${wexId}-${setNum}` so each row
@@ -858,7 +866,9 @@ useVisibilityRefresh(loadAll);
                 <tr v-for="n in wex.target_sets" :key="n"
                     v-if="!isTimedExercise(wex)"
                     :class="{ logged: isSetLogged(wex, n) }">
-                  <td>{{ n }}</td>
+                  <td :class="{ side: bilateralSideLabel(wex, n) !== String(n) }">
+                    {{ bilateralSideLabel(wex, n) }}
+                  </td>
                   <td>
                     <input
                       type="number" step="0.5" inputmode="decimal"
@@ -910,7 +920,9 @@ useVisibilityRefresh(loadAll);
                 <tr v-for="n in wex.target_sets" :key="`t-${n}`"
                     v-if="isTimedExercise(wex)"
                     :class="{ logged: isSetLogged(wex, n) }">
-                  <td>{{ n }}</td>
+                  <td :class="{ side: bilateralSideLabel(wex, n) !== String(n) }">
+                    {{ bilateralSideLabel(wex, n) }}
+                  </td>
                   <td colspan="3" class="timer-cell">
                     <template v-if="isSetLogged(wex, n)">
                       <span class="dim">Held {{ wex.target_reps_low }}s ✓</span>

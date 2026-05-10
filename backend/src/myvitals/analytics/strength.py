@@ -1105,14 +1105,16 @@ async def generate_plan(
                 ],
             )
 
-    # Day-spacing check: don't recommend back-to-back strength sessions.
-    # If a workout was completed yesterday OR earlier today (and we're
-    # generating for today), surface as rest. Override via force_no_rest.
+    # Day-spacing check: don't recommend back-to-back STRENGTH sessions.
+    # Yoga + cardio are intentionally excluded — a daily yoga habit
+    # shouldn't push every strength day into yoga. (Same fix as v0.7.142
+    # in /upcoming; this is the sibling path inside generate_plan.)
     if not force_no_rest:
         recent_q = await db.execute(
             select(func.max(models.StrengthWorkout.date))
             .where(models.StrengthWorkout.status == "completed")
             .where(models.StrengthWorkout.date < target_date)
+            .where(models.StrengthWorkout.split_focus.notin_(["yoga", "cardio"]))
         )
         last_completed = recent_q.scalar()
         if last_completed is not None:

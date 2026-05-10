@@ -6,7 +6,7 @@
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { Play, Pause, RotateCw, Plus, SkipForward, Replace as SwapIcon, Timer, Check } from "lucide-vue-next";
+import { Play, Pause, RotateCw, Plus, SkipForward, Timer, Check } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { apiBase, queryToken } from "@/config";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
@@ -793,6 +793,27 @@ useVisibilityRefresh(loadAll);
         </div>
       </div>
 
+      <!-- Cardio prescription — no exercise list, notes-only.
+           Renders the suggestion text + a "Complete cardio" button. -->
+      <div v-if="workout.split_focus === 'cardio' && workout.exercises.length === 0"
+           class="cardio-card">
+        <h3>Cardio session</h3>
+        <p class="cardio-notes">{{ workout.notes }}</p>
+        <p class="hint">
+          The session itself syncs from the activity provider (Concept2 for
+          rowing, Strava for biking). Once it lands in /activities you can
+          mark today complete here.
+        </p>
+        <button v-if="workout.status === 'planned' || workout.status === 'in_progress'"
+                class="primary" :disabled="busy === 'complete'"
+                @click="completeWorkout">
+          {{ busy === 'complete' ? 'Saving…' : 'Mark cardio complete' }}
+        </button>
+        <p v-else-if="workout.status === 'completed'" class="ok">
+          ✓ Cardio session marked complete.
+        </p>
+      </div>
+
       <!-- Exercise list -->
       <div v-for="(wex, idx) in workout.exercises" :key="wex.id" class="ex-card"
            :class="{ current: currentExercise?.id === wex.id, done: isExerciseDone(wex), superset: !!wex.superset_id }"
@@ -847,7 +868,7 @@ useVisibilityRefresh(loadAll);
             </a>
             <button v-if="wex.sets.filter(s => s.actual_reps != null).length === 0"
                     class="swap-btn" @click="openSwap(wex.id)">
-              <SwapIcon :size="13" /> Swap exercise
+              Swap exercise
             </button>
           </div>
 
@@ -1118,6 +1139,19 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 }
 .rest-timer .rt-btn.ghost { background: transparent; color: var(--muted); }
 .rest-timer .rt-btn:hover { color: var(--text); border-color: var(--accent, #ef4444); }
+
+.cardio-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid #38bdf8;
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  margin-bottom: 1rem;
+}
+.cardio-card h3 { margin: 0 0 0.5rem; }
+.cardio-notes { color: var(--text); line-height: 1.5; margin: 0 0 0.6rem; }
+.cardio-card .hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.8rem; }
+.cardio-card .ok { color: var(--good); margin: 0; }
 
 .ex-card {
   border: 1px solid var(--line); border-radius: 10px;

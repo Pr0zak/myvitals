@@ -152,6 +152,11 @@ export interface StrengthEquipment {
   kettlebells_lb: number[];
   resistance_bands: boolean;
   bodyweight: boolean;
+  cardio_rower?: boolean;
+  cardio_bike_indoor?: boolean;
+  cardio_mtb_outdoor?: boolean;
+  cardio_road_bike?: boolean;
+  cardio_treadmill?: boolean;
   exercise_prefs?: Record<string, string>;
   training?: {
     level: "beginner" | "intermediate" | "advanced";

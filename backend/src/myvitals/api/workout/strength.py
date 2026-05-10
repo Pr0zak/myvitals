@@ -130,6 +130,16 @@ class EquipmentPayload(BaseModel):
     kettlebells_lb: list[float] = []
     resistance_bands: bool = False
     bodyweight: bool = True
+    # Cardio equipment hints. Used by build_cardio_plan() to suggest a
+    # specific modality on cardio days (rower indoors, MTB outdoors).
+    # The actual data syncs separately — Concept2 ERG → /activities for
+    # rowing, Strava → /activities for biking — so these are just
+    # *suggestions*, not session-logging hooks.
+    cardio_rower: bool = False        # Concept2 / similar erg
+    cardio_bike_indoor: bool = False  # spin / Peloton / Zwift
+    cardio_mtb_outdoor: bool = False  # mountain bike (Strava)
+    cardio_road_bike: bool = False
+    cardio_treadmill: bool = False
     # Per-exercise overrides — exercise_id → one of:
     #   "disabled"  — never include in generated plans
     #   "favorite"  — prefer when filling a slot the exercise can fill
@@ -1482,6 +1492,7 @@ async def swap_today_type(
             today, regen_count=regen_count,
             duration_minutes=duration,
             difficulty=body.difficulty,
+            equipment=equipment,
         )
 
     workout = await strength_algo.persist_plan(db, plan, today)

@@ -947,11 +947,19 @@ def build_cardio_plan(
     target_date: date, regen_count: int = 0,
     duration_minutes: int | None = None,
     difficulty: str | None = None,
+    equipment: dict[str, Any] | None = None,
 ) -> GeneratedPlan:
     """Standalone cardio recommendation — surfaces as a notes-only
     workout. The Today screen renders the prescription text rather
     than an exercise list. `duration_minutes` and `difficulty` shift
-    the prescribed length and HR target."""
+    the prescribed length and HR target.
+
+    `equipment.cardio_*` flags suggest a specific modality. Both
+    rowing (Concept2 ERG → /activities) and MTB / road bike (Strava)
+    sync data through their own integrations — this plan is a
+    placeholder only. When weather context is available the suggestion
+    leans outdoor; otherwise the indoor option is the safer default.
+    """
     seed = _seed(target_date, regen_count)
     minutes = duration_minutes or 35
     hr_low, hr_high = {
@@ -959,13 +967,31 @@ def build_cardio_plan(
         "hard": (145, 160),
     }.get(difficulty or "", (125, 135))
     zone = {"easy": "Z2", "hard": "Z3-Z4"}.get(difficulty or "", "Z2")
+
+    # Pick a modality suggestion from the user's cardio equipment list.
+    # Outdoor options listed first so they take precedence when both
+    # categories are enabled — bias toward "go outside when possible"
+    # for the canonical case.
+    eq = equipment or {}
+    options: list[str] = []
+    if eq.get("cardio_mtb_outdoor"):  options.append("mountain bike outdoors (Strava will log)")
+    if eq.get("cardio_road_bike"):    options.append("road bike outdoors (Strava will log)")
+    if eq.get("cardio_rower"):        options.append("rower (Concept2 ERG will log)")
+    if eq.get("cardio_bike_indoor"):  options.append("indoor bike")
+    if eq.get("cardio_treadmill"):    options.append("treadmill")
+    if not options:
+        options = ["rower, bike, walk, or trail — whatever's available"]
+    suggestion = options[0] if len(options) == 1 else (
+        "Pick one: " + "; ".join(options)
+    )
+
     return GeneratedPlan(
         seed=seed, split_focus="cardio", exercises=[],
         notes=[
             f"Cardio: {minutes} min {zone} effort. "
             f"Target HR ~{hr_low}-{hr_high} bpm "
             f"({'conversational' if zone == 'Z2' else 'comfortably hard'} pace). "
-            "Rower, bike, walk, or trail.",
+            + suggestion + ".",
         ],
     )
 
@@ -1013,7 +1039,9 @@ async def generate_plan(
     if not force_no_rest and not override_split:
         day_type = schedule_day_type(target_date, days_per_week, cardio_per_week)
         if day_type == "cardio":
-            return build_cardio_plan(target_date, regen_count=regen_count)
+            return build_cardio_plan(
+                target_date, regen_count=regen_count, equipment=equipment,
+            )
         if day_type == "yoga" and yoga_on_rest:
             return build_yoga_plan(
                 target_date, regen_count=regen_count,

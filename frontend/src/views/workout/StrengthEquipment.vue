@@ -37,6 +37,11 @@ function defaultEquip(): StrengthEquipment {
     kettlebells_lb: [],
     resistance_bands: false,
     bodyweight: true,
+    cardio_rower: false,
+    cardio_bike_indoor: false,
+    cardio_mtb_outdoor: false,
+    cardio_road_bike: false,
+    cardio_treadmill: false,
     training: {
       level: "intermediate",
       days_per_week: 3,
@@ -243,6 +248,21 @@ onMounted(() => { equip.value = defaultEquip(); load(); });
         <label><input type="checkbox" v-model="equip.barbell"/> Barbell + plates</label>
         <label><input type="checkbox" v-model="equip.squat_rack"/> Squat rack</label>
         <label><input type="checkbox" v-model="equip.cable_stack"/> Cable stack / lat pulldown</label>
+      </div>
+
+      <h3 class="sub">Cardio modalities</h3>
+      <p class="hint">
+        Suggested on cardio days. Outdoor options are picked first when
+        available. Rowing logs via Concept2 ERG; biking via Strava —
+        these checkboxes don't change the data pipeline, just the
+        prescription text.
+      </p>
+      <div class="checks col">
+        <label><input type="checkbox" v-model="equip.cardio_rower"/> Rower (Concept2)</label>
+        <label><input type="checkbox" v-model="equip.cardio_mtb_outdoor"/> Mountain bike (outdoors)</label>
+        <label><input type="checkbox" v-model="equip.cardio_road_bike"/> Road bike</label>
+        <label><input type="checkbox" v-model="equip.cardio_bike_indoor"/> Indoor bike / trainer</label>
+        <label><input type="checkbox" v-model="equip.cardio_treadmill"/> Treadmill</label>
       </div>
 
       <h3 class="sub">Training preferences</h3>

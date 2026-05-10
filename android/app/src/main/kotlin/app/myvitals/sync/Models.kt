@@ -416,6 +416,11 @@ data class EquipmentPayload(
     @Json(name = "kettlebells_lb") val kettlebellsLb: List<Double> = emptyList(),
     @Json(name = "resistance_bands") val resistanceBands: Boolean = false,
     val bodyweight: Boolean = true,
+    @Json(name = "cardio_rower") val cardioRower: Boolean = false,
+    @Json(name = "cardio_bike_indoor") val cardioBikeIndoor: Boolean = false,
+    @Json(name = "cardio_mtb_outdoor") val cardioMtbOutdoor: Boolean = false,
+    @Json(name = "cardio_road_bike") val cardioRoadBike: Boolean = false,
+    @Json(name = "cardio_treadmill") val cardioTreadmill: Boolean = false,
     @Json(name = "exercise_prefs") val exercisePrefs: Map<String, String> = emptyMap(),
     val training: TrainingPreferences = TrainingPreferences(),
 )

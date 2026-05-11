@@ -99,17 +99,30 @@ async function loadFocus() {
   } finally { focusLoading.value = false; }
 }
 
-async function loadSwaps() {
-  if (swaps.value !== null || swapsLoading.value) return;
+async function loadSwaps(force = false) {
+  if (swapsLoading.value) return;
+  if (swaps.value !== null && !force) return;
   swapsLoading.value = true;
   swapsError.value = null;
   try {
     const r = await api.aiStrengthNudge(props.workoutId);
     swaps.value = r.nudge?.swaps ?? [];
+    if (force) swapsDismissed.value = new Set();
   } catch (e) {
     swapsError.value = e instanceof Error ? e.message : String(e);
     swaps.value = [];
   } finally { swapsLoading.value = false; }
+}
+
+function acceptSwap(s: Swap) {
+  emit("accept-swap", {
+    targetExerciseId: s.target_exercise_id,
+    replacementExerciseId: s.replacement_exercise_id,
+  });
+  // Implicit dismiss — the swap is applied, no reason to keep showing
+  // it. Avoids the "AI keeps changing its mind" feel where every
+  // re-tap would query against the now-modified plan.
+  swapsDismissed.value = new Set([...swapsDismissed.value, s.target_exercise_id]);
 }
 
 async function loadExplain() {
@@ -209,6 +222,9 @@ watch(() => props.refreshKey, () => {
         <span v-if="swaps !== null && visibleSwaps().length > 0" class="pill pill-suggest">
           {{ visibleSwaps().length }} swap{{ visibleSwaps().length === 1 ? "" : "s" }}
         </span>
+        <span v-else-if="swaps !== null && swaps.length > 0" class="pill pill-clear">
+          all handled
+        </span>
         <span v-else-if="swaps !== null" class="pill pill-clear">balanced</span>
         <span v-else class="pill pill-unloaded">tap to check</span>
         <span class="caret">{{ open.variety ? "−" : "+" }}</span>
@@ -220,7 +236,7 @@ watch(() => props.refreshKey, () => {
           Plan looks balanced — no swaps suggested.
         </p>
         <p v-else-if="visibleSwaps().length === 0" class="muted small">
-          All suggestions dismissed.
+          All suggestions handled.
         </p>
         <ul v-else class="swap-list">
           <li v-for="s in visibleSwaps()" :key="s.target_exercise_id" class="swap-item">
@@ -231,14 +247,21 @@ watch(() => props.refreshKey, () => {
             </div>
             <div class="reason">{{ s.reason }}</div>
             <div class="actions">
-              <button class="primary" @click="emit('accept-swap', {
-                targetExerciseId: s.target_exercise_id,
-                replacementExerciseId: s.replacement_exercise_id,
-              })">Accept swap</button>
+              <button class="primary" @click="acceptSwap(s)">Accept swap</button>
               <button class="ghost-btn" @click="dismissSwap(s)">Dismiss</button>
             </div>
           </li>
         </ul>
+        <!-- Once all current suggestions are accepted / dismissed, offer
+             an explicit re-check button. We don't auto-refetch on
+             accept because each call considers the latest plan state
+             and returns different swaps, which feels indecisive. -->
+        <div v-if="swaps !== null && visibleSwaps().length === 0 && swaps.length > 0"
+             class="recheck">
+          <button class="ghost-btn" :disabled="swapsLoading" @click="loadSwaps(true)">
+            {{ swapsLoading ? "Thinking…" : "Get fresh suggestions" }}
+          </button>
+        </div>
         <p v-if="swapsError" class="muted small">AI unavailable. Check Settings → AI.</p>
       </div>
     </div>
@@ -331,6 +354,7 @@ watch(() => props.refreshKey, () => {
 .why-h { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
          color: var(--muted); margin-bottom: 0.2rem; }
 .why-section p { margin: 0; color: var(--text); font-size: 0.82rem; line-height: 1.45; }
+.recheck { margin-top: 0.5rem; }
 .muted { color: var(--muted); }
 .muted.small { font-size: 0.8rem; }
 </style>

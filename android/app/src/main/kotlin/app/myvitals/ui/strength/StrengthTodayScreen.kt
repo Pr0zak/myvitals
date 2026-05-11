@@ -1528,14 +1528,16 @@ internal fun CoachCard(
             finally { focusLoading = false }
         }
     }
-    fun loadSwaps() {
-        if (swaps != null || swapsLoading) return
+    fun loadSwaps(force: Boolean = false) {
+        if (swapsLoading) return
+        if (swaps != null && !force) return
         swapsLoading = true
         scope.launch {
             try {
                 val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
                 val r = withContext(Dispatchers.IO) { api.strengthNudge(workoutId) }
                 swaps = r.nudge.swaps
+                if (force) dismissed.clear()
             } catch (e: Exception) {
                 Timber.w(e, "coach variety nudge"); swaps = emptyList()
             } finally { swapsLoading = false }
@@ -1637,7 +1639,7 @@ internal fun CoachCard(
                 pill = when {
                     swaps == null -> "tap to check"
                     visibleSwaps.isEmpty() && (swaps?.isEmpty() == true) -> "balanced"
-                    visibleSwaps.isEmpty() -> "all dismissed"
+                    visibleSwaps.isEmpty() -> "all handled"
                     else -> "${visibleSwaps.size} swap${if (visibleSwaps.size == 1) "" else "s"}"
                 },
                 pillColor = if (swaps != null && visibleSwaps.isNotEmpty())
@@ -1683,6 +1685,10 @@ internal fun CoachCard(
                                 Button(
                                     onClick = {
                                         onAcceptSwap(s.targetExerciseId, s.replacementExerciseId)
+                                        // Implicit dismiss — the swap is applied, no point
+                                        // re-showing it (and tapping Accept again would
+                                        // query the AI against the modified plan, which
+                                        // feels indecisive).
                                         dismissed[s.targetExerciseId] = true
                                     },
                                     colors = ButtonDefaults.buttonColors(
@@ -1694,6 +1700,21 @@ internal fun CoachCard(
                                     onClick = { dismissed[s.targetExerciseId] = true },
                                 ) { Text("Dismiss", fontSize = 10.sp) }
                             }
+                        }
+                    }
+                    // Once every current suggestion has been accepted /
+                    // dismissed, surface an explicit "Get fresh suggestions"
+                    // button so re-fetching is intentional, not automatic.
+                    if (visibleSwaps.isEmpty() && (swaps?.isNotEmpty() == true)) {
+                        Spacer(Modifier.height(6.dp))
+                        OutlinedButton(
+                            onClick = { loadSwaps(force = true) },
+                            enabled = !swapsLoading,
+                        ) {
+                            Text(
+                                if (swapsLoading) "Thinking…" else "Get fresh suggestions",
+                                fontSize = 10.sp,
+                            )
                         }
                     }
                 }

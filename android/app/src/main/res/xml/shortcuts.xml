@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Static app shortcuts. Appear in the launcher's long-press menu on
+  the myvitals icon, and the user can drag each onto the home screen
+  as a 1x1 widget-shortcut.
+
+  Each shortcut launches MainActivity with `shortcut_route` extra so
+  the NavController can land on the right top-level tab without
+  routing through the Vitals home tab first.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <shortcut
+        android:shortcutId="workout"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_workout"
+        android:shortcutShortLabel="@string/shortcut_workout_short"
+        android:shortcutLongLabel="@string/shortcut_workout_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="app.myvitals"
+            android:targetClass="app.myvitals.MainActivity">
+            <extra android:name="shortcut_route" android:value="workout/today" />
+        </intent>
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="trails"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_trails"
+        android:shortcutShortLabel="@string/shortcut_trails_short"
+        android:shortcutLongLabel="@string/shortcut_trails_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="app.myvitals"
+            android:targetClass="app.myvitals.MainActivity">
+            <extra android:name="shortcut_route" android:value="trails" />
+        </intent>
+    </shortcut>
+
+</shortcuts>

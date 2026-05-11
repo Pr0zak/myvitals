@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terrain
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
@@ -75,6 +76,15 @@ private object Routes {
 }
 
 class MainActivity : ComponentActivity() {
+    // Re-route to the shortcut's target tab when the user taps a static
+    // app shortcut while the app is already running (singleTop + new
+    // intent). setIntent makes the new `shortcut_route` extra visible
+    // to the next setContent recomposition path.
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -111,6 +121,24 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyVitalsTheme {
                 val nav = rememberNavController()
+                // Read the `shortcut_route` extra on every onCreate /
+                // singleTop re-launch and navigate to that tab. The
+                // intent comes from a static app shortcut declared in
+                // res/xml/shortcuts.xml — Workouts and Trails today.
+                val routeFromShortcut = intent?.getStringExtra("shortcut_route")
+                LaunchedEffect(routeFromShortcut) {
+                    val target = routeFromShortcut
+                    if (!target.isNullOrEmpty() && target in setOf(
+                            Routes.WORKOUT, Routes.TRAILS, Routes.VITALS,
+                            Routes.ACTIVITIES, Routes.SETTINGS,
+                        )
+                    ) {
+                        nav.navigateTab(target)
+                        // Consume the extra so onResume doesn't re-fire on
+                        // every Lifecycle event.
+                        intent?.removeExtra("shortcut_route")
+                    }
+                }
                 Scaffold(
                     bottomBar = { BottomBar(nav) },
                     containerColor = MV.Bg,

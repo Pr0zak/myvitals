@@ -1769,10 +1769,17 @@ private fun CoachRow(
         Modifier
             .fillMaxWidth()
             .then(borderMod)
-            .clickable { onToggle() }
             .padding(vertical = 4.dp, horizontal = 4.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // Only the header row is clickable. The body must NOT be clickable
+        // because Compose's `clickable` modifier intercepts touches for
+        // the whole element; buttons inside the body fire their handlers
+        // BUT their click also propagates to the parent. That was making
+        // tapping Accept inside Variety close the section.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().clickable { onToggle() },
+        ) {
             Text(icon, color = accent ?: MV.OnSurfaceVariant, fontSize = 12.sp,
                 modifier = Modifier.padding(end = 6.dp).width(14.dp))
             Text(title, color = MV.OnSurface, fontSize = 12.sp,

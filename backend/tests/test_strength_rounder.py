@@ -106,20 +106,33 @@ class TestRoundWeight:
 
 class TestProgressFromRating:
     def test_failed_set_drops_75pct(self):
+        # Fail behaviour is goal-agnostic — pre-WP-12 invariant.
         assert progress_from_rating(100, 1.5, is_compound=True) == pytest.approx(92.5)
         assert progress_from_rating(100, 2.0, is_compound=False) == pytest.approx(92.5)
+        assert progress_from_rating(100, 1.5, is_compound=True, goal="strength") == pytest.approx(92.5)
+        assert progress_from_rating(100, 1.5, is_compound=True, goal="general") == pytest.approx(92.5)
 
     def test_hard_holds_weight(self):
         assert progress_from_rating(50, 3.0, is_compound=True) == 50
         assert progress_from_rating(50, 4.0, is_compound=False) == 50
 
-    def test_easy_compound_adds_10pct(self):
-        assert progress_from_rating(100, 5.0, is_compound=True) == pytest.approx(110)
+    def test_strength_goal_jumps_bigger(self):
+        # Compound +10%, isolation +7.5% for strength goal.
+        assert progress_from_rating(100, 5.0, is_compound=True, goal="strength") == pytest.approx(110)
+        assert progress_from_rating(100, 5.0, is_compound=False, goal="strength") == pytest.approx(107.5)
 
-    def test_easy_isolation_adds_5pct(self):
-        assert progress_from_rating(20, 5.0, is_compound=False) == pytest.approx(21)
+    def test_hypertrophy_goal_default_jumps(self):
+        # Compound +7.5%, isolation +5% — also the default when goal omitted.
+        assert progress_from_rating(100, 5.0, is_compound=True) == pytest.approx(107.5)
+        assert progress_from_rating(100, 5.0, is_compound=False) == pytest.approx(105)
+        assert progress_from_rating(100, 5.0, is_compound=True, goal="hypertrophy") == pytest.approx(107.5)
+
+    def test_general_goal_smaller_jumps(self):
+        # Compound +5%, isolation +2.5% — keeps user in higher rep ranges.
+        assert progress_from_rating(100, 5.0, is_compound=True, goal="general") == pytest.approx(105)
+        assert progress_from_rating(100, 5.0, is_compound=False, goal="general") == pytest.approx(102.5)
 
     def test_threshold_at_4_5(self):
         """Avg rating of 4.4 = hold (still moderate); 4.5 = bump."""
         assert progress_from_rating(100, 4.4, is_compound=True) == 100
-        assert progress_from_rating(100, 4.5, is_compound=True) == pytest.approx(110)
+        assert progress_from_rating(100, 4.5, is_compound=True) == pytest.approx(107.5)

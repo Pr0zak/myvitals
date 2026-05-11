@@ -113,6 +113,13 @@ class TrainingPreferences(BaseModel):
     # M/W/F strength, T/Th cardio, Sat yoga, Sun rest. Set to 0 to
     # keep cardio purely manual via the swap-day menu.
     cardio_days_per_week: int = 2
+    # Training goal — drives rep ranges + rest periods + progression
+    # behavior. Defaults to hypertrophy (research consensus for
+    # dumbbell-only home gyms hitting general population goals).
+    #   strength      — 3-6 reps,  3-5 min rest, bigger weight jumps
+    #   hypertrophy   — 6-12 reps, 60-90 s rest, balanced jumps
+    #   general       — 8-15 reps, 30-60 s rest, smaller jumps
+    goal: Literal["strength", "hypertrophy", "general"] = "hypertrophy"
 
 
 class EquipmentPayload(BaseModel):
@@ -228,6 +235,7 @@ async def put_equipment(
     watched_fields = (
         "level", "days_per_week", "split_preference", "workout_minutes",
         "cardio_days_per_week", "include_mobility", "yoga_on_rest_days",
+        "goal",
     )
     training_changed = any(
         prior_training.get(f) != new_training.get(f) for f in watched_fields

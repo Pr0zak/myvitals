@@ -301,6 +301,21 @@ onMounted(() => { equip.value = defaultEquip(); load(); });
         </label>
 
         <label class="train-row">
+          <span>Goal</span>
+          <div class="seg">
+            <button v-for="g in (['strength','hypertrophy','general'] as const)" :key="g"
+                    :class="{ on: (ensureTraining(equip).goal ?? 'hypertrophy') === g }"
+                    @click="ensureTraining(equip).goal = g">{{ g }}</button>
+          </div>
+        </label>
+        <p class="hint" style="margin: -0.4rem 0 0.6rem;">
+          <strong>Strength</strong>: 3–6 reps, 3–4 min rest, heavier loads.
+          <strong>Hypertrophy</strong>: 6–12 reps, 60–120 s rest, balanced —
+          recommended for dumbbell-only training. <strong>General</strong>:
+          8–15 reps, 30–75 s rest, time-efficient.
+        </p>
+
+        <label class="train-row">
           <span>Target session length</span>
           <input type="number" min="20" max="120" step="5"
                  :value="ensureTraining(equip).workout_minutes"

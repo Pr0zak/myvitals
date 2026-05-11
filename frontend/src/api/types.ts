@@ -165,6 +165,8 @@ export interface StrengthEquipment {
     workout_minutes: number;
     include_mobility?: boolean;
     yoga_on_rest_days?: boolean;
+    cardio_days_per_week?: number;
+    goal?: "strength" | "hypertrophy" | "general";
   };
 }
 

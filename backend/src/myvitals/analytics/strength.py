@@ -347,19 +347,36 @@ def starting_weight_lb(movement_pattern: str, level: str) -> float | None:
 
 
 def progress_from_rating(
-    last_weight_lb: float, avg_rating: float, is_compound: bool
+    last_weight_lb: float, avg_rating: float, is_compound: bool,
+    goal: str = "hypertrophy",
 ) -> float:
-    """Apply Fitbod-style RPE-driven progression.
+    """Apply Fitbod-style RPE-driven progression, modulated by goal.
 
-    - rating ≤ 2  → -7.5%  (failed)
-    - rating 3-4  →  hold
-    - rating ≥ 4.5 → +5% isolation, +10% compound  (easy)
+    Fail handling is goal-agnostic: rating ≤ 2.5 → -7.5%.
+    Hold zone: 2.5 < rating < easy_threshold → no change.
+    Easy zone (rating ≥ easy_threshold) → goal-specific jump.
+
+    Strength favours bigger weight jumps because neural adaptation
+    benefits from heavier loads; hypertrophy uses moderate jumps so
+    rep volume stays in the productive range; general uses small
+    nudges so the user can keep hitting the higher rep targets.
+
+    Thresholds:
+        strength    → compound +10%, isolation +7.5%, easy_thr=4.5
+        hypertrophy → compound +7.5%, isolation +5%,   easy_thr=4.5
+        general     → compound +5%,   isolation +2.5%, easy_thr=4.5
     """
     if avg_rating <= 2.5:
         return last_weight_lb * 0.925
-    if avg_rating < 4.5:
+    easy_thr = 4.5
+    if avg_rating < easy_thr:
         return last_weight_lb
-    return last_weight_lb * (1.10 if is_compound else 1.05)
+    if goal == "strength":
+        return last_weight_lb * (1.10 if is_compound else 1.075)
+    if goal == "general":
+        return last_weight_lb * (1.05 if is_compound else 1.025)
+    # hypertrophy default
+    return last_weight_lb * (1.075 if is_compound else 1.05)
 
 
 # ------------------------------------------------------------------
@@ -629,17 +646,37 @@ def pair_supersets(
 # ------------------------------------------------------------------
 
 def prescribe_slot(
-    ex: dict[str, Any], slot_role: str
+    ex: dict[str, Any], slot_role: str, goal: str = "hypertrophy",
 ) -> tuple[int, int, int, int]:
     """Return (sets, reps_low, reps_high, rest_s) given the exercise + slot role.
 
     slot_role ∈ {"main_compound", "secondary_compound", "isolation"}.
+    `goal` shifts rep ranges + rest periods per Schoenfeld 2010 / 2017:
+      - strength    → 3-6 reps,  long rest (180-240s), fewer total reps,
+                      load near 80-90% 1RM
+      - hypertrophy → 6-12 reps, moderate rest (75-120s),
+                      load 65-80% 1RM, more volume
+      - general     → 8-15 reps, short rest (45-75s),
+                      load 55-70% 1RM, time-efficient
     """
+    if goal == "strength":
+        if slot_role == "main_compound":
+            return (5, 3, 5, 240)
+        if slot_role == "secondary_compound":
+            return (4, 4, 6, 180)
+        return (3, 6, 10, 120)
+    if goal == "general":
+        if slot_role == "main_compound":
+            return (4, 8, 10, 75)
+        if slot_role == "secondary_compound":
+            return (3, 10, 12, 60)
+        return (3, 12, 15, 45)
+    # hypertrophy (default)
     if slot_role == "main_compound":
-        return (5, 5, 5, DEFAULT_REST_S_HEAVY)
+        return (4, 6, 8, 120)
     if slot_role == "secondary_compound":
-        return (4, 6, 8, DEFAULT_REST_S_MODERATE)
-    return (3, 8, 12, DEFAULT_REST_S_ISOLATION)
+        return (4, 8, 10, 90)
+    return (3, 10, 12, 60)
 
 
 # ------------------------------------------------------------------
@@ -1031,6 +1068,7 @@ async def generate_plan(
     include_mobility = bool(training.get("include_mobility", True))
     yoga_on_rest = bool(training.get("yoga_on_rest_days", True))
     cardio_per_week = int(training.get("cardio_days_per_week", 2))
+    goal = training.get("goal", "hypertrophy")
 
     # Day-type allocation by weekday — runs before recovery / rest
     # checks. If today's slot is cardio or yoga (auto), we short-circuit
@@ -1218,12 +1256,14 @@ async def generate_plan(
             slot_role = "secondary_compound"
         else:
             slot_role = "isolation"
-        sets, reps_lo, reps_hi, rest_s = prescribe_slot(ex, slot_role)
+        sets, reps_lo, reps_hi, rest_s = prescribe_slot(ex, slot_role, goal=goal)
 
         # History-driven progression first, then starting weight.
         avg_rating, avg_weight = await last_target_weight_for_exercise(db, ex["id"])
         if avg_rating is not None and avg_weight is not None:
-            target = progress_from_rating(avg_weight, avg_rating, ex["is_compound"])
+            target = progress_from_rating(
+                avg_weight, avg_rating, ex["is_compound"], goal=goal,
+            )
         else:
             target = starting_weight_lb(ex["movement_pattern"], level)
 

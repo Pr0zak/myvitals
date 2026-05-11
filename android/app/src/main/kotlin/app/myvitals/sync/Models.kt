@@ -383,6 +383,20 @@ data class StrengthNudgeResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class MuscleVolumeRow(
+    val sets: Int = 0,
+    val mev: Int = 0,
+    val mav: Int = 0,
+    val status: String = "untrained",   // untrained | under | in_range | over
+)
+
+@JsonClass(generateAdapter = true)
+data class MuscleVolumeResponse(
+    @Json(name = "window_days") val windowDays: Int = 7,
+    val muscles: Map<String, MuscleVolumeRow> = emptyMap(),
+)
+
+@JsonClass(generateAdapter = true)
 data class FocusCueBody(
     val headline: String = "",
     val tone: String = "neutral",

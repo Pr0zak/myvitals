@@ -74,6 +74,11 @@ interface BackendApi {
     @POST("ai/strength/nudge/{id}")
     suspend fun strengthNudge(@Path("id") id: Long): StrengthNudgeResponse
 
+    @GET("workout/strength/muscle-volume")
+    suspend fun strengthMuscleVolume(
+        @Query("days") days: Int = 7,
+    ): MuscleVolumeResponse
+
     @POST("ai/strength/focus-cue/{id}")
     suspend fun strengthFocusCue(@Path("id") id: Long): FocusCueResponse
 

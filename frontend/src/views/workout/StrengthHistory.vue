@@ -10,6 +10,7 @@ import VChart from "vue-echarts";
 import { api } from "@/api/client";
 import { queryToken } from "@/config";
 import Card from "@/components/Card.vue";
+import MuscleVolume from "@/components/MuscleVolume.vue";
 import { chartTheme } from "@/theme";
 import type { StrengthExercise, StrengthWorkoutDetail } from "@/api/types";
 
@@ -192,6 +193,7 @@ const calendarHeight = computed(() => {
     </Card>
 
     <template v-else>
+      <MuscleVolume />
       <Card v-if="calendarOption" title="Workout calendar">
         <div class="cal" :style="{ height: calendarHeight + 'px' }">
           <VChart :option="calendarOption" autoresize/>

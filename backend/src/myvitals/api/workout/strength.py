@@ -1564,6 +1564,31 @@ async def swap_today_type(
     return await _hydrate_workout(db, workout)
 
 
+@router.get("/muscle-volume")
+async def get_muscle_volume(
+    days: int = 7,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Weekly direct-set audit per primary muscle vs research-backed
+    MEV / MAV targets (#WP-4). days=7 by default — clamp 1-28.
+
+    Returns:
+        {
+          "window_days": 7,
+          "muscles": {
+            "chest":     {"sets": 12, "mev": 10, "mav": 20, "status": "in_range"},
+            "biceps":    {"sets": 4,  "mev": 8,  "mav": 16, "status": "under"},
+            ...
+          }
+        }
+
+    status ∈ {"untrained","under","in_range","over"} drives UI colour.
+    """
+    days = max(1, min(28, int(days)))
+    muscles = await strength_algo.weekly_muscle_volume(db, days=days)
+    return {"window_days": days, "muscles": muscles}
+
+
 @router.get("/recovery")
 async def get_recovery(
     db: AsyncSession = Depends(get_session),

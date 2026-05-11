@@ -832,6 +832,94 @@ async def recent_ratings_by_exercise(
     }
 
 
+# #WP-4 — research-backed weekly direct-set targets per muscle group.
+# Sources: Schoenfeld 2017 SR + Helms / Wolf / Israetel volume framework.
+# Tuple is (minimum_effective_volume, maximum_adaptive_volume).
+# Counts WORKING sets per muscle's PRIMARY mover only — secondary
+# stimulus (e.g. triceps from bench) is acknowledged in MEV/MAV ranges.
+MUSCLE_VOLUME_TARGETS: dict[str, tuple[int, int]] = {
+    "chest":       (10, 20),
+    "back":        (10, 20),
+    "lats":        (10, 20),
+    "shoulders":   (8,  16),
+    "biceps":      (8,  16),
+    "triceps":     (6,  14),
+    "quadriceps":  (10, 18),
+    "hamstrings":  (8,  16),
+    "glutes":      (10, 18),
+    "calves":      (8,  14),
+    "abdominals":  (8,  16),
+    "forearms":    (4,  10),
+    "traps":       (4,  10),
+    "lower_back":  (4,  10),
+    "neck":        (2,  6),
+}
+
+
+async def weekly_muscle_volume(
+    db: AsyncSession, days: int = 7,
+) -> dict[str, dict[str, Any]]:
+    """Sum of working sets per primary muscle over the last `days` of
+    completed / in-progress strength workouts. Returns:
+
+        {
+          "chest":     {"sets": 12, "mev": 10, "mav": 20, "status": "in_range"},
+          "biceps":    {"sets": 4,  "mev": 8,  "mav": 16, "status": "under"},
+          ...
+        }
+
+    Skipped sets and unrated empty sets don't count — only sets where
+    actual_reps is not None and skipped is false. Mobility / cardio
+    workouts are excluded by status filter on split_focus.
+    """
+    from datetime import timedelta as _td
+    since = datetime.now(timezone.utc).date() - _td(days=days)
+
+    # Join through to get the exercise_id for each logged set.
+    rows = (await db.execute(
+        select(models.StrengthWorkoutExercise.exercise_id, func.count(models.StrengthSet.id))
+        .join(
+            models.StrengthSet,
+            models.StrengthSet.workout_exercise_id == models.StrengthWorkoutExercise.id,
+        )
+        .join(
+            models.StrengthWorkout,
+            models.StrengthWorkout.id == models.StrengthWorkoutExercise.workout_id,
+        )
+        .where(models.StrengthWorkout.date >= since)
+        .where(models.StrengthWorkout.status.in_(("completed", "in_progress")))
+        .where(models.StrengthWorkout.split_focus.notin_(["yoga", "cardio"]))
+        .where(models.StrengthSet.actual_reps.is_not(None))
+        .where(models.StrengthSet.skipped.is_(False))
+        .group_by(models.StrengthWorkoutExercise.exercise_id)
+    )).all()
+
+    sets_by_muscle: dict[str, int] = {}
+    for ex_id, n_sets in rows:
+        info = CATALOG_BY_ID.get(ex_id)
+        if info is None:
+            continue
+        muscle = info.get("primary_muscle")
+        if not muscle:
+            continue
+        sets_by_muscle[muscle] = sets_by_muscle.get(muscle, 0) + int(n_sets)
+
+    out: dict[str, dict[str, Any]] = {}
+    for muscle in MUSCLE_VOLUME_TARGETS:
+        sets = sets_by_muscle.get(muscle, 0)
+        mev, mav = MUSCLE_VOLUME_TARGETS[muscle]
+        if sets == 0:
+            status = "untrained"
+        elif sets < mev:
+            status = "under"
+        elif sets <= mav:
+            status = "in_range"
+        else:
+            status = "over"
+        out[muscle] = {"sets": sets, "mev": mev, "mav": mav, "status": status}
+    return out
+
+
 async def recent_frequency_by_exercise(
     db: AsyncSession, since_days: int = 28,
 ) -> dict[str, int]:

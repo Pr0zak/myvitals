@@ -31,17 +31,25 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
 import app.myvitals.data.SettingsRepository
 import app.myvitals.strength.StrengthRepository
+import app.myvitals.sync.BackendClient
+import app.myvitals.sync.MuscleVolumeRow
 import app.myvitals.sync.StrengthExerciseInfo
 import app.myvitals.sync.StrengthWorkoutDetail
 import app.myvitals.sync.StrengthWorkoutSummary
 import app.myvitals.ui.MV
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -105,6 +113,7 @@ fun StrengthHistoryScreen(
                 contentPadding = PaddingValues(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                item { MuscleVolumeCard(settings = settings) }
                 item { WorkoutCalendar(rows) }
                 items(rows, key = { it.id }) { r ->
                     HistoryRow(r) {
@@ -118,6 +127,98 @@ fun StrengthHistoryScreen(
         }
     }
 }
+
+/** #WP-4 — Weekly muscle volume audit. Sets-per-primary-muscle over
+ *  the last 7 days, coloured by under/in-range/over vs research-backed
+ *  MEV/MAV ranges. Mirrors web's MuscleVolume.vue. */
+@Composable
+private fun MuscleVolumeCard(settings: SettingsRepository) {
+    var rows by remember { mutableStateOf<List<Pair<String, MuscleVolumeRow>>>(emptyList()) }
+    var windowDays by remember { mutableStateOf(7) }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val resp = withContext(Dispatchers.IO) { api.strengthMuscleVolume(7) }
+            windowDays = resp.windowDays
+            // Sort: non-zero by descending sets, then zero-volume alphabetical.
+            rows = resp.muscles.toList().sortedWith(
+                compareBy<Pair<String, MuscleVolumeRow>> { it.second.sets == 0 }
+                    .thenByDescending { it.second.sets }
+                    .thenBy { it.first }
+            )
+        } catch (e: Exception) {
+            Timber.w(e, "muscle volume load failed")
+            error = e.message?.take(160)
+        } finally { loading = false }
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(
+                "Weekly muscle volume",
+                color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "Last $windowDays days vs research-backed MEV / MAV",
+                color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+            when {
+                loading -> Text("Loading…", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                error != null -> Text(error!!, color = MV.Red, fontSize = 11.sp)
+                rows.isEmpty() -> Text("No data.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                else -> for ((muscle, r) in rows) {
+                    val accent = when (r.status) {
+                        "under" -> Color(0xFFFACC15)
+                        "in_range" -> Color(0xFF22C55E)
+                        "over" -> Color(0xFFEF4444)
+                        else -> MV.OnSurfaceVariant
+                    }
+                    val fillPct = if (r.mav > 0) {
+                        (r.sets.toFloat() / r.mav.toFloat()).coerceAtMost(1f)
+                    } else 0f
+                    Column(Modifier.padding(vertical = 3.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                muscle.replace('_', ' '),
+                                color = MV.OnSurface, fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                "${r.sets} / ${r.mev}–${r.mav}",
+                                color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                            )
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(MV.SurfaceContainerLow),
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(fillPct)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(accent),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 /** Year-strip calendar of completed workouts. Each cell is a day;
  *  color encodes split_focus (strength=red, yoga=violet, cardio=blue).

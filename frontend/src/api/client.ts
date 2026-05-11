@@ -903,6 +903,18 @@ export const api = {
     return data;
   },
 
+  async strengthMuscleVolume(days = 7): Promise<{
+    window_days: number;
+    muscles: Record<string, {
+      sets: number; mev: number; mav: number;
+      status: "untrained" | "under" | "in_range" | "over";
+    }>;
+  }> {
+    const { data } = await http.get("/workout/strength/muscle-volume",
+      { params: { days } });
+    return data;
+  },
+
   async aiStrengthFocusCue(workoutId: number): Promise<{
     cue: { headline: string; tone: string; cue: string };
     generated_at: string;

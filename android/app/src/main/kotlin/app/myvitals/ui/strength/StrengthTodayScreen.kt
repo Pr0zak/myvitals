@@ -59,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -597,6 +598,16 @@ fun StrengthTodayScreen(
                                 it.exerciseId == targetExId
                             }
                             if (wex2 != null) {
+                                // Show "Swap applied" feedback right away so
+                                // the section stays open visually even while
+                                // the network swap + reload run in the
+                                // background.
+                                Toast.makeText(
+                                    context,
+                                    "Swap applied: " +
+                                        replacementExId.replace('_', ' '),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
                                 scope.launch {
                                     try {
                                         val api = BackendClient.create(

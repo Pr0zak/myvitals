@@ -86,8 +86,38 @@ fun SettingsScreen(
     var profile by remember { mutableStateOf<ProfileResponse?>(null) }
     var reminderEnabled by remember { mutableStateOf(false) }
     var reminderHour by remember { mutableStateOf(8) }
+    var showClearBufferConfirm by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    if (showClearBufferConfirm) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showClearBufferConfirm = false },
+            title = { Text("Clear sync buffer?") },
+            text = {
+                Text(
+                    "Discards every unsynced set log, workout patch and " +
+                    "log line currently buffered on this device. Use this " +
+                    "only if the buffer is stuck and you don't mind losing " +
+                    "the pending writes.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        showClearBufferConfirm = false
+                        onClearBuffer()
+                        Toast.makeText(context, "Sync buffer cleared", Toast.LENGTH_SHORT).show()
+                    },
+                ) { Text("Clear", color = MV.Red) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { showClearBufferConfirm = false },
+                ) { Text("Cancel") }
+            },
+        )
+    }
 
     LaunchedEffect(Unit) {
         if (!settings.isConfigured()) return@LaunchedEffect
@@ -464,11 +494,8 @@ fun SettingsScreen(
                         Toast.makeText(context, "Log upload queued", Toast.LENGTH_SHORT).show()
                     }
                     Divider()
-                    ActionRow {
-                        OutlinedPill(label = "Clear sync buffer", danger = true) {
-                            onClearBuffer()
-                            Toast.makeText(context, "Sync buffer cleared", Toast.LENGTH_SHORT).show()
-                        }
+                    ListLinkRow(label = "Clear sync buffer", destructive = true) {
+                        showClearBufferConfirm = true
                     }
                 }
             }
@@ -630,7 +657,11 @@ private fun KvRow(label: String, value: String, valueColor: Color? = null) {
 }
 
 @Composable
-private fun ListLinkRow(label: String, onClick: () -> Unit) {
+private fun ListLinkRow(
+    label: String,
+    destructive: Boolean = false,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -639,7 +670,8 @@ private fun ListLinkRow(label: String, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, fontSize = 15.sp, color = MV.OnSurface)
+        Text(label, fontSize = 15.sp,
+            color = if (destructive) MV.Red else MV.OnSurface)
         Text("›", fontSize = 18.sp, color = MV.OnSurfaceDim)
     }
 }

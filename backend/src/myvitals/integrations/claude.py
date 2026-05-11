@@ -1424,6 +1424,188 @@ async def deload_check(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     )
 
 
+FOCUS_CUE_TOOL = {
+    "name": "give_focus_cue",
+    "description": (
+        "Return a short, specific pre-workout coaching cue for the "
+        "user's planned session. Tied to TODAY'S exercises + recent "
+        "performance — not generic motivation."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "headline": {
+                "type": "string",
+                "description": "≤10 words. The single thing to focus on this session.",
+            },
+            "tone": {"type": "string", "enum": ["good", "warn", "bad", "neutral"]},
+            "cue": {
+                "type": "string",
+                "description": (
+                    "≤45 words. Two sentences max. Sentence 1: form/technique "
+                    "focus on a SPECIFIC exercise from today's plan. "
+                    "Sentence 2: a load/volume warning or push, citing "
+                    "recent history (avg rating, trend) when relevant."
+                ),
+            },
+        },
+        "required": ["headline", "tone", "cue"],
+    },
+}
+
+
+def _focus_cue_system(tone: str) -> str:
+    return f"""You are a brief strength coach giving a single pre-workout
+focus cue for the user's planned session today.
+
+{_tone_line(tone)}
+
+Use the `give_focus_cue` tool. Rules:
+- Reference SPECIFIC exercises from today's plan, not generic advice.
+- If recent ratings on a specific lift have been creeping down, mention
+  it and suggest conservative weight on that lift.
+- If a lift hasn't been touched in 4+ weeks, mention it's fresh — be
+  conservative on the first set.
+- Cue must be actionable — "engage your lats" is not actionable;
+  "pause 1s at the bottom of the Decline Push-Up" is.
+- Don't editorialise about recovery state — that's the deload banner's
+  job. Stay focused on form / load / pacing for the planned lifts.
+"""
+
+
+async def build_focus_cue_payload(
+    db: AsyncSession, workout_id: int, catalog_by_id: dict[str, dict],
+) -> dict[str, Any]:
+    """Bounded payload for the per-workout focus cue.
+
+    Slim: today's exercise list (id + name + target prescription) +
+    per-exercise recent avg_rating + weeks-since-last-seen + the
+    today recovery context already on the workout row.
+    """
+    workout = await db.get(models.StrengthWorkout, workout_id)
+    if workout is None:
+        return {}
+
+    wex_rows = (await db.execute(
+        select(models.StrengthWorkoutExercise)
+        .where(models.StrengthWorkoutExercise.workout_id == workout_id)
+        .order_by(models.StrengthWorkoutExercise.order_index)
+    )).scalars().all()
+    today_plan: list[dict[str, Any]] = []
+    for wex in wex_rows:
+        info = catalog_by_id.get(wex.exercise_id, {})
+        today_plan.append({
+            "exercise_id": wex.exercise_id,
+            "name": info.get("name", wex.exercise_id),
+            "primary_muscle": info.get("primary_muscle"),
+            "is_compound": info.get("is_compound", False),
+            "target": (
+                f"{wex.target_sets}x{wex.target_reps_low}"
+                f"{('-' + str(wex.target_reps_high)) if wex.target_reps_high != wex.target_reps_low else ''}"
+                f"{(' @ ' + str(wex.target_weight_lb) + 'lb') if wex.target_weight_lb else ''}"
+            ),
+        })
+
+    # Trailing 6w per-exercise history: avg rating, last seen.
+    cutoff = workout.date - timedelta(days=42)
+    prior_q = (await db.execute(
+        select(
+            models.StrengthWorkoutExercise.exercise_id,
+            models.StrengthWorkout.date,
+            models.StrengthSet.rating,
+        )
+        .join(
+            models.StrengthSet,
+            models.StrengthSet.workout_exercise_id == models.StrengthWorkoutExercise.id,
+        )
+        .join(
+            models.StrengthWorkout,
+            models.StrengthWorkout.id == models.StrengthWorkoutExercise.workout_id,
+        )
+        .where(models.StrengthWorkout.date >= cutoff)
+        .where(models.StrengthWorkout.date < workout.date)
+        .where(models.StrengthSet.skipped.is_(False))
+    )).all()
+
+    by_ex: dict[str, dict[str, Any]] = {}
+    for ex_id, dt, rating in prior_q:
+        entry = by_ex.setdefault(ex_id, {"ratings": [], "last_seen": None})
+        if rating is not None:
+            entry["ratings"].append(int(rating))
+        iso = str(dt)
+        if entry["last_seen"] is None or iso > entry["last_seen"]:
+            entry["last_seen"] = iso
+    today_iso = str(workout.date)
+    history = {}
+    for ex_id, e in by_ex.items():
+        ratings = e["ratings"]
+        ls = e["last_seen"]
+        days_ago = None
+        if ls is not None:
+            try:
+                days_ago = (workout.date - date.fromisoformat(ls)).days
+            except Exception:  # noqa: BLE001
+                days_ago = None
+        history[ex_id] = {
+            "avg_rating": round(sum(ratings) / len(ratings), 2) if ratings else None,
+            "samples": len(ratings),
+            "days_since_last": days_ago,
+        }
+
+    return {
+        "today": today_iso,
+        "split": workout.split_focus,
+        "recovery_score": workout.recovery_score_used,
+        "readiness_score": workout.readiness_score_used,
+        "sleep_h": (round(workout.sleep_h_used, 1)
+                    if workout.sleep_h_used is not None else None),
+        "plan": today_plan,
+        "history_6w": history,
+    }
+
+
+async def strength_focus_cue(
+    db: AsyncSession, workout_id: int, cfg: models.AiConfig,
+    catalog_by_id: dict[str, dict],
+) -> AiResult:
+    """Pre-workout focus cue — short, plan-specific."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    payload = await build_focus_cue_payload(db, workout_id, catalog_by_id)
+    if not payload:
+        raise RuntimeError("workout not found")
+    user_text = (
+        f"User is about to start their planned session. Give one "
+        f"focus cue tied to today's exercises + recent history.\n\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=300,
+        system=_cached_system(_focus_cue_system(cfg.tone)),
+        tools=[FOCUS_CUE_TOOL],
+        tool_choice={"type": "tool", "name": "give_focus_cue"},
+        messages=[{"role": "user", "content": user_text}],
+    )
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use" and block.name == "give_focus_cue":
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    if not tool_input:
+        tool_input = {
+            "headline": "No cue generated", "tone": "neutral",
+            "cue": "Train as planned.",
+        }
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
 async def phrase_anomaly(cfg: models.AiConfig, anomaly: dict[str, Any]) -> str:
     """Single-sentence push notification body for an anomaly. ~$0.0005/call."""
     if not cfg.enabled or not cfg.anthropic_api_key:

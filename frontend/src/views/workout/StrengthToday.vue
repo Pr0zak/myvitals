@@ -14,6 +14,7 @@ import Card from "@/components/Card.vue";
 import WhyThisWorkout from "@/components/WhyThisWorkout.vue";
 import VarietyNudge from "@/components/VarietyNudge.vue";
 import DeloadBanner from "@/components/DeloadBanner.vue";
+import FocusCue from "@/components/FocusCue.vue";
 import type { StrengthExercise, StrengthWorkoutDetail, StrengthWorkoutExercise } from "@/api/types";
 
 const router = useRouter();
@@ -713,6 +714,10 @@ useVisibilityRefresh(loadAll);
     <DeloadBanner v-if="queryToken && workout
                         && (workout.status === 'planned' || workout.status === 'in_progress')"
                   :key="deloadRefreshKey" />
+    <FocusCue v-if="queryToken && workout
+                    && (workout.status === 'planned' || workout.status === 'in_progress')"
+              :workout-id="workout.id"
+              :key="`focus-${workout.id}-${deloadRefreshKey}`" />
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load today's plan.</p>
     <p v-else-if="loading" class="hint">Loading…</p>

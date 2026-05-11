@@ -903,6 +903,16 @@ export const api = {
     return data;
   },
 
+  async aiStrengthFocusCue(workoutId: number): Promise<{
+    cue: { headline: string; tone: string; cue: string };
+    generated_at: string;
+    model: string;
+    cached: boolean;
+  }> {
+    const { data } = await http.post(`/ai/strength/focus-cue/${workoutId}`);
+    return data;
+  },
+
   async aiStrengthDeloadCheck(): Promise<{
     judgment: {
       should_deload: boolean;

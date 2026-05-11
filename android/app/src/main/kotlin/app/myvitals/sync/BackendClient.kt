@@ -74,6 +74,9 @@ interface BackendApi {
     @POST("ai/strength/nudge/{id}")
     suspend fun strengthNudge(@Path("id") id: Long): StrengthNudgeResponse
 
+    @POST("ai/strength/focus-cue/{id}")
+    suspend fun strengthFocusCue(@Path("id") id: Long): FocusCueResponse
+
     @POST("ai/strength/deload-check")
     suspend fun strengthDeloadCheck(): DeloadCheckResponse
 

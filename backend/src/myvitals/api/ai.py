@@ -748,6 +748,69 @@ async def strength_nudge_endpoint(
     }
 
 
+# ─────────────── Pre-workout focus cue ───────────────
+
+@router.post("/strength/focus-cue/{workout_id}")
+async def strength_focus_cue_endpoint(
+    workout_id: int, db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Short pre-workout coaching cue tied to today's specific plan
+    + 6-week per-exercise history. Cached by payload hash like the
+    other strength AI endpoints."""
+    workout = await db.get(models.StrengthWorkout, workout_id)
+    if workout is None:
+        raise HTTPException(status_code=404, detail="workout not found")
+
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+
+    from ..analytics import strength as strength_algo
+    from ..integrations.claude import (
+        build_focus_cue_payload, strength_focus_cue,
+    )
+    catalog_by_id = strength_algo.CATALOG_BY_ID
+
+    payload = await build_focus_cue_payload(db, workout_id, catalog_by_id)
+    payload_hash = hash_payload(payload)
+    range_kind = f"strength_focus_cue:{workout_id}"
+    cached = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == range_kind)
+        .where(models.AiSummary.payload_hash == payload_hash)
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if cached is not None:
+        import json as _json
+        try: cue = _json.loads(cached.content)
+        except Exception: cue = {}  # noqa: BLE001
+        return {
+            "cue": cue, "generated_at": cached.generated_at,
+            "model": cached.model, "cached": True,
+            "input_tokens": cached.input_tokens, "output_tokens": cached.output_tokens,
+        }
+
+    result = await strength_focus_cue(db, workout_id, cfg, catalog_by_id)
+    cfg.calls_today += 1
+    summary = models.AiSummary(
+        generated_at=datetime.now(timezone.utc),
+        range_kind=range_kind, payload_hash=payload_hash,
+        model=result.model,
+        input_tokens=result.input_tokens, output_tokens=result.output_tokens,
+        content=result.content,
+    )
+    db.add(summary)
+    await db.commit()
+    import json as _json
+    try: cue = _json.loads(result.content)
+    except Exception: cue = {}  # noqa: BLE001
+    return {
+        "cue": cue, "generated_at": summary.generated_at,
+        "model": result.model, "cached": False,
+        "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
+    }
+
+
 # ─────────────── Deload trigger (multi-signal AI judgment) ───────────────
 
 @router.post("/strength/deload-check")

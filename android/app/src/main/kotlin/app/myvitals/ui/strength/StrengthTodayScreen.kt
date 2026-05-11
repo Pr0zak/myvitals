@@ -588,6 +588,13 @@ fun StrengthTodayScreen(
         ) {
             if (plan.status == "planned" || plan.status == "in_progress") {
                 item { DeloadBannerCard(settings = settings, refreshKey = deloadRefreshKey) }
+                item {
+                    FocusCueCard(
+                        settings = settings,
+                        workoutId = plan.id,
+                        refreshKey = deloadRefreshKey,
+                    )
+                }
             }
             items(orderedExercises, key = { it.id }) { wex ->
                 val canSwap = wex.sets.none { it.actualReps != null && !it.skipped }
@@ -1270,6 +1277,77 @@ internal fun VarietyNudgeCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun FocusCueCard(
+    settings: SettingsRepository, workoutId: Long, refreshKey: Int = 0,
+) {
+    var cue by remember(workoutId) {
+        mutableStateOf<app.myvitals.sync.FocusCueBody?>(null)
+    }
+    var loading by remember(workoutId) { mutableStateOf(false) }
+    var failed by remember(workoutId) { mutableStateOf(false) }
+    var expanded by remember(workoutId) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    fun load() {
+        if (loading || !settings.isConfigured()) return
+        loading = true
+        failed = false
+        scope.launch {
+            try {
+                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                val resp = withContext(Dispatchers.IO) { api.strengthFocusCue(workoutId) }
+                cue = resp.cue
+                expanded = true
+            } catch (e: Exception) {
+                Timber.w(e, "focus cue failed")
+                failed = true
+            } finally { loading = false }
+        }
+    }
+
+    // refreshKey changes (e.g. after a regenerate) → drop cached cue
+    // so the next tap re-fetches against the new plan.
+    LaunchedEffect(refreshKey) {
+        if (refreshKey != 0) { cue = null; failed = false; expanded = false }
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFFA78BFA).copy(alpha = 0.10f)
+        ),
+        modifier = Modifier.fillMaxWidth().clickable {
+            if (cue == null) load() else expanded = !expanded
+        },
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("◇", color = Color(0xFFA78BFA), fontSize = 14.sp,
+                    modifier = Modifier.padding(end = 6.dp))
+                Text(
+                    cue?.headline?.takeIf { it.isNotEmpty() } ?: "Focus cue",
+                    color = MV.OnSurface, fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    when {
+                        loading -> "Thinking…"
+                        failed -> "Unavailable"
+                        cue == null -> "Ask AI"
+                        else -> if (expanded) "−" else "+"
+                    },
+                    color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                )
+            }
+            if (expanded && cue != null && cue!!.cue.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(cue!!.cue, color = MV.OnSurface, fontSize = 12.sp)
             }
         }
     }

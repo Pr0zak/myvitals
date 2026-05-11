@@ -383,6 +383,21 @@ data class StrengthNudgeResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class FocusCueBody(
+    val headline: String = "",
+    val tone: String = "neutral",
+    val cue: String = "",
+)
+
+@JsonClass(generateAdapter = true)
+data class FocusCueResponse(
+    val cue: FocusCueBody,
+    @Json(name = "generated_at") val generatedAt: String,
+    val model: String,
+    val cached: Boolean = false,
+)
+
+@JsonClass(generateAdapter = true)
 data class DeloadJudgment(
     @Json(name = "should_deload") val shouldDeload: Boolean = false,
     val severity: String = "none",            // none | light | moderate | rest

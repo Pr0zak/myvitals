@@ -135,57 +135,6 @@ fun StrengthTodayScreen(
     // + swaps and made the AI look like it kept changing its mind.
     val coachState = remember(workout?.id) { CoachCardState() }
 
-    // Surface a "workout complete?" dialog the moment the last
-    // prescribed set is logged. User can finish now or keep going
-    // (bonus sets). Dismissed flag keyed by workout id so a new
-    // workout pops the dialog freshly.
-    var showCompleteDialog by remember(workout?.id) { mutableStateOf(false) }
-    var completeDialogDismissed by remember(workout?.id) { mutableStateOf(false) }
-    val totalSets = workout?.exercises?.sumOf { it.targetSets } ?: 0
-    val completedSets = workout?.exercises?.flatMap { it.sets }
-        ?.count { it.actualReps != null && !it.skipped } ?: 0
-    val allSetsDone = totalSets > 0 && completedSets >= totalSets
-    LaunchedEffect(allSetsDone, workout?.status) {
-        if (allSetsDone
-            && !completeDialogDismissed
-            && workout?.status != "completed"
-        ) showCompleteDialog = true
-    }
-    if (showCompleteDialog && workout != null) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = {
-                showCompleteDialog = false
-                completeDialogDismissed = true
-            },
-            title = { Text("Workout complete?") },
-            text = {
-                Text(
-                    "All $totalSets prescribed sets logged. Finish and stamp " +
-                    "the session, or keep going if you want to add bonus work.",
-                )
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(
-                    onClick = {
-                        showCompleteDialog = false
-                        scope.launch {
-                            try { workout = repo.completeWorkout(workout!!.id); reload() }
-                            catch (e: Exception) { error = e.message?.take(160) }
-                        }
-                    },
-                ) { Text("Finish workout", color = MV.Green) }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(
-                    onClick = {
-                        showCompleteDialog = false
-                        completeDialogDismissed = true
-                    },
-                ) { Text("Keep going") }
-            },
-        )
-    }
-
     fun bumpDeload() {
         deloadRefreshKey++
         scope.launch {
@@ -253,6 +202,58 @@ fun StrengthTodayScreen(
 
     LaunchedEffect(Unit) { reload(); refreshBuffered() }
     app.myvitals.ui.common.LifecycleResumeEffect { scope.launch { reload() } }
+
+    // Workout-complete dialog. Pops the moment the last prescribed set
+    // is logged. Declared AFTER reload() and `error` because the
+    // confirmButton lambda refers to them; Kotlin local functions /
+    // vars must be in scope at use site.
+    var showCompleteDialog by remember(workout?.id) { mutableStateOf(false) }
+    var completeDialogDismissed by remember(workout?.id) { mutableStateOf(false) }
+    val totalSets = workout?.exercises?.sumOf { it.targetSets } ?: 0
+    val completedSets = workout?.exercises?.flatMap { it.sets }
+        ?.count { it.actualReps != null && !it.skipped } ?: 0
+    val allSetsDone = totalSets > 0 && completedSets >= totalSets
+    LaunchedEffect(allSetsDone, workout?.status) {
+        if (allSetsDone
+            && !completeDialogDismissed
+            && workout?.status != "completed"
+        ) showCompleteDialog = true
+    }
+    if (showCompleteDialog && workout != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = {
+                showCompleteDialog = false
+                completeDialogDismissed = true
+            },
+            title = { Text("Workout complete?") },
+            text = {
+                Text(
+                    "All $totalSets prescribed sets logged. Finish and stamp " +
+                    "the session, or keep going if you want to add bonus work.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        showCompleteDialog = false
+                        scope.launch {
+                            try { workout = repo.completeWorkout(workout!!.id); reload() }
+                            catch (e: Exception) { error = e.message?.take(160) }
+                        }
+                    },
+                ) { Text("Finish workout", color = MV.Green) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        showCompleteDialog = false
+                        completeDialogDismissed = true
+                    },
+                ) { Text("Keep going") }
+            },
+        )
+    }
+
     // Auto-flush both buffers (set logs + workout-status patches) when
     // network returns. Sets first so the workout's logged-set list is
     // current before the patch applies; then status patches.

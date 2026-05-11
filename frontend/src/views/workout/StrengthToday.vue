@@ -11,10 +11,7 @@ import { api } from "@/api/client";
 import { apiBase, queryToken } from "@/config";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import Card from "@/components/Card.vue";
-import WhyThisWorkout from "@/components/WhyThisWorkout.vue";
-import VarietyNudge from "@/components/VarietyNudge.vue";
-import DeloadBanner from "@/components/DeloadBanner.vue";
-import FocusCue from "@/components/FocusCue.vue";
+import CoachCard from "@/components/CoachCard.vue";
 import type { StrengthExercise, StrengthWorkoutDetail, StrengthWorkoutExercise } from "@/api/types";
 
 const router = useRouter();
@@ -711,13 +708,11 @@ useVisibilityRefresh(loadAll);
     <p v-if="workout?.notes" class="hint subtle">{{ workout.notes }}</p>
     <!-- Why + Variety nudge moved below the exercise list. -->
 
-    <DeloadBanner v-if="queryToken && workout
-                        && (workout.status === 'planned' || workout.status === 'in_progress')"
-                  :key="deloadRefreshKey" />
-    <FocusCue v-if="queryToken && workout
-                    && (workout.status === 'planned' || workout.status === 'in_progress')"
-              :workout-id="workout.id"
-              :key="`focus-${workout.id}-${deloadRefreshKey}`" />
+    <CoachCard v-if="queryToken && workout
+                     && (workout.status === 'planned' || workout.status === 'in_progress')"
+               :workout-id="workout.id"
+               :refresh-key="deloadRefreshKey"
+               @accept-swap="acceptNudge" />
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load today's plan.</p>
     <p v-else-if="loading" class="hint">Loading…</p>
@@ -1070,14 +1065,8 @@ useVisibilityRefresh(loadAll);
         </div>
       </Card>
 
-      <!-- Bottom-of-screen helpers — collapsed by default, no longer
-           persistent top chrome. -->
-      <div class="bottom-helpers">
-        <WhyThisWorkout :workout-id="workout.id" />
-        <VarietyNudge v-if="workout.status === 'planned' || workout.status === 'in_progress'"
-                      :workout-id="workout.id"
-                      @accept="acceptNudge" />
-      </div>
+      <!-- Why + Variety + Deload + Focus are now consolidated into the
+           single CoachCard mounted near the top of the page. -->
 
       <!-- Next workouts moved to bottom — "look ahead" not "do now" -->
       <div v-if="upcoming.filter(u => !u.is_today).length > 0" class="upcoming">

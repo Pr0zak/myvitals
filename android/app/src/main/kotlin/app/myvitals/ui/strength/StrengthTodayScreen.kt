@@ -587,12 +587,35 @@ fun StrengthTodayScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (plan.status == "planned" || plan.status == "in_progress") {
-                item { DeloadBannerCard(settings = settings, refreshKey = deloadRefreshKey) }
                 item {
-                    FocusCueCard(
+                    CoachCard(
                         settings = settings,
                         workoutId = plan.id,
                         refreshKey = deloadRefreshKey,
+                        onAcceptSwap = { targetExId, replacementExId ->
+                            val wex2 = plan.exercises.firstOrNull {
+                                it.exerciseId == targetExId
+                            }
+                            if (wex2 != null) {
+                                scope.launch {
+                                    try {
+                                        val api = BackendClient.create(
+                                            settings.backendUrl, settings.bearerToken,
+                                        )
+                                        withContext(Dispatchers.IO) {
+                                            api.swapStrengthExercise(
+                                                wex2.id,
+                                                app.myvitals.sync.SwapBody(replacementExId),
+                                            )
+                                        }
+                                        reload()
+                                    } catch (e: Exception) {
+                                        Timber.w(e, "coach swap failed")
+                                        error = "Swap failed: ${e.message?.take(80)}"
+                                    }
+                                }
+                            }
+                        },
                     )
                 }
             }
@@ -741,54 +764,8 @@ fun StrengthTodayScreen(
                     }
                 }
             }
-            // Bottom-of-screen helpers — Why + Variety nudge live here
-            // (collapsed by default) instead of as persistent top chrome.
-            if (plan.status == "planned" || plan.status == "in_progress") {
-                item {
-                    Spacer(Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Box(Modifier.weight(1f)) {
-                            WhyWorkoutCard(settings = settings, workoutId = plan.id)
-                        }
-                        Box(Modifier.weight(1f)) {
-                            VarietyNudgeCard(
-                                settings = settings,
-                                workoutId = plan.id,
-                                onAccept = { targetExId, replacementExId ->
-                                    val wex2 = plan.exercises.firstOrNull {
-                                        it.exerciseId == targetExId
-                                    }
-                                    if (wex2 != null) {
-                                        scope.launch {
-                                            try {
-                                                val api = BackendClient.create(
-                                                    settings.backendUrl,
-                                                    settings.bearerToken,
-                                                )
-                                                kotlinx.coroutines.withContext(
-                                                    kotlinx.coroutines.Dispatchers.IO,
-                                                ) {
-                                                    api.swapStrengthExercise(
-                                                        wex2.id,
-                                                        app.myvitals.sync.SwapBody(
-                                                            replacementExId,
-                                                        ),
-                                                    )
-                                                }
-                                                reload()
-                                            } catch (e: Exception) {
-                                                Timber.w(e, "nudge swap failed")
-                                                error = "Swap failed: " +
-                                                    "${e.message?.take(80)}"
-                                            }
-                                        }
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-            }
+            // Why + Variety + Deload + Focus are consolidated into CoachCard
+            // mounted at the top of the LazyColumn — no separate bottom block.
         }
         }  // end PullToRefreshBox
     }
@@ -1476,6 +1453,324 @@ internal fun DeloadBannerCard(settings: SettingsRepository, refreshKey: Int = 0)
                     enabled = !loading,
                 ) { Text(if (loading) "Thinking…" else "Re-check", fontSize = 11.sp) }
             }
+        }
+    }
+}
+
+/** Consolidated Coach card — replaces 4 separate cards (Why, Deload,
+ *  Variety, Focus) with one collapsible card that has four expandable
+ *  sections. Each section lazy-loads its body on first expand; deload
+ *  pre-fetches /latest so its severity pill is accurate without a tap.
+ *  refreshKey invalidates cached state after a regenerate. */
+@Composable
+internal fun CoachCard(
+    settings: SettingsRepository,
+    workoutId: Long,
+    refreshKey: Int = 0,
+    onAcceptSwap: (targetExerciseId: String, replacementExerciseId: String) -> Unit,
+) {
+    var deload by remember(workoutId) { mutableStateOf<app.myvitals.sync.DeloadJudgment?>(null) }
+    var deloadLoading by remember(workoutId) { mutableStateOf(false) }
+    var focus by remember(workoutId) { mutableStateOf<app.myvitals.sync.FocusCueBody?>(null) }
+    var focusLoading by remember(workoutId) { mutableStateOf(false) }
+    var swaps by remember(workoutId) {
+        mutableStateOf<List<app.myvitals.sync.StrengthSwapSuggestion>?>(null)
+    }
+    var swapsLoading by remember(workoutId) { mutableStateOf(false) }
+    val dismissed = remember(workoutId) { mutableStateMapOf<String, Boolean>() }
+    var explain by remember(workoutId) {
+        mutableStateOf<app.myvitals.sync.StrengthExplain?>(null)
+    }
+    var explainLoading by remember(workoutId) { mutableStateOf(false) }
+
+    var openDeload by remember(workoutId) { mutableStateOf(false) }
+    var openFocus by remember(workoutId) { mutableStateOf(false) }
+    var openVariety by remember(workoutId) { mutableStateOf(false) }
+    var openWhy by remember(workoutId) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // Pre-fetch the cached deload judgment so its pill is right without a tap.
+    LaunchedEffect(refreshKey) {
+        if (refreshKey != 0) {
+            deload = null; focus = null; swaps = null; explain = null
+            dismissed.clear()
+        }
+        if (settings.isConfigured()) {
+            try {
+                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                val resp = withContext(Dispatchers.IO) { api.strengthDeloadLatest() }
+                if (resp.isSuccessful) deload = resp.body()?.judgment
+            } catch (e: Exception) { Timber.d(e, "coach deload prefetch") }
+        }
+    }
+
+    fun reCheckDeload() {
+        if (deloadLoading) return
+        deloadLoading = true
+        scope.launch {
+            try {
+                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                val r = withContext(Dispatchers.IO) { api.strengthDeloadCheck() }
+                deload = r.judgment
+            } catch (e: Exception) { Timber.w(e, "coach deload check") }
+            finally { deloadLoading = false }
+        }
+    }
+    fun loadFocus() {
+        if (focus != null || focusLoading) return
+        focusLoading = true
+        scope.launch {
+            try {
+                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                val r = withContext(Dispatchers.IO) { api.strengthFocusCue(workoutId) }
+                focus = r.cue
+            } catch (e: Exception) { Timber.w(e, "coach focus cue") }
+            finally { focusLoading = false }
+        }
+    }
+    fun loadSwaps() {
+        if (swaps != null || swapsLoading) return
+        swapsLoading = true
+        scope.launch {
+            try {
+                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                val r = withContext(Dispatchers.IO) { api.strengthNudge(workoutId) }
+                swaps = r.nudge.swaps
+            } catch (e: Exception) {
+                Timber.w(e, "coach variety nudge"); swaps = emptyList()
+            } finally { swapsLoading = false }
+        }
+    }
+    fun loadExplain() {
+        if (explain != null || explainLoading) return
+        explainLoading = true
+        scope.launch {
+            try {
+                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                val r = withContext(Dispatchers.IO) { api.strengthExplain(workoutId) }
+                explain = r
+            } catch (e: Exception) { Timber.w(e, "coach explain") }
+            finally { explainLoading = false }
+        }
+    }
+
+    val visibleSwaps = (swaps ?: emptyList()).filter { dismissed[it.targetExerciseId] != true }
+    val sevColor = when (deload?.severity) {
+        "rest" -> Color(0xFFEF4444)
+        "moderate" -> Color(0xFFF97316)
+        "light" -> Color(0xFFFACC15)
+        else -> null
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(10.dp)) {
+            Text("Coach", color = MV.OnSurface, fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+
+            // Deload
+            CoachRow(
+                icon = "▲",
+                title = "Deload",
+                pill = deload?.severity?.takeIf { it != "none" }
+                    ?: if (deload != null) "clear" else "tap to check",
+                pillColor = sevColor ?: if (deload != null) Color(0xFF22C55E) else MV.OnSurfaceVariant,
+                expanded = openDeload,
+                accent = sevColor,
+                onToggle = { openDeload = !openDeload },
+            ) {
+                if (deload != null && deload!!.severity != "none") {
+                    Text(deload!!.headline, color = MV.OnSurface, fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(4.dp))
+                    for (e in deload!!.evidence) {
+                        Text("• $e", color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                            modifier = Modifier.padding(vertical = 1.dp))
+                    }
+                    if (deload!!.recommendation.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text("What to do: ${deload!!.recommendation}",
+                            color = MV.OnSurface, fontSize = 11.sp)
+                    }
+                } else if (deload != null) {
+                    Text("No deload needed.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                } else if (deloadLoading) {
+                    Text("Thinking…", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                }
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(onClick = { reCheckDeload() }, enabled = !deloadLoading) {
+                    Text(if (deloadLoading) "Thinking…" else "Re-check", fontSize = 10.sp)
+                }
+            }
+
+            // Focus
+            CoachRow(
+                icon = "◇",
+                title = "Focus cue",
+                pill = if (focus != null) "ready" else "tap to load",
+                pillColor = if (focus != null) Color(0xFF38BDF8) else MV.OnSurfaceVariant,
+                expanded = openFocus,
+                accent = null,
+                onToggle = { openFocus = !openFocus; if (openFocus) loadFocus() },
+            ) {
+                if (focus != null) {
+                    Text(focus!!.headline, color = MV.OnSurface, fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium)
+                    if (focus!!.cue.isNotEmpty()) {
+                        Spacer(Modifier.height(3.dp))
+                        Text(focus!!.cue, color = MV.OnSurface, fontSize = 11.sp)
+                    }
+                } else if (focusLoading) {
+                    Text("Thinking…", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                } else {
+                    Text("Tap to load.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                }
+            }
+
+            // Variety
+            CoachRow(
+                icon = "✦",
+                title = "Variety",
+                pill = when {
+                    swaps == null -> "tap to check"
+                    visibleSwaps.isEmpty() && (swaps?.isEmpty() == true) -> "balanced"
+                    visibleSwaps.isEmpty() -> "all dismissed"
+                    else -> "${visibleSwaps.size} swap${if (visibleSwaps.size == 1) "" else "s"}"
+                },
+                pillColor = if (swaps != null && visibleSwaps.isNotEmpty())
+                    Color(0xFFA78BFA)
+                else if (swaps != null) Color(0xFF22C55E)
+                else MV.OnSurfaceVariant,
+                expanded = openVariety,
+                accent = null,
+                onToggle = { openVariety = !openVariety; if (openVariety) loadSwaps() },
+            ) {
+                if (swapsLoading) {
+                    Text("Thinking…", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                } else if (swaps == null) {
+                    Text("Tap to load.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                } else if (visibleSwaps.isEmpty()) {
+                    Text("Plan looks balanced — no swaps suggested.",
+                        color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                } else {
+                    for (s in visibleSwaps) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MV.SurfaceContainerLow)
+                                .padding(8.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(s.targetExerciseId.replace('_', ' ')
+                                        .replaceFirstChar(Char::titlecase),
+                                    color = MV.OnSurface, fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold)
+                                Text(" → ", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                                Text(s.replacementExerciseId.replace('_', ' ')
+                                        .replaceFirstChar(Char::titlecase),
+                                    color = MV.Green, fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold)
+                            }
+                            Spacer(Modifier.height(2.dp))
+                            Text(s.reason, color = MV.OnSurfaceVariant, fontSize = 10.sp)
+                            Spacer(Modifier.height(4.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Button(
+                                    onClick = {
+                                        onAcceptSwap(s.targetExerciseId, s.replacementExerciseId)
+                                        dismissed[s.targetExerciseId] = true
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MV.BrandRed,
+                                        contentColor = MV.OnSurface,
+                                    ),
+                                ) { Text("Accept", fontSize = 10.sp) }
+                                OutlinedButton(
+                                    onClick = { dismissed[s.targetExerciseId] = true },
+                                ) { Text("Dismiss", fontSize = 10.sp) }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Why
+            CoachRow(
+                icon = "?",
+                title = "Why this workout",
+                pill = if (explain != null) "loaded" else "tap to view",
+                pillColor = MV.OnSurfaceVariant,
+                expanded = openWhy,
+                accent = null,
+                onToggle = { openWhy = !openWhy; if (openWhy) loadExplain() },
+            ) {
+                if (explainLoading) {
+                    Text("…", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                } else if (explain == null) {
+                    Text("Tap to load.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                } else {
+                    Text("WHY THIS SPLIT", color = MV.OnSurfaceVariant, fontSize = 9.sp)
+                    Text(explain!!.whySplit, color = MV.OnSurface, fontSize = 11.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text("WHY THESE EXERCISES", color = MV.OnSurfaceVariant, fontSize = 9.sp)
+                    Text(explain!!.whyExercises, color = MV.OnSurface, fontSize = 11.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text("WHY THESE TARGETS", color = MV.OnSurfaceVariant, fontSize = 9.sp)
+                    Text(explain!!.whyTargets, color = MV.OnSurface, fontSize = 11.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CoachRow(
+    icon: String,
+    title: String,
+    pill: String,
+    pillColor: Color,
+    expanded: Boolean,
+    accent: Color?,
+    onToggle: () -> Unit,
+    body: @Composable () -> Unit,
+) {
+    val borderMod = if (accent != null) {
+        Modifier
+            .background(accent.copy(alpha = 0.07f))
+            .padding(start = 3.dp)
+    } else Modifier
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(borderMod)
+            .clickable { onToggle() }
+            .padding(vertical = 4.dp, horizontal = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(icon, color = accent ?: MV.OnSurfaceVariant, fontSize = 12.sp,
+                modifier = Modifier.padding(end = 6.dp).width(14.dp))
+            Text(title, color = MV.OnSurface, fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text(
+                pill,
+                color = pillColor,
+                fontSize = 10.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(pillColor.copy(alpha = 0.15f))
+                    .padding(horizontal = 7.dp, vertical = 2.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(if (expanded) "−" else "+", color = MV.OnSurfaceVariant, fontSize = 13.sp)
+        }
+        if (expanded) {
+            Spacer(Modifier.height(4.dp))
+            Column(Modifier.padding(start = 18.dp)) { body() }
         }
     }
 }

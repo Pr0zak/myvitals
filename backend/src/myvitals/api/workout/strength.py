@@ -194,6 +194,18 @@ async def put_equipment(
 ) -> EquipmentOut:
     now = datetime.now(timezone.utc)
     row = await db.get(models.UserEquipment, 1)
+    # Capture the prior training prefs so we can detect a meaningful
+    # change after the write and auto-regenerate today's plan. Only
+    # fields that actually change the workout shape trigger this:
+    # level, days_per_week, split_preference, workout_minutes,
+    # cardio_days_per_week, include_mobility, yoga_on_rest_days.
+    # Equipment-only changes (e.g. flipping a cardio_rower flag) do
+    # NOT trigger a strength regen since the strength plan is
+    # unaffected.
+    prior_training: dict[str, Any] = {}
+    if row is not None:
+        prior_training = (row.payload or {}).get("training") or {}
+
     if row is None:
         row = models.UserEquipment(
             id=1,
@@ -208,6 +220,51 @@ async def put_equipment(
         row.updated_at = now
     await db.commit()
     await db.refresh(row)
+
+    # Detect a real training-prefs change and auto-regenerate today
+    # IF today's plan exists, is still planned, and has no logged sets
+    # (don't clobber in-progress work).
+    new_training = (row.payload or {}).get("training") or {}
+    watched_fields = (
+        "level", "days_per_week", "split_preference", "workout_minutes",
+        "cardio_days_per_week", "include_mobility", "yoga_on_rest_days",
+    )
+    training_changed = any(
+        prior_training.get(f) != new_training.get(f) for f in watched_fields
+    )
+    if training_changed:
+        today_d = _local_today()
+        existing = await _existing_workout_for(db, today_d)
+        if existing is not None and existing.status == "planned":
+            # Has any set been logged on today's workout yet?
+            logged_q = await db.execute(
+                select(func.count(models.StrengthSet.id))
+                .join(
+                    models.StrengthWorkoutExercise,
+                    models.StrengthSet.workout_exercise_id
+                    == models.StrengthWorkoutExercise.id,
+                )
+                .where(models.StrengthWorkoutExercise.workout_id == existing.id)
+                .where(models.StrengthSet.actual_reps.is_not(None))
+            )
+            logged_count = logged_q.scalar() or 0
+            if logged_count == 0:
+                # Safe to regenerate. Mark the prior plan as
+                # regenerated (history-preserving) and persist a fresh
+                # one with the new prefs.
+                regen = (await db.execute(
+                    select(models.StrengthWorkout)
+                    .where(models.StrengthWorkout.date == today_d)
+                )).scalars().all()
+                regen_count = len(regen)
+                profile = await db.get(models.UserProfile, 1)
+                equipment_payload = await _equipment_payload(db)
+                plan = await strength_algo.generate_plan(
+                    db, today_d, equipment_payload, profile,
+                    regen_count=regen_count, force_no_rest=True,
+                )
+                await strength_algo.persist_plan(db, plan, today_d)
+
     return EquipmentOut(
         id=row.id,
         payload=EquipmentPayload(**row.payload),

@@ -748,6 +748,87 @@ async def strength_nudge_endpoint(
     }
 
 
+# ─────────────── Deload trigger (multi-signal AI judgment) ───────────────
+
+@router.post("/strength/deload-check")
+async def strength_deload_check_endpoint(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Multi-signal AI deload trigger. Reads 28d of vitals + 14d of
+    strength performance, returns a structured judgment with severity.
+
+    Cached by signals-payload hash in ai_summaries — repeated calls on
+    the same day with unchanged data are free."""
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+
+    from ..integrations.claude import build_deload_payload, deload_check
+
+    payload = await build_deload_payload(db)
+    payload_hash = hash_payload(payload)
+    range_kind = "strength_deload"
+    cached = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == range_kind)
+        .where(models.AiSummary.payload_hash == payload_hash)
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if cached is not None:
+        import json as _json
+        try: judgment = _json.loads(cached.content)
+        except Exception: judgment = {}  # noqa: BLE001
+        return {
+            "judgment": judgment, "generated_at": cached.generated_at,
+            "model": cached.model, "cached": True,
+            "input_tokens": cached.input_tokens, "output_tokens": cached.output_tokens,
+        }
+
+    result = await deload_check(db, cfg)
+    cfg.calls_today += 1
+    summary = models.AiSummary(
+        generated_at=datetime.now(timezone.utc),
+        range_kind=range_kind, payload_hash=payload_hash,
+        model=result.model,
+        input_tokens=result.input_tokens, output_tokens=result.output_tokens,
+        content=result.content,
+    )
+    db.add(summary)
+    await db.commit()
+    import json as _json
+    try: judgment = _json.loads(result.content)
+    except Exception: judgment = {}  # noqa: BLE001
+    return {
+        "judgment": judgment, "generated_at": summary.generated_at,
+        "model": result.model, "cached": False,
+        "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
+    }
+
+
+@router.get("/strength/deload-check/latest")
+async def strength_deload_latest(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any] | None:
+    """Read the most recent cached deload judgment without billing.
+    Phone + web banners poll this so they can render without forcing a
+    Claude call on every screen open."""
+    row = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == "strength_deload")
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    import json as _json
+    try: judgment = _json.loads(row.content)
+    except Exception: judgment = {}  # noqa: BLE001
+    return {
+        "judgment": judgment, "generated_at": row.generated_at,
+        "model": row.model,
+    }
+
+
 # ─────────────── Batch mode ───────────────
 
 @router.post("/explain-all")

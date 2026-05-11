@@ -13,6 +13,7 @@ import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import Card from "@/components/Card.vue";
 import WhyThisWorkout from "@/components/WhyThisWorkout.vue";
 import VarietyNudge from "@/components/VarietyNudge.vue";
+import DeloadBanner from "@/components/DeloadBanner.vue";
 import type { StrengthExercise, StrengthWorkoutDetail, StrengthWorkoutExercise } from "@/api/types";
 
 const router = useRouter();
@@ -693,6 +694,8 @@ useVisibilityRefresh(loadAll);
     <p v-if="workout?.notes" class="hint subtle">{{ workout.notes }}</p>
     <!-- Why + Variety nudge moved below the exercise list. -->
 
+    <DeloadBanner v-if="queryToken && workout
+                        && (workout.status === 'planned' || workout.status === 'in_progress')" />
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load today's plan.</p>
     <p v-else-if="loading" class="hint">Loading…</p>

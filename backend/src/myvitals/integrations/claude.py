@@ -1238,6 +1238,192 @@ async def strength_review(
     )
 
 
+DELOAD_TOOL = {
+    "name": "give_deload_judgment",
+    "description": (
+        "Decide if the user needs a deload right now based on multi-signal "
+        "recovery + training-load + strength-performance data. Return a "
+        "structured judgment — only recommend a deload when signals "
+        "converge. Better silence than a false alarm."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "should_deload": {
+                "type": "boolean",
+                "description": "Whether the user should deload this week.",
+            },
+            "severity": {
+                "type": "string",
+                "enum": ["none", "light", "moderate", "rest"],
+                "description": (
+                    "none = train as planned; "
+                    "light = cut volume ~20% (one fewer set/exercise); "
+                    "moderate = cut volume ~40% AND weight ~10%; "
+                    "rest = skip today entirely, prioritise sleep."
+                ),
+            },
+            "headline": {
+                "type": "string",
+                "description": "≤14 words. The single most important read on recovery state.",
+            },
+            "evidence": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "2-4 bullets, ≤22 words each, EACH citing a specific "
+                    "number from the data (HRV trend, RHR delta, sleep "
+                    "debt, TSB, avg rating, missed sets, etc)."
+                ),
+            },
+            "recommendation": {
+                "type": "string",
+                "description": "≤30 words. Concrete action for today.",
+            },
+        },
+        "required": ["should_deload", "severity", "headline", "evidence", "recommendation"],
+    },
+}
+
+
+def _deload_system(tone: str) -> str:
+    return f"""You are a brief strength coach reading the user's recovery
++ training-load + recent strength-performance signals to decide if they
+need a deload right now.
+
+{_tone_line(tone)}
+
+Use the `give_deload_judgment` tool. Rules:
+- Default to NO deload (severity=none) unless multiple signals converge.
+- A single bad day is not enough — look for trends (HRV dropping AND
+  RHR rising AND avg_rating falling, sleep_debt accumulating, TSB
+  deeply negative, missed sets stacking up).
+- "moderate" only for clear over-reaching (HRV ≥1σ below baseline for
+  ≥4 days, AND avg_rating drifting ≥0.5 below baseline).
+- "rest" only when recovery is severely impaired (sickness signals: RHR
+  ≥10bpm above baseline + sleep debt + low HRV) — flag honestly.
+- Every evidence bullet must cite an actual number from the data.
+- Headline is the read, not the prescription.
+"""
+
+
+async def build_deload_payload(db: AsyncSession) -> dict[str, Any]:
+    """Bounded signals payload for the deload-trigger AI judgment.
+
+    Pulls 28 days of dailies (splits into trailing-7d vs 8-28d baseline
+    for delta math, computed server-side) + last 14d of strength workout
+    aggregates (avg rating, missed/skipped sets, weights).
+    """
+    today = datetime.now(timezone.utc).date()
+    daily = await _daily_rows(db, 28)
+    recent = [r for r in daily if r["date"] >= str(today - timedelta(days=7))]
+    baseline = [r for r in daily if r["date"] < str(today - timedelta(days=7))]
+
+    def _mean(rows: list[dict[str, Any]], key: str) -> float | None:
+        vals = [r[key] for r in rows if r.get(key) is not None]
+        return round(sum(vals) / len(vals), 2) if vals else None
+
+    trends: dict[str, dict[str, Any]] = {}
+    for k in ("rhr", "hrv", "recovery", "sleep_h", "sleep_debt_h",
+              "readiness", "tsb", "ctl", "atl"):
+        cur = _mean(recent, k)
+        base = _mean(baseline, k)
+        trends[k] = {
+            "last_7d": cur,
+            "baseline_8_28d": base,
+            "delta": round(cur - base, 2) if cur is not None and base is not None else None,
+        }
+
+    # Strength performance over the last 14d
+    since = today - timedelta(days=14)
+    workouts = (await db.execute(
+        select(models.StrengthWorkout)
+        .where(models.StrengthWorkout.date >= since)
+        .where(models.StrengthWorkout.status.in_(("completed", "in_progress")))
+    )).scalars().all()
+    wex_ids: list[int] = []
+    if workouts:
+        wex_rows = (await db.execute(
+            select(models.StrengthWorkoutExercise.id)
+            .where(models.StrengthWorkoutExercise.workout_id.in_(
+                [w.id for w in workouts]
+            ))
+        )).all()
+        wex_ids = [r[0] for r in wex_rows]
+    strength_signal: dict[str, Any] = {
+        "n_workouts": len(workouts),
+        "avg_rating": None,
+        "missed_or_skipped_sets": 0,
+        "total_logged_sets": 0,
+    }
+    if wex_ids:
+        sets_rows = (await db.execute(
+            select(models.StrengthSet)
+            .where(models.StrengthSet.workout_exercise_id.in_(wex_ids))
+        )).scalars().all()
+        ratings = [s.rating for s in sets_rows if s.rating is not None and not s.skipped]
+        skipped = sum(1 for s in sets_rows if s.skipped)
+        missed = sum(1 for s in sets_rows
+                     if s.actual_reps is None and not s.skipped)
+        logged = sum(1 for s in sets_rows
+                     if s.actual_reps is not None and not s.skipped)
+        strength_signal["avg_rating"] = (
+            round(sum(ratings) / len(ratings), 2) if ratings else None
+        )
+        strength_signal["missed_or_skipped_sets"] = skipped + missed
+        strength_signal["total_logged_sets"] = logged
+
+    return {
+        "today": str(today),
+        "profile": await _profile_ctx(db),
+        "trends": trends,
+        "recent_dailies": recent,
+        "strength_last_14d": strength_signal,
+        "trend_badges": await compute_badges(db, max_badges=4),
+    }
+
+
+async def deload_check(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
+    """Multi-signal AI judgment: should the user deload right now?"""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    payload = await build_deload_payload(db)
+    user_text = (
+        f"Decide if the user should deload right now. The data covers "
+        f"their last 28 days of vitals + last 14 days of strength "
+        f"performance:\n\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=500,
+        system=_cached_system(_deload_system(cfg.tone)),
+        tools=[DELOAD_TOOL],
+        tool_choice={"type": "tool", "name": "give_deload_judgment"},
+        messages=[{"role": "user", "content": user_text}],
+    )
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use" and block.name == "give_deload_judgment":
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    if not tool_input:
+        tool_input = {
+            "should_deload": False,
+            "severity": "none",
+            "headline": "Could not produce a deload judgment from the data",
+            "evidence": [],
+            "recommendation": "Train as planned; try again later.",
+        }
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
 async def phrase_anomaly(cfg: models.AiConfig, anomaly: dict[str, Any]) -> str:
     """Single-sentence push notification body for an anomaly. ~$0.0005/call."""
     if not cfg.enabled or not cfg.anthropic_api_key:

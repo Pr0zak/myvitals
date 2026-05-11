@@ -515,6 +515,9 @@ fun StrengthTodayScreen(
             contentPadding = PaddingValues(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (plan.status == "planned" || plan.status == "in_progress") {
+                item { DeloadBannerCard(settings = settings) }
+            }
             items(orderedExercises, key = { it.id }) { wex ->
                 val canSwap = wex.sets.none { it.actualReps != null && !it.skipped }
                 ExerciseCard(
@@ -1193,6 +1196,132 @@ internal fun VarietyNudgeCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun DeloadBannerCard(settings: SettingsRepository) {
+    var judgment by remember { mutableStateOf<app.myvitals.sync.DeloadJudgment?>(null) }
+    var expanded by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // Load latest cached judgment on first composition. Silent on failure;
+    // a missing /latest just leaves the banner in its "Ask AI" state.
+    LaunchedEffect(Unit) {
+        if (!settings.isConfigured()) return@LaunchedEffect
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val resp = withContext(Dispatchers.IO) { api.strengthDeloadLatest() }
+            if (resp.isSuccessful) judgment = resp.body()?.judgment
+        } catch (e: Exception) {
+            Timber.d(e, "deload latest fetch failed")
+        }
+    }
+
+    fun refresh() {
+        if (loading || !settings.isConfigured()) return
+        loading = true
+        failed = false
+        scope.launch {
+            try {
+                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                val resp = withContext(Dispatchers.IO) { api.strengthDeloadCheck() }
+                judgment = resp.judgment
+            } catch (e: Exception) {
+                Timber.w(e, "deload check failed")
+                failed = true
+            } finally { loading = false }
+        }
+    }
+
+    val j = judgment
+    if (j == null) {
+        // Compact "ask AI" pill when nothing cached yet
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainerLow),
+            modifier = Modifier.fillMaxWidth().clickable { refresh() },
+        ) {
+            Row(
+                Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("▲ Deload check",
+                    color = MV.OnSurface, fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(
+                    when {
+                        loading -> "Reading…"
+                        failed -> "Unavailable"
+                        else -> "Ask AI"
+                    },
+                    color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                )
+            }
+        }
+        return
+    }
+
+    if (j.severity == "none") return  // no banner when AI says all clear
+
+    val accent = when (j.severity) {
+        "light" -> Color(0xFFFACC15)
+        "moderate" -> Color(0xFFF97316)
+        "rest" -> Color(0xFFEF4444)
+        else -> MV.OnSurfaceVariant
+    }
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = accent.copy(alpha = 0.10f),
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 0.dp,
+                color = androidx.compose.ui.graphics.Color.Transparent,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            )
+            .clickable { expanded = !expanded },
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("▲", color = accent, fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(end = 6.dp))
+                Text(
+                    "Deload ${j.severity}",
+                    color = MV.OnSurface, fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    j.headline,
+                    color = MV.OnSurface, fontSize = 12.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(if (expanded) "▾" else "▸",
+                    color = MV.OnSurfaceVariant, fontSize = 14.sp)
+            }
+            if (expanded) {
+                Spacer(Modifier.height(6.dp))
+                for (e in j.evidence) {
+                    Text("• $e", color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                        modifier = Modifier.padding(vertical = 1.dp))
+                }
+                if (j.recommendation.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "What to do: ${j.recommendation}",
+                        color = MV.OnSurface, fontSize = 12.sp,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { refresh() },
+                    enabled = !loading,
+                ) { Text(if (loading) "Thinking…" else "Re-check", fontSize = 11.sp) }
             }
         }
     }

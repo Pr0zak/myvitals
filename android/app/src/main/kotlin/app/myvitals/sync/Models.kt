@@ -383,6 +383,23 @@ data class StrengthNudgeResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class DeloadJudgment(
+    @Json(name = "should_deload") val shouldDeload: Boolean = false,
+    val severity: String = "none",            // none | light | moderate | rest
+    val headline: String = "",
+    val evidence: List<String> = emptyList(),
+    val recommendation: String = "",
+)
+
+@JsonClass(generateAdapter = true)
+data class DeloadCheckResponse(
+    val judgment: DeloadJudgment,
+    @Json(name = "generated_at") val generatedAt: String,
+    val model: String,
+    val cached: Boolean = false,
+)
+
+@JsonClass(generateAdapter = true)
 data class TrainingPreferences(
     val level: String = "intermediate",                   // beginner | intermediate | advanced
     @Json(name = "days_per_week") val daysPerWeek: Int = 3,

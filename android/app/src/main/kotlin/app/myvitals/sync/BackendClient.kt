@@ -74,6 +74,12 @@ interface BackendApi {
     @POST("ai/strength/nudge/{id}")
     suspend fun strengthNudge(@Path("id") id: Long): StrengthNudgeResponse
 
+    @POST("ai/strength/deload-check")
+    suspend fun strengthDeloadCheck(): DeloadCheckResponse
+
+    @GET("ai/strength/deload-check/latest")
+    suspend fun strengthDeloadLatest(): Response<DeloadCheckResponse>
+
     @GET("workout/strength/exercises/{id}/stats")
     suspend fun strengthExerciseStats(
         @Path("id") exerciseId: String,

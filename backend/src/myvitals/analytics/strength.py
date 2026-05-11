@@ -645,8 +645,63 @@ def pair_supersets(
 # Pure: prescribe sets / reps / rest for an exercise slot
 # ------------------------------------------------------------------
 
+def _is_bodyweight_only(ex: dict[str, Any]) -> bool:
+    """True when an exercise has no external-load equipment — load is
+    fixed at body mass, so progression is rep-based, not weight-based."""
+    eq = ex.get("equipment") or []
+    if not eq:
+        return False
+    # Bench is non-load-bearing for some BW moves (e.g. dips) but the
+    # generator still wires up a weight slot via micro-loaders. Treat
+    # bench as bodyweight-allowed when the rest of the equipment list
+    # is bodyweight only.
+    load_bearing = {"dumbbell", "barbell", "cable", "kettlebell", "bands"}
+    return not any(tag in load_bearing for tag in eq)
+
+
+def _scale_bw_reps(rl: int, rh: int, bodyweight_lb: float | None) -> tuple[int, int]:
+    """Bodyweight exercises can't be progressively loaded with external
+    weight, so we scale rep targets in two ways:
+      1. Shift up by 50% across the board (more reps to drive stimulus).
+      2. Inverse-scale by bodyweight against a 150 lb baseline so
+         heavier users do fewer reps and lighter users do more,
+         keeping relative load roughly comparable. Clamped to [0.6, 1.6].
+    """
+    factor = 1.0
+    if bodyweight_lb is not None and bodyweight_lb > 0:
+        factor = max(0.6, min(1.6, 150.0 / bodyweight_lb))
+    new_rl = max(5, round(rl * 1.5 * factor))
+    new_rh = max(new_rl + 2, round(rh * 1.5 * factor))
+    return new_rl, new_rh
+
+
+def _age_scale(
+    rest_s: int, sets: int, age: int | None, slot_role: str,
+) -> tuple[int, int]:
+    """Age-aware rest + volume scaling. Older lifters need longer rest
+    between sets and slightly lower total set count, especially on
+    isolation work where local fatigue compounds. Loosely based on
+    ACSM 2009 / Peterson 2011 SR on age-related strength training.
+
+      <40:  no change (baseline)
+      40-49: +15 s rest
+      50-59: +30 s rest, -1 set on isolation
+      60+:   +45 s rest, -1 set on isolation + secondary
+    """
+    if age is None or age < 40:
+        return rest_s, sets
+    if age < 50:
+        return rest_s + 15, sets
+    if age < 60:
+        return rest_s + 30, max(2, sets - 1) if slot_role == "isolation" else sets
+    # 60+
+    new_sets = sets - 1 if slot_role in ("isolation", "secondary_compound") else sets
+    return rest_s + 45, max(2, new_sets)
+
+
 def prescribe_slot(
     ex: dict[str, Any], slot_role: str, goal: str = "hypertrophy",
+    age: int | None = None, bodyweight_lb: float | None = None,
 ) -> tuple[int, int, int, int]:
     """Return (sets, reps_low, reps_high, rest_s) given the exercise + slot role.
 
@@ -658,25 +713,42 @@ def prescribe_slot(
                       load 65-80% 1RM, more volume
       - general     → 8-15 reps, short rest (45-75s),
                       load 55-70% 1RM, time-efficient
+
+    `age` scales rest up (+15/+30/+45 s for 40s/50s/60+) and trims a set
+    off isolation/secondary work in the 60+ bucket.
+
+    `bodyweight_lb`: only used for bodyweight-only exercises — rep
+    targets are shifted up and inversely scaled by user weight so a
+    180-lb lifter doesn't get the same 8-rep Push-Up target as a 130-lb
+    one.
     """
     if goal == "strength":
         if slot_role == "main_compound":
-            return (5, 3, 5, 240)
-        if slot_role == "secondary_compound":
-            return (4, 4, 6, 180)
-        return (3, 6, 10, 120)
-    if goal == "general":
+            sets, rl, rh, rest = 5, 3, 5, 240
+        elif slot_role == "secondary_compound":
+            sets, rl, rh, rest = 4, 4, 6, 180
+        else:
+            sets, rl, rh, rest = 3, 6, 10, 120
+    elif goal == "general":
         if slot_role == "main_compound":
-            return (4, 8, 10, 75)
-        if slot_role == "secondary_compound":
-            return (3, 10, 12, 60)
-        return (3, 12, 15, 45)
-    # hypertrophy (default)
-    if slot_role == "main_compound":
-        return (4, 6, 8, 120)
-    if slot_role == "secondary_compound":
-        return (4, 8, 10, 90)
-    return (3, 10, 12, 60)
+            sets, rl, rh, rest = 4, 8, 10, 75
+        elif slot_role == "secondary_compound":
+            sets, rl, rh, rest = 3, 10, 12, 60
+        else:
+            sets, rl, rh, rest = 3, 12, 15, 45
+    else:  # hypertrophy
+        if slot_role == "main_compound":
+            sets, rl, rh, rest = 4, 6, 8, 120
+        elif slot_role == "secondary_compound":
+            sets, rl, rh, rest = 4, 8, 10, 90
+        else:
+            sets, rl, rh, rest = 3, 10, 12, 60
+
+    if _is_bodyweight_only(ex):
+        rl, rh = _scale_bw_reps(rl, rh, bodyweight_lb)
+
+    rest, sets = _age_scale(rest, sets, age, slot_role)
+    return (sets, rl, rh, rest)
 
 
 # ------------------------------------------------------------------
@@ -1070,6 +1142,21 @@ async def generate_plan(
     cardio_per_week = int(training.get("cardio_days_per_week", 2))
     goal = training.get("goal", "hypertrophy")
 
+    # Age + bodyweight context for prescribe_slot — drives age-scaled
+    # rest / volume and bodyweight-scaled rep targets on BW exercises.
+    user_age: int | None = None
+    if profile is not None and getattr(profile, "birth_date", None) is not None:
+        user_age = (target_date - profile.birth_date).days // 365
+    user_bodyweight_lb: float | None = None
+    latest_bw = (await db.execute(
+        select(models.BodyMetric)
+        .where(models.BodyMetric.weight_kg.is_not(None))
+        .order_by(models.BodyMetric.time.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if latest_bw is not None and latest_bw.weight_kg:
+        user_bodyweight_lb = float(latest_bw.weight_kg) * 2.20462
+
     # Day-type allocation by weekday — runs before recovery / rest
     # checks. If today's slot is cardio or yoga (auto), we short-circuit
     # to that plan instead of building a strength session. Override
@@ -1256,7 +1343,10 @@ async def generate_plan(
             slot_role = "secondary_compound"
         else:
             slot_role = "isolation"
-        sets, reps_lo, reps_hi, rest_s = prescribe_slot(ex, slot_role, goal=goal)
+        sets, reps_lo, reps_hi, rest_s = prescribe_slot(
+            ex, slot_role, goal=goal,
+            age=user_age, bodyweight_lb=user_bodyweight_lb,
+        )
 
         # History-driven progression first, then starting weight.
         avg_rating, avg_weight = await last_target_weight_for_exercise(db, ex["id"])

@@ -136,3 +136,77 @@ class TestProgressFromRating:
         """Avg rating of 4.4 = hold (still moderate); 4.5 = bump."""
         assert progress_from_rating(100, 4.4, is_compound=True) == 100
         assert progress_from_rating(100, 4.5, is_compound=True) == pytest.approx(107.5)
+
+
+class TestPrescribeSlotAgeAndBodyweight:
+    """v0.7.149 — age-aware rest/volume + bodyweight-scaled rep targets."""
+
+    def _weighted(self):
+        # An external-load compound: should NOT trigger BW scaling.
+        return {"id": "Dumbbell_Bench_Press", "is_compound": True,
+                "equipment": ["dumbbell", "bench"], "movement_pattern": "press"}
+
+    def _bw(self):
+        # A pure bodyweight exercise.
+        return {"id": "Push-Up", "is_compound": True,
+                "equipment": ["bodyweight"], "movement_pattern": "press"}
+
+    def test_age_under_40_no_change(self):
+        from myvitals.analytics.strength import prescribe_slot
+        sets, _, _, rest = prescribe_slot(
+            self._weighted(), "main_compound", goal="hypertrophy", age=35,
+        )
+        assert sets == 4 and rest == 120
+
+    def test_age_40s_adds_15s_rest(self):
+        from myvitals.analytics.strength import prescribe_slot
+        sets, _, _, rest = prescribe_slot(
+            self._weighted(), "main_compound", goal="hypertrophy", age=45,
+        )
+        assert sets == 4 and rest == 135
+
+    def test_age_50s_trims_isolation_set(self):
+        from myvitals.analytics.strength import prescribe_slot
+        sets, _, _, rest = prescribe_slot(
+            self._weighted(), "isolation", goal="hypertrophy", age=55,
+        )
+        assert sets == 2 and rest == 90  # was 3 sets / 60s
+
+    def test_age_60_plus_trims_secondary_too(self):
+        from myvitals.analytics.strength import prescribe_slot
+        sets, _, _, rest = prescribe_slot(
+            self._weighted(), "secondary_compound", goal="hypertrophy", age=65,
+        )
+        assert sets == 3 and rest == 135  # was 4 sets / 90s
+
+    def test_bodyweight_shifts_reps_up(self):
+        # Push-Up hypertrophy main: baseline 6-8 weighted → 1.5× = 9-12 BW.
+        from myvitals.analytics.strength import prescribe_slot
+        _, rl, rh, _ = prescribe_slot(
+            self._bw(), "main_compound", goal="hypertrophy", bodyweight_lb=150,
+        )
+        assert rl == 9 and rh == 12
+
+    def test_bodyweight_scales_inverse_to_user_weight(self):
+        # 200 lb user: 150/200 = 0.75× → 9*0.75=6.75→7, 12*0.75=9
+        from myvitals.analytics.strength import prescribe_slot
+        _, rl_heavy, rh_heavy, _ = prescribe_slot(
+            self._bw(), "main_compound", goal="hypertrophy", bodyweight_lb=200,
+        )
+        # 100 lb user (clamped to 1.5× max): 9*1.5=13.5→14, 12*1.5=18
+        _, rl_light, rh_light, _ = prescribe_slot(
+            self._bw(), "main_compound", goal="hypertrophy", bodyweight_lb=100,
+        )
+        assert rl_light > rl_heavy
+        assert rh_light > rh_heavy
+
+    def test_weighted_exercise_ignores_bodyweight(self):
+        # A weighted exercise should keep its baseline reps regardless of user BW.
+        from myvitals.analytics.strength import prescribe_slot
+        _, rl_a, rh_a, _ = prescribe_slot(
+            self._weighted(), "main_compound", goal="hypertrophy", bodyweight_lb=100,
+        )
+        _, rl_b, rh_b, _ = prescribe_slot(
+            self._weighted(), "main_compound", goal="hypertrophy", bodyweight_lb=250,
+        )
+        assert (rl_a, rh_a) == (rl_b, rh_b) == (6, 8)

@@ -121,6 +121,22 @@ fun StrengthTodayScreen(
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var catalog by remember { mutableStateOf<Map<String, StrengthExerciseInfo>>(emptyMap()) }
     var recoveryReason by remember { mutableStateOf<String?>(null) }
+    // Incremented after each regenerate. DeloadBannerCard keys its
+    // LaunchedEffect on this, so the banner re-fetches /latest after
+    // a regen and we POST a fresh /deload-check in parallel (cached
+    // by signals hash — free when nothing actually moved).
+    var deloadRefreshKey by remember { mutableStateOf(0) }
+    fun bumpDeload() {
+        deloadRefreshKey++
+        scope.launch {
+            try {
+                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                withContext(Dispatchers.IO) { api.strengthDeloadCheck() }
+            } catch (e: Exception) {
+                Timber.d(e, "deload re-check after regen failed")
+            }
+        }
+    }
     var history by remember { mutableStateOf<List<app.myvitals.sync.StrengthWorkoutSummary>>(emptyList()) }
     var daysPerWeek by remember { mutableStateOf(3) }
     var loading by remember { mutableStateOf(true) }
@@ -263,7 +279,10 @@ fun StrengthTodayScreen(
                     onClick = {
                         scope.launch {
                             generating = true
-                            try { workout = repo.regenerate(true); reload() }
+                            try {
+                                workout = repo.regenerate(true); reload()
+                                bumpDeload()
+                            }
                             catch (e: Exception) { error = e.message?.take(160) }
                             finally { generating = false }
                         }
@@ -335,7 +354,10 @@ fun StrengthTodayScreen(
                                 headerMenuOpen = false
                                 scope.launch {
                                     generating = true
-                                    try { workout = repo.regenerate(true); reload() }
+                                    try {
+                                        workout = repo.regenerate(true); reload()
+                                        bumpDeload()
+                                    }
                                     catch (e: Exception) { error = e.message?.take(160) }
                                     finally { generating = false }
                                 }
@@ -427,7 +449,10 @@ fun StrengthTodayScreen(
                     onForceGenerate = {
                         scope.launch {
                             generating = true
-                            try { workout = repo.regenerate(true); reload() }
+                            try {
+                                workout = repo.regenerate(true); reload()
+                                bumpDeload()
+                            }
                             catch (e: Exception) { error = e.message?.take(160) }
                             finally { generating = false }
                         }
@@ -438,7 +463,10 @@ fun StrengthTodayScreen(
                     onClick = {
                         scope.launch {
                             generating = true
-                            try { workout = repo.regenerate(false); reload() }
+                            try {
+                                workout = repo.regenerate(false); reload()
+                                bumpDeload()
+                            }
                             catch (e: Exception) { error = e.message?.take(160) }
                             finally { generating = false }
                         }
@@ -559,7 +587,7 @@ fun StrengthTodayScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (plan.status == "planned" || plan.status == "in_progress") {
-                item { DeloadBannerCard(settings = settings) }
+                item { DeloadBannerCard(settings = settings, refreshKey = deloadRefreshKey) }
             }
             items(orderedExercises, key = { it.id }) { wex ->
                 val canSwap = wex.sets.none { it.actualReps != null && !it.skipped }
@@ -667,7 +695,10 @@ fun StrengthTodayScreen(
                                 TextButton(
                                     onClick = {
                                         scope.launch {
-                                            try { workout = repo.regenerate(true); reload() }
+                                            try {
+                                                workout = repo.regenerate(true); reload()
+                                                bumpDeload()
+                                            }
                                             catch (e: Exception) {
                                                 Timber.w(e, "redo workout failed")
                                             }
@@ -1245,16 +1276,17 @@ internal fun VarietyNudgeCard(
 }
 
 @Composable
-internal fun DeloadBannerCard(settings: SettingsRepository) {
+internal fun DeloadBannerCard(settings: SettingsRepository, refreshKey: Int = 0) {
     var judgment by remember { mutableStateOf<app.myvitals.sync.DeloadJudgment?>(null) }
     var expanded by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    // Load latest cached judgment on first composition. Silent on failure;
-    // a missing /latest just leaves the banner in its "Ask AI" state.
-    LaunchedEffect(Unit) {
+    // Load latest cached judgment on first composition AND whenever
+    // refreshKey changes — the workout screen bumps it after every
+    // regenerate so the banner stays in sync with the active plan.
+    LaunchedEffect(refreshKey) {
         if (!settings.isConfigured()) return@LaunchedEffect
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)

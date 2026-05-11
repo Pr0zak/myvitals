@@ -357,11 +357,20 @@ function youtubeUrl(slug: string): string {
   return `https://www.youtube.com/results?search_query=${q}`;
 }
 
+// Bumped after every regenerate so the DeloadBanner (keyed on this)
+// remounts and re-reads /latest. We also fire the deload-check POST
+// in parallel so the cached judgment is rebuilt against the same
+// fresh signals the workout just used. Backend caches by signals
+// hash, so re-clicks that don't change underlying data are free.
+const deloadRefreshKey = ref(0);
+
 async function regenerate(force = false) {
   busy.value = "regen";
   error.value = "";
   try {
     workout.value = await api.regenerateStrengthToday(force);
+    api.aiStrengthDeloadCheck().catch(() => { /* banner stays stale on failure */ });
+    deloadRefreshKey.value++;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -702,7 +711,8 @@ useVisibilityRefresh(loadAll);
     <!-- Why + Variety nudge moved below the exercise list. -->
 
     <DeloadBanner v-if="queryToken && workout
-                        && (workout.status === 'planned' || workout.status === 'in_progress')" />
+                        && (workout.status === 'planned' || workout.status === 'in_progress')"
+                  :key="deloadRefreshKey" />
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load today's plan.</p>
     <p v-else-if="loading" class="hint">Loading…</p>

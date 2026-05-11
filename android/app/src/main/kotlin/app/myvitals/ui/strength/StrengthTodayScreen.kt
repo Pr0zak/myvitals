@@ -127,6 +127,13 @@ fun StrengthTodayScreen(
     // a regen and we POST a fresh /deload-check in parallel (cached
     // by signals hash — free when nothing actually moved).
     var deloadRefreshKey by remember { mutableStateOf(0) }
+    // Coach card state — keyed by workout id at the screen level so the
+    // state outlives any CoachCard re-creation. Earlier the state lived
+    // inside CoachCard via `remember(workoutId)`, but apparently the
+    // composable was getting disposed and re-created on some recomposition
+    // path (LazyColumn slot churn), which dropped openVariety + dismissed
+    // + swaps and made the AI look like it kept changing its mind.
+    val coachState = remember(workout?.id) { CoachCardState() }
     fun bumpDeload() {
         deloadRefreshKey++
         scope.launch {
@@ -592,6 +599,7 @@ fun StrengthTodayScreen(
                     CoachCard(
                         settings = settings,
                         workoutId = plan.id,
+                        state = coachState,
                         refreshKey = deloadRefreshKey,
                         onAcceptSwap = { targetExId, replacementExId ->
                             val wex2 = plan.exercises.firstOrNull {
@@ -1468,107 +1476,115 @@ internal fun DeloadBannerCard(settings: SettingsRepository, refreshKey: Int = 0)
     }
 }
 
+/** All mutable state used by CoachCard, hoisted into a holder so the
+ *  parent screen owns the lifetime. Earlier the state was internal to
+ *  CoachCard, which meant any path that disposed and re-created the
+ *  composable (LazyColumn item churn, conditional re-evaluation, etc.)
+ *  dropped openVariety + dismissed + swaps, making it look like the
+ *  AI was re-querying on every Accept. */
+@androidx.compose.runtime.Stable
+internal class CoachCardState {
+    var deload by mutableStateOf<app.myvitals.sync.DeloadJudgment?>(null)
+    var deloadLoading by mutableStateOf(false)
+    var focus by mutableStateOf<app.myvitals.sync.FocusCueBody?>(null)
+    var focusLoading by mutableStateOf(false)
+    var swaps by mutableStateOf<List<app.myvitals.sync.StrengthSwapSuggestion>?>(null)
+    var swapsLoading by mutableStateOf(false)
+    val dismissed = mutableStateMapOf<String, Boolean>()
+    var explain by mutableStateOf<app.myvitals.sync.StrengthExplain?>(null)
+    var explainLoading by mutableStateOf(false)
+    var openDeload by mutableStateOf(false)
+    var openFocus by mutableStateOf(false)
+    var openVariety by mutableStateOf(false)
+    var openWhy by mutableStateOf(false)
+}
+
 /** Consolidated Coach card — replaces 4 separate cards (Why, Deload,
  *  Variety, Focus) with one collapsible card that has four expandable
  *  sections. Each section lazy-loads its body on first expand; deload
  *  pre-fetches /latest so its severity pill is accurate without a tap.
- *  refreshKey invalidates cached state after a regenerate. */
+ *  refreshKey invalidates cached state after a regenerate. State is
+ *  hoisted via the `state` param so the parent's lifetime owns it. */
 @Composable
 internal fun CoachCard(
     settings: SettingsRepository,
     workoutId: Long,
+    state: CoachCardState,
     refreshKey: Int = 0,
     onAcceptSwap: (targetExerciseId: String, replacementExerciseId: String) -> Unit,
 ) {
-    var deload by remember(workoutId) { mutableStateOf<app.myvitals.sync.DeloadJudgment?>(null) }
-    var deloadLoading by remember(workoutId) { mutableStateOf(false) }
-    var focus by remember(workoutId) { mutableStateOf<app.myvitals.sync.FocusCueBody?>(null) }
-    var focusLoading by remember(workoutId) { mutableStateOf(false) }
-    var swaps by remember(workoutId) {
-        mutableStateOf<List<app.myvitals.sync.StrengthSwapSuggestion>?>(null)
-    }
-    var swapsLoading by remember(workoutId) { mutableStateOf(false) }
-    val dismissed = remember(workoutId) { mutableStateMapOf<String, Boolean>() }
-    var explain by remember(workoutId) {
-        mutableStateOf<app.myvitals.sync.StrengthExplain?>(null)
-    }
-    var explainLoading by remember(workoutId) { mutableStateOf(false) }
-
-    var openDeload by remember(workoutId) { mutableStateOf(false) }
-    var openFocus by remember(workoutId) { mutableStateOf(false) }
-    var openVariety by remember(workoutId) { mutableStateOf(false) }
-    var openWhy by remember(workoutId) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // Pre-fetch the cached deload judgment so its pill is right without a tap.
-    LaunchedEffect(refreshKey) {
+    LaunchedEffect(refreshKey, workoutId) {
         if (refreshKey != 0) {
-            deload = null; focus = null; swaps = null; explain = null
-            dismissed.clear()
+            state.deload = null; state.focus = null; state.swaps = null; state.explain = null
+            state.dismissed.clear()
         }
         if (settings.isConfigured()) {
             try {
                 val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
                 val resp = withContext(Dispatchers.IO) { api.strengthDeloadLatest() }
-                if (resp.isSuccessful) deload = resp.body()?.judgment
+                if (resp.isSuccessful) state.deload = resp.body()?.judgment
             } catch (e: Exception) { Timber.d(e, "coach deload prefetch") }
         }
     }
 
     fun reCheckDeload() {
-        if (deloadLoading) return
-        deloadLoading = true
+        if (state.deloadLoading) return
+        state.deloadLoading = true
         scope.launch {
             try {
                 val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
                 val r = withContext(Dispatchers.IO) { api.strengthDeloadCheck() }
-                deload = r.judgment
+                state.deload = r.judgment
             } catch (e: Exception) { Timber.w(e, "coach deload check") }
-            finally { deloadLoading = false }
+            finally { state.deloadLoading = false }
         }
     }
     fun loadFocus() {
-        if (focus != null || focusLoading) return
-        focusLoading = true
+        if (state.focus != null || state.focusLoading) return
+        state.focusLoading = true
         scope.launch {
             try {
                 val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
                 val r = withContext(Dispatchers.IO) { api.strengthFocusCue(workoutId) }
-                focus = r.cue
+                state.focus = r.cue
             } catch (e: Exception) { Timber.w(e, "coach focus cue") }
-            finally { focusLoading = false }
+            finally { state.focusLoading = false }
         }
     }
     fun loadSwaps(force: Boolean = false) {
-        if (swapsLoading) return
-        if (swaps != null && !force) return
-        swapsLoading = true
+        if (state.swapsLoading) return
+        if (state.swaps != null && !force) return
+        state.swapsLoading = true
         scope.launch {
             try {
                 val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
                 val r = withContext(Dispatchers.IO) { api.strengthNudge(workoutId) }
-                swaps = r.nudge.swaps
-                if (force) dismissed.clear()
+                state.swaps = r.nudge.swaps
+                if (force) state.dismissed.clear()
             } catch (e: Exception) {
-                Timber.w(e, "coach variety nudge"); swaps = emptyList()
-            } finally { swapsLoading = false }
+                Timber.w(e, "coach variety nudge"); state.swaps = emptyList()
+            } finally { state.swapsLoading = false }
         }
     }
     fun loadExplain() {
-        if (explain != null || explainLoading) return
-        explainLoading = true
+        if (state.explain != null || state.explainLoading) return
+        state.explainLoading = true
         scope.launch {
             try {
                 val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
                 val r = withContext(Dispatchers.IO) { api.strengthExplain(workoutId) }
-                explain = r
+                state.explain = r
             } catch (e: Exception) { Timber.w(e, "coach explain") }
-            finally { explainLoading = false }
+            finally { state.explainLoading = false }
         }
     }
 
-    val visibleSwaps = (swaps ?: emptyList()).filter { dismissed[it.targetExerciseId] != true }
-    val sevColor = when (deload?.severity) {
+    val visibleSwaps = (state.swaps ?: emptyList())
+        .filter { state.dismissed[it.targetExerciseId] != true }
+    val sevColor = when (state.deload?.severity) {
         "rest" -> Color(0xFFEF4444)
         "moderate" -> Color(0xFFF97316)
         "light" -> Color(0xFFFACC15)
@@ -1588,34 +1604,36 @@ internal fun CoachCard(
             CoachRow(
                 icon = "▲",
                 title = "Deload",
-                pill = deload?.severity?.takeIf { it != "none" }
-                    ?: if (deload != null) "clear" else "tap to check",
-                pillColor = sevColor ?: if (deload != null) Color(0xFF22C55E) else MV.OnSurfaceVariant,
-                expanded = openDeload,
+                pill = state.deload?.severity?.takeIf { it != "none" }
+                    ?: if (state.deload != null) "clear" else "tap to check",
+                pillColor = sevColor
+                    ?: if (state.deload != null) Color(0xFF22C55E) else MV.OnSurfaceVariant,
+                expanded = state.openDeload,
                 accent = sevColor,
-                onToggle = { openDeload = !openDeload },
+                onToggle = { state.openDeload = !state.openDeload },
             ) {
-                if (deload != null && deload!!.severity != "none") {
-                    Text(deload!!.headline, color = MV.OnSurface, fontSize = 12.sp,
+                val d = state.deload
+                if (d != null && d.severity != "none") {
+                    Text(d.headline, color = MV.OnSurface, fontSize = 12.sp,
                         fontWeight = FontWeight.Medium)
                     Spacer(Modifier.height(4.dp))
-                    for (e in deload!!.evidence) {
+                    for (e in d.evidence) {
                         Text("• $e", color = MV.OnSurfaceVariant, fontSize = 11.sp,
                             modifier = Modifier.padding(vertical = 1.dp))
                     }
-                    if (deload!!.recommendation.isNotEmpty()) {
+                    if (d.recommendation.isNotEmpty()) {
                         Spacer(Modifier.height(4.dp))
-                        Text("What to do: ${deload!!.recommendation}",
+                        Text("What to do: ${d.recommendation}",
                             color = MV.OnSurface, fontSize = 11.sp)
                     }
-                } else if (deload != null) {
+                } else if (d != null) {
                     Text("No deload needed.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
-                } else if (deloadLoading) {
+                } else if (state.deloadLoading) {
                     Text("Thinking…", color = MV.OnSurfaceVariant, fontSize = 11.sp)
                 }
                 Spacer(Modifier.height(6.dp))
-                OutlinedButton(onClick = { reCheckDeload() }, enabled = !deloadLoading) {
-                    Text(if (deloadLoading) "Thinking…" else "Re-check", fontSize = 10.sp)
+                OutlinedButton(onClick = { reCheckDeload() }, enabled = !state.deloadLoading) {
+                    Text(if (state.deloadLoading) "Thinking…" else "Re-check", fontSize = 10.sp)
                 }
             }
 
@@ -1623,20 +1641,24 @@ internal fun CoachCard(
             CoachRow(
                 icon = "◇",
                 title = "Focus cue",
-                pill = if (focus != null) "ready" else "tap to load",
-                pillColor = if (focus != null) Color(0xFF38BDF8) else MV.OnSurfaceVariant,
-                expanded = openFocus,
+                pill = if (state.focus != null) "ready" else "tap to load",
+                pillColor = if (state.focus != null) Color(0xFF38BDF8) else MV.OnSurfaceVariant,
+                expanded = state.openFocus,
                 accent = null,
-                onToggle = { openFocus = !openFocus; if (openFocus) loadFocus() },
+                onToggle = {
+                    state.openFocus = !state.openFocus
+                    if (state.openFocus) loadFocus()
+                },
             ) {
-                if (focus != null) {
-                    Text(focus!!.headline, color = MV.OnSurface, fontSize = 12.sp,
+                val f = state.focus
+                if (f != null) {
+                    Text(f.headline, color = MV.OnSurface, fontSize = 12.sp,
                         fontWeight = FontWeight.Medium)
-                    if (focus!!.cue.isNotEmpty()) {
+                    if (f.cue.isNotEmpty()) {
                         Spacer(Modifier.height(3.dp))
-                        Text(focus!!.cue, color = MV.OnSurface, fontSize = 11.sp)
+                        Text(f.cue, color = MV.OnSurface, fontSize = 11.sp)
                     }
-                } else if (focusLoading) {
+                } else if (state.focusLoading) {
                     Text("Thinking…", color = MV.OnSurfaceVariant, fontSize = 11.sp)
                 } else {
                     Text("Tap to load.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
@@ -1648,22 +1670,25 @@ internal fun CoachCard(
                 icon = "✦",
                 title = "Variety",
                 pill = when {
-                    swaps == null -> "tap to check"
-                    visibleSwaps.isEmpty() && (swaps?.isEmpty() == true) -> "balanced"
+                    state.swaps == null -> "tap to check"
+                    visibleSwaps.isEmpty() && (state.swaps?.isEmpty() == true) -> "balanced"
                     visibleSwaps.isEmpty() -> "all handled"
                     else -> "${visibleSwaps.size} swap${if (visibleSwaps.size == 1) "" else "s"}"
                 },
-                pillColor = if (swaps != null && visibleSwaps.isNotEmpty())
+                pillColor = if (state.swaps != null && visibleSwaps.isNotEmpty())
                     Color(0xFFA78BFA)
-                else if (swaps != null) Color(0xFF22C55E)
+                else if (state.swaps != null) Color(0xFF22C55E)
                 else MV.OnSurfaceVariant,
-                expanded = openVariety,
+                expanded = state.openVariety,
                 accent = null,
-                onToggle = { openVariety = !openVariety; if (openVariety) loadSwaps() },
+                onToggle = {
+                    state.openVariety = !state.openVariety
+                    if (state.openVariety) loadSwaps()
+                },
             ) {
-                if (swapsLoading) {
+                if (state.swapsLoading) {
                     Text("Thinking…", color = MV.OnSurfaceVariant, fontSize = 11.sp)
-                } else if (swaps == null) {
+                } else if (state.swaps == null) {
                     Text("Tap to load.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
                 } else if (visibleSwaps.isEmpty()) {
                     Text("Plan looks balanced — no swaps suggested.",
@@ -1696,11 +1721,8 @@ internal fun CoachCard(
                                 Button(
                                     onClick = {
                                         onAcceptSwap(s.targetExerciseId, s.replacementExerciseId)
-                                        // Implicit dismiss — the swap is applied, no point
-                                        // re-showing it (and tapping Accept again would
-                                        // query the AI against the modified plan, which
-                                        // feels indecisive).
-                                        dismissed[s.targetExerciseId] = true
+                                        // Implicit dismiss — swap is applied; no point showing it.
+                                        state.dismissed[s.targetExerciseId] = true
                                     },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MV.BrandRed,
@@ -1708,22 +1730,19 @@ internal fun CoachCard(
                                     ),
                                 ) { Text("Accept", fontSize = 10.sp) }
                                 OutlinedButton(
-                                    onClick = { dismissed[s.targetExerciseId] = true },
+                                    onClick = { state.dismissed[s.targetExerciseId] = true },
                                 ) { Text("Dismiss", fontSize = 10.sp) }
                             }
                         }
                     }
-                    // Once every current suggestion has been accepted /
-                    // dismissed, surface an explicit "Get fresh suggestions"
-                    // button so re-fetching is intentional, not automatic.
-                    if (visibleSwaps.isEmpty() && (swaps?.isNotEmpty() == true)) {
+                    if (visibleSwaps.isEmpty() && (state.swaps?.isNotEmpty() == true)) {
                         Spacer(Modifier.height(6.dp))
                         OutlinedButton(
                             onClick = { loadSwaps(force = true) },
-                            enabled = !swapsLoading,
+                            enabled = !state.swapsLoading,
                         ) {
                             Text(
-                                if (swapsLoading) "Thinking…" else "Get fresh suggestions",
+                                if (state.swapsLoading) "Thinking…" else "Get fresh suggestions",
                                 fontSize = 10.sp,
                             )
                         }
@@ -1735,25 +1754,29 @@ internal fun CoachCard(
             CoachRow(
                 icon = "?",
                 title = "Why this workout",
-                pill = if (explain != null) "loaded" else "tap to view",
+                pill = if (state.explain != null) "loaded" else "tap to view",
                 pillColor = MV.OnSurfaceVariant,
-                expanded = openWhy,
+                expanded = state.openWhy,
                 accent = null,
-                onToggle = { openWhy = !openWhy; if (openWhy) loadExplain() },
+                onToggle = {
+                    state.openWhy = !state.openWhy
+                    if (state.openWhy) loadExplain()
+                },
             ) {
-                if (explainLoading) {
+                val ex = state.explain
+                if (state.explainLoading) {
                     Text("…", color = MV.OnSurfaceVariant, fontSize = 11.sp)
-                } else if (explain == null) {
+                } else if (ex == null) {
                     Text("Tap to load.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
                 } else {
                     Text("WHY THIS SPLIT", color = MV.OnSurfaceVariant, fontSize = 9.sp)
-                    Text(explain!!.whySplit, color = MV.OnSurface, fontSize = 11.sp)
+                    Text(ex.whySplit, color = MV.OnSurface, fontSize = 11.sp)
                     Spacer(Modifier.height(4.dp))
                     Text("WHY THESE EXERCISES", color = MV.OnSurfaceVariant, fontSize = 9.sp)
-                    Text(explain!!.whyExercises, color = MV.OnSurface, fontSize = 11.sp)
+                    Text(ex.whyExercises, color = MV.OnSurface, fontSize = 11.sp)
                     Spacer(Modifier.height(4.dp))
                     Text("WHY THESE TARGETS", color = MV.OnSurfaceVariant, fontSize = 9.sp)
-                    Text(explain!!.whyTargets, color = MV.OnSurface, fontSize = 11.sp)
+                    Text(ex.whyTargets, color = MV.OnSurface, fontSize = 11.sp)
                 }
             }
         }

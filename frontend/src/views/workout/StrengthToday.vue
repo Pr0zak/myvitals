@@ -4,7 +4,7 @@
  * via one component: planned (preview + start), in_progress (active workout
  * with set logging + rest timer), completed (summary).
  */
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { Play, Pause, RotateCw, Plus, SkipForward, Timer, Check } from "lucide-vue-next";
 import { api } from "@/api/client";
@@ -530,6 +530,33 @@ const completedSetsCount = computed(() => {
 const totalSetsCount = computed(() =>
   workout.value?.exercises.reduce((acc, ex) => acc + ex.target_sets, 0) ?? 0
 );
+
+// Surface a "workout finished?" confirmation the moment the last
+// prescribed set is logged. Less intrusive than auto-completing —
+// user might want to add bonus sets — but more discoverable than the
+// small "Complete workout" button at the bottom of the page.
+const showCompleteDialog = ref(false);
+const completeDialogDismissed = ref(false);
+const allSetsDone = computed(() =>
+  totalSetsCount.value > 0
+  && completedSetsCount.value >= totalSetsCount.value
+);
+watch(allSetsDone, (done, prev) => {
+  if (done && !prev && !completeDialogDismissed.value
+      && workout.value && workout.value.status !== "completed") {
+    showCompleteDialog.value = true;
+  }
+});
+async function finishFromDialog() {
+  showCompleteDialog.value = false;
+  await completeWorkout();
+}
+function dismissCompleteDialog() {
+  showCompleteDialog.value = false;
+  // Don't re-pop on every recomposition. User explicitly chose to
+  // keep going; honour that until the next workout.
+  completeDialogDismissed.value = true;
+}
 
 const currentExercise = computed(() => {
   if (!workout.value) return null;
@@ -1087,6 +1114,25 @@ useVisibilityRefresh(loadAll);
         </div>
       </div>
     </template>
+
+    <!-- Workout-complete confirmation. Pops on the false → true
+         transition of allSetsDone; user can finish now or keep
+         going (e.g. bonus sets). -->
+    <div v-if="showCompleteDialog" class="cd-backdrop" @click.self="dismissCompleteDialog">
+      <div class="cd-card">
+        <h2>Workout complete?</h2>
+        <p class="cd-sub">
+          All {{ totalSetsCount }} prescribed sets logged. Finish and stamp
+          the session, or keep going if you want to add bonus work.
+        </p>
+        <div class="cd-actions">
+          <button class="ghost" @click="dismissCompleteDialog">Keep going</button>
+          <button class="primary" :disabled="busy === 'complete'" @click="finishFromDialog">
+            {{ busy === 'complete' ? 'Finishing…' : 'Finish workout' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -1485,4 +1531,20 @@ button.primary.small { padding: 0.25rem 0.6rem; font-size: 0.78rem; }
 button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 button.ghost { background: transparent; color: var(--text-soft); }
 button.ghost:hover { color: var(--text); border-color: var(--accent, #ef4444); }
+
+/* Workout-complete confirmation dialog */
+.cd-backdrop {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100; padding: 1rem;
+}
+.cd-card {
+  background: var(--bg-0); border: 1px solid var(--line);
+  border-radius: 12px; padding: 1.5rem; max-width: 24rem; width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.cd-card h2 { margin: 0 0 0.5rem; font-size: 1.15rem; color: var(--text); }
+.cd-sub { color: var(--text-soft); font-size: 0.88rem; line-height: 1.45;
+          margin: 0 0 1rem; }
+.cd-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
 </style>

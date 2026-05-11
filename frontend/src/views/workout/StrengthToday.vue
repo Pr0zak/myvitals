@@ -655,6 +655,13 @@ useVisibilityRefresh(loadAll);
         </span>
       </div>
       <div class="head-actions">
+        <button v-if="workout && workout.status === 'planned'"
+                class="ghost"
+                :disabled="busy === 'regen'"
+                :title="'Re-runs the plan against the latest sleep / HRV / recovery / strength signals'"
+                @click="regenerate(true)">
+          {{ busy === 'regen' ? 'Regenerating…' : 'Regenerate ↻' }}
+        </button>
         <button class="ghost" :disabled="swapBusyType !== null"
                 @click="swapMenuOpen = !swapMenuOpen">
           {{ swapBusyType ? `Switching to ${swapBusyType}…` : "Swap day ▾" }}

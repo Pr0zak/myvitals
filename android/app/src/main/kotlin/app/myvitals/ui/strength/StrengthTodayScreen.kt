@@ -254,6 +254,29 @@ fun StrengthTodayScreen(
                 }
                 Spacer(Modifier.width(4.dp))
             }
+            if (workout?.status == "planned") {
+                // Visible regenerate button — mirrors the web header's
+                // "Regenerate ↻". Re-pulls fresh recovery / HRV / sleep
+                // signals and rebuilds the plan; dropdown copy below
+                // stays as a fallback.
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            generating = true
+                            try { workout = repo.regenerate(true); reload() }
+                            catch (e: Exception) { error = e.message?.take(160) }
+                            finally { generating = false }
+                        }
+                    },
+                    enabled = !generating,
+                ) {
+                    Icon(
+                        Icons.Filled.Refresh,
+                        contentDescription = "Regenerate with latest signals",
+                        tint = MV.OnSurfaceVariant,
+                    )
+                }
+            }
             Box {
                 IconButton(onClick = { headerMenuOpen = true }) {
                     Icon(
@@ -299,6 +322,26 @@ fun StrengthTodayScreen(
                             customSheetOpen = true
                         },
                     )
+                    if (workout?.status == "planned") {
+                        // Dropdown copy of Regenerate — same action as the
+                        // header IconButton, kept for users who reach for
+                        // the menu first. Mirrors web's "Regenerate plan"
+                        // entry inside the Swap day ▾ dropdown.
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("Regenerate plan") },
+                            leadingIcon = { Icon(Icons.Filled.Refresh, null,
+                                modifier = Modifier.size(16.dp)) },
+                            onClick = {
+                                headerMenuOpen = false
+                                scope.launch {
+                                    generating = true
+                                    try { workout = repo.regenerate(true); reload() }
+                                    catch (e: Exception) { error = e.message?.take(160) }
+                                    finally { generating = false }
+                                }
+                            },
+                        )
+                    }
                     if (workout?.status == "planned" || workout?.status == "in_progress") {
                         // Discard — only meaningful when the workout has
                         // no logged sets yet. After a "Custom workout"

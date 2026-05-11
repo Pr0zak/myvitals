@@ -465,6 +465,7 @@ def select_exercises_for_split(
     rng: random.Random,
     exercise_prefs: dict[str, str] | None = None,
     recent_ratings: dict[str, float] | None = None,
+    recent_frequency: dict[str, int] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """Pick exercises for the focus's slot list, in slot order.
 
@@ -485,6 +486,7 @@ def select_exercises_for_split(
     notes: list[str] = []
     prefs = exercise_prefs or {}
     ratings = recent_ratings or {}
+    freq = recent_frequency or {}
     slots = SPLIT_SLOTS.get(focus) or SPLIT_SLOTS["full_body"]
 
     # Auto-avoid: exercises the user has rated consistently low over the
@@ -518,23 +520,28 @@ def select_exercises_for_split(
             if candidates:
                 fallback_used.append(f"{pattern}({'/'.join(muscles)})")
 
-        # Apply user prefs:
+        # Apply user prefs + rotation pressure:
         #   - favorites: if any candidate is favorited, pick from favorites only
-        #   - avoid: only consider these as a last resort (push to back)
+        #   - avoid / auto-avoid: pushed to the back (last-resort picks)
+        #   - frequency: among non-avoided candidates, lower 4-week
+        #     count wins — anti-staleness so the seeded RNG over time
+        #     surfaces variety instead of grinding the same lifts.
         if candidates:
             favs = [c for c in candidates if prefs.get(c["id"]) == "favorite"]
             if favs:
                 candidates = favs
             else:
-                # Combine explicit "avoid" prefs with auto-avoids (low
-                # recent ratings) — both pushed to the back.
-                def _avoid_score(e: dict[str, Any]) -> int:
-                    if prefs.get(e["id"]) == "avoid":
-                        return 2
-                    if e["id"] in auto_avoid:
-                        return 1
-                    return 0
-                candidates = sorted(candidates, key=_avoid_score)
+                def _sort_key(e: dict[str, Any]) -> tuple[int, int]:
+                    eid = e["id"]
+                    if prefs.get(eid) == "avoid":
+                        avoid_bucket = 2
+                    elif eid in auto_avoid:
+                        avoid_bucket = 1
+                    else:
+                        avoid_bucket = 0
+                    # Secondary key: 4-week frequency. Lower count → front.
+                    return (avoid_bucket, freq.get(eid, 0))
+                candidates = sorted(candidates, key=_sort_key)
 
         if not candidates:
             if pattern == "vertical_pull":
@@ -823,6 +830,42 @@ async def recent_ratings_by_exercise(
     return {
         eid: sum(rs) / len(rs) for eid, rs in by_ex.items() if rs
     }
+
+
+async def recent_frequency_by_exercise(
+    db: AsyncSession, since_days: int = 28,
+) -> dict[str, int]:
+    """Count how many times each exercise appeared in the user's last
+    `since_days` of completed / in-progress workouts. Used to add
+    anti-staleness rotation pressure in selection: heavily-used
+    exercises are pushed lower in the candidate list so the picker
+    naturally favours less-recently-seen alternatives. Skipped sets
+    don't decrement — a slot only counts if there was at least one
+    real logged set.
+    """
+    from datetime import timedelta as _td
+    since = datetime.now(timezone.utc).date() - _td(days=since_days)
+
+    rows = (await db.execute(
+        select(
+            models.StrengthWorkoutExercise.exercise_id,
+            func.count(models.StrengthSet.id).label("real_sets"),
+        )
+        .join(
+            models.StrengthSet,
+            models.StrengthSet.workout_exercise_id == models.StrengthWorkoutExercise.id,
+        )
+        .join(
+            models.StrengthWorkout,
+            models.StrengthWorkoutExercise.workout_id == models.StrengthWorkout.id,
+        )
+        .where(models.StrengthWorkout.date >= since)
+        .where(models.StrengthWorkout.status.in_(("completed", "in_progress")))
+        .where(models.StrengthSet.actual_reps.is_not(None))
+        .where(models.StrengthSet.skipped.is_(False))
+        .group_by(models.StrengthWorkoutExercise.exercise_id)
+    )).all()
+    return {ex_id: int(n) for ex_id, n in rows if n}
 
 
 async def recent_mobility_history(
@@ -1288,10 +1331,12 @@ async def generate_plan(
         if isinstance(equipment, dict) else {}
     )
     recent_ratings = await recent_ratings_by_exercise(db, since_days=14)
+    recent_frequency = await recent_frequency_by_exercise(db, since_days=28)
     chosen, chosen_slots, sel_notes = select_exercises_for_split(
         catalog, focus, level, rng,
         exercise_prefs=exercise_prefs,
         recent_ratings=recent_ratings,
+        recent_frequency=recent_frequency,
     )
     notes.extend(sel_notes)
     auto_avoid_count = sum(

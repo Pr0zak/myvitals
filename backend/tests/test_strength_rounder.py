@@ -200,6 +200,43 @@ class TestPrescribeSlotAgeAndBodyweight:
         assert rl_light > rl_heavy
         assert rh_light > rh_heavy
 
+    def test_rotation_pressure_promotes_unseen_exercises(self):
+        """#WP-7: select_exercises_for_split should down-rank exercises
+        the user has done a lot recently in favour of less-used ones.
+
+        Build a 2-exercise catalog for a single slot, mark one as
+        heavily-used (count=4) and one as unseen (absent from freq
+        map). The seeded picker should consistently choose the unseen
+        one even though the rank_key would otherwise tie them.
+        """
+        from myvitals.analytics.strength import select_exercises_for_split
+        import random
+        a = {
+            "id": "Heavily_Used", "movement_pattern": "isolation_arm",
+            "primary_muscle": "biceps", "is_compound": False,
+            "level": "intermediate", "equipment": ["dumbbell"],
+        }
+        b = {
+            "id": "Fresh_Pick", "movement_pattern": "isolation_arm",
+            "primary_muscle": "biceps", "is_compound": False,
+            "level": "intermediate", "equipment": ["dumbbell"],
+        }
+        catalog = [a, b]
+        # Frequency: Heavily_Used picked 4 times in last 4w, Fresh_Pick 0.
+        freq = {"Heavily_Used": 4}
+        # We need a focus whose slot list has at least one
+        # isolation_arm pattern entry. "pull" includes one.
+        rng = random.Random(0)
+        chosen, _, _ = select_exercises_for_split(
+            catalog, "pull", "intermediate", rng,
+            recent_frequency=freq,
+        )
+        ids = [c["id"] for c in chosen]
+        # Fresh_Pick should be picked over Heavily_Used on the
+        # isolation_arm slot.
+        assert "Fresh_Pick" in ids
+        assert "Heavily_Used" not in ids
+
     def test_weighted_exercise_ignores_bodyweight(self):
         # A weighted exercise should keep its baseline reps regardless of user BW.
         from myvitals.analytics.strength import prescribe_slot

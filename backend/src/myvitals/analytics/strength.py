@@ -1317,6 +1317,40 @@ async def generate_plan(
     last_split = await last_split_for_user(db)
     focus = override_split or select_split(days_per_week, split_pref, last_split)
 
+    # #WP-8 frequency advisory — compare declared days_per_week against
+    # actual completed strength sessions in the trailing 14 days. If
+    # they're off by ≥2 sessions (i.e. user declared 4 but actually
+    # does 2/wk, or declared 2 but actually does 5/wk), surface a
+    # one-line note suggesting they update the pref so the split
+    # mapping matches their real cadence.
+    freq_advisory_note: str | None = None
+    if split_pref == "auto" and not override_split:
+        since14 = target_date - timedelta(days=14)
+        actual_count_q = await db.execute(
+            select(func.count(models.StrengthWorkout.id))
+            .where(models.StrengthWorkout.date >= since14)
+            .where(models.StrengthWorkout.date < target_date)
+            .where(models.StrengthWorkout.status == "completed")
+            .where(models.StrengthWorkout.split_focus.notin_(["yoga", "cardio"]))
+        )
+        actual_14d = int(actual_count_q.scalar() or 0)
+        actual_per_week = actual_14d / 2.0  # 14 days = 2 weeks
+        # Suggested days based on actual cadence, rounded.
+        suggested = max(1, min(6, round(actual_per_week)))
+        if actual_14d >= 4 and abs(suggested - days_per_week) >= 2:
+            suggested_split = (
+                "full_body" if suggested <= 3 else
+                "upper_lower" if suggested == 4 else "ppl"
+            )
+            freq_advisory_note = (
+                f"You've completed {actual_14d} strength sessions in the "
+                f"last 14 days (~{actual_per_week:.1f}/week), but your "
+                f"setting is {days_per_week}/week → {focus.replace('_', ' ')}. "
+                f"Consider bumping days_per_week to {suggested} → "
+                f"{suggested_split.replace('_', ' ')} split for a better "
+                f"per-muscle frequency match."
+            )
+
     catalog = filter_catalog_for_equipment(CATALOG, equipment)
     if not catalog:
         return GeneratedPlan(
@@ -1339,6 +1373,8 @@ async def generate_plan(
         recent_frequency=recent_frequency,
     )
     notes.extend(sel_notes)
+    if freq_advisory_note:
+        notes.append(freq_advisory_note)
     auto_avoid_count = sum(
         1 for r in recent_ratings.values() if r is not None and r <= 2.0
     )

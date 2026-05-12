@@ -700,6 +700,53 @@ fun StrengthTodayScreen(
                     )
                 }
             }
+            // Soft warning when the plan was generated before today's
+            // sleep data was ingested. Plan still usable, but its
+            // deload + load decisions ignored last night's recovery.
+            if (plan.recoveryStale) {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFFACC15).copy(alpha = 0.08f),
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("↻", color = Color(0xFFFACC15), fontSize = 16.sp,
+                                modifier = Modifier.padding(end = 8.dp))
+                            Text(
+                                "Plan generated before today's sleep data " +
+                                    "was synced — tap Regenerate to refresh.",
+                                color = MV.OnSurface, fontSize = 12.sp,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        generating = true
+                                        try {
+                                            workout = repo.regenerate(true); reload()
+                                            bumpDeload()
+                                        } catch (e: Exception) {
+                                            error = e.message?.take(160)
+                                        } finally { generating = false }
+                                    }
+                                },
+                                enabled = !generating,
+                            ) {
+                                Text(
+                                    if (generating) "Refreshing…" else "Regenerate",
+                                    fontSize = 10.sp,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             // Cardio / notes-only plans (split_focus == "cardio") come back
             // with exercises=[] and the prescription text in `notes`. Without
             // this card the screen looks blank between the Coach card and

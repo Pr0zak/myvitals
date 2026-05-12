@@ -733,6 +733,22 @@ useVisibilityRefresh(loadAll);
     </header>
 
     <p v-if="workout?.notes" class="hint subtle">{{ workout.notes }}</p>
+
+    <!-- Soft warning when the plan was generated before today's sleep
+         data was ingested. Plan is still usable but its deload + load
+         decisions ignored last night's recovery. Surface a "Regenerate
+         to refresh" prompt so the user can grab the fresh-data plan. -->
+    <div v-if="workout?.recovery_stale" class="stale-banner">
+      <span class="stale-icon">↻</span>
+      <span class="stale-text">
+        Plan generated before today's sleep data was synced —
+        tap Regenerate to refresh with fresh recovery context.
+      </span>
+      <button class="ghost small" :disabled="busy === 'regen'"
+              @click="regenerate(true)">
+        {{ busy === 'regen' ? 'Refreshing…' : 'Regenerate' }}
+      </button>
+    </div>
     <!-- Why + Variety nudge moved below the exercise list. -->
 
     <CoachCard v-if="queryToken && workout
@@ -1531,6 +1547,18 @@ button.primary.small { padding: 0.25rem 0.6rem; font-size: 0.78rem; }
 button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 button.ghost { background: transparent; color: var(--text-soft); }
 button.ghost:hover { color: var(--text); border-color: var(--accent, #ef4444); }
+
+/* Soft sleep-stale warning banner */
+.stale-banner {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.55rem 0.8rem; margin: 0 0 0.7rem;
+  background: rgba(250, 204, 21, 0.07);
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  border-left: 3px solid #facc15;
+  border-radius: 8px; color: var(--text);
+}
+.stale-icon { color: #facc15; font-size: 1.05rem; }
+.stale-text { flex: 1; font-size: 0.83rem; line-height: 1.35; }
 
 /* Workout-complete confirmation dialog */
 .cd-backdrop {

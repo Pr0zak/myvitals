@@ -566,6 +566,12 @@ class WorkoutOut(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     notes: str | None
+    # True when the plan was generated before today's sleep data was
+    # available AND fresh sleep has since landed. Surface a banner +
+    # "Regenerate to refresh" prompt on the UI; the plan is still
+    # usable but its deload factor / starting weights ignored the
+    # last night's recovery.
+    recovery_stale: bool = False
     exercises: list[WorkoutExerciseOut] = []
 
 
@@ -616,6 +622,25 @@ def _wex_to_out(
     )
 
 
+async def _workout_recovery_stale(
+    db: AsyncSession, w: models.StrengthWorkout,
+) -> bool:
+    """True when the plan was generated before today's sleep data was
+    available AND fresh sleep is now ingested. Lets the UI surface a
+    "Regenerate to refresh" banner so the user doesn't unknowingly
+    train against stale recovery context.
+
+    Conservative — never flips to true once the plan recorded a
+    sleep_h_used value (further-up-stream rollups can change but the
+    plan's view of recovery is what it built against)."""
+    if w.sleep_h_used is not None:
+        return False
+    summary = await db.get(models.DailySummary, w.date)
+    if summary and summary.sleep_duration_s:
+        return True
+    return False
+
+
 async def _hydrate_workout(
     db: AsyncSession, w: models.StrengthWorkout
 ) -> WorkoutOut:
@@ -648,6 +673,7 @@ async def _hydrate_workout(
         started_at=w.started_at,
         completed_at=w.completed_at,
         notes=w.notes,
+        recovery_stale=await _workout_recovery_stale(db, w),
         exercises=[
             _wex_to_out(wex, sets_by_wex.get(wex.id, [])) for wex in wex_rows
         ],

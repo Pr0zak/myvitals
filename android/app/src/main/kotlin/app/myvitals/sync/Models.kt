@@ -226,6 +226,7 @@ data class StrengthWorkoutDetail(
     @Json(name = "split_focus") val splitFocus: String,
     val status: String,
     val seed: String,
+    @Json(name = "recovery_stale") val recoveryStale: Boolean = false,
     @Json(name = "recovery_score_used") val recoveryScoreUsed: Double? = null,
     @Json(name = "readiness_score_used") val readinessScoreUsed: Double? = null,
     @Json(name = "sleep_h_used") val sleepHUsed: Double? = null,

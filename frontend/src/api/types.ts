@@ -234,5 +234,6 @@ export interface StrengthWorkoutDetail {
   started_at: string | null;
   completed_at: string | null;
   notes: string | null;
+  recovery_stale?: boolean;
   exercises: StrengthWorkoutExercise[];
 }

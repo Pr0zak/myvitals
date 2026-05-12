@@ -35,6 +35,11 @@ const icon = computed(() => {
     return Dumbbell;
   if (t.includes("hiit") || t.includes("crossfit") || t === "workout")
     return Flame;
+  // Generic cardio day (from the strength generator's cardio split).
+  // Modality is the user's choice (rower / bike / MTB) — surface as a
+  // bike since that's the user's outdoor default + matches the
+  // Activities bottom-nav tab icon.
+  if (t === "cardio") return Bike;
   if (t.includes("yoga") || t.includes("pilates") || t.includes("stretch"))
     return User;
   if (t.includes("indoor_cardio") || t.includes("treadmill") || t.includes("elliptical"))

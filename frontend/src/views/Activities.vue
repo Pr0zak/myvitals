@@ -115,12 +115,21 @@ async function load() {
         return {
           source: "strength",
           source_id: String(w.id),
-          // Yoga / mobility-only sessions get their own type so the
-          // activity-icon + filter chip distinguish them from strength.
-          type: w.split_focus === "yoga" ? "yoga" : "strength",
+          // Yoga / cardio / strength each get their own type so the
+          // activity-icon + filter chip distinguish them. Cardio rows
+          // were rendering as the strength dumbbell before, which was
+          // visually misleading — they're auto-logged Z2 sessions via
+          // Concept2 ERG / Strava, not strength sessions.
+          type: w.split_focus === "yoga"
+            ? "yoga"
+            : w.split_focus === "cardio"
+              ? "cardio"
+              : "strength",
           name: w.split_focus === "yoga"
             ? "Yoga flow"
-            : `${w.split_focus.charAt(0).toUpperCase() + w.split_focus.slice(1)} day`,
+            : w.split_focus === "cardio"
+              ? "Cardio day"
+              : `${w.split_focus.charAt(0).toUpperCase() + w.split_focus.slice(1)} day`,
           start_at: start,
           duration_s: duration,
           distance_m: null, elevation_gain_m: null,

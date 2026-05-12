@@ -276,19 +276,32 @@ private fun StrengthListRow(
             Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val isYoga = w.splitFocus == "yoga"
+            // Distinguish the three workout types — cardio days were
+            // showing the strength dumbbell, which was visually
+            // misleading (they're rest-style days that auto-log via
+            // Concept2 ERG / Strava, not strength sessions).
+            val typeIcon = when (w.splitFocus) {
+                "yoga" -> androidx.compose.material.icons.Icons.Outlined.SelfImprovement
+                "cardio" -> androidx.compose.material.icons.Icons.AutoMirrored.Outlined.DirectionsBike
+                else -> androidx.compose.material.icons.Icons.Outlined.FitnessCenter
+            }
+            val typeTint = when (w.splitFocus) {
+                "yoga" -> Color(0xFFA78BFA)
+                "cardio" -> Color(0xFF38BDF8)
+                else -> MV.BrandRed
+            }
+            val typeDesc = when (w.splitFocus) {
+                "yoga" -> "Yoga"
+                "cardio" -> "Cardio"
+                else -> "Strength"
+            }
             Box(
                 Modifier.size(32.dp).clip(CircleShape)
                     .background(MV.SurfaceContainerLow),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    if (isYoga)
-                        androidx.compose.material.icons.Icons.Outlined.SelfImprovement
-                    else
-                        androidx.compose.material.icons.Icons.Outlined.FitnessCenter,
-                    contentDescription = if (isYoga) "Yoga" else "Strength",
-                    tint = if (isYoga) Color(0xFFA78BFA) else MV.BrandRed,
+                    typeIcon, contentDescription = typeDesc, tint = typeTint,
                     modifier = Modifier.size(18.dp),
                 )
             }
@@ -320,6 +333,8 @@ private fun muscleGroupsForFocus(focus: String): String = when (focus.lowercase(
     "upper" -> "Chest · Back · Arms"
     "lower" -> "Quads · Hams · Glutes"
     "full_body", "fullbody", "full" -> "Full body"
+    "yoga" -> "Mobility flow"
+    "cardio" -> "Z2 effort"
     "rest" -> "Rest day"
     else -> focus.replace('_', ' ')
 }

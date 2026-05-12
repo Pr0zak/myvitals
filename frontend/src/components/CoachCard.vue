@@ -67,6 +67,9 @@ const explainLoading = ref(false);
 const open = ref<{ deload: boolean; focus: boolean; variety: boolean; why: boolean }>({
   deload: false, focus: false, variety: false, why: false,
 });
+// Master collapse — Coach card body hidden by default so it doesn't
+// eat half the workout screen. Tap the header to expand.
+const cardOpen = ref(false);
 
 async function loadDeloadLatest() {
   try {
@@ -164,7 +167,19 @@ watch(() => props.refreshKey, () => {
 </script>
 
 <template>
-  <Card title="Coach" :flat="true" class="coach-card">
+  <Card :flat="true" class="coach-card">
+    <button class="card-head" @click="cardOpen = !cardOpen">
+      <span class="card-title">Coach</span>
+      <!-- Surface the most-actionable signal in the collapsed header
+           so the user sees state without expanding. Severity pill if
+           the deload judgment isn't "none"; otherwise hide. -->
+      <span v-if="!cardOpen && deloadJ && deloadJ.severity !== 'none'"
+            class="pill" :class="`pill-${deloadJ.severity}`">
+        Deload {{ deloadJ.severity }}
+      </span>
+      <span class="card-caret">{{ cardOpen ? "−" : "+" }}</span>
+    </button>
+    <div v-if="cardOpen">
     <!-- Deload section -->
     <div :class="['row', `sev-${deloadJ?.severity ?? 'none'}`]">
       <button class="row-head" @click="toggle('deload')">
@@ -293,10 +308,18 @@ watch(() => props.refreshKey, () => {
         <p v-else class="muted small">No rationale available.</p>
       </div>
     </div>
+    </div><!-- end v-if cardOpen -->
   </Card>
 </template>
 
 <style scoped>
+.card-head {
+  width: 100%; display: flex; align-items: center; gap: 0.5rem;
+  background: transparent; border: none; padding: 0.35rem 0.2rem;
+  cursor: pointer; color: var(--text); text-align: left;
+}
+.card-title { font-weight: 700; font-size: 1rem; flex: 1; }
+.card-caret { color: var(--muted); font-size: 1.1rem; }
 .coach-card { margin: 0 0 0.7rem; padding: 0.4rem 0.6rem !important;
               border-radius: 10px !important; }
 .coach-card :deep(header) { padding: 0.3rem 0.2rem; }

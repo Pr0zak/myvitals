@@ -1592,6 +1592,8 @@ internal class CoachCardState {
     var openFocus by mutableStateOf(false)
     var openVariety by mutableStateOf(false)
     var openWhy by mutableStateOf(false)
+    // Master collapse — Coach body hidden by default. Tap header to expand.
+    var cardOpen by mutableStateOf(false)
 }
 
 /** Consolidated Coach card — replaces 4 separate cards (Why, Deload,
@@ -1691,10 +1693,46 @@ internal fun CoachCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(10.dp)) {
-            Text("Coach", color = MV.OnSurface, fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
-
+            // Clickable header. Surfaces the most-actionable signal
+            // (deload severity) inline when collapsed so the user sees
+            // state without expanding.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { state.cardOpen = !state.cardOpen }
+                    .padding(start = 4.dp, end = 4.dp,
+                        top = 2.dp, bottom = if (state.cardOpen) 4.dp else 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Coach", color = MV.OnSurface, fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                val sevPill = state.deload?.severity?.takeIf { it != "none" }
+                if (!state.cardOpen && sevPill != null) {
+                    val sevColor = when (sevPill) {
+                        "rest" -> Color(0xFFEF4444)
+                        "moderate" -> Color(0xFFF97316)
+                        "light" -> Color(0xFFFACC15)
+                        else -> MV.OnSurfaceVariant
+                    }
+                    Text(
+                        "Deload $sevPill",
+                        color = sevColor, fontSize = 11.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(sevColor.copy(alpha = 0.15f))
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    if (state.cardOpen) "−" else "+",
+                    color = MV.OnSurfaceVariant, fontSize = 16.sp,
+                )
+            }
+            if (!state.cardOpen) return@Column
             // Deload
             CoachRow(
                 icon = "▲",

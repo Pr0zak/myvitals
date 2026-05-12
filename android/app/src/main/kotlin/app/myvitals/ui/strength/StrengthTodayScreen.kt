@@ -700,6 +700,39 @@ fun StrengthTodayScreen(
                     )
                 }
             }
+            // Cardio / notes-only plans (split_focus == "cardio") come back
+            // with exercises=[] and the prescription text in `notes`. Without
+            // this card the screen looks blank between the Coach card and
+            // the Complete button. Web has the equivalent card since v0.7.144.
+            if (plan.exercises.isEmpty() && !plan.notes.isNullOrBlank()) {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MV.SurfaceContainer,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text(
+                                when (plan.splitFocus) {
+                                    "cardio" -> "Cardio prescription"
+                                    "yoga" -> "Mobility flow"
+                                    "rest" -> "Rest day"
+                                    else -> plan.splitFocus
+                                        .replaceFirstChar(Char::titlecase)
+                                },
+                                color = MV.OnSurface, fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(bottom = 6.dp),
+                            )
+                            Text(
+                                plan.notes!!,
+                                color = MV.OnSurfaceVariant, fontSize = 13.sp,
+                            )
+                        }
+                    }
+                }
+            }
             items(orderedExercises, key = { it.id }) { wex ->
                 val canSwap = wex.sets.none { it.actualReps != null && !it.skipped }
                 ExerciseCard(

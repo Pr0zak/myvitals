@@ -58,13 +58,30 @@ app needs to surface them.
       B-Stance RDL, DB Hip Thrust, Cuban Rotation, Zottman Preacher,
       Cross-Body Hammer, Plank Pull-Through, Pike / Archer / Hindu
       push-ups, etc.) as a supplementary JSON merged at catalog load.
-- [ ] **Strength v2 — training preferences UI** — Settings →
-      Strength equipment currently hard-codes level/days-per-week/
-      split-preference defaults. Add a Training tab to edit these,
-      stored alongside equipment in `user_equipment.payload.training`.
-- [ ] **Strength v2 — exercise swap** — "swap this for another"
-      button on the active-workout screen (filtered to same primary
-      muscle + matching equipment).
+- [x] **Strength v2 — training preferences UI** — done.
+      `StrengthEquipment.vue` has a training section editing
+      `level / days_per_week / split_preference / workout_minutes /
+      include_mobility / yoga_on_rest_days / cardio_days_per_week /
+      goal` (`strength` | `hypertrophy` | `general`, added v0.7.147).
+      `put_equipment` auto-regens today's plan when any of these
+      change and today's workout is planned + has zero logged sets.
+- [x] **Strength v2 — exercise swap** — done. Per-exercise "Swap
+      exercise" button on the active workout screen filtered by
+      `/workout/strength/workout-exercises/{wex_id}/swap` plus the
+      AI Variety nudge (`POST /ai/strength/nudge/{workout_id}`)
+      returning 0-2 surgical AI suggestions with reasoning.
+- [x] **Strength v2 — AI coach surfaces** — done. Consolidated Coach
+      card (`CoachCard.vue` / `CoachCard` composable) with four rows:
+      multi-signal deload trigger (`/ai/strength/deload-check`),
+      per-workout focus cue (`/ai/strength/focus-cue/{id}`), variety
+      nudge, and Why-this-workout rationale. State hoisted to the
+      parent screen (`CoachCardState` class) so it survives LazyColumn
+      re-creation.
+- [x] **Strength v2 — goal-aware prescription** — done. `prescribe_slot`
+      reads training.goal + profile.age + latest bodyweight; rotation
+      pressure (`recent_frequency_by_exercise`) down-ranks recently-used
+      exercises. Weekly muscle-group volume audit endpoint exposes
+      sets/MEV/MAV per primary_muscle.
 - [x] **Trail-status integration** — done in v0.7.0 (web only). Backend
       polls RainoutLine `/dnis_refresh` every 15 min, persists snapshots
       as a hypertable, and exposes /trails endpoints. Frontend Trails

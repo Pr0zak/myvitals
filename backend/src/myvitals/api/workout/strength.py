@@ -630,9 +630,16 @@ async def _workout_recovery_stale(
     "Regenerate to refresh" banner so the user doesn't unknowingly
     train against stale recovery context.
 
+    Only meaningful for strength plans — cardio + yoga plans don't
+    consume recovery_score / sleep_duration in their prescription
+    (build_cardio_plan / build_yoga_plan are static), so flagging
+    them as "stale" produces a permanent false-positive banner.
+
     Conservative — never flips to true once the plan recorded a
     sleep_h_used value (further-up-stream rollups can change but the
     plan's view of recovery is what it built against)."""
+    if w.split_focus in ("cardio", "yoga", "rest"):
+        return False
     if w.sleep_h_used is not None:
         return False
     summary = await db.get(models.DailySummary, w.date)

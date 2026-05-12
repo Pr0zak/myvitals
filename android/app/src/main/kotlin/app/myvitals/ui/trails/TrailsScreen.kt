@@ -194,8 +194,13 @@ fun TrailsScreen(settings: SettingsRepository) {
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val rows = withContext(Dispatchers.IO) { api.activities(limit = 30) }
-            // Keep types most likely to match a trail visit
+            // Keep types most likely to match a trail visit AND filter
+            // out rides that already have a trail_id — this section is
+            // for the user to manually link the ones the auto-linker
+            // couldn't match (e.g. trail not yet seeded, GPS noise).
+            // Showing already-linked rides clutters the picker.
             recentRides = rows.filter { r ->
+                if (r.trailId != null) return@filter false
                 val t = r.type
                 t.contains("Ride", ignoreCase = true) ||
                     t.contains("Run", ignoreCase = true) ||

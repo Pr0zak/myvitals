@@ -119,6 +119,46 @@ Ship order driven by dependencies:
          (`_DAILY_SUMMARY_METRICS`) so Insights auto-surfaces
          fasting↔HRV/weight/sleep relationships.
 
+## Fitbit → Google Health migration (May 19, 2026)
+
+Google is rebranding the Fitbit app to Google Health with auto-
+updates rolling May 19–26, 2026. Most of myvitals' Fitbit usage is
+file-based imports + Health Connect, so impact is limited but
+needs verification post-cutover. All tasks are gated until after
+the user's phone has auto-updated to Google Health.
+
+- [ ] **#FITBIT-1** Post-May 19 sync smoke test — verify
+      Pixel Watch 3 → Google Health → Health Connect → SyncWorker
+      flow still works; check `/query/last-sync` has no
+      `permissions_lost` flag; compare record-counts 24h before
+      vs after the transition.
+- [ ] **#FITBIT-2** Test `parse_fitbit_zip` against a Google Health
+      export. Catalog any filename / directory-layout deltas vs
+      the legacy Fitbit ZIP; update the parser to handle both
+      shapes so archived exports still import.
+- [ ] **#FITBIT-3** Update Settings.vue + README copy for the
+      Google Health rebrand — change "Fitbit" labels to "Fitbit
+      / Google Health" and replace the export-URL link with the
+      post-cutover URL once known. Blocked by #FITBIT-2.
+- [ ] **#FITBIT-4** Mark `_parse_fitbit_wrist_temp` as legacy —
+      Google is removing skin temperature minute-by-minute data;
+      keep the parser for historical ZIPs but emit a "deprecated"
+      notice in import-job results when a Google Health export
+      yields zero wrist-temp rows. Blocked by #FITBIT-2.
+- [ ] **#FITBIT-5** HC background-read permission parity check —
+      verify `READ_HEALTH_DATA_IN_BACKGROUND` still works after
+      Google Health takes over as the HC writer. If Android
+      re-prompts for grants, route the user through the existing
+      v0.7.133 re-grant banner.
+
+Not affected (per Google's published guidance):
+- Health Connect API contract — explicitly maintained
+- Strava + Withings — independent OAuth, no Fitbit linkage in
+  myvitals
+- Garmin imports — separate ecosystem
+- Fasting / sober / workouts / trails / AI surfaces — no Fitbit
+  dependency
+
 ## Other deferred features
 
 - [x] **Fitbod / strength importer** — done in v0.6.0 as a generator,

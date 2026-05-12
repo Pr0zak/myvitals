@@ -1291,8 +1291,12 @@ async def generate_plan(
     # Day-type allocation by weekday — runs before recovery / rest
     # checks. If today's slot is cardio or yoga (auto), we short-circuit
     # to that plan instead of building a strength session. Override
-    # via /today/swap-type or force_no_rest=true (which skips this).
-    if not force_no_rest and not override_split:
+    # ONLY via /today/swap-type (which sets override_split explicitly).
+    # `force_no_rest` used to bypass this too, which meant every
+    # Regenerate tap on a cardio day silently flipped the plan to
+    # strength — wrong. force_no_rest now scopes strictly to the
+    # recovery-rest-day check below.
+    if not override_split:
         day_type = schedule_day_type(target_date, days_per_week, cardio_per_week)
         if day_type == "cardio":
             return build_cardio_plan(

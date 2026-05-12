@@ -47,6 +47,78 @@ app needs to surface them.
       already in DB but not in Claude's payload. Adding it lets the
       model correlate sleep with environmental factors.
 
+## Fasting feature (planned, 15 tasks)
+
+Intermittent-fasting tracker with protocol catalog, scheduled +
+active modes, configurable notification cadence, home-screen widget
++ app-shortcut tile, religious calendar pre-sets, and AI / Insights
+correlation surfaces. Full scope confirmed; nothing built yet.
+
+Ship order driven by dependencies:
+
+1. **Backend foundation**
+   - [ ] **#FAST-1** `fasting_sessions` table + Alembic migration.
+         Hypertable on `started_at`. Single-active-session unique
+         index `WHERE ended_at IS NULL`.
+   - [ ] **#FAST-2** `/fasting/*` endpoints — start, end, current,
+         history, stats. Stage thresholds computed server-side
+         (gut_rest / glycogen / ketosis / autophagy / deep_autophagy
+         / 36h / 48h / 72h+) so phone + web render identical text.
+   - [ ] **#FAST-8** Daily-summary integration — add `fasting_hours`
+         to the nightly rollup so Today + AI surfaces can consume
+         fasting context with one query.
+
+2. **UI parity (parallel)**
+   - [ ] **#FAST-3** Vue Fasting view — active ring + stage label +
+         Start/End + protocol picker + history card + streak pill.
+   - [ ] **#FAST-4** Phone FastingScreen composable — same shape.
+         New tab in BottomBar; encrypted-prefs offline cache.
+
+3. **Settings + notifications**
+   - [ ] **#FAST-7** Settings — full protocol catalog picker, Active
+         vs Scheduled mode toggle, eating-window times, per-stage
+         notification cadence checklist (4h / 12h / 16h / 18h / 24h /
+         36h / 48h / 72h / target reached / window-opens-in-30 /
+         window-closing-in-30), religious-calendar opt-in.
+   - [ ] **#FAST-5** Phone milestone notifications — new
+         `FASTING_CHANNEL_ID`, WorkManager one-shots scheduled at
+         each enabled stage threshold; cancelled if fast ends early.
+
+4. **Widgets**
+   - [ ] **#FAST-6** 1×1 app-shortcut tile (long-press app icon →
+         Fasting). Mirrors the Workout / Trails shortcuts added in
+         v0.7.164. New `ic_shortcut_fasting.xml` vector.
+   - [ ] **#FAST-9** 2×1 live home-screen widget — elapsed time +
+         stage label + progress ring. AppWidgetProvider +
+         RemoteViews + WorkManager 15-min refresh during active
+         fasts.
+
+5. **Scheduled + extended**
+   - [ ] **#FAST-12** Scheduled-mode auto start/end — WorkManager
+         one-shots at the user's eating-window boundaries POST
+         `/fasting/start` and `/fasting/end`. Rescheduled on every
+         fasting_prefs change; manual End wins.
+   - [ ] **#FAST-13** `fasting_logs` table — hunger / mood /
+         hydration / notes during a fast. Surfaced as an in-fast
+         card during sessions >12h.
+   - [ ] **#FAST-10** Extended-fast protocols (24h+) + symptoms /
+         hydration card. 5:2, Eat-Stop-Eat, ADF, Extended 36/48/72h.
+         Electrolyte reminder card at 24h / 48h (informational).
+
+6. **Religious calendar**
+   - [ ] **#FAST-14** Ramadan / Lent / Yom Kippur pre-sets. 5-year
+         static date table; #FAST-12 worker auto-starts/ends on
+         those dates. Solar-aware Ramadan windows need lat/long
+         (Settings can ask, fallback to local 5:00 / 19:30).
+
+7. **AI + Insights correlations**
+   - [ ] **#FAST-11** Plumb `current_fast` + `recent_fast_hours_7d`
+         into deload-check + today's verdict payloads so AI tones
+         recommendations during a fast.
+   - [ ] **#FAST-15** Add `fasting_hours` to the correlation engine
+         (`_DAILY_SUMMARY_METRICS`) so Insights auto-surfaces
+         fasting↔HRV/weight/sleep relationships.
+
 ## Other deferred features
 
 - [x] **Fitbod / strength importer** — done in v0.6.0 as a generator,

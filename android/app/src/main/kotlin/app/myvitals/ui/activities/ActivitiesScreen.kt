@@ -308,8 +308,11 @@ private fun StrengthListRow(
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (isYoga) "Yoga flow"
-                    else "${w.splitFocus.replaceFirstChar { it.titlecase() }} day",
+                    when (w.splitFocus) {
+                        "yoga" -> "Yoga flow"
+                        "cardio" -> "Cardio day"
+                        else -> "${w.splitFocus.replaceFirstChar { it.titlecase() }} day"
+                    },
                     color = MV.OnSurface, fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold, maxLines = 1,
                 )

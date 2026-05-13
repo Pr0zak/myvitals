@@ -72,15 +72,22 @@ class TestFilterCatalog:
         self, user_equipment, equipment_with_pullup_bar,
     ):
         """Adding a pull-up bar to the user's setup at runtime should
-        expand the catalog by at least one entry — the pull-up itself."""
-        # Note: the pull-up entries in the catalog are equipment=['bodyweight']
-        # because they don't need a *device* in free-exercise-db's taxonomy.
-        # That's a known catalog quirk. So this test doesn't actually
-        # change the count — it just sanity-checks that adding gear
-        # never *shrinks* the catalog.
-        before = len(filter_catalog_for_equipment(CATALOG, user_equipment))
-        after = len(filter_catalog_for_equipment(CATALOG, equipment_with_pullup_bar))
-        assert after >= before
+        expand the catalog by exactly the bar-required exercises.
+        Pull-ups, chin-ups, and hanging movements are tagged
+        equipment=['bodyweight'] in free-exercise-db (the body is the
+        load), but the bar is the gate — filter_catalog_for_equipment
+        drops them by id when pull_up_bar=false."""
+        from myvitals.analytics.strength import _BAR_REQUIRED_EXERCISES
+        before_set = {e["id"] for e in filter_catalog_for_equipment(CATALOG, user_equipment)}
+        after_set = {e["id"] for e in filter_catalog_for_equipment(CATALOG, equipment_with_pullup_bar)}
+        unlocked = after_set - before_set
+        assert unlocked == _BAR_REQUIRED_EXERCISES & {e["id"] for e in CATALOG}, (
+            f"expected bar to unlock exactly {_BAR_REQUIRED_EXERCISES}, "
+            f"got {unlocked}"
+        )
+        assert "Pullups" not in before_set, "Pullups leaked without a bar"
+        assert "Pullups" in after_set, "Pullups missing when bar present"
+        assert len(after_set) > len(before_set), "bar should strictly expand the catalog"
 
 
 class TestSelectExercisesForSplit:

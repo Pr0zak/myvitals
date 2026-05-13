@@ -44,7 +44,9 @@ def bare_equipment() -> dict:
 
 @pytest.fixture
 def equipment_with_pullup_bar(user_equipment: dict) -> dict:
-    """User's setup + a doorway pull-up bar. Verifies the catalog
-    filter expands when gear is added (no code change required)."""
-    user_equipment["pull_up_bar"] = True
-    return user_equipment
+    """User's setup + a doorway pull-up bar. Returns a *copy* so a
+    side-by-side test can compare the with/without-bar catalogs
+    against the same baseline. Mutating user_equipment in place
+    would mean both fixtures point at the same dict and a
+    pull_up_bar=False filter call would already see True."""
+    return {**user_equipment, "pull_up_bar": True}

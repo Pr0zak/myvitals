@@ -383,6 +383,23 @@ def progress_from_rating(
 # Pure: equipment filter for the catalog
 # ------------------------------------------------------------------
 
+# Catalog quirk: free-exercise-db tags pull-up / chin-up / hanging
+# movements as equipment=['bodyweight'] because the body is the load.
+# But the bar is the *gate* — without a doorway pull-up bar (or rack
+# with a chinning bar), the user physically can't do any of these.
+# Listed by catalog id so we can drop them when pull_up_bar=false.
+_BAR_REQUIRED_EXERCISES: frozenset[str] = frozenset({
+    "Chin-Up",
+    "Gorilla_Chin_Crunch",
+    "Hanging_Leg_Raise",
+    "Hanging_Pike",
+    "Pullups",
+    "Scapular_Pull-Up",
+    "V-Bar_Pullup",
+    "Wide-Grip_Rear_Pull-Up",
+})
+
+
 def filter_catalog_for_equipment(
     catalog: list[dict[str, Any]], equipment: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -393,6 +410,11 @@ def filter_catalog_for_equipment(
     'dumbbell' requires equipment.dumbbells.type != 'none'.
     Other tags ('barbell', 'cable', 'kettlebell', 'machine', 'bands')
     require the corresponding equipment flag to be true.
+
+    Bar-required bodyweight exercises (Pullups, Chin-Up, hanging-leg-
+    raise, etc.) are filtered by id when pull_up_bar=false — see the
+    _BAR_REQUIRED_EXERCISES note above for why this is by-id instead
+    of by-tag.
     """
     bench_owned = (
         equipment.get("bench", {}).get("flat")
@@ -400,8 +422,11 @@ def filter_catalog_for_equipment(
         or equipment.get("bench", {}).get("decline")
     )
     db_owned = equipment.get("dumbbells", {}).get("type", "none") != "none"
+    bar_owned = bool(equipment.get("pull_up_bar"))
 
     def can_do(ex: dict[str, Any]) -> bool:
+        if not bar_owned and ex["id"] in _BAR_REQUIRED_EXERCISES:
+            return False
         for tag in ex["equipment"]:
             if tag == "bodyweight":
                 continue

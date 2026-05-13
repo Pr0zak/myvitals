@@ -47,6 +47,37 @@ app needs to surface them.
       already in DB but not in Claude's payload. Adding it lets the
       model correlate sleep with environmental factors.
 
+## Home Assistant realtime sync (planned, 9 tasks)
+
+Add HA WebSocket as a parallel sync source for sub-minute Pixel
+Watch 3 data (HR, steps, device_status). Health Connect stays
+intact for what HA can't carry (SpO2 / HRV / sleep / skin temp).
+Detailed plan is held locally — internal IPs keep it out of the
+public repo. Once HC + HA overlap on HR/steps, the daily-summary
+rollup will need source-priority dedupe so the two streams don't
+double-count.
+
+- [ ] **#HA-1** Alembic — `device_status` hypertable + ORM model.
+- [ ] **#HA-2** Backend — `integrations/ha_realtime.py` WebSocket
+      consumer + dispatch (HR / steps → existing ingest path,
+      device_status → new table). No deps on #HA-1.
+- [ ] **#HA-3** Backend — lifespan wiring in `main.py` so the
+      consumer starts/stops with the app. Blocked by #HA-2.
+- [ ] **#HA-4** Backend — `GET /api/device-status/latest` returning
+      the most recent watch status row. Blocked by #HA-1.
+- [ ] **#HA-5** Frontend — `Settings.vue` HA section (URL / token /
+      entities / connected status). Note SpO2 / HRV / sleep / skin
+      temp explicitly stay on HC. Blocked by #HA-3, #HA-4.
+- [ ] **#HA-6** Frontend — `Home.vue` Watch status tile rendering
+      `/api/device-status/latest`. Blocked by #HA-4.
+- [ ] **#HA-7** Manual — generate a long-lived HA token; paste into
+      Settings. Blocked by #HA-5.
+- [ ] **#HA-8** Smoke + freshness verification (9 checks). Blocked
+      by #HA-7.
+- [ ] **#HA-9** *Followup* — source-priority dedupe in
+      `compute_daily_summary` once HC + HA overlap. Blocked by
+      #HA-8.
+
 ## Fasting feature (planned, 15 tasks)
 
 Intermittent-fasting tracker with protocol catalog, scheduled +

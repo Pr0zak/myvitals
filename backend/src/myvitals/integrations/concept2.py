@@ -6,22 +6,24 @@ becomes a row in the `activities` table with `source='concept2'`
 and the Concept2 result id as `source_id`, slotting into the same
 machinery (Activities feed, HR chart overlay) Strava already uses.
 
-Per-stroke HR is intentionally NOT ingested into `vitals_heartrate`
-— the wrist watch is already covering that window. We keep avg/max
-on the activity row only, and stash the full result payload in
-Activity.raw for later detail-view rendering.
+Each upserted activity also (a) writes per-interval HR samples into
+`vitals_heartrate` so the HR-during-workout + HR-zone charts have
+data for the row window, and (b) triggers cardio-day auto-complete
+on a matching planned `strength_workouts` row for that local date.
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import models
+from .cardio_completion import maybe_complete_cardio_day
 
 LOGBOOK_BASE = "https://log.concept2.com"
 PER_PAGE = 250  # Concept2 max
@@ -108,8 +110,26 @@ def map_result(result: dict[str, Any]) -> dict[str, Any] | None:
     typ = (result.get("type") or "rower").lower()
 
     workout = result.get("workout") or {}
-    workout_name = workout.get("name") or workout.get("type") or ""
-    name = workout_name.strip() or None
+    # Try the user-set name inside workout, then workout.type, then the
+    # root-level workout_type field (where Concept2 actually puts the
+    # template name like "VariableInterval" / "JustRow_Time"). If all
+    # three are empty, synthesize from duration + distance so the UI
+    # never shows "(untitled)".
+    explicit = (
+        (workout.get("name") or workout.get("type") or result.get("workout_type") or "")
+        .strip()
+    )
+    if explicit:
+        if duration_s and distance_m:
+            mm, ss = divmod(duration_s, 60)
+            name: str | None = f"{explicit} · {mm}:{ss:02d} / {int(distance_m)}m"
+        else:
+            name = explicit
+    elif duration_s and distance_m:
+        mm, ss = divmod(duration_s, 60)
+        name = f"Row · {mm}:{ss:02d} / {int(distance_m)}m"
+    else:
+        name = None
 
     # Compose a one-line note with the things a rower actually wants
     # to glance at (drag, stroke rate, 500m split).
@@ -147,6 +167,55 @@ def map_result(result: dict[str, Any]) -> dict[str, Any] | None:
         "notes": notes,
         "raw": result,
     }
+
+
+async def write_interval_hr(
+    db: AsyncSession,
+    raw: dict[str, Any],
+    start_at: datetime,
+) -> int:
+    """Emit per-interval HR samples to vitals_heartrate so the HR chart
+    has coverage for the workout window.
+
+    Three samples per interval (start=min, mid=average, end=ending) — a
+    typical 5-interval row produces ~15 rows. vitals_heartrate's PK is
+    (time) only, so collisions with HC writes are resolved with
+    ON CONFLICT DO NOTHING (HC wins). Source tagged 'concept2' for
+    downstream per-source dedupe.
+    """
+    intervals = (raw.get("workout") or {}).get("intervals") or []
+    if not intervals:
+        return 0
+    rows: list[dict[str, Any]] = []
+    t = start_at
+    for iv in intervals:
+        if not isinstance(iv, dict):
+            continue
+        hr = iv.get("heart_rate") or {}
+        dur_s = (iv.get("time") or 0) / 10
+        if dur_s <= 0:
+            continue
+        for offset_s, bpm in (
+            (0.0,         hr.get("min")),
+            (dur_s / 2,   hr.get("average")),
+            (dur_s,       hr.get("ending")),
+        ):
+            if bpm and bpm > 0:
+                rows.append({
+                    "time": t + timedelta(seconds=offset_s),
+                    "bpm": float(bpm),
+                    "source": "concept2",
+                })
+        t = t + timedelta(seconds=dur_s + (iv.get("rest_time") or 0) / 10)
+    if not rows:
+        return 0
+    stmt = (
+        pg_insert(models.HeartRate)
+        .values(rows)
+        .on_conflict_do_nothing(index_elements=["time"])
+    )
+    await db.execute(stmt)
+    return len(rows)
 
 
 async def sync_results(
@@ -188,6 +257,15 @@ async def sync_results(
                         continue
                     setattr(existing, k, v)
             upserted += 1
+            await write_interval_hr(db, raw, mapped["start_at"])
+            await maybe_complete_cardio_day(
+                db,
+                source=mapped["source"],
+                source_id=mapped["source_id"],
+                activity_type=mapped["type"],
+                start_at=mapped["start_at"],
+                duration_s=mapped["duration_s"],
+            )
 
         meta = body.get("meta") or {}
         pagination = meta.get("pagination") or {}

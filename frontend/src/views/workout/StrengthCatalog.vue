@@ -36,7 +36,7 @@ const loading = ref(true);
 const error = ref<string>("");
 const filter = ref<"available" | "all">("available");
 const search = ref("");
-const sortBy = ref<"name" | "most_done" | "recent" | "heaviest" | "volume">("name");
+const sortBy = ref<"name" | "most_done" | "least_done" | "recent" | "heaviest" | "volume">("name");
 
 // Category filter chips. Multi-select; combine with AND. Empty set = no filter.
 type Category =
@@ -188,9 +188,14 @@ const visible = computed<StrengthExercise[]>(() => {
 
 function statSortKey(ex: StrengthExercise): number {
   const s = statsSummary.value[ex.id];
-  if (!s) return 0;
+  // Never-done exercises have no stats row at all. For 'least_done' we
+  // want them to land FIRST in a DESC sort, so return a large positive
+  // key. For other stat sorts they go to the bottom (0).
+  if (!s) return sortBy.value === "least_done" ? Number.POSITIVE_INFINITY : 0;
   switch (sortBy.value) {
     case "most_done":  return s.times_performed;
+    // Negate count so DESC sort surfaces lowest-count first.
+    case "least_done": return -s.times_performed;
     case "recent":     return s.last_performed_date
                          ? new Date(s.last_performed_date).getTime() : 0;
     case "heaviest":   return s.max_weight_lb ?? 0;
@@ -339,6 +344,7 @@ onMounted(load);
       <select v-model="sortBy" class="muscle-select">
         <option value="name">Sort: A-Z by muscle</option>
         <option value="most_done">Sort: most done</option>
+        <option value="least_done">Sort: never / least done</option>
         <option value="recent">Sort: recently done</option>
         <option value="heaviest">Sort: heaviest weight</option>
         <option value="volume">Sort: total volume</option>
@@ -389,7 +395,16 @@ onMounted(load);
               <component v-else :is="placeholderIcon(ex)" :size="22"/>
             </div>
             <div class="meta">
-              <strong>{{ ex.name }}</strong>
+              <strong>{{ ex.name }}
+                <span class="done-pill" :class="{ never: !statsSummary[ex.id]?.times_performed }"
+                      :title="statsSummary[ex.id]?.times_performed
+                        ? `Performed ${statsSummary[ex.id].times_performed} session(s)`
+                        : 'Never performed'">
+                  {{ statsSummary[ex.id]?.times_performed
+                       ? `${statsSummary[ex.id].times_performed}×`
+                       : 'never' }}
+                </span>
+              </strong>
               <span class="tags">
                 <span v-if="muscleIcon(ex.primary_muscle)" class="muscle-chip"
                       :title="muscleLabel(ex.primary_muscle)">
@@ -639,6 +654,23 @@ header h1 { margin: 0; }
 .muscle-chip {
   display: inline-flex; align-items: center; gap: 0.25rem;
   vertical-align: middle;
+}
+.done-pill {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  vertical-align: middle;
+  background: rgba(34, 197, 94, 0.18);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+.done-pill.never {
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--muted, #94a3b8);
+  border-color: rgba(148, 163, 184, 0.3);
 }
 .muscle-mask {
   display: inline-block;

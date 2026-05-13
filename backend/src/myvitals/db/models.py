@@ -408,6 +408,8 @@ class StrengthWorkout(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_by_activity_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    completed_by_activity_source_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class StrengthWorkoutExercise(Base):

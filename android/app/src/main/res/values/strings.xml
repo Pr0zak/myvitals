@@ -7,4 +7,6 @@
     <string name="shortcut_workout_long">Today\'s workout</string>
     <string name="shortcut_trails_short">Trails</string>
     <string name="shortcut_trails_long">Trail map</string>
+    <string name="shortcut_sober_short">Sober</string>
+    <string name="shortcut_sober_long">Sober time</string>
 </resources>

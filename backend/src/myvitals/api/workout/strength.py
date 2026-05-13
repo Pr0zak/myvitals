@@ -770,6 +770,8 @@ async def list_workouts(
                 "started_at": w.started_at,
                 "completed_at": w.completed_at,
                 "generated_at": w.generated_at,
+                "completed_by_activity_source": w.completed_by_activity_source,
+                "completed_by_activity_source_id": w.completed_by_activity_source_id,
                 **set_stats.get(w.id, {}),
                 **hr_stats.get(w.id, {}),
             }

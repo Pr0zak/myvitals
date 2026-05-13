@@ -85,6 +85,13 @@ fun StrengthCatalogScreen(
     var detailEx by remember { mutableStateOf<StrengthExerciseInfo?>(null) }
     var detailStats by remember { mutableStateOf<app.myvitals.sync.StrengthExerciseStats?>(null) }
     var detailStatsLoading by remember { mutableStateOf(false) }
+    val statsSummary = remember {
+        mutableStateMapOf<String, app.myvitals.sync.StrengthExerciseStatsSummary>()
+    }
+    // Sort options mirror the web catalog (StrengthCatalog.vue):
+    //   NAME · MOST_DONE · LEAST_DONE · RECENT · HEAVIEST · VOLUME
+    var sortBy by remember { mutableStateOf("name") }
+    var sortMenuOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         try {
@@ -94,6 +101,10 @@ fun StrengthCatalogScreen(
             equipment = eq.payload
             prefs.clear()
             prefs.putAll(eq.payload.exercisePrefs)
+            // Non-critical: fetch per-exercise stats for pill + sort.
+            val ss = repo.exercisesStatsSummary()
+            statsSummary.clear()
+            statsSummary.putAll(ss)
         } catch (e: Exception) {
             Timber.w(e, "catalog load failed")
             error = e.message?.take(160)
@@ -161,7 +172,30 @@ fun StrengthCatalogScreen(
         derivedStateOf { catalog.map { it.primaryMuscle }.distinct().sorted() }
     }
 
-    val visible by remember(catalog, equipment, search, activeCategories.toMap(), muscleFilter) {
+    fun statSortKey(ex: StrengthExerciseInfo): Double {
+        val s = statsSummary[ex.id]
+        if (s == null) {
+            // Never-performed exercises surface first for least_done.
+            return if (sortBy == "least_done") Double.POSITIVE_INFINITY else 0.0
+        }
+        return when (sortBy) {
+            "most_done"  -> s.timesPerformed.toDouble()
+            // Negate so DESC sort surfaces lowest count first.
+            "least_done" -> -s.timesPerformed.toDouble()
+            "recent"     -> s.lastPerformedDate?.let {
+                runCatching { java.time.LocalDate.parse(it).toEpochDay().toDouble() }
+                    .getOrDefault(0.0)
+            } ?: 0.0
+            "heaviest"   -> s.maxWeightLb ?: 0.0
+            "volume"     -> s.totalVolumeLb
+            else         -> 0.0
+        }
+    }
+
+    val visible by remember(
+        catalog, equipment, search, activeCategories.toMap(), muscleFilter,
+        sortBy, statsSummary.toMap(),
+    ) {
         derivedStateOf {
             var base = catalog.filter { isAvailable(it) }
             val activeKeys = activeCategories.filterValues { it }.keys
@@ -172,12 +206,20 @@ fun StrengthCatalogScreen(
                 base = base.filter { it.primaryMuscle == muscleFilter }
             }
             val q = search.trim()
-            if (q.isEmpty()) base
+            val afterSearch = if (q.isEmpty()) base
             else base.mapNotNull { ex ->
                 fuzzyScore(ex, q)?.let { s -> ex to s }
             }.sortedWith(compareByDescending<Pair<StrengthExerciseInfo, Int>> { it.second }
                 .thenBy { it.first.name })
                 .map { it.first }
+            // Stat sort only applies when not searching — search ranks
+            // by fuzzy score (matches web catalog behaviour).
+            if (q.isEmpty() && sortBy != "name") {
+                afterSearch.sortedWith(
+                    compareByDescending<StrengthExerciseInfo> { statSortKey(it) }
+                        .thenBy { it.name }
+                )
+            } else afterSearch
         }
     }
 
@@ -305,6 +347,39 @@ fun StrengthCatalogScreen(
             }
         }
 
+        // Sort-by dropdown (mirrors the web catalog).
+        val sortLabels = listOf(
+            "name"       to "Sort: A-Z by muscle",
+            "most_done"  to "Sort: most done",
+            "least_done" to "Sort: never / least done",
+            "recent"     to "Sort: recently done",
+            "heaviest"   to "Sort: heaviest weight",
+            "volume"     to "Sort: total volume",
+        )
+        Box(modifier = Modifier.padding(bottom = 8.dp)) {
+            androidx.compose.material3.OutlinedButton(
+                onClick = { sortMenuOpen = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    sortLabels.firstOrNull { it.first == sortBy }?.second
+                        ?: "Sort: A-Z by muscle",
+                    color = MV.OnSurface, fontSize = 13.sp,
+                )
+            }
+            DropdownMenu(
+                expanded = sortMenuOpen,
+                onDismissRequest = { sortMenuOpen = false },
+            ) {
+                for ((key, label) in sortLabels) {
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        onClick = { sortBy = key; sortMenuOpen = false },
+                    )
+                }
+            }
+        }
+
         when {
             loading -> Text("Loading…", color = MV.OnSurfaceVariant)
             error != null -> Text(error!!, color = MV.Red)
@@ -412,8 +487,29 @@ fun StrengthCatalogScreen(
                                 Spacer(Modifier.width(8.dp))
                             }
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(ex.name, color = MV.OnSurface, fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(ex.name, color = MV.OnSurface, fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.weight(1f, fill = false))
+                                    val count = statsSummary[ex.id]?.timesPerformed ?: 0
+                                    val pillBg = if (count > 0)
+                                        Color(0x2D22C55E) else Color(0x26B0BEC5)
+                                    val pillFg = if (count > 0)
+                                        Color(0xFF22C55E) else MV.OnSurfaceVariant
+                                    Spacer(Modifier.width(6.dp))
+                                    Box(
+                                        Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(pillBg)
+                                            .padding(horizontal = 7.dp, vertical = 1.dp),
+                                    ) {
+                                        Text(
+                                            if (count > 0) "${count}×" else "never",
+                                            color = pillFg, fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     val musclePath = muscleIconPath(ex.primaryMuscle)
                                     if (musclePath != null && baseUrl.isNotEmpty()) {

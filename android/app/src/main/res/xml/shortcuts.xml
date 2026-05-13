@@ -38,4 +38,18 @@
         </intent>
     </shortcut>
 
+    <shortcut
+        android:shortcutId="sober"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_sober"
+        android:shortcutShortLabel="@string/shortcut_sober_short"
+        android:shortcutLongLabel="@string/shortcut_sober_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="app.myvitals"
+            android:targetClass="app.myvitals.MainActivity">
+            <extra android:name="shortcut_route" android:value="sober" />
+        </intent>
+    </shortcut>
+
 </shortcuts>

@@ -254,6 +254,19 @@ async def upsert_activities(db: AsyncSession, payloads: list[dict[str, Any]]) ->
         set_=update_cols,
     )
     await db.execute(stmt)
+    # Cardio-day auto-complete: fire per row. Helper is idempotent — a
+    # second pass on a row whose cardio workout is already 'completed'
+    # is a no-op.
+    from .cardio_completion import maybe_complete_cardio_day
+    for r in rows:
+        await maybe_complete_cardio_day(
+            db,
+            source=r["source"],
+            source_id=r["source_id"],
+            activity_type=r["type"],
+            start_at=r["start_at"],
+            duration_s=r["duration_s"],
+        )
     await db.commit()
     return len(rows)
 

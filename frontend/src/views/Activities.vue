@@ -96,6 +96,10 @@ async function load() {
     const sinceDate = params.since ?? new Date(0);
     const synthStrength: Activity[] = sw.workouts
       .filter((w) => w.status !== "regenerated" && w.status !== "planned")
+      // Skip cardio days auto-completed by an Activity (Concept2 row,
+      // Strava bike). The underlying activity is already in the feed —
+      // showing the StrengthWorkout too would duplicate the row.
+      .filter((w) => !(w.split_focus === "cardio" && w.completed_by_activity_source))
       .filter((w) => new Date(w.date + "T00:00:00") >= sinceDate)
       .map((w) => {
         const start = w.started_at ?? `${w.date}T17:00:00Z`;

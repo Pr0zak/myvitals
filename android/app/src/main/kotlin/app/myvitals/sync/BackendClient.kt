@@ -93,6 +93,9 @@ interface BackendApi {
         @Path("id") exerciseId: String,
     ): StrengthExerciseStats
 
+    @GET("workout/strength/exercises-stats-summary")
+    suspend fun strengthExercisesStatsSummary(): Map<String, StrengthExerciseStatsSummary>
+
     @GET("workout/strength/explain/{id}")
     suspend fun strengthExplain(@Path("id") id: Long): StrengthExplain
 

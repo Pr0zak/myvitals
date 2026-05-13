@@ -53,6 +53,9 @@ CLAUDE.md
 # user-supplied seed data (not for the public repo)
 backend/src/myvitals/data/trail_locations.json
 
+# planning docs with internal infra references — durable copy lives in claude memory
+docs/HA_REALTIME_PLAN.md
+
 # kotlin compiler session caches
 android/.kotlin/
 frontend/package-lock.json

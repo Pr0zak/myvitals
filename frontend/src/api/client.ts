@@ -609,6 +609,8 @@ export const api = {
     workouts: Array<{
       id: number; date: string; split_focus: string; status: string;
       started_at: string | null; completed_at: string | null; generated_at: string;
+      completed_by_activity_source?: string | null;
+      completed_by_activity_source_id?: string | null;
       set_count?: number;
       total_reps?: number;
       total_volume_lb?: number;

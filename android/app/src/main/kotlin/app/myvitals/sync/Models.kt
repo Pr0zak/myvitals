@@ -287,6 +287,10 @@ data class StrengthWorkoutSummary(
     @Json(name = "started_at") val startedAt: String? = null,
     @Json(name = "completed_at") val completedAt: String? = null,
     @Json(name = "generated_at") val generatedAt: String,
+    @Json(name = "completed_by_activity_source")
+    val completedByActivitySource: String? = null,
+    @Json(name = "completed_by_activity_source_id")
+    val completedByActivitySourceId: String? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -361,6 +365,20 @@ data class StrengthExerciseStats(
     @Json(name = "max_weight_lb") val maxWeightLb: Double? = null,
     @Json(name = "last_performed_date") val lastPerformedDate: String? = null,
     @Json(name = "avg_rating") val avgRating: Double? = null,
+)
+
+/** Bulk variant of StrengthExerciseStats — returned by
+ *  /exercises-stats-summary as `Map<exerciseId, …>` so the catalog can
+ *  paint per-row pills without N round-trips. exerciseId is omitted
+ *  (it's the map key). */
+@JsonClass(generateAdapter = true)
+data class StrengthExerciseStatsSummary(
+    @Json(name = "times_performed") val timesPerformed: Int,
+    @Json(name = "total_sets") val totalSets: Int,
+    @Json(name = "total_reps") val totalReps: Int,
+    @Json(name = "total_volume_lb") val totalVolumeLb: Double,
+    @Json(name = "max_weight_lb") val maxWeightLb: Double? = null,
+    @Json(name = "last_performed_date") val lastPerformedDate: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

@@ -130,7 +130,7 @@ class MainActivity : ComponentActivity() {
                     val target = routeFromShortcut
                     if (!target.isNullOrEmpty() && target in setOf(
                             Routes.WORKOUT, Routes.TRAILS, Routes.VITALS,
-                            Routes.ACTIVITIES, Routes.SETTINGS,
+                            Routes.ACTIVITIES, Routes.SETTINGS, Routes.SOBER,
                         )
                     ) {
                         nav.navigateTab(target)

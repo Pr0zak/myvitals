@@ -95,6 +95,18 @@ class StrengthRepository(
             }
         }
 
+    /** Bulk per-exercise stats keyed by exercise_id. Used by the catalog
+     *  screen to surface times-performed pills and stat-based sort. Best-
+     *  effort: returns empty map on network failure. */
+    suspend fun exercisesStatsSummary(): Map<String, app.myvitals.sync.StrengthExerciseStatsSummary> =
+        withContext(Dispatchers.IO) {
+            try { api().strengthExercisesStatsSummary() }
+            catch (e: Exception) {
+                Timber.w(e, "exercisesStatsSummary failed")
+                emptyMap()
+            }
+        }
+
     /** Patch the workout status. On network failure: buffer the request,
      *  mutate the local cache so the UI reflects the new state, and
      *  return the locally-mutated plan. SyncWorker / the foreground

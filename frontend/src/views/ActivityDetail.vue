@@ -24,6 +24,31 @@ const error = ref<string | null>(null);
 const mapEl = ref<HTMLDivElement | null>(null);
 let map: L.Map | null = null;
 let polylineLayer: L.Polyline | null = null;
+let heatmapSegments: L.Polyline[] = [];
+let mapCursor: L.CircleMarker | null = null;
+let polylineCoords: [number, number][] = [];
+const mapMode = ref<"line" | "heatmap">("line");
+
+// Trail-layer overlay state
+const trailMarkers = new Map<number, L.CircleMarker>();
+const hiddenTrailIds = ref<Set<number>>(new Set());
+const trailLayerOpen = ref(false);  // legend collapsed by default
+const NEARBY_TRAIL_MILES = 25;       // ~40 km — generous so out-of-state activities still pull in something
+
+const TRAIL_STATUS_COLOR: Record<string, string> = {
+  open: "#22c55e", closed: "#ef4444", delayed: "#f59e0b", unknown: "#94a3b8",
+};
+
+// Shared cursor (seconds since activity.start_at). Hover on any
+// time-aligned chart sets this; the map marker + the other chart's
+// tooltips track it.
+const cursorOffsetS = ref<number | null>(null);
+const hrChartRef = ref<any>(null);
+const streamChartRef = ref<any>(null);
+// Re-entry guard: showTip dispatched programmatically also fires
+// updateAxisPointer on the target chart, which would re-emit and
+// loop. Set during programmatic dispatch.
+let dispatching = false;
 
 // Notes & tags state
 const notesInput = ref("");
@@ -58,9 +83,12 @@ async function load() {
 function renderMap() {
   if (!mapEl.value || !activity.value || !activity.value.polyline) return;
   if (map) { map.remove(); map = null; }
+  mapCursor = null;
+  heatmapSegments = [];
 
   const coords = polylineDecoder.decode(activity.value.polyline) as [number, number][];
   if (coords.length === 0) return;
+  polylineCoords = coords;
 
   map = L.map(mapEl.value, { zoomControl: true });
   const tiles = effectiveTheme.value === "dark"
@@ -73,6 +101,7 @@ function renderMap() {
   }).addTo(map);
 
   polylineLayer = L.polyline(coords, { color: "#38bdf8", weight: 3 }).addTo(map);
+  applyMapMode();
 
   // Start (green) + end (red) markers
   const startIcon = L.divIcon({
@@ -107,6 +136,7 @@ function renderMap() {
   }
 
   map.fitBounds(polylineLayer.getBounds(), { padding: [20, 20] });
+  applyTrailLayer();
 }
 
 function haversine(a: [number, number], b: [number, number]): number {
@@ -143,6 +173,195 @@ onMounted(loadMaxHr);
 const ZONE_COLORS = ["#38bdf8", "#22c55e", "#eab308", "#f97316", "#ef4444"];
 const ZONE_LABELS = ["Z1 Recovery", "Z2 Endurance", "Z3 Tempo", "Z4 Threshold", "Z5 VO2"];
 
+// Toggle map between solid-blue polyline and HR-colored segments.
+// Heatmap uses the same zone palette as the HR-zones chart so the
+// visual story stays consistent across cards. Assumes uniform GPS
+// sample spacing in time across the activity — same approximation
+// as the cursor sync.
+function applyMapMode() {
+  if (!map || !activity.value) return;
+  // Clear any previous heatmap segments
+  for (const seg of heatmapSegments) seg.remove();
+  heatmapSegments = [];
+  if (mapMode.value === "line") {
+    if (polylineLayer) polylineLayer.setStyle({ opacity: 1 });
+    return;
+  }
+  if (!hr.value || hr.value.points.length === 0 || polylineCoords.length < 2) {
+    // No HR data → fall back to line view silently.
+    if (polylineLayer) polylineLayer.setStyle({ opacity: 1 });
+    return;
+  }
+  if (polylineLayer) polylineLayer.setStyle({ opacity: 0.15 });
+  const startMs = new Date(activity.value.start_at).getTime();
+  const durMs = activity.value.duration_s * 1000;
+  // Pre-bin HR samples by time bucket aligned to polyline-index for fast lookup.
+  const N = polylineCoords.length;
+  for (let i = 0; i < N - 1; i++) {
+    const tFrac = i / (N - 1);
+    const tMs = startMs + tFrac * durMs;
+    // Find nearest HR sample
+    let nearest = hr.value.points[0];
+    let nearestDelta = Math.abs(new Date(nearest.time).getTime() - tMs);
+    for (const p of hr.value.points) {
+      const d = Math.abs(new Date(p.time).getTime() - tMs);
+      if (d < nearestDelta) { nearest = p; nearestDelta = d; }
+    }
+    const z = zoneFor(nearest.value) - 1;
+    const seg = L.polyline([polylineCoords[i], polylineCoords[i + 1]], {
+      color: ZONE_COLORS[z], weight: 4, opacity: 0.9,
+    }).addTo(map);
+    heatmapSegments.push(seg);
+  }
+}
+
+watch(mapMode, () => applyMapMode());
+watch(hr, () => { if (mapMode.value === "heatmap") applyMapMode(); });
+
+// ── Trail layer ──
+const activityCentroid = computed<[number, number] | null>(() => {
+  if (polylineCoords.length === 0) return null;
+  let sLat = 0, sLng = 0;
+  for (const [la, ln] of polylineCoords) { sLat += la; sLng += ln; }
+  return [sLat / polylineCoords.length, sLng / polylineCoords.length];
+});
+
+const nearbyTrails = computed(() => {
+  const c = activityCentroid.value;
+  if (!c) return [];
+  return trails.value
+    .filter((t) => t.latitude != null && t.longitude != null)
+    .map((t) => ({ t, mi: haversineMi(c, [t.latitude!, t.longitude!]) }))
+    .filter((x) => x.mi <= NEARBY_TRAIL_MILES)
+    .sort((a, b) => a.mi - b.mi);
+});
+
+function haversineMi(a: [number, number], b: [number, number]): number {
+  const R = 3958.8;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const lat1 = toRad(a[0]);
+  const lat2 = toRad(b[0]);
+  const s = Math.sin(dLat / 2) ** 2 +
+    Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+function applyTrailLayer() {
+  if (!map) return;
+  for (const m of trailMarkers.values()) m.remove();
+  trailMarkers.clear();
+  for (const { t } of nearbyTrails.value) {
+    if (hiddenTrailIds.value.has(t.id)) continue;
+    const color = TRAIL_STATUS_COLOR[t.status ?? "unknown"];
+    const marker = L.circleMarker([t.latitude!, t.longitude!], {
+      radius: 8, color, weight: 2, fillColor: color, fillOpacity: 0.75,
+    }).addTo(map);
+    marker.bindTooltip(
+      `<strong>${t.name}</strong><br/>${t.status ?? "unknown"}` +
+      (t.city ? `<br/><span style="color:#94a3b8">${t.city}${t.state ? ', ' + t.state : ''}</span>` : ''),
+      { direction: "top" },
+    );
+    trailMarkers.set(t.id, marker);
+  }
+}
+
+watch([nearbyTrails, hiddenTrailIds], () => applyTrailLayer(), { deep: true });
+
+function toggleTrail(id: number) {
+  const s = new Set(hiddenTrailIds.value);
+  if (s.has(id)) s.delete(id); else s.add(id);
+  hiddenTrailIds.value = s;
+}
+
+function panToTrail(id: number) {
+  const t = nearbyTrails.value.find((x) => x.t.id === id)?.t;
+  if (!t || !map) return;
+  map.setView([t.latitude!, t.longitude!], 13);
+}
+
+// ── Synchronized cursor across HR-time chart, HR-zones-stream chart, and map ──
+// Each time-aligned chart emits `updateAxisPointer` on hover; we
+// translate the chart-local x-value into a duration-offset in seconds,
+// then mirror that offset onto the other chart + the Leaflet map.
+
+function clampOffset(s: number): number {
+  if (!activity.value) return 0;
+  return Math.max(0, Math.min(activity.value.duration_s, s));
+}
+
+function onHrChartAxisPointer(ev: any) {
+  if (dispatching || !activity.value || !hr.value) return;
+  const info = ev.axesInfo?.[0];
+  if (!info || info.value == null) return;
+  const startMs = new Date(activity.value.start_at).getTime();
+  cursorOffsetS.value = clampOffset((Number(info.value) - startMs) / 1000);
+}
+
+function onStreamChartAxisPointer(ev: any) {
+  if (dispatching || !activity.value) return;
+  const info = ev.axesInfo?.[0];
+  if (!info || info.value == null) return;
+  // Stream chart x-axis is category index 0..N-1 mapped to bucket midpoints.
+  const N = 50;
+  const idx = Math.max(0, Math.min(N - 1, Math.round(Number(info.value))));
+  cursorOffsetS.value = clampOffset(((idx + 0.5) / N) * activity.value.duration_s);
+}
+
+// When cursor moves, dispatch showTip on the chart(s) that didn't originate
+// the event so their tooltip + axisPointer line stays in sync. Skip the
+// source chart to avoid re-entrant loops.
+watch(cursorOffsetS, (offsetS) => {
+  if (offsetS == null || !activity.value) return;
+  const startMs = new Date(activity.value.start_at).getTime();
+
+  // HR-over-time chart: find the nearest point in hr.value.points
+  if (hr.value && hrChartRef.value && hr.value.points.length > 0) {
+    const targetMs = startMs + offsetS * 1000;
+    let nearest = 0;
+    let nearestDelta = Infinity;
+    for (let i = 0; i < hr.value.points.length; i++) {
+      const d = Math.abs(new Date(hr.value.points[i].time).getTime() - targetMs);
+      if (d < nearestDelta) { nearest = i; nearestDelta = d; }
+    }
+    dispatching = true;
+    try {
+      hrChartRef.value.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: nearest });
+    } finally { dispatching = false; }
+  }
+
+  // Zone-stream chart: bucket index
+  if (streamChartRef.value) {
+    const N = 50;
+    const idx = Math.max(0, Math.min(N - 1, Math.floor((offsetS / activity.value.duration_s) * N)));
+    dispatching = true;
+    try {
+      streamChartRef.value.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: idx });
+    } finally { dispatching = false; }
+  }
+
+  // Map marker: interpolate position along the polyline. Linear-by-index
+  // (assumes uniform GPS sample spacing in time across the activity —
+  // imperfect on rest-y rides but a reasonable first cut).
+  if (map && polylineCoords.length > 0) {
+    const t = offsetS / activity.value.duration_s;
+    const fIdx = t * (polylineCoords.length - 1);
+    const i0 = Math.floor(fIdx);
+    const i1 = Math.min(i0 + 1, polylineCoords.length - 1);
+    const frac = fIdx - i0;
+    const lat = polylineCoords[i0][0] + frac * (polylineCoords[i1][0] - polylineCoords[i0][0]);
+    const lng = polylineCoords[i0][1] + frac * (polylineCoords[i1][1] - polylineCoords[i0][1]);
+    if (mapCursor) {
+      mapCursor.setLatLng([lat, lng]);
+    } else {
+      mapCursor = L.circleMarker([lat, lng], {
+        radius: 7, color: "#fbbf24", weight: 3, fillColor: "#fbbf24", fillOpacity: 0.9,
+      }).addTo(map);
+    }
+  }
+});
+
 function zoneFor(bpm: number): number {
   // 1-indexed Z1..Z5; clamp at 1 below 50% and 5 above 100%.
   const pct = bpm / maxHr.value;
@@ -165,6 +384,9 @@ const hrZoneStreamOption = computed(() => {
   const buckets: number[][] = Array.from({ length: 5 }, () => Array(N).fill(0));
   for (const p of hr.value.points) {
     const t_ms = new Date(p.time).getTime();
+    // Drop samples outside the activity window — otherwise pre/post HR
+    // collapses into bucket 0 / N-1 and shows up as a phantom spike.
+    if (t_ms < start || t_ms > start + dur) continue;
     const idx = Math.max(0, Math.min(N - 1, Math.floor(((t_ms - start) / dur) * N)));
     const z = zoneFor(p.value) - 1;  // 0-indexed
     buckets[z][idx] += 1;
@@ -188,9 +410,15 @@ const hrZoneStreamOption = computed(() => {
 const hrZonePieOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
-  if (!hr.value || hr.value.points.length < 5) return null;
+  if (!hr.value || hr.value.points.length < 5 || !activity.value) return null;
+  const start = new Date(activity.value.start_at).getTime();
+  const end = start + activity.value.duration_s * 1000;
   const counts = [0, 0, 0, 0, 0];
-  for (const p of hr.value.points) counts[zoneFor(p.value) - 1] += 1;
+  for (const p of hr.value.points) {
+    const t_ms = new Date(p.time).getTime();
+    if (t_ms < start || t_ms > end) continue;
+    counts[zoneFor(p.value) - 1] += 1;
+  }
   const total = counts.reduce((a, b) => a + b, 0) || 1;
   return {
     tooltip: { ...t.tooltip, formatter: (p: any) =>
@@ -363,11 +591,51 @@ async function applyTrailLink() {
         </Card>
 
         <Card v-if="activity.polyline" title="Route">
+          <div class="map-toolbar">
+            <button class="map-toggle" :class="{ on: mapMode === 'line' }"
+                    @click="mapMode = 'line'">Line</button>
+            <button class="map-toggle" :class="{ on: mapMode === 'heatmap' }"
+                    @click="mapMode = 'heatmap'"
+                    :disabled="!hr || hr.points.length === 0"
+                    :title="!hr || hr.points.length === 0 ? 'No HR data for this activity' : 'Color the route by HR zone'">
+              HR heatmap
+            </button>
+            <button v-if="nearbyTrails.length"
+                    class="map-toggle"
+                    :class="{ on: trailLayerOpen }"
+                    @click="trailLayerOpen = !trailLayerOpen"
+                    :title="`${nearbyTrails.length} trail(s) within ${25} mi`">
+              Trails ({{ nearbyTrails.length }})
+            </button>
+            <span v-if="mapMode === 'heatmap'" class="zone-legend">
+              <span v-for="(c, i) in ['#38bdf8','#22c55e','#eab308','#f97316','#ef4444']" :key="i"
+                    class="zone-swatch" :style="`background:${c}`"
+                    :title="`Z${i+1}`"/>
+              <span class="zone-legend-text">Z1 → Z5</span>
+            </span>
+          </div>
+          <div v-if="trailLayerOpen && nearbyTrails.length" class="trail-legend">
+            <p class="trail-legend-hint">Nearby trails — click to pan, checkbox to hide</p>
+            <ul>
+              <li v-for="{ t, mi } in nearbyTrails" :key="t.id">
+                <input type="checkbox"
+                       :checked="!hiddenTrailIds.has(t.id)"
+                       @change="toggleTrail(t.id)"/>
+                <span class="trail-status-dot"
+                      :style="`background:${ {open:'#22c55e',closed:'#ef4444',delayed:'#f59e0b',unknown:'#94a3b8'}[t.status ?? 'unknown'] }`"
+                      :title="t.status ?? 'unknown'"/>
+                <button class="trail-name" @click="panToTrail(t.id)">{{ t.name }}</button>
+                <span class="trail-meta">
+                  {{ t.status ?? 'unknown' }}{{ t.city ? ' · ' + t.city : '' }} · {{ mi.toFixed(1) }} mi
+                </span>
+              </li>
+            </ul>
+          </div>
           <div ref="mapEl" class="map"></div>
         </Card>
 
         <Card v-if="hrZoneStreamOption" title="HR zones over time">
-          <div class="chart"><VChart :option="hrZoneStreamOption" autoresize/></div>
+          <div class="chart"><VChart ref="streamChartRef" :option="hrZoneStreamOption" autoresize @updateAxisPointer="onStreamChartAxisPointer"/></div>
         </Card>
 
         <Card v-if="hrZonePieOption" title="HR zone distribution">
@@ -376,7 +644,7 @@ async function applyTrailLink() {
 
         <Card title="Heart rate during activity">
           <div class="chart">
-            <VChart v-if="hrChartOption" :option="hrChartOption" autoresize/>
+            <VChart v-if="hrChartOption" ref="hrChartRef" :option="hrChartOption" autoresize @updateAxisPointer="onHrChartAxisPointer"/>
             <div v-else class="empty">No HR data captured during this window</div>
           </div>
         </Card>
@@ -465,6 +733,63 @@ dt { color: var(--muted-2); font-size: 0.7rem; text-transform: uppercase; letter
 dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
 
 .map { height: 360px; width: 100%; border-radius: 6px; }
+.map-toolbar {
+  display: flex; gap: 6px; align-items: center;
+  margin-bottom: 6px; flex-wrap: wrap;
+}
+.map-toggle {
+  font-size: 0.75rem; padding: 3px 10px; border-radius: 999px;
+  background: var(--surface, #1e293b); color: var(--muted, #94a3b8);
+  border: 1px solid var(--border, #334155); cursor: pointer;
+}
+.map-toggle.on {
+  background: var(--accent, #a78bfa); color: white;
+  border-color: var(--accent, #a78bfa);
+}
+.map-toggle:disabled { opacity: 0.4; cursor: not-allowed; }
+.zone-legend {
+  display: inline-flex; gap: 2px; align-items: center;
+  margin-left: auto;
+}
+.zone-swatch {
+  width: 14px; height: 4px; border-radius: 2px;
+}
+.zone-legend-text {
+  font-size: 0.7rem; color: var(--muted, #94a3b8); margin-left: 4px;
+}
+.trail-legend {
+  background: var(--surface, #1e293b);
+  border: 1px solid var(--border, #334155);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.trail-legend-hint {
+  font-size: 0.7rem; color: var(--muted, #94a3b8);
+  margin: 0 0 4px 0;
+}
+.trail-legend ul {
+  list-style: none; margin: 0; padding: 0;
+}
+.trail-legend li {
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 0; font-size: 0.78rem;
+}
+.trail-status-dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  flex: 0 0 auto;
+}
+.trail-name {
+  background: none; border: none; padding: 0;
+  color: var(--accent, #a78bfa); cursor: pointer; font-size: 0.78rem;
+  text-align: left;
+}
+.trail-name:hover { text-decoration: underline; }
+.trail-meta {
+  font-size: 0.7rem; color: var(--muted, #94a3b8); margin-left: auto;
+}
 :deep(.start-marker > div) { width: 14px; height: 14px; border-radius: 50%; background: #22c55e; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.5); }
 :deep(.end-marker > div)   { width: 14px; height: 14px; border-radius: 50%; background: #ef4444; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.5); }
 

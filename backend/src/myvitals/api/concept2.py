@@ -180,6 +180,16 @@ async def concept2_webhook(
                 if k in ("source", "source_id"):
                     continue
                 setattr(existing, k, v)
+        await concept2_int.write_interval_hr(db, result, mapped["start_at"])
+        from ..integrations.cardio_completion import maybe_complete_cardio_day
+        await maybe_complete_cardio_day(
+            db,
+            source=mapped["source"],
+            source_id=mapped["source_id"],
+            activity_type=mapped["type"],
+            start_at=mapped["start_at"],
+            duration_s=mapped["duration_s"],
+        )
         await db.commit()
         log.info("concept2 webhook %s: upserted source_id=%s", event, mapped["source_id"])
         return {"ok": True, "event": event, "action": "upserted",

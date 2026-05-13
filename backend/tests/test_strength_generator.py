@@ -36,6 +36,19 @@ class TestSelectSplit:
         old last_split that's no longer in rotation is ignored."""
         assert select_split(3, "auto", "push") == "full_body"
 
+    def test_rotation_focuses_constant_covers_every_rotation(self):
+        """`_ROTATION_FOCUSES` is the SQL filter used by
+        last_split_for_user. If a new split is added to ROTATION but the
+        filter constant isn't updated, intervening cardio/yoga will
+        collapse the new rotation to its first element."""
+        from myvitals.analytics.strength import ROTATION, _ROTATION_FOCUSES
+        all_rotation_values = {v for vals in ROTATION.values() for v in vals}
+        assert all_rotation_values <= set(_ROTATION_FOCUSES), (
+            f"ROTATION values {all_rotation_values - set(_ROTATION_FOCUSES)} "
+            "missing from _ROTATION_FOCUSES — last_split_for_user will "
+            "skip them and collapse the rotation."
+        )
+
 
 class TestFilterCatalog:
     def test_user_setup_keeps_dumbbell_and_bodyweight(self, user_equipment):

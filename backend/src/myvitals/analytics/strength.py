@@ -777,13 +777,25 @@ async def read_recovery_inputs(
     )
 
 
+_ROTATION_FOCUSES = ("push", "pull", "legs", "upper", "lower", "full_body")
+
+
 async def last_split_for_user(
     db: AsyncSession, before: datetime | None = None
 ) -> str | None:
-    """Most recent strength workout's split_focus (completed or in progress)."""
+    """Most recent rotation-relevant strength workout's split_focus.
+
+    Filters to PPL / upper-lower / full_body focuses so that an
+    intervening cardio or yoga session doesn't collapse the rotation
+    to its first element. Without this filter, push→yoga→strength
+    sequences read last_split='yoga', which is not in any rotation,
+    and select_split falls back to rotation[0]=push every time —
+    pull and legs never get picked.
+    """
     stmt = (
         select(models.StrengthWorkout)
         .where(models.StrengthWorkout.status.in_(("completed", "in_progress")))
+        .where(models.StrengthWorkout.split_focus.in_(_ROTATION_FOCUSES))
         .order_by(models.StrengthWorkout.date.desc())
         .limit(1)
     )

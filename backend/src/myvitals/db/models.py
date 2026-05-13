@@ -214,6 +214,11 @@ class UserProfile(Base):
     strength_recovery_aware: Mapped[bool] = mapped_column(Boolean, default=True)
     # Free-form JSON for conditions / medications / notes
     extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Map default-center coordinates (set in Settings → Profile). Used by
+    # the Activities Map / Trails Map to anchor the view instead of
+    # fit-bounds-to-all.
+    home_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    home_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

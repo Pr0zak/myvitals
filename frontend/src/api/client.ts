@@ -484,6 +484,7 @@ export const api = {
     height_cm: number | null; weight_goal_kg: number | null;
     resting_hr_baseline: number | null; activity_level: string | null;
     extra: Record<string, unknown> | null; updated_at: string | null;
+    home_latitude: number | null; home_longitude: number | null;
     derived: { age?: number; max_hr_estimated?: number; bmi_at_goal?: number;
                resting_hr_baseline_auto?: number | null;
                hr_zones?: { zone: number; label: string; low: number; high: number }[] };
@@ -506,8 +507,17 @@ export const api = {
     birth_date?: string | null; sex?: string | null; height_cm?: number | null;
     weight_goal_kg?: number | null; resting_hr_baseline?: number | null;
     activity_level?: string | null; extra?: Record<string, unknown> | null;
+    home_latitude?: number | null; home_longitude?: number | null;
   }): Promise<unknown> {
     const { data } = await http.put("/profile", body);
+    return data;
+  },
+
+  async geocodeHome(query: string): Promise<{
+    latitude: number; longitude: number;
+    display_name?: string; source: string;
+  }> {
+    const { data } = await http.post("/profile/geocode", { query });
     return data;
   },
 

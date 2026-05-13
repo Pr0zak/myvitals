@@ -24,6 +24,8 @@ class ProfileIn(BaseModel):
     resting_hr_baseline: float | None = None
     activity_level: str | None = None  # "sedentary"|"light"|"moderate"|"active"|"athlete"
     extra: dict[str, Any] | None = None
+    home_latitude: float | None = None
+    home_longitude: float | None = None
 
 
 def _age_years(birth: date | None) -> int | None:
@@ -77,7 +79,9 @@ async def _profile_dict(
         return {
             "id": 1, "birth_date": None, "sex": None, "height_cm": None,
             "weight_goal_kg": None, "resting_hr_baseline": None,
-            "activity_level": None, "extra": None, "updated_at": None,
+            "activity_level": None, "extra": None,
+            "home_latitude": None, "home_longitude": None,
+            "updated_at": None,
             "derived": {"resting_hr_baseline_auto": auto_rhr},
         }
     age = _age_years(p.birth_date)
@@ -99,6 +103,8 @@ async def _profile_dict(
         "resting_hr_baseline": p.resting_hr_baseline,
         "activity_level": p.activity_level,
         "extra": p.extra,
+        "home_latitude": p.home_latitude,
+        "home_longitude": p.home_longitude,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
         "derived": derived,
     }
@@ -129,7 +135,89 @@ async def put_profile(
     p.resting_hr_baseline = body.resting_hr_baseline
     p.activity_level = body.activity_level
     p.extra = body.extra
+    p.home_latitude = body.home_latitude
+    p.home_longitude = body.home_longitude
     p.updated_at = now
     await db.commit()
     await db.refresh(p)
     return await _profile_dict(db, p)
+
+
+class GeocodeIn(BaseModel):
+    query: str
+
+
+@router.post("/geocode")
+async def geocode_home(body: GeocodeIn) -> dict[str, Any]:
+    """Resolve a freeform address / Google Maps URL / lat,lng pair to
+    coordinates. Used by the Settings 'Home location' field so the user
+    can paste anything and get back a lat/lng to save.
+
+    Order of attempts: short-URL redirect → @lat,lng pattern → bare
+    lat,lng → Nominatim. Nominatim is rate-limited (1 req/sec per their
+    fair-use policy) and requires a User-Agent — fine for the
+    handful-of-times-a-year a home setting changes.
+    """
+    import re
+    import httpx
+    q = (body.query or "").strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="empty query")
+
+    # Expand a Google Maps short URL (maps.app.goo.gl/...) by following
+    # its redirect to the long form, where coords are embedded.
+    if "maps.app.goo.gl" in q or "goo.gl/maps" in q:
+        try:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as c:
+                r = await c.head(q)
+                q = str(r.url)
+        except Exception:  # noqa: BLE001 — short URL is best-effort
+            pass
+
+    # Google Maps long URL with @lat,lng
+    m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)", q)
+    if m:
+        return {
+            "latitude": float(m.group(1)),
+            "longitude": float(m.group(2)),
+            "source": "google_maps_url",
+        }
+
+    # q=lat,lng or ?q=lat,lng style
+    m = re.search(r"[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)", q)
+    if m:
+        return {
+            "latitude": float(m.group(1)),
+            "longitude": float(m.group(2)),
+            "source": "google_maps_url",
+        }
+
+    # Bare "lat,lng" pair
+    m = re.match(r"^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$", q)
+    if m:
+        return {
+            "latitude": float(m.group(1)),
+            "longitude": float(m.group(2)),
+            "source": "pair",
+        }
+
+    # Fall back to Nominatim address geocoding
+    try:
+        async with httpx.AsyncClient(timeout=15.0,
+            headers={"User-Agent": "myvitals/1.0 (self-hosted; admin@local)"}) as c:
+            r = await c.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": q, "format": "json", "limit": 1},
+            )
+            r.raise_for_status()
+            results = r.json()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"geocode upstream failed: {e}")
+    if not results:
+        raise HTTPException(status_code=404, detail="No match for that address.")
+    return {
+        "latitude": float(results[0]["lat"]),
+        "longitude": float(results[0]["lon"]),
+        "display_name": results[0].get("display_name"),
+        "source": "nominatim",
+    }

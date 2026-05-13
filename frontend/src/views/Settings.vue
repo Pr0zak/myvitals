@@ -185,6 +185,59 @@ type Profile = Awaited<ReturnType<typeof api.getProfile>>;
 const profile = ref<Profile | null>(null);
 const profileSaving = ref(false);
 const profileMsg = ref<string>("");
+const locating = ref(false);
+const locateError = ref<string>("");
+const homeQueryInput = ref<string>("");
+const geocoding = ref(false);
+const geocodedLabel = ref<string>("");
+
+async function useCurrentLocation() {
+  if (!navigator.geolocation) {
+    locateError.value = "Geolocation not available in this browser.";
+    return;
+  }
+  locating.value = true;
+  locateError.value = "";
+  geocodedLabel.value = "";
+  try {
+    const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true, timeout: 10000, maximumAge: 0,
+      });
+    });
+    if (profile.value) {
+      profile.value.home_latitude = Math.round(pos.coords.latitude * 1e6) / 1e6;
+      profile.value.home_longitude = Math.round(pos.coords.longitude * 1e6) / 1e6;
+    }
+  } catch (e: any) {
+    locateError.value = e?.message ?? "Location denied or unavailable.";
+  } finally {
+    locating.value = false;
+  }
+}
+
+async function resolveHomeQuery() {
+  const q = homeQueryInput.value.trim();
+  if (!q) return;
+  geocoding.value = true;
+  locateError.value = "";
+  geocodedLabel.value = "";
+  try {
+    const r = await api.geocodeHome(q);
+    if (profile.value) {
+      profile.value.home_latitude = Math.round(r.latitude * 1e6) / 1e6;
+      profile.value.home_longitude = Math.round(r.longitude * 1e6) / 1e6;
+    }
+    geocodedLabel.value = r.display_name
+      ? `Matched: ${r.display_name}`
+      : `Resolved via ${r.source}`;
+  } catch (e: any) {
+    locateError.value = e?.response?.data?.detail
+      ?? e?.message ?? "Geocode failed.";
+  } finally {
+    geocoding.value = false;
+  }
+}
 
 // Weight goal display: stored in kg, shown in user units. Use a computed
 // setter so `v-model` works smoothly (typing fires every keystroke; the
@@ -243,6 +296,8 @@ async function saveProfile() {
       resting_hr_baseline: profile.value.resting_hr_baseline,
       activity_level: profile.value.activity_level,
       extra: Object.keys(extra).length ? extra : null,
+      home_latitude: profile.value.home_latitude,
+      home_longitude: profile.value.home_longitude,
     }) as Profile;
     profileMsg.value = "Saved.";
   } catch (e) {
@@ -736,6 +791,52 @@ onUnmounted(stopJobPolling);
                  placeholder="8"/>
         </label>
       </div>
+
+      <fieldset class="fieldset">
+        <legend>Home location</legend>
+        <p class="hint">Used to center the Activities Map. Paste an address, a Google Maps share link, or a lat,lng pair — or click ‘Use current location’.</p>
+        <label>
+          <span>Address or Google Maps link</span>
+          <div style="display:flex; gap:0.4rem;">
+            <input type="text"
+                   v-model="homeQueryInput"
+                   placeholder="123 Main St, Pittsburgh PA · or https://maps.app.goo.gl/…"
+                   style="flex:1;"
+                   @keyup.enter="resolveHomeQuery"/>
+            <button :disabled="geocoding || !homeQueryInput.trim()"
+                    @click="resolveHomeQuery">
+              {{ geocoding ? 'Resolving…' : 'Resolve' }}
+            </button>
+          </div>
+          <span v-if="geocodedLabel" class="hint" style="color: var(--good, #22c55e);">
+            ✓ {{ geocodedLabel }}
+          </span>
+        </label>
+        <div class="grid two">
+          <label>
+            <span>Latitude</span>
+            <input type="number" step="0.000001" min="-90" max="90"
+                   v-model.number="profile.home_latitude"
+                   placeholder="e.g. 40.4406"/>
+          </label>
+          <label>
+            <span>Longitude</span>
+            <input type="number" step="0.000001" min="-180" max="180"
+                   v-model.number="profile.home_longitude"
+                   placeholder="e.g. -79.9959"/>
+          </label>
+        </div>
+        <div class="actions" style="margin-top: 0.4rem;">
+          <button :disabled="locating" @click="useCurrentLocation">
+            {{ locating ? 'Locating…' : 'Use current location' }}
+          </button>
+          <button v-if="profile.home_latitude != null || profile.home_longitude != null"
+                  @click="profile.home_latitude = null; profile.home_longitude = null; geocodedLabel = ''">
+            Clear
+          </button>
+          <span v-if="locateError" class="err" style="font-size:0.8rem;">{{ locateError }}</span>
+        </div>
+      </fieldset>
 
       <div v-if="profile.derived?.max_hr_estimated" class="derived">
         <strong>Derived:</strong>

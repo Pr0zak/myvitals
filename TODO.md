@@ -47,36 +47,45 @@ app needs to surface them.
       already in DB but not in Claude's payload. Adding it lets the
       model correlate sleep with environmental factors.
 
-## Home Assistant realtime sync (planned, 9 tasks)
+## Home Assistant device-status sync (planned, 7 tasks · scope trimmed v0.7.181)
 
-Add HA WebSocket as a parallel sync source for sub-minute Pixel
-Watch 3 data (HR, steps, device_status). Health Connect stays
-intact for what HA can't carry (SpO2 / HRV / sleep / skin temp).
-Detailed plan is held locally — internal IPs keep it out of the
-public repo. Once HC + HA overlap on HR/steps, the daily-summary
-rollup will need source-priority dedupe so the two streams don't
-double-count.
+Add HA WebSocket as a liveness signal for the Pixel Watch 3 —
+watch on/off, charging, activity state, battery. HC stays the
+authoritative source for **everything else** (HR, HRV, SpO2,
+sleep, skin temp, steps).
+
+**Scope trimmed after probing the actual data:** the Wear OS
+Companion App's `sensor.pixel_watch_3_heart_rate` writes only ~17
+HC rows over 48 hours (vs HC's ~1400 samples/hour). HA can't
+deliver realtime HR with this setup, so HR + steps are dropped
+from the HA pipeline — they'd produce strictly worse data than
+HC. HA's job here is the "watch on / off / charging" tile that HC
+literally cannot produce.
 
 - [ ] **#HA-1** Alembic — `device_status` hypertable + ORM model.
 - [ ] **#HA-2** Backend — `integrations/ha_realtime.py` WebSocket
-      consumer + dispatch (HR / steps → existing ingest path,
-      device_status → new table). No deps on #HA-1.
+      consumer + dispatch. Subscribe ONLY to device_status-class
+      entities (`on_body`, `activity_state`, `battery_level`,
+      `battery_state`, `charger_type`). Originally planned to also
+      carry HR + daily_steps; dropped per the probe above.
 - [ ] **#HA-3** Backend — lifespan wiring in `main.py` so the
       consumer starts/stops with the app. Blocked by #HA-2.
-- [ ] **#HA-4** Backend — `GET /api/device-status/latest` returning
-      the most recent watch status row. Blocked by #HA-1.
+- [ ] **#HA-4** Backend — `GET /api/device-status/latest`
+      returning the most recent watch status row. Blocked by #HA-1.
 - [ ] **#HA-5** Frontend — `Settings.vue` HA section (URL / token /
-      entities / connected status). Note SpO2 / HRV / sleep / skin
-      temp explicitly stay on HC. Blocked by #HA-3, #HA-4.
+      connected indicator). Include a blurb explaining HA is
+      liveness-only; HR/HRV/SpO2/sleep stay on HC. Blocked by
+      #HA-3, #HA-4.
 - [ ] **#HA-6** Frontend — `Home.vue` Watch status tile rendering
       `/api/device-status/latest`. Blocked by #HA-4.
-- [ ] **#HA-7** Manual — generate a long-lived HA token; paste into
-      Settings. Blocked by #HA-5.
-- [ ] **#HA-8** Smoke + freshness verification (9 checks). Blocked
-      by #HA-7.
-- [ ] **#HA-9** *Followup* — source-priority dedupe in
-      `compute_daily_summary` once HC + HA overlap. Blocked by
-      #HA-8.
+- [ ] **#HA-7** Manual — generate a long-lived HA token; paste
+      into Settings. Blocked by #HA-5.
+- [ ] **#HA-8** Smoke + freshness verification — device_status
+      updates land within seconds, disconnect writes online=false,
+      reconnect recovers. Blocked by #HA-7.
+
+*(`#HA-9` source-priority dedupe dropped — no HC/HA overlap to
+dedupe now that HA isn't carrying HR or steps.)*
 
 ## Fasting feature (planned, 15 tasks)
 

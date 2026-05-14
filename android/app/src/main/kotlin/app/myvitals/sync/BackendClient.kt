@@ -47,6 +47,9 @@ interface BackendApi {
     @GET("fasting/stats")
     suspend fun fastingStats(@Query("days") days: Int = 90): FastingStats
 
+    @POST("fasting/logs")
+    suspend fun fastingLogAdd(@Body body: FastingLogRequest): Response<Unit>
+
     // ── Strength training ─────────────────────────────────────
     @GET("workout/strength/today")
     suspend fun strengthToday(): Response<StrengthWorkoutDetail>

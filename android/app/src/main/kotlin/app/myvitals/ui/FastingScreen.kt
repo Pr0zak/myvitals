@@ -50,6 +50,7 @@ import app.myvitals.data.SettingsRepository
 import app.myvitals.fasting.FastingMilestoneWorker
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.FastingEndRequest
+import app.myvitals.sync.FastingLogRequest
 import app.myvitals.sync.FastingSession
 import app.myvitals.sync.FastingStartRequest
 import app.myvitals.sync.FastingStats
@@ -114,6 +115,15 @@ fun FastingScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf(PROTOCOLS[0].slug) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    // In-fast logging state — surfaces in active section once elapsed
+    // crosses 12h or for any extended_* protocol.
+    var logHunger by remember { mutableStateOf(5) }
+    var logMood by remember { mutableStateOf(5) }
+    var logHydrationMl by remember { mutableStateOf("") }
+    var logNotes by remember { mutableStateOf("") }
+    var logSaving by remember { mutableStateOf(false) }
+    var logMsg by remember { mutableStateOf<String?>(null) }
 
     suspend fun loadAll() {
         if (!settings.isConfigured()) {
@@ -234,6 +244,68 @@ fun FastingScreen(
                 Kv("Next milestone", "${(nxt - elapsedH).coerceAtLeast(0.0).format1()}h")
             }
             Kv("Started", cur.startedAt.take(16).replace("T", " "))
+
+            // ── Symptoms / hydration card (extended fasts or > 12h) ──
+            if (cur.protocol.startsWith("extended_") || elapsedH >= 12.0) {
+                Spacer(Modifier.height(20.dp))
+                Section("How are you feeling?")
+                LogSlider("Hunger", logHunger) { logHunger = it }
+                LogSlider("Mood", logMood) { logMood = it }
+                androidx.compose.material3.OutlinedTextField(
+                    value = logHydrationMl,
+                    onValueChange = { v -> logHydrationMl = v.filter { it.isDigit() } },
+                    label = { Text("Hydration today (ml)", fontSize = 11.sp) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MV.OnSurface,
+                        unfocusedTextColor = MV.OnSurface,
+                    ),
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = logNotes,
+                    onValueChange = { logNotes = it },
+                    label = { Text("Notes", fontSize = 11.sp) },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MV.OnSurface,
+                        unfocusedTextColor = MV.OnSurface,
+                    ),
+                )
+                Button(
+                    onClick = {
+                        scope.launch {
+                            logSaving = true; logMsg = null
+                            try {
+                                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                                withContext(Dispatchers.IO) {
+                                    api.fastingLogAdd(FastingLogRequest(
+                                        sessionId = cur.id,
+                                        hunger = logHunger,
+                                        mood = logMood,
+                                        hydrationMl = logHydrationMl.toIntOrNull(),
+                                        notes = logNotes.ifBlank { null },
+                                    ))
+                                }
+                                logMsg = "Logged."
+                                logNotes = ""
+                            } catch (e: Exception) {
+                                Timber.w(e, "log add failed"); logMsg = e.message?.take(160)
+                            } finally { logSaving = false }
+                        }
+                    },
+                    enabled = !logSaving,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MV.SurfaceContainerLow, contentColor = MV.OnSurface,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (logSaving) "Saving…" else "Log entry") }
+                logMsg?.let {
+                    Text(it, color = MV.OnSurfaceDim, fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 4.dp))
+                }
+            }
 
             Spacer(Modifier.height(16.dp))
             Button(
@@ -421,6 +493,28 @@ private fun Section(title: String) {
         letterSpacing = 1.sp,
         modifier = Modifier.padding(top = 16.dp, bottom = 6.dp),
     )
+}
+
+@Composable
+private fun LogSlider(label: String, value: Int, onChange: (Int) -> Unit) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                modifier = Modifier.weight(1f))
+            Text("$value / 10", color = MV.OnSurface, fontSize = 12.sp)
+        }
+        androidx.compose.material3.Slider(
+            value = value.toFloat(),
+            onValueChange = { onChange(it.toInt().coerceIn(0, 10)) },
+            valueRange = 0f..10f,
+            steps = 9,
+            colors = androidx.compose.material3.SliderDefaults.colors(
+                thumbColor = MV.BrandRed,
+                activeTrackColor = MV.BrandRed,
+                inactiveTrackColor = MV.OutlineVariant,
+            ),
+        )
+    }
 }
 
 @Composable

@@ -48,6 +48,35 @@ const selectedSpec = computed(() =>
   PROTOCOLS.find((p) => p.slug === selectedProtocol.value) ?? PROTOCOLS[0],
 );
 
+// In-fast logging — surfaces in active-fast view once elapsed > 12h
+// or for any extended_* protocol. Inputs map to /fasting/logs.
+const logHunger = ref<number>(5);
+const logMood = ref<number>(5);
+const logHydration = ref<number | null>(null);
+const logNotes = ref<string>("");
+const logSaving = ref(false);
+const logMsg = ref<string>("");
+
+async function submitLog() {
+  if (!current.value || !current.value.is_active) return;
+  logSaving.value = true; logMsg.value = "";
+  try {
+    await api.fastingLogAdd({
+      session_id: current.value.id,
+      hunger: Number(logHunger.value),
+      mood: Number(logMood.value),
+      hydration_ml: logHydration.value ? Number(logHydration.value) : undefined,
+      notes: logNotes.value.trim() || undefined,
+    });
+    logMsg.value = "Logged.";
+    logNotes.value = "";
+  } catch (e: unknown) {
+    logMsg.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    logSaving.value = false;
+  }
+}
+
 // Recompute elapsed locally from started_at so the ring ticks every
 // second; current_stage / next_stage_at_h come from the backend.
 const liveElapsedH = computed<number>(() => {
@@ -198,6 +227,35 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
+      <!-- Symptoms / hydration logging card. Surfaces for any
+           extended_* protocol or once a 16:8-style fast has crossed
+           12h — the early hunger phase is where notes start mattering. -->
+      <div v-if="current.protocol.startsWith('extended_') || liveElapsedH >= 12" class="log-card">
+        <h4>How are you feeling?</h4>
+        <label class="slider">
+          <span>Hunger</span>
+          <input type="range" min="0" max="10" v-model.number="logHunger"/>
+          <span class="val">{{ logHunger }}</span>
+        </label>
+        <label class="slider">
+          <span>Mood</span>
+          <input type="range" min="0" max="10" v-model.number="logMood"/>
+          <span class="val">{{ logMood }}</span>
+        </label>
+        <label class="numfield">
+          <span>Hydration today (ml)</span>
+          <input type="number" min="0" step="50" v-model.number="logHydration" placeholder="optional"/>
+        </label>
+        <label class="numfield">
+          <span>Notes</span>
+          <textarea v-model="logNotes" rows="2" placeholder="brief — what symptoms, what's working"/>
+        </label>
+        <button class="ghost" :disabled="logSaving" @click="submitLog">
+          {{ logSaving ? "Saving…" : "Log entry" }}
+        </button>
+        <span v-if="logMsg" class="log-msg">{{ logMsg }}</span>
+      </div>
+
       <div class="actions">
         <button class="end" :disabled="busy" @click="end">
           <Square :size="14"/> End fast
@@ -304,6 +362,16 @@ button { font-family: inherit; cursor: pointer; border-radius: 8px; padding: 0.6
 .primary { background: #38bdf8; color: #0f172a; flex: 1; justify-content: center; }
 .primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .end { background: transparent; color: #ef4444; border-color: #ef4444; }
+
+.log-card { margin-top: 1rem; padding: 0.9rem; background: var(--surface-2); border-radius: 8px; border: 1px solid var(--border); }
+.log-card h4 { margin: 0 0 0.6rem; font-size: 0.85rem; color: var(--text); }
+.log-card .slider { display: grid; grid-template-columns: 80px 1fr 32px; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--muted); }
+.log-card .slider .val { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.log-card .numfield { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.5rem; font-size: 0.78rem; color: var(--muted); }
+.log-card .numfield input,
+.log-card .numfield textarea { background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 0.5rem; font-family: inherit; }
+.log-card .ghost { background: transparent; color: var(--text); border: 1px solid var(--border); padding: 0.45rem 0.9rem; }
+.log-msg { margin-left: 0.5rem; color: var(--muted); font-size: 0.78rem; }
 
 /* Stats */
 .kpi { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.4rem; }

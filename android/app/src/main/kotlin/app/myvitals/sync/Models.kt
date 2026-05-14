@@ -505,6 +505,15 @@ data class FastingEndRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class FastingLogRequest(
+    @Json(name = "session_id") val sessionId: Long,
+    val hunger: Int? = null,
+    val mood: Int? = null,
+    @Json(name = "hydration_ml") val hydrationMl: Int? = null,
+    val notes: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
 data class FastingStats(
     @Json(name = "sessions_count") val sessionsCount: Int,
     @Json(name = "completed_count") val completedCount: Int,

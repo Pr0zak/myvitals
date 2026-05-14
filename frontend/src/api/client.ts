@@ -1034,6 +1034,16 @@ export const api = {
     const { data } = await http.get("/fasting/stats", { params: { days } });
     return data;
   },
+  async fastingLogAdd(body: {
+    session_id: number;
+    hunger?: number;
+    mood?: number;
+    hydration_ml?: number;
+    notes?: string;
+  }): Promise<unknown> {
+    const { data } = await http.post("/fasting/logs", body);
+    return data;
+  },
 
   async deviceStatusLatest(device_id = "pixel_watch_3"): Promise<{
     device_id: string;

@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
+import app.myvitals.fasting.FastingMilestoneWorker
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.FastingEndRequest
 import app.myvitals.sync.FastingSession
@@ -104,6 +105,7 @@ fun FastingScreen(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var current by remember { mutableStateOf<FastingSession?>(null) }
     var history by remember { mutableStateOf<List<FastingSession>>(emptyList()) }
     var stats by remember { mutableStateOf<FastingStats?>(null) }
@@ -240,9 +242,13 @@ fun FastingScreen(
                         busy = true
                         try {
                             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                            val sessionId = cur.id
                             withContext(Dispatchers.IO) {
                                 api.fastingEnd(FastingEndRequest())
                             }
+                            // Drop any pending milestone alarms for the
+                            // session we just ended.
+                            FastingMilestoneWorker.cancelAll(context, sessionId)
                             loadAll()
                         } catch (e: Exception) {
                             Timber.w(e, "end failed"); error = e.message?.take(160)
@@ -310,13 +316,22 @@ fun FastingScreen(
                         try {
                             val spec = selectedSpec()
                             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-                            withContext(Dispatchers.IO) {
+                            val started = withContext(Dispatchers.IO) {
                                 api.fastingStart(FastingStartRequest(
                                     protocol = spec.slug,
                                     targetHours = spec.targetH,
                                     targetEatingWindowH = spec.eatingH,
                                 ))
                             }
+                            // Schedule milestone notifications relative to
+                            // the server-recorded start (not local now) so
+                            // backdated starts hit the right boundaries.
+                            val startMs = runCatching {
+                                Instant.parse(started.startedAt).toEpochMilli()
+                            }.getOrDefault(System.currentTimeMillis())
+                            FastingMilestoneWorker.schedule(
+                                context, started.id, startMs, spec.targetH,
+                            )
                             loadAll()
                         } catch (e: Exception) {
                             Timber.w(e, "start failed"); error = e.message?.take(160)

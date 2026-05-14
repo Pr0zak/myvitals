@@ -134,6 +134,7 @@ class MainActivity : ComponentActivity() {
                     if (!target.isNullOrEmpty() && target in setOf(
                             Routes.WORKOUT, Routes.TRAILS, Routes.VITALS,
                             Routes.ACTIVITIES, Routes.SETTINGS, Routes.SOBER,
+                            Routes.FASTING,
                         )
                     ) {
                         nav.navigateTab(target)

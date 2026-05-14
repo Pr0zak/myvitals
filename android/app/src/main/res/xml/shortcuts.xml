@@ -52,4 +52,18 @@
         </intent>
     </shortcut>
 
+    <shortcut
+        android:shortcutId="fasting"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_fasting"
+        android:shortcutShortLabel="@string/shortcut_fasting_short"
+        android:shortcutLongLabel="@string/shortcut_fasting_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="app.myvitals"
+            android:targetClass="app.myvitals.MainActivity">
+            <extra android:name="shortcut_route" android:value="fasting" />
+        </intent>
+    </shortcut>
+
 </shortcuts>

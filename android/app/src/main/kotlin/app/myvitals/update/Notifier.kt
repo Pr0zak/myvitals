@@ -16,6 +16,8 @@ object Notifier {
     private const val TRAIL_NOTIF_BASE = 2000
     const val REST_TIMER_CHANNEL_ID = "rest_timer"
     private const val REST_TIMER_NOTIF_ID = 3001
+    const val FASTING_CHANNEL_ID = "fasting"
+    private const val FASTING_NOTIF_BASE = 4000
 
     fun ensureChannel(context: Context) {
         val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -50,6 +52,44 @@ object Notifier {
                 }
             )
         }
+        if (mgr.getNotificationChannel(FASTING_CHANNEL_ID) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    FASTING_CHANNEL_ID,
+                    "Fasting milestones",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = "Pings as you hit each fasting stage (ketosis, autophagy, …)"
+                }
+            )
+        }
+    }
+
+    /** Fire a fasting-stage milestone notification.
+     *  notifKey makes the id stable per (session, stage) so re-posting
+     *  (rare; e.g. the worker fires twice on a deferred wake-up) replaces
+     *  rather than stacks. */
+    fun postFastingMilestone(
+        context: Context, sessionId: Long, stageLabel: String,
+        elapsedH: Double, targetH: Double,
+    ) {
+        ensureChannel(context)
+        val title = "Fasting: $stageLabel"
+        val body = "${"%.0f".format(elapsedH)}h in — ${"%.0f".format(targetH - elapsedH)}h to your target."
+        val notif = NotificationCompat.Builder(context, FASTING_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .build()
+        // Bucket id by session+stageLabel so different stages of one fast
+        // stack cleanly; a future fast won't collide.
+        val notifId = FASTING_NOTIF_BASE + (sessionId.toInt() and 0xff) * 16 +
+            (stageLabel.hashCode() and 0xf)
+        try {
+            NotificationManagerCompat.from(context).notify(notifId, notif)
+        } catch (_: SecurityException) { /* permission revoked */ }
     }
 
     /** Vibrate + chime when a yoga / mobility hold timer reaches 0.

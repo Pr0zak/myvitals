@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Hourglass glyph for the "Fasting" app shortcut. Material
+  `hourglass_empty` filled icon at 24x24 — fasting feature is
+  fundamentally about elapsed time inside a target window.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#EF4444">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M6,2 L6,8 L6.01,8 L6,8.01 L10,12 L6,16 L6.01,16.01 L6,16.01 L6,22 L18,22 L18,16.01 L17.99,16.01 L18,16 L14,12 L18,8.01 L17.99,8 L18,8 L18,2 L6,2 Z M16,16.5 L16,20 L8,20 L8,16.5 L12,12.5 L16,16.5 Z M12,11.5 L8,7.5 L8,4 L16,4 L16,7.5 L12,11.5 Z" />
+</vector>

@@ -9,4 +9,6 @@
     <string name="shortcut_trails_long">Trail map</string>
     <string name="shortcut_sober_short">Sober</string>
     <string name="shortcut_sober_long">Sober time</string>
+    <string name="shortcut_fasting_short">Fasting</string>
+    <string name="shortcut_fasting_long">Fasting timer</string>
 </resources>

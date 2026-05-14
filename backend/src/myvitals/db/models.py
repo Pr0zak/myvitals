@@ -516,6 +516,34 @@ class TrailAlert(Base):
     acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class FastingSession(Base):
+    """One row per intermittent-fasting session. A row with ended_at IS
+    NULL is the (single) active fast; the partial unique index in the
+    schema enforces only one ongoing row at a time."""
+    __tablename__ = "fasting_sessions"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    protocol: Mapped[str] = mapped_column(String(32))
+    mode: Mapped[str] = mapped_column(String(16), default="active")
+    target_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_eating_window_h: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class FastingLog(Base):
+    """Freeform in-fast log entries — hunger / mood / hydration / notes.
+    Joined to fasting_sessions on session_id."""
+    __tablename__ = "fasting_logs"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    hunger: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mood: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hydration_ml: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class DeviceStatus(Base):
     """Pixel Watch (and future devices) liveness snapshot from the HA
     WebSocket consumer. Each HA event mutates one field; the consumer

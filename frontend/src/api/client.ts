@@ -24,6 +24,31 @@ http.interceptors.request.use((cfg) => {
   return cfg;
 });
 
+// ── Fasting types ────────────────────────────────────────────────────
+export interface FastingSessionOut {
+  id: number;
+  started_at: string;
+  ended_at: string | null;
+  protocol: string;
+  mode: string;
+  target_hours: number | null;
+  target_eating_window_h: number | null;
+  notes: string | null;
+  elapsed_h: number;
+  current_stage: string;
+  next_stage_at_h: number | null;
+  is_active: boolean;
+}
+export interface FastingStatsOut {
+  sessions_count: number;
+  completed_count: number;
+  avg_duration_h: number | null;
+  median_duration_h: number | null;
+  longest_h: number | null;
+  current_streak_days: number;
+  last_completed_at: string | null;
+}
+
 interface RangeParams {
   since?: Date | string;
   until?: Date | string;
@@ -975,6 +1000,38 @@ export const api = {
     error: string | null;
   }[]> {
     const { data } = await http.get("/import/jobs", { params: { limit } });
+    return data;
+  },
+
+  // ── Fasting ────────────────────────────────────────────────────────
+  async fastingCurrent(): Promise<FastingSessionOut | null> {
+    const { data } = await http.get("/fasting/current");
+    return data;
+  },
+  async fastingStart(body: {
+    protocol: string;
+    target_hours?: number;
+    target_eating_window_h?: number;
+    notes?: string;
+    started_at?: string;
+  }): Promise<FastingSessionOut> {
+    const { data } = await http.post("/fasting/start", body);
+    return data;
+  },
+  async fastingEnd(body: {
+    session_id?: number;
+    ended_at?: string;
+    notes?: string;
+  } = {}): Promise<FastingSessionOut> {
+    const { data } = await http.post("/fasting/end", body);
+    return data;
+  },
+  async fastingHistory(limit = 20): Promise<FastingSessionOut[]> {
+    const { data } = await http.get("/fasting/history", { params: { limit } });
+    return data;
+  },
+  async fastingStats(days = 90): Promise<FastingStatsOut> {
+    const { data } = await http.get("/fasting/stats", { params: { days } });
     return data;
   },
 

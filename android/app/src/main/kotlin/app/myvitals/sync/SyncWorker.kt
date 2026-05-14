@@ -22,6 +22,7 @@ import app.myvitals.health.DataMapper
 import app.myvitals.health.HealthConnectGateway
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import java.time.Instant
@@ -64,7 +65,16 @@ class SyncWorker(
         Timber.d("SyncWorker.doWork()")
         val attemptAt = Instant.now()
         return try {
-            runSync(attemptAt)
+            try {
+                runSync(attemptAt)
+            } catch (e: CancellationException) {
+                state.errors += "cancelled before completion"
+                throw e
+            } catch (e: Throwable) {
+                Timber.e(e, "SyncWorker runSync threw")
+                state.errors += "${e.javaClass.simpleName}: ${e.message?.take(180) ?: "(no message)"}"
+                Result.retry()
+            }
         } finally {
             persistFlags()
             sendHeartbeat(attemptAt)

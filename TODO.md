@@ -236,6 +236,15 @@ Not affected (per Google's published guidance):
       polls every 30 min and posts a notification per unnotified
       flip. Added as 4th bottom-nav tab (Sober / Workout / Trails /
       Settings).
+- [ ] **#PHONE-EQUIP-1 Equipment + training prefs on phone** —
+      currently web-only (`StrengthEquipment.vue` PUTs to
+      `/workout/strength/equipment`). Phone reads equipment for
+      display but can't edit. Add an `EquipmentScreen.kt` (under
+      Settings or the Workout group) that covers dumbbells / bench /
+      pull_up_bar / cardio gear / training.* fields. Match web's
+      auto-regen behavior — when days_per_week or split_preference
+      change and today's workout is planned + zero logged sets,
+      backend already regenerates; phone just needs to refetch.
 - [ ] **iOS app** — currently Android-only. Same Health Connect
       analogue would be HealthKit on iOS.
 - [ ] **Multi-user** — single-user assumed throughout; no user_id

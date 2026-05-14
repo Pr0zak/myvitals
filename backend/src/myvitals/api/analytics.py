@@ -125,7 +125,6 @@ SUPPORTED_METRICS = [
     "mood_score",
 ]
 
-# Metrics that map directly to a column in daily_summary.
 _DAILY_SUMMARY_METRICS = {
     "resting_hr", "hrv_avg", "recovery_score",
     "sleep_duration_s", "sleep_score", "steps_total",
@@ -135,6 +134,7 @@ _DAILY_SUMMARY_METRICS = {
     "readiness_score", "training_stress_score",
     "ctl", "atl", "tsb",
     "sleep_consistency_score", "sleep_debt_h",
+    "fasting_hours",
 }
 
 

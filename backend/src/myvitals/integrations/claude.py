@@ -272,6 +272,48 @@ async def _correlations(db: AsyncSession, days: int = 90, top_n: int = 5) -> lis
     return out[:top_n]
 
 
+async def _fasting_status(db: AsyncSession) -> dict[str, Any] | None:
+    """Active fast + last 7 days of fasting hours, as a tiny dict
+    for AI payloads. Returns None on empty history so the AI doesn't
+    waste tokens on a "no fasts" placeholder.
+
+    Keep this BOUNDED — single ints/floats only, no per-session rows.
+    The Claude payload budget is enforced; ballooning this is how the
+    cache-hash spreads + cost climbs."""
+    try:
+        active = (await db.execute(
+            select(models.FastingSession)
+            .where(models.FastingSession.ended_at.is_(None))
+            .limit(1)
+        )).scalar_one_or_none()
+        # Sum fasting_hours from daily_summary over the last 7 days as a
+        # cheap proxy for "how much is the user actually fasting".
+        from datetime import date as _date
+        since = _date.today().isoformat()  # placeholder; computed below
+        today_d = datetime.now(timezone.utc).date()
+        from datetime import timedelta as _td
+        seven_ago = today_d - _td(days=6)
+        rows = (await db.execute(
+            select(models.DailySummary.fasting_hours)
+            .where(models.DailySummary.date >= seven_ago)
+            .where(models.DailySummary.date <= today_d)
+        )).all()
+        weekly_h = round(sum(r[0] or 0 for r in rows), 1)
+        if active is None and weekly_h == 0:
+            return None
+        out: dict[str, Any] = {"weekly_fasting_hours": weekly_h}
+        if active is not None:
+            secs = (datetime.now(timezone.utc) - active.started_at).total_seconds()
+            out["active_fast"] = {
+                "protocol": active.protocol,
+                "elapsed_h": round(secs / 3600.0, 1),
+                "target_h": active.target_hours,
+            }
+        return out
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def _sober_status(db: AsyncSession) -> dict[str, Any] | None:
     try:
         active = (await db.execute(
@@ -335,6 +377,7 @@ async def build_summary_payload(db: AsyncSession, range_kind: str) -> dict[str, 
         "activities": await _activities(db, days),
         "annotations": await _annotations(db, days),
         "sober": await _sober_status(db),
+        "fasting": await _fasting_status(db),
         "trend_badges": await compute_badges(db),
     }
 
@@ -468,6 +511,7 @@ async def build_verdict_payload(db: AsyncSession) -> dict[str, Any]:
         "last_7_days": rows,
         "trend_badges": await compute_badges(db, max_badges=4),
         "sober": await _sober_status(db),
+        "fasting": await _fasting_status(db),
     }
 
 
@@ -1379,6 +1423,7 @@ async def build_deload_payload(db: AsyncSession) -> dict[str, Any]:
         "trends": trends,
         "recent_dailies": recent,
         "strength_last_14d": strength_signal,
+        "fasting": await _fasting_status(db),
         "trend_badges": await compute_badges(db, max_badges=4),
     }
 

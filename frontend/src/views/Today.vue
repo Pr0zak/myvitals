@@ -22,6 +22,7 @@ import "@/styles/today-tokens.css";
 import PageHeader from "@/components/today/PageHeader.vue";
 import Hero from "@/components/today/Hero.vue";
 import LiveVitals from "@/components/today/LiveVitals.vue";
+import WatchStatus from "@/components/today/WatchStatus.vue";
 import AIInsights, {
   type AiTopicId, type AiTone, type AiTopicResult,
 } from "@/components/today/AIInsights.vue";
@@ -544,6 +545,8 @@ function openLog() { router.push("/log"); }
       :hrv="liveHrv"
       :steps="liveSteps"
     />
+
+    <WatchStatus/>
 
     <div class="two-col body-row">
       <BodyMetrics

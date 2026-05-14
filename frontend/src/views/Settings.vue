@@ -39,6 +39,21 @@ const webhookBase = computed(
   () => apiBase.value || window.location.origin,
 );
 
+// Home Assistant — device-status liveness for the Pixel Watch.
+// Config (ha_url / ha_token / ha_realtime_enabled) lives in the backend
+// .env; this section only surfaces the live status. HR / HRV / SpO2 /
+// sleep stay on Health Connect — HA only carries the on-body / battery
+// / charger / activity-state signals.
+type DeviceStatus = Awaited<ReturnType<typeof api.deviceStatusLatest>>;
+const haStatus = ref<DeviceStatus>(null);
+const haError = ref<string | null>(null);
+const haLoading = ref(false);
+const haAgeS = computed<number | null>(() => {
+  const ts = haStatus.value?.time;
+  if (!ts) return null;
+  return Math.max(0, Math.round((Date.now() - new Date(ts).getTime()) / 1000));
+});
+
 // Strava OAuth credential fields (dashboard-editable)
 const cidInput = ref("");
 const secretInput = ref("");
@@ -454,7 +469,7 @@ async function test() {
     await api.health();
     await api.lastSync();
     status.value = "ok";
-    await Promise.all([loadStrava(), loadTrailCfg(), loadConcept2()]);
+    await Promise.all([loadStrava(), loadTrailCfg(), loadConcept2(), loadHaStatus()]);
   } catch (e: unknown) {
     status.value = "fail";
     if (e && typeof e === "object" && "response" in e) {
@@ -572,6 +587,19 @@ async function loadConcept2() {
   }
 }
 
+async function loadHaStatus() {
+  if (!queryToken.value) return;
+  haError.value = null;
+  haLoading.value = true;
+  try {
+    haStatus.value = await api.deviceStatusLatest();
+  } catch (e: unknown) {
+    haError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    haLoading.value = false;
+  }
+}
+
 async function saveConcept2() {
   const token = concept2TokenInput.value.trim();
   if (!token) {
@@ -658,6 +686,7 @@ onMounted(() => {
   loadTrailCfg();
   loadProfile();
   loadAiCfg();
+  loadHaStatus();
   startJobPolling();
 });
 onUnmounted(stopJobPolling);
@@ -1152,6 +1181,63 @@ onUnmounted(stopJobPolling);
       <div v-else-if="!stravaError" class="hint">Loading…</div>
     </details>
 
+    <!-- ── Home Assistant ── -->
+    <details class="section">
+      <summary><h2>Home Assistant (watch status)</h2></summary>
+      <p class="hint">
+        Pulls the Pixel Watch's on-body / battery / charger / activity
+        signals from HA's WebSocket. HR, HRV, SpO2, sleep, skin temp
+        all continue to come from Health Connect — the Wear OS
+        Companion App's HR sensor publishes too sparsely to replace HC.
+      </p>
+
+      <div v-if="haError" class="err">{{ haError }}</div>
+
+      <template v-if="haLoading && !haStatus">
+        <p class="hint">Loading…</p>
+      </template>
+
+      <template v-else-if="haStatus">
+        <p class="ok-text">
+          <Check :size="14"/>
+          <strong>{{ haStatus.online ? "Connected" : "Disconnected" }}</strong>
+          —
+          <span v-if="haAgeS !== null && haAgeS < 60">updated just now</span>
+          <span v-else-if="haAgeS !== null && haAgeS < 3600">updated {{ Math.floor(haAgeS / 60) }}m ago</span>
+          <span v-else-if="haAgeS !== null && haAgeS < 86400">updated {{ Math.floor(haAgeS / 3600) }}h ago</span>
+          <span v-else-if="haAgeS !== null">updated {{ Math.floor(haAgeS / 86400) }}d ago</span>
+        </p>
+        <ul class="kv">
+          <li><span>Battery</span><span>{{ haStatus.battery_pct ?? "—" }}%</span></li>
+          <li><span>Charger</span><span>{{ haStatus.is_charging === null ? "—" : (haStatus.is_charging ? "Plugged in" : "Not charging") }}</span></li>
+          <li><span>On body</span><span>{{ haStatus.is_worn === null ? "—" : (haStatus.is_worn ? "Yes" : "No") }}</span></li>
+          <li><span>Activity</span><span>{{ haStatus.activity_state ?? "—" }}</span></li>
+          <li><span>Device</span><span><code>{{ haStatus.device_id }}</code></span></li>
+        </ul>
+        <div class="actions">
+          <button class="ghost" :disabled="haLoading" @click="loadHaStatus">
+            {{ haLoading ? "Refreshing…" : "Refresh" }}
+          </button>
+        </div>
+      </template>
+
+      <template v-else>
+        <p class="hint">
+          No device_status rows yet — the WebSocket consumer hasn't
+          captured an event. To enable: set
+          <code>HA_URL</code>, <code>HA_TOKEN</code>, and
+          <code>HA_REALTIME_ENABLED=true</code> in the backend's
+          <code>.env</code>, then restart the backend container.
+          Generate the long-lived token in HA → Profile → Security.
+        </p>
+        <div class="actions">
+          <button class="ghost" :disabled="haLoading" @click="loadHaStatus">
+            {{ haLoading ? "Refreshing…" : "Refresh" }}
+          </button>
+        </div>
+      </template>
+    </details>
+
     <!-- ── Concept2 ── -->
     <details class="section">
       <summary><h2>Concept2 (rower)</h2></summary>
@@ -1244,6 +1330,10 @@ button { border-radius: 6px; padding: 0.55rem 1rem; cursor: pointer; font-weight
 .danger { color: #ef4444; }
 .ok { color: #22c55e; padding: 0.6rem 0.8rem; background: rgba(34, 197, 94, 0.1); border-left: 3px solid #22c55e; margin-top: 0.6rem; }
 .ok-text { color: #22c55e; }
+.kv { list-style: none; padding: 0; margin: 0.4rem 0; }
+.kv li { display: flex; justify-content: space-between; padding: 0.25rem 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1); font-size: 0.9rem; }
+.kv li:last-child { border-bottom: none; }
+.kv li > span:first-child { color: #94a3b8; }
 .err { color: #ef4444; padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; margin-top: 0.6rem; }
 .err small { color: #94a3b8; font-family: monospace; }
 .muted { color: #94a3b8; font-size: 0.85rem; }

@@ -977,4 +977,28 @@ export const api = {
     const { data } = await http.get("/import/jobs", { params: { limit } });
     return data;
   },
+
+  async deviceStatusLatest(device_id = "pixel_watch_3"): Promise<{
+    device_id: string;
+    time: string;
+    battery_pct: number | null;
+    battery_state: string | null;
+    is_charging: boolean | null;
+    activity_state: string | null;
+    is_worn: boolean | null;
+    online: boolean | null;
+  } | null> {
+    try {
+      const { data } = await http.get("/api/device-status/latest", {
+        params: { device_id },
+      });
+      return data;
+    } catch (e: unknown) {
+      // 404 = no rows yet (consumer not running or not connected). Surface
+      // as null so the UI can render the "not configured" state.
+      const err = e as { response?: { status?: number } };
+      if (err?.response?.status === 404) return null;
+      throw e;
+    }
+  },
 };

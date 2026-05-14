@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
@@ -98,6 +99,7 @@ fun StrengthTodayScreen(
     onOpenHistory: () -> Unit,
     onOpenCatalog: () -> Unit = {},
     onOpenTrainingPrefs: () -> Unit = {},
+    onOpenEquipment: () -> Unit = {},
     onOpenDay: (dateIso: String) -> Unit = {},
     onOpenCharts: () -> Unit = {},
 ) {
@@ -392,6 +394,12 @@ fun StrengthTodayScreen(
                         leadingIcon = { Icon(Icons.Filled.Tune, null,
                             modifier = Modifier.size(16.dp)) },
                         onClick = { headerMenuOpen = false; onOpenTrainingPrefs() },
+                    )
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Equipment") },
+                        leadingIcon = { Icon(Icons.Filled.FitnessCenter, null,
+                            modifier = Modifier.size(16.dp)) },
+                        onClick = { headerMenuOpen = false; onOpenEquipment() },
                     )
                     androidx.compose.material3.DropdownMenuItem(
                         text = { Text("Custom workout") },

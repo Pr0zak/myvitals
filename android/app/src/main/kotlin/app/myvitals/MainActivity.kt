@@ -49,6 +49,7 @@ import app.myvitals.ui.SoberHomeScreen
 import app.myvitals.ui.strength.StrengthCatalogScreen
 import app.myvitals.ui.strength.StrengthHistoryScreen
 import app.myvitals.ui.strength.StrengthTodayScreen
+import app.myvitals.ui.strength.StrengthEquipmentScreen
 import app.myvitals.ui.strength.StrengthTrainingPrefsScreen
 import app.myvitals.ui.trails.TrailsScreen
 import kotlinx.coroutines.CoroutineScope
@@ -67,6 +68,7 @@ private object Routes {
     fun workoutDay(date: String) = "workout/day/$date"
     const val WORKOUT_CHARTS = "workout/charts"
     const val WORKOUT_CATALOG = "workout/catalog"
+    const val WORKOUT_EQUIPMENT = "workout/equipment"
     const val WORKOUT_TRAINING_PREFS = "workout/training-prefs"
     const val ACTIVITIES = "activities"
     const val ACTIVITY_DETAIL = "activity/{source}/{sourceId}"
@@ -195,6 +197,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenHistory = { nav.navigate(Routes.WORKOUT_HISTORY) },
                                 onOpenCatalog = { nav.navigate(Routes.WORKOUT_CATALOG) },
                                 onOpenTrainingPrefs = { nav.navigate(Routes.WORKOUT_TRAINING_PREFS) },
+                                onOpenEquipment = { nav.navigate(Routes.WORKOUT_EQUIPMENT) },
                                 onOpenDay = { date -> nav.navigate(Routes.workoutDay(date)) },
                                 onOpenCharts = { nav.navigate(Routes.WORKOUT_CHARTS) },
                             )
@@ -233,6 +236,12 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(Routes.WORKOUT_TRAINING_PREFS) {
                             StrengthTrainingPrefsScreen(
+                                settings = settings,
+                                onBack = { nav.popBackStack() },
+                            )
+                        }
+                        composable(Routes.WORKOUT_EQUIPMENT) {
+                            StrengthEquipmentScreen(
                                 settings = settings,
                                 onBack = { nav.popBackStack() },
                             )

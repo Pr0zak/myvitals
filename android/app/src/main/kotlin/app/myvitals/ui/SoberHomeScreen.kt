@@ -66,7 +66,6 @@ private const val HOLD_DURATION_MS = 1500L
 @Composable
 fun SoberHomeScreen(
     settings: SettingsRepository,
-    onOpenSettings: () -> Unit,
     onBack: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
@@ -75,7 +74,6 @@ fun SoberHomeScreen(
     var history by remember { mutableStateOf<List<app.myvitals.sync.SoberStreak>>(emptyList()) }
     var historyOpen by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
-    var refreshing by remember { mutableStateOf(false) }
     var resetting by remember { mutableStateOf(false) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
@@ -97,10 +95,9 @@ fun SoberHomeScreen(
 
     suspend fun fetch() {
         if (!settings.isConfigured()) {
-            loadError = "Backend not configured — swipe right to set URL + token."
+            loadError = "Backend not configured — open the Settings tab to set URL + token."
             return
         }
-        refreshing = true
         loadError = null
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
@@ -116,8 +113,6 @@ fun SoberHomeScreen(
         } catch (e: Exception) {
             Timber.w(e, "soberCurrent failed")
             loadError = e.message?.take(160) ?: "Network error"
-        } finally {
-            refreshing = false
         }
     }
 
@@ -200,8 +195,6 @@ fun SoberHomeScreen(
                     color = MV.OnSurfaceVariant,
                 )
             }
-            PagerDots(active = 0)
-            Spacer(Modifier.width(48.dp))
         }
 
         // ── Hero ──
@@ -375,43 +368,6 @@ fun SoberHomeScreen(
                 },
                 resetting = resetting,
             )
-        }
-
-        // ── Sync pill + actions (full-width column so the children's
-        //     CenterHorizontally + Center arrangement actually centers) ──
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, bottom = 14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            SyncStatusPill(settings = settings, nowMs = nowMs)
-            Spacer(Modifier.height(14.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = { scope.launch { fetch() } }) {
-                    Text(
-                        if (refreshing) "Refreshing…" else "Refresh",
-                        color = MV.OnSurfaceVariant,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
-                Text("·", color = MV.OnSurfaceDim, fontSize = 14.sp)
-                Spacer(Modifier.width(8.dp))
-                TextButton(onClick = onOpenSettings) {
-                    Text(
-                        "Settings ›",
-                        color = MV.OnSurfaceVariant,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
-            }
         }
 
         AnimatedVisibility(visible = loadError != null) {
@@ -594,62 +550,3 @@ private fun ResetButton(hasActive: Boolean, onTriggered: () -> Unit, resetting: 
 }
 
 
-@Composable
-private fun SyncStatusPill(settings: SettingsRepository, nowMs: Long) {
-    val lastSync = settings.lastSyncInstant()
-    val lastSuccess = settings.lastSuccessInstant()
-    val permsLost = settings.permissionsLost
-    val freshest = listOfNotNull(lastSync, lastSuccess).maxByOrNull { it.epochSecond }
-    val ageS = freshest?.let { (nowMs / 1000) - it.epochSecond } ?: -1L
-
-    val (dot, text) = when {
-        permsLost -> MV.Red to "perms revoked — open Settings"
-        freshest == null -> MV.OnSurfaceDim to "no sync yet"
-        ageS < 60 -> MV.Green to "synced just now"
-        ageS < 3600 -> MV.Green to "synced ${ageS / 60}m ago"
-        ageS < 86400 -> MV.Amber to "synced ${ageS / 3600}h ago"
-        else -> MV.Amber to "synced ${ageS / 86400}d ago"
-    }
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(MV.SurfaceContainer)
-            .border(1.dp, MV.OutlineVariant, RoundedCornerShape(50))
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(RoundedCornerShape(50))
-                .background(dot),
-        )
-        Text(
-            text = text,
-            fontSize = 13.sp,
-            color = MV.OnSurfaceVariant,
-            letterSpacing = 0.1.sp,
-        )
-    }
-}
-
-@Composable
-private fun PagerDots(active: Int) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        for (i in 0..1) {
-            val isActive = i == active
-            Box(
-                modifier = Modifier
-                    .height(6.dp)
-                    .width(if (isActive) 18.dp else 6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(
-                        if (isActive) MV.OnSurface.copy(alpha = 0.95f)
-                        else MV.OnSurfaceDim.copy(alpha = 0.5f),
-                    ),
-            )
-        }
-    }
-}

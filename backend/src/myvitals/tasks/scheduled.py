@@ -80,6 +80,52 @@ async def _fasting_scheduled_tick() -> None:
                 .limit(1)
             )).scalar_one_or_none()
 
+            # Religious-calendar overrides — if today/now falls in a
+            # Ramadan or Yom Kippur window, those drive the schedule
+            # instead of the user's normal eating-window pattern.
+            from ..integrations.fasting_calendar import (
+                is_ramadan_day, ramadan_today_window, is_yom_kippur_window,
+            )
+            religious = (prefs.get("religious_calendar") or "none")
+            now_utc = datetime.now(timezone.utc)
+            religious_window: tuple[datetime | None, datetime | None, str] = (None, None, "")
+            if religious == "yom_kippur":
+                in_yk, yk_start = is_yom_kippur_window(now_utc, local_tz)
+                if in_yk:
+                    religious_window = (
+                        yk_start, yk_start and yk_start + timedelta(hours=25),
+                        "yom_kippur",
+                    )
+            elif religious == "ramadan":
+                is_r, dawn_utc, dusk_utc = ramadan_today_window(now_utc, local_tz)
+                # Ramadan: fast from dawn to dusk. Only auto-start inside
+                # the dawn-to-dusk window; outside it is the eating period.
+                if is_r and dawn_utc <= now_utc <= dusk_utc:
+                    religious_window = (dawn_utc, dusk_utc, "ramadan")
+
+            rel_start, rel_end, rel_label = religious_window
+            if rel_start is not None and rel_end is not None:
+                # Religious window active.
+                if active is None:
+                    db.add(models.FastingSession(
+                        started_at=rel_start,
+                        protocol=rel_label,
+                        mode="scheduled",
+                        target_hours=(rel_end - rel_start).total_seconds() / 3600.0,
+                    ))
+                    await db.commit()
+                    log.info("Religious fast auto-start (%s): started_at=%s",
+                             rel_label, rel_start.isoformat())
+                # If a scheduled fast is active and we're past rel_end,
+                # end it. Will catch on the next tick — keeps this branch
+                # short.
+                if active is not None and active.mode == "scheduled" and now_utc > rel_end:
+                    active.ended_at = now_utc
+                    await db.commit()
+                    log.info("Religious fast auto-end (%s): id=%s",
+                             rel_label, active.id)
+                return
+
             if not in_eating_window and active is None:
                 # We should be fasting and aren't → start.
                 target_h = (24.0 - (eat_end - eat_start))

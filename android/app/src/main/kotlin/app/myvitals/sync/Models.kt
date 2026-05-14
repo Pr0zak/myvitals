@@ -471,6 +471,51 @@ data class DumbbellSpec(
 @JsonClass(generateAdapter = true)
 data class BenchSpec(val flat: Boolean = false, val incline: Boolean = false, val decline: Boolean = false)
 
+// ── Fasting ────────────────────────────────────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class FastingSession(
+    val id: Long,
+    @Json(name = "started_at") val startedAt: String,
+    @Json(name = "ended_at") val endedAt: String?,
+    val protocol: String,
+    val mode: String,
+    @Json(name = "target_hours") val targetHours: Double?,
+    @Json(name = "target_eating_window_h") val targetEatingWindowH: Double?,
+    val notes: String?,
+    @Json(name = "elapsed_h") val elapsedH: Double,
+    @Json(name = "current_stage") val currentStage: String,
+    @Json(name = "next_stage_at_h") val nextStageAtH: Double?,
+    @Json(name = "is_active") val isActive: Boolean,
+)
+
+@JsonClass(generateAdapter = true)
+data class FastingStartRequest(
+    val protocol: String,
+    @Json(name = "target_hours") val targetHours: Double? = null,
+    @Json(name = "target_eating_window_h") val targetEatingWindowH: Double? = null,
+    val notes: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class FastingEndRequest(
+    @Json(name = "session_id") val sessionId: Long? = null,
+    @Json(name = "ended_at") val endedAt: String? = null,
+    val notes: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class FastingStats(
+    @Json(name = "sessions_count") val sessionsCount: Int,
+    @Json(name = "completed_count") val completedCount: Int,
+    @Json(name = "avg_duration_h") val avgDurationH: Double?,
+    @Json(name = "median_duration_h") val medianDurationH: Double?,
+    @Json(name = "longest_h") val longestH: Double?,
+    @Json(name = "current_streak_days") val currentStreakDays: Int,
+    @Json(name = "last_completed_at") val lastCompletedAt: String?,
+)
+
+
 @JsonClass(generateAdapter = true)
 data class EquipmentPayload(
     val dumbbells: DumbbellSpec = DumbbellSpec(),

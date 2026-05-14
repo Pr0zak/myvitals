@@ -31,6 +31,22 @@ interface BackendApi {
     @POST("sober/reset")
     suspend fun soberReset(@Body body: SoberResetRequest): SoberResetResponse
 
+    // ── Fasting ────────────────────────────────────────────────
+    @GET("fasting/current")
+    suspend fun fastingCurrent(): Response<FastingSession>   // 200 with null body or row
+
+    @POST("fasting/start")
+    suspend fun fastingStart(@Body body: FastingStartRequest): FastingSession
+
+    @POST("fasting/end")
+    suspend fun fastingEnd(@Body body: FastingEndRequest): FastingSession
+
+    @GET("fasting/history")
+    suspend fun fastingHistory(@Query("limit") limit: Int = 20): List<FastingSession>
+
+    @GET("fasting/stats")
+    suspend fun fastingStats(@Query("days") days: Int = 90): FastingStats
+
     // ── Strength training ─────────────────────────────────────
     @GET("workout/strength/today")
     suspend fun strengthToday(): Response<StrengthWorkoutDetail>

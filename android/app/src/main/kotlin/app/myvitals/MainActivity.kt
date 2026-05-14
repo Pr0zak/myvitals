@@ -62,6 +62,7 @@ private object Routes {
     const val VITAL_DETAIL = "vitals/{key}"
     fun vitalDetail(key: String) = "vitals/$key"
     const val SOBER = "sober"
+    const val FASTING = "fasting"
     const val WORKOUT = "workout/today"
     const val WORKOUT_HISTORY = "workout/history"
     const val WORKOUT_DAY = "workout/day/{date}"
@@ -156,6 +157,7 @@ class MainActivity : ComponentActivity() {
                                 settings = settings,
                                 onOpenSettings = { nav.navigateTab(Routes.SETTINGS) },
                                 onOpenSober = { nav.navigate(Routes.SOBER) },
+                                onOpenFasting = { nav.navigate(Routes.FASTING) },
                                 onOpenVitalDetail = { v ->
                                     nav.navigate(Routes.vitalDetail(v.name))
                                 },
@@ -186,6 +188,12 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(Routes.SOBER) {
                             SoberHomeScreen(
+                                settings = settings,
+                                onBack = { nav.popBackStack() },
+                            )
+                        }
+                        composable(Routes.FASTING) {
+                            app.myvitals.ui.FastingScreen(
                                 settings = settings,
                                 onBack = { nav.popBackStack() },
                             )

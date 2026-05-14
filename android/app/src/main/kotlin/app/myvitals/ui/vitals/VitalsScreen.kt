@@ -34,6 +34,7 @@ import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.FitnessCenter
+import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Terrain
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.MonitorWeight
@@ -96,6 +97,7 @@ enum class Vital(val label: String, val icon: ImageVector, val color: Color) {
     WEIGHT("Weight", Icons.Outlined.MonitorWeight, Color(0xFFF59E0B)),
     BP("Blood pressure", Icons.Outlined.FavoriteBorder, Color(0xFFEC4899)),
     SOBER("Sober", Icons.Outlined.Timer, Color(0xFF84CC16)),
+    FASTING("Fasting", Icons.Outlined.HourglassEmpty, Color(0xFF38BDF8)),
     WORKOUT("Workout", Icons.Outlined.FitnessCenter, Color(0xFFEF4444)),
     ACTIVITY("Last activity", Icons.AutoMirrored.Outlined.DirectionsBike,
         Color(0xFF38BDF8)),
@@ -117,6 +119,7 @@ fun VitalsScreen(
     onOpenWorkout: () -> Unit = {},
     onOpenActivity: (source: String, sourceId: String) -> Unit = { _, _ -> },
     onOpenTrails: () -> Unit = {},
+    onOpenFasting: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
@@ -125,6 +128,7 @@ fun VitalsScreen(
     var weight by remember { mutableStateOf(WeightSnapshot(emptyList(), null, null)) }
     var bp by remember { mutableStateOf(BpSnapshot(null, null, null)) }
     var sober by remember { mutableStateOf<SoberCurrentResponse?>(null) }
+    var fasting by remember { mutableStateOf<app.myvitals.sync.FastingSession?>(null) }
     var profile by remember { mutableStateOf<ProfileResponse?>(null) }
     var lastActivity by remember { mutableStateOf<app.myvitals.sync.ActivityRow?>(null) }
     var trailCounts by remember { mutableStateOf(Triple(0, 0, 0)) }  // open/delayed/closed
@@ -216,6 +220,13 @@ fun VitalsScreen(
                 val soberD = async(Dispatchers.IO) {
                     runCatching { api.soberCurrent() }.getOrNull()
                 }
+                val fastingD = async(Dispatchers.IO) {
+                    // /fasting/current returns null body when no active fast.
+                    runCatching {
+                        val r = api.fastingCurrent()
+                        if (r.isSuccessful) r.body() else null
+                    }.getOrNull()
+                }
                 val profileD = async(Dispatchers.IO) {
                     runCatching { api.profile() }.getOrNull()
                 }
@@ -246,6 +257,7 @@ fun VitalsScreen(
                 weight = weightD.await()
                 bp = bpD.await()
                 sober = soberD.await()
+                fasting = fastingD.await()
                 profile = profileD.await()
                 lastActivity = activityD.await()
                 trailCounts = trailsD.await()
@@ -282,7 +294,7 @@ fun VitalsScreen(
         listOf(
             Vital.HR, Vital.SLEEP, Vital.STEPS, Vital.HRV,
             Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS,
-            Vital.WEIGHT, Vital.BP, Vital.SOBER,
+            Vital.WEIGHT, Vital.BP, Vital.SOBER, Vital.FASTING,
         )
     }
     val tiles = remember(profile) {
@@ -407,6 +419,7 @@ fun VitalsScreen(
             items(tiles, key = { it.name }) { v ->
                 when (v) {
                     Vital.SOBER -> SoberBadge(sober, onClick = onOpenSober)
+                    Vital.FASTING -> FastingBadge(fasting, nowMs, onClick = onOpenFasting)
                     Vital.HR -> HrBadge(hr, today, rows, nowMs,
                         onClick = { onOpenVitalDetail(v) })
                     Vital.HRV -> HrvBadge(rows, nowMs, onClick = { onOpenVitalDetail(v) })
@@ -764,6 +777,47 @@ private fun SoberBadge(sober: SoberCurrentResponse?, onClick: () -> Unit) {
         }
         Spacer(Modifier.height(6.dp))
         Text("Tap to manage", color = MV.OnSurfaceDim, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun FastingBadge(
+    fasting: app.myvitals.sync.FastingSession?,
+    nowMs: Long,
+    onClick: () -> Unit,
+) {
+    val v = Vital.FASTING
+    BadgeFrame(v, null, onClick) {
+        if (fasting == null || !fasting.isActive) {
+            Text("—", color = MV.OnSurface,
+                fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            Text("Tap to start", color = MV.OnSurfaceDim, fontSize = 10.sp)
+            return@BadgeFrame
+        }
+        // Live elapsed from started_at so the badge ticks with nowMs.
+        val startMs = runCatching {
+            java.time.Instant.parse(fasting.startedAt).toEpochMilli()
+        }.getOrDefault(nowMs)
+        val elapsedH = ((nowMs - startMs).coerceAtLeast(0L)) / 3_600_000.0
+        val target = fasting.targetHours ?: 16.0
+        val wh = elapsedH.toInt()
+        val wm = ((elapsedH - wh) * 60).toInt()
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text("${wh}h", color = MV.OnSurface,
+                fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(4.dp))
+            Text("%02d".format(wm) + "m",
+                color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 4.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("/ ${target.toInt()}h",
+                color = MV.OnSurfaceDim, fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 4.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(fasting.currentStage.replace("_", " "),
+            color = MV.OnSurfaceDim, fontSize = 10.sp)
     }
 }
 

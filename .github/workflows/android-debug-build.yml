@@ -18,6 +18,13 @@ on:
 permissions:
   contents: read
 
+# Opt every JavaScript-based action into Node 24 ahead of GitHub's
+# 2026-06-02 forced cutover. Surfaces compatibility breakage now
+# instead of on the deadline. Removable once each action publishes
+# a release pinned to Node 24 by default.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     runs-on: ubuntu-latest

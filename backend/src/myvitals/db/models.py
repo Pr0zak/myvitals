@@ -516,6 +516,23 @@ class TrailAlert(Base):
     acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class DeviceStatus(Base):
+    """Pixel Watch (and future devices) liveness snapshot from the HA
+    WebSocket consumer. Each HA event mutates one field; the consumer
+    copies forward unchanged fields from the most recent row and
+    inserts a new dense row at the event timestamp. HC has no
+    equivalent signal — HA is the only source."""
+    __tablename__ = "device_status"
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    device_id: Mapped[str] = mapped_column(String(96), primary_key=True)
+    battery_pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    battery_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    is_charging: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    activity_state: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    is_worn: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    online: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+
 class SyncHeartbeat(Base):
     """Companion-app sync diagnostics — one row per doWork() invocation."""
     __tablename__ = "sync_heartbeat"

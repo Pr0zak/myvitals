@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,7 @@ from .api import (
     annotations,
     concept2,
     debug,
+    devices,
     export,
     imports,
     ingest,
@@ -44,8 +46,33 @@ async def lifespan(app: FastAPI):
     # populated immediately. Don't block app startup if it fails.
     asyncio.create_task(_safe_initial_summary())
 
-    yield
-    scheduler.shutdown(wait=False)
+    # HA WebSocket realtime consumer — only starts if explicitly enabled in
+    # config AND credentials are present. Failures inside the task surface
+    # via its own logging + backoff loop; the lifespan doesn't await it.
+    ha_task: asyncio.Task | None = None
+    if (
+        settings.ha_realtime_enabled
+        and settings.ha_url and settings.ha_token
+    ):
+        from .integrations.ha_realtime import run as _ha_run
+        ha_task = asyncio.create_task(_ha_run(), name="ha_realtime")
+        log.info("HA realtime consumer task started")
+    else:
+        log.info(
+            "HA realtime consumer disabled (enabled=%s, url=%s, token=%s)",
+            settings.ha_realtime_enabled,
+            bool(settings.ha_url),
+            bool(settings.ha_token),
+        )
+
+    try:
+        yield
+    finally:
+        scheduler.shutdown(wait=False)
+        if ha_task is not None:
+            ha_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await asyncio.wait_for(ha_task, timeout=5.0)
 
 
 async def _safe_initial_summary() -> None:
@@ -173,6 +200,7 @@ app.include_router(sober.router, tags=["sober"])
 app.include_router(ai.router, tags=["ai"])
 app.include_router(workout_strength.router, tags=["workout-strength"])
 app.include_router(trails.router, tags=["trails"])
+app.include_router(devices.router, tags=["devices"])
 app.include_router(concept2.router)
 app.include_router(concept2._webhook_router)
 

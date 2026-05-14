@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     def ha_entity_list(self) -> list[str]:
         return [e.strip() for e in self.ha_entities.split(",") if e.strip()]
 
+    # --- HA realtime WebSocket consumer (device_status liveness only) ---
+    # Empty → consumer is disabled. The device_id label is what every
+    # device_status row carries; the entity prefix is used to derive
+    # the HA entities subscribed for that device.
+    ha_realtime_enabled: bool = False
+    ha_realtime_device_id: str = "pixel_watch_3"
+
     # --- RainoutLine trail-status integration (optional) ---
     # 10-digit DNIS for the RainoutLine endpoint your trails are listed on.
     # Without this, the trail-status poller is a no-op.

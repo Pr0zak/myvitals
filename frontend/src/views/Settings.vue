@@ -39,6 +39,19 @@ const webhookBase = computed(
   () => apiBase.value || window.location.origin,
 );
 
+// Fasting preferences — stored as profile.extra.fasting_prefs.
+// Drives the default-protocol pre-selection on Fasting.vue,
+// notification cadence, and the server's scheduled-mode auto-
+// start/end (#FAST-12 fasting_scheduled APScheduler job).
+const fastingDefaultProto = ref<string>("16:8");
+const fastingScheduledMode = ref<boolean>(false);
+const fastingEatStart = ref<number>(12);
+const fastingEatEnd = ref<number>(20);
+const fastingNotifs = ref<boolean>(true);
+const fastingReligiousCal = ref<string>("none");
+const fastingSaving = ref(false);
+const fastingMsg = ref<string>("");
+
 // Home Assistant — device-status liveness for the Pixel Watch.
 // Config (ha_url / ha_token / ha_realtime_enabled) lives in the backend
 // .env; this section only surfaces the live status. HR / HRV / SpO2 /
@@ -286,7 +299,49 @@ async function loadProfile() {
     const extra = (profile.value?.extra ?? {}) as Record<string, unknown>;
     stepsGoalInput.value = (extra.steps_goal as number | undefined) ?? null;
     sleepGoalInput.value = (extra.sleep_goal_h as number | undefined) ?? null;
+    const fp = (extra.fasting_prefs ?? {}) as Record<string, unknown>;
+    fastingDefaultProto.value = (fp.default_protocol as string | undefined) ?? "16:8";
+    fastingScheduledMode.value = Boolean(fp.scheduled_mode_enabled);
+    fastingEatStart.value = (fp.eating_window_start_h as number | undefined) ?? 12;
+    fastingEatEnd.value = (fp.eating_window_end_h as number | undefined) ?? 20;
+    fastingNotifs.value = (fp.notifications_enabled as boolean | undefined) ?? true;
+    fastingReligiousCal.value = (fp.religious_calendar as string | undefined) ?? "none";
   } catch { /* ignore */ }
+}
+
+async function saveFastingPrefs() {
+  if (!profile.value) return;
+  fastingSaving.value = true;
+  fastingMsg.value = "";
+  try {
+    const extra: Record<string, unknown> = {
+      ...(profile.value.extra as Record<string, unknown> | null ?? {}),
+    };
+    extra.fasting_prefs = {
+      default_protocol: fastingDefaultProto.value,
+      scheduled_mode_enabled: fastingScheduledMode.value,
+      eating_window_start_h: Number(fastingEatStart.value),
+      eating_window_end_h: Number(fastingEatEnd.value),
+      notifications_enabled: fastingNotifs.value,
+      religious_calendar: fastingReligiousCal.value,
+    };
+    profile.value = await api.putProfile({
+      birth_date: profile.value.birth_date,
+      sex: profile.value.sex,
+      height_cm: profile.value.height_cm,
+      weight_goal_kg: profile.value.weight_goal_kg,
+      resting_hr_baseline: profile.value.resting_hr_baseline,
+      activity_level: profile.value.activity_level,
+      extra,
+      home_latitude: profile.value.home_latitude,
+      home_longitude: profile.value.home_longitude,
+    }) as typeof profile.value;
+    fastingMsg.value = "Saved.";
+  } catch (e: unknown) {
+    fastingMsg.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    fastingSaving.value = false;
+  }
 }
 async function saveProfile() {
   if (!profile.value) return;
@@ -1181,6 +1236,74 @@ onUnmounted(stopJobPolling);
       <div v-else-if="!stravaError" class="hint">Loading…</div>
     </details>
 
+    <!-- ── Fasting preferences ── -->
+    <details class="section">
+      <summary><h2>Fasting</h2></summary>
+      <p class="hint">
+        Default protocol pre-selects on the Fasting page.
+        Scheduled mode auto-starts and ends fasts at your eating-window
+        boundaries (server-side, every 5 min). Manual start always wins
+        over scheduled — if you start manually it stays active until you
+        end it.
+      </p>
+
+      <label>
+        <span>Default protocol</span>
+        <select v-model="fastingDefaultProto">
+          <option value="16:8">16:8 (16h fast, 8h eat)</option>
+          <option value="18:6">18:6</option>
+          <option value="20:4">20:4</option>
+          <option value="omad">OMAD (23:1)</option>
+          <option value="extended_24">24h fast</option>
+          <option value="extended_36">36h fast</option>
+          <option value="extended_48">48h fast</option>
+          <option value="extended_72">72h fast</option>
+        </select>
+      </label>
+
+      <label class="row-inline">
+        <input type="checkbox" v-model="fastingScheduledMode"/>
+        <span>Enable scheduled mode (auto start/end)</span>
+      </label>
+
+      <div class="window-row">
+        <label>
+          <span>Eating window starts</span>
+          <select v-model.number="fastingEatStart" :disabled="!fastingScheduledMode">
+            <option v-for="h in 24" :key="h-1" :value="h-1">{{ h-1 }}:00</option>
+          </select>
+        </label>
+        <label>
+          <span>and ends</span>
+          <select v-model.number="fastingEatEnd" :disabled="!fastingScheduledMode">
+            <option v-for="h in 24" :key="h" :value="h">{{ h }}:00</option>
+          </select>
+        </label>
+      </div>
+
+      <label class="row-inline">
+        <input type="checkbox" v-model="fastingNotifs"/>
+        <span>Milestone notifications on phone (ketosis, autophagy, ...)</span>
+      </label>
+
+      <label>
+        <span>Religious calendar (auto-fasts on tradition dates)</span>
+        <select v-model="fastingReligiousCal">
+          <option value="none">None</option>
+          <option value="ramadan">Ramadan (dawn-to-dusk fasts)</option>
+          <option value="lent">Lent (40 days, abstinence-based)</option>
+          <option value="yom_kippur">Yom Kippur (single 25h fast)</option>
+        </select>
+      </label>
+
+      <div class="actions">
+        <button class="primary" :disabled="fastingSaving" @click="saveFastingPrefs">
+          {{ fastingSaving ? "Saving…" : "Save preferences" }}
+        </button>
+      </div>
+      <div v-if="fastingMsg" class="hint">{{ fastingMsg }}</div>
+    </details>
+
     <!-- ── Home Assistant ── -->
     <details class="section">
       <summary><h2>Home Assistant (watch status)</h2></summary>
@@ -1334,6 +1457,12 @@ button { border-radius: 6px; padding: 0.55rem 1rem; cursor: pointer; font-weight
 .kv li { display: flex; justify-content: space-between; padding: 0.25rem 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1); font-size: 0.9rem; }
 .kv li:last-child { border-bottom: none; }
 .kv li > span:first-child { color: #94a3b8; }
+.row-inline { display: flex; flex-direction: row; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; }
+.row-inline input { width: auto; }
+.window-row { display: flex; gap: 0.8rem; margin-bottom: 1rem; }
+.window-row label { flex: 1; }
+select { background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 0.6rem; font-size: 1rem; font-family: inherit; }
+select:disabled { opacity: 0.5; }
 .err { color: #ef4444; padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; margin-top: 0.6rem; }
 .err small { color: #94a3b8; font-family: monospace; }
 .muted { color: #94a3b8; font-size: 0.85rem; }

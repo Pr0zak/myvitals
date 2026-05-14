@@ -128,6 +128,23 @@ class SyncWorker(
         val summaries = db.buffered().summaries()
         Timber.d("Flushing buffer (count=%d): %s", summaries.size,
             summaries.joinToString { "id=${it.id}/bytes=${it.json_len}/attempts=${it.attempts}" })
+
+        // Pre-flight: drop rows whose JSON exceeds the safe Room read size.
+        // Android's CursorWindow is ~2 MB; a single >2 MB row causes
+        // SQLiteBlobTooBigException on every subsequent buffered_batches read,
+        // which silently breaks the whole SyncWorker. Without this guard, an
+        // accumulated deep-sweep payload from a multi-day offline period can
+        // permanently jam the pipe.
+        val oversized = summaries.filter { it.json_len > MAX_SAFE_BUFFER_JSON_BYTES }
+        if (oversized.isNotEmpty()) {
+            val sizeList = oversized.joinToString { "id=${it.id}/bytes=${it.json_len}" }
+            Timber.w("Dropping %d oversized buffered batches (>%d bytes): %s",
+                oversized.size, MAX_SAFE_BUFFER_JSON_BYTES, sizeList)
+            for (row in oversized) db.buffered().delete(row.id)
+            state.errors += "dropped ${oversized.size} buffer row(s) over " +
+                "${MAX_SAFE_BUFFER_JSON_BYTES / 1000}KB: $sizeList"
+        }
+
         if (!flushBuffer(api)) {
             Timber.w("Buffer flush failed; will retry")
             state.errors += "buffer flush failed"
@@ -200,12 +217,18 @@ class SyncWorker(
         } catch (e: Exception) {
             Timber.e(e, "Ingest POST failed; buffering locally")
             state.errors += "ingest POST: ${e.javaClass.simpleName}: ${e.message?.take(200)}"
-            db.buffered().insert(
-                BufferedBatch(
-                    json = batchAdapter.toJson(batch),
-                    createdAtEpochS = until.epochSecond,
+            // Split the failed batch using the same per-type slicing as
+            // ingestChunked. A single Room row holding the full multi-day
+            // deep-sweep JSON can exceed Android's ~2 MB CursorWindow and
+            // permanently jam every future buffer read.
+            for (sub in splitForBuffer(batch)) {
+                db.buffered().insert(
+                    BufferedBatch(
+                        json = batchAdapter.toJson(sub),
+                        createdAtEpochS = until.epochSecond,
+                    )
                 )
-            )
+            }
             settings.lastSyncEpochSeconds = until.epochSecond
             // Don't advance the deep-sweep checkpoint when the request fails —
             // we want to retry the deep sweep on the next periodic run.
@@ -269,6 +292,44 @@ class SyncWorker(
             state.errors += "HC ${type.simpleName}: ${e.javaClass.simpleName}: ${e.message?.take(160)}"
             emptyList()
         }
+    }
+
+    /**
+     * Slice [batch] into sub-batches each holding at most [MAX_PER_TYPE]
+     * records of any single record type. Used both for the staged POSTs in
+     * [ingestChunked] and for buffering on POST failure — same slicing keeps
+     * each Room row's JSON well under Android's CursorWindow ceiling.
+     */
+    internal fun splitForBuffer(batch: IngestBatch): List<IngestBatch> {
+        val hr = batch.heartrate.chunked(MAX_PER_TYPE)
+        val hrv = batch.hrv.chunked(MAX_PER_TYPE)
+        val steps = batch.steps.chunked(MAX_PER_TYPE)
+        val sleep = batch.sleepStages.chunked(MAX_PER_TYPE)
+        val workouts = batch.workouts.chunked(MAX_PER_TYPE)
+        val body = batch.bodyMetrics.chunked(MAX_PER_TYPE)
+        val bp = batch.bloodPressure.chunked(MAX_PER_TYPE)
+        val temp = batch.skinTemp.chunked(MAX_PER_TYPE)
+        val sessions = batch.sleepSessions.chunked(MAX_PER_TYPE)
+        val n = listOf(
+            hr.size, hrv.size, steps.size, sleep.size, workouts.size,
+            body.size, bp.size, temp.size, sessions.size,
+        ).maxOrNull() ?: 0
+        val out = ArrayList<IngestBatch>(n)
+        for (i in 0 until n) {
+            val sub = IngestBatch(
+                heartrate = hr.getOrElse(i) { emptyList() },
+                hrv = hrv.getOrElse(i) { emptyList() },
+                steps = steps.getOrElse(i) { emptyList() },
+                sleepStages = sleep.getOrElse(i) { emptyList() },
+                workouts = workouts.getOrElse(i) { emptyList() },
+                bodyMetrics = body.getOrElse(i) { emptyList() },
+                bloodPressure = bp.getOrElse(i) { emptyList() },
+                skinTemp = temp.getOrElse(i) { emptyList() },
+                sleepSessions = sessions.getOrElse(i) { emptyList() },
+            )
+            if (!sub.isEmpty()) out += sub
+        }
+        return out
     }
 
     /**
@@ -391,5 +452,11 @@ class SyncWorker(
         private const val MAX_PER_TYPE = 4000
         private const val MAX_BUFFER_ATTEMPTS = 3
         private const val BUFFER_ENTRY_TIMEOUT_MS = 240_000L
+
+        // Android's CursorWindow ceiling is ~2 MB; any single buffered_batches
+        // row whose `json` column exceeds it throws SQLiteBlobTooBigException
+        // on every read of that table. 1.5 MB gives margin for the
+        // unaccounted-for cursor metadata + UTF-8 expansion.
+        internal const val MAX_SAFE_BUFFER_JSON_BYTES = 1_500_000
     }
 }

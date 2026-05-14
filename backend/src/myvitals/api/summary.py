@@ -178,6 +178,7 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
             ctl=pick("ctl"), atl=pick("atl"), tsb=pick("tsb"),
             sleep_consistency_score=pick("sleep_consistency_score"),
             sleep_debt_h=pick("sleep_debt_h"),
+            fasting_hours=pick("fasting_hours"),
             last_sync=last_sync,
         )
 
@@ -271,6 +272,7 @@ async def summary_range(
             ctl=r.ctl, atl=r.atl, tsb=r.tsb,
             sleep_consistency_score=r.sleep_consistency_score,
             sleep_debt_h=r.sleep_debt_h,
+            fasting_hours=r.fasting_hours,
         )
         for r in rows
     ]

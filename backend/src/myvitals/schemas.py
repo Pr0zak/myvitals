@@ -59,6 +59,7 @@ class TodaySummary(BaseModel):
     tsb: float | None = None
     sleep_consistency_score: float | None = None
     sleep_debt_h: float | None = None
+    fasting_hours: float | None = None
     last_sync: datetime | None = None
 
 

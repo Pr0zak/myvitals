@@ -153,6 +153,7 @@ class DailySummary(Base):
     tsb: Mapped[float | None] = mapped_column(Float, nullable=True)
     sleep_consistency_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     sleep_debt_h: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fasting_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

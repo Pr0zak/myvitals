@@ -98,6 +98,29 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
         )).scalar()
         skin_temp_delta_avg = float(temp_val) if temp_val is not None else None
 
+        # Fasting hours overlapping this day. Sum of each session's
+        # overlap with [day_start, day_end). Active fasts (ended_at NULL)
+        # contribute their elapsed portion to now(). Computed via a
+        # raw SQL EXTRACT on the GREATEST/LEAST overlap so postgres can
+        # sum without round-tripping all sessions through Python.
+        fast_rows = await db.execute(
+            select(models.FastingSession.started_at, models.FastingSession.ended_at)
+            .where(models.FastingSession.started_at < day_end)
+            .where(
+                (models.FastingSession.ended_at.is_(None))
+                | (models.FastingSession.ended_at >= day_start)
+            )
+        )
+        now_utc = datetime.now(timezone.utc)
+        fasting_seconds = 0.0
+        for start, end in fast_rows.all():
+            end_clamped = end or now_utc
+            ov_start = max(start, day_start)
+            ov_end = min(end_clamped, day_end)
+            if ov_end > ov_start:
+                fasting_seconds += (ov_end - ov_start).total_seconds()
+        fasting_hours = round(fasting_seconds / 3600.0, 3) or None
+
         # === Advanced derived metrics ===
         readiness = await readiness_score(
             db, target, hrv=hrv, rhr=rhr,
@@ -129,6 +152,7 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
             ctl=ctl, atl=atl, tsb=tsb,
             sleep_consistency_score=sc,
             sleep_debt_h=sd,
+            fasting_hours=fasting_hours,
         )
         stmt = insert(models.DailySummary).values(**values).on_conflict_do_update(
             index_elements=["date"],

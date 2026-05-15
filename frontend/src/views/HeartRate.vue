@@ -18,8 +18,8 @@ import type {
 } from "@/api/types";
 import { chartTheme } from "@/theme";
 import {
-  meanMarkLine, sleepMarkArea, soberResetMarkLine, timeAxisFormatter,
-  workoutMarkArea,
+  meanMarkLine, offBodyMarkArea, sleepMarkArea, soberResetMarkLine,
+  timeAxisFormatter, workoutMarkArea,
 } from "@/components/charts/chartHelpers";
 import type { SleepNight } from "@/api/types";
 
@@ -36,6 +36,10 @@ const cur = computed(() => RANGES.find((r) => r.key === range.value)!);
 
 const hr24 = ref<HeartRateSeries | null>(null);
 const hrv24 = ref<HrvSeries | null>(null);
+// Off-wrist context for the 24h trace (WATCH-2). Stored as the raw
+// device_status points so chartHelpers can compute markArea bands.
+const wearPoints24 = ref<Array<{ time: string; is_worn: boolean | null }>>([]);
+const onBodyPct24 = ref<number | null>(null);
 const dailyRows = ref<TodaySummary[]>([]);
 const priorRows = ref<TodaySummary[]>([]);
 const yearAgoRows = ref<TodaySummary[]>([]);
@@ -57,16 +61,23 @@ async function loadTrace() {
   try {
     const since = new Date(Date.now() - 24 * 3600 * 1000);
     const sinceMs = since.getTime();
-    const [liveHr, liveHrv, acts, sleep, swo, sbHist] = await Promise.all([
+    const [liveHr, liveHrv, acts, sleep, swo, sbHist, wear] = await Promise.all([
       api.heartRate({ since }),
       api.hrv({ since }),
       api.activities({ since, limit: 30 }),
       api.lastSleep().catch(() => null),
       api.strengthWorkouts({ limit: 5 }).catch(() => ({ count: 0, workouts: [] })),
       api.soberHistory(50).catch(() => []),
+      api.deviceStatusSeries({ since }).catch(() => null),
     ]);
     hr24.value = liveHr;
     hrv24.value = liveHrv;
+    if (wear) {
+      wearPoints24.value = wear.points.map((p) => ({
+        time: p.time, is_worn: p.is_worn,
+      }));
+      onBodyPct24.value = wear.on_body_pct;
+    }
 
     // Merge strength workouts that overlap the 24h window into the
     // activity list as Activity-shaped rows, so workoutMarkArea can
@@ -226,6 +237,19 @@ const traceOption = computed(() => {
         ? { markArea: workoutMarkArea(activities24.value) } : {}),
     },
   ];
+
+  // Third host series for the off-wrist bands so a missing HR run
+  // is visibly attributed to the watch being off rather than to a
+  // sync gap. markArea is one-per-series, so we keep this separate
+  // from the workout/sleep host series.
+  const offBodyArea = offBodyMarkArea(wearPoints24.value);
+  if (offBodyArea) {
+    series.push({
+      type: "line", name: "Off wrist",
+      data: [], showSymbol: false, silent: true,
+      markArea: offBodyArea,
+    });
+  }
 
   // Second host series for the sleep band (markArea is one-per-series).
   const sleepArea = sleepMarkArea(

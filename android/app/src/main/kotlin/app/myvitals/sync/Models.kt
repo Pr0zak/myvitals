@@ -786,3 +786,26 @@ data class WorkoutPatchRequest(
     @Json(name = "completed_at") val completedAt: String? = null,
     val notes: String? = null,
 )
+
+@JsonClass(generateAdapter = true)
+data class DeviceStatusPoint(
+    val time: String,
+    @Json(name = "battery_pct") val batteryPct: Int? = null,
+    @Json(name = "is_charging") val isCharging: Boolean? = null,
+    @Json(name = "activity_state") val activityState: String? = null,
+    @Json(name = "is_worn") val isWorn: Boolean? = null,
+    val online: Boolean? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class DeviceStatusSeriesResponse(
+    @Json(name = "device_id") val deviceId: String,
+    val since: String,
+    val until: String,
+    val count: Int,
+    val points: List<DeviceStatusPoint> = emptyList(),
+    @Json(name = "on_body_pct") val onBodyPct: Double? = null,
+    @Json(name = "on_body_seconds") val onBodySeconds: Double = 0.0,
+    @Json(name = "off_body_seconds") val offBodySeconds: Double = 0.0,
+    @Json(name = "unknown_seconds") val unknownSeconds: Double = 0.0,
+)

@@ -69,6 +69,74 @@ export function baseTimeOption() {
 }
 
 /**
+ * Build a markArea component for the intervals where a wearable was
+ * not on the user's body. Intended for the 24h HR / HRV / SpO2 traces
+ * so the gap in samples reads as "watch was off" rather than as a
+ * data anomaly.
+ *
+ * Takes the raw device_status point list (newest order doesn't
+ * matter) and integrates consecutive false-worn pairs. Adjacent
+ * pairs whose gap is < 60s are dropped — these are usually
+ * accelerometer flutter at the watch's wear-detection threshold and
+ * would carpet the chart with tiny bands the user can't act on.
+ */
+type DevicePoint = {
+  time: string;
+  is_worn: boolean | null;
+};
+
+export function offBodyMarkArea(points: DevicePoint[]) {
+  if (points.length < 2) return null;
+  // Sort ascending — caller may pass either order.
+  const sorted = [...points].sort((a, b) => a.time.localeCompare(b.time));
+  type Interval = { start: string; end: string };
+  const intervals: Interval[] = [];
+  let runStart: string | null = null;
+  for (let i = 0; i < sorted.length; i++) {
+    const cur = sorted[i];
+    if (cur.is_worn === false) {
+      if (runStart === null) runStart = cur.time;
+    } else if (runStart !== null) {
+      // Close the run at cur.time (the moment the watch came back on).
+      const startMs = new Date(runStart).getTime();
+      const endMs = new Date(cur.time).getTime();
+      if (endMs - startMs >= 60_000) {
+        intervals.push({ start: runStart, end: cur.time });
+      }
+      runStart = null;
+    }
+  }
+  // If still off at the end, close the last run at the latest timestamp.
+  if (runStart !== null) {
+    const last = sorted[sorted.length - 1].time;
+    const startMs = new Date(runStart).getTime();
+    const endMs = new Date(last).getTime();
+    if (endMs - startMs >= 60_000) {
+      intervals.push({ start: runStart, end: last });
+    }
+  }
+  if (intervals.length === 0) return null;
+  return {
+    silent: false,
+    itemStyle: { color: "rgba(148, 163, 184, 0.18)", borderColor: "rgba(148, 163, 184, 0.45)" },
+    label: {
+      show: true,
+      position: "insideTop",
+      distance: 4,
+      color: "#94a3b8",
+      fontSize: 9,
+      fontWeight: 600,
+      formatter: "off wrist",
+    },
+    data: intervals.map((iv) => [
+      { xAxis: iv.start, name: "off wrist" },
+      { xAxis: iv.end },
+    ]),
+  };
+}
+
+
+/**
  * Convert a list of activities to a markArea series component.
  * Use as: { ...lineSeries, markArea: workoutMarkArea(activities) }.
  * Strength sessions (type === "strength") are tinted with the workout

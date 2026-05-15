@@ -271,6 +271,13 @@ interface BackendApi {
         @retrofit2.http.Query("radius_m") radiusM: Double = 500.0,
         @retrofit2.http.Query("relink") relink: Boolean = false,
     ): TrailOsmFetchAllResponse
+
+    @GET("api/device-status/series")
+    suspend fun deviceStatusSeries(
+        @retrofit2.http.Query("device_id") deviceId: String = "pixel_watch_3",
+        @retrofit2.http.Query("since") since: String? = null,
+        @retrofit2.http.Query("until") until: String? = null,
+    ): DeviceStatusSeriesResponse
 }
 
 object BackendClient {

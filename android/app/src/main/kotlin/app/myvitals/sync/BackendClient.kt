@@ -296,6 +296,12 @@ interface BackendApi {
     suspend fun aiGoals(
         @retrofit2.http.Query("active_only") activeOnly: Boolean = true,
     ): List<AiGoal>
+
+    @GET("update/check")
+    suspend fun updateCheck(): UpdateCheck
+
+    @POST("update/apply")
+    suspend fun updateApply(): UpdateApplyResult
 }
 
 object BackendClient {

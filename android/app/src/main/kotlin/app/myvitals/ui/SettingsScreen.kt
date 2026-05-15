@@ -82,6 +82,13 @@ fun SettingsScreen(
     var token by remember { mutableStateOf(settings.bearerToken) }
     var updateStatus by remember { mutableStateOf("") }
     var pendingRelease by remember { mutableStateOf<GitHubRelease?>(null) }
+
+    // UPDATE-2: backend release check + apply.
+    var backendCheck by remember {
+        mutableStateOf<app.myvitals.sync.UpdateCheck?>(null)
+    }
+    var backendBusy by remember { mutableStateOf(false) }
+    var backendApplyMsg by remember { mutableStateOf("") }
     var dirty by remember { mutableStateOf(false) }
     var profile by remember { mutableStateOf<ProfileResponse?>(null) }
     var reminderEnabled by remember { mutableStateOf(false) }
@@ -496,6 +503,112 @@ fun SettingsScreen(
                     Divider()
                     ListLinkRow(label = "Clear sync buffer", destructive = true) {
                         showClearBufferConfirm = true
+                    }
+                }
+            }
+        }
+
+        // ── Backend updates (UPDATE-2) ──
+        item {
+            Section(title = "Backend updates") {
+                Card {
+                    KvRow(
+                        label = "Running",
+                        value = backendCheck?.current ?: "—",
+                    )
+                    Divider()
+                    KvRow(
+                        label = "Latest release",
+                        value = backendCheck?.latest?.let { "v$it" } ?: "—",
+                    )
+                    backendCheck?.latestPublishedAt?.let { ts ->
+                        Divider()
+                        val rel = remember(ts) {
+                            runCatching {
+                                val inst = Instant.parse(ts)
+                                DateTimeFormatter.ofPattern("MMM d, HH:mm")
+                                    .withZone(ZoneId.systemDefault())
+                                    .format(inst)
+                            }.getOrDefault(ts)
+                        }
+                        KvRow(label = "Published", value = rel)
+                    }
+                    Divider()
+                    ListLinkRow(
+                        label = if (backendBusy) "Checking…" else "Check for updates",
+                    ) {
+                        if (backendBusy) return@ListLinkRow
+                        backendBusy = true
+                        backendApplyMsg = ""
+                        scope.launch {
+                            try {
+                                val api = BackendClient.create(
+                                    settings.backendUrl, settings.bearerToken,
+                                )
+                                backendCheck = withContext(Dispatchers.IO) { api.updateCheck() }
+                            } catch (e: Exception) {
+                                Timber.w(e, "backend update check failed")
+                                backendApplyMsg = "Check failed: ${e.message?.take(80)}"
+                            } finally {
+                                backendBusy = false
+                            }
+                        }
+                    }
+                    val check = backendCheck
+                    if (check?.updateAvailable == true) {
+                        Divider()
+                        ActionRow {
+                            FilledPill(
+                                label = "Apply v${check.latest}",
+                                onClick = {
+                                    if (backendBusy) return@FilledPill
+                                    backendBusy = true
+                                    backendApplyMsg = ""
+                                    scope.launch {
+                                        try {
+                                            val api = BackendClient.create(
+                                                settings.backendUrl, settings.bearerToken,
+                                            )
+                                            val r = withContext(Dispatchers.IO) {
+                                                api.updateApply()
+                                            }
+                                            backendApplyMsg = if (r.triggered) {
+                                                "Update triggered. Backend will restart in ~60s."
+                                            } else {
+                                                r.hint ?: r.error ?: "Trigger failed."
+                                            }
+                                            // Wait a beat, re-check
+                                            kotlinx.coroutines.delay(30_000)
+                                            val again = withContext(Dispatchers.IO) {
+                                                runCatching { api.updateCheck() }.getOrNull()
+                                            }
+                                            if (again != null) backendCheck = again
+                                        } catch (e: Exception) {
+                                            backendApplyMsg = "Apply failed: ${e.message?.take(80)}"
+                                        } finally {
+                                            backendBusy = false
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    if (backendApplyMsg.isNotBlank()) {
+                        Divider()
+                        Text(
+                            backendApplyMsg,
+                            fontSize = 13.sp,
+                            color = MV.OnSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        )
+                    }
+                    check?.error?.let { err ->
+                        Divider()
+                        Text(
+                            "Couldn't check GitHub: $err",
+                            fontSize = 12.sp, color = MV.OnSurfaceDim,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        )
                     }
                 }
             }

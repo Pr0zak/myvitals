@@ -804,6 +804,26 @@ data class AiGoal(
 )
 
 @JsonClass(generateAdapter = true)
+data class UpdateCheck(
+    val current: String,
+    val latest: String? = null,
+    @Json(name = "latest_tag") val latestTag: String? = null,
+    @Json(name = "latest_url") val latestUrl: String? = null,
+    @Json(name = "latest_published_at") val latestPublishedAt: String? = null,
+    @Json(name = "release_notes") val releaseNotes: String? = null,
+    @Json(name = "update_available") val updateAvailable: Boolean = false,
+    val error: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateApplyResult(
+    val triggered: Boolean,
+    @Json(name = "trigger_path") val triggerPath: String? = null,
+    val error: String? = null,
+    val hint: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
 data class Annotation(
     val id: Int,
     val ts: String,

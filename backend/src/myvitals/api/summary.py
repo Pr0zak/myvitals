@@ -1,5 +1,7 @@
+import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -276,3 +278,80 @@ async def summary_range(
         )
         for r in rows
     ]
+
+
+@router.get("/today/snapshot")
+async def today_snapshot(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """TODAY-4: bundled Today-page data in a single round-trip.
+
+    Today.vue used to fire 16 parallel HTTP requests on mount; that
+    works but every call pays the TLS+route-handler overhead and the
+    waterfall pegs at the slowest one. This endpoint dispatches the
+    same handlers in-process via asyncio.gather and returns a single
+    union JSON.
+
+    Each section is best-effort — any handler that raises lands as
+    null/empty in its slot so a single broken subsystem doesn't take
+    down the whole snapshot. The frontend can opt into this endpoint
+    while keeping the per-call fallback for backward compat.
+    """
+    from datetime import timedelta as _td
+    # Avoid circular imports — these modules in turn import .summary.
+    from .annotations import list_annotations as _journal_list
+    from .fasting import current_fast as _fasting_current
+    from .profile import get_profile as _profile_get
+    from .query import (
+        get_blood_pressure as _bp_get,
+        get_heartrate as _hr_get,
+        get_hrv as _hrv_get,
+        get_last_sleep as _sleep_last,
+        get_steps as _steps_get,
+        get_weight as _weight_get,
+    )
+    from .sober import get_current as _sober_current
+    from .ai import list_goals as _goals_list
+
+    now = datetime.now(timezone.utc)
+    day_ago = now - _td(days=1)
+    seven_ago = (now - _td(days=7)).date()
+    thirty_ago = now - _td(days=30)
+    today_local = date.today()
+
+    # SQLAlchemy AsyncSession can't run concurrent ops, so each parallel
+    # handler gets its own session. The request-scoped `db` is only used
+    # for the synchronous `today()` call which we do first to avoid
+    # contention.
+    from ..db.session import SessionLocal
+
+    async def safe(name: str, fn):
+        try:
+            async with SessionLocal() as own_db:
+                return name, await fn(own_db)
+        except Exception as e:  # noqa: BLE001
+            log.warning("snapshot section %s failed: %s", name, e)
+            return name, None
+
+    results = await asyncio.gather(
+        safe("today", lambda s: today(db=s)),
+        safe("summary7d", lambda s: summary_range(since=seven_ago, until=None, db=s)),
+        safe("hr24", lambda s: _hr_get(since=day_ago, until=None, db=s)),
+        safe("hrv24", lambda s: _hrv_get(since=day_ago, until=None, db=s)),
+        safe("steps24", lambda s: _steps_get(since=day_ago, until=None, db=s)),
+        safe("sleep_last", lambda s: _sleep_last(db=s)),
+        safe("weight30", lambda s: _weight_get(since=thirty_ago, until=None, db=s)),
+        safe("bp30", lambda s: _bp_get(since=thirty_ago, until=None, db=s)),
+        safe("annotations1d", lambda s: _journal_list(
+            since=day_ago, type=None, limit=50, db=s,
+        )),
+        safe("profile", lambda s: _profile_get(db=s)),
+        safe("sober", lambda s: _sober_current(addiction="alcohol", db=s)),
+        safe("fasting", lambda s: _fasting_current(db=s)),
+        safe("goals", lambda s: _goals_list(active_only=True, db=s)),
+    )
+
+    snapshot: dict[str, Any] = {"generated_at": now.isoformat()}
+    for name, value in results:
+        snapshot[name] = value
+    return snapshot

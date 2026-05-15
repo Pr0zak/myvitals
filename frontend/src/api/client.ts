@@ -154,6 +154,22 @@ export const api = {
     return data;
   },
 
+  /**
+   * TODAY-4: bundled snapshot of every endpoint Today.vue mounts.
+   * Returns null when the server is older than v0.7.221 (404) so the
+   * caller can fall back to the per-call fan-out without changing
+   * its existing code path. */
+  async todaySnapshot(): Promise<Record<string, unknown> | null> {
+    try {
+      const { data } = await http.get("/summary/today/snapshot");
+      return data;
+    } catch (e: unknown) {
+      const err = e as { response?: { status?: number } };
+      if (err?.response?.status === 404) return null;
+      throw e;
+    }
+  },
+
   async summaryRange(since: Date | string, until?: Date | string): Promise<TodaySummary[]> {
     const params: Record<string, string> = {
       since: since instanceof Date ? since.toISOString().slice(0, 10) : since,

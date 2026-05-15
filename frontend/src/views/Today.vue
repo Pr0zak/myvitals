@@ -80,6 +80,52 @@ async function loadCore() {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
+    // TODAY-4: try the bundled snapshot endpoint first. When present
+    // (v0.7.221+), it collapses 13 of the 16 round-trips into one.
+    // The remaining three — version, activities, strengthWorkouts —
+    // stay parallel since the snapshot doesn't carry them yet.
+    const snap = await api.todaySnapshot().catch(() => null);
+
+    if (snap) {
+      const [a, sw, ver] = await Promise.all([
+        api.activities({ since: thirtyDaysAgo, limit: 30 }).catch(() => []),
+        api.strengthWorkouts({ limit: 5 }).catch(() => ({ count: 0, workouts: [] })),
+        api.version().catch(() => ({ version: "?", git_sha: "?", build_time: "?" })),
+      ]);
+      summary.value = snap.today as TodaySummary;
+      summary7d.value = (snap.summary7d as TodaySummary[]) ?? [];
+      hr24.value = snap.hr24 as HeartRateSeries | null;
+      hrv24.value = snap.hrv24 as HrvSeries | null;
+      sleep.value = snap.sleep_last as SleepNight | null;
+      steps24.value = snap.steps24 as StepsSeries | null;
+      activities.value = a;
+      strengthWorkouts.value = sw.workouts ?? [];
+      annotations.value = (snap.annotations1d as Annotation[]) ?? [];
+      version.value = ver.version;
+      lastSync.value = (snap.today as TodaySummary | null)?.last_sync ?? null;
+      profile.value = snap.profile as any;
+      weightSeries.value = (snap.weight30 as any)?.points ?? [];
+      bpSeries.value = snap.bp30 as any;
+      goals.value = (snap.goals as any) ?? [];
+      const sob = snap.sober as { active?: unknown; days?: number; hours?: number } | null;
+      soberCurrent.value = sob && sob.active
+        ? { days: sob.days ?? null, hours: sob.hours ?? null }
+        : null;
+      const fst = snap.fasting as { is_active?: boolean; started_at?: string;
+        target_hours?: number; current_stage?: string } | null;
+      fastingCurrent.value = fst
+        ? {
+            isActive: fst.is_active ?? true,
+            startedAt: fst.started_at ?? "",
+            targetHours: fst.target_hours ?? null,
+            currentStage: fst.current_stage ?? "",
+          }
+        : null;
+      loading.value = false;
+      return;
+    }
+
+    // Fallback: original per-call fan-out for pre-v0.7.221 servers.
     const [s, s7, h, hv, sl, st, a, sw, an, ver, prof, ws, bps, gs, sob, fst] = await Promise.all([
       api.todaySummary(),
       api.summaryRange(sevenDaysAgo).catch(() => []),

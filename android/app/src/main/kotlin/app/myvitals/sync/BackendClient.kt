@@ -173,6 +173,17 @@ interface BackendApi {
     @POST("trails/alerts/mark-notified")
     suspend fun markTrailAlertsNotified(@Body body: MarkNotifiedBody): Map<String, Int>
 
+    // AI anomaly / goal / streak alerts (distinct from trail alerts above).
+    // Backend handles lazy anomaly-scan triggering on read.
+    @GET("ai/alerts")
+    suspend fun aiAlerts(
+        @retrofit2.http.Query("unacked_only") unackedOnly: Boolean = true,
+        @retrofit2.http.Query("limit") limit: Int = 20,
+    ): List<AiAlertRow>
+
+    @POST("ai/alerts/mark-notified")
+    suspend fun markAiAlertsNotified(@Body ids: List<Long>): Map<String, Int>
+
     @retrofit2.http.PUT("trails/{id}/location")
     suspend fun editTrailLocation(
         @Path("id") id: Long, @Body body: TrailLocationBody,

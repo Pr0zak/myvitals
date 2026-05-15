@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
-import { RouterView, useRoute } from "vue-router";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { RouterView, useRoute, useRouter } from "vue-router";
 import { Menu as MenuIcon } from "lucide-vue-next";
 import { isConfigured } from "@/config";
 import { api } from "@/api/client";
@@ -8,6 +8,7 @@ import SideNav from "@/components/SideNav.vue";
 
 const sideNavOpen = ref(false);
 const route = useRoute();
+const router = useRouter();
 watch(() => route.fullPath, () => { sideNavOpen.value = false; });
 
 // Phone-side sync health — surfaced as a top banner when HC perms are
@@ -16,6 +17,18 @@ watch(() => route.fullPath, () => { sideNavOpen.value = false; });
 const permsLost = ref(false);
 const permsMissing = ref<string[]>([]);
 const alerts = ref<Awaited<ReturnType<typeof api.aiAlerts>>>([]);
+
+// Deep-link target: when a phone notification fires
+// `myvitals.local/?alert=<id>`, highlight the matching banner and
+// scroll it into view. We clear the query param once we've focused
+// so a manual page refresh doesn't keep re-glowing.
+const focusedAlertId = computed<number | null>(() => {
+  const raw = route.query.alert;
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  const n = v ? Number.parseInt(v, 10) : NaN;
+  return Number.isFinite(n) ? n : null;
+});
+
 async function refreshSyncHealth() {
   if (!isConfigured()) return;
   try {
@@ -35,7 +48,32 @@ async function ackAll() {
   try { await api.aiAckAllAlerts(); alerts.value = []; }
   catch { /* ignore */ }
 }
-onMounted(() => { refreshSyncHealth(); setInterval(refreshSyncHealth, 60_000); });
+
+// When the deep-link target arrives (or alerts finish loading with one
+// queued), scroll the matching banner into view and clear the query
+// param after a short delay so the focused border glow has time to
+// register before the URL goes back to clean.
+async function focusDeepLinkedAlert() {
+  const id = focusedAlertId.value;
+  if (id == null) return;
+  if (!alerts.value.some((a) => a.id === id)) return;
+  await nextTick();
+  const el = document.querySelector<HTMLElement>(`[data-alert-id="${id}"]`);
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  // Strip the query param after the glow is visible
+  setTimeout(() => {
+    const q = { ...route.query };
+    delete q.alert;
+    router.replace({ path: route.path, query: q, hash: route.hash });
+  }, 4_000);
+}
+watch([focusedAlertId, alerts], focusDeepLinkedAlert);
+
+onMounted(async () => {
+  await refreshSyncHealth();
+  await focusDeepLinkedAlert();
+  setInterval(refreshSyncHealth, 60_000);
+});
 </script>
 
 <template>
@@ -62,7 +100,8 @@ onMounted(() => { refreshSyncHealth(); setInterval(refreshSyncHealth, 60_000); }
         </span>
       </div>
       <div v-for="a in alerts" :key="a.id" class="banner banner-alert"
-           :class="`severity-${a.severity}`">
+           :class="[`severity-${a.severity}`, { focused: focusedAlertId === a.id }]"
+           :data-alert-id="a.id">
         <span class="al-icon">●</span>
         <div class="al-text">
           <strong>{{ a.title }}</strong>
@@ -239,6 +278,14 @@ main {
   font-size: 0.95rem; cursor: pointer; padding: 0.2rem 0.4rem; line-height: 1;
 }
 .banner-alert .al-ack:hover { opacity: 1; }
+.banner-alert.focused {
+  animation: alert-glow 1.2s ease-in-out 2;
+  box-shadow: 0 0 0 1px currentColor, 0 0 18px -2px currentColor;
+}
+@keyframes alert-glow {
+  0%, 100% { box-shadow: 0 0 0 1px currentColor, 0 0 18px -2px currentColor; }
+  50% { box-shadow: 0 0 0 2px currentColor, 0 0 28px 2px currentColor; }
+}
 .banner-ack-all {
   margin: 0 1.5rem 0.4rem; text-align: right;
 }

@@ -217,6 +217,7 @@ export interface StrengthWorkoutExercise {
   target_reps_high: number;
   target_weight_lb: number | null;
   target_rest_s: number;
+  is_timed?: boolean;     // backend flag — target_reps_* are hold seconds
   notes: string | null;
   sets: StrengthSet[];
 }

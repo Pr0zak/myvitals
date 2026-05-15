@@ -18,6 +18,8 @@ object Notifier {
     private const val REST_TIMER_NOTIF_ID = 3001
     const val FASTING_CHANNEL_ID = "fasting"
     private const val FASTING_NOTIF_BASE = 4000
+    const val AI_ALERT_CHANNEL_ID = "ai_alerts"
+    private const val AI_ALERT_NOTIF_BASE = 5000
 
     fun ensureChannel(context: Context) {
         val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -60,6 +62,17 @@ object Notifier {
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply {
                     description = "Pings as you hit each fasting stage (ketosis, autophagy, …)"
+                }
+            )
+        }
+        if (mgr.getNotificationChannel(AI_ALERT_CHANNEL_ID) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    AI_ALERT_CHANNEL_ID,
+                    "Health alerts",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = "Anomalies, goal milestones, and other AI-flagged signals"
                 }
             )
         }
@@ -198,6 +211,47 @@ object Notifier {
             NotificationManagerCompat.from(context)
                 .notify(TRAIL_NOTIF_BASE + alertId.toInt(), notif)
         } catch (_: SecurityException) { /* permission revoked */ }
+    }
+
+    /** Surface an AI-generated anomaly / goal / streak alert. The id is
+     *  stable so reposting the same alert id replaces rather than stacks
+     *  (the backend's phone_notified_at guard already prevents that, but
+     *  belt-and-braces here). Tapping opens the dashboard at /?alert=<id>
+     *  so the relevant card can scroll into view. */
+    fun postAiAlert(
+        context: Context, alertId: Long, severity: String,
+        title: String, body: String, backendBaseUrl: String,
+    ) {
+        ensureChannel(context)
+        val dashboard = backendBaseUrl
+            .trimEnd('/')
+            .removeSuffix("/api")
+            .ifBlank { return }    // no backend configured → no deep-link tap target
+        val deepLink = Intent(
+            Intent.ACTION_VIEW,
+            android.net.Uri.parse("$dashboard/?alert=$alertId"),
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+        val pi = PendingIntent.getActivity(
+            context, alertId.toInt(), deepLink,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val icon = when (severity) {
+            "bad"  -> android.R.drawable.stat_sys_warning
+            "good" -> android.R.drawable.stat_notify_more
+            else   -> android.R.drawable.stat_notify_sync
+        }
+        val notif = NotificationCompat.Builder(context, AI_ALERT_CHANNEL_ID)
+            .setSmallIcon(icon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(pi)
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(context)
+                .notify(AI_ALERT_NOTIF_BASE + alertId.toInt(), notif)
+        } catch (_: SecurityException) { /* perm revoked */ }
     }
 
     fun postUpdateAvailable(context: Context, release: GitHubRelease) {

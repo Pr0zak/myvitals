@@ -266,12 +266,8 @@ ideas if HA + HC ever both carry overlapping HR / steps:
       B-Stance RDL, DB Hip Thrust, Cuban Rotation, Zottman Preacher,
       Cross-Body Hammer, Plank Pull-Through, Pike / Archer / Hindu
       push-ups, etc.) as a supplementary JSON merged at catalog load.
-- [ ] **iOS app** — currently Android-only. Same Health Connect
-      analogue would be HealthKit on iOS.
 - [ ] **Multi-user** — single-user assumed throughout; no user_id
       column on most tables. Big refactor if ever wanted.
-- [ ] **Watch-side complication** — Wear OS face complication
-      showing sober days / readiness / verdict.
 
 ### Already shipped (kept for cross-reference)
 

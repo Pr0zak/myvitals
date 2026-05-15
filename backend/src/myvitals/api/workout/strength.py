@@ -538,6 +538,12 @@ class WorkoutExerciseOut(BaseModel):
     target_reps_high: int
     target_weight_lb: float | None
     target_rest_s: int
+    # When True, target_reps_low/high carry HOLD SECONDS and the
+    # `actual_reps` field on each set should be interpreted as seconds.
+    # Sourced from the catalog at serialization time so we don't need a
+    # DB column or migration. Lets clients show "30-60s" instead of
+    # "30-60 reps" for planks / isometric holds.
+    is_timed: bool = False
     notes: str | None
     sets: list[SetOut] = []
 
@@ -617,6 +623,7 @@ def _wex_to_out(
         target_reps_high=wex.target_reps_high,
         target_weight_lb=wex.target_weight_lb,
         target_rest_s=wex.target_rest_s,
+        is_timed=bool(_CATALOG_BY_ID.get(wex.exercise_id, {}).get("is_timed")),
         notes=wex.notes,
         sets=[_set_to_out(s) for s in sorted(sets, key=lambda x: x.set_number)],
     )

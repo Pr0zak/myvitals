@@ -214,6 +214,9 @@ data class StrengthWorkoutExerciseRow(
     @Json(name = "target_reps_high") val targetRepsHigh: Int,
     @Json(name = "target_weight_lb") val targetWeightLb: Double? = null,
     @Json(name = "target_rest_s") val targetRestS: Int = 90,
+    // Backend flag — when true, targetReps* carry HOLD SECONDS and the
+    // logged actualReps should be interpreted as seconds too.
+    @Json(name = "is_timed") val isTimed: Boolean = false,
     val notes: String? = null,
     val sets: List<StrengthSetRow> = emptyList(),
 )
@@ -647,6 +650,20 @@ data class TrailAlertRow(
 
 @JsonClass(generateAdapter = true)
 data class MarkNotifiedBody(val ids: List<Long>)
+
+@JsonClass(generateAdapter = true)
+data class AiAlertRow(
+    val id: Long,
+    @Json(name = "created_at") val createdAt: String,
+    val kind: String,
+    val severity: String,
+    val title: String,
+    val body: String,
+    val metric: String?,
+    @Json(name = "z_score") val zScore: Double?,
+    @Json(name = "acked_at") val ackedAt: String?,
+    @Json(name = "phone_notified_at") val phoneNotifiedAt: String?,
+)
 
 @JsonClass(generateAdapter = true)
 data class ActivityRow(

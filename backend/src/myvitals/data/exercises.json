@@ -2617,6 +2617,7 @@
       "bodyweight"
     ],
     "is_compound": false,
+    "is_timed": true,
     "movement_pattern": "isolation_shoulder",
     "level": "beginner",
     "mechanic": "isolation",
@@ -2640,6 +2641,7 @@
       "bodyweight"
     ],
     "is_compound": false,
+    "is_timed": true,
     "movement_pattern": "isolation_shoulder",
     "level": "beginner",
     "mechanic": "isolation",
@@ -3226,6 +3228,7 @@
       "bodyweight"
     ],
     "is_compound": false,
+    "is_timed": true,
     "movement_pattern": "isolation_core",
     "level": "beginner",
     "mechanic": "isolation",
@@ -4004,6 +4007,7 @@
       "bodyweight"
     ],
     "is_compound": false,
+    "is_timed": true,
     "movement_pattern": "isolation_core",
     "level": "beginner",
     "mechanic": "isolation",

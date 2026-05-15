@@ -735,25 +735,29 @@ def prescribe_slot(
     ex: dict[str, Any], slot_role: str, goal: str = "hypertrophy",
     age: int | None = None, bodyweight_lb: float | None = None,
 ) -> tuple[int, int, int, int]:
-    """Return (sets, reps_low, reps_high, rest_s) given the exercise + slot role.
+    """Reps-or-seconds prescription. When the exercise is marked
+    `is_timed` in the catalog (planks, side bridges, isometric neck,
+    …), the returned (reps_low, reps_high) are HOLD SECONDS, not rep
+    counts. The UI keys on the same `is_timed` flag on the exercise to
+    label the field appropriately."""
+    if ex.get("is_timed"):
+        if slot_role == "main_compound":
+            sets, rl, rh, rest = 3, 45, 60, 90
+        elif slot_role == "secondary_compound":
+            sets, rl, rh, rest = 3, 30, 60, 75
+        else:
+            sets, rl, rh, rest = 3, 30, 45, 60
+        rest, sets = _age_scale(rest, sets, age, slot_role)
+        return (sets, rl, rh, rest)
 
-    slot_role ∈ {"main_compound", "secondary_compound", "isolation"}.
-    `goal` shifts rep ranges + rest periods per Schoenfeld 2010 / 2017:
-      - strength    → 3-6 reps,  long rest (180-240s), fewer total reps,
-                      load near 80-90% 1RM
-      - hypertrophy → 6-12 reps, moderate rest (75-120s),
-                      load 65-80% 1RM, more volume
-      - general     → 8-15 reps, short rest (45-75s),
-                      load 55-70% 1RM, time-efficient
-
-    `age` scales rest up (+15/+30/+45 s for 40s/50s/60+) and trims a set
-    off isolation/secondary work in the 60+ bucket.
-
-    `bodyweight_lb`: only used for bodyweight-only exercises — rep
-    targets are shifted up and inversely scaled by user weight so a
-    180-lb lifter doesn't get the same 8-rep Push-Up target as a 130-lb
-    one.
-    """
+    # Rep-based prescription. `goal` shifts rep ranges + rest periods
+    # per Schoenfeld 2010/2017:
+    #   strength    → 3-6 reps,  long rest, ~80-90% 1RM
+    #   hypertrophy → 6-12 reps, moderate rest, ~65-80% 1RM
+    #   general     → 8-15 reps, short rest, ~55-70% 1RM
+    # `age` scales rest up and trims an isolation/secondary set at 60+.
+    # `bodyweight_lb` scales bodyweight-only rep targets up inversely
+    # so a heavier lifter doesn't get the same target as a lighter one.
     if goal == "strength":
         if slot_role == "main_compound":
             sets, rl, rh, rest = 5, 3, 5, 240

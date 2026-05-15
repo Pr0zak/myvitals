@@ -435,7 +435,8 @@ async def list_alerts(
     return [
         {"id": r.id, "created_at": r.created_at, "kind": r.kind,
          "severity": r.severity, "title": r.title, "body": r.body,
-         "metric": r.metric, "z_score": r.z_score, "acked_at": r.acked_at}
+         "metric": r.metric, "z_score": r.z_score, "acked_at": r.acked_at,
+         "phone_notified_at": r.phone_notified_at}
         for r in rows
     ]
 

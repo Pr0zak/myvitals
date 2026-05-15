@@ -254,7 +254,12 @@ function exName(slug: string): string {
 // `is_timed` flag (rep-based mobility like Thread-the-Needle / Cat-Cow
 // returns false). Non-mobility falls through to the prior heuristic.
 function isTimedExercise(wex: StrengthWorkoutExercise): boolean {
+  // Prefer the backend's per-exercise flag (planks, side bridges,
+  // isometric neck, mobility holds, …). The legacy heuristic below
+  // only fires if the backend somehow didn't include the flag.
+  if ((wex as { is_timed?: boolean }).is_timed === true) return true;
   const c = ex(wex.exercise_id);
+  if (c?.is_timed === true) return true;
   if (c?.movement_pattern === "mobility") return c.is_timed !== false;
   if (
     wex.target_weight_lb == null &&

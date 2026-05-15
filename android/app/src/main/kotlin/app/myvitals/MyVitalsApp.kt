@@ -14,6 +14,7 @@ import app.myvitals.fasting.FastingWidgetProvider
 import app.myvitals.widget.WidgetsRefreshWorker
 import app.myvitals.strength.WorkoutReminderWorker
 import app.myvitals.sync.SyncWorker
+import app.myvitals.ai.AiAlertWorker
 import app.myvitals.trails.TrailAlertWorker
 import app.myvitals.update.Notifier
 import app.myvitals.update.UpdateCheckWorker
@@ -47,6 +48,7 @@ class MyVitalsApp : Application() {
         scheduleUpdateCheck()
         scheduleLogUpload()
         scheduleTrailAlertPoll()
+        scheduleAiAlertPoll()
         scheduleWorkoutReminder()
 
         // Refresh any installed fasting widgets every 15 min (system's
@@ -84,6 +86,21 @@ class MyVitalsApp : Application() {
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             TrailAlertWorker.UNIQUE_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
+    }
+
+    private fun scheduleAiAlertPoll() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+        val request = PeriodicWorkRequestBuilder<AiAlertWorker>(30, TimeUnit.MINUTES)
+            .setConstraints(constraints)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 60, TimeUnit.SECONDS)
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            AiAlertWorker.UNIQUE_NAME,
             ExistingPeriodicWorkPolicy.KEEP,
             request,
         )

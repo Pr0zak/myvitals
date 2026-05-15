@@ -29,6 +29,7 @@ import AIInsights, {
 import ActivityRow from "@/components/today/ActivityRow.vue";
 import BodyMetrics from "@/components/today/BodyMetrics.vue";
 import BloodPressure from "@/components/today/BloodPressure.vue";
+import AnnotationLog from "@/components/today/AnnotationLog.vue";
 import Footer from "@/components/today/Footer.vue";
 
 const loading = ref(true);
@@ -520,6 +521,13 @@ import { useRouter } from "vue-router";
 const router = useRouter();
 function openBp() { router.push("/blood-pressure"); }
 function openLog() { router.push("/journal"); }
+
+async function refreshAnnotations() {
+  const dayAgo = new Date(Date.now() - 24 * 3600 * 1000);
+  try {
+    annotations.value = await api.listAnnotations({ since: dayAgo, limit: 50 });
+  } catch { /* non-fatal — chip strip will refresh next loadCore */ }
+}
 </script>
 
 <template>
@@ -583,6 +591,12 @@ function openLog() { router.push("/journal"); }
         :erg="ergCell"
       />
     </div>
+
+    <AnnotationLog
+      :chips="annotationChips"
+      @log="openLog"
+      @added="refreshAnnotations"
+    />
 
     <Footer :version="version"/>
   </div>

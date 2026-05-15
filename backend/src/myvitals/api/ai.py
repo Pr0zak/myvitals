@@ -422,6 +422,7 @@ async def list_alerts(
     # /ai/alerts, so the scan piggybacks on actual demand instead of
     # firing on a fixed cadence regardless of whether anyone's looking.
     await _maybe_run_anomaly_scan(db)
+    await _check_goals_for_completion(db)
 
     stmt = (
         select(models.AiAlert)
@@ -443,6 +444,117 @@ async def list_alerts(
 # sufficient since we're single-process (uvicorn worker count = 1 in
 # the deployment).
 _anomaly_scan_lock = __import__("asyncio").Lock()
+
+
+async def _check_goals_for_completion(db: AsyncSession) -> None:
+    """Auto-complete active AiGoals once their targets are crossed
+    (GOALS-6). Hardcoded direction convention by kind — `weight` going
+    down, the rest going up. Creates a 'good'-severity goal_reached
+    AiAlert with a per-goal dedup_key so re-firing is structurally
+    impossible.
+    """
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from sqlalchemy import func as _func
+    now = _dt.now(_tz.utc)
+    today = now.date()
+    goals = (await db.execute(
+        select(models.AiGoal)
+        .where(models.AiGoal.ended_at.is_(None))
+        .where(models.AiGoal.target_value.is_not(None))
+    )).scalars().all()
+    if not goals:
+        return
+
+    kinds = {g.kind for g in goals}
+
+    latest_weight_kg: float | None = None
+    if "weight" in kinds:
+        latest_weight_kg = (await db.execute(
+            select(models.BodyMetric.weight_kg)
+            .where(models.BodyMetric.weight_kg.is_not(None))
+            .order_by(models.BodyMetric.time.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+
+    avg_sleep_h: float | None = None
+    if "sleep" in kinds:
+        since = today - _td(days=7)
+        rows = (await db.execute(
+            select(models.DailySummary.sleep_duration_s)
+            .where(models.DailySummary.date >= since)
+            .where(models.DailySummary.sleep_duration_s.is_not(None))
+        )).scalars().all()
+        if rows:
+            avg_sleep_h = sum(rows) / len(rows) / 3600.0
+
+    today_steps: int | None = None
+    if "steps" in kinds:
+        today_steps = (await db.execute(
+            select(models.DailySummary.steps_total)
+            .where(models.DailySummary.date == today)
+            .limit(1)
+        )).scalar_one_or_none()
+
+    sober_days: float | None = None
+    if "sober" in kinds:
+        s = (await db.execute(
+            select(models.SoberStreak)
+            .where(models.SoberStreak.end_at.is_(None))
+            .limit(1)
+        )).scalar_one_or_none()
+        if s is not None:
+            sober_days = (now - s.start_at).total_seconds() / 86400.0
+
+    def _target_kg(g: models.AiGoal) -> float:
+        """Normalise a weight goal's target to kilograms regardless of
+        the unit the user typed it in. The /goals form lets users pick
+        either kg or lb; storing both unit + value lets us be robust
+        without forcing a migration."""
+        unit = (g.target_unit or "").strip().lower()
+        if unit in ("lb", "lbs", "pound", "pounds"):
+            return g.target_value / 2.20462
+        return g.target_value
+
+    new_alerts: list[models.AiAlert] = []
+    for g in goals:
+        reached = False
+        evidence = "—"
+        if g.kind == "weight" and latest_weight_kg is not None:
+            target_kg = _target_kg(g)
+            reached = latest_weight_kg <= target_kg
+            evidence = f"{latest_weight_kg:.1f} kg vs target {target_kg:.1f} kg"
+        elif g.kind == "sleep" and avg_sleep_h is not None:
+            # target_unit on sleep goals is typically "h" or "h/night";
+            # value is hours either way.
+            reached = avg_sleep_h >= g.target_value
+            evidence = f"{avg_sleep_h:.1f}h/night avg vs target {g.target_value:.1f}h"
+        elif g.kind == "steps" and today_steps is not None:
+            reached = float(today_steps) >= g.target_value
+            evidence = f"{today_steps:,} steps today vs target {int(g.target_value):,}"
+        elif g.kind == "sober" and sober_days is not None:
+            reached = sober_days >= g.target_value
+            evidence = f"{sober_days:.0f} sober days vs target {int(g.target_value)}"
+        if not reached:
+            continue
+        g.ended_at = now
+        dedup_key = f"goal_reached:{g.id}"
+        # Dedup by dedup_key so a phantom re-create can't double-alert.
+        # _anomaly_scan uses the same mechanism for the same reason.
+        existing = (await db.execute(
+            select(_func.count(models.AiAlert.id))
+            .where(models.AiAlert.dedup_key == dedup_key)
+        )).scalar_one()
+        if existing == 0:
+            new_alerts.append(models.AiAlert(
+                created_at=now, kind="goal_reached", severity="good",
+                title=f"Goal reached: {g.title}",
+                body=f"{evidence} — automatically marked complete.",
+                metric=g.kind, dedup_key=dedup_key,
+            ))
+    for a in new_alerts:
+        db.add(a)
+    if new_alerts or any(g.ended_at == now for g in goals):
+        await db.commit()
 
 
 async def _maybe_run_anomaly_scan(db: AsyncSession) -> None:

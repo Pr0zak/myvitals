@@ -31,6 +31,7 @@ import BodyMetrics from "@/components/today/BodyMetrics.vue";
 import BloodPressure from "@/components/today/BloodPressure.vue";
 import AnnotationLog from "@/components/today/AnnotationLog.vue";
 import GoalsTile from "@/components/today/GoalsTile.vue";
+import LifestyleStrip from "@/components/today/LifestyleStrip.vue";
 import Footer from "@/components/today/Footer.vue";
 
 const loading = ref(true);
@@ -51,6 +52,11 @@ const goals = ref<Array<{
   target_value: number | null; target_unit: string | null;
   current_value: number | null; progress_pct: number | null;
 }>>([]);
+const soberCurrent = ref<{ days: number | null; hours: number | null } | null>(null);
+const fastingCurrent = ref<{
+  isActive: boolean; startedAt: string;
+  targetHours: number | null; currentStage: string;
+} | null>(null);
 const lastSync = ref<string | null>(null);
 const version = ref<string>("0.0.0");
 
@@ -82,7 +88,7 @@ async function loadCore() {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const [s, s7, h, hv, sl, st, a, sw, an, ver, prof, ws, bps, gs] = await Promise.all([
+    const [s, s7, h, hv, sl, st, a, sw, an, ver, prof, ws, bps, gs, sob, fst] = await Promise.all([
       api.todaySummary(),
       api.summaryRange(sevenDaysAgo).catch(() => []),
       api.heartRate({ since: dayAgo }).catch(() => null),
@@ -97,6 +103,8 @@ async function loadCore() {
       api.weight({ since: thirtyDaysAgo }).catch(() => ({ points: [] as any })),
       api.bloodPressure({ since: thirtyDaysAgo }).catch(() => null),
       api.aiGoals(true).catch(() => []),
+      api.soberCurrent().catch(() => null),
+      api.fastingCurrent().catch(() => null),
     ]);
     summary.value = s;
     summary7d.value = s7;
@@ -113,6 +121,17 @@ async function loadCore() {
     weightSeries.value = (ws as any)?.points ?? [];
     bpSeries.value = bps as any;
     goals.value = gs as any;
+    soberCurrent.value = sob && sob.active
+      ? { days: sob.days ?? null, hours: sob.hours ?? null }
+      : null;
+    fastingCurrent.value = fst
+      ? {
+          isActive: (fst as any).is_active ?? true,
+          startedAt: (fst as any).started_at,
+          targetHours: (fst as any).target_hours ?? null,
+          currentStage: (fst as any).current_stage ?? "",
+        }
+      : null;
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : "Failed to load";
   } finally {
@@ -605,6 +624,8 @@ async function refreshAnnotations() {
       @log="openLog"
       @added="refreshAnnotations"
     />
+
+    <LifestyleStrip :sober="soberCurrent" :fasting="fastingCurrent"/>
 
     <GoalsTile :goals="goals"/>
 

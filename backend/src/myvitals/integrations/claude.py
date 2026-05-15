@@ -1766,6 +1766,45 @@ Frame your assessment against widely-accepted training principles:
 Cite specific numbers in evidence. Don't be vague."""
 
 
+async def _recent_alerts_ctx(
+    db: AsyncSession, days: int = 14, limit: int = 6,
+) -> list[dict[str, Any]]:
+    """Compact ai_alerts feed for Coach payloads (ALERTS-2).
+
+    Returns last N alerts in the trailing window, prefering severity ordering
+    (bad > warn > info > good), then recency. Only the fields the AI actually
+    benefits from — date, severity, kind, metric, title — so we don't blow up
+    the cached-payload size or accidentally include body prose that already
+    paraphrases the numbers the AI will see in its own metric blocks.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (await db.execute(
+        select(models.AiAlert)
+        .where(models.AiAlert.created_at >= cutoff)
+        .order_by(models.AiAlert.created_at.desc())
+        .limit(limit * 4)  # over-fetch so the severity sort below has room
+    )).scalars().all()
+    sev_weight = {"bad": 3, "warn": 2, "info": 1, "good": 0}
+    ranked = sorted(
+        rows,
+        key=lambda r: (
+            sev_weight.get(r.severity, 0),
+            int(r.created_at.timestamp()),
+        ),
+        reverse=True,
+    )[:limit]
+    return [
+        {
+            "date": r.created_at.date().isoformat(),
+            "severity": r.severity,
+            "kind": r.kind,
+            "metric": r.metric,
+            "title": r.title,
+        }
+        for r in ranked
+    ]
+
+
 async def build_cardio_coach_payload(db: AsyncSession) -> dict[str, Any]:
     """Bounded payload for the cardio coach AI card."""
     from ..analytics.cardio import cardio_summary
@@ -1774,6 +1813,7 @@ async def build_cardio_coach_payload(db: AsyncSession) -> dict[str, Any]:
         "today": datetime.now(timezone.utc).date().isoformat(),
         "profile": await _profile_ctx(db),
         "cardio_30d": summary,
+        "recent_alerts": await _recent_alerts_ctx(db),
     }
 
 
@@ -1867,6 +1907,9 @@ def _workout_coach_system(tone: str) -> str:
 - Last 30 days of cardio (HR zones, polarization, volume by type)
 - Last 28 days of vitals (HRV, RHR, sleep, readiness, training load CTL/ATL/TSB)
 - Today's daily summary
+- recent_alerts — anomaly alerts the system already flagged (high RHR,
+  suppressed HRV, illness risk, broken streaks). Treat these as confirmed
+  signals worth name-checking when they cluster around the week's pattern.
 
 {_tone_line(tone)}
 
@@ -1876,7 +1919,9 @@ Use the `give_workout_coach` tool. Rules:
   volume is good but HRV is suppressed; pull back hard sessions this week"
   or "strength is plateauing because sleep debt is climbing".
 - Be specific. Generic motivation is bad. Cite numbers in evidence.
-- A single high-confidence change beats five vague ones."""
+- A single high-confidence change beats five vague ones.
+- If recent_alerts cluster (e.g. two RHR anomalies in five days), weight
+  the recommendation accordingly. Ignore stale or isolated ones."""
 
 
 async def build_workout_coach_payload(db: AsyncSession) -> dict[str, Any]:
@@ -1894,6 +1939,7 @@ async def build_workout_coach_payload(db: AsyncSession) -> dict[str, Any]:
         "cardio_30d": cardio,
         "fasting": await _fasting_status(db),
         "trend_badges": await compute_badges(db, max_badges=4),
+        "recent_alerts": await _recent_alerts_ctx(db),
     }
 
 

@@ -788,6 +788,23 @@ data class WorkoutPatchRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class Annotation(
+    val id: Int,
+    val ts: String,
+    val type: String,
+    val payload: Map<String, Any> = emptyMap(),
+    val note: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class AnnotationCreate(
+    val type: String,
+    val payload: Map<String, Any> = emptyMap(),
+    val ts: String? = null,
+    val note: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
 data class DeviceStatusPoint(
     val time: String,
     @Json(name = "battery_pct") val batteryPct: Int? = null,

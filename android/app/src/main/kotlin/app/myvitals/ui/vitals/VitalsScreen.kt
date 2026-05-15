@@ -41,6 +41,7 @@ import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Terrain
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.MonitorWeight
+import androidx.compose.material.icons.outlined.Note
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Timer
@@ -107,6 +108,7 @@ enum class Vital(val label: String, val icon: ImageVector, val color: Color) {
     ACTIVITY("Last activity", Icons.AutoMirrored.Outlined.DirectionsBike,
         Color(0xFF38BDF8)),
     TRAILS("Trails", Icons.Outlined.Terrain, Color(0xFF22C55E)),
+    JOURNAL("Journal", Icons.Outlined.Note, Color(0xFF94A3B8)),
 }
 
 /** Lightweight wrapper for the live HR points + their freshness. */
@@ -126,6 +128,7 @@ fun VitalsScreen(
     onOpenTrails: () -> Unit = {},
     onOpenFasting: () -> Unit = {},
     onOpenCoach: () -> Unit = {},
+    onOpenJournal: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
@@ -301,7 +304,7 @@ fun VitalsScreen(
             Vital.HR, Vital.SLEEP, Vital.STEPS, Vital.HRV,
             Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS,
             Vital.WEIGHT, Vital.BP, Vital.SOBER, Vital.FASTING,
-            Vital.COACH,
+            Vital.COACH, Vital.JOURNAL,
         )
     }
     val tiles = remember(profile) {
@@ -428,6 +431,7 @@ fun VitalsScreen(
                     Vital.SOBER -> SoberBadge(sober, onClick = onOpenSober)
                     Vital.FASTING -> FastingBadge(fasting, nowMs, onClick = onOpenFasting)
                     Vital.COACH -> CoachBadge(onClick = onOpenCoach)
+                    Vital.JOURNAL -> JournalBadge(onClick = onOpenJournal)
                     Vital.HR -> HrBadge(hr, today, rows, nowMs,
                         onClick = { onOpenVitalDetail(v) })
                     Vital.HRV -> HrvBadge(rows, nowMs, onClick = { onOpenVitalDetail(v) })
@@ -859,6 +863,17 @@ private fun CoachBadge(onClick: () -> Unit) {
             fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(6.dp))
         Text("Workout + cardio", color = MV.OnSurfaceDim, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun JournalBadge(onClick: () -> Unit) {
+    val v = Vital.JOURNAL
+    BadgeFrame(v, null, onClick, isAction = true) {
+        Text("Quick", color = MV.OnSurface,
+            fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        Text("Caffeine · alcohol · mood", color = MV.OnSurfaceDim, fontSize = 10.sp)
     }
 }
 

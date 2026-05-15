@@ -278,6 +278,19 @@ interface BackendApi {
         @retrofit2.http.Query("since") since: String? = null,
         @retrofit2.http.Query("until") until: String? = null,
     ): DeviceStatusSeriesResponse
+
+    @GET("journal")
+    suspend fun journalList(
+        @retrofit2.http.Query("since") since: String? = null,
+        @retrofit2.http.Query("type") type: String? = null,
+        @retrofit2.http.Query("limit") limit: Int = 50,
+    ): List<Annotation>
+
+    @POST("journal")
+    suspend fun journalCreate(@Body body: AnnotationCreate): Annotation
+
+    @retrofit2.http.DELETE("journal/{id}")
+    suspend fun journalDelete(@Path("id") id: Int): Response<okhttp3.ResponseBody>
 }
 
 object BackendClient {

@@ -200,7 +200,8 @@ private fun fmtForVital(v: Float, vital: Vital): String = when (vital) {
     Vital.BP -> "%.0f mmHg".format(v)
     Vital.SOBER -> "${v.toInt()}d"
     Vital.FASTING -> "%.1f h".format(v)
-    Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS, Vital.COACH -> "${v.toInt()}"
+    Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS, Vital.COACH,
+    Vital.JOURNAL -> "${v.toInt()}"
 }
 
 private suspend fun fetchSeries(
@@ -250,7 +251,8 @@ private suspend fun fetchSeries(
             // is meaningless for fasting (it's a per-day rollup).
             return summaryXY(dailyRows(api, range)) { it.fastingHours }
         }
-        Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS, Vital.COACH ->
+        Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS, Vital.COACH,
+        Vital.JOURNAL ->
             return Pair(emptyList(), emptyList())  // navigate, no chart
     }
 }

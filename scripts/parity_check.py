@@ -70,6 +70,9 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/utils/muscleIcon.ts",
      "android/app/src/main/kotlin/app/myvitals/ui/strength/MuscleIcon.kt",
      "Muscle anatomy chip resolver"),
+    ("frontend/src/views/Journal.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/JournalScreen.kt",
+     "Journal / annotation entry surface (#LOG family)"),
 ]
 
 # Paths that are intentionally web-only (don't trigger a parity warning

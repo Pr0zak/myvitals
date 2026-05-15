@@ -44,6 +44,7 @@ import app.myvitals.health.HealthConnectGateway
 import app.myvitals.sync.SyncWorker
 import app.myvitals.ui.MV
 import app.myvitals.ui.MyVitalsTheme
+import app.myvitals.ui.JournalScreen
 import app.myvitals.ui.SettingsScreen
 import app.myvitals.ui.SoberHomeScreen
 import app.myvitals.ui.strength.StrengthCatalogScreen
@@ -64,6 +65,7 @@ private object Routes {
     const val SOBER = "sober"
     const val FASTING = "fasting"
     const val COACH = "coach"
+    const val JOURNAL = "journal"
     const val WORKOUT = "workout/today"
     const val WORKOUT_HISTORY = "workout/history"
     const val WORKOUT_DAY = "workout/day/{date}"
@@ -135,7 +137,7 @@ class MainActivity : ComponentActivity() {
                     if (!target.isNullOrEmpty() && target in setOf(
                             Routes.WORKOUT, Routes.TRAILS, Routes.VITALS,
                             Routes.ACTIVITIES, Routes.SETTINGS, Routes.SOBER,
-                            Routes.FASTING,
+                            Routes.FASTING, Routes.JOURNAL,
                         )
                     ) {
                         nav.navigateTab(target)
@@ -161,6 +163,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenSober = { nav.navigate(Routes.SOBER) },
                                 onOpenFasting = { nav.navigate(Routes.FASTING) },
                                 onOpenCoach = { nav.navigate(Routes.COACH) },
+                                onOpenJournal = { nav.navigate(Routes.JOURNAL) },
                                 onOpenVitalDetail = { v ->
                                     nav.navigate(Routes.vitalDetail(v.name))
                                 },
@@ -203,6 +206,12 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(Routes.COACH) {
                             app.myvitals.ui.CoachScreen(
+                                settings = settings,
+                                onBack = { nav.popBackStack() },
+                            )
+                        }
+                        composable(Routes.JOURNAL) {
+                            JournalScreen(
                                 settings = settings,
                                 onBack = { nav.popBackStack() },
                             )

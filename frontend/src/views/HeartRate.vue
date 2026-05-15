@@ -14,12 +14,12 @@ import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import type {
-  Activity, HeartRateSeries, HrvSeries, TodaySummary,
+  Activity, Annotation, HeartRateSeries, HrvSeries, TodaySummary,
 } from "@/api/types";
 import { chartTheme } from "@/theme";
 import {
-  meanMarkLine, offBodyMarkArea, sleepMarkArea, soberResetMarkLine,
-  timeAxisFormatter, workoutMarkArea,
+  annotationMarkPoint, meanMarkLine, offBodyMarkArea, sleepMarkArea,
+  soberResetMarkLine, timeAxisFormatter, workoutMarkArea,
 } from "@/components/charts/chartHelpers";
 import type { SleepNight } from "@/api/types";
 
@@ -40,6 +40,10 @@ const hrv24 = ref<HrvSeries | null>(null);
 // device_status points so chartHelpers can compute markArea bands.
 const wearPoints24 = ref<Array<{ time: string; is_worn: boolean | null }>>([]);
 const onBodyPct24 = ref<number | null>(null);
+// Journal annotations in the 24h window (LOG-4). Surfaced as emoji
+// markpoints on the HR trace so caffeine / alcohol / mood / food /
+// meds events line up against the HR curve they actually affected.
+const annotations24 = ref<Annotation[]>([]);
 const dailyRows = ref<TodaySummary[]>([]);
 const priorRows = ref<TodaySummary[]>([]);
 const yearAgoRows = ref<TodaySummary[]>([]);
@@ -61,7 +65,7 @@ async function loadTrace() {
   try {
     const since = new Date(Date.now() - 24 * 3600 * 1000);
     const sinceMs = since.getTime();
-    const [liveHr, liveHrv, acts, sleep, swo, sbHist, wear] = await Promise.all([
+    const [liveHr, liveHrv, acts, sleep, swo, sbHist, wear, anns] = await Promise.all([
       api.heartRate({ since }),
       api.hrv({ since }),
       api.activities({ since, limit: 30 }),
@@ -69,6 +73,7 @@ async function loadTrace() {
       api.strengthWorkouts({ limit: 5 }).catch(() => ({ count: 0, workouts: [] })),
       api.soberHistory(50).catch(() => []),
       api.deviceStatusSeries({ since }).catch(() => null),
+      api.listAnnotations({ since, limit: 50 }).catch(() => [] as Annotation[]),
     ]);
     hr24.value = liveHr;
     hrv24.value = liveHrv;
@@ -78,6 +83,7 @@ async function loadTrace() {
       }));
       onBodyPct24.value = wear.on_body_pct;
     }
+    annotations24.value = anns;
 
     // Merge strength workouts that overlap the 24h window into the
     // activity list as Activity-shaped rows, so workoutMarkArea can
@@ -225,6 +231,13 @@ const traceOption = computed(() => {
     markLineConfig = markLineConfig ?? { symbol: ["none", "none"] };
   }
 
+  // Park annotation markers slightly above the HR series' max value
+  // so the emoji icons don't collide with the HR line itself.
+  const hrMax = hr24.value.points.reduce(
+    (m, p) => Math.max(m, p.value ?? 0), 0,
+  );
+  const annoYValue = hrMax > 0 ? hrMax + 8 : 100;
+
   const series: any[] = [
     {
       type: "line", name: "HR", showSymbol: false, smooth: true,
@@ -235,6 +248,9 @@ const traceOption = computed(() => {
         ? { markLine: { ...markLineConfig, data: markLineData } } : {}),
       ...(activities24.value.length > 0
         ? { markArea: workoutMarkArea(activities24.value) } : {}),
+      ...(annotations24.value.length > 0
+        ? { markPoint: annotationMarkPoint(annotations24.value, annoYValue) }
+        : {}),
     },
   ];
 

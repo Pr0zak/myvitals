@@ -28,7 +28,14 @@ from fastapi import APIRouter, Depends
 
 from ..auth import require_query
 
-router = APIRouter(prefix="/api/update", dependencies=[Depends(require_query)])
+# NOTE: prefix is `/update`, NOT `/api/update`. The Caddy frontend
+# does `uri strip_prefix /api` on incoming `/api/*` requests before
+# proxying, so a browser call to `/api/update/check` arrives here as
+# `/update/check`. Hard-coding `/api/update/...` in the route would
+# get double-stripped and 404 through Caddy. Phone clients hitting
+# port 8000 directly use the same path: `http://host:8000/update/check`
+# (with explicit `/api` only when going via the web frontend).
+router = APIRouter(prefix="/update", dependencies=[Depends(require_query)])
 
 TRIGGER_FILE = Path("/var/lib/myvitals/update-requested")
 GITHUB_REPO = "Pr0zak/myvitals"

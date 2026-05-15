@@ -1,0 +1,17 @@
+# myvitals — pull-based auto-update for the CT (UPDATE-1).
+#
+# Install on the CT:
+#   sudo cp deploy/myvitals-auto-update.cron /etc/cron.d/myvitals-auto-update
+#   sudo chmod 644 /etc/cron.d/myvitals-auto-update
+#   sudo systemctl restart cron
+#
+# Logs: /var/log/myvitals-auto-update.log
+# Silent on no-op; one-line summary per actual update; full rollback log
+# on failure.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Every 15 minutes — same cadence the dev's manual ship rhythm settles
+# into. Adjust to taste; CI takes ~4 min to publish images after a tag.
+*/15 * * * * root /opt/myvitals/deploy/auto-update.sh >> /var/log/myvitals-auto-update.log 2>&1

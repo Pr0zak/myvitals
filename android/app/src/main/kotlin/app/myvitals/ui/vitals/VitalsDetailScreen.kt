@@ -199,7 +199,8 @@ private fun fmtForVital(v: Float, vital: Vital): String = when (vital) {
     Vital.WEIGHT -> "%.1f lb".format(v)
     Vital.BP -> "%.0f mmHg".format(v)
     Vital.SOBER -> "${v.toInt()}d"
-    Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS -> "${v.toInt()}"
+    Vital.FASTING -> "%.1f h".format(v)
+    Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS, Vital.COACH -> "${v.toInt()}"
 }
 
 private suspend fun fetchSeries(
@@ -244,7 +245,12 @@ private suspend fun fetchSeries(
             return summaryXY(dailyRows(api, range)) { it.bpSystolicAvg }
         }
         Vital.SOBER -> return Pair(emptyList(), emptyList())  // not chartable here
-        Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS ->
+        Vital.FASTING -> {
+            // Chart fasting_hours from the daily summary range. Day range
+            // is meaningless for fasting (it's a per-day rollup).
+            return summaryXY(dailyRows(api, range)) { it.fastingHours }
+        }
+        Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS, Vital.COACH ->
             return Pair(emptyList(), emptyList())  // navigate, no chart
     }
 }

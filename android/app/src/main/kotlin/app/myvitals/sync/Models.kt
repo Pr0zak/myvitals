@@ -689,6 +689,7 @@ data class DailySummary(
     @Json(name = "bp_diastolic_avg") val bpDiastolicAvg: Double? = null,
     @Json(name = "readiness_score") val readinessScore: Double? = null,
     @Json(name = "sleep_debt_h") val sleepDebtH: Double? = null,
+    @Json(name = "fasting_hours") val fastingHours: Double? = null,
 )
 
 @JsonClass(generateAdapter = true)

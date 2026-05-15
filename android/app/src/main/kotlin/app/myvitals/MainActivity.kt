@@ -160,6 +160,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenSettings = { nav.navigateTab(Routes.SETTINGS) },
                                 onOpenSober = { nav.navigate(Routes.SOBER) },
                                 onOpenFasting = { nav.navigate(Routes.FASTING) },
+                                onOpenCoach = { nav.navigate(Routes.COACH) },
                                 onOpenVitalDetail = { v ->
                                     nav.navigate(Routes.vitalDetail(v.name))
                                 },

@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.HourglassEmpty
+import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Terrain
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.MonitorWeight
@@ -98,6 +99,7 @@ enum class Vital(val label: String, val icon: ImageVector, val color: Color) {
     BP("Blood pressure", Icons.Outlined.FavoriteBorder, Color(0xFFEC4899)),
     SOBER("Sober", Icons.Outlined.Timer, Color(0xFF84CC16)),
     FASTING("Fasting", Icons.Outlined.HourglassEmpty, Color(0xFF38BDF8)),
+    COACH("Coach", Icons.Outlined.Psychology, Color(0xFFA78BFA)),
     WORKOUT("Workout", Icons.Outlined.FitnessCenter, Color(0xFFEF4444)),
     ACTIVITY("Last activity", Icons.AutoMirrored.Outlined.DirectionsBike,
         Color(0xFF38BDF8)),
@@ -120,6 +122,7 @@ fun VitalsScreen(
     onOpenActivity: (source: String, sourceId: String) -> Unit = { _, _ -> },
     onOpenTrails: () -> Unit = {},
     onOpenFasting: () -> Unit = {},
+    onOpenCoach: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
@@ -295,6 +298,7 @@ fun VitalsScreen(
             Vital.HR, Vital.SLEEP, Vital.STEPS, Vital.HRV,
             Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS,
             Vital.WEIGHT, Vital.BP, Vital.SOBER, Vital.FASTING,
+            Vital.COACH,
         )
     }
     val tiles = remember(profile) {
@@ -420,6 +424,7 @@ fun VitalsScreen(
                 when (v) {
                     Vital.SOBER -> SoberBadge(sober, onClick = onOpenSober)
                     Vital.FASTING -> FastingBadge(fasting, nowMs, onClick = onOpenFasting)
+                    Vital.COACH -> CoachBadge(onClick = onOpenCoach)
                     Vital.HR -> HrBadge(hr, today, rows, nowMs,
                         onClick = { onOpenVitalDetail(v) })
                     Vital.HRV -> HrvBadge(rows, nowMs, onClick = { onOpenVitalDetail(v) })
@@ -818,6 +823,17 @@ private fun FastingBadge(
         Spacer(Modifier.height(6.dp))
         Text(fasting.currentStage.replace("_", " "),
             color = MV.OnSurfaceDim, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun CoachBadge(onClick: () -> Unit) {
+    val v = Vital.COACH
+    BadgeFrame(v, null, onClick) {
+        Text("AI", color = MV.OnSurface,
+            fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        Text("Workout + cardio", color = MV.OnSurfaceDim, fontSize = 10.sp)
     }
 }
 

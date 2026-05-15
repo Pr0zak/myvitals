@@ -56,7 +56,7 @@ def _mask(token: str | None) -> str | None:
     return token[:3] + "•••" + token[-4:]
 
 
-@router.get("/api/ha-config", response_model=HaConfigOut)
+@router.get("/ha-config", response_model=HaConfigOut)
 async def get_ha_config(
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
@@ -76,7 +76,7 @@ async def get_ha_config(
     }
 
 
-@router.put("/api/ha-config", response_model=HaConfigOut)
+@router.put("/ha-config", response_model=HaConfigOut)
 async def put_ha_config(
     body: HaConfigIn, db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
@@ -99,6 +99,10 @@ async def put_ha_config(
     existing.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(existing)
+    # HA-9: nudge the in-process consumer to re-read config so a toggle
+    # or token update takes effect without a backend restart.
+    from ..integrations.ha_realtime import request_restart as _ha_restart
+    _ha_restart()
     return {
         "url": existing.url,
         "token_masked": _mask(existing.token),

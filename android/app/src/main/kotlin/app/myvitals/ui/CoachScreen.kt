@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.DirectionsBike
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Refresh
@@ -72,6 +73,11 @@ fun CoachScreen(
     var cardioLoading by remember { mutableStateOf(false) }
     var cardioErr by remember { mutableStateOf<String?>(null) }
 
+    var sleepOpen by remember { mutableStateOf(false) }
+    var sleep by remember { mutableStateOf<CoachCard?>(null) }
+    var sleepLoading by remember { mutableStateOf(false) }
+    var sleepErr by remember { mutableStateOf<String?>(null) }
+
     var goals by remember { mutableStateOf<List<app.myvitals.sync.AiGoal>>(emptyList()) }
 
     suspend fun fetchWorkout(refresh: Boolean) {
@@ -98,6 +104,18 @@ fun CoachScreen(
         } finally { cardioLoading = false }
     }
 
+    suspend fun fetchSleep(refresh: Boolean) {
+        sleepLoading = true; sleepErr = null
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            sleep = if (refresh || sleep == null) {
+                withContext(Dispatchers.IO) { api.coachSleep() }
+            } else sleep
+        } catch (e: Exception) {
+            Timber.w(e, "sleep coach failed"); sleepErr = e.message?.take(160)
+        } finally { sleepLoading = false }
+    }
+
     // Preload the latest cached cards on mount so the user sees content
     // immediately without burning a Claude call. Goals load alongside —
     // they're cheap (no AI) and feed the read-only progress strip.
@@ -109,6 +127,8 @@ fun CoachScreen(
             if (w.isSuccessful) workout = w.body()
             val c = withContext(Dispatchers.IO) { api.coachCardioLatest() }
             if (c.isSuccessful) cardio = c.body()
+            val s = withContext(Dispatchers.IO) { api.coachSleepLatest() }
+            if (s.isSuccessful) sleep = s.body()
             goals = withContext(Dispatchers.IO) {
                 runCatching { api.aiGoals() }.getOrDefault(emptyList())
             }
@@ -166,6 +186,37 @@ fun CoachScreen(
         if (goals.isNotEmpty()) {
             GoalsCard(goals)
         }
+
+        CoachCardBlock(
+            icon = Icons.Outlined.Bedtime,
+            title = "Sleep coach",
+            subtitle = "duration · consistency · stages · recovery link",
+            open = sleepOpen,
+            loading = sleepLoading,
+            error = sleepErr,
+            card = sleep,
+            onToggle = {
+                sleepOpen = !sleepOpen
+                if (sleepOpen && sleep == null) {
+                    scope.launch { fetchSleep(false) }
+                }
+            },
+            onRefresh = { scope.launch { fetchSleep(true) } },
+            renderBody = { c ->
+                val a = c.analysis
+                Headline(a["headline"]?.toString() ?: "")
+                LabeledPlan(
+                    "Supporting recovery",
+                    (a["supporting_recovery"]?.toString() ?: "marginal"),
+                )
+                Pair("Duration", a["duration_assessment"]?.toString() ?: "")
+                Pair("Consistency", a["consistency_assessment"]?.toString() ?: "")
+                Pair("Stages", a["stage_assessment"]?.toString() ?: "")
+                Pair("Recovery link", a["recovery_link"]?.toString() ?: "")
+                EvidenceList(a["evidence"])
+                LabeledPlan("Recommendation", a["recommendation"]?.toString() ?: "")
+            },
+        )
 
         CoachCardBlock(
             icon = Icons.Outlined.DirectionsBike,

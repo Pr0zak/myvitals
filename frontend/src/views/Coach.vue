@@ -12,7 +12,7 @@
 import { onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import { api, type CoachCardOut } from "@/api/client";
-import { Activity, Dumbbell, RefreshCw, Target } from "lucide-vue-next";
+import { Activity, Bed, Dumbbell, RefreshCw, Target } from "lucide-vue-next";
 
 interface GoalProgress {
   id: number;
@@ -40,6 +40,7 @@ type CardState = {
 
 const cardio = ref<CardState>({ open: false, loading: false, data: null, error: null });
 const workout = ref<CardState>({ open: false, loading: false, data: null, error: null });
+const sleep = ref<CardState>({ open: false, loading: false, data: null, error: null });
 
 async function preload() {
   try {
@@ -47,6 +48,9 @@ async function preload() {
   } catch { /* swallow */ }
   try {
     workout.value.data = await api.coachWorkoutLatest();
+  } catch { /* swallow */ }
+  try {
+    sleep.value.data = await api.coachSleepLatest();
   } catch { /* swallow */ }
 }
 
@@ -80,8 +84,16 @@ async function toggleWorkout() {
   }
 }
 
+async function toggleSleep() {
+  sleep.value.open = !sleep.value.open;
+  if (sleep.value.open && sleep.value.data === null) {
+    await fetchCard(sleep.value, false, api.coachSleep);
+  }
+}
+
 function refreshCardio() { fetchCard(cardio.value, true, api.coachCardio); }
 function refreshWorkout() { fetchCard(workout.value, true, api.coachWorkout); }
+function refreshSleep() { fetchCard(sleep.value, true, api.coachSleep); }
 
 function tonePill(tone: string | undefined): string {
   return tone || "neutral";
@@ -203,6 +215,62 @@ onMounted(() => { preload(); loadGoals(); });
             {{ g.target_value }} <span class="muted">{{ g.target_unit ?? '' }}</span>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- Sleep coach (duration + consistency + stages + recovery link) -->
+    <section class="card" :class="['tone-' + tonePill(sleep.data?.analysis?.tone as string | undefined)]">
+      <button class="head" @click="toggleSleep">
+        <Bed :size="18"/>
+        <span class="title">Sleep coach</span>
+        <span class="sub">duration · consistency · stages · recovery link</span>
+        <span class="chev">{{ sleep.open ? "▾" : "▸" }}</span>
+      </button>
+
+      <div v-if="sleep.open" class="body">
+        <p v-if="sleep.loading" class="hint">Thinking…</p>
+        <p v-else-if="sleep.error" class="err">{{ sleep.error }}</p>
+        <template v-else-if="sleep.data?.analysis">
+          <h3 class="headline">{{ sleep.data.analysis.headline }}</h3>
+          <p class="plan supporting">
+            <strong>Supporting recovery:</strong>
+            {{ sleep.data.analysis.supporting_recovery }}
+          </p>
+          <div class="grid">
+            <div>
+              <div class="lbl">Duration</div>
+              <p>{{ sleep.data.analysis.duration_assessment }}</p>
+            </div>
+            <div>
+              <div class="lbl">Consistency</div>
+              <p>{{ sleep.data.analysis.consistency_assessment }}</p>
+            </div>
+            <div>
+              <div class="lbl">Stages</div>
+              <p>{{ sleep.data.analysis.stage_assessment }}</p>
+            </div>
+            <div>
+              <div class="lbl">Recovery link</div>
+              <p>{{ sleep.data.analysis.recovery_link }}</p>
+            </div>
+          </div>
+          <div class="lbl">Evidence</div>
+          <ul class="bullets">
+            <li v-for="(e, i) in asLines(sleep.data.analysis.evidence)" :key="i">{{ e }}</li>
+          </ul>
+          <div class="lbl">Recommendation</div>
+          <p class="plan">{{ sleep.data.analysis.recommendation }}</p>
+          <div class="footer">
+            <span class="muted">{{ fmtTime(sleep.data.generated_at) }} · {{ sleep.data.model }}
+              <span v-if="sleep.data.cached">(cached)</span></span>
+            <button class="ghost" :disabled="sleep.loading" @click="refreshSleep">
+              <RefreshCw :size="13"/> Refresh
+            </button>
+          </div>
+        </template>
+        <template v-else>
+          <p class="hint">No coach card cached yet — tap to generate.</p>
+        </template>
       </div>
     </section>
 

@@ -2025,6 +2025,195 @@ Use the `give_workout_coach` tool. Rules:
   numbers from recent_dailies — they're already correct and bounded."""
 
 
+# ─────────────── Sleep coach (COACH-5) ───────────────
+
+SLEEP_COACH_TOOL = {
+    "name": "give_sleep_coach",
+    "description": (
+        "Verdict on whether the user's sleep pattern is supporting "
+        "recovery — pulls duration, consistency, stage breakdown, "
+        "sleep debt, and HRV/RHR drift."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "headline": {
+                "type": "string",
+                "description": "≤14 words. One-line verdict.",
+            },
+            "tone": {"type": "string", "enum": ["good", "warn", "bad", "neutral"]},
+            "supporting_recovery": {
+                "type": "string",
+                "enum": ["yes", "marginal", "no"],
+                "description": "Bottom-line: is sleep currently a force-multiplier or a drag?",
+            },
+            "duration_assessment": {
+                "type": "string",
+                "description": "≤30 words. How does avg sleep_h vs target_h look, and how stable is it?",
+            },
+            "consistency_assessment": {
+                "type": "string",
+                "description": "≤30 words. Bedtime/wake variance picture — is the schedule shifting?",
+            },
+            "stage_assessment": {
+                "type": "string",
+                "description": "≤30 words. Deep/REM/light proportions — flag if deep is suppressed.",
+            },
+            "recovery_link": {
+                "type": "string",
+                "description": "≤30 words. Whether HRV/RHR/readiness drift tracks sleep changes.",
+            },
+            "evidence": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "2-4 bullets citing specific signals (sleep_debt_h, 7d avg sleep, HRV WoW, etc).",
+            },
+            "recommendation": {
+                "type": "string",
+                "description": "≤40 words. Single most actionable adjustment, with WHEN.",
+            },
+        },
+        "required": [
+            "headline", "tone", "supporting_recovery", "duration_assessment",
+            "consistency_assessment", "stage_assessment", "recovery_link",
+            "evidence", "recommendation",
+        ],
+    },
+}
+
+
+def _sleep_coach_system(tone: str) -> str:
+    return f"""You are the user's sleep coach. You see a 28-day window of:
+- per-night sleep_h, sleep_score, sleep_consistency_score, sleep_debt_h
+- 7-day avg vs 28-day baseline for each
+- stage breakdown (deep_h / rem_h / light_h / awake_h) summed over last 7 days
+- HRV / RHR / readiness 7d-avg vs 28d-baseline so you can correlate
+- profile.sleep_target_h and the user's tone preference
+- top_correlations between sleep and downstream metrics
+- recent_alerts the system already flagged (suppressed HRV, high RHR, illness risk)
+
+{_tone_line(tone)}
+
+Use the `give_sleep_coach` tool. Rules:
+- The verdict (supporting_recovery yes / marginal / no) is the most
+  important field — clients use it for the headline color.
+- Be specific. Quote numbers in evidence. "Avg sleep 6.4 h vs 7.5 h
+  target" beats "you're not sleeping enough".
+- Distinguish DURATION (how long), CONSISTENCY (variance), and STAGES
+  (composition). All three can independently be off.
+- If stage data is mostly missing, say so in stage_assessment — don't
+  hallucinate a deep-sleep estimate.
+- The recovery_link should defend (or push back on) the supporting_recovery
+  verdict using the HRV / RHR / readiness deltas. Don't just restate.
+- The recommendation should pick the SINGLE biggest lever — earlier
+  bedtime, more consistent wake, caffeine cutoff, etc. Not a list.
+"""
+
+
+async def _sleep_stage_breakdown(db: AsyncSession, days: int = 7) -> dict[str, Any]:
+    """Sum stage seconds over a trailing window. Empty if no stage rows."""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from sqlalchemy import func as _func
+    since = _dt.now(_tz.utc) - _td(days=days)
+    rows = (await db.execute(
+        select(
+            models.SleepStage.stage,
+            _func.sum(models.SleepStage.duration_s).label("total_s"),
+        )
+        .where(models.SleepStage.time >= since)
+        .group_by(models.SleepStage.stage)
+    )).all()
+    if not rows:
+        return {"days": days, "stages_seconds": {}}
+    by_stage = {r.stage: int(r.total_s or 0) for r in rows}
+    return {"days": days, "stages_seconds": by_stage}
+
+
+async def build_sleep_coach_payload(db: AsyncSession) -> dict[str, Any]:
+    """Bounded payload for the sleep coach card."""
+    from statistics import mean
+    daily = await _daily_rows(db, 28)
+    last7 = daily[-7:] if len(daily) >= 7 else daily
+
+    def _avg(rows: list[dict[str, Any]], key: str) -> float | None:
+        vals = [r[key] for r in rows if r.get(key) is not None]
+        return round(mean(vals), 2) if vals else None
+
+    last7_summary = {
+        "sleep_h": _avg(last7, "sleep_h"),
+        "sleep_score": _avg(last7, "sleep_score"),
+        "sleep_debt_h": _avg(last7, "sleep_debt_h"),
+        "hrv": _avg(last7, "hrv"),
+        "rhr": _avg(last7, "rhr"),
+        "readiness": _avg(last7, "readiness"),
+    }
+    baseline_28d = {
+        "sleep_h": _avg(daily, "sleep_h"),
+        "sleep_score": _avg(daily, "sleep_score"),
+        "sleep_debt_h": _avg(daily, "sleep_debt_h"),
+        "hrv": _avg(daily, "hrv"),
+        "rhr": _avg(daily, "rhr"),
+        "readiness": _avg(daily, "readiness"),
+    }
+    return {
+        "today": datetime.now(timezone.utc).date().isoformat(),
+        "profile": await _profile_ctx(db),
+        "last7_summary": last7_summary,
+        "baseline_28d": baseline_28d,
+        "recent_dailies": daily,
+        "stage_breakdown_7d": await _sleep_stage_breakdown(db, days=7),
+        "recent_alerts": await _recent_alerts_ctx(db),
+        "top_correlations": _top_correlations(daily),
+        "wow_deltas": _wow_deltas(daily),
+    }
+
+
+async def sleep_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
+    """Structured AI verdict on whether sleep is currently supporting
+    recovery."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    payload = await build_sleep_coach_payload(db)
+    user_text = (
+        f"Read the user's last 28 days of sleep + recovery vitals and "
+        f"return a structured verdict via the `give_sleep_coach` tool:\n\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=600,
+        system=_cached_system(_sleep_coach_system(cfg.tone)),
+        tools=[SLEEP_COACH_TOOL],
+        tool_choice={"type": "tool", "name": "give_sleep_coach"},
+        messages=[{"role": "user", "content": user_text}],
+    )
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use" and block.name == "give_sleep_coach":
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    if not tool_input:
+        tool_input = {
+            "headline": "Not enough sleep data to coach yet",
+            "tone": "neutral",
+            "supporting_recovery": "marginal",
+            "duration_assessment": "Need a few more nights logged.",
+            "consistency_assessment": "Need a few more nights logged.",
+            "stage_assessment": "No stage data available yet.",
+            "recovery_link": "Insufficient overlap with HRV/RHR data.",
+            "evidence": [],
+            "recommendation": "Keep wearing the watch overnight and re-check in a week.",
+        }
+    _normalize_array_field(tool_input, "evidence")
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
 async def build_workout_coach_payload(db: AsyncSession) -> dict[str, Any]:
     """Multi-signal payload — reuses cardio + deload signals."""
     from ..analytics.cardio import cardio_summary

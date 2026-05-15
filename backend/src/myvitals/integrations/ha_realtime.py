@@ -209,44 +209,128 @@ async def _consume_once(device_id: str, entity_map: dict[str, str]) -> None:
                 log.warning("HA event handling failed: %s", e, exc_info=True)
 
 
+# HA-9: live re-arm. PUT /ha-config sets this event so the consumer
+# loop drops its current connection (or its "not configured" sleep)
+# and re-reads url/token/device_id/enabled. Constructed lazily inside
+# the asyncio loop because asyncio.Event needs a running loop on
+# Python < 3.10 — at module import time, FastAPI hasn't started yet.
+_restart_event: asyncio.Event | None = None
+
+
+def request_restart() -> None:
+    """Signal the running consumer to re-read ha_config and rebind.
+    Safe to call from any coroutine (event.set is non-blocking) and
+    a no-op if the consumer hasn't been started yet."""
+    if _restart_event is not None and not _restart_event.is_set():
+        _restart_event.set()
+
+
+async def _consume_with_restart(
+    device_id: str, entity_map: dict[str, str],
+) -> str:
+    """Run one consume cycle, racing it against the restart event.
+
+    Returns "restart" if the event fired (caller should rebind config),
+    or raises whatever the consume coroutine raised on disconnect."""
+    assert _restart_event is not None
+    consume = asyncio.create_task(_consume_once(device_id, entity_map))
+    waiter = asyncio.create_task(_restart_event.wait())
+    try:
+        done, _pending = await asyncio.wait(
+            {consume, waiter}, return_when=asyncio.FIRST_COMPLETED,
+        )
+        if waiter in done:
+            _restart_event.clear()
+            consume.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await consume
+            return "restart"
+        # consume completed (likely raised) — surface its exception.
+        waiter.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await waiter
+        consume.result()      # re-raises any error from _consume_once
+        return "ok"
+    except asyncio.CancelledError:
+        consume.cancel(); waiter.cancel()
+        raise
+
+
 async def run() -> None:
     """Top-level consumer loop with exponential backoff reconnect.
 
     Cancellation propagates out cleanly — finally writes online=false
-    so /api/device-status/latest reflects the gap.
-    """
-    url, token, device_id, enabled = await _load_config()
-    if not (url and token):
-        log.warning("HA realtime: url/token not configured in DB or env, consumer disabled")
-        return
-    if not enabled:
-        log.info("HA realtime: configured but realtime_enabled=false, not starting")
-        return
+    so /device-status/latest reflects the gap.
 
-    entity_map = _build_entity_map(device_id)
-    backoff_s = 1.0
+    Live re-arm: PUT /ha-config calls request_restart(); the consumer
+    drops the current WebSocket / sleep and re-reads config without
+    needing a backend restart.
+    """
+    global _restart_event
+    _restart_event = asyncio.Event()
+    current_device_id: str | None = None
+
     try:
         while True:
-            try:
-                await _consume_once(device_id, entity_map)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:  # noqa: BLE001
+            url, token, device_id, enabled = await _load_config()
+            if not (url and token):
                 log.warning(
-                    "HA WebSocket dropped (%s); retrying in %.1fs",
-                    e, backoff_s, exc_info=True,
+                    "HA realtime: url/token not configured, idling "
+                    "(will rebind on PUT /ha-config)"
                 )
-                # Surface the disconnect in the table so the UI knows.
+                await _restart_event.wait()
+                _restart_event.clear()
+                continue
+            if not enabled:
+                log.info(
+                    "HA realtime: configured but realtime_enabled=false, idling"
+                )
+                # Seed offline so UI shows the channel is down by choice.
+                if current_device_id:
+                    with contextlib.suppress(Exception):
+                        await _seed_offline(current_device_id)
+                await _restart_event.wait()
+                _restart_event.clear()
+                continue
+
+            entity_map = _build_entity_map(device_id)
+            current_device_id = device_id
+            backoff_s = 1.0
+            should_rebind = False
+            while not should_rebind:
                 try:
-                    await _seed_offline(device_id)
-                except Exception:  # noqa: BLE001
-                    log.warning("offline marker write failed", exc_info=True)
-                jitter = random.uniform(0, backoff_s * 0.25)
-                await asyncio.sleep(backoff_s + jitter)
-                backoff_s = min(backoff_s * 2.0, 60.0)
-            else:
-                backoff_s = 1.0
+                    outcome = await _consume_with_restart(device_id, entity_map)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    log.warning(
+                        "HA WebSocket dropped (%s); retrying in %.1fs",
+                        e, backoff_s, exc_info=True,
+                    )
+                    try:
+                        await _seed_offline(device_id)
+                    except Exception:  # noqa: BLE001
+                        log.warning("offline marker write failed", exc_info=True)
+                    # Sleep with restart-aware wait so a re-arm during
+                    # backoff doesn't get stuck behind a 60 s nap.
+                    jitter = random.uniform(0, backoff_s * 0.25)
+                    try:
+                        await asyncio.wait_for(
+                            _restart_event.wait(), timeout=backoff_s + jitter,
+                        )
+                        _restart_event.clear()
+                        should_rebind = True
+                    except asyncio.TimeoutError:
+                        pass
+                    backoff_s = min(backoff_s * 2.0, 60.0)
+                else:
+                    if outcome == "restart":
+                        log.info("HA realtime: re-arm requested, reloading config")
+                        should_rebind = True
+                    else:
+                        backoff_s = 1.0
     finally:
         # Final offline marker on shutdown — best effort.
-        with contextlib.suppress(Exception):
-            await _seed_offline(device_id)
+        if current_device_id:
+            with contextlib.suppress(Exception):
+                await _seed_offline(current_device_id)

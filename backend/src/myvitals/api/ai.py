@@ -16,6 +16,7 @@ from ..db.session import get_session
 from ..integrations.claude import (
     ask,
     build_cardio_coach_payload,
+    build_sleep_coach_payload,
     build_summary_payload,
     build_topic_payload,
     build_workout_coach_payload,
@@ -25,6 +26,7 @@ from ..integrations.claude import (
     explain_topic,
     hash_payload,
     pre_workout,
+    sleep_coach,
     verdict,
     workout_coach,
 )
@@ -1343,3 +1345,49 @@ async def coach_workout_latest(
         "model": row.model,
         "cached": True,
     }
+
+
+@router.post("/coach/sleep")
+async def coach_sleep_endpoint(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """AI sleep coach card. Verdict on whether sleep is supporting
+    recovery — synthesises duration, consistency, stage breakdown,
+    sleep_debt_h, and HRV/RHR drift."""
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    payload = await build_sleep_coach_payload(db)
+    payload_hash = hash_payload({"kind": "coach_sleep", "tone": cfg.tone, "p": payload})
+    cached = await _coach_cached(db, "coach_sleep", payload_hash)
+    if cached is not None:
+        return cached
+    result = await sleep_coach(db, cfg)
+    cfg.calls_today += 1
+    return await _coach_persist(db, "coach_sleep", payload_hash, result)
+
+
+@router.get("/coach/sleep/latest")
+async def coach_sleep_latest(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any] | None:
+    """Return the most recent sleep-coach card without billing."""
+    row = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == "coach_sleep")
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    import json as _json
+    try:
+        analysis = _json.loads(row.content)
+    except Exception:  # noqa: BLE001
+        analysis = {"raw": row.content}
+    return {
+        "analysis": analysis,
+        "generated_at": row.generated_at,
+        "model": row.model,
+        "cached": True,
+    }
+

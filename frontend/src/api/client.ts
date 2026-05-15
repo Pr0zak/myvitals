@@ -1077,7 +1077,7 @@ export const api = {
     updated_at: string | null;
     configured: boolean;
   }> {
-    const { data } = await http.get("/api/ha-config");
+    const { data } = await http.get("/ha-config");
     return data;
   },
 
@@ -1087,7 +1087,7 @@ export const api = {
     realtime_enabled?: boolean;
     device_id?: string;
   }): Promise<unknown> {
-    const { data } = await http.put("/api/ha-config", body);
+    const { data } = await http.put("/ha-config", body);
     return data;
   },
 
@@ -1106,6 +1106,14 @@ export const api = {
   },
   async coachWorkoutLatest(): Promise<CoachCardOut | null> {
     const { data } = await http.get("/ai/coach/workout/latest");
+    return data;
+  },
+  async coachSleep(): Promise<CoachCardOut> {
+    const { data } = await http.post("/ai/coach/sleep", {});
+    return data;
+  },
+  async coachSleepLatest(): Promise<CoachCardOut | null> {
+    const { data } = await http.get("/ai/coach/sleep/latest");
     return data;
   },
 

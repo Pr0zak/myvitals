@@ -48,6 +48,37 @@ const updateApplying = ref(false);
 const updateApplyResult = ref<string>("");
 const updateApplyError = ref<string | null>(null);
 
+interface UpdateStatus {
+  log_present: boolean;
+  log_modified_at: string | null;
+  stale_seconds: number | null;
+  cron_healthy: boolean;
+  tail: string[];
+  trigger_pending: boolean;
+}
+const updateStatus = ref<UpdateStatus | null>(null);
+const updateLogOpen = ref(false);
+
+function relAge(seconds: number | null): string {
+  if (seconds == null) return "—";
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+async function loadUpdateStatus() {
+  try {
+    const { data } = await axios.get<UpdateStatus>("/api/update/status", {
+      baseURL: apiBase.value || undefined,
+      headers: queryToken.value ? { Authorization: `Bearer ${queryToken.value}` } : {},
+    });
+    updateStatus.value = data;
+  } catch {
+    updateStatus.value = null;
+  }
+}
+
 async function checkUpdate() {
   updateChecking.value = true;
   updateApplyResult.value = "";
@@ -857,6 +888,7 @@ onMounted(() => {
   loadHaStatus();
   startJobPolling();
   checkUpdate();
+  loadUpdateStatus();
 });
 onUnmounted(stopJobPolling);
 </script>
@@ -915,6 +947,25 @@ onUnmounted(stopJobPolling);
         <h3>What's new</h3>
         <pre>{{ updateInfo.release_notes }}</pre>
       </div>
+
+      <!-- Auto-update cron status — only renders when the backend
+           has visibility into the host log (i.e. shared volume is
+           mounted and the cron has written at least once). -->
+      <div v-if="updateStatus?.log_present" class="cron-status">
+        <span :class="['cron-dot', updateStatus.cron_healthy ? 'ok' : 'bad']"/>
+        <span class="cron-text">
+          Auto-update {{ updateStatus.cron_healthy ? 'running' : 'stalled' }}
+          <span class="dim">· last activity {{ relAge(updateStatus.stale_seconds) }}</span>
+          <span v-if="updateStatus.trigger_pending" class="dim">
+            · trigger queued
+          </span>
+        </span>
+        <button class="ghost btn-tiny" @click="updateLogOpen = !updateLogOpen">
+          {{ updateLogOpen ? 'Hide' : 'View' }} log
+        </button>
+      </div>
+      <pre v-if="updateLogOpen && updateStatus?.tail?.length"
+           class="cron-log">{{ updateStatus.tail.join('\n') }}</pre>
 
       <div v-if="updateApplyResult" class="ok">
         <Check :size="14"/> {{ updateApplyResult }}
@@ -1870,5 +1921,27 @@ tr.job-failed { background: rgba(239, 68, 68, 0.05); }
   font-weight: 600;
   margin-left: 0.5rem;
   vertical-align: middle;
+}
+.cron-status {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin-top: 1rem; padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+.cron-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+}
+.cron-dot.ok  { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.45); }
+.cron-dot.bad { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.45); }
+.cron-text { color: var(--text); flex: 1; }
+.cron-text .dim { color: var(--muted); margin-left: 0.25rem; font-size: 0.78rem; }
+.cron-log {
+  margin-top: 0.5rem; padding: 0.7rem;
+  background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: ui-monospace, monospace; font-size: 0.72rem;
+  color: var(--text-soft);
+  max-height: 280px; overflow: auto;
+  white-space: pre-wrap;
 }
 </style>

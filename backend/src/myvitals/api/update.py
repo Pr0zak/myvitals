@@ -38,6 +38,7 @@ from ..auth import require_query
 router = APIRouter(prefix="/update", dependencies=[Depends(require_query)])
 
 TRIGGER_FILE = Path("/var/lib/myvitals/update-requested")
+LOG_FILE = Path("/var/lib/myvitals/auto-update.log")
 GITHUB_REPO = "Pr0zak/myvitals"
 
 
@@ -147,3 +148,51 @@ async def apply_update() -> dict[str, Any]:
             "hint": "Trigger volume not mounted. See deploy/auto-update.sh "
                     "header for activation instructions.",
         }
+
+
+@router.get("/status")
+async def cron_status() -> dict[str, Any]:
+    """Report the host cron's health for the Settings UI.
+
+    The host-side cron writes to `/var/lib/myvitals/auto-update.log`
+    (the bind-mounted shared volume); the backend reads it via the
+    same mount. Stale log = cron probably not running.
+
+    Returns:
+      log_present       — whether the log file exists at all
+      log_modified_at   — ISO timestamp of last write, null if absent
+      stale_seconds     — seconds since last write, null if absent
+      cron_healthy      — true when the routine 15-min cron has run
+                          within the last 20 min (slack window)
+      tail              — last 20 lines of the log, newest last
+      trigger_pending   — true when an UI-triggered update is still
+                          waiting to be picked up by the cron
+    """
+    out: dict[str, Any] = {
+        "log_present": False,
+        "log_modified_at": None,
+        "stale_seconds": None,
+        "cron_healthy": False,
+        "tail": [],
+        "trigger_pending": TRIGGER_FILE.exists(),
+    }
+    if not LOG_FILE.exists():
+        return out
+    out["log_present"] = True
+    from datetime import datetime, timezone
+    import time
+    mtime = LOG_FILE.stat().st_mtime
+    out["log_modified_at"] = datetime.fromtimestamp(
+        mtime, tz=timezone.utc,
+    ).isoformat()
+    stale = int(time.time() - mtime)
+    out["stale_seconds"] = stale
+    # 20-min slack lets the 15-min cron miss exactly one tick before
+    # we flag it unhealthy. Tight enough to catch real outages.
+    out["cron_healthy"] = stale < 20 * 60
+    try:
+        lines = LOG_FILE.read_text(errors="replace").splitlines()
+        out["tail"] = lines[-20:]
+    except Exception:  # noqa: BLE001
+        pass
+    return out

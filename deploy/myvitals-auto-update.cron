@@ -5,18 +5,21 @@
 #   sudo chmod 644 /etc/cron.d/myvitals-auto-update
 #   sudo systemctl restart cron
 #
-# Logs: /var/log/myvitals-auto-update.log
-# Silent on no-op; one-line summary per actual update; full rollback log
-# on failure.
+# Logs: /var/lib/myvitals/auto-update.log
+# (Inside the bind-mounted volume so the backend container can read
+# them for the Settings UI's "last run" display.)
+#
+# Silent on no-op; one-line summary per actual update; full rollback
+# log on failure.
 
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Routine pull every 15 min. Adjust to taste; CI takes ~4 min to
 # publish images after a tag, so 15-min is a comfortable floor.
-*/15 * * * * root /opt/myvitals/deploy/auto-update.sh >> /var/log/myvitals-auto-update.log 2>&1
+*/15 * * * * root /opt/myvitals/deploy/auto-update.sh >> /var/lib/myvitals/auto-update.log 2>&1
 
 # UI-triggered watchdog (UPDATE-1). Per-minute test for the flag file
 # the backend writes when the user clicks "Apply update" in Settings.
 # Fast no-op when flag absent — single `test -f` call.
-* * * * * root test -f /var/lib/myvitals/update-requested && /opt/myvitals/deploy/auto-update.sh >> /var/log/myvitals-auto-update.log 2>&1
+* * * * * root test -f /var/lib/myvitals/update-requested && /opt/myvitals/deploy/auto-update.sh >> /var/lib/myvitals/auto-update.log 2>&1

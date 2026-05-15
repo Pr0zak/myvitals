@@ -94,7 +94,7 @@ function hasAny(s: Array<number | null>): boolean {
     </RouterLink>
 
     <!-- Steps -->
-    <RouterLink to="/trends#steps" class="cell linkable last">
+    <RouterLink to="/steps" class="cell linkable last">
       <div class="head">
         <div class="title">
           <Footprints :size="14" class="muted"/>

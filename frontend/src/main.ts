@@ -26,6 +26,7 @@ const router = createRouter({
     { path: "/heart-rate", name: "heart-rate", component: () => import("./views/HeartRate.vue") },
     { path: "/yoga-icon-samples", name: "yoga-icon-samples", component: () => import("./views/YogaIconSamples.vue") },
     { path: "/weight", name: "weight", component: () => import("./views/Weight.vue") },
+    { path: "/steps", name: "steps", component: () => import("./views/Steps.vue") },
     { path: "/blood-pressure", name: "blood-pressure", component: () => import("./views/BloodPressure.vue") },
     { path: "/journal", name: "journal", component: () => import("./views/Journal.vue") },
     { path: "/sober", name: "sober", component: () => import("./views/Sober.vue") },

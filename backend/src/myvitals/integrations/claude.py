@@ -1672,6 +1672,36 @@ async def phrase_anomaly(cfg: models.AiConfig, anomaly: dict[str, Any]) -> str:
     return "\n".join(text_parts).strip().strip('"').strip()
 
 
+def _normalize_array_field(tool_input: dict[str, Any], key: str) -> None:
+    """Claude tool-use occasionally returns array fields as a string
+    containing `<parameter name="item">…</parameter>` blocks instead of
+    a proper JSON array (a known model quirk on some prompts). Rewrites
+    `tool_input[key]` in place so downstream consumers always see a list.
+
+    Also folds in a stray top-level `item` key if the model lifted one
+    of the array elements out of the array."""
+    import re as _re
+    val = tool_input.get(key)
+    extra = tool_input.pop("item", None)
+    if isinstance(val, list):
+        if isinstance(extra, str) and extra:
+            val.append(extra)
+        tool_input[key] = val
+        return
+    if isinstance(val, str):
+        # Extract <parameter name="item">…</parameter> blocks first.
+        tags = _re.findall(r"<parameter[^>]*>([\s\S]*?)</parameter>", val)
+        items = [s.strip() for s in tags if s.strip()]
+        if not items:
+            # Fallback: split on newlines.
+            items = [s.strip() for s in val.splitlines() if s.strip()]
+        if isinstance(extra, str) and extra.strip():
+            items.append(extra.strip())
+        tool_input[key] = items
+        return
+    tool_input[key] = []
+
+
 # ─────────────── Cardio coach ───────────────
 
 CARDIO_COACH_TOOL = {
@@ -1780,6 +1810,7 @@ async def cardio_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
             "evidence": [],
             "recommendation": "Log a few cardio sessions then retry.",
         }
+    _normalize_array_field(tool_input, "evidence")
     return AiResult(
         content=json.dumps(tool_input),
         model=resp.model,
@@ -1900,6 +1931,7 @@ async def workout_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
             "evidence": [],
             "weekly_plan_hint": "Train as planned and re-check next week.",
         }
+    _normalize_array_field(tool_input, "evidence")
     return AiResult(
         content=json.dumps(tool_input),
         model=resp.model,

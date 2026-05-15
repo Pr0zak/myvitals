@@ -283,7 +283,17 @@ private fun Pair(label: String, value: String) {
 private fun EvidenceList(raw: Any?) {
     val items: List<String> = when (raw) {
         is List<*> -> raw.mapNotNull { it?.toString() }
-        is String -> listOf(raw)
+        is String -> {
+            // Claude tool-use sometimes returns array fields as a
+            // single string with <parameter name="item">…</parameter>
+            // blocks instead of a JSON array. Extract those when
+            // present; otherwise fall back to newline-split.
+            val tagRe = Regex("""<parameter[^>]*>([\s\S]*?)</parameter>""")
+            val tagItems = tagRe.findAll(raw).map { it.groupValues[1].trim() }
+                .filter { it.isNotEmpty() }.toList()
+            if (tagItems.isNotEmpty()) tagItems
+            else raw.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        }
         else -> emptyList()
     }
     if (items.isEmpty()) return

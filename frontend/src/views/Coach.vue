@@ -69,6 +69,29 @@ function tonePill(tone: string | undefined): string {
   return tone || "neutral";
 }
 
+/**
+ * Claude tool-use occasionally returns array fields as a single string
+ * containing `<parameter name="item">…</parameter>` blocks rather than
+ * a proper JSON array. Without normalization, Vue's v-for iterates the
+ * STRING'S CHARACTERS — one bullet per letter. This helper makes the
+ * UI robust regardless of which shape the model emits.
+ */
+function asLines(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.map((v) => String(v));
+  }
+  if (typeof raw === "string") {
+    // Extract <parameter name="item">…</parameter> blocks first; fall
+    // back to splitting on newlines if no tags are present.
+    const tagMatches = Array.from(raw.matchAll(/<parameter[^>]*>([\s\S]*?)<\/parameter>/g));
+    if (tagMatches.length > 0) {
+      return tagMatches.map((m) => m[1].trim()).filter((s) => s.length > 0);
+    }
+    return raw.split(/\r?\n/).map((s) => s.trim()).filter((s) => s.length > 0);
+  }
+  return [];
+}
+
 function fmtTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleString(undefined, {
@@ -116,7 +139,7 @@ onMounted(preload);
           </div>
           <div class="lbl">Evidence</div>
           <ul class="bullets">
-            <li v-for="(e, i) in (workout.data.analysis.evidence as string[] ?? [])" :key="i">{{ e }}</li>
+            <li v-for="(e, i) in asLines(workout.data.analysis.evidence)" :key="i">{{ e }}</li>
           </ul>
           <div class="lbl">This week's plan hint</div>
           <p class="plan">{{ workout.data.analysis.weekly_plan_hint }}</p>
@@ -160,7 +183,7 @@ onMounted(preload);
           </div>
           <div class="lbl">Evidence</div>
           <ul class="bullets">
-            <li v-for="(e, i) in (cardio.data.analysis.evidence as string[] ?? [])" :key="i">{{ e }}</li>
+            <li v-for="(e, i) in asLines(cardio.data.analysis.evidence)" :key="i">{{ e }}</li>
           </ul>
           <div class="lbl">Recommendation</div>
           <p class="plan">{{ cardio.data.analysis.recommendation }}</p>

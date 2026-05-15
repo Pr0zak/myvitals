@@ -788,6 +788,22 @@ data class WorkoutPatchRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class AiGoal(
+    val id: Int,
+    val kind: String,
+    val title: String,
+    @Json(name = "target_value") val targetValue: Double? = null,
+    @Json(name = "target_unit") val targetUnit: String? = null,
+    @Json(name = "target_date") val targetDate: String? = null,
+    @Json(name = "started_at") val startedAt: String,
+    @Json(name = "ended_at") val endedAt: String? = null,
+    val notes: String? = null,
+    @Json(name = "current_value") val currentValue: Double? = null,
+    @Json(name = "progress_pct") val progressPct: Double? = null,
+    @Json(name = "baseline_value") val baselineValue: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
 data class Annotation(
     val id: Int,
     val ts: String,

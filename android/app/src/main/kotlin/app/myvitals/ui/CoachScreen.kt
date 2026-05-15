@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.DirectionsBike
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.GpsFixed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -71,6 +72,8 @@ fun CoachScreen(
     var cardioLoading by remember { mutableStateOf(false) }
     var cardioErr by remember { mutableStateOf<String?>(null) }
 
+    var goals by remember { mutableStateOf<List<app.myvitals.sync.AiGoal>>(emptyList()) }
+
     suspend fun fetchWorkout(refresh: Boolean) {
         workoutLoading = true; workoutErr = null
         try {
@@ -96,7 +99,8 @@ fun CoachScreen(
     }
 
     // Preload the latest cached cards on mount so the user sees content
-    // immediately without burning a Claude call.
+    // immediately without burning a Claude call. Goals load alongside —
+    // they're cheap (no AI) and feed the read-only progress strip.
     LaunchedEffect(Unit) {
         if (!settings.isConfigured()) return@LaunchedEffect
         try {
@@ -105,6 +109,9 @@ fun CoachScreen(
             if (w.isSuccessful) workout = w.body()
             val c = withContext(Dispatchers.IO) { api.coachCardioLatest() }
             if (c.isSuccessful) cardio = c.body()
+            goals = withContext(Dispatchers.IO) {
+                runCatching { api.aiGoals() }.getOrDefault(emptyList())
+            }
         } catch (_: Exception) { /* preload best-effort */ }
     }
 
@@ -155,6 +162,10 @@ fun CoachScreen(
                 LabeledPlan("This week's plan", a["weekly_plan_hint"]?.toString() ?: "")
             },
         )
+
+        if (goals.isNotEmpty()) {
+            GoalsCard(goals)
+        }
 
         CoachCardBlock(
             icon = Icons.Outlined.DirectionsBike,
@@ -321,5 +332,91 @@ private fun LabeledPlan(label: String, value: String) {
             .padding(8.dp),
     ) {
         Text(value, color = MV.OnSurface, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun GoalsCard(goals: List<app.myvitals.sync.AiGoal>) {
+    // Phone mirror of the web Coach.vue Goals card (GOALS-4 / GOALS-5).
+    // Read-only — no AI call. Just renders the progress payload
+    // already enriched on /ai/goals (GOALS-3).
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 10.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MV.SurfaceContainer)
+            .border(
+                androidx.compose.foundation.BorderStroke(1.dp, MV.OutlineVariant),
+                RoundedCornerShape(10.dp),
+            )
+            .padding(12.dp),
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Outlined.GpsFixed, contentDescription = null,
+                    tint = MV.OnSurface, modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Goals", color = MV.OnSurface, fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("${goals.size} active",
+                    color = MV.OnSurfaceVariant, fontSize = 11.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            goals.forEach { g ->
+                GoalRow(g)
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun GoalRow(g: app.myvitals.sync.AiGoal) {
+    val pct = (g.progressPct ?: 0.0).coerceIn(0.0, 100.0)
+    val barColor = if (pct >= 100.0) Color(0xFF22C55E) else Color(0xFF38BDF8)
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                g.kind.uppercase(), color = Color(0xFF38BDF8),
+                fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .background(Color(0x1A38BDF8), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(g.title, color = MV.OnSurface, fontSize = 13.sp,
+                modifier = Modifier.weight(1f))
+            if (g.progressPct != null) {
+                Text("${pct.toInt()}%", color = MV.OnSurface,
+                    fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color(0x14FFFFFF)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction = (pct / 100.0).toFloat())
+                    .fillMaxSize()
+                    .background(barColor),
+            )
+        }
+        if (g.currentValue != null && g.targetValue != null) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "%.1f / %s %s".format(
+                    g.currentValue, g.targetValue.toString(), g.targetUnit ?: "",
+                ),
+                color = MV.OnSurfaceDim, fontSize = 10.sp,
+            )
+        }
     }
 }

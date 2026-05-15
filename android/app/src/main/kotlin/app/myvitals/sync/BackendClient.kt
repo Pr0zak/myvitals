@@ -291,6 +291,11 @@ interface BackendApi {
 
     @retrofit2.http.DELETE("journal/{id}")
     suspend fun journalDelete(@Path("id") id: Int): Response<okhttp3.ResponseBody>
+
+    @GET("ai/goals")
+    suspend fun aiGoals(
+        @retrofit2.http.Query("active_only") activeOnly: Boolean = true,
+    ): List<AiGoal>
 }
 
 object BackendClient {

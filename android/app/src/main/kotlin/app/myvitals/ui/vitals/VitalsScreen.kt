@@ -456,8 +456,10 @@ fun VitalsScreen(
                         closed = trailCounts.third,
                         onClick = onOpenTrails,
                     )
-                    Vital.WEIGHT -> WeightBadge(weight, nowMs,
-                        onClick = { onOpenVitalDetail(v) })
+                    Vital.WEIGHT -> WeightBadge(
+                        weight, profile?.weightGoalKg, nowMs,
+                        onClick = { onOpenVitalDetail(v) },
+                    )
                     Vital.BP -> BpBadge(bp, nowMs, onClick = { onOpenVitalDetail(v) })
                 }
             }
@@ -716,7 +718,9 @@ private fun StepsBadge(
 }
 
 @Composable
-private fun WeightBadge(snap: WeightSnapshot, nowMs: Long, onClick: () -> Unit) {
+private fun WeightBadge(
+    snap: WeightSnapshot, goalKg: Double?, nowMs: Long, onClick: () -> Unit,
+) {
     val v = Vital.WEIGHT
     val lbs = snap.latestKg?.times(2.20462)
     // Trend = current vs ~30d-ago value (average of oldest 3 points)
@@ -727,6 +731,10 @@ private fun WeightBadge(snap: WeightSnapshot, nowMs: Long, onClick: () -> Unit) 
             (cur - baseline) * 2.20462
         }
     }
+    // GOALS-3: distance to goal in lb, signed (positive = above goal,
+    // negative = already past it on the loss-direction default).
+    val toGoalLb: Double? = if (snap.latestKg != null && goalKg != null)
+        (snap.latestKg - goalKg) * 2.20462 else null
     BadgeFrame(v, snap.lastIso?.let { fmtRelative(it, nowMs) }, onClick) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(lbs?.let { "%.1f".format(it) } ?: "—",
@@ -744,6 +752,12 @@ private fun WeightBadge(snap: WeightSnapshot, nowMs: Long, onClick: () -> Unit) 
             }
             Text("$arrow %+.1f lb (30d)".format(trend),
                 color = trendColor, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        }
+        if (toGoalLb != null) {
+            val gColor = if (toGoalLb <= 0.1) Color(0xFF22C55E) else MV.OnSurfaceDim
+            val label = if (toGoalLb <= 0.1) "Goal reached"
+                        else "%.1f lb to goal".format(toGoalLb)
+            Text(label, color = gColor, fontSize = 10.sp)
         }
         Spacer(Modifier.height(6.dp))
         Box(Modifier.fillMaxWidth().height(34.dp)) {

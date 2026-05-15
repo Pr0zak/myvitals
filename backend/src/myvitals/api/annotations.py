@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +13,29 @@ from ..schemas import AnnotationCreate, AnnotationOut, AnnotationUpdate
 router = APIRouter(dependencies=[Depends(require_query)])
 
 
-@router.post("/log", response_model=AnnotationOut, status_code=201)
+# Backward-compatibility shims: /log/* → /journal/* via 308 redirects.
+# Cached frontend bundles or any out-of-tree client still hitting /log
+# get redirected to the renamed endpoint instead of a 404. Remove after
+# one release once we're sure nothing's still calling /log.
+_legacy = APIRouter(dependencies=[Depends(require_query)])
+
+
+@_legacy.api_route("/log", methods=["GET", "POST"], include_in_schema=False)
+async def _log_root_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/journal", status_code=308)
+
+
+@_legacy.api_route(
+    "/log/{annotation_id}", methods=["PATCH", "DELETE"], include_in_schema=False,
+)
+async def _log_item_redirect(annotation_id: int) -> RedirectResponse:
+    return RedirectResponse(url=f"/journal/{annotation_id}", status_code=308)
+
+
+router.include_router(_legacy)
+
+
+@router.post("/journal", response_model=AnnotationOut, status_code=201)
 async def create_annotation(
     body: AnnotationCreate,
     db: AsyncSession = Depends(get_session),
@@ -31,7 +54,7 @@ async def create_annotation(
     )
 
 
-@router.get("/log", response_model=list[AnnotationOut])
+@router.get("/journal", response_model=list[AnnotationOut])
 async def list_annotations(
     since: datetime | None = Query(None),
     type: str | None = Query(None, description="filter by annotation type"),
@@ -55,7 +78,7 @@ async def list_annotations(
     ]
 
 
-@router.patch("/log/{annotation_id}", response_model=AnnotationOut)
+@router.patch("/journal/{annotation_id}", response_model=AnnotationOut)
 async def update_annotation(
     annotation_id: int,
     body: AnnotationUpdate,
@@ -76,7 +99,7 @@ async def update_annotation(
     return AnnotationOut(id=row.id, ts=row.ts, type=row.type, payload=row.payload, note=row.note)
 
 
-@router.delete("/log/{annotation_id}", status_code=204)
+@router.delete("/journal/{annotation_id}", status_code=204)
 async def delete_annotation(
     annotation_id: int,
     db: AsyncSession = Depends(get_session),

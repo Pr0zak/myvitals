@@ -168,12 +168,12 @@ export const api = {
     if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;
     if (opts.type) params.type = opts.type;
     if (opts.limit) params.limit = opts.limit;
-    const { data } = await http.get<Annotation[]>("/log", { params });
+    const { data } = await http.get<Annotation[]>("/journal", { params });
     return data;
   },
 
   async createAnnotation(body: AnnotationCreate): Promise<Annotation> {
-    const { data } = await http.post<Annotation>("/log", body);
+    const { data } = await http.post<Annotation>("/journal", body);
     return data;
   },
 
@@ -182,12 +182,12 @@ export const api = {
     payload?: Record<string, unknown>;
     note?: string | null;
   }): Promise<Annotation> {
-    const { data } = await http.patch<Annotation>(`/log/${id}`, body);
+    const { data } = await http.patch<Annotation>(`/journal/${id}`, body);
     return data;
   },
 
   async deleteAnnotation(id: number): Promise<void> {
-    await http.delete(`/log/${id}`);
+    await http.delete(`/journal/${id}`);
   },
 
   // ── Sober tracking ─────────────────────────────────────────

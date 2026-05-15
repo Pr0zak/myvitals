@@ -511,6 +511,51 @@ async def mark_alerts_notified(
 
 # ─────────────── Goals (CRUD + check-in) ───────────────
 
+
+# Goal kinds whose target value lives ALSO in user_profile / .extra
+# (single source of truth — see GOALS-1). When one of these changes
+# on either side, the other side is brought along.
+def _profile_target_for_kind(kind: str, prof: models.UserProfile | None) -> float | None:
+    if prof is None:
+        return None
+    if kind == "weight":
+        return prof.weight_goal_kg
+    if kind == "sleep":
+        return prof.sleep_target_h
+    if kind == "steps":
+        extra = prof.extra or {}
+        v = extra.get("steps_goal")
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+async def _profile_set_target_for_kind(
+    db: AsyncSession, kind: str, value: float | None,
+) -> None:
+    """Bidirectional sync: writing a goal target writes back to the
+    matching profile field so a single source of truth is preserved."""
+    prof = await db.get(models.UserProfile, 1)
+    if prof is None:
+        return
+    if kind == "weight":
+        prof.weight_goal_kg = value
+    elif kind == "sleep":
+        prof.sleep_target_h = value
+    elif kind == "steps":
+        extra = dict(prof.extra or {})
+        if value is None:
+            extra.pop("steps_goal", None)
+        else:
+            extra["steps_goal"] = int(value)
+        prof.extra = extra
+    else:
+        return
+    prof.updated_at = datetime.now(timezone.utc)
+
+
 class GoalCreate(BaseModel):
     kind: str
     title: str
@@ -552,9 +597,19 @@ async def list_goals(
 async def create_goal(
     body: GoalCreate, db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
+    # GOALS-1 sync: if target_value was omitted and the kind has a
+    # matching profile field, prefill from the profile so the goal +
+    # profile don't diverge. If target_value was provided, write it
+    # back to the profile.
+    target = body.target_value
+    if target is None:
+        prof = await db.get(models.UserProfile, 1)
+        target = _profile_target_for_kind(body.kind, prof)
+    else:
+        await _profile_set_target_for_kind(db, body.kind, target)
     g = models.AiGoal(
         kind=body.kind, title=body.title,
-        target_value=body.target_value, target_unit=body.target_unit,
+        target_value=target, target_unit=body.target_unit,
         target_date=body.target_date, started_at=datetime.now(timezone.utc),
         notes=body.notes,
     )
@@ -571,8 +626,13 @@ async def update_goal(
     g = await db.get(models.AiGoal, goal_id)
     if g is None:
         raise HTTPException(status_code=404, detail="goal not found")
-    for k, v in body.model_dump(exclude_unset=True).items():
+    patch = body.model_dump(exclude_unset=True)
+    for k, v in patch.items():
         setattr(g, k, v)
+    # GOALS-1 sync: when target_value was patched and this goal's
+    # kind has a matching profile field, push the change to the profile.
+    if "target_value" in patch:
+        await _profile_set_target_for_kind(db, g.kind, g.target_value)
     await db.commit()
     await db.refresh(g)
     return _goal_to_dict(g)

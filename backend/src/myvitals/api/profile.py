@@ -131,13 +131,43 @@ async def put_profile(
     p.birth_date = body.birth_date
     p.sex = body.sex
     p.height_cm = body.height_cm
+    # Detect goal-relevant changes before applying so we can propagate
+    # to any active AiGoal of the matching kind (GOALS-1 bidirectional
+    # sync — see api/ai.py:_profile_target_for_kind).
+    sync_pairs: list[tuple[str, float | None]] = []
+    if body.weight_goal_kg != p.weight_goal_kg:
+        sync_pairs.append(("weight", body.weight_goal_kg))
+    new_sleep = (body.extra or {}).get("sleep_target_h") if body.extra else None
+    if new_sleep != p.sleep_target_h:
+        sync_pairs.append(("sleep", new_sleep))
+    new_steps = (body.extra or {}).get("steps_goal") if body.extra else None
+    cur_steps = (p.extra or {}).get("steps_goal") if p.extra else None
+    if new_steps != cur_steps:
+        sync_pairs.append(("steps", float(new_steps) if new_steps is not None else None))
+
     p.weight_goal_kg = body.weight_goal_kg
     p.resting_hr_baseline = body.resting_hr_baseline
     p.activity_level = body.activity_level
     p.extra = body.extra
     p.home_latitude = body.home_latitude
     p.home_longitude = body.home_longitude
+    if new_sleep is not None:
+        try:
+            p.sleep_target_h = float(new_sleep)
+        except (TypeError, ValueError):
+            pass
     p.updated_at = now
+
+    # Propagate to active goals of matching kind.
+    for kind, value in sync_pairs:
+        rows = (await db.execute(
+            select(models.AiGoal)
+            .where(models.AiGoal.kind == kind)
+            .where(models.AiGoal.ended_at.is_(None))
+        )).scalars().all()
+        for g in rows:
+            g.target_value = value
+
     await db.commit()
     await db.refresh(p)
     return await _profile_dict(db, p)

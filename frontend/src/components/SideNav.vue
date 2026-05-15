@@ -15,7 +15,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import {
-  Activity, AlertTriangle, BarChart3, Battery, Bed, Brain, Calendar, ChevronDown,
+  Activity, BarChart3, Battery, Bed, Brain, Calendar, ChevronDown,
   ChevronRight, Droplets, Dumbbell, Edit3, Footprints, Github, GitCompare,
   Heart, Home, Hourglass, List, Map, Menu, Mountain, RotateCcw, Scale, Search, Settings, Sparkles,
   Target, Terminal, Thermometer, TrendingUp, Watch as WatchIcon, type LucideIcon,
@@ -80,7 +80,6 @@ const summary = ref<Awaited<ReturnType<typeof api.todaySummary>> | null>(null);
 const activitiesCount = ref<number | null>(null);
 const activitiesDistanceM = ref<number | null>(null);
 const discoveriesCount = ref<number | null>(null);
-const alertsCount = ref<number | null>(null);
 const backendOk = ref<boolean | null>(null);
 const lastSyncAt = ref<Date | null>(null);
 const lastAttemptAt = ref<Date | null>(null);
@@ -249,7 +248,7 @@ const groups = computed<Group[]>(() => {
       badgeColor: "#a78bfa",
     },
     { id: "coach",  to: "/coach",  icon: Brain,        label: "Coach" },
-    { id: "log",     to: "/log",     icon: Edit3,         label: "Log" },
+    { id: "log",     to: "/journal", icon: Edit3,         label: "Journal" },
     {
       id: "sober",   to: "/sober",   icon: RotateCcw,     label: "Sober time",
       badge: soberDays.value != null ? `${Math.floor(soberDays.value)}d` : undefined,
@@ -261,12 +260,6 @@ const groups = computed<Group[]>(() => {
       badgeColor: "#38bdf8",
     },
     { id: "goals",  to: "/goals",  icon: Target,         label: "Goals" },
-    {
-      id: "alerts",  to: "/alerts",  icon: AlertTriangle, label: "Alerts",
-      badge: alertsCount.value && alertsCount.value > 0
-        ? `${alertsCount.value}` : undefined,
-      badgeColor: "#ef4444",
-    },
     { id: "compare", to: "/compare", icon: BarChart3,     label: "Compare" },
     { id: "logs",    to: "/logs",    icon: Terminal,      label: "Debug logs" },
     { id: "settings",to: "/settings",icon: Settings,      label: "Settings" },

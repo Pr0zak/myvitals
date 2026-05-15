@@ -519,7 +519,7 @@ const annotationChips = computed(() =>
 import { useRouter } from "vue-router";
 const router = useRouter();
 function openBp() { router.push("/blood-pressure"); }
-function openLog() { router.push("/log"); }
+function openLog() { router.push("/journal"); }
 </script>
 
 <template>

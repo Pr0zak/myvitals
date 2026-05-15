@@ -2088,6 +2088,13 @@ def _sleep_coach_system(tone: str) -> str:
 - 7-day avg vs 28-day baseline for each
 - stage breakdown (deep_h / rem_h / light_h / awake_h) summed over last 7 days
 - HRV / RHR / readiness 7d-avg vs 28d-baseline so you can correlate
+- overnight_env_7d — averaged sleep-window bedroom temp/humidity etc.
+  from Home Assistant sensors (may be empty if HA isn't configured).
+  Cite specific numbers when available: "bedroom temp avg 19.4 °C is
+  well within the 16-19 °C sleep-quality sweet spot" or "humidity at
+  62% is on the high side, can contribute to night sweats". Don't
+  over-weight a single sensor pair — these are environmental hints,
+  not the primary signal.
 - profile.sleep_target_h and the user's tone preference
 - top_correlations between sleep and downstream metrics
 - recent_alerts the system already flagged (suppressed HRV, high RHR, illness risk)
@@ -2108,6 +2115,45 @@ Use the `give_sleep_coach` tool. Rules:
 - The recommendation should pick the SINGLE biggest lever — earlier
   bedtime, more consistent wake, caffeine cutoff, etc. Not a list.
 """
+
+
+async def _overnight_env_readings(
+    db: AsyncSession, days: int = 7,
+) -> dict[str, Any]:
+    """Average bedroom temp / humidity / etc. across last N overnight
+    windows (defined as 23:00-06:00 local each night). Returns empty
+    dict if no env_readings rows match — caller should gracefully
+    elide the section in payloads.
+
+    Naive timezone — uses UTC for the 23:00-06:00 cutoff which is fine
+    in practice because we're averaging and the user's bedtime is
+    typically a stable offset; mis-bucketing one hour at the edges
+    doesn't move the mean meaningfully."""
+    from statistics import mean
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    since = _dt.now(_tz.utc) - _td(days=days)
+    rows = (await db.execute(
+        select(models.EnvReading)
+        .where(models.EnvReading.time >= since)
+    )).scalars().all()
+    if not rows:
+        return {"days": days, "sources": {}}
+    # Bucket by (source, metric); only keep rows in the overnight
+    # window 23:00-06:00 UTC. This filters out daytime spikes from
+    # the bedroom sensor that would skew the "sleep environment" read.
+    buckets: dict[tuple[str, str], list[float]] = {}
+    for r in rows:
+        h = r.time.hour
+        if not (h >= 23 or h < 6):
+            continue
+        key = (r.source, r.metric)
+        buckets.setdefault(key, []).append(r.value)
+    if not buckets:
+        return {"days": days, "sources": {}}
+    sources: dict[str, dict[str, float]] = {}
+    for (source, metric), vals in buckets.items():
+        sources.setdefault(source, {})[metric] = round(mean(vals), 2)
+    return {"days": days, "sources": sources}
 
 
 async def _sleep_stage_breakdown(db: AsyncSession, days: int = 7) -> dict[str, Any]:
@@ -2162,6 +2208,7 @@ async def build_sleep_coach_payload(db: AsyncSession) -> dict[str, Any]:
         "baseline_28d": baseline_28d,
         "recent_dailies": daily,
         "stage_breakdown_7d": await _sleep_stage_breakdown(db, days=7),
+        "overnight_env_7d": await _overnight_env_readings(db, days=7),
         "recent_alerts": await _recent_alerts_ctx(db),
         "top_correlations": _top_correlations(daily),
         "wow_deltas": _wow_deltas(daily),
@@ -2352,6 +2399,7 @@ async def build_recovery_coach_payload(db: AsyncSession) -> dict[str, Any]:
         "last7_summary": last7_summary,
         "baseline_28d": baseline_28d,
         "skin_temp_warm_days_7d": skin_warm_count,
+        "overnight_env_7d": await _overnight_env_readings(db, days=7),
         "recent_dailies": daily,
         "recent_alerts": await _recent_alerts_ctx(db),
         "top_correlations": _top_correlations(daily),

@@ -1120,7 +1120,7 @@ export const api = {
     online: boolean | null;
   } | null> {
     try {
-      const { data } = await http.get("/api/device-status/latest", {
+      const { data } = await http.get("/device-status/latest", {
         params: { device_id },
       });
       return data;
@@ -1160,7 +1160,7 @@ export const api = {
     };
     if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;
     if (opts.until) params.until = opts.until instanceof Date ? opts.until.toISOString() : opts.until;
-    const { data } = await http.get("/api/device-status/series", { params });
+    const { data } = await http.get("/device-status/series", { params });
     return data;
   },
 };

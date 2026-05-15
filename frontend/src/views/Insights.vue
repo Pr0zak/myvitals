@@ -16,6 +16,7 @@ function daysFromRoute(fallback: number): number {
   const v = Array.isArray(q) ? q[0] : q;
   return (v && RANGE_TO_DAYS[v]) ? RANGE_TO_DAYS[v] : fallback;
 }
+import { RouterLink } from "vue-router";
 import VChart from "vue-echarts";
 import { ArrowRightLeft, ChevronDown, ArrowDown, ArrowUp } from "lucide-vue-next";
 import Card from "@/components/Card.vue";
@@ -44,6 +45,25 @@ const METRIC_LABEL: Record<string, string> = {
   mood_score: "mood",
 };
 const mLabel = (k: string): string => METRIC_LABEL[k] ?? k;
+
+// ANALYTICS-3: map a metric key to its dedicated detail view (when
+// one exists). Returns null for metrics that don't have a view yet
+// (mood, alcohol, caffeine) so the UI hides the drill-down arrow.
+const METRIC_DETAIL_PATH: Record<string, string> = {
+  hrv_avg: "/hrv",
+  resting_hr: "/heart-rate",
+  recovery_score: "/heart-rate",  // recovery lives inside HR view
+  sleep_score: "/sleep",
+  sleep_duration_s: "/sleep",
+  weight_kg: "/weight",
+  body_fat_pct: "/weight",
+  bp_systolic_avg: "/blood-pressure",
+  bp_diastolic_avg: "/blood-pressure",
+  skin_temp_delta_avg: "/skin-temp",
+  steps_total: "/steps",
+};
+const metricDetailPath = (k: string): string | null =>
+  METRIC_DETAIL_PATH[k] ?? null;
 
 function fmtVal(metric: string, v: number): string {
   if (metric === "sleep_duration_s") return `${(v / 3600).toFixed(1)} h`;
@@ -193,14 +213,30 @@ const METRIC_GROUPS = [
 ];
 
 const x = ref("alcohol_count");
-const y = ref("hrv_avg");
+// ANALYTICS-3: when the user drills in from a detail page or a
+// Coach evidence link, `?metric=<key>` arrives in the URL. Seed
+// the y selector from that and open the explorer so the chart is
+// visible immediately rather than collapsed behind the toggle.
+function yFromRoute(fallback: string): string {
+  const q = route.query.metric;
+  const v = Array.isArray(q) ? q[0] : q;
+  return (v && METRIC_LABEL[v]) ? v : fallback;
+}
+const y = ref(yFromRoute("hrv_avg"));
 const lag = ref(1);
 const days = ref(daysFromRoute(90));
+const explorerOpen = ref(!!route.query.metric);
 watch(() => route.query.range, () => {
   const next = daysFromRoute(days.value);
   if (next !== days.value) days.value = next;
 });
-const explorerOpen = ref(false);
+watch(() => route.query.metric, () => {
+  const next = yFromRoute(y.value);
+  if (next !== y.value) {
+    y.value = next;
+    explorerOpen.value = true;
+  }
+});
 
 const LAG_OPTIONS = [
   { v: 0, label: "Same day" },
@@ -511,6 +547,13 @@ const explorerStrength = computed(() => strengthIdx(result.value?.pearson_r));
                 <option v-for="m in g.metrics" :key="m.key" :value="m.key">{{ m.label }}</option>
               </optgroup>
             </select>
+            <!-- ANALYTICS-3: drill-down to the dedicated detail view
+                 when one exists for the selected y metric. -->
+            <RouterLink v-if="metricDetailPath(y)"
+                        :to="metricDetailPath(y)!" class="detail-link"
+                        :title="`Open ${mLabel(y)} detail page`">
+              ↗
+            </RouterLink>
           </label>
           <label>
             <span>Effect appears</span>
@@ -565,6 +608,16 @@ const explorerStrength = computed(() => strengthIdx(result.value?.pearson_r));
 </template>
 
 <style scoped>
+.metric-pick { position: relative; }
+.detail-link {
+  position: absolute; right: 6px; top: 50%;
+  transform: translateY(-50%);
+  color: #38bdf8; text-decoration: none;
+  font-size: 0.78rem; font-weight: 600;
+  padding: 2px 4px; border-radius: 4px;
+  background: rgba(56, 189, 248, 0.08);
+}
+.detail-link:hover { background: rgba(56, 189, 248, 0.18); }
 .ask-row { display: flex; gap: 0.5rem; }
 .ask-input {
   flex: 1; background: var(--surface); color: var(--text);

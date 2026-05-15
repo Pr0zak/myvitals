@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import VChart from "vue-echarts";
 import Card from "@/components/Card.vue";
+import PatternsLink from "@/components/PatternsLink.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
@@ -279,6 +280,7 @@ function fmtNightDate(n: SleepNight): string {
     <header class="head">
       <h1>Sleep</h1>
       <div class="picker">
+        <PatternsLink metric="sleep_score" label="sleep"/>
         <button v-for="r in [7, 30, 90]" :key="r"
                 :class="{ active: range === r }" @click="range = r as 7 | 30 | 90; load()">
           {{ r }} days

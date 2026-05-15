@@ -16,6 +16,7 @@ import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
 import { chartTheme } from "@/theme";
 import { timeAxisFormatter } from "@/components/charts/chartHelpers";
+import PatternsLink from "@/components/PatternsLink.vue";
 
 type RangeKey = "7d" | "30d" | "90d" | "1y";
 const RANGES: Array<{ key: RangeKey; label: string; days: number }> = [
@@ -180,10 +181,13 @@ const stats = computed(() => {
   <div class="skin-view">
     <header class="hdr">
       <h1>Skin temperature Δ</h1>
-      <div class="seg-toggle">
-        <button v-for="r in RANGES" :key="r.key"
-                :class="{ active: range === r.key }"
-                @click="range = r.key">{{ r.label }}</button>
+      <div class="hdr-actions">
+        <PatternsLink metric="skin_temp_delta_avg" label="skin temp"/>
+        <div class="seg-toggle">
+          <button v-for="r in RANGES" :key="r.key"
+                  :class="{ active: range === r.key }"
+                  @click="range = r.key">{{ r.label }}</button>
+        </div>
       </div>
     </header>
 
@@ -238,7 +242,8 @@ const stats = computed(() => {
 
 <style scoped>
 .skin-view { max-width: 1080px; margin: 0 auto; padding: 1rem 1.25rem 2rem; }
-.hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; gap: 12px; }
+.hdr-actions { display: flex; align-items: center; gap: 10px; }
 h1 { margin: 0; }
 .err { color: #ef4444; }
 .dim { color: var(--muted); font-size: 0.85rem; }

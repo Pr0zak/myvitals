@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "vue-echarts";
 import Card from "@/components/Card.vue";
+import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { chartTheme } from "@/theme";
 import { fmtDateTime } from "@/format";
@@ -179,6 +180,7 @@ function categoryLabel(s: number, d: number): string {
     <header class="head">
       <h1>Blood pressure</h1>
       <div class="picker">
+        <PatternsLink metric="bp_systolic_avg" label="BP"/>
         <button v-for="r in RANGES" :key="r.key"
                 :class="{ active: range === r.key }" @click="range = r.key">{{ r.label }}</button>
       </div>

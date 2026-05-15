@@ -11,6 +11,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "vue-echarts";
 import Card from "@/components/Card.vue";
+import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import type {
@@ -564,6 +565,7 @@ const minHrInWindow = computed(() => hr24.value?.min_bpm ?? null);
     <header class="page-head">
       <h1>Heart rate</h1>
       <div class="ranges">
+        <PatternsLink metric="resting_hr" label="resting HR"/>
         <button v-for="r in RANGES" :key="r.key"
                 :class="{ pill: true, active: range === r.key }"
                 @click="range = r.key">{{ r.label }}</button>

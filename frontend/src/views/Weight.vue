@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "vue-echarts";
 import Card from "@/components/Card.vue";
+import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import { chartTheme } from "@/theme";
@@ -302,6 +303,7 @@ function deltaCls(kg: number | null, lowerIsBetter = true): string {
         <span v-if="recomp" class="recomp" :class="recomp.cls">· {{ recomp.label }}</span>
       </h1>
       <div class="picker">
+        <PatternsLink metric="weight_kg" label="weight"/>
         <button v-for="r in RANGES" :key="r.key"
                 :class="{ active: range === r.key, dim: yoy }"
                 :disabled="yoy" @click="range = r.key">{{ r.label }}</button>

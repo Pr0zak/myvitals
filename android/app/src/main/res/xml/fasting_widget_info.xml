@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  2×1 home-screen widget for the active fast. Shows elapsed time,
+  current stage, and a progress bar against the target. Updates
+  every 15 min via FastingWidgetUpdateWorker (faster than the
+  system updatePeriodMillis cadence which can't go below 30 min).
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="80dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_fasting"
+    android:previewLayout="@layout/widget_fasting"
+    android:resizeMode="horizontal"
+    android:widgetCategory="home_screen"
+    android:description="@string/widget_fasting_description" />

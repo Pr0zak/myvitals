@@ -106,5 +106,19 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- 2×1 fasting home-screen widget. Repaint cadence is 15 min
+             via FastingWidgetUpdateWorker (the manifest updatePeriod
+             can't go below 30 min). -->
+        <receiver
+            android:name=".fasting.FastingWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/fasting_widget_info" />
+        </receiver>
     </application>
 </manifest>

@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
 import app.myvitals.fasting.FastingMilestoneWorker
+import app.myvitals.fasting.FastingWidgetProvider
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.FastingEndRequest
 import app.myvitals.sync.FastingLogRequest
@@ -321,6 +322,7 @@ fun FastingScreen(
                             // Drop any pending milestone alarms for the
                             // session we just ended.
                             FastingMilestoneWorker.cancelAll(context, sessionId)
+                            FastingWidgetProvider.refreshAll(context)
                             loadAll()
                         } catch (e: Exception) {
                             Timber.w(e, "end failed"); error = e.message?.take(160)
@@ -404,6 +406,7 @@ fun FastingScreen(
                             FastingMilestoneWorker.schedule(
                                 context, started.id, startMs, spec.targetH,
                             )
+                            FastingWidgetProvider.refreshAll(context)
                             loadAll()
                         } catch (e: Exception) {
                             Timber.w(e, "start failed"); error = e.message?.take(160)

@@ -11,4 +11,7 @@
     <string name="shortcut_sober_long">Sober time</string>
     <string name="shortcut_fasting_short">Fasting</string>
     <string name="shortcut_fasting_long">Fasting timer</string>
+
+    <!-- Fasting home-screen widget -->
+    <string name="widget_fasting_description">Live fasting timer with progress + stage</string>
 </resources>

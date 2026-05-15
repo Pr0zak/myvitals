@@ -2303,12 +2303,15 @@ private fun ExerciseCard(
 internal fun isTimedExercise(
     wex: StrengthWorkoutExerciseRow, info: StrengthExerciseInfo?,
 ): Boolean {
-    // Backend-supplied flag wins (planks, isometric holds, mobility…).
-    // The legacy heuristic below only matters if the API somehow omits
-    // the field or the user's still on a pre-flag plan in cache.
+    // Backend-supplied wex.isTimed is authoritative — derived at
+    // serialization time from the catalog row's is_timed flag.
     if (wex.isTimed) return true
-    if (info?.isTimed == true) return true
-    if (info?.movementPattern == "mobility") return info.isTimed
+    // Catalog info.isTimed is only consulted for mobility (where it
+    // distinguishes yoga holds from rep-based mobility like Cat-Cow).
+    // Other movement patterns rely on the workout payload's flag.
+    if (info?.movementPattern == "mobility" && info.isTimed) return true
+    // Legacy heuristic — for pre-flag cached plans that survive an
+    // upgrade. Rep-low == rep-high AND ≥ 20 reads as "30s hold".
     if (wex.targetWeightLb == null
         && wex.targetRepsLow == wex.targetRepsHigh
         && wex.targetRepsLow >= 20) return true

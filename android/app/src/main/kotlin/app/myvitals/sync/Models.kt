@@ -174,11 +174,14 @@ data class StrengthExerciseInfo(
     @Json(name = "image_front") val imageFront: String? = null,
     @Json(name = "image_side") val imageSide: String? = null,
     @Json(name = "youtube_query") val youtubeQuery: String? = null,
-    // Mobility-only flags. Bilateral → 2 sets, one per side; UI labels
-    // them R / L. is_timed=false means the "reps" target is actual rep
-    // count (Thread-the-Needle, Cat-Cow), not seconds-to-hold.
+    // Bilateral → 2 sets, one per side; UI labels them R / L.
+    // is_timed=true means target reps carry HOLD SECONDS (planks,
+    // isometric holds, mobility yoga). Default false — Moshi fills
+    // the default when the JSON omits the key, so we want a
+    // false-by-default for the long tail of rep-based exercises.
+    // Catalog rows opt-in by explicitly setting is_timed:true.
     @Json(name = "is_bilateral") val isBilateral: Boolean = false,
-    @Json(name = "is_timed") val isTimed: Boolean = true,
+    @Json(name = "is_timed") val isTimed: Boolean = false,
 )
 
 @JsonClass(generateAdapter = true)

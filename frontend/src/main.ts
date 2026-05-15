@@ -31,6 +31,7 @@ const router = createRouter({
     { path: "/sober", name: "sober", component: () => import("./views/Sober.vue") },
     { path: "/fasting", name: "fasting", component: () => import("./views/Fasting.vue") },
     { path: "/watch", name: "watch", component: () => import("./views/Watch.vue") },
+    { path: "/coach", name: "coach", component: () => import("./views/Coach.vue") },
     { path: "/goals", name: "goals", component: () => import("./views/Goals.vue") },
     { path: "/activities", name: "activities", component: () => import("./views/Activities.vue") },
     { path: "/activity/:source/:id", name: "activity-detail", component: () => import("./views/ActivityDetail.vue") },

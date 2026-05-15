@@ -15,14 +15,18 @@ from ..db import models
 from ..db.session import get_session
 from ..integrations.claude import (
     ask,
+    build_cardio_coach_payload,
     build_summary_payload,
     build_topic_payload,
+    build_workout_coach_payload,
+    cardio_coach,
     explain_discovery,
     explain_legacy,
     explain_topic,
     hash_payload,
     pre_workout,
     verdict,
+    workout_coach,
 )
 
 router = APIRouter(prefix="/ai", dependencies=[Depends(require_any)])
@@ -913,4 +917,147 @@ async def explain_all_endpoint(db: AsyncSession = Depends(get_session)) -> dict[
         "model": result.model,
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
+    }
+
+
+# ─────────────── Coach endpoints ───────────────
+
+
+async def _coach_cached(
+    db: AsyncSession, range_kind: str, payload_hash: str,
+) -> dict[str, Any] | None:
+    row = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == range_kind)
+        .where(models.AiSummary.payload_hash == payload_hash)
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    import json as _json
+    try:
+        analysis = _json.loads(row.content)
+    except Exception:  # noqa: BLE001
+        analysis = {"raw": row.content}
+    return {
+        "analysis": analysis,
+        "generated_at": row.generated_at,
+        "model": row.model,
+        "cached": True,
+    }
+
+
+async def _coach_persist(
+    db: AsyncSession, range_kind: str, payload_hash: str, result: Any,
+) -> dict[str, Any]:
+    import json as _json
+    summary = models.AiSummary(
+        generated_at=datetime.now(timezone.utc),
+        range_kind=range_kind,
+        payload_hash=payload_hash,
+        model=result.model,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        content=result.content,
+    )
+    db.add(summary)
+    await db.commit()
+    try:
+        analysis = _json.loads(result.content)
+    except Exception:  # noqa: BLE001
+        analysis = {"raw": result.content}
+    return {
+        "analysis": analysis,
+        "generated_at": summary.generated_at,
+        "model": result.model,
+        "cached": False,
+    }
+
+
+@router.post("/coach/cardio")
+async def coach_cardio_endpoint(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """AI cardio coach card. Caches by payload-hash so re-asking the
+    same data doesn't re-bill — invalidates the moment a new cardio
+    session lands."""
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    payload = await build_cardio_coach_payload(db)
+    payload_hash = hash_payload({"kind": "coach_cardio", "tone": cfg.tone, "p": payload})
+    cached = await _coach_cached(db, "coach_cardio", payload_hash)
+    if cached is not None:
+        return cached
+    result = await cardio_coach(db, cfg)
+    cfg.calls_today += 1
+    return await _coach_persist(db, "coach_cardio", payload_hash, result)
+
+
+@router.get("/coach/cardio/latest")
+async def coach_cardio_latest(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any] | None:
+    """Return the most recent cardio-coach card without billing."""
+    row = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == "coach_cardio")
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    import json as _json
+    try:
+        analysis = _json.loads(row.content)
+    except Exception:  # noqa: BLE001
+        analysis = {"raw": row.content}
+    return {
+        "analysis": analysis,
+        "generated_at": row.generated_at,
+        "model": row.model,
+        "cached": True,
+    }
+
+
+@router.post("/coach/workout")
+async def coach_workout_endpoint(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Multi-signal AI workout coach — synthesizes strength, cardio,
+    sleep, HRV, and training load into a single weekly card."""
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    payload = await build_workout_coach_payload(db)
+    payload_hash = hash_payload({"kind": "coach_workout", "tone": cfg.tone, "p": payload})
+    cached = await _coach_cached(db, "coach_workout", payload_hash)
+    if cached is not None:
+        return cached
+    result = await workout_coach(db, cfg)
+    cfg.calls_today += 1
+    return await _coach_persist(db, "coach_workout", payload_hash, result)
+
+
+@router.get("/coach/workout/latest")
+async def coach_workout_latest(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any] | None:
+    row = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == "coach_workout")
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    import json as _json
+    try:
+        analysis = _json.loads(row.content)
+    except Exception:  # noqa: BLE001
+        analysis = {"raw": row.content}
+    return {
+        "analysis": analysis,
+        "generated_at": row.generated_at,
+        "model": row.model,
+        "cached": True,
     }

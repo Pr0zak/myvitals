@@ -83,6 +83,8 @@ WEB_ONLY_OK = {
     "frontend/src/views/Alerts.vue",
     "frontend/src/views/BloodPressure.vue",
     "frontend/src/views/Log.vue",
+    "frontend/src/views/Watch.vue",      # phone surfaces watch via Today.vue tile
+    "frontend/src/views/Coach.vue",      # COACH-4 follow-up will pair this
 }
 
 

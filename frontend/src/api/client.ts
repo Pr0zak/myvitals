@@ -49,6 +49,14 @@ export interface FastingStatsOut {
   last_completed_at: string | null;
 }
 
+// ── Coach types ──────────────────────────────────────────────────────
+export interface CoachCardOut {
+  analysis: Record<string, unknown>;
+  generated_at: string;
+  model: string;
+  cached: boolean;
+}
+
 interface RangeParams {
   since?: Date | string;
   until?: Date | string;
@@ -1064,6 +1072,24 @@ export const api = {
     device_id?: string;
   }): Promise<unknown> {
     const { data } = await http.put("/api/ha-config", body);
+    return data;
+  },
+
+  // ── Coach ──────────────────────────────────────────────────────────
+  async coachCardio(): Promise<CoachCardOut> {
+    const { data } = await http.post("/ai/coach/cardio", {});
+    return data;
+  },
+  async coachCardioLatest(): Promise<CoachCardOut | null> {
+    const { data } = await http.get("/ai/coach/cardio/latest");
+    return data;
+  },
+  async coachWorkout(): Promise<CoachCardOut> {
+    const { data } = await http.post("/ai/coach/workout", {});
+    return data;
+  },
+  async coachWorkoutLatest(): Promise<CoachCardOut | null> {
+    const { data } = await http.get("/ai/coach/workout/latest");
     return data;
   },
 

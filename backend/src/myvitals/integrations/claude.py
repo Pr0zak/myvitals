@@ -1670,3 +1670,239 @@ async def phrase_anomaly(cfg: models.AiConfig, anomaly: dict[str, Any]) -> str:
     )
     text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
     return "\n".join(text_parts).strip().strip('"').strip()
+
+
+# ─────────────── Cardio coach ───────────────
+
+CARDIO_COACH_TOOL = {
+    "name": "give_cardio_coach",
+    "description": (
+        "Return a structured analysis of the user's cardio pattern over the "
+        "trailing window: zone distribution, weekly volume, polarization, "
+        "concrete recommendation."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "headline": {
+                "type": "string",
+                "description": "≤14 words. Single most important read on current cardio dose.",
+            },
+            "tone": {"type": "string", "enum": ["good", "warn", "bad", "neutral"]},
+            "polarized_assessment": {
+                "type": "string",
+                "description": (
+                    "≤30 words. Is the Z1/Z2 : Z3+ ratio healthy? Polarized "
+                    "training research says ~80:20 easy:hard for endurance "
+                    "athletes; recreational users land closer to 70:30."
+                ),
+            },
+            "volume_assessment": {
+                "type": "string",
+                "description": "≤30 words. Is weekly volume appropriate (too much / too little / right)?",
+            },
+            "evidence": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "2-4 bullets, each citing specific numbers (Z2 min/week, polarized ratio, …).",
+            },
+            "recommendation": {
+                "type": "string",
+                "description": "≤30 words. Concrete lever (more Z2, cut grey zone, recovery week, etc).",
+            },
+        },
+        "required": [
+            "headline", "tone", "polarized_assessment",
+            "volume_assessment", "evidence", "recommendation",
+        ],
+    },
+}
+
+
+def _cardio_coach_system(tone: str) -> str:
+    return f"""You are a brief cardio coach reading the user's last 30
+days of HR-zone training data. Use the `give_cardio_coach` tool.
+
+{_tone_line(tone)}
+
+Frame your assessment against widely-accepted training principles:
+- Polarized training (Seiler) — ~80% time in Z1+Z2 ("easy"), ~20% in
+  Z4+Z5 ("hard"), minimal Z3 ("grey zone") for best aerobic gains.
+- Recreational adults benefit from 150 min/wk Z2-or-above; 300 min/wk
+  is the target for cardiovascular fitness gains.
+- Too much Z3 indicates time spent too hard for recovery, too easy
+  for stimulus — biggest single fixable problem in most amateurs.
+
+Cite specific numbers in evidence. Don't be vague."""
+
+
+async def build_cardio_coach_payload(db: AsyncSession) -> dict[str, Any]:
+    """Bounded payload for the cardio coach AI card."""
+    from ..analytics.cardio import cardio_summary
+    summary = await cardio_summary(db, days=30)
+    return {
+        "today": datetime.now(timezone.utc).date().isoformat(),
+        "profile": await _profile_ctx(db),
+        "cardio_30d": summary,
+    }
+
+
+async def cardio_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
+    """Structured AI analysis of cardio zone distribution + dose."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    payload = await build_cardio_coach_payload(db)
+    user_text = (
+        f"Analyze this user's cardio pattern over the last 30 days and "
+        f"return structured advice via the `give_cardio_coach` tool:\n\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=500,
+        system=_cached_system(_cardio_coach_system(cfg.tone)),
+        tools=[CARDIO_COACH_TOOL],
+        tool_choice={"type": "tool", "name": "give_cardio_coach"},
+        messages=[{"role": "user", "content": user_text}],
+    )
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use" and block.name == "give_cardio_coach":
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    if not tool_input:
+        tool_input = {
+            "headline": "Not enough cardio data to coach on yet",
+            "tone": "neutral",
+            "polarized_assessment": "Need more sessions logged before zone math is meaningful.",
+            "volume_assessment": "Unknown.",
+            "evidence": [],
+            "recommendation": "Log a few cardio sessions then retry.",
+        }
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
+# ─────────────── Workout coach (multi-signal) ───────────────
+
+WORKOUT_COACH_TOOL = {
+    "name": "give_workout_coach",
+    "description": (
+        "Multi-signal weekly coach. Synthesizes strength, cardio, sleep, "
+        "HRV, and training load into a single guidance card."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "headline": {
+                "type": "string",
+                "description": "≤14 words. Top-level read on this week's training state.",
+            },
+            "tone": {"type": "string", "enum": ["good", "warn", "bad", "neutral"]},
+            "what_is_working": {
+                "type": "string",
+                "description": "≤30 words. Specific behaviour worth keeping.",
+            },
+            "what_to_change": {
+                "type": "string",
+                "description": "≤30 words. Single most actionable adjustment.",
+            },
+            "evidence": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "2-4 bullets citing specific signals (HRV delta, sleep debt, missed sets, Z2 min, etc).",
+            },
+            "weekly_plan_hint": {
+                "type": "string",
+                "description": "≤40 words. How to balance strength + cardio + rest this week given the data.",
+            },
+        },
+        "required": [
+            "headline", "tone", "what_is_working", "what_to_change",
+            "evidence", "weekly_plan_hint",
+        ],
+    },
+}
+
+
+def _workout_coach_system(tone: str) -> str:
+    return f"""You are the user's weekly training coach. You see:
+- Last 14 days of strength performance (avg rating, missed sets, muscle volume)
+- Last 30 days of cardio (HR zones, polarization, volume by type)
+- Last 28 days of vitals (HRV, RHR, sleep, readiness, training load CTL/ATL/TSB)
+- Today's daily summary
+
+{_tone_line(tone)}
+
+Use the `give_workout_coach` tool. Rules:
+- Synthesize across silos — don't just report strength OR cardio.
+- The MOST common useful insight is the interaction: e.g. "your cardio
+  volume is good but HRV is suppressed; pull back hard sessions this week"
+  or "strength is plateauing because sleep debt is climbing".
+- Be specific. Generic motivation is bad. Cite numbers in evidence.
+- A single high-confidence change beats five vague ones."""
+
+
+async def build_workout_coach_payload(db: AsyncSession) -> dict[str, Any]:
+    """Multi-signal payload — reuses cardio + deload signals."""
+    from ..analytics.cardio import cardio_summary
+    # Reuse the deload payload's trend + strength signals, but rename
+    # so the system prompt knows this is a broader weekly read.
+    deload = await build_deload_payload(db)
+    cardio = await cardio_summary(db, days=30)
+    return {
+        "today": datetime.now(timezone.utc).date().isoformat(),
+        "profile": await _profile_ctx(db),
+        "vitals_trends": deload.get("trends"),
+        "strength_last_14d": deload.get("strength_last_14d"),
+        "cardio_30d": cardio,
+        "fasting": await _fasting_status(db),
+        "trend_badges": await compute_badges(db, max_badges=4),
+    }
+
+
+async def workout_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
+    """Synthesizing AI coach — weekly perspective, multi-signal."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    payload = await build_workout_coach_payload(db)
+    user_text = (
+        f"Synthesize the user's strength + cardio + recovery picture "
+        f"into a single weekly-perspective coaching card via the "
+        f"`give_workout_coach` tool:\n\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=600,
+        system=_cached_system(_workout_coach_system(cfg.tone)),
+        tools=[WORKOUT_COACH_TOOL],
+        tool_choice={"type": "tool", "name": "give_workout_coach"},
+        messages=[{"role": "user", "content": user_text}],
+    )
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use" and block.name == "give_workout_coach":
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    if not tool_input:
+        tool_input = {
+            "headline": "Not enough cross-signal data yet",
+            "tone": "neutral",
+            "what_is_working": "Keep logging.",
+            "what_to_change": "Nothing specific to suggest yet.",
+            "evidence": [],
+            "weekly_plan_hint": "Train as planned and re-check next week.",
+        }
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )

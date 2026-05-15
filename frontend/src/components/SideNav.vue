@@ -15,7 +15,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import {
-  Activity, AlertTriangle, BarChart3, Battery, Bed, Calendar, ChevronDown,
+  Activity, AlertTriangle, BarChart3, Battery, Bed, Brain, Calendar, ChevronDown,
   ChevronRight, Droplets, Dumbbell, Edit3, Footprints, Github, GitCompare,
   Heart, Home, Hourglass, List, Map, Menu, Mountain, RotateCcw, Scale, Search, Settings, Sparkles,
   Target, Terminal, Thermometer, TrendingUp, Watch as WatchIcon, type LucideIcon,
@@ -228,6 +228,7 @@ const groups = computed<Group[]>(() => {
         ? `${discoveriesCount.value} new` : undefined,
       badgeColor: "#a78bfa",
     },
+    { id: "coach",  to: "/coach",  icon: Brain,        label: "Coach" },
     { id: "log",     to: "/log",     icon: Edit3,         label: "Log" },
     {
       id: "sober",   to: "/sober",   icon: RotateCcw,     label: "Sober time",

@@ -27,6 +27,7 @@ const router = createRouter({
     { path: "/yoga-icon-samples", name: "yoga-icon-samples", component: () => import("./views/YogaIconSamples.vue") },
     { path: "/weight", name: "weight", component: () => import("./views/Weight.vue") },
     { path: "/steps", name: "steps", component: () => import("./views/Steps.vue") },
+    { path: "/hrv", name: "hrv", component: () => import("./views/Hrv.vue") },
     { path: "/blood-pressure", name: "blood-pressure", component: () => import("./views/BloodPressure.vue") },
     { path: "/journal", name: "journal", component: () => import("./views/Journal.vue") },
     { path: "/sober", name: "sober", component: () => import("./views/Sober.vue") },

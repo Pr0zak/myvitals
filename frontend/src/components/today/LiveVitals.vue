@@ -67,7 +67,7 @@ function hasAny(s: Array<number | null>): boolean {
     </RouterLink>
 
     <!-- HRV -->
-    <RouterLink to="/heart-rate" class="cell linkable">
+    <RouterLink to="/hrv" class="cell linkable">
       <div class="head">
         <div class="title">
           <Activity :size="14" class="good"/>

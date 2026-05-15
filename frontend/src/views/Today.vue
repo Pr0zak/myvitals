@@ -30,6 +30,7 @@ import ActivityRow from "@/components/today/ActivityRow.vue";
 import BodyMetrics from "@/components/today/BodyMetrics.vue";
 import BloodPressure from "@/components/today/BloodPressure.vue";
 import AnnotationLog from "@/components/today/AnnotationLog.vue";
+import GoalsTile from "@/components/today/GoalsTile.vue";
 import Footer from "@/components/today/Footer.vue";
 
 const loading = ref(true);
@@ -45,6 +46,11 @@ const steps24 = ref<StepsSeries | null>(null);
 const activities = ref<Activity[]>([]);
 const strengthWorkouts = ref<Awaited<ReturnType<typeof api.strengthWorkouts>>["workouts"]>([]);
 const annotations = ref<Annotation[]>([]);
+const goals = ref<Array<{
+  id: number; kind: string; title: string;
+  target_value: number | null; target_unit: string | null;
+  current_value: number | null; progress_pct: number | null;
+}>>([]);
 const lastSync = ref<string | null>(null);
 const version = ref<string>("0.0.0");
 
@@ -76,7 +82,7 @@ async function loadCore() {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const [s, s7, h, hv, sl, st, a, sw, an, ver, prof, ws, bps] = await Promise.all([
+    const [s, s7, h, hv, sl, st, a, sw, an, ver, prof, ws, bps, gs] = await Promise.all([
       api.todaySummary(),
       api.summaryRange(sevenDaysAgo).catch(() => []),
       api.heartRate({ since: dayAgo }).catch(() => null),
@@ -90,6 +96,7 @@ async function loadCore() {
       api.getProfile().catch(() => null),
       api.weight({ since: thirtyDaysAgo }).catch(() => ({ points: [] as any })),
       api.bloodPressure({ since: thirtyDaysAgo }).catch(() => null),
+      api.aiGoals(true).catch(() => []),
     ]);
     summary.value = s;
     summary7d.value = s7;
@@ -105,6 +112,7 @@ async function loadCore() {
     profile.value = prof as any;
     weightSeries.value = (ws as any)?.points ?? [];
     bpSeries.value = bps as any;
+    goals.value = gs as any;
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : "Failed to load";
   } finally {
@@ -597,6 +605,8 @@ async function refreshAnnotations() {
       @log="openLog"
       @added="refreshAnnotations"
     />
+
+    <GoalsTile :goals="goals"/>
 
     <Footer :version="version"/>
   </div>

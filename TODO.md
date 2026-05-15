@@ -220,9 +220,9 @@ app still needs to surface them as system notifications.
       play.
 - [ ] **Voice Q&A** on the phone — TTS the answer; tap-to-speak
       input via Android speech recognizer.
-- [ ] **HA env enrichment** — `env_readings` (bedroom temp/humidity)
-      already in DB but not in Claude's payload. Adding it lets the
-      model correlate sleep with environmental factors.
+- ~~**HA env enrichment**~~ — shipped v0.7.242 (AI-1) — overnight
+  env_readings (bedroom temp/humidity) now bundled into the sleep
+  + recovery coach payloads on a 7-day average, 23:00-06:00 window.
 
 ---
 
@@ -233,16 +233,15 @@ cards shipped v0.7.190–v0.7.191 (Workout coach, Cardio coach), and the
 payloads now see historical alerts (ALERTS-2, v0.7.201). Natural
 follow-ups:
 
-- [ ] **Sleep coach** — synthesizes sleep duration, consistency,
-      stage breakdown, sleep_debt_h, and recent HRV/RHR drift into a
-      "sleep is / isn't supporting recovery" verdict.
-- [ ] **Recovery coach** — broader than the existing deload-check.
-      Includes overnight HRV / RHR / skin temp delta / readiness with
-      multi-week trend framing.
-- [ ] **In-process re-arm** — `_ha_run()` task currently only
-      re-reads `ha_config` on each disconnect. Settings toggle today
-      needs a backend restart. Add a SIGUSR1-or-similar nudge so
-      toggling realtime live doesn't require restart.
+- ~~**Sleep coach**~~ — shipped v0.7.240 (COACH-5) — duration +
+  consistency + stage breakdown + sleep_debt_h + HRV/RHR drift
+  synthesised into a supporting_recovery yes/marginal/no verdict.
+- ~~**Recovery coach**~~ — shipped v0.7.241 (COACH-6) — multi-week
+  HRV / RHR / skin-temp Δ / readiness trend verdict (improving /
+  flat / declining), broader than the per-workout deload check.
+- ~~**In-process re-arm**~~ — shipped v0.7.240 (HA-9) — restart_event
+  + request_restart() signalled from PUT /ha-config so toggling
+  realtime live no longer needs a backend restart.
 
 ---
 
@@ -260,12 +259,11 @@ ideas if HA + HC ever both carry overlapping HR / steps:
 
 ## Other deferred features
 
-- [ ] **Strength v2 — catalog supplement** — add ~25 named exercises
-      Fitbod has that free-exercise-db doesn't (Incline Row, Kroc Row,
-      Bird Dog Row, Renegade Row, Tate Press, Single-Arm Floor Press,
-      B-Stance RDL, DB Hip Thrust, Cuban Rotation, Zottman Preacher,
-      Cross-Body Hammer, Plank Pull-Through, Pike / Archer / Hindu
-      push-ups, etc.) as a supplementary JSON merged at catalog load.
+- ~~**Strength v2 — catalog supplement**~~ — already shipped:
+  `backend/src/myvitals/data/exercises_supplement.json` has 69
+  entries (Incline DB Row, Kroc Row, Bird Dog Row, Renegade Row,
+  Tate Press, B-Stance RDL, etc.) merged into the catalog at
+  import time by `api/workout/strength.py`.
 - [ ] **Multi-user** — single-user assumed throughout; no user_id
       column on most tables. Big refactor if ever wanted.
 

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Eye, EyeOff, Check, X as XIcon } from "lucide-vue-next";
+import {
+  Eye, EyeOff, Check, X as XIcon,
+  Download, RefreshCw, ExternalLink, AlertCircle,
+} from "lucide-vue-next";
 import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
 import { units, weightUnit, weightVal, weightToKg } from "@/units";
@@ -27,6 +30,77 @@ const stravaConfig = ref<StravaAppConfigStatus | null>(null);
 const stravaError = ref<string | null>(null);
 const stravaSyncing = ref(false);
 const stravaSyncResult = ref<string>("");
+
+// UPDATE-1: release check + apply trigger
+interface UpdateCheck {
+  current: string;
+  latest: string | null;
+  latest_tag: string | null;
+  latest_url: string | null;
+  latest_published_at: string | null;
+  release_notes: string | null;
+  update_available: boolean;
+  error: string | null;
+}
+const updateInfo = ref<UpdateCheck | null>(null);
+const updateChecking = ref(false);
+const updateApplying = ref(false);
+const updateApplyResult = ref<string>("");
+const updateApplyError = ref<string | null>(null);
+
+async function checkUpdate() {
+  updateChecking.value = true;
+  updateApplyResult.value = "";
+  updateApplyError.value = null;
+  try {
+    const { data } = await axios.get<UpdateCheck>("/api/update/check", {
+      baseURL: apiBase.value || undefined,
+      headers: queryToken.value ? { Authorization: `Bearer ${queryToken.value}` } : {},
+    });
+    updateInfo.value = data;
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { detail?: string } }; message?: string };
+    updateInfo.value = {
+      current: "?", latest: null, latest_tag: null, latest_url: null,
+      latest_published_at: null, release_notes: null,
+      update_available: false,
+      error: err?.response?.data?.detail ?? err?.message ?? "check failed",
+    };
+  } finally {
+    updateChecking.value = false;
+  }
+}
+
+async function applyUpdate() {
+  if (!confirm(
+    "Apply the latest release? The backend will restart and the dashboard "
+    + "will be unreachable for ~15 seconds.",
+  )) return;
+  updateApplying.value = true;
+  updateApplyResult.value = "";
+  updateApplyError.value = null;
+  try {
+    const { data } = await axios.post<{
+      triggered: boolean; error?: string; hint?: string;
+    }>("/api/update/apply", {}, {
+      baseURL: apiBase.value || undefined,
+      headers: queryToken.value ? { Authorization: `Bearer ${queryToken.value}` } : {},
+    });
+    if (data.triggered) {
+      updateApplyResult.value =
+        "Update triggered. Backend will restart in <60s. Re-check in ~30s.";
+      // Poll for the new version every 5s.
+      setTimeout(() => checkUpdate(), 30_000);
+    } else {
+      updateApplyError.value = data.hint ?? data.error ?? "Trigger failed.";
+    }
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { detail?: string } }; message?: string };
+    updateApplyError.value = err?.response?.data?.detail ?? err?.message ?? "apply failed";
+  } finally {
+    updateApplying.value = false;
+  }
+}
 
 // Concept2 (rower) — long-lived personal token from log.concept2.com/developers
 type Concept2Status = Awaited<ReturnType<typeof api.concept2Status>>;
@@ -782,6 +856,7 @@ onMounted(() => {
   loadAiCfg();
   loadHaStatus();
   startJobPolling();
+  checkUpdate();
 });
 onUnmounted(stopJobPolling);
 </script>
@@ -789,6 +864,68 @@ onUnmounted(stopJobPolling);
 <template>
   <div class="settings">
     <h1>Settings</h1>
+
+    <details class="section" open>
+      <summary>
+        <h2>
+          Updates
+          <span v-if="updateInfo?.update_available" class="badge-new">
+            v{{ updateInfo.latest }} available
+          </span>
+          <span v-else-if="updateInfo && !updateInfo.error" class="badge-ok">
+            up to date
+          </span>
+        </h2>
+      </summary>
+      <div class="update-row">
+        <div class="update-versions">
+          <div class="kv">
+            <span class="kv-label">Running</span>
+            <span class="kv-value mono">{{ updateInfo?.current ?? "—" }}</span>
+          </div>
+          <div class="kv">
+            <span class="kv-label">Latest release</span>
+            <span class="kv-value mono">
+              {{ updateInfo?.latest ?? "—" }}
+              <a v-if="updateInfo?.latest_url" :href="updateInfo.latest_url"
+                 target="_blank" rel="noopener" class="release-link">
+                <ExternalLink :size="11"/>
+              </a>
+            </span>
+          </div>
+          <div v-if="updateInfo?.latest_published_at" class="kv">
+            <span class="kv-label">Published</span>
+            <span class="kv-value">{{ fmtDateTime(updateInfo.latest_published_at) }}</span>
+          </div>
+        </div>
+        <div class="update-actions">
+          <button class="ghost" :disabled="updateChecking" @click="checkUpdate">
+            <RefreshCw :size="14" :class="{ spin: updateChecking }"/>
+            {{ updateChecking ? "Checking…" : "Check for updates" }}
+          </button>
+          <button v-if="updateInfo?.update_available"
+                  class="primary" :disabled="updateApplying" @click="applyUpdate">
+            <Download :size="14"/>
+            {{ updateApplying ? "Applying…" : `Apply v${updateInfo.latest}` }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="updateInfo?.release_notes" class="release-notes">
+        <h3>What's new</h3>
+        <pre>{{ updateInfo.release_notes }}</pre>
+      </div>
+
+      <div v-if="updateApplyResult" class="ok">
+        <Check :size="14"/> {{ updateApplyResult }}
+      </div>
+      <div v-if="updateApplyError" class="err">
+        <AlertCircle :size="14"/> {{ updateApplyError }}
+      </div>
+      <div v-if="updateInfo?.error" class="hint">
+        Couldn't check GitHub: {{ updateInfo.error }}
+      </div>
+    </details>
 
     <details class="section" open>
       <summary><h2>Backend access</h2></summary>
@@ -1667,5 +1804,71 @@ tr.job-failed { background: rgba(239, 68, 68, 0.05); }
   border-radius: 8px; padding: 0.7rem; max-height: 280px; overflow: auto;
   font-family: ui-monospace, monospace; font-size: 0.75rem;
   color: var(--text-soft); margin-top: 0.5rem; white-space: pre-wrap;
+}
+
+/* UPDATE-1: release check + apply controls */
+.update-row {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap;
+  margin-top: 0.4rem;
+}
+.update-versions {
+  display: grid; grid-template-columns: auto auto;
+  column-gap: 0.8rem; row-gap: 0.3rem;
+  font-size: 0.85rem;
+}
+.update-versions .kv {
+  display: contents; /* let the parent grid space columns */
+}
+.update-versions .kv-label { color: var(--muted); }
+.update-versions .kv-value { color: var(--text); }
+.update-versions .mono { font-family: ui-monospace, monospace; }
+.release-link { color: #38bdf8; margin-left: 0.4rem; vertical-align: middle; }
+.update-actions {
+  display: flex; gap: 0.5rem; flex-wrap: wrap;
+}
+.update-actions button {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.release-notes {
+  margin-top: 1rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.7rem 0.9rem;
+}
+.release-notes h3 {
+  margin: 0 0 0.4rem; font-size: 0.78rem;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted); font-weight: 600;
+}
+.release-notes pre {
+  margin: 0; white-space: pre-wrap; font-family: inherit;
+  font-size: 0.82rem; color: var(--text-soft);
+  max-height: 240px; overflow: auto;
+}
+.badge-new {
+  display: inline-block;
+  background: rgba(56, 189, 248, 0.18); color: #38bdf8;
+  border-radius: 4px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+  font-weight: 600;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+.badge-ok {
+  display: inline-block;
+  background: rgba(34, 197, 94, 0.14); color: #22c55e;
+  border-radius: 4px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+  font-weight: 600;
+  margin-left: 0.5rem;
+  vertical-align: middle;
 }
 </style>

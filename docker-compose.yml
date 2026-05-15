@@ -44,6 +44,12 @@ services:
       STRAVA_CALLBACK_URL: ${STRAVA_CALLBACK_URL:-}
     ports:
       - "8000:8000"
+    volumes:
+      # UPDATE-1: backend writes /var/lib/myvitals/update-requested
+      # here when the Settings UI clicks "Apply update". The host's
+      # auto-update cron watches the same path on the next minute
+      # tick and runs deploy/auto-update.sh.
+      - update_signals:/var/lib/myvitals
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)"]
       interval: 30s
@@ -63,3 +69,14 @@ services:
 
 volumes:
   db_data:
+  update_signals:
+    driver: local
+    driver_opts:
+      # Bind-mount to a host path the host-side cron can read; the
+      # backend's POST /api/update/apply writes a flag file here.
+      # Falls back to a docker-managed volume in dev environments
+      # where /var/lib/myvitals doesn't exist on the host yet — see
+      # deploy/ct-bootstrap.sh for the mkdir.
+      type: none
+      o: bind
+      device: /var/lib/myvitals

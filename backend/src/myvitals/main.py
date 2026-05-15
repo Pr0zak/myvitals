@@ -28,6 +28,7 @@ from .api import (
     strava,
     summary,
     trails,
+    update as update_api,
 )
 from .api.workout import strength as workout_strength
 from .config import settings
@@ -192,6 +193,7 @@ app.include_router(workout_strength.router, tags=["workout-strength"])
 app.include_router(trails.router, tags=["trails"])
 app.include_router(devices.router, tags=["devices"])
 app.include_router(fasting.router, tags=["fasting"])
+app.include_router(update_api.router, tags=["update"])
 app.include_router(concept2.router)
 app.include_router(concept2._webhook_router)
 

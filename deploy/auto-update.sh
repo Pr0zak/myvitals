@@ -28,6 +28,15 @@ set -euo pipefail
 LOG_TAG="[$(date -Iseconds)]"
 cd "$(dirname "$0")/.." || exit 1
 
+# UPDATE-1 trigger: backend's POST /api/update/apply writes
+# /var/lib/myvitals/update-requested. When present, log it and
+# clear the flag so a single click doesn't re-fire on the next tick.
+TRIGGER_FILE=/var/lib/myvitals/update-requested
+if [ -f "$TRIGGER_FILE" ]; then
+    echo "$LOG_TAG triggered by UI request"
+    rm -f "$TRIGGER_FILE" 2>/dev/null || true
+fi
+
 # NOTE: the CT's /opt/myvitals is not a git checkout under the current
 # bootstrap (deploy uses tar+rsync). So we don't `git pull` here — only
 # image pulls, which cover the 99% case. If docker-compose.yml or the

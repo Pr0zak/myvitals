@@ -40,6 +40,11 @@ if [ ! -d myvitals ]; then
 fi
 cd myvitals
 
+# UPDATE-1: shared volume the backend writes to when the Settings UI
+# clicks "Apply update" — host-side cron watches the same path.
+# Idempotent; fine to leave even when the cron isn't installed.
+mkdir -p /var/lib/myvitals
+
 if [ ! -f .env ]; then
     cp .env.example .env
     echo ">>> Edit /opt/myvitals/.env (set INGEST_TOKEN, QUERY_TOKEN, POSTGRES_PASSWORD)"

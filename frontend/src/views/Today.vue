@@ -1,14 +1,13 @@
 <script setup lang="ts">
 /**
- * Today — redesigned dashboard. Six modules:
- *   PageHeader · Hero · LiveVitals · (AIInsights / ActivityRow) ·
- *   (BodyMetrics / BloodPressure) · AnnotationLog · Footer
+ * Today — redesigned dashboard. Stack after TODAY-1 + TODAY-2:
+ *   PageHeader · Hero · LiveVitals · WatchStatus ·
+ *   (BodyMetrics / BloodPressure) · ActivityRow · CoachHint ·
+ *   AnnotationLog · LifestyleStrip · GoalsTile · Footer
  *
- * Data loading mirrors the previous implementation: same /summary/today,
- * /summary/range (7d), /query/heartrate, /query/hrv, /query/steps,
- * /query/sleep/last, /activities, /workout/strength/workouts,
- * /query/weight, /query/blood-pressure, /annotations, /profile,
- * /ai/config + /ai/verdict + /ai/explain-topic.
+ * AIInsights (the topic explorer) is gone — full Coach lives at
+ * /analytics?tab=coach and gets a single-line link below the
+ * activity row. The Hero verdict is the only AI surface inline.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api } from "@/api/client";
@@ -23,9 +22,6 @@ import PageHeader from "@/components/today/PageHeader.vue";
 import Hero from "@/components/today/Hero.vue";
 import LiveVitals from "@/components/today/LiveVitals.vue";
 import WatchStatus from "@/components/today/WatchStatus.vue";
-import AIInsights, {
-  type AiTopicId, type AiTone, type AiTopicResult,
-} from "@/components/today/AIInsights.vue";
 import ActivityRow from "@/components/today/ActivityRow.vue";
 import BodyMetrics from "@/components/today/BodyMetrics.vue";
 import BloodPressure from "@/components/today/BloodPressure.vue";
@@ -72,10 +68,6 @@ const bpSeries = ref<{
 const aiCfg = ref<Awaited<ReturnType<typeof api.aiConfig>> | null>(null);
 const aiVerdict = ref<{ content: string; generated_at: string; model: string } | null>(null);
 const aiVerdictBusy = ref(false);
-const activeTopic = ref<AiTopicId | null>(null);
-const aiBusy = ref(false);
-const aiError = ref<string | null>(null);
-const aiTopicResult = ref<AiTopicResult | null>(null);
 
 async function loadCore() {
   loading.value = true;
@@ -153,23 +145,10 @@ async function refreshVerdict() {
   finally { aiVerdictBusy.value = false; }
 }
 
-async function selectTopic(id: AiTopicId) {
-  if (!aiCfg.value?.enabled) return;
-  activeTopic.value = id;
-  aiBusy.value = true;
-  aiError.value = null;
-  try {
-    const r = await api.aiExplainTopic(id);
-    aiTopicResult.value = r as unknown as AiTopicResult;
-  } catch (e: unknown) {
-    aiError.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    aiBusy.value = false;
-  }
-}
-async function refreshTopic() {
-  if (activeTopic.value) await selectTopic(activeTopic.value);
-}
+// AIInsights / topic explorer removed from Today in TODAY-2.
+// The full multi-card Coach experience lives on /coach (or
+// /analytics?tab=coach). Today keeps only the Hero verdict for
+// a single-glance read.
 
 // Live polling — every 30s while the tab is visible, refresh just the
 // rapidly-changing data (HR, HRV, steps, summary). Heavy queries
@@ -544,7 +523,7 @@ const annotationChips = computed(() =>
 );
 
 // ── BP slide-over (deferred — for now a route to /blood-pressure form) ──
-import { useRouter } from "vue-router";
+import { RouterLink, useRouter } from "vue-router";
 const router = useRouter();
 function openBp() { router.push("/blood-pressure"); }
 function openLog() { router.push("/journal"); }
@@ -602,22 +581,16 @@ async function refreshAnnotations() {
       />
     </div>
 
-    <div class="two-col mid">
-      <AIInsights
-        :enabled="!!aiCfg?.enabled"
-        :active="activeTopic"
-        :busy="aiBusy"
-        :result="aiTopicResult"
-        :error="aiError"
-        @select="selectTopic"
-        @refresh="refreshTopic"
-      />
-      <ActivityRow
-        :cardio="cardioCell"
-        :strength="strengthCell"
-        :erg="ergCell"
-      />
-    </div>
+    <ActivityRow
+      :cardio="cardioCell"
+      :strength="strengthCell"
+      :erg="ergCell"
+    />
+
+    <p v-if="aiCfg?.enabled" class="coach-hint">
+      Want deeper synthesis?
+      <RouterLink to="/analytics?tab=coach">Open Coach →</RouterLink>
+    </p>
 
     <AnnotationLog
       :chips="annotationChips"
@@ -642,6 +615,9 @@ async function refreshAnnotations() {
 }
 .two-col { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
 .body-row { grid-template-columns: 1fr 1fr; }
+.coach-hint { font-size: 0.85rem; color: var(--on-surface-2); margin: 4px 0; }
+.coach-hint a { color: #38bdf8; text-decoration: none; }
+.coach-hint a:hover { text-decoration: underline; }
 .err { color: var(--bad); }
 @media (max-width: 720px) {
   .today { padding: 16px; gap: 12px; }

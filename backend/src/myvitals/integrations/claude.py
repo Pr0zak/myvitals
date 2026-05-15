@@ -1766,6 +1766,95 @@ Frame your assessment against widely-accepted training principles:
 Cite specific numbers in evidence. Don't be vague."""
 
 
+def _pearson(xs: list[float], ys: list[float]) -> float | None:
+    """Plain Pearson r. Returns None when fewer than 5 paired samples or
+    when either series has zero variance. Kept dependency-light because
+    we already do everything else in pure Python."""
+    n = len(xs)
+    if n < 5 or n != len(ys):
+        return None
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    syy = sum((y - my) ** 2 for y in ys)
+    if sxx == 0 or syy == 0:
+        return None
+    sxy = sum((xs[i] - mx) * (ys[i] - my) for i in range(n))
+    return sxy / ((sxx ** 0.5) * (syy ** 0.5))
+
+
+_CORR_METRICS = ("rhr", "hrv", "recovery", "sleep_h", "readiness", "steps", "tsb")
+
+
+def _top_correlations(
+    rows: list[dict[str, Any]], min_abs: float = 0.5, top_k: int = 3,
+) -> list[dict[str, Any]]:
+    """Pairwise Pearson between trailing-window vitals (ANALYTICS-4).
+
+    Returns the strongest correlations across the input rows so the
+    Coach AI can name-check real-data relationships ("your sleep_h
+    and readiness ride at r=0.78") instead of speculating from a
+    spotty individual-day view. Caps at top_k and filters out
+    anything weaker than |r| ≥ min_abs to keep the payload terse."""
+    if len(rows) < 7:
+        return []
+    out: list[tuple[str, str, float]] = []
+    for i, a in enumerate(_CORR_METRICS):
+        for b in _CORR_METRICS[i + 1:]:
+            xs: list[float] = []
+            ys: list[float] = []
+            for r in rows:
+                xa = r.get(a)
+                xb = r.get(b)
+                if xa is None or xb is None:
+                    continue
+                xs.append(float(xa))
+                ys.append(float(xb))
+            r_val = _pearson(xs, ys)
+            if r_val is None:
+                continue
+            if abs(r_val) < min_abs:
+                continue
+            out.append((a, b, r_val))
+    out.sort(key=lambda t: abs(t[2]), reverse=True)
+    return [
+        {"a": a, "b": b, "r": round(rv, 2), "n": sum(
+            1 for r in rows if r.get(a) is not None and r.get(b) is not None
+        )}
+        for (a, b, rv) in out[:top_k]
+    ]
+
+
+def _wow_deltas(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Week-over-week deltas for the same metric set (ANALYTICS-4).
+
+    Splits the trailing rows into the last 7 days and the prior 7 days
+    and returns mean + absolute delta + percent change per metric. The
+    AI uses this in evidence bullets ("HRV is up 8% vs last week").
+    """
+    if len(rows) < 7:
+        return {}
+    last = rows[-7:]
+    prior = rows[-14:-7] if len(rows) >= 14 else []
+    out: dict[str, dict[str, Any]] = {}
+    for k in _CORR_METRICS:
+        vs_last = [r[k] for r in last if r.get(k) is not None]
+        vs_prior = [r[k] for r in prior if r.get(k) is not None]
+        if not vs_last or not vs_prior:
+            continue
+        m_last = sum(vs_last) / len(vs_last)
+        m_prior = sum(vs_prior) / len(vs_prior)
+        delta = m_last - m_prior
+        pct = (delta / m_prior * 100.0) if m_prior else None
+        out[k] = {
+            "last_7d": round(m_last, 2),
+            "prior_7d": round(m_prior, 2),
+            "delta": round(delta, 2),
+            "pct_change": round(pct, 1) if pct is not None else None,
+        }
+    return out
+
+
 async def _recent_alerts_ctx(
     db: AsyncSession, days: int = 14, limit: int = 6,
 ) -> list[dict[str, Any]]:
@@ -1809,11 +1898,14 @@ async def build_cardio_coach_payload(db: AsyncSession) -> dict[str, Any]:
     """Bounded payload for the cardio coach AI card."""
     from ..analytics.cardio import cardio_summary
     summary = await cardio_summary(db, days=30)
+    daily = await _daily_rows(db, 28)
     return {
         "today": datetime.now(timezone.utc).date().isoformat(),
         "profile": await _profile_ctx(db),
         "cardio_30d": summary,
         "recent_alerts": await _recent_alerts_ctx(db),
+        "top_correlations": _top_correlations(daily),
+        "wow_deltas": _wow_deltas(daily),
     }
 
 
@@ -1910,6 +2002,13 @@ def _workout_coach_system(tone: str) -> str:
 - recent_alerts — anomaly alerts the system already flagged (high RHR,
   suppressed HRV, illness risk, broken streaks). Treat these as confirmed
   signals worth name-checking when they cluster around the week's pattern.
+- top_correlations — pre-computed Pearson r between trailing-28d vitals
+  (only |r| ≥ 0.5 kept, top 3). Use these to make causal-sounding
+  observations defensible: "your sleep_h and readiness ride at r=0.78
+  this month, so the bad readiness today follows from short sleep".
+- wow_deltas — last-7d vs prior-7d mean + percent change per metric.
+  Quote the pct_change figure in evidence ("HRV +8% vs last week")
+  rather than hand-computing from the dailies.
 
 {_tone_line(tone)}
 
@@ -1921,7 +2020,9 @@ Use the `give_workout_coach` tool. Rules:
 - Be specific. Generic motivation is bad. Cite numbers in evidence.
 - A single high-confidence change beats five vague ones.
 - If recent_alerts cluster (e.g. two RHR anomalies in five days), weight
-  the recommendation accordingly. Ignore stale or isolated ones."""
+  the recommendation accordingly. Ignore stale or isolated ones.
+- Prefer wow_deltas and top_correlations over re-deriving the same
+  numbers from recent_dailies — they're already correct and bounded."""
 
 
 async def build_workout_coach_payload(db: AsyncSession) -> dict[str, Any]:
@@ -1931,6 +2032,11 @@ async def build_workout_coach_payload(db: AsyncSession) -> dict[str, Any]:
     # so the system prompt knows this is a broader weekly read.
     deload = await build_deload_payload(db)
     cardio = await cardio_summary(db, days=30)
+    # Reuse the 28-day daily rows the deload payload already pulled
+    # (held in deload["recent_dailies"] + the baseline window) by
+    # re-fetching cheaply — _daily_rows is a single SELECT and falls
+    # well inside the cache-keyed payload hash.
+    daily = await _daily_rows(db, 28)
     return {
         "today": datetime.now(timezone.utc).date().isoformat(),
         "profile": await _profile_ctx(db),
@@ -1940,6 +2046,8 @@ async def build_workout_coach_payload(db: AsyncSession) -> dict[str, Any]:
         "fasting": await _fasting_status(db),
         "trend_badges": await compute_badges(db, max_badges=4),
         "recent_alerts": await _recent_alerts_ctx(db),
+        "top_correlations": _top_correlations(daily),
+        "wow_deltas": _wow_deltas(daily),
     }
 
 

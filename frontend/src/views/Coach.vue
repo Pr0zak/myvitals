@@ -10,8 +10,26 @@
  * no new data returns the same row + cached:true without billing.
  */
 import { onMounted, ref } from "vue";
+import { RouterLink } from "vue-router";
 import { api, type CoachCardOut } from "@/api/client";
-import { Activity, Dumbbell, RefreshCw } from "lucide-vue-next";
+import { Activity, Dumbbell, RefreshCw, Target } from "lucide-vue-next";
+
+interface GoalProgress {
+  id: number;
+  kind: string;
+  title: string;
+  target_value: number | null;
+  target_unit: string | null;
+  current_value: number | null;
+  progress_pct: number | null;
+}
+
+const goals = ref<GoalProgress[]>([]);
+async function loadGoals() {
+  try {
+    goals.value = await api.aiGoals(true) as unknown as GoalProgress[];
+  } catch { /* swallow */ }
+}
 
 type CardState = {
   open: boolean;
@@ -99,7 +117,7 @@ function fmtTime(iso: string): string {
   });
 }
 
-onMounted(preload);
+onMounted(() => { preload(); loadGoals(); });
 </script>
 
 <template>
@@ -154,6 +172,37 @@ onMounted(preload);
         <template v-else>
           <p class="hint">No coach card cached yet — tap to generate.</p>
         </template>
+      </div>
+    </section>
+
+    <!-- Goals — read-only progress summary (GOALS-5) -->
+    <section v-if="goals.length > 0" class="card tone-neutral">
+      <div class="head static">
+        <Target :size="18"/>
+        <span class="title">Goals</span>
+        <span class="sub">{{ goals.length }} active</span>
+        <RouterLink class="ghost link" to="/goals">Open</RouterLink>
+      </div>
+      <div class="body goals-body">
+        <div v-for="g in goals" :key="g.id" class="goal-row">
+          <div class="goal-row-head">
+            <span class="goal-kind-pill">{{ g.kind }}</span>
+            <span class="goal-title">{{ g.title }}</span>
+            <span v-if="g.progress_pct != null" class="goal-pct mono">
+              {{ g.progress_pct.toFixed(0) }}%
+            </span>
+          </div>
+          <div class="bar">
+            <div class="bar-fill"
+                 :class="{ done: (g.progress_pct ?? 0) >= 100 }"
+                 :style="{ width: Math.min(100, g.progress_pct ?? 0) + '%' }"/>
+          </div>
+          <div v-if="g.current_value != null && g.target_value != null"
+               class="goal-row-foot mono">
+            {{ g.current_value.toFixed(1) }} <span class="muted">/</span>
+            {{ g.target_value }} <span class="muted">{{ g.target_unit ?? '' }}</span>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -238,4 +287,29 @@ h1 { margin: 0 0 0.4rem; }
 .footer { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-top: 0.8rem; }
 .ghost { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.7rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; }
 .ghost:disabled { opacity: 0.5; }
+
+.head.static { cursor: default; }
+.head.static:hover { background: transparent; }
+.head .ghost.link {
+  margin-left: auto; text-decoration: none;
+  font-size: 0.78rem; padding: 0.3rem 0.6rem;
+}
+.card.tone-neutral { border-left: 3px solid #94a3b8; }
+.goals-body { padding-top: 0.4rem; }
+.goal-row { padding: 0.55rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.04); }
+.goal-row:last-child { border-bottom: 0; }
+.goal-row-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem; }
+.goal-kind-pill {
+  background: rgba(56, 189, 248, 0.12); color: #38bdf8;
+  border-radius: 4px; padding: 0.08rem 0.4rem;
+  font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.goal-title { color: var(--text); font-size: 0.88rem; flex: 1; }
+.goal-pct { color: var(--text); font-size: 0.82rem; }
+.bar { height: 4px; background: rgba(255, 255, 255, 0.06); border-radius: 2px; overflow: hidden; }
+.bar-fill { height: 100%; background: #38bdf8; transition: width 320ms ease; }
+.bar-fill.done { background: #22c55e; }
+.goal-row-foot { font-size: 0.74rem; color: var(--text-soft); margin-top: 0.2rem; }
+.muted { color: var(--muted); }
 </style>

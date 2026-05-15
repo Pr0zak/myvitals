@@ -87,10 +87,6 @@
             </intent-filter>
         </activity-alias>
 
-        <activity
-            android:name=".update.UpdateInstallerActivity"
-            android:exported="false"
-            android:theme="@style/Theme.MyVitals" />
 
         <activity
             android:name=".debug.LogViewerActivity"

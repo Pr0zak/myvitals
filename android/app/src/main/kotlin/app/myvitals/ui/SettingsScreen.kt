@@ -56,7 +56,9 @@ import app.myvitals.sync.ProfilePutBody
 import app.myvitals.sync.ProfileResponse
 import app.myvitals.update.GitHubRelease
 import app.myvitals.update.UpdateChecker
-import app.myvitals.update.UpdateInstallerActivity
+import app.myvitals.update.ApkDownloader
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -96,6 +98,7 @@ fun SettingsScreen(
     var showClearBufferConfirm by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val apkState by ApkDownloader.state.collectAsState()
 
     if (showClearBufferConfirm) {
         androidx.compose.material3.AlertDialog(
@@ -634,15 +637,78 @@ fun SettingsScreen(
                     }
                     pendingRelease?.let { release ->
                         val asset = release.assets.firstOrNull { it.name.endsWith(".apk") }
-                        if (asset != null) {
+                        if (asset != null && apkState is ApkDownloader.State.Idle) {
                             Divider()
                             ActionRow {
                                 FilledPill(
-                                    label = "Install ${release.tagName}",
-                                    onClick = { UpdateInstallerActivity.start(context, asset.browserDownloadUrl, asset.name) },
+                                    label = "Download ${release.tagName}",
+                                    onClick = {
+                                        ApkDownloader.start(
+                                            context, asset.browserDownloadUrl, asset.name,
+                                        )
+                                    },
                                 )
                             }
                         }
+                    }
+                    // Inline APK download progress — replaces the old
+                    // full-screen UpdateInstallerActivity.
+                    when (val s = apkState) {
+                        is ApkDownloader.State.Pending -> {
+                            Divider()
+                            ApkProgressRow(
+                                label = "Starting download…",
+                                progress = 0f, determinate = false,
+                            )
+                        }
+                        is ApkDownloader.State.Downloading -> {
+                            Divider()
+                            val pct = (s.progress * 100).toInt()
+                            val label = if (s.bytesTotal > 0)
+                                "Downloading… $pct%  ·  ${fmtMb(s.bytesDownloaded)} / ${fmtMb(s.bytesTotal)}"
+                            else
+                                "Downloading… ${fmtMb(s.bytesDownloaded)}"
+                            ApkProgressRow(
+                                label = label,
+                                progress = s.progress,
+                                determinate = s.bytesTotal > 0,
+                            )
+                            ActionRow {
+                                FilledPill(
+                                    label = "Cancel",
+                                    onClick = { ApkDownloader.cancelInflight(context) },
+                                )
+                            }
+                        }
+                        is ApkDownloader.State.Installing -> {
+                            Divider()
+                            Text(
+                                "Download complete. Tap Install to launch the system installer.",
+                                fontSize = 13.sp, color = MV.OnSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            )
+                            ActionRow {
+                                FilledPill(
+                                    label = "Install",
+                                    onClick = { ApkDownloader.launchInstaller(context) },
+                                )
+                            }
+                        }
+                        is ApkDownloader.State.Failed -> {
+                            Divider()
+                            Text(
+                                s.message,
+                                fontSize = 13.sp, color = MV.Red,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            )
+                            ActionRow {
+                                FilledPill(
+                                    label = "Dismiss",
+                                    onClick = { ApkDownloader.dismiss() },
+                                )
+                            }
+                        }
+                        else -> { /* idle — show nothing extra */ }
                     }
                     if (updateStatus.isNotBlank() && pendingRelease == null) {
                         Divider()
@@ -671,6 +737,35 @@ fun SettingsScreen(
         }
     }
     }   // Close watermark Box wrapper
+}
+
+// ── APK download progress row (inline) ──────────────────────────
+
+@Composable
+private fun ApkProgressRow(label: String, progress: Float, determinate: Boolean) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(label, fontSize = 13.sp, color = MV.OnSurface)
+        Spacer(Modifier.height(8.dp))
+        if (determinate) {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth().height(4.dp),
+                color = MV.BrandRed,
+                trackColor = MV.SurfaceContainer,
+            )
+        } else {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().height(4.dp),
+                color = MV.BrandRed,
+                trackColor = MV.SurfaceContainer,
+            )
+        }
+    }
+}
+
+private fun fmtMb(bytes: Long): String {
+    if (bytes <= 0) return "0.0 MB"
+    return String.format(java.util.Locale.US, "%.1f MB", bytes / 1_048_576.0)
 }
 
 // ── Layout primitives ───────────────────────────────────────────

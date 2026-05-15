@@ -16,6 +16,7 @@ import app.myvitals.strength.WorkoutReminderWorker
 import app.myvitals.sync.SyncWorker
 import app.myvitals.ai.AiAlertWorker
 import app.myvitals.trails.TrailAlertWorker
+import app.myvitals.update.ApkDownloadCompleteReceiver
 import app.myvitals.update.Notifier
 import app.myvitals.update.UpdateCheckWorker
 import timber.log.Timber
@@ -44,6 +45,9 @@ class MyVitalsApp : Application() {
 
         Notifier.ensureChannel(this)
         WorkoutReminderWorker.ensureChannel(this)
+        // App-scope receiver routes DownloadManager completion events
+        // into ApkDownloader regardless of which Activity is in front.
+        ApkDownloadCompleteReceiver.register(this)
         schedulePeriodicSync()
         scheduleUpdateCheck()
         scheduleLogUpload()

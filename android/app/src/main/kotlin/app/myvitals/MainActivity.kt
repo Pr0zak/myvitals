@@ -146,6 +146,22 @@ class MainActivity : ComponentActivity() {
                         intent?.removeExtra("shortcut_route")
                     }
                 }
+                // APK update notification deep-link: extras carry the
+                // download URL + asset name → kick off ApkDownloader
+                // so the user lands on Settings with inline progress
+                // already running (no full-screen activity).
+                val apkUrl = intent?.getStringExtra("apk_update_url")
+                val apkName = intent?.getStringExtra("apk_update_name")
+                LaunchedEffect(apkUrl, apkName) {
+                    if (!apkUrl.isNullOrEmpty() && !apkName.isNullOrEmpty()) {
+                        app.myvitals.update.ApkDownloader.start(
+                            activity, apkUrl, apkName,
+                        )
+                        intent?.removeExtra("apk_update_url")
+                        intent?.removeExtra("apk_update_name")
+                        intent?.removeExtra("apk_update_tag")
+                    }
+                }
                 Scaffold(
                     bottomBar = { BottomBar(nav) },
                     containerColor = MV.Bg,

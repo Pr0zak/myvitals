@@ -259,10 +259,19 @@ object Notifier {
 
         val asset = release.assets.firstOrNull { it.name.endsWith(".apk") } ?: return
 
-        val intent = Intent(context, UpdateInstallerActivity::class.java).apply {
-            putExtra(UpdateInstallerActivity.EXTRA_URL, asset.browserDownloadUrl)
-            putExtra(UpdateInstallerActivity.EXTRA_NAME, asset.name)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        // Route through MainActivity → Settings tab with extras the
+        // SettingsScreen reads to auto-start the inline download.
+        // Avoids the dedicated full-screen UpdateInstallerActivity
+        // (deleted in this release) in favour of a panel embedded
+        // in the regular Updates section.
+        val intent = Intent(
+            context, Class.forName("app.myvitals.MainActivity"),
+        ).apply {
+            putExtra("shortcut_route", "settings")
+            putExtra("apk_update_url", asset.browserDownloadUrl)
+            putExtra("apk_update_name", asset.name)
+            putExtra("apk_update_tag", release.tagName)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
 
         val pi = PendingIntent.getActivity(

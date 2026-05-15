@@ -73,11 +73,12 @@ const anyVisible = computed(() =>
 <style scoped>
 .strip {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  /* auto-fit so a lone tile (e.g. sober only, no active fast) fills the
+     row instead of leaving a phantom half-width gap, and so the strip
+     gracefully collapses when its parent is the narrow column of the
+     Today bottom-row grid. */
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
-}
-@media (max-width: 720px) {
-  .strip { grid-template-columns: 1fr; }
 }
 .tile {
   background: var(--surface);

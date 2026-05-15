@@ -644,9 +644,13 @@ async function refreshAnnotations() {
       @added="refreshAnnotations"
     />
 
-    <LifestyleStrip :sober="soberCurrent" :fasting="fastingCurrent"/>
-
-    <GoalsTile :goals="goals"/>
+    <!-- Sober/Fasting + Goals share a row. Both are short cards on a
+         typical day; pairing them keeps the page from spilling lots
+         of vertical whitespace below the Log surface. -->
+    <div class="bottom-row">
+      <LifestyleStrip :sober="soberCurrent" :fasting="fastingCurrent"/>
+      <GoalsTile :goals="goals"/>
+    </div>
 
     <Footer :version="version"/>
   </div>
@@ -661,6 +665,8 @@ async function refreshAnnotations() {
 }
 .two-col { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
 .body-row { grid-template-columns: 1fr 1fr; }
+.bottom-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.bottom-row > * { min-width: 0; }
 .coach-hint { font-size: 0.85rem; color: var(--on-surface-2); margin: 4px 0; }
 .coach-hint a { color: #38bdf8; text-decoration: none; }
 .coach-hint a:hover { text-decoration: underline; }
@@ -668,5 +674,6 @@ async function refreshAnnotations() {
 @media (max-width: 720px) {
   .today { padding: 16px; gap: 12px; }
   .two-col { grid-template-columns: 1fr; }
+  .bottom-row { grid-template-columns: 1fr; }
 }
 </style>

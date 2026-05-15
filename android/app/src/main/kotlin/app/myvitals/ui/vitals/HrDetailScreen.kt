@@ -27,6 +27,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,6 +79,9 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     var live by remember { mutableStateOf<List<TimePoint>>(emptyList()) }
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
     var bands by remember { mutableStateOf<List<HrEventBand>>(emptyList()) }
+    var annotations by remember {
+        mutableStateOf<List<app.myvitals.sync.Annotation>>(emptyList())
+    }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var maxHr by remember { mutableStateOf(190) }
@@ -110,7 +116,16 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                             )
                         }.getOrNull()
                     }
+                    val annoD = async(Dispatchers.IO) {
+                        runCatching {
+                            api.journalList(
+                                since = Instant.now().minusSeconds(86_400).toString(),
+                                limit = 50,
+                            )
+                        }.getOrDefault(emptyList())
+                    }
                     live = liveD.await().points
+                    annotations = annoD.await()
 
                     // Build event bands for the 24h window.
                     val windowStart = Instant.now().minusSeconds(86_400).toEpochMilli()
@@ -223,7 +238,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (range == VitalRange.DAY) {
-                    item { LiveHrChart(live, maxHr, bands) }
+                    item { LiveHrChart(live, maxHr, bands, annotations) }
                     item { TimeInZone(live, maxHr) }
                     item { HrHistogram(live) }
                 } else {
@@ -235,11 +250,22 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     }
 }
 
+private fun annotationEmoji(kind: String): String = when (kind) {
+    "caffeine" -> "☕"
+    "alcohol"  -> "🍺"
+    "mood"     -> "🙂"
+    "food"     -> "🍽️"
+    "meds"     -> "💊"
+    "note"     -> "📝"
+    else        -> "•"
+}
+
 @Composable
 private fun LiveHrChart(
     points: List<TimePoint>,
     maxHr: Int,
     bands: List<HrEventBand> = emptyList(),
+    annotations: List<app.myvitals.sync.Annotation> = emptyList(),
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
@@ -270,6 +296,17 @@ private fun LiveHrChart(
             val minV = sampled.minOf { it.second }
             val maxV = sampled.maxOf { it.second }
             val avgV = sampled.map { it.second }.average()
+            val textMeasurer = rememberTextMeasurer()
+            // Pre-parse annotation timestamps so we can drop emoji glyphs
+            // at the top of the chart at their exact x-position (LOG-4
+            // phone parity).
+            val parsedAnnotations = remember(annotations) {
+                annotations.mapNotNull { a ->
+                    val t = runCatching { Instant.parse(a.ts).toEpochMilli() }
+                        .getOrNull() ?: return@mapNotNull null
+                    t to annotationEmoji(a.type)
+                }
+            }
             Box(Modifier.fillMaxWidth().height(220.dp)) {
                 Canvas(Modifier.fillMaxSize()) {
                     val padX = 32.dp.toPx()
@@ -355,6 +392,20 @@ private fun LiveHrChart(
                             floatArrayOf(4.dp.toPx(), 3.dp.toPx())
                         ),
                     )
+                    // Annotation emoji markers — drop above the chart so
+                    // caffeine / mood / etc. entries align with the HR
+                    // trace they affected (LOG-4 phone parity).
+                    val emojiStyle = TextStyle(fontSize = 12.sp)
+                    for ((t, glyph) in parsedAnnotations) {
+                        if (t < tStart || t > tEnd) continue
+                        val x = padX + ((t - tStart).toFloat() / tSpan) * plotW
+                        drawText(
+                            textMeasurer = textMeasurer,
+                            text = glyph,
+                            topLeft = Offset(x - 6.dp.toPx(), 0f),
+                            style = emojiStyle,
+                        )
+                    }
                 }
                 // Y-axis label column
                 Column(Modifier.fillMaxSize(),

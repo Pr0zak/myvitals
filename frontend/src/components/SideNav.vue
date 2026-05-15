@@ -213,7 +213,6 @@ const groups = computed<Group[]>(() => {
     ? fmtDistance(activitiesDistanceM.value, 0) : "—";
   return [
     { id: "today",   to: "/",        icon: Home,        label: "Today" },
-    { id: "trends",  to: "/trends",  icon: TrendingUp,  label: "Trends" },
     {
       id: "vitals", icon: Heart, label: "Vitals", children: [
         { to: "/heart-rate",     icon: Heart,       label: "Heart rate",     sub: hrStr,     subColor: "#ef4444" },
@@ -242,12 +241,17 @@ const groups = computed<Group[]>(() => {
     },
     { id: "trails", to: "/trails", icon: Mountain, label: "Trails" },
     {
-      id: "insights", to: "/insights", icon: Sparkles, label: "Insights",
+      id: "analytics", icon: TrendingUp, label: "Analytics",
       badge: discoveriesCount.value && discoveriesCount.value > 0
         ? `${discoveriesCount.value} new` : undefined,
       badgeColor: "#a78bfa",
+      children: [
+        { to: "/analytics?tab=trends",   icon: TrendingUp, label: "Over time" },
+        { to: "/analytics?tab=patterns", icon: Sparkles,   label: "Patterns" },
+        { to: "/analytics?tab=compare",  icon: BarChart3,  label: "Vs last period" },
+        { to: "/analytics?tab=coach",    icon: Brain,      label: "Coach" },
+      ],
     },
-    { id: "coach",  to: "/coach",  icon: Brain,        label: "Coach" },
     { id: "log",     to: "/journal", icon: Edit3,         label: "Journal" },
     {
       id: "sober",   to: "/sober",   icon: RotateCcw,     label: "Sober time",
@@ -260,7 +264,6 @@ const groups = computed<Group[]>(() => {
       badgeColor: "#38bdf8",
     },
     { id: "goals",  to: "/goals",  icon: Target,         label: "Goals" },
-    { id: "compare", to: "/compare", icon: BarChart3,     label: "Compare" },
     { id: "logs",    to: "/logs",    icon: Terminal,      label: "Debug logs" },
     { id: "settings",to: "/settings",icon: Settings,      label: "Settings" },
   ];
@@ -269,7 +272,20 @@ const groups = computed<Group[]>(() => {
 function toggle(id: string) { expanded.value[id] = !expanded.value[id]; }
 
 function isActive(to: string): boolean {
-  return route.path === to;
+  // Targets can include a query string (e.g. /analytics?tab=trends) so
+  // the matching has to be path-aware. Hash fragments are intentionally
+  // ignored — we want /trends#skin-temp to count as "on the trends
+  // route" for sidebar-highlighting purposes.
+  const [path, query] = to.split("?");
+  if (route.path !== path) return false;
+  if (!query) return true;
+  const params = new URLSearchParams(query);
+  for (const [k, v] of params) {
+    const cur = route.query[k];
+    const curStr = Array.isArray(cur) ? cur[0] : cur;
+    if (curStr !== v) return false;
+  }
+  return true;
 }
 function isGroupActive(g: Group): boolean {
   if (g.to && isActive(g.to)) return true;

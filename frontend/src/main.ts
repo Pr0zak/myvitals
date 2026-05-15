@@ -38,6 +38,7 @@ const router = createRouter({
     { path: "/activities/map", name: "activities-map", component: () => import("./views/ActivitiesMap.vue") },
     { path: "/activities/compare", name: "activities-compare", component: () => import("./views/ActivitiesCompare.vue") },
     { path: "/calendar", name: "calendar", component: () => import("./views/Calendar.vue") },
+    { path: "/analytics", name: "analytics", component: () => import("./views/Analytics.vue") },
     { path: "/insights", name: "insights", component: () => import("./views/Insights.vue") },
     { path: "/compare", name: "compare", component: () => import("./views/Compare.vue") },
     { path: "/trails", name: "trails", component: () => import("./views/Trails.vue") },

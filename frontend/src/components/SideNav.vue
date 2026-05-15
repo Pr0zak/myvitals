@@ -16,11 +16,13 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import {
   Activity, BarChart3, Battery, Bed, Brain, Calendar, ChevronDown,
-  ChevronRight, Droplets, Dumbbell, Edit3, Footprints, Github, GitCompare,
-  Heart, Home, Hourglass, List, Map, Menu, Mountain, RotateCcw, Scale, Search, Settings, Sparkles,
-  Target, Terminal, Thermometer, TrendingUp, Watch as WatchIcon, type LucideIcon,
+  ChevronRight, Download, Droplets, Dumbbell, Edit3, FileUp, Footprints, Github, GitCompare,
+  Heart, Home, Hourglass, Key, List, Map, Menu, Monitor, Mountain, RotateCcw, Scale, Search,
+  Settings, Ship, Sparkles, Target, Terminal, Thermometer, TrendingUp, User, Watch as WatchIcon,
+  Wrench, type LucideIcon,
 } from "lucide-vue-next";
 import { api } from "@/api/client";
+import { queryToken } from "@/config";
 import { fmtDateTime } from "@/format";
 import { fmtWeight, fmtDistance, weightVal, distanceUnit } from "@/units";
 import AppLogo from "@/components/AppLogo.vue";
@@ -271,7 +273,32 @@ const groups = computed<Group[]>(() => {
     },
     { id: "goals",  to: "/goals",  icon: Target,         label: "Goals" },
     { id: "logs",    to: "/logs",    icon: Terminal,      label: "Debug logs" },
-    { id: "settings",to: "/settings",icon: Settings,      label: "Settings" },
+    {
+      // Group, not a leaf — children mirror Settings.vue's sections so
+      // the user can jump straight to "Strava" or "Updates" from the
+      // rail without first landing on /settings and hunting for it.
+      // Token-gated children fall away when queryToken is empty so
+      // a fresh install isn't taunted by tabs it can't open.
+      id: "settings", icon: Settings, label: "Settings",
+      children: [
+        { to: "/settings?tab=updates",  icon: Download,    label: "Updates" },
+        { to: "/settings?tab=access",   icon: Key,         label: "Backend access" },
+        { to: "/settings?tab=display",  icon: Monitor,     label: "Display" },
+        ...(queryToken.value ? [
+          { to: "/settings?tab=profile",  icon: User,        label: "Profile" },
+          { to: "/settings?tab=ai",       icon: Sparkles,    label: "AI summaries" },
+          { to: "/settings?tab=trails",   icon: Mountain,    label: "Trail status" },
+        ] : []),
+        { to: "/settings?tab=strava",   icon: Activity,    label: "Strava" },
+        { to: "/settings?tab=concept2", icon: Ship,        label: "Concept2" },
+        { to: "/settings?tab=fasting",  icon: Hourglass,   label: "Fasting" },
+        { to: "/settings?tab=ha",       icon: Home,        label: "Home Assistant" },
+        ...(queryToken.value ? [
+          { to: "/settings?tab=imports",  icon: FileUp,      label: "Historical imports" },
+          { to: "/settings?tab=tools",    icon: Wrench,      label: "Tools & exports" },
+        ] : []),
+      ],
+    },
   ];
 });
 

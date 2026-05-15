@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute } from "vue-router";
 import {
   Eye, EyeOff, Check, X as XIcon,
   Download, RefreshCw, ExternalLink, AlertCircle,
-  Key, Monitor, User, Sparkles, Wrench, FileUp, Mountain,
-  Activity, Hourglass, Home, Ship,
 } from "lucide-vue-next";
 import { apiBase, queryToken } from "@/config";
 import { api } from "@/api/client";
@@ -21,57 +19,30 @@ const apiBaseInput = ref(apiBase.value);
 const status = ref<"idle" | "ok" | "fail">("idle");
 const errorMsg = ref<string>("");
 
-// SETTINGS-1: sidebar layout. Each section is one entry; the
-// content panes below use v-show keyed on activeTab so component
-// state (form values, fetched config) survives tab switches and
-// we don't re-fetch on every click.
-//
-// `gated` means the section is `v-if="queryToken"` in the template
-// — hide it from the nav if the user hasn't entered their token
-// yet so they're not nudged toward broken-looking tabs.
+// SETTINGS-1: active section is driven by ?tab= in the URL so the
+// left-rail "Settings" group in SideNav can deep-link to a specific
+// section (and the existing isActive() query-matching makes the
+// child glow when it's the live tab). Content panes below use
+// v-show so form state survives tab switches.
 type SectionKey =
   | "updates" | "access" | "display" | "profile" | "ai"
   | "tools" | "imports" | "trails" | "strava" | "fasting"
   | "ha" | "concept2";
-interface Section {
-  key: SectionKey;
-  label: string;
-  icon: typeof Download;
-  gated?: boolean;
-}
-const SECTIONS: readonly Section[] = [
-  { key: "updates",  label: "Updates",           icon: Download },
-  { key: "access",   label: "Backend access",    icon: Key },
-  { key: "display",  label: "Display",           icon: Monitor },
-  { key: "profile",  label: "Profile",           icon: User,      gated: true },
-  { key: "ai",       label: "AI summaries",      icon: Sparkles,  gated: true },
-  { key: "trails",   label: "Trail status",      icon: Mountain,  gated: true },
-  { key: "strava",   label: "Strava",            icon: Activity },
-  { key: "concept2", label: "Concept2",          icon: Ship },
-  { key: "fasting",  label: "Fasting",           icon: Hourglass },
-  { key: "ha",       label: "Home Assistant",    icon: Home },
-  { key: "imports",  label: "Historical imports", icon: FileUp,   gated: true },
-  { key: "tools",    label: "Tools & exports",   icon: Wrench,    gated: true },
+const SECTION_KEYS: readonly SectionKey[] = [
+  "updates", "access", "display", "profile", "ai", "trails",
+  "strava", "concept2", "fasting", "ha", "imports", "tools",
 ];
 
 const route = useRoute();
-const router = useRouter();
-function tabFromHash(h: string | undefined): SectionKey {
-  const key = (h ?? "").replace(/^#/, "");
-  const found = SECTIONS.find((s) => s.key === key);
-  return (found?.key ?? "updates") as SectionKey;
+function tabFromQuery(q: unknown): SectionKey {
+  const v = Array.isArray(q) ? q[0] : q;
+  if (typeof v === "string" && (SECTION_KEYS as readonly string[]).includes(v)) {
+    return v as SectionKey;
+  }
+  return "updates";
 }
-const activeTab = ref<SectionKey>(tabFromHash(route.hash));
-watch(() => route.hash, (h) => { activeTab.value = tabFromHash(h); });
-function selectTab(key: SectionKey) {
-  activeTab.value = key;
-  // Replace, not push — back-button should leave Settings entirely
-  // rather than stepping through every tab the user clicked.
-  router.replace({ hash: `#${key}` });
-}
-const visibleSections = computed<Section[]>(() =>
-  SECTIONS.filter((s) => !s.gated || !!queryToken.value),
-);
+const activeTab = ref<SectionKey>(tabFromQuery(route.query.tab));
+watch(() => route.query.tab, (t) => { activeTab.value = tabFromQuery(t); });
 
 const trailCfg = ref<{ dnis: string | null; configured: boolean; updated_at: string | null } | null>(null);
 const trailCfgError = ref<string | null>(null);
@@ -952,23 +923,6 @@ onUnmounted(stopJobPolling);
   <div class="settings">
     <h1>Settings</h1>
 
-    <div class="settings-shell">
-      <nav class="settings-sidebar" aria-label="Settings sections">
-        <button
-          v-for="s in visibleSections"
-          :key="s.key"
-          :class="['settings-tab', { active: activeTab === s.key }]"
-          @click="selectTab(s.key)"
-        >
-          <component :is="s.icon" :size="16"/>
-          <span class="tab-label">{{ s.label }}</span>
-          <span v-if="s.key === 'updates' && updateInfo?.update_available"
-                class="tab-dot" title="Update available"/>
-        </button>
-      </nav>
-
-      <div class="settings-content">
-
     <section v-show="activeTab === 'updates'" class="settings-pane">
         <h2>
           Updates
@@ -1745,90 +1699,22 @@ onUnmounted(stopJobPolling);
 
       <div v-else-if="!concept2Error" class="hint">Loading…</div>
     </section>
-
-      </div><!-- /.settings-content -->
-    </div><!-- /.settings-shell -->
   </div>
 </template>
 
 <style scoped>
-.settings { max-width: 1080px; }
-h1 { margin: 0 0 0.6rem; }
+.settings { max-width: 800px; }
+h1 { margin: 0 0 1rem; }
 h2 { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 1rem; display: flex; align-items: center; gap: 0.5rem; }
 
-/* SETTINGS-1 — sidebar layout */
-.settings-shell {
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 1.25rem;
-  align-items: start;
-}
-.settings-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  position: sticky;
-  top: 1rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.4rem;
-}
-.settings-tab {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.55rem 0.7rem;
-  border-radius: 7px;
-  background: transparent;
-  border: 0;
-  color: #94a3b8;
-  font-size: 0.92rem;
-  font-weight: 500;
-  text-align: left;
-  cursor: pointer;
-  width: 100%;
-  position: relative;
-}
-.settings-tab:hover { background: rgba(148, 163, 184, 0.08); color: #e2e8f0; }
-.settings-tab.active {
-  background: rgba(56, 189, 248, 0.12);
-  color: #38bdf8;
-}
-.settings-tab .tab-label { flex: 1; }
-.settings-tab .tab-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: #f59e0b; flex-shrink: 0;
-}
-.settings-content { min-width: 0; }
+/* SETTINGS-1 — section panes; the section navigation lives in the
+   main SideNav rail, not inside the Settings page. */
 .settings-pane {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1.1rem 1.2rem 1.4rem;
-}
-
-@media (max-width: 800px) {
-  .settings-shell { grid-template-columns: 1fr; }
-  .settings-sidebar {
-    flex-direction: row;
-    overflow-x: auto;
-    position: static;
-    padding: 0.35rem;
-    gap: 4px;
-  }
-  .settings-tab {
-    flex-direction: column;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 0.5rem 0.65rem;
-    font-size: 0.75rem;
-    min-width: 70px;
-  }
-  .settings-tab .tab-label { flex: none; white-space: nowrap; }
-  .settings-tab .tab-dot {
-    position: absolute; top: 6px; right: 6px;
-  }
+  margin-bottom: 1rem;
 }
 .block { margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #1e293b; }
 .block:last-child { border-bottom: none; padding-bottom: 0; }

@@ -109,7 +109,7 @@ async def put_ha_config(
     }
 
 
-@router.get("/api/device-status/latest", response_model=DeviceStatusOut)
+@router.get("/device-status/latest", response_model=DeviceStatusOut)
 async def latest_device_status(
     device_id: str = Query("pixel_watch_3"),
     db: AsyncSession = Depends(get_session),
@@ -146,7 +146,7 @@ class DeviceStatusPoint(BaseModel):
     online: bool | None
 
 
-@router.get("/api/device-status/series")
+@router.get("/device-status/series")
 async def device_status_series(
     device_id: str = Query("pixel_watch_3"),
     since: datetime | None = Query(None),

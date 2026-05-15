@@ -272,7 +272,7 @@ interface BackendApi {
         @retrofit2.http.Query("relink") relink: Boolean = false,
     ): TrailOsmFetchAllResponse
 
-    @GET("api/device-status/series")
+    @GET("device-status/series")
     suspend fun deviceStatusSeries(
         @retrofit2.http.Query("device_id") deviceId: String = "pixel_watch_3",
         @retrofit2.http.Query("since") since: String? = null,

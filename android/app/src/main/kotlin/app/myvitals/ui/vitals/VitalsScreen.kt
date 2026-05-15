@@ -11,8 +11,10 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +47,7 @@ import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.ArrowDropUp
+import androidx.compose.material.icons.automirrored.outlined.ArrowForwardIos
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Card
@@ -470,6 +473,11 @@ private fun BadgeFrame(
     onClick: () -> Unit,
     onLongPress: (() -> Unit)? = null,
     pulseBpm: Double? = null,
+    // Action chips (Workout / Activity / Trails / Coach) navigate to a
+    // separate screen rather than drilling into a metric detail. The
+    // dimmer container + chevron eyebrow signals "tap to navigate" and
+    // visually separates them from the value-displaying status chips.
+    isAction: Boolean = false,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
     // When pulseBpm is set, the eyebrow icon scales rhythmically at
@@ -491,8 +499,18 @@ private fun BadgeFrame(
     } else 1.0f
 
     Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isAction) MV.SurfaceContainerLow else MV.SurfaceContainer,
+        ),
         modifier = Modifier.fillMaxWidth().height(150.dp)
+            .then(
+                if (isAction)
+                    Modifier.border(
+                        androidx.compose.foundation.BorderStroke(1.dp, MV.OutlineVariant),
+                        RoundedCornerShape(12.dp),
+                    )
+                else Modifier,
+            )
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongPress?.invoke() },
@@ -514,6 +532,13 @@ private fun BadgeFrame(
                     modifier = Modifier.weight(1f), maxLines = 1)
                 if (lastUpdate != null) {
                     Text(lastUpdate, color = MV.OnSurfaceDim, fontSize = 9.sp)
+                } else if (isAction) {
+                    Icon(
+                        Icons.AutoMirrored.Outlined.ArrowForwardIos,
+                        contentDescription = "Open",
+                        tint = MV.OnSurfaceDim,
+                        modifier = Modifier.size(10.dp),
+                    )
                 }
             }
             Spacer(Modifier.height(6.dp))
@@ -829,7 +854,7 @@ private fun FastingBadge(
 @Composable
 private fun CoachBadge(onClick: () -> Unit) {
     val v = Vital.COACH
-    BadgeFrame(v, null, onClick) {
+    BadgeFrame(v, null, onClick, isAction = true) {
         Text("AI", color = MV.OnSurface,
             fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(6.dp))
@@ -846,7 +871,7 @@ private fun WorkoutBadge(
     val v = Vital.WORKOUT
     val freshness = last?.startedAt?.let { fmtRelative(it, nowMs) }
         ?: last?.date?.let { fmtRelativeDate(it, nowMs) }
-    BadgeFrame(v, freshness, onClick) {
+    BadgeFrame(v, freshness, onClick, isAction = true) {
         if (last == null) {
             Text("—", color = MV.OnSurface, fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold)
@@ -890,7 +915,7 @@ private fun ActivityBadge(
 ) {
     val v = Vital.ACTIVITY
     val freshness = last?.startAt?.let { fmtRelative(it, nowMs) }
-    BadgeFrame(v, freshness, onClick) {
+    BadgeFrame(v, freshness, onClick, isAction = true) {
         if (last == null) {
             Text("—", color = MV.OnSurface, fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold)
@@ -930,7 +955,7 @@ private fun TrailsBadge(
     onClick: () -> Unit,
 ) {
     val v = Vital.TRAILS
-    BadgeFrame(v, null, onClick) {
+    BadgeFrame(v, null, onClick, isAction = true) {
         val total = open + delayed + closed
         if (total == 0) {
             Text("—", color = MV.OnSurface, fontSize = 22.sp,

@@ -209,6 +209,10 @@ const groups = computed<Group[]>(() => {
   const hrStr = summary.value?.resting_hr ? `${Math.round(summary.value.resting_hr)}` : "—";
   const tempStr = summary.value?.skin_temp_delta_avg != null
     ? `${summary.value.skin_temp_delta_avg.toFixed(2)}` : "—";
+  const stepsStr = summary.value?.steps_total != null
+    ? summary.value.steps_total.toLocaleString() : "—";
+  const hrvStr = summary.value?.hrv_avg != null
+    ? `${Math.round(summary.value.hrv_avg)}` : "—";
   const distStr = activitiesDistanceM.value != null
     ? fmtDistance(activitiesDistanceM.value, 0) : "—";
   return [
@@ -216,10 +220,12 @@ const groups = computed<Group[]>(() => {
     {
       id: "vitals", icon: Heart, label: "Vitals", children: [
         { to: "/heart-rate",     icon: Heart,       label: "Heart rate",     sub: hrStr,     subColor: "#ef4444" },
+        { to: "/hrv",            icon: Activity,    label: "HRV",            sub: hrvStr,    subColor: "#34d399" },
         { to: "/sleep",          icon: Bed,         label: "Sleep",          sub: sleepStr,  subColor: "#a78bfa" },
+        { to: "/steps",          icon: Footprints,  label: "Steps",          sub: stepsStr,  subColor: "#22c55e" },
         { to: "/blood-pressure", icon: Droplets,    label: "Blood pressure", sub: bpStr,     subColor: "#fb923c" },
         { to: "/weight",         icon: Scale,       label: "Weight",         sub: weightStr, subColor: "#38bdf8" },
-        { to: "/skin-temp", icon: Thermometer, label: "Skin Δ",       sub: tempStr,   subColor: "#94a3b8" },
+        { to: "/skin-temp",      icon: Thermometer, label: "Skin Δ",         sub: tempStr,   subColor: "#94a3b8" },
         { to: "/watch",          icon: WatchIcon,   label: "Watch",          sub: watchSub.value, subColor: "#38bdf8" },
       ],
     },

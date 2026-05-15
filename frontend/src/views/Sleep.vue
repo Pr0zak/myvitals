@@ -26,6 +26,10 @@ const lastNightRaw = ref<{ time: string; stage: string; duration_s: number }[]>(
 const loading = ref(true);
 const error = ref<string | null>(null);
 const range = ref<7 | 30 | 90>(30);
+// Sleep target from profile (GOALS-2). Drives the markLine on the
+// stacked-nights chart so the user can see at a glance which nights
+// hit their goal.
+const sleepTargetH = ref<number | null>(null);
 
 async function load() {
   loading.value = true;
@@ -33,12 +37,15 @@ async function load() {
   try {
     const since = new Date();
     since.setDate(since.getDate() - range.value);
-    const [n, raw] = await Promise.all([
+    const [n, raw, prof] = await Promise.all([
       api.sleepRange(since),
       api.sleepRaw(new Date(Date.now() - 36 * 3600 * 1000)),
+      api.getProfile().catch(() => null),
     ]);
     nights.value = n;
     lastNightRaw.value = raw;
+    sleepTargetH.value = (prof as { sleep_target_h?: number | null } | null)
+      ?.sleep_target_h ?? null;
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Failed to load";
   } finally {
@@ -159,7 +166,7 @@ const stackedNightsOption = computed(() => {
   const allStages = Array.from(new Set(nights.value.flatMap((n) => n.stages.map((s) => s.stage))));
   const orderedStages = [...STAGE_ORDER, ...allStages.filter((s) => !STAGE_ORDER.includes(s))];
 
-  const series = orderedStages.filter((s) => allStages.includes(s)).map((stage) => ({
+  const series: any[] = orderedStages.filter((s) => allStages.includes(s)).map((stage) => ({
     name: stage,
     type: "bar",
     stack: "sleep",
@@ -169,6 +176,30 @@ const stackedNightsOption = computed(() => {
     }),
     itemStyle: { color: STAGE_COLORS[stage] ?? "#64748b" },
   }));
+
+  // Sleep target markLine (GOALS-2). Attached to the first series so
+  // it renders once across the full chart width. Skipped when no
+  // target is configured.
+  if (sleepTargetH.value != null && series.length > 0) {
+    const targetMin = sleepTargetH.value * 60;
+    series[0] = {
+      ...series[0],
+      markLine: {
+        silent: true,
+        symbol: ["none", "none"],
+        data: [{
+          yAxis: targetMin,
+          lineStyle: { color: t.palette.recovery, type: "dashed" as const, width: 1.5, opacity: 0.7 },
+          label: {
+            formatter: `Target ${sleepTargetH.value!.toFixed(1)}h`,
+            color: t.palette.recovery,
+            fontSize: 10,
+            position: "insideEndTop",
+          },
+        }],
+      },
+    };
+  }
 
   return {
     grid: { left: 50, right: 12, top: 30, bottom: 28 },

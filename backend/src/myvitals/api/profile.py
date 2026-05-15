@@ -100,6 +100,7 @@ async def _profile_dict(
         "sex": p.sex,
         "height_cm": p.height_cm,
         "weight_goal_kg": p.weight_goal_kg,
+        "sleep_target_h": p.sleep_target_h,
         "resting_hr_baseline": p.resting_hr_baseline,
         "activity_level": p.activity_level,
         "extra": p.extra,

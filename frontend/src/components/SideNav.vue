@@ -45,11 +45,31 @@ type Group = {
 const COLLAPSED_KEY = "myvitals.sidenav.collapsed";
 const EXPANDED_GROUPS_KEY = "myvitals.sidenav.expanded";
 
-const collapsed = ref<boolean>(localStorage.getItem(COLLAPSED_KEY) === "1");
+// Mobile: never use the narrow-rail mode. The collapsed pref is desktop-
+// only — when the drawer slides in on a small screen, the user wants
+// labels. Track viewport width reactively so an orientation flip or
+// devtools resize updates the layout without a reload.
+const isMobile = ref<boolean>(
+  typeof window !== "undefined" &&
+  window.matchMedia("(max-width: 700px)").matches,
+);
+if (typeof window !== "undefined") {
+  const mq = window.matchMedia("(max-width: 700px)");
+  const handler = (e: MediaQueryListEvent) => { isMobile.value = e.matches; };
+  // Older Safari uses addListener; both supported.
+  if (mq.addEventListener) mq.addEventListener("change", handler);
+  else mq.addListener(handler);
+}
+
+const collapsedPref = ref<boolean>(localStorage.getItem(COLLAPSED_KEY) === "1");
+const collapsed = computed<boolean>({
+  get: () => isMobile.value ? false : collapsedPref.value,
+  set: (v) => { collapsedPref.value = v; },
+});
 const expanded = ref<Record<string, boolean>>(
   JSON.parse(localStorage.getItem(EXPANDED_GROUPS_KEY) || '{"vitals":true}'),
 );
-watch(collapsed, (v) => localStorage.setItem(COLLAPSED_KEY, v ? "1" : "0"));
+watch(collapsedPref, (v) => localStorage.setItem(COLLAPSED_KEY, v ? "1" : "0"));
 watch(expanded, (v) => localStorage.setItem(EXPANDED_GROUPS_KEY, JSON.stringify(v)),
   { deep: true });
 

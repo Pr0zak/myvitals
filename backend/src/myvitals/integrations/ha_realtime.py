@@ -126,9 +126,25 @@ async def _seed_offline(device_id: str) -> None:
     )
 
 
+async def _load_config() -> tuple[str | None, str | None, str, bool]:
+    """Read (url, token, device_id, enabled) from ha_config singleton.
+    Falls back to settings env-vars only if the DB row is empty — keeps
+    early-adopter setups working without forcing a Settings round-trip."""
+    async with SessionLocal() as db:
+        row = await db.get(models.HaConfig, 1)
+    url = (row.url if row else None) or settings.ha_url
+    token = (row.token if row else None) or settings.ha_token
+    device_id = (row.device_id if row else None) or settings.ha_realtime_device_id
+    enabled = (row.realtime_enabled if row else False) or settings.ha_realtime_enabled
+    return url, token, device_id, enabled
+
+
 async def _consume_once(device_id: str, entity_map: dict[str, str]) -> None:
     """One connect-subscribe-process cycle. Raises on disconnect."""
-    ws_url = settings.ha_url.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
+    url, token, _did, _en = await _load_config()
+    if not (url and token):
+        raise RuntimeError("HA url/token missing (cleared from Settings?)")
+    ws_url = url.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
     if not ws_url.endswith("/api/websocket"):
         ws_url = ws_url.rstrip("/") + "/api/websocket"
 
@@ -137,7 +153,7 @@ async def _consume_once(device_id: str, entity_map: dict[str, str]) -> None:
         auth_req = json.loads(await ws.recv())
         if auth_req.get("type") != "auth_required":
             raise RuntimeError(f"unexpected HA greeting: {auth_req}")
-        await ws.send(json.dumps({"type": "auth", "access_token": settings.ha_token}))
+        await ws.send(json.dumps({"type": "auth", "access_token": token}))
         auth_resp = json.loads(await ws.recv())
         if auth_resp.get("type") != "auth_ok":
             raise RuntimeError(f"HA auth rejected: {auth_resp}")
@@ -199,11 +215,14 @@ async def run() -> None:
     Cancellation propagates out cleanly — finally writes online=false
     so /api/device-status/latest reflects the gap.
     """
-    if not (settings.ha_url and settings.ha_token):
-        log.warning("HA realtime: ha_url + ha_token not set, consumer disabled")
+    url, token, device_id, enabled = await _load_config()
+    if not (url and token):
+        log.warning("HA realtime: url/token not configured in DB or env, consumer disabled")
+        return
+    if not enabled:
+        log.info("HA realtime: configured but realtime_enabled=false, not starting")
         return
 
-    device_id = settings.ha_realtime_device_id
     entity_map = _build_entity_map(device_id)
     backoff_s = 1.0
     try:

@@ -1045,6 +1045,28 @@ export const api = {
     return data;
   },
 
+  async haConfigGet(): Promise<{
+    url: string | null;
+    token_masked: string | null;
+    realtime_enabled: boolean;
+    device_id: string;
+    updated_at: string | null;
+    configured: boolean;
+  }> {
+    const { data } = await http.get("/api/ha-config");
+    return data;
+  },
+
+  async haConfigPut(body: {
+    url?: string | null;
+    token?: string | null;
+    realtime_enabled?: boolean;
+    device_id?: string;
+  }): Promise<unknown> {
+    const { data } = await http.put("/api/ha-config", body);
+    return data;
+  },
+
   async deviceStatusLatest(device_id = "pixel_watch_3"): Promise<{
     device_id: string;
     time: string;

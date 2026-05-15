@@ -545,6 +545,19 @@ class FastingLog(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class HaConfig(Base):
+    """Singleton (id=1) config row for the HA WebSocket consumer.
+    Replaces the env-only HA_URL / HA_TOKEN / HA_REALTIME_ENABLED so
+    the user can manage them from Settings instead of editing .env."""
+    __tablename__ = "ha_config"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    realtime_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    device_id: Mapped[str] = mapped_column(String(96), default="pixel_watch_3")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class DeviceStatus(Base):
     """Pixel Watch (and future devices) liveness snapshot from the HA
     WebSocket consumer. Each HA event mutates one field; the consumer

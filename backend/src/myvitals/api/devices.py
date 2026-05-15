@@ -1,14 +1,17 @@
-"""Device-status read endpoints — fronts the device_status hypertable
-populated by the HA WebSocket consumer.
+"""Device-status read endpoints + HA config CRUD — fronts the
+device_status hypertable populated by the HA WebSocket consumer
+and exposes the singleton ha_config row to Settings.
 
 Auth via the existing query/ingest token plumbing (same as /query/*)."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import require_any
@@ -27,6 +30,83 @@ class DeviceStatusOut(BaseModel):
     activity_state: str | None
     is_worn: bool | None
     online: bool | None
+
+
+class HaConfigOut(BaseModel):
+    url: str | None
+    token_masked: str | None    # never echo the token plaintext
+    realtime_enabled: bool
+    device_id: str
+    updated_at: str | None
+    configured: bool             # both url + token present
+
+
+class HaConfigIn(BaseModel):
+    url: str | None = None
+    token: str | None = None    # if omitted, keep existing; pass "" to clear
+    realtime_enabled: bool | None = None
+    device_id: str | None = None
+
+
+def _mask(token: str | None) -> str | None:
+    if not token:
+        return None
+    if len(token) <= 8:
+        return "•" * len(token)
+    return token[:3] + "•••" + token[-4:]
+
+
+@router.get("/api/ha-config", response_model=HaConfigOut)
+async def get_ha_config(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    row = await db.get(models.HaConfig, 1)
+    if row is None:
+        return {
+            "url": None, "token_masked": None, "realtime_enabled": False,
+            "device_id": "pixel_watch_3", "updated_at": None, "configured": False,
+        }
+    return {
+        "url": row.url,
+        "token_masked": _mask(row.token),
+        "realtime_enabled": row.realtime_enabled,
+        "device_id": row.device_id,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "configured": bool(row.url and row.token),
+    }
+
+
+@router.put("/api/ha-config", response_model=HaConfigOut)
+async def put_ha_config(
+    body: HaConfigIn, db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    existing = await db.get(models.HaConfig, 1)
+    if existing is None:
+        existing = models.HaConfig(
+            id=1, realtime_enabled=False, device_id="pixel_watch_3",
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(existing)
+    if body.url is not None:
+        existing.url = body.url.strip() or None
+    if body.token is not None:
+        # Empty string explicitly clears; None means "keep current".
+        existing.token = body.token if body.token.strip() else None
+    if body.realtime_enabled is not None:
+        existing.realtime_enabled = body.realtime_enabled
+    if body.device_id is not None and body.device_id.strip():
+        existing.device_id = body.device_id.strip()
+    existing.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(existing)
+    return {
+        "url": existing.url,
+        "token_masked": _mask(existing.token),
+        "realtime_enabled": existing.realtime_enabled,
+        "device_id": existing.device_id,
+        "updated_at": existing.updated_at.isoformat(),
+        "configured": bool(existing.url and existing.token),
+    }
 
 
 @router.get("/api/device-status/latest", response_model=DeviceStatusOut)

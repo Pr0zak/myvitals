@@ -47,24 +47,13 @@ async def lifespan(app: FastAPI):
     # populated immediately. Don't block app startup if it fails.
     asyncio.create_task(_safe_initial_summary())
 
-    # HA WebSocket realtime consumer — only starts if explicitly enabled in
-    # config AND credentials are present. Failures inside the task surface
-    # via its own logging + backoff loop; the lifespan doesn't await it.
-    ha_task: asyncio.Task | None = None
-    if (
-        settings.ha_realtime_enabled
-        and settings.ha_url and settings.ha_token
-    ):
-        from .integrations.ha_realtime import run as _ha_run
-        ha_task = asyncio.create_task(_ha_run(), name="ha_realtime")
-        log.info("HA realtime consumer task started")
-    else:
-        log.info(
-            "HA realtime consumer disabled (enabled=%s, url=%s, token=%s)",
-            settings.ha_realtime_enabled,
-            bool(settings.ha_url),
-            bool(settings.ha_token),
-        )
+    # HA WebSocket realtime consumer — always start the task; the run()
+    # function reads ha_config (DB) + env fallbacks and bails out if
+    # url / token / realtime_enabled aren't all set. This lets Settings
+    # changes pick up after the next backend restart without env-var
+    # surgery; in-process re-arm is a future improvement.
+    from .integrations.ha_realtime import run as _ha_run
+    ha_task: asyncio.Task | None = asyncio.create_task(_ha_run(), name="ha_realtime")
 
     try:
         yield

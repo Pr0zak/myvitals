@@ -67,6 +67,15 @@ const haAgeS = computed<number | null>(() => {
   return Math.max(0, Math.round((Date.now() - new Date(ts).getTime()) / 1000));
 });
 
+// HA config form state — token stored in DB, never echoed plaintext.
+const haCfgUrl = ref<string>("");
+const haCfgToken = ref<string>("");        // user typing field; empty = keep existing
+const haCfgEnabled = ref<boolean>(false);
+const haCfgMasked = ref<string | null>(null);
+const haCfgSaving = ref(false);
+const haCfgMsg = ref<string>("");
+const haCfgConfigured = ref<boolean>(false);
+
 // Strava OAuth credential fields (dashboard-editable)
 const cidInput = ref("");
 const secretInput = ref("");
@@ -647,11 +656,41 @@ async function loadHaStatus() {
   haError.value = null;
   haLoading.value = true;
   try {
-    haStatus.value = await api.deviceStatusLatest();
+    const [status, cfg] = await Promise.all([
+      api.deviceStatusLatest(),
+      api.haConfigGet(),
+    ]);
+    haStatus.value = status;
+    haCfgUrl.value = cfg.url ?? "";
+    haCfgEnabled.value = cfg.realtime_enabled;
+    haCfgMasked.value = cfg.token_masked;
+    haCfgConfigured.value = cfg.configured;
   } catch (e: unknown) {
     haError.value = e instanceof Error ? e.message : String(e);
   } finally {
     haLoading.value = false;
+  }
+}
+
+async function saveHaConfig() {
+  haCfgSaving.value = true; haCfgMsg.value = "";
+  try {
+    const body: Record<string, unknown> = {
+      url: haCfgUrl.value.trim() || null,
+      realtime_enabled: haCfgEnabled.value,
+    };
+    // Only send token if the user typed something — empty input
+    // means "keep what's in the DB". To explicitly clear, the user
+    // can type any whitespace and the backend trims it.
+    if (haCfgToken.value !== "") body.token = haCfgToken.value;
+    await api.haConfigPut(body);
+    haCfgToken.value = "";   // never keep it in memory
+    haCfgMsg.value = "Saved. Restart the backend to apply (a future iteration will hot-reload).";
+    await loadHaStatus();
+  } catch (e: unknown) {
+    haCfgMsg.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    haCfgSaving.value = false;
   }
 }
 
@@ -1346,12 +1385,9 @@ onUnmounted(stopJobPolling);
 
       <template v-else>
         <p class="hint">
-          No device_status rows yet — the WebSocket consumer hasn't
-          captured an event. To enable: set
-          <code>HA_URL</code>, <code>HA_TOKEN</code>, and
-          <code>HA_REALTIME_ENABLED=true</code> in the backend's
-          <code>.env</code>, then restart the backend container.
-          Generate the long-lived token in HA → Profile → Security.
+          No device_status rows yet — the WebSocket consumer either
+          isn't configured or hasn't connected. Set the URL + token
+          below and toggle realtime on.
         </p>
         <div class="actions">
           <button class="ghost" :disabled="haLoading" @click="loadHaStatus">
@@ -1359,6 +1395,36 @@ onUnmounted(stopJobPolling);
           </button>
         </div>
       </template>
+
+      <!-- HA config form — stored in ha_config table, not .env -->
+      <h3 class="sub">Config</h3>
+      <label>
+        <span>HA base URL</span>
+        <input v-model="haCfgUrl" type="url" placeholder="http://10.x.x.x:8123" autocomplete="off"/>
+      </label>
+      <label>
+        <span>Long-lived access token
+          <span v-if="haCfgMasked" class="muted">(current: <code>{{ haCfgMasked }}</code>)</span>
+        </span>
+        <input v-model="haCfgToken" type="password"
+               :placeholder="haCfgMasked ? 'leave blank to keep, paste to replace' : 'paste HA token'"
+               autocomplete="off"/>
+      </label>
+      <label class="row-inline">
+        <input type="checkbox" v-model="haCfgEnabled"/>
+        <span>Enable realtime WebSocket consumer</span>
+      </label>
+      <p class="hint">
+        Generate the token in HA → your profile → Security → Long-lived
+        access tokens. Stored in the DB (never echoed back). HR / HRV /
+        SpO2 / sleep continue to come from Health Connect.
+      </p>
+      <div class="actions">
+        <button class="primary" :disabled="haCfgSaving" @click="saveHaConfig">
+          {{ haCfgSaving ? "Saving…" : "Save HA config" }}
+        </button>
+      </div>
+      <div v-if="haCfgMsg" class="hint">{{ haCfgMsg }}</div>
     </details>
 
     <!-- ── Concept2 ── -->

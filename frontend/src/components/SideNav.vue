@@ -15,10 +15,10 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import {
-  Activity, AlertTriangle, BarChart3, Bed, Calendar, ChevronDown,
+  Activity, AlertTriangle, BarChart3, Battery, Bed, Calendar, ChevronDown,
   ChevronRight, Droplets, Dumbbell, Edit3, Footprints, Github, GitCompare,
-  Heart, Home, List, Map, Menu, Mountain, RotateCcw, Scale, Search, Settings, Sparkles,
-  Target, Terminal, Thermometer, TrendingUp, type LucideIcon,
+  Heart, Home, Hourglass, List, Map, Menu, Mountain, RotateCcw, Scale, Search, Settings, Sparkles,
+  Target, Terminal, Thermometer, TrendingUp, Watch as WatchIcon, type LucideIcon,
 } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { fmtDateTime } from "@/format";
@@ -67,17 +67,26 @@ const lastAttemptAt = ref<Date | null>(null);
 const permissionsLost = ref(false);
 const permsMissing = ref<string[] | null>(null);
 const soberDays = ref<number | null>(null);
+const fastingActive = ref<boolean>(false);
+const watchBatteryPct = ref<number | null>(null);
+const watchOnline = ref<boolean>(false);
+const watchSub = computed<string | null>(() => {
+  if (watchBatteryPct.value === null) return null;
+  return `${watchBatteryPct.value}%${watchOnline.value ? "" : " · offline"}`;
+});
 const backendVersion = ref<string | null>(null);
 const nowTick = ref(Date.now());
 
 async function refreshSidebarData() {
   try {
-    const [s, stats, disc, sync, sober] = await Promise.all([
+    const [s, stats, disc, sync, sober, fast, watch] = await Promise.all([
       api.todaySummary().catch(() => null),
       api.activitiesStats(365).catch(() => null),
       api.discoveries(90).catch(() => []),
       api.lastSync().catch(() => null),
       api.soberCurrent().catch(() => null),
+      api.fastingCurrent().catch(() => null),
+      api.deviceStatusLatest().catch(() => null),
     ]);
     summary.value = s;
     if (stats) {
@@ -86,6 +95,9 @@ async function refreshSidebarData() {
     }
     discoveriesCount.value = disc?.length ?? 0;
     soberDays.value = sober?.days ?? null;
+    fastingActive.value = !!fast?.is_active;
+    watchBatteryPct.value = watch?.battery_pct ?? null;
+    watchOnline.value = !!watch?.online;
     lastSyncAt.value = sync?.last_sync ? new Date(sync.last_sync) : null;
     lastAttemptAt.value = sync?.last_attempt ? new Date(sync.last_attempt) : null;
     permissionsLost.value = !!sync?.permissions_lost;
@@ -190,6 +202,7 @@ const groups = computed<Group[]>(() => {
         { to: "/blood-pressure", icon: Droplets,    label: "Blood pressure", sub: bpStr,     subColor: "#fb923c" },
         { to: "/weight",         icon: Scale,       label: "Weight",         sub: weightStr, subColor: "#38bdf8" },
         { to: "/trends#skin-temp", icon: Thermometer, label: "Skin Δ",       sub: tempStr,   subColor: "#94a3b8" },
+        { to: "/watch",          icon: WatchIcon,   label: "Watch",          sub: watchSub.value, subColor: "#38bdf8" },
       ],
     },
     {
@@ -220,6 +233,11 @@ const groups = computed<Group[]>(() => {
       id: "sober",   to: "/sober",   icon: RotateCcw,     label: "Sober time",
       badge: soberDays.value != null ? `${Math.floor(soberDays.value)}d` : undefined,
       badgeColor: "#22c55e",
+    },
+    {
+      id: "fasting", to: "/fasting", icon: Hourglass,     label: "Fasting",
+      badge: fastingActive.value ? "active" : undefined,
+      badgeColor: "#38bdf8",
     },
     { id: "goals",  to: "/goals",  icon: Target,         label: "Goals" },
     {

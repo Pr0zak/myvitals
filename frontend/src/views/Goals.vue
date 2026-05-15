@@ -16,6 +16,8 @@ interface Goal {
   started_at: string;
   ended_at: string | null;
   notes: string | null;
+  current_value?: number | null;
+  progress_pct?: number | null;
 }
 
 const goals = ref<Goal[]>([]);
@@ -171,6 +173,19 @@ onMounted(load);
         </span>
         <span class="muted">started {{ fmtDateTime(g.started_at) }}</span>
       </div>
+      <div v-if="g.progress_pct != null && g.ended_at == null" class="progress-row">
+        <div class="progress-bar">
+          <div class="progress-fill"
+               :class="{ done: g.progress_pct >= 100 }"
+               :style="{ width: Math.min(100, g.progress_pct) + '%' }"/>
+        </div>
+        <span class="progress-text mono">
+          {{ g.current_value != null ? g.current_value.toFixed(1) : '—' }}
+          <span class="dim">/ {{ g.target_value }} {{ g.target_unit ?? '' }}</span>
+          <span class="dim">·</span>
+          {{ g.progress_pct.toFixed(0) }}%
+        </span>
+      </div>
       <p v-if="g.notes" class="notes">{{ g.notes }}</p>
       <div class="goal-actions">
         <button class="primary" :disabled="checking === g.id" @click="checkGoal(g)">
@@ -225,6 +240,22 @@ button { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointe
 .ghost.danger:hover { color: var(--bad); border-color: var(--bad); }
 
 .goal-meta { display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
+.progress-row {
+  display: flex; align-items: center; gap: 0.75rem;
+  margin: 0.5rem 0 0.2rem;
+}
+.progress-bar {
+  flex: 1; height: 6px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.06));
+  border-radius: 3px; overflow: hidden;
+}
+.progress-fill {
+  height: 100%; background: var(--accent, #38bdf8);
+  transition: width 320ms ease;
+}
+.progress-fill.done { background: #22c55e; }
+.progress-text { font-size: 0.78rem; color: var(--text-soft); white-space: nowrap; }
+.progress-text .dim { color: var(--muted); margin: 0 0.25rem; }
 .kind-pill {
   background: rgba(56, 189, 248, 0.12); color: var(--accent);
   border-radius: 4px; padding: 0.1rem 0.45rem; text-transform: uppercase;

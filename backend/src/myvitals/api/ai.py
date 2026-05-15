@@ -695,6 +695,98 @@ def _goal_to_dict(g: models.AiGoal) -> dict[str, Any]:
     }
 
 
+async def _baseline_weight_kg_for_goal(
+    db: AsyncSession, started_at: datetime,
+) -> float | None:
+    """First body_metrics row at or after the goal's started_at, used
+    as the progress denominator for weight goals so the progress bar
+    measures "distance from where you began" rather than a heuristic
+    baseline."""
+    return (await db.execute(
+        select(models.BodyMetric.weight_kg)
+        .where(models.BodyMetric.weight_kg.is_not(None))
+        .where(models.BodyMetric.time >= started_at)
+        .order_by(models.BodyMetric.time.asc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+
+async def _current_values_for_goals(
+    db: AsyncSession, kinds: set[str],
+) -> dict[str, float | None]:
+    """Pull the latest-progress value for each goal kind the caller cares
+    about (GOALS-3 + GOALS-6 share this). Keys present in the returned
+    dict correspond to AiGoal.kind values; entries may be None if no
+    underlying data has landed yet."""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    now = _dt.now(_tz.utc)
+    today = now.date()
+    out: dict[str, float | None] = {}
+    if "weight" in kinds:
+        out["weight"] = (await db.execute(
+            select(models.BodyMetric.weight_kg)
+            .where(models.BodyMetric.weight_kg.is_not(None))
+            .order_by(models.BodyMetric.time.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+    if "sleep" in kinds:
+        since = today - _td(days=7)
+        rows = (await db.execute(
+            select(models.DailySummary.sleep_duration_s)
+            .where(models.DailySummary.date >= since)
+            .where(models.DailySummary.sleep_duration_s.is_not(None))
+        )).scalars().all()
+        out["sleep"] = (sum(rows) / len(rows) / 3600.0) if rows else None
+    if "steps" in kinds:
+        v = (await db.execute(
+            select(models.DailySummary.steps_total)
+            .where(models.DailySummary.date == today)
+            .limit(1)
+        )).scalar_one_or_none()
+        out["steps"] = float(v) if v is not None else None
+    if "sober" in kinds:
+        s = (await db.execute(
+            select(models.SoberStreak)
+            .where(models.SoberStreak.end_at.is_(None))
+            .limit(1)
+        )).scalar_one_or_none()
+        out["sober"] = (
+            (now - s.start_at).total_seconds() / 86400.0 if s is not None else None
+        )
+    return out
+
+
+def _goal_progress(
+    g: models.AiGoal, current: float | None, baseline: float | None = None,
+) -> dict[str, Any]:
+    """Direction-aware progress for a goal (GOALS-3).
+
+    - weight: loss-oriented. Progress measured against `baseline` (the
+      weight at goal-start). Falls back to `current + 1` so the bar
+      shows ~0% until real progress is made, rather than a confusing
+      negative pct.
+    - sleep / steps / sober: gain-oriented. Progress = current / target.
+    """
+    if current is None or g.target_value is None:
+        return {"current_value": None, "progress_pct": None}
+    unit = (g.target_unit or "").strip().lower()
+    target = g.target_value
+    if g.kind == "weight":
+        target_kg = (target / 2.20462) if unit in ("lb", "lbs", "pound", "pounds") else target
+        start = baseline if baseline is not None else (current + 1.0)
+        denom = start - target_kg
+        if denom <= 0:
+            pct = 100.0 if current <= target_kg else 0.0
+        else:
+            pct = (start - current) / denom * 100.0
+        pct = max(0.0, min(100.0, pct))
+        return {"current_value": round(current, 2), "progress_pct": round(pct, 1)}
+    # Gain-oriented kinds
+    pct = (current / target * 100.0) if target > 0 else 0.0
+    pct = max(0.0, min(100.0, pct))
+    return {"current_value": round(current, 2), "progress_pct": round(pct, 1)}
+
+
 @router.get("/goals")
 async def list_goals(
     active_only: bool = True, db: AsyncSession = Depends(get_session),
@@ -702,7 +794,24 @@ async def list_goals(
     stmt = select(models.AiGoal).order_by(models.AiGoal.started_at.desc())
     if active_only:
         stmt = stmt.where(models.AiGoal.ended_at.is_(None))
-    return [_goal_to_dict(g) for g in (await db.execute(stmt)).scalars().all()]
+    goals = (await db.execute(stmt)).scalars().all()
+    kinds = {g.kind for g in goals if g.ended_at is None}
+    currents = await _current_values_for_goals(db, kinds) if kinds else {}
+    out: list[dict[str, Any]] = []
+    for g in goals:
+        d = _goal_to_dict(g)
+        if g.ended_at is None and g.kind in currents:
+            baseline = None
+            if g.kind == "weight":
+                baseline = await _baseline_weight_kg_for_goal(db, g.started_at)
+            d.update(_goal_progress(g, currents[g.kind], baseline))
+            d["baseline_value"] = round(baseline, 2) if baseline is not None else None
+        else:
+            d["current_value"] = None
+            d["progress_pct"] = None
+            d["baseline_value"] = None
+        out.append(d)
+    return out
 
 
 @router.post("/goals")

@@ -12,7 +12,7 @@
 import { onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import { api, type CoachCardOut } from "@/api/client";
-import { Activity, Bed, Dumbbell, RefreshCw, Target } from "lucide-vue-next";
+import { Activity, Bed, Dumbbell, HeartPulse, RefreshCw, Target } from "lucide-vue-next";
 
 interface GoalProgress {
   id: number;
@@ -41,6 +41,7 @@ type CardState = {
 const cardio = ref<CardState>({ open: false, loading: false, data: null, error: null });
 const workout = ref<CardState>({ open: false, loading: false, data: null, error: null });
 const sleep = ref<CardState>({ open: false, loading: false, data: null, error: null });
+const recovery = ref<CardState>({ open: false, loading: false, data: null, error: null });
 
 async function preload() {
   try {
@@ -51,6 +52,9 @@ async function preload() {
   } catch { /* swallow */ }
   try {
     sleep.value.data = await api.coachSleepLatest();
+  } catch { /* swallow */ }
+  try {
+    recovery.value.data = await api.coachRecoveryLatest();
   } catch { /* swallow */ }
 }
 
@@ -91,9 +95,17 @@ async function toggleSleep() {
   }
 }
 
+async function toggleRecovery() {
+  recovery.value.open = !recovery.value.open;
+  if (recovery.value.open && recovery.value.data === null) {
+    await fetchCard(recovery.value, false, api.coachRecovery);
+  }
+}
+
 function refreshCardio() { fetchCard(cardio.value, true, api.coachCardio); }
 function refreshWorkout() { fetchCard(workout.value, true, api.coachWorkout); }
 function refreshSleep() { fetchCard(sleep.value, true, api.coachSleep); }
+function refreshRecovery() { fetchCard(recovery.value, true, api.coachRecovery); }
 
 function tonePill(tone: string | undefined): string {
   return tone || "neutral";
@@ -264,6 +276,62 @@ onMounted(() => { preload(); loadGoals(); });
             <span class="muted">{{ fmtTime(sleep.data.generated_at) }} · {{ sleep.data.model }}
               <span v-if="sleep.data.cached">(cached)</span></span>
             <button class="ghost" :disabled="sleep.loading" @click="refreshSleep">
+              <RefreshCw :size="13"/> Refresh
+            </button>
+          </div>
+        </template>
+        <template v-else>
+          <p class="hint">No coach card cached yet — tap to generate.</p>
+        </template>
+      </div>
+    </section>
+
+    <!-- Recovery coach (multi-week HRV/RHR/skin-temp/readiness trend) -->
+    <section class="card" :class="['tone-' + tonePill(recovery.data?.analysis?.tone as string | undefined)]">
+      <button class="head" @click="toggleRecovery">
+        <HeartPulse :size="18"/>
+        <span class="title">Recovery coach</span>
+        <span class="sub">HRV · RHR · skin temp · readiness — multi-week trend</span>
+        <span class="chev">{{ recovery.open ? "▾" : "▸" }}</span>
+      </button>
+
+      <div v-if="recovery.open" class="body">
+        <p v-if="recovery.loading" class="hint">Thinking…</p>
+        <p v-else-if="recovery.error" class="err">{{ recovery.error }}</p>
+        <template v-else-if="recovery.data?.analysis">
+          <h3 class="headline">{{ recovery.data.analysis.headline }}</h3>
+          <p class="plan supporting">
+            <strong>Trend:</strong>
+            {{ recovery.data.analysis.trend_direction }}
+          </p>
+          <div class="grid">
+            <div>
+              <div class="lbl">HRV</div>
+              <p>{{ recovery.data.analysis.hrv_assessment }}</p>
+            </div>
+            <div>
+              <div class="lbl">Resting HR</div>
+              <p>{{ recovery.data.analysis.rhr_assessment }}</p>
+            </div>
+            <div>
+              <div class="lbl">Skin temperature Δ</div>
+              <p>{{ recovery.data.analysis.skin_temp_assessment }}</p>
+            </div>
+            <div>
+              <div class="lbl">Readiness</div>
+              <p>{{ recovery.data.analysis.readiness_assessment }}</p>
+            </div>
+          </div>
+          <div class="lbl">Evidence</div>
+          <ul class="bullets">
+            <li v-for="(e, i) in asLines(recovery.data.analysis.evidence)" :key="i">{{ e }}</li>
+          </ul>
+          <div class="lbl">Recommendation</div>
+          <p class="plan">{{ recovery.data.analysis.recommendation }}</p>
+          <div class="footer">
+            <span class="muted">{{ fmtTime(recovery.data.generated_at) }} · {{ recovery.data.model }}
+              <span v-if="recovery.data.cached">(cached)</span></span>
+            <button class="ghost" :disabled="recovery.loading" @click="refreshRecovery">
               <RefreshCw :size="13"/> Refresh
             </button>
           </div>

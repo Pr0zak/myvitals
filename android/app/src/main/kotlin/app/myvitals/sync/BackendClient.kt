@@ -51,6 +51,12 @@ interface BackendApi {
     @GET("ai/coach/sleep/latest")
     suspend fun coachSleepLatest(): Response<CoachCard>
 
+    @POST("ai/coach/recovery")
+    suspend fun coachRecovery(@Body body: Map<String, Any> = emptyMap()): CoachCard
+
+    @GET("ai/coach/recovery/latest")
+    suspend fun coachRecoveryLatest(): Response<CoachCard>
+
     @GET("fasting/current")
     suspend fun fastingCurrent(): Response<FastingSession>   // 200 with null body or row
 

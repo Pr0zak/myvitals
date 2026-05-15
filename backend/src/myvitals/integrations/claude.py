@@ -2214,6 +2214,196 @@ async def sleep_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     )
 
 
+# ─────────────── Recovery coach (COACH-6) ───────────────
+
+RECOVERY_COACH_TOOL = {
+    "name": "give_recovery_coach",
+    "description": (
+        "Multi-week recovery trend read: HRV + RHR + skin-temp Δ + "
+        "readiness + recovery score. Broader than the per-workout "
+        "deload check; surfaces directional momentum, not single-day "
+        "anomalies."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "headline": {
+                "type": "string",
+                "description": "≤14 words. One-line directional read.",
+            },
+            "tone": {"type": "string", "enum": ["good", "warn", "bad", "neutral"]},
+            "trend_direction": {
+                "type": "string",
+                "enum": ["improving", "flat", "declining"],
+                "description": "Multi-week momentum across the core recovery signals.",
+            },
+            "hrv_assessment": {
+                "type": "string",
+                "description": "≤30 words. 7d vs 28d HRV picture and what that implies.",
+            },
+            "rhr_assessment": {
+                "type": "string",
+                "description": "≤30 words. 7d vs 28d RHR picture and what that implies.",
+            },
+            "skin_temp_assessment": {
+                "type": "string",
+                "description": "≤30 words. Skin-temp Δ trend — flag clustered positive deltas as illness risk.",
+            },
+            "readiness_assessment": {
+                "type": "string",
+                "description": "≤30 words. Daily-summary readiness/recovery score trajectory.",
+            },
+            "evidence": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "2-4 bullets with specific numbers (HRV -6% vs 28d, RHR +3bpm, 3 nights skin-temp Δ ≥ +0.3 °C, etc).",
+            },
+            "recommendation": {
+                "type": "string",
+                "description": "≤40 words. Single most actionable adjustment, accounting for trend direction.",
+            },
+        },
+        "required": [
+            "headline", "tone", "trend_direction", "hrv_assessment",
+            "rhr_assessment", "skin_temp_assessment", "readiness_assessment",
+            "evidence", "recommendation",
+        ],
+    },
+}
+
+
+def _recovery_coach_system(tone: str) -> str:
+    return f"""You are the user's recovery coach. You see a 28-day window of:
+- per-day HRV (rMSSD ms), resting HR, skin_temp_delta_avg (°C vs baseline),
+  recovery_score, readiness_score, sleep_h, sleep_score
+- 7-day vs 28-day averages so you can talk in deltas instead of raw numbers
+- wow_deltas — pre-computed last-7d vs prior-7d pct changes per metric
+- top_correlations — Pearson r≥0.5 between the core vitals (use these
+  to make causal-sounding claims defensible)
+- recent_alerts the anomaly scanner already raised (high RHR, suppressed
+  HRV, skin-temp clusters, illness risk)
+- profile.tone preference
+
+{_tone_line(tone)}
+
+Use the `give_recovery_coach` tool. Rules:
+- The MAIN read is trend_direction (improving / flat / declining). Pick
+  it from the 7d vs 28d direction across HRV + RHR + readiness — they
+  usually align, but if they diverge call that out in evidence.
+- Skin-temp delta is the SUBTLE one: positive deltas clustered over
+  2-3+ days are the earliest illness signal. Quote the count and peak
+  in skin_temp_assessment when present.
+- Don't react to single-day anomalies — this is the multi-week view.
+  Cite trend numbers (7d avg, pct delta) not yesterday's single reading.
+- The recommendation should match trend_direction: improving → keep
+  loading; flat → identify a leverage point; declining → back off,
+  identify the suspected driver (sleep debt, training load, illness).
+- If recent_alerts cluster (e.g. two suppressed-HRV alerts in five
+  days), weight the verdict toward declining even if averages mask it.
+"""
+
+
+async def build_recovery_coach_payload(db: AsyncSession) -> dict[str, Any]:
+    """Bounded payload for the recovery coach card. Adds skin-temp Δ
+    rows beyond what _daily_rows ships by default."""
+    from statistics import mean
+    daily = await _daily_rows(db, 28)
+    # Pull skin-temp deltas separately and join by date — they live in
+    # DailySummary too but _daily_rows doesn't project that column.
+    skin_rows = (await db.execute(
+        select(models.DailySummary.date, models.DailySummary.skin_temp_delta_avg)
+        .where(models.DailySummary.date >= (
+            datetime.now(timezone.utc).date() - timedelta(days=28)
+        ))
+        .order_by(models.DailySummary.date)
+    )).all()
+    skin_by_date = {str(r.date): r.skin_temp_delta_avg for r in skin_rows}
+    for row in daily:
+        row["skin_temp_delta"] = skin_by_date.get(row["date"])
+
+    last7 = daily[-7:] if len(daily) >= 7 else daily
+
+    def _avg(rows: list[dict[str, Any]], key: str) -> float | None:
+        vals = [r[key] for r in rows if r.get(key) is not None]
+        return round(mean(vals), 2) if vals else None
+
+    last7_summary = {
+        "hrv": _avg(last7, "hrv"),
+        "rhr": _avg(last7, "rhr"),
+        "recovery": _avg(last7, "recovery"),
+        "readiness": _avg(last7, "readiness"),
+        "sleep_h": _avg(last7, "sleep_h"),
+        "skin_temp_delta": _avg(last7, "skin_temp_delta"),
+    }
+    baseline_28d = {
+        "hrv": _avg(daily, "hrv"),
+        "rhr": _avg(daily, "rhr"),
+        "recovery": _avg(daily, "recovery"),
+        "readiness": _avg(daily, "readiness"),
+        "sleep_h": _avg(daily, "sleep_h"),
+        "skin_temp_delta": _avg(daily, "skin_temp_delta"),
+    }
+    skin_warm_count = sum(
+        1 for r in last7 if (r.get("skin_temp_delta") or 0) >= 0.3
+    )
+    return {
+        "today": datetime.now(timezone.utc).date().isoformat(),
+        "profile": await _profile_ctx(db),
+        "last7_summary": last7_summary,
+        "baseline_28d": baseline_28d,
+        "skin_temp_warm_days_7d": skin_warm_count,
+        "recent_dailies": daily,
+        "recent_alerts": await _recent_alerts_ctx(db),
+        "top_correlations": _top_correlations(daily),
+        "wow_deltas": _wow_deltas(daily),
+    }
+
+
+async def recovery_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
+    """Multi-week recovery trend verdict + recommendation."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    payload = await build_recovery_coach_payload(db)
+    user_text = (
+        f"Read the user's last 28 days of recovery vitals and return a "
+        f"structured trend verdict via the `give_recovery_coach` tool:\n\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=600,
+        system=_cached_system(_recovery_coach_system(cfg.tone)),
+        tools=[RECOVERY_COACH_TOOL],
+        tool_choice={"type": "tool", "name": "give_recovery_coach"},
+        messages=[{"role": "user", "content": user_text}],
+    )
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use" and block.name == "give_recovery_coach":
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    if not tool_input:
+        tool_input = {
+            "headline": "Not enough recovery data to read trend yet",
+            "tone": "neutral",
+            "trend_direction": "flat",
+            "hrv_assessment": "Need more data.",
+            "rhr_assessment": "Need more data.",
+            "skin_temp_assessment": "Need more data.",
+            "readiness_assessment": "Need more data.",
+            "evidence": [],
+            "recommendation": "Keep wearing the watch overnight and re-check in a week.",
+        }
+    _normalize_array_field(tool_input, "evidence")
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
 async def build_workout_coach_payload(db: AsyncSession) -> dict[str, Any]:
     """Multi-signal payload — reuses cardio + deload signals."""
     from ..analytics.cardio import cardio_summary

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.DirectionsBike
+import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.GpsFixed
@@ -78,6 +79,11 @@ fun CoachScreen(
     var sleepLoading by remember { mutableStateOf(false) }
     var sleepErr by remember { mutableStateOf<String?>(null) }
 
+    var recoveryOpen by remember { mutableStateOf(false) }
+    var recovery by remember { mutableStateOf<CoachCard?>(null) }
+    var recoveryLoading by remember { mutableStateOf(false) }
+    var recoveryErr by remember { mutableStateOf<String?>(null) }
+
     var goals by remember { mutableStateOf<List<app.myvitals.sync.AiGoal>>(emptyList()) }
 
     suspend fun fetchWorkout(refresh: Boolean) {
@@ -116,6 +122,18 @@ fun CoachScreen(
         } finally { sleepLoading = false }
     }
 
+    suspend fun fetchRecovery(refresh: Boolean) {
+        recoveryLoading = true; recoveryErr = null
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            recovery = if (refresh || recovery == null) {
+                withContext(Dispatchers.IO) { api.coachRecovery() }
+            } else recovery
+        } catch (e: Exception) {
+            Timber.w(e, "recovery coach failed"); recoveryErr = e.message?.take(160)
+        } finally { recoveryLoading = false }
+    }
+
     // Preload the latest cached cards on mount so the user sees content
     // immediately without burning a Claude call. Goals load alongside —
     // they're cheap (no AI) and feed the read-only progress strip.
@@ -129,6 +147,8 @@ fun CoachScreen(
             if (c.isSuccessful) cardio = c.body()
             val s = withContext(Dispatchers.IO) { api.coachSleepLatest() }
             if (s.isSuccessful) sleep = s.body()
+            val r = withContext(Dispatchers.IO) { api.coachRecoveryLatest() }
+            if (r.isSuccessful) recovery = r.body()
             goals = withContext(Dispatchers.IO) {
                 runCatching { api.aiGoals() }.getOrDefault(emptyList())
             }
@@ -213,6 +233,37 @@ fun CoachScreen(
                 Pair("Consistency", a["consistency_assessment"]?.toString() ?: "")
                 Pair("Stages", a["stage_assessment"]?.toString() ?: "")
                 Pair("Recovery link", a["recovery_link"]?.toString() ?: "")
+                EvidenceList(a["evidence"])
+                LabeledPlan("Recommendation", a["recommendation"]?.toString() ?: "")
+            },
+        )
+
+        CoachCardBlock(
+            icon = Icons.Outlined.Favorite,
+            title = "Recovery coach",
+            subtitle = "HRV · RHR · skin temp · readiness — multi-week trend",
+            open = recoveryOpen,
+            loading = recoveryLoading,
+            error = recoveryErr,
+            card = recovery,
+            onToggle = {
+                recoveryOpen = !recoveryOpen
+                if (recoveryOpen && recovery == null) {
+                    scope.launch { fetchRecovery(false) }
+                }
+            },
+            onRefresh = { scope.launch { fetchRecovery(true) } },
+            renderBody = { c ->
+                val a = c.analysis
+                Headline(a["headline"]?.toString() ?: "")
+                LabeledPlan(
+                    "Trend",
+                    (a["trend_direction"]?.toString() ?: "flat"),
+                )
+                Pair("HRV", a["hrv_assessment"]?.toString() ?: "")
+                Pair("Resting HR", a["rhr_assessment"]?.toString() ?: "")
+                Pair("Skin temperature Δ", a["skin_temp_assessment"]?.toString() ?: "")
+                Pair("Readiness", a["readiness_assessment"]?.toString() ?: "")
                 EvidenceList(a["evidence"])
                 LabeledPlan("Recommendation", a["recommendation"]?.toString() ?: "")
             },

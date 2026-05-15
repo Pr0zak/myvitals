@@ -90,7 +90,7 @@
         <activity
             android:name=".update.UpdateInstallerActivity"
             android:exported="false"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+            android:theme="@style/Theme.MyVitals" />
 
         <activity
             android:name=".debug.LogViewerActivity"

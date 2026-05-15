@@ -74,6 +74,16 @@ const updateApplying = ref(false);
 const updateApplyResult = ref<string>("");
 const updateApplyError = ref<string | null>(null);
 
+// Live apply progress — populated while the host cron is running the
+// auto-update script. The phases map to recognisable lines in the
+// auto-update.log so the UI can show a meaningful step-by-step,
+// rather than just spinning until /version comes back.
+type ApplyPhase = "idle" | "queued" | "pulling" | "recreating" | "verifying" | "done" | "failed";
+const applyPhase = ref<ApplyPhase>("idle");
+const applyProgress = ref<string[]>([]);   // log tail lines collected during apply
+let applyPollHandle: ReturnType<typeof setInterval> | null = null;
+let applyDeadline = 0;
+
 interface UpdateStatus {
   log_present: boolean;
   log_modified_at: string | null;
@@ -128,6 +138,26 @@ async function checkUpdate() {
   }
 }
 
+function stopApplyPoll() {
+  if (applyPollHandle) {
+    clearInterval(applyPollHandle);
+    applyPollHandle = null;
+  }
+}
+
+// Walk the log tail lines and pick the latest one that maps to a known
+// phase. The auto-update.sh emits specific strings we can match on
+// (see deploy/auto-update.sh).
+function classifyLogLine(line: string): ApplyPhase | null {
+  if (line.includes("update succeeded — now running")) return "done";
+  if (line.includes("unhealthy after upgrade") || line.includes("rollback")) return "failed";
+  if (line.includes("Health probe") || line.includes("/health")) return "verifying";
+  if (line.includes("recreating services") || line.includes("force-recreate")) return "recreating";
+  if (line.includes("pulling") || line.includes("Pulling") || line.includes("digest")) return "pulling";
+  if (line.includes("triggered by UI request") || line.includes("update detected")) return "queued";
+  return null;
+}
+
 async function applyUpdate() {
   if (!confirm(
     "Apply the latest release? The backend will restart and the dashboard "
@@ -136,6 +166,12 @@ async function applyUpdate() {
   updateApplying.value = true;
   updateApplyResult.value = "";
   updateApplyError.value = null;
+  applyPhase.value = "queued";
+  applyProgress.value = [];
+  const startedAt = Date.now();
+  applyDeadline = startedAt + 5 * 60_000;     // give up after 5 min
+  const baselineTail = updateStatus.value?.tail?.join("\n") ?? "";
+
   try {
     const { data } = await axios.post<{
       triggered: boolean; error?: string; hint?: string;
@@ -143,20 +179,64 @@ async function applyUpdate() {
       baseURL: apiBase.value || undefined,
       headers: queryToken.value ? { Authorization: `Bearer ${queryToken.value}` } : {},
     });
-    if (data.triggered) {
-      updateApplyResult.value =
-        "Update triggered. Backend will restart in <60s. Re-check in ~30s.";
-      // Poll for the new version every 5s.
-      setTimeout(() => checkUpdate(), 30_000);
-    } else {
+    if (!data.triggered) {
+      applyPhase.value = "failed";
       updateApplyError.value = data.hint ?? data.error ?? "Trigger failed.";
+      updateApplying.value = false;
+      return;
     }
   } catch (e: unknown) {
     const err = e as { response?: { data?: { detail?: string } }; message?: string };
+    applyPhase.value = "failed";
     updateApplyError.value = err?.response?.data?.detail ?? err?.message ?? "apply failed";
-  } finally {
     updateApplying.value = false;
+    return;
   }
+
+  // Trigger queued — now poll /update/status until the cron picks it up
+  // and the log advances. Show a live tail until we see the terminal
+  // "update succeeded" / rollback line.
+  applyPollHandle = setInterval(async () => {
+    if (Date.now() > applyDeadline) {
+      stopApplyPoll();
+      applyPhase.value = "failed";
+      updateApplyError.value =
+        "Update timed out after 5 minutes. Check the log manually on the host.";
+      updateApplying.value = false;
+      return;
+    }
+    await loadUpdateStatus();
+    const status = updateStatus.value;
+    if (!status) return;
+
+    // Only show *new* lines (the ones written after we triggered).
+    const tail = status.tail ?? [];
+    const joined = tail.join("\n");
+    if (joined === baselineTail) return;
+    // Find the index where the new tail diverges from the baseline.
+    const baselineLines = baselineTail.split("\n");
+    const newLines = tail.slice(baselineLines.length);
+    if (newLines.length > 0) applyProgress.value = newLines;
+
+    // Walk the newest lines to update phase.
+    for (let i = newLines.length - 1; i >= 0; i--) {
+      const phase = classifyLogLine(newLines[i]);
+      if (phase) { applyPhase.value = phase; break; }
+    }
+
+    if (applyPhase.value === "done") {
+      stopApplyPoll();
+      updateApplyResult.value = "Update complete. Re-checking version…";
+      updateApplying.value = false;
+      // Give the new backend a moment to come up before polling /version.
+      setTimeout(() => checkUpdate(), 1_500);
+    } else if (applyPhase.value === "failed") {
+      stopApplyPoll();
+      const lastLine = newLines[newLines.length - 1] ?? "Update failed.";
+      updateApplyError.value = lastLine;
+      updateApplying.value = false;
+    }
+  }, 2_000);
 }
 
 // Concept2 (rower) — long-lived personal token from log.concept2.com/developers
@@ -916,7 +996,20 @@ onMounted(() => {
   checkUpdate();
   loadUpdateStatus();
 });
-onUnmounted(stopJobPolling);
+onUnmounted(() => {
+  stopJobPolling();
+  stopApplyPoll();
+});
+
+const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
+  idle: "",
+  queued: "Waiting for host cron to pick up trigger…",
+  pulling: "Pulling new images from GHCR…",
+  recreating: "Recreating containers…",
+  verifying: "Verifying backend health…",
+  done: "Update complete.",
+  failed: "Update failed.",
+};
 </script>
 
 <template>
@@ -965,6 +1058,40 @@ onUnmounted(stopJobPolling);
             {{ updateApplying ? "Applying…" : `Apply v${updateInfo.latest}` }}
           </button>
         </div>
+      </div>
+
+      <!-- Live apply progress — visible while the host cron is running
+           the auto-update script (or while we're waiting for it to
+           pick up the trigger). Shows current phase + tail of the
+           auto-update.log so the user sees what's actually happening
+           instead of staring at a "Applying…" button label. -->
+      <div v-if="updateApplying || applyPhase === 'done' || applyPhase === 'failed'"
+           class="apply-progress" :class="`phase-${applyPhase}`">
+        <div class="apply-head">
+          <span class="apply-dot" :class="`phase-${applyPhase}`"/>
+          <span class="apply-phase-label">{{ APPLY_PHASE_LABEL[applyPhase] }}</span>
+          <RefreshCw v-if="updateApplying" :size="13" class="spin"/>
+        </div>
+        <ol class="apply-steps">
+          <li :class="['done']">Trigger queued</li>
+          <li :class="{
+                done: ['pulling','recreating','verifying','done'].includes(applyPhase),
+                current: applyPhase === 'pulling',
+              }">Pull images</li>
+          <li :class="{
+                done: ['recreating','verifying','done'].includes(applyPhase),
+                current: applyPhase === 'recreating',
+              }">Recreate containers</li>
+          <li :class="{
+                done: ['verifying','done'].includes(applyPhase),
+                current: applyPhase === 'verifying',
+              }">Health check</li>
+          <li :class="{
+                done: applyPhase === 'done',
+                current: applyPhase === 'verifying',
+              }">Verify new version</li>
+        </ol>
+        <pre v-if="applyProgress.length" class="apply-tail">{{ applyProgress.join('\n') }}</pre>
       </div>
 
       <div v-if="updateInfo?.release_notes" class="release-notes">
@@ -1968,6 +2095,66 @@ tr.job-failed { background: rgba(239, 68, 68, 0.05); }
   font-family: ui-monospace, monospace; font-size: 0.72rem;
   color: var(--text-soft);
   max-height: 280px; overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* Live apply progress card */
+.apply-progress {
+  margin-top: 0.9rem;
+  padding: 0.9rem 1rem;
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 8px;
+}
+.apply-progress.phase-done {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.35);
+}
+.apply-progress.phase-failed {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+.apply-head {
+  display: flex; align-items: center; gap: 0.55rem;
+  font-size: 0.9rem; color: var(--text);
+  margin-bottom: 0.7rem;
+}
+.apply-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #38bdf8; box-shadow: 0 0 6px rgba(56, 189, 248, 0.55);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.apply-dot.phase-done { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.55); animation: none; }
+.apply-dot.phase-failed { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.55); animation: none; }
+.apply-phase-label { flex: 1; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.apply-steps {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 0.3rem;
+  font-size: 0.82rem;
+}
+.apply-steps li {
+  position: relative; padding-left: 1.3rem;
+  color: var(--muted);
+}
+.apply-steps li::before {
+  content: "○"; position: absolute; left: 0;
+  color: #475569;
+}
+.apply-steps li.done { color: var(--text); }
+.apply-steps li.done::before { content: "●"; color: #22c55e; }
+.apply-steps li.current { color: #38bdf8; }
+.apply-steps li.current::before { content: "●"; color: #38bdf8; }
+.apply-tail {
+  margin: 0.7rem 0 0; padding: 0.6rem;
+  background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: ui-monospace, monospace; font-size: 0.7rem;
+  color: var(--text-soft);
+  max-height: 180px; overflow: auto;
   white-space: pre-wrap;
 }
 </style>

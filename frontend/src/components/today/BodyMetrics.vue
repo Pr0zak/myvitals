@@ -28,27 +28,29 @@ defineProps<{
         <Plus :size="11"/> Log weight
       </RouterLink>
     </div>
-    <div class="hl-row">
-      <span class="mono num-xl">
-        {{ latestLb != null ? latestLb.toFixed(1) : "—" }}
-        <span class="unit">lb</span>
-      </span>
-      <Delta v-if="delta30Lb != null" :value="+delta30Lb.toFixed(1)" suffix=" lb" invert/>
-      <span class="dim ago">30d</span>
-    </div>
-    <div class="dim sub" v-if="asOfLabel || goalLb != null">
-      <template v-if="asOfLabel">last reading · {{ asOfLabel }}</template>
-      <template v-if="goalLb != null"> · goal {{ goalLb.toFixed(1) }} lb</template>
-    </div>
-    <div class="chart">
-      <Sparkline :data="series" color="#94A3B8" :mean="goalLb"
-                 :height="64" :area-opacity="0.10" :dashed-mean="true" :pad-top="6"/>
-    </div>
-    <div class="legend">
-      <span class="dim mono">{{ fromLabel }}</span>
-      <span v-if="goalLb != null" class="dim mono">— goal {{ goalLb.toFixed(1) }}</span>
-      <span class="dim mono">{{ toLabel }}</span>
-    </div>
+    <RouterLink to="/weight" class="data-link">
+      <div class="hl-row">
+        <span class="mono num-xl">
+          {{ latestLb != null ? latestLb.toFixed(1) : "—" }}
+          <span class="unit">lb</span>
+        </span>
+        <Delta v-if="delta30Lb != null" :value="+delta30Lb.toFixed(1)" suffix=" lb" invert/>
+        <span class="dim ago">30d</span>
+      </div>
+      <div class="dim sub" v-if="asOfLabel || goalLb != null">
+        <template v-if="asOfLabel">last reading · {{ asOfLabel }}</template>
+        <template v-if="goalLb != null"> · goal {{ goalLb.toFixed(1) }} lb</template>
+      </div>
+      <div class="chart">
+        <Sparkline :data="series" color="#94A3B8" :mean="goalLb"
+                   :height="64" :area-opacity="0.10" :dashed-mean="true" :pad-top="6"/>
+      </div>
+      <div class="legend">
+        <span class="dim mono">{{ fromLabel }}</span>
+        <span v-if="goalLb != null" class="dim mono">— goal {{ goalLb.toFixed(1) }}</span>
+        <span class="dim mono">{{ toLabel }}</span>
+      </div>
+    </RouterLink>
   </div>
 </template>
 
@@ -63,4 +65,10 @@ defineProps<{
 }
 .dim { color: var(--on-surface-2); }
 .btn-tiny { text-transform: none; letter-spacing: 0; text-decoration: none; }
+.data-link {
+  display: block; color: inherit; text-decoration: none;
+  border-radius: 6px;
+  transition: background-color 120ms ease;
+}
+.data-link:hover { background: rgba(255, 255, 255, 0.02); }
 </style>

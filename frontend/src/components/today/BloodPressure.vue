@@ -5,6 +5,7 @@
  * for a future polish pass; we emit a "log" event so the parent can
  * show its existing inline form (or convert it to a slide-over later).
  */
+import { RouterLink } from "vue-router";
 import { Plus } from "lucide-vue-next";
 import DualLine from "./DualLine.vue";
 
@@ -32,32 +33,34 @@ function bpCategory(s: number, d: number): { label: string; tone: "good" | "warn
         <Plus :size="11"/> Log BP
       </button>
     </div>
-    <div class="hl-row" v-if="latest">
-      <span class="mono num-xl">{{ latest.systolic }}</span>
-      <span class="dim mono num-l slash">/</span>
-      <span class="mono num-xl"
-            :style="{ color: latest.diastolic >= 80 ? 'var(--warn)' : 'inherit' }">
-        {{ latest.diastolic }}
-      </span>
-      <span class="unit">mmHg</span>
-      <span :class="['chip', 'tone', `tone-${bpCategory(latest.systolic, latest.diastolic).tone}`]">
-        <span :class="['dot', `dot-${bpCategory(latest.systolic, latest.diastolic).tone}`]"/>
-        {{ bpCategory(latest.systolic, latest.diastolic).label }}
-      </span>
-    </div>
-    <div v-else class="dim sub">No readings logged yet.</div>
-    <div class="dim sub" v-if="asOfLabel">logged · {{ asOfLabel }}</div>
-    <div class="chart" v-if="sys.length && dia.length">
-      <DualLine :sys="sys" :dia="dia" :height="64" :pad-top="6"/>
-    </div>
-    <div class="legend">
-      <span class="leg-item">
-        <span class="leg-dash" style="background: #EF4444"/> systolic
-      </span>
-      <span class="leg-item">
-        <span class="leg-dash" style="background: #EAB308"/> diastolic
-      </span>
-    </div>
+    <RouterLink to="/blood-pressure" class="data-link">
+      <div class="hl-row" v-if="latest">
+        <span class="mono num-xl">{{ latest.systolic }}</span>
+        <span class="dim mono num-l slash">/</span>
+        <span class="mono num-xl"
+              :style="{ color: latest.diastolic >= 80 ? 'var(--warn)' : 'inherit' }">
+          {{ latest.diastolic }}
+        </span>
+        <span class="unit">mmHg</span>
+        <span :class="['chip', 'tone', `tone-${bpCategory(latest.systolic, latest.diastolic).tone}`]">
+          <span :class="['dot', `dot-${bpCategory(latest.systolic, latest.diastolic).tone}`]"/>
+          {{ bpCategory(latest.systolic, latest.diastolic).label }}
+        </span>
+      </div>
+      <div v-else class="dim sub">No readings logged yet.</div>
+      <div class="dim sub" v-if="asOfLabel">logged · {{ asOfLabel }}</div>
+      <div class="chart" v-if="sys.length && dia.length">
+        <DualLine :sys="sys" :dia="dia" :height="64" :pad-top="6"/>
+      </div>
+      <div class="legend">
+        <span class="leg-item">
+          <span class="leg-dash" style="background: #EF4444"/> systolic
+        </span>
+        <span class="leg-item">
+          <span class="leg-dash" style="background: #EAB308"/> diastolic
+        </span>
+      </div>
+    </RouterLink>
   </div>
 </template>
 
@@ -78,4 +81,10 @@ function bpCategory(s: number, d: number): { label: string; tone: "good" | "warn
 .leg-dash { width: 8px; height: 2px; border-radius: 1px; }
 .dim { color: var(--on-surface-2); }
 .btn-tiny { text-transform: none; letter-spacing: 0; }
+.data-link {
+  display: block; color: inherit; text-decoration: none;
+  border-radius: 6px;
+  transition: background-color 120ms ease;
+}
+.data-link:hover { background: rgba(255, 255, 255, 0.02); }
 </style>

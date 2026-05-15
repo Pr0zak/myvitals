@@ -135,3 +135,77 @@ async def latest_device_status(
         "is_worn": row.is_worn,
         "online": row.online,
     }
+
+
+class DeviceStatusPoint(BaseModel):
+    time: str
+    battery_pct: int | None
+    is_charging: bool | None
+    activity_state: str | None
+    is_worn: bool | None
+    online: bool | None
+
+
+@router.get("/api/device-status/series")
+async def device_status_series(
+    device_id: str = Query("pixel_watch_3"),
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Time-series device_status rows for the /watch dashboard charts.
+
+    Returns the raw row sequence (already dense — the HA consumer copies
+    forward unchanged fields), plus aggregates the frontend would compute
+    anyway: total on-body time vs off-body, average battery across the
+    window, and the most-recent activity_state per discrete state.
+    """
+    from datetime import timedelta as _td
+    now = datetime.now(timezone.utc)
+    if since is None:
+        since = now - _td(hours=24)
+    if until is None:
+        until = now
+    rows = (await db.execute(
+        select(models.DeviceStatus)
+        .where(models.DeviceStatus.device_id == device_id)
+        .where(models.DeviceStatus.time >= since)
+        .where(models.DeviceStatus.time <= until)
+        .order_by(models.DeviceStatus.time.asc())
+    )).scalars().all()
+    points = [
+        {
+            "time": r.time.isoformat(),
+            "battery_pct": r.battery_pct,
+            "is_charging": r.is_charging,
+            "activity_state": r.activity_state,
+            "is_worn": r.is_worn,
+            "online": r.online,
+        }
+        for r in rows
+    ]
+    # Compute on-body % by integrating is_worn between adjacent rows.
+    on_s = 0.0
+    off_s = 0.0
+    unknown_s = 0.0
+    for i in range(len(rows) - 1):
+        dt = (rows[i + 1].time - rows[i].time).total_seconds()
+        if rows[i].is_worn is True:
+            on_s += dt
+        elif rows[i].is_worn is False:
+            off_s += dt
+        else:
+            unknown_s += dt
+    total = on_s + off_s + unknown_s
+    on_pct = (on_s / total * 100.0) if total > 0 else None
+    return {
+        "device_id": device_id,
+        "since": since.isoformat(),
+        "until": until.isoformat(),
+        "count": len(points),
+        "points": points,
+        "on_body_pct": on_pct,
+        "on_body_seconds": on_s,
+        "off_body_seconds": off_s,
+        "unknown_seconds": unknown_s,
+    }

@@ -1116,4 +1116,35 @@ export const api = {
       throw e;
     }
   },
+
+  async deviceStatusSeries(opts: {
+    device_id?: string;
+    since?: Date | string;
+    until?: Date | string;
+  } = {}): Promise<{
+    device_id: string;
+    since: string;
+    until: string;
+    count: number;
+    points: Array<{
+      time: string;
+      battery_pct: number | null;
+      is_charging: boolean | null;
+      activity_state: string | null;
+      is_worn: boolean | null;
+      online: boolean | null;
+    }>;
+    on_body_pct: number | null;
+    on_body_seconds: number;
+    off_body_seconds: number;
+    unknown_seconds: number;
+  }> {
+    const params: Record<string, string> = {
+      device_id: opts.device_id ?? "pixel_watch_3",
+    };
+    if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;
+    if (opts.until) params.until = opts.until instanceof Date ? opts.until.toISOString() : opts.until;
+    const { data } = await http.get("/api/device-status/series", { params });
+    return data;
+  },
 };

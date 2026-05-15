@@ -67,8 +67,10 @@ import java.time.Instant
  * Fasting — Compose mirror of the web Fasting.vue. Protocol picker,
  * ring + elapsed counter, start/end controls, stats, history.
  *
- * Backend ownership: all stage thresholds + elapsed_h come from
- * /fasting/* so phone and web render identical labels.
+ * Backend ownership: all stage thresholds + elapsed_h come from the
+ * `/fasting` endpoint family so phone and web render identical labels.
+ * (Kotlin nests block comments — never write `/<asterisk>` inside a
+ * KDoc block or the whole file stops parsing.)
  */
 
 private data class ProtocolSpec(

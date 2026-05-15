@@ -120,5 +120,40 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/fasting_widget_info" />
         </receiver>
+
+        <!-- WIDGET family. All share WidgetsRefreshWorker (15-min cadence)
+             scheduled by MyVitalsApp.onCreate(). -->
+        <receiver android:name=".widget.SoberWidgetProvider" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/sober_widget_info" />
+        </receiver>
+        <receiver android:name=".widget.StepsWidgetProvider" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/steps_widget_info" />
+        </receiver>
+        <receiver android:name=".widget.ReadinessWidgetProvider" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/readiness_widget_info" />
+        </receiver>
+        <receiver android:name=".widget.WeightWidgetProvider" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/weight_widget_info" />
+        </receiver>
+        <receiver android:name=".widget.WorkoutWidgetProvider" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/workout_widget_info" />
+        </receiver>
+        <receiver android:name=".widget.SleepWidgetProvider" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/sleep_widget_info" />
+        </receiver>
+        <receiver android:name=".widget.HrWidgetProvider" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/hr_widget_info" />
+        </receiver>
+        <receiver android:name=".widget.ActivityWidgetProvider" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/activity_widget_info" />
+        </receiver>
     </application>
 </manifest>

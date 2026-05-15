@@ -14,4 +14,14 @@
 
     <!-- Fasting home-screen widget -->
     <string name="widget_fasting_description">Live fasting timer with progress + stage</string>
+
+    <!-- WIDGET family (2x1 unless noted) -->
+    <string name="widget_sober_description">Current sober streak — days + remainder hours</string>
+    <string name="widget_steps_description">Today\'s steps + progress against goal</string>
+    <string name="widget_readiness_description">Today readiness score + recovery state</string>
+    <string name="widget_weight_description">Active weight-goal progress</string>
+    <string name="widget_workout_description">Today\'s workout split + status</string>
+    <string name="widget_sleep_description">Last night sleep: total + deep/rem teaser</string>
+    <string name="widget_hr_description">Most-recent heart rate + relative time</string>
+    <string name="widget_activity_description">Most-recent activity (2x2): distance, time, HR</string>
 </resources>

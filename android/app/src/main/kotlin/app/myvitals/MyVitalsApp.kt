@@ -11,6 +11,7 @@ import androidx.work.WorkManager
 import app.myvitals.debug.LogUploadWorker
 import app.myvitals.debug.RoomLogTree
 import app.myvitals.fasting.FastingWidgetProvider
+import app.myvitals.widget.WidgetsRefreshWorker
 import app.myvitals.strength.WorkoutReminderWorker
 import app.myvitals.sync.SyncWorker
 import app.myvitals.trails.TrailAlertWorker
@@ -52,6 +53,10 @@ class MyVitalsApp : Application() {
         // manifest updatePeriodMillis floor is 30 min). No-op when the
         // user hasn't added the widget yet.
         FastingWidgetProvider.schedulePeriodicRefresh(this)
+        // Same cadence for the WIDGET family (sober / steps / readiness
+        // / weight / workout / sleep / hr / activity) — single shared
+        // worker drives all of them.
+        WidgetsRefreshWorker.schedulePeriodicRefresh(this)
     }
 
     private fun scheduleWorkoutReminder() {

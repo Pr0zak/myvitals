@@ -471,6 +471,17 @@ data class DumbbellSpec(
 @JsonClass(generateAdapter = true)
 data class BenchSpec(val flat: Boolean = false, val incline: Boolean = false, val decline: Boolean = false)
 
+// ── Coach (AI cards) ───────────────────────────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class CoachCard(
+    val analysis: Map<String, Any?>,
+    @Json(name = "generated_at") val generatedAt: String,
+    val model: String,
+    val cached: Boolean,
+)
+
+
 // ── Fasting ────────────────────────────────────────────────────────
 
 @JsonClass(generateAdapter = true)

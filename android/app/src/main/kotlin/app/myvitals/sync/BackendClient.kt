@@ -32,6 +32,19 @@ interface BackendApi {
     suspend fun soberReset(@Body body: SoberResetRequest): SoberResetResponse
 
     // ── Fasting ────────────────────────────────────────────────
+    // ── Coach (AI) ─────────────────────────────────────────────
+    @POST("ai/coach/cardio")
+    suspend fun coachCardio(@Body body: Map<String, Any> = emptyMap()): CoachCard
+
+    @GET("ai/coach/cardio/latest")
+    suspend fun coachCardioLatest(): Response<CoachCard>
+
+    @POST("ai/coach/workout")
+    suspend fun coachWorkout(@Body body: Map<String, Any> = emptyMap()): CoachCard
+
+    @GET("ai/coach/workout/latest")
+    suspend fun coachWorkoutLatest(): Response<CoachCard>
+
     @GET("fasting/current")
     suspend fun fastingCurrent(): Response<FastingSession>   // 200 with null body or row
 

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueryStats
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SkipNext
@@ -100,6 +101,7 @@ fun StrengthTodayScreen(
     onOpenCatalog: () -> Unit = {},
     onOpenTrainingPrefs: () -> Unit = {},
     onOpenEquipment: () -> Unit = {},
+    onOpenCoach: () -> Unit = {},
     onOpenDay: (dateIso: String) -> Unit = {},
     onOpenCharts: () -> Unit = {},
 ) {
@@ -400,6 +402,12 @@ fun StrengthTodayScreen(
                         leadingIcon = { Icon(Icons.Filled.FitnessCenter, null,
                             modifier = Modifier.size(16.dp)) },
                         onClick = { headerMenuOpen = false; onOpenEquipment() },
+                    )
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Coach") },
+                        leadingIcon = { Icon(Icons.Filled.Psychology, null,
+                            modifier = Modifier.size(16.dp)) },
+                        onClick = { headerMenuOpen = false; onOpenCoach() },
                     )
                     androidx.compose.material3.DropdownMenuItem(
                         text = { Text("Custom workout") },

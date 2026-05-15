@@ -63,6 +63,7 @@ private object Routes {
     fun vitalDetail(key: String) = "vitals/$key"
     const val SOBER = "sober"
     const val FASTING = "fasting"
+    const val COACH = "coach"
     const val WORKOUT = "workout/today"
     const val WORKOUT_HISTORY = "workout/history"
     const val WORKOUT_DAY = "workout/day/{date}"
@@ -199,6 +200,12 @@ class MainActivity : ComponentActivity() {
                                 onBack = { nav.popBackStack() },
                             )
                         }
+                        composable(Routes.COACH) {
+                            app.myvitals.ui.CoachScreen(
+                                settings = settings,
+                                onBack = { nav.popBackStack() },
+                            )
+                        }
                         composable(Routes.WORKOUT) {
                             StrengthTodayScreen(
                                 settings = settings,
@@ -206,6 +213,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenCatalog = { nav.navigate(Routes.WORKOUT_CATALOG) },
                                 onOpenTrainingPrefs = { nav.navigate(Routes.WORKOUT_TRAINING_PREFS) },
                                 onOpenEquipment = { nav.navigate(Routes.WORKOUT_EQUIPMENT) },
+                                onOpenCoach = { nav.navigate(Routes.COACH) },
                                 onOpenDay = { date -> nav.navigate(Routes.workoutDay(date)) },
                                 onOpenCharts = { nav.navigate(Routes.WORKOUT_CHARTS) },
                             )

@@ -40,6 +40,9 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/views/Fasting.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/FastingScreen.kt",
      "Fasting protocol picker + active fast + history (#FAST family)"),
+    ("frontend/src/views/Coach.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/CoachScreen.kt",
+     "Multi-card AI coach surface (#COACH family)"),
     ("frontend/src/views/workout/StrengthToday.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/strength/StrengthTodayScreen.kt",
      "Today's workout + set logging UI"),
@@ -84,7 +87,8 @@ WEB_ONLY_OK = {
     "frontend/src/views/BloodPressure.vue",
     "frontend/src/views/Log.vue",
     "frontend/src/views/Watch.vue",      # phone surfaces watch via Today.vue tile
-    "frontend/src/views/Coach.vue",      # COACH-4 follow-up will pair this
+    # Coach.vue now paired with android/.../CoachScreen.kt — moved out
+    # of WEB_ONLY_OK; the pair is registered above.
 }
 
 

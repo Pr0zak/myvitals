@@ -30,6 +30,7 @@ const Compare  = defineAsyncComponent(() => import("./Compare.vue"));
 const Coach    = defineAsyncComponent(() => import("./Coach.vue"));
 
 type TabKey = "trends" | "patterns" | "compare" | "coach";
+type RangeKey = "7d" | "30d" | "90d" | "365d";
 
 const TABS: { key: TabKey; label: string; icon: any; help: string }[] = [
   { key: "trends",   label: "Over time",      icon: LineChart,
@@ -42,7 +43,15 @@ const TABS: { key: TabKey; label: string; icon: any; help: string }[] = [
     help: "AI synthesis across vitals, training, and recovery signals." },
 ];
 
+const RANGES: { key: RangeKey; label: string }[] = [
+  { key: "7d",   label: "7d" },
+  { key: "30d",  label: "30d" },
+  { key: "90d",  label: "90d" },
+  { key: "365d", label: "1y" },
+];
+
 const VALID = new Set<TabKey>(TABS.map((t) => t.key));
+const VALID_RANGE = new Set<RangeKey>(RANGES.map((r) => r.key));
 
 const route = useRoute();
 const router = useRouter();
@@ -53,9 +62,26 @@ const tab = computed<TabKey>(() => {
   return (v && VALID.has(v as TabKey)) ? (v as TabKey) : "trends";
 });
 
+const range = computed<RangeKey>(() => {
+  const q = route.query.range;
+  const v = Array.isArray(q) ? q[0] : q;
+  return (v && VALID_RANGE.has(v as RangeKey)) ? (v as RangeKey) : "30d";
+});
+
+// Range selector is meaningful for Trends (Over time) and Insights
+// (Patterns). Compare hardcodes a 9-week window for its week-over-week
+// math, and Coach generates a multi-window synthesis itself — hide
+// the selector on those tabs to avoid suggesting it has an effect.
+const showRange = computed(() => tab.value === "trends" || tab.value === "patterns");
+
 function setTab(next: TabKey) {
   if (next === tab.value) return;
   router.replace({ query: { ...route.query, tab: next } });
+}
+
+function setRange(next: RangeKey) {
+  if (next === range.value) return;
+  router.replace({ query: { ...route.query, range: next } });
 }
 
 // Keep the document title in sync — small thing but it makes the
@@ -76,19 +102,29 @@ watch(tab, (v) => {
       </p>
     </header>
 
-    <nav class="tabs" aria-label="Analytics views">
-      <button
-        v-for="t in TABS" :key="t.key"
-        class="tab"
-        :class="{ active: tab === t.key }"
-        :title="t.help"
-        :aria-current="tab === t.key ? 'page' : undefined"
-        @click="setTab(t.key)"
-      >
-        <component :is="t.icon" :size="14"/>
-        <span>{{ t.label }}</span>
-      </button>
-    </nav>
+    <div class="tab-row">
+      <nav class="tabs" aria-label="Analytics views">
+        <button
+          v-for="t in TABS" :key="t.key"
+          class="tab"
+          :class="{ active: tab === t.key }"
+          :title="t.help"
+          :aria-current="tab === t.key ? 'page' : undefined"
+          @click="setTab(t.key)"
+        >
+          <component :is="t.icon" :size="14"/>
+          <span>{{ t.label }}</span>
+        </button>
+      </nav>
+
+      <div v-if="showRange" class="range-toggle" aria-label="Time range">
+        <button
+          v-for="r in RANGES" :key="r.key"
+          :class="{ active: range === r.key }"
+          @click="setRange(r.key)"
+        >{{ r.label }}</button>
+      </div>
+    </div>
 
     <main class="panel">
       <Trends   v-if="tab === 'trends'"/>
@@ -109,11 +145,31 @@ watch(tab, (v) => {
 h1 { margin: 0 0 0.4rem; }
 .muted { color: var(--muted); font-size: 0.9rem; max-width: 70ch; }
 
+.tab-row {
+  display: flex; align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--outline);
+  margin-bottom: 1rem;
+}
 .tabs {
   display: flex; gap: 4px;
-  margin-bottom: 1rem;
-  border-bottom: 1px solid var(--outline);
   overflow-x: auto;
+}
+.range-toggle {
+  display: inline-flex; border: 1px solid var(--outline);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.range-toggle button {
+  appearance: none; border: 0; background: transparent;
+  padding: 4px 12px;
+  font-size: 0.78rem; color: var(--on-surface-2);
+  cursor: pointer;
+}
+.range-toggle button.active {
+  background: var(--surface); color: var(--on-surface);
 }
 .tab {
   display: inline-flex; align-items: center; gap: 6px;

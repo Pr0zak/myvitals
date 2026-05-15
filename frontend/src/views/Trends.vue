@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import VChart from "vue-echarts";
 import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
 import { chartTheme } from "@/theme";
 import { weightVal, weightUnit, fmtWeight, weightToKg, isImperial, tempUnit } from "@/units";
+
+const route = useRoute();
 
 const _C_TO_F = 1.8;  // ΔF = ΔC × 9/5
 
@@ -19,7 +22,20 @@ const RANGES: { key: Range; label: string; days: number }[] = [
 
 type ChartType = "line" | "bar" | "area";
 
-const range = ref<Range>("30d");
+// ANALYTICS-2: range can be driven externally via the Analytics shell's
+// shared selector (writes `?range=…` on the URL). Falls back to the
+// per-page default when absent.
+const VALID_RANGE = new Set(["7d", "30d", "90d", "365d"]);
+function rangeFromRoute(): Range {
+  const q = route.query.range;
+  const v = Array.isArray(q) ? q[0] : q;
+  return (v && VALID_RANGE.has(v)) ? (v as Range) : "30d";
+}
+const range = ref<Range>(rangeFromRoute());
+watch(() => route.query.range, () => {
+  const next = rangeFromRoute();
+  if (next !== range.value) range.value = next;
+});
 const data = ref<TodaySummary[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);

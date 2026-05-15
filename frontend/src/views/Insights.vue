@@ -1,6 +1,21 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
+
+const route = useRoute();
+
+// ANALYTICS-2: respond to the shared `?range=` query param when present.
+// Insights stores days as a number; map the shared "7d"/"30d"/"90d"/"365d"
+// vocabulary back to integer days.
+const RANGE_TO_DAYS: Record<string, number> = {
+  "7d": 7, "30d": 30, "90d": 90, "365d": 365,
+};
+function daysFromRoute(fallback: number): number {
+  const q = route.query.range;
+  const v = Array.isArray(q) ? q[0] : q;
+  return (v && RANGE_TO_DAYS[v]) ? RANGE_TO_DAYS[v] : fallback;
+}
 import VChart from "vue-echarts";
 import { ArrowRightLeft, ChevronDown, ArrowDown, ArrowUp } from "lucide-vue-next";
 import Card from "@/components/Card.vue";
@@ -180,7 +195,11 @@ const METRIC_GROUPS = [
 const x = ref("alcohol_count");
 const y = ref("hrv_avg");
 const lag = ref(1);
-const days = ref(90);
+const days = ref(daysFromRoute(90));
+watch(() => route.query.range, () => {
+  const next = daysFromRoute(days.value);
+  if (next !== days.value) days.value = next;
+});
 const explorerOpen = ref(false);
 
 const LAG_OPTIONS = [

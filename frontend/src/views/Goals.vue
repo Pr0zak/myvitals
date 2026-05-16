@@ -35,11 +35,12 @@ const draftDate = ref<string>("");
 const draftNotes = ref<string>("");
 
 const KIND_PRESETS = [
-  { id: "weight",  label: "Weight",        unit_default: "kg" },
-  { id: "sober",   label: "Sober streak",  unit_default: "days" },
-  { id: "sleep",   label: "Sleep",         unit_default: "h/night" },
-  { id: "steps",   label: "Daily steps",   unit_default: "steps" },
-  { id: "custom",  label: "Custom",        unit_default: "" },
+  { id: "weight",      label: "Weight",        unit_default: "kg" },
+  { id: "sober",       label: "Sober streak",  unit_default: "days" },
+  { id: "sleep",       label: "Sleep",         unit_default: "h/night" },
+  { id: "steps",       label: "Daily steps",   unit_default: "steps" },
+  { id: "fast_streak", label: "Fasting",       unit_default: "h/week" },
+  { id: "custom",      label: "Custom",        unit_default: "" },
 ];
 
 async function load() {

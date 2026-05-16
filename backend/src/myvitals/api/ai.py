@@ -510,6 +510,19 @@ async def _check_goals_for_completion(db: AsyncSession) -> None:
         if s is not None:
             sober_days = (now - s.start_at).total_seconds() / 86400.0
 
+    # FAST-17: fast_streak. Sum daily_summary.fasting_hours over the
+    # trailing 7d and compare to the goal target value (interpreted as
+    # weekly cumulative fasting hours).
+    fast_streak_hours_7d: float | None = None
+    if "fast_streak" in kinds:
+        since = today - _td(days=6)
+        rows = (await db.execute(
+            select(models.DailySummary.fasting_hours)
+            .where(models.DailySummary.date >= since)
+            .where(models.DailySummary.date <= today)
+        )).all()
+        fast_streak_hours_7d = sum((r[0] or 0) for r in rows)
+
     def _target_kg(g: models.AiGoal) -> float:
         """Normalise a weight goal's target to kilograms regardless of
         the unit the user typed it in. The /goals form lets users pick
@@ -539,6 +552,12 @@ async def _check_goals_for_completion(db: AsyncSession) -> None:
         elif g.kind == "sober" and sober_days is not None:
             reached = sober_days >= g.target_value
             evidence = f"{sober_days:.0f} sober days vs target {int(g.target_value)}"
+        elif g.kind == "fast_streak" and fast_streak_hours_7d is not None:
+            reached = fast_streak_hours_7d >= g.target_value
+            evidence = (
+                f"{fast_streak_hours_7d:.1f}h fasted in last 7d "
+                f"vs target {g.target_value:.0f}h/week"
+            )
         if not reached:
             continue
         g.ended_at = now
@@ -646,6 +665,8 @@ def _profile_target_for_kind(kind: str, prof: models.UserProfile | None) -> floa
             return float(v) if v is not None else None
         except (TypeError, ValueError):
             return None
+    if kind == "fast_streak":
+        return prof.fasting_target_hours_per_week
     return None
 
 
@@ -668,6 +689,8 @@ async def _profile_set_target_for_kind(
         else:
             extra["steps_goal"] = int(value)
         prof.extra = extra
+    elif kind == "fast_streak":
+        prof.fasting_target_hours_per_week = value
     else:
         return
     prof.updated_at = datetime.now(timezone.utc)
@@ -758,6 +781,14 @@ async def _current_values_for_goals(
         out["sober"] = (
             (now - s.start_at).total_seconds() / 86400.0 if s is not None else None
         )
+    if "fast_streak" in kinds:
+        since = today - _td(days=6)
+        rows = (await db.execute(
+            select(models.DailySummary.fasting_hours)
+            .where(models.DailySummary.date >= since)
+            .where(models.DailySummary.date <= today)
+        )).all()
+        out["fast_streak"] = sum((r[0] or 0) for r in rows)
     return out
 
 

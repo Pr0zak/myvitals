@@ -21,6 +21,7 @@ class ProfileIn(BaseModel):
     sex: str | None = None  # "male" | "female" | "other"
     height_cm: float | None = None
     weight_goal_kg: float | None = None
+    fasting_target_hours_per_week: float | None = None
     resting_hr_baseline: float | None = None
     activity_level: str | None = None  # "sedentary"|"light"|"moderate"|"active"|"athlete"
     extra: dict[str, Any] | None = None
@@ -101,6 +102,7 @@ async def _profile_dict(
         "height_cm": p.height_cm,
         "weight_goal_kg": p.weight_goal_kg,
         "sleep_target_h": p.sleep_target_h,
+        "fasting_target_hours_per_week": p.fasting_target_hours_per_week,
         "resting_hr_baseline": p.resting_hr_baseline,
         "activity_level": p.activity_level,
         "extra": p.extra,
@@ -145,8 +147,11 @@ async def put_profile(
     cur_steps = (p.extra or {}).get("steps_goal") if p.extra else None
     if new_steps != cur_steps:
         sync_pairs.append(("steps", float(new_steps) if new_steps is not None else None))
+    if body.fasting_target_hours_per_week != p.fasting_target_hours_per_week:
+        sync_pairs.append(("fast_streak", body.fasting_target_hours_per_week))
 
     p.weight_goal_kg = body.weight_goal_kg
+    p.fasting_target_hours_per_week = body.fasting_target_hours_per_week
     p.resting_hr_baseline = body.resting_hr_baseline
     p.activity_level = body.activity_level
     p.extra = body.extra

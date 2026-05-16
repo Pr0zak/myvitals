@@ -482,7 +482,7 @@ private fun GoalRow(g: app.myvitals.sync.AiGoal) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                g.kind.uppercase(), color = Color(0xFF38BDF8),
+                g.kind.replace('_', ' ').uppercase(), color = Color(0xFF38BDF8),
                 fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
                     .background(Color(0x1A38BDF8), RoundedCornerShape(4.dp))

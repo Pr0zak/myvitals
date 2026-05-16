@@ -210,6 +210,9 @@ class UserProfile(Base):
     resting_hr_baseline: Mapped[float | None] = mapped_column(Float, nullable=True)
     activity_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     sleep_target_h: Mapped[float | None] = mapped_column(Float, nullable=True, default=8)
+    # FAST-17: weekly fasting-hours target — auto-syncs with the
+    # fast_streak AiGoal kind. Null when fasting isn't goal-tracked.
+    fasting_target_hours_per_week: Mapped[float | None] = mapped_column(Float, nullable=True)
     # When true, the strength workout generator reads recovery_score / sleep /
     # readiness from daily_summary and adjusts intensity accordingly.
     strength_recovery_aware: Mapped[bool] = mapped_column(Boolean, default=True)

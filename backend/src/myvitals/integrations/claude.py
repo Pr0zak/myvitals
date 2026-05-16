@@ -2517,6 +2517,274 @@ async def recovery_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     )
 
 
+# ─────────────── Fasting coach (FAST-16) ───────────────
+
+FASTING_COACH_TOOL = {
+    "name": "give_fasting_coach",
+    "description": (
+        "Decide whether the user should fast today, what protocol, "
+        "and how it fits their active weight / fasting goal. Returns "
+        "a structured card the client renders as the Fasting hero."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "recommendation": {
+                "type": "string",
+                "enum": ["fast", "eat_normally", "light_fast", "break_now"],
+                "description": (
+                    "Verdict. break_now is reserved for an in-progress fast "
+                    "that signals say to abort — and MUST NOT fire if "
+                    "is_religious_active is true."
+                ),
+            },
+            "tone": {"type": "string", "enum": ["good", "warn", "bad", "neutral"]},
+            "protocol_suggestion": {
+                "type": "string",
+                "description": (
+                    "When recommendation is `fast` or `light_fast`, the "
+                    "protocol label: \"16:8\" / \"18:6\" / \"20:4\" / \"24h\" / "
+                    "\"36h\". Empty string when not applicable."
+                ),
+            },
+            "best_window": {
+                "type": "string",
+                "description": (
+                    "Free-form when window. Empty string when not relevant. "
+                    "Example: \"18:00 today → 12:00 tomorrow\"."
+                ),
+            },
+            "goal_alignment": {
+                "type": "string",
+                "description": "≤ 30 words. How this verdict fits the active weight / fasting goal.",
+            },
+            "evidence": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "2-4 bullets citing specific signals.",
+            },
+            "caveats": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Safeguards: religious-fast preserved, hydration cue, "
+                    "medication timing — empty array OK."
+                ),
+            },
+        },
+        "required": [
+            "recommendation", "tone", "protocol_suggestion", "best_window",
+            "goal_alignment", "evidence", "caveats",
+        ],
+    },
+}
+
+
+def _fasting_coach_system(tone: str) -> str:
+    return f"""You are the user's fasting coach. You see:
+- 28d daily summary trends (HRV, RHR, recovery, readiness, sleep_h,
+  sleep_debt_h)
+- 14d fasting history — per-fast started_at, duration_h, protocol
+- 14d in-fast logs — hunger (1-5), mood (1-5), hydration_ml, notes
+- Today's planned strength split + recovery_score (when there is one)
+- Active weight goal — current_value, target_value, progress_pct,
+  direction (loss-oriented)
+- Active fasting goal — target_value (hours/week)
+- recent_alerts the anomaly scanner already raised
+- top_correlations, wow_deltas
+- is_religious_active — true when an in-progress fast's protocol
+  is religious (ramadan / lent / yom_kippur)
+
+{_tone_line(tone)}
+
+Use the `give_fasting_coach` tool. RULES (order matters):
+
+1. If `is_religious_active` is true, `recommendation` MUST NOT be
+   `break_now`. The user is observing a religious fast; coaching
+   collapses to hydration + reframing benefits. Use caveats to
+   acknowledge the religious context.
+2. If today's planned strength split contains a `main_compound` 3-5
+   rep range AND the user is approaching a planned long fast,
+   recommend `eat_normally` — fasted heavy lifts are an injury risk
+   the system rules against (see FAST-COACH plan, hard rule).
+3. Active weight goal stalled ≥ 3 weeks → lean toward `fast` /
+   `light_fast` matched to current cadence. Active weight goal
+   on track → `eat_normally` is fine; don't push harder than the
+   plan needs.
+4. `break_now` requires a strong signal — HRV cliff ≥ 30 ms below
+   28d baseline overnight, mood ≤ 2 with hunger ≥ 4 from the most
+   recent log, OR alert kind `illness_risk`. Single anomalies aren't
+   enough; pattern matters.
+5. Cite numbers in evidence. "Down 0.4 kg in 3 weeks at 14:10" beats
+   "weight progress is slow".
+6. Single high-confidence call beats five hedges.
+"""
+
+
+async def _recent_fasting_log_summary(
+    db: AsyncSession, days: int = 14,
+) -> dict[str, Any]:
+    """Per-log avg hunger / mood and total hydration over the trailing
+    window. Bounded: returns 5-6 scalars regardless of log count."""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    since = _dt.now(_tz.utc) - _td(days=days)
+    rows = (await db.execute(
+        select(models.FastingLog)
+        .where(models.FastingLog.time >= since)
+    )).scalars().all()
+    if not rows:
+        return {"days": days, "log_count": 0}
+    from statistics import mean
+    hungers = [r.hunger for r in rows if r.hunger is not None]
+    moods = [r.mood for r in rows if r.mood is not None]
+    hydrations = [r.hydration_ml for r in rows if r.hydration_ml is not None]
+    return {
+        "days": days,
+        "log_count": len(rows),
+        "avg_hunger": round(mean(hungers), 1) if hungers else None,
+        "avg_mood": round(mean(moods), 1) if moods else None,
+        "total_hydration_ml": sum(hydrations) if hydrations else 0,
+    }
+
+
+async def _active_weight_goal_ctx(db: AsyncSession) -> dict[str, Any] | None:
+    """Pull the single active weight goal with current value + pct.
+    Returns None when no active weight goal exists."""
+    g = (await db.execute(
+        select(models.AiGoal)
+        .where(models.AiGoal.kind == "weight")
+        .where(models.AiGoal.ended_at.is_(None))
+        .limit(1)
+    )).scalar_one_or_none()
+    if g is None:
+        return None
+    latest_kg = (await db.execute(
+        select(models.BodyMetric.weight_kg)
+        .where(models.BodyMetric.weight_kg.is_not(None))
+        .order_by(models.BodyMetric.time.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    return {
+        "title": g.title,
+        "target_value": g.target_value,
+        "target_unit": g.target_unit,
+        "current_value": latest_kg,
+        "started_at": g.started_at.isoformat() if g.started_at else None,
+    }
+
+
+async def _active_fasting_goal_target(db: AsyncSession) -> float | None:
+    g = (await db.execute(
+        select(models.AiGoal.target_value)
+        .where(models.AiGoal.kind == "fast_streak")
+        .where(models.AiGoal.ended_at.is_(None))
+        .limit(1)
+    )).scalar_one_or_none()
+    return g
+
+
+async def _planned_strength_today(db: AsyncSession) -> dict[str, Any] | None:
+    """Pull today's strength_workout split_focus + the highest-rep-
+    intensity slot — lets the fasting coach see whether today is a
+    heavy day (no fasted lifting) or a yoga / cardio day (fasting is
+    fine)."""
+    from datetime import date as _date
+    today_d = _date.today()
+    w = (await db.execute(
+        select(models.StrengthWorkout)
+        .where(models.StrengthWorkout.date == today_d)
+        .limit(1)
+    )).scalar_one_or_none()
+    if w is None:
+        return None
+    return {
+        "split_focus": w.split_focus,
+        "status": w.status,
+        "recovery_score_used": w.recovery_score_used,
+    }
+
+
+async def build_fasting_coach_payload(db: AsyncSession) -> dict[str, Any]:
+    """Bounded payload for the fasting coach card."""
+    daily = await _daily_rows(db, 28)
+    fasting = await _fasting_status(db)
+    log_summary = await _recent_fasting_log_summary(db, days=14)
+    weight_goal = await _active_weight_goal_ctx(db)
+    fasting_goal_target = await _active_fasting_goal_target(db)
+    planned_strength = await _planned_strength_today(db)
+    is_religious_active = bool(
+        fasting is not None
+        and fasting.get("active_fast")
+        and fasting["active_fast"].get("is_religious")
+    )
+    return {
+        "today": datetime.now(timezone.utc).date().isoformat(),
+        "profile": await _profile_ctx(db),
+        "fasting_status": fasting,
+        "is_religious_active": is_religious_active,
+        "log_summary_14d": log_summary,
+        "active_weight_goal": weight_goal,
+        "active_fasting_goal_target_h_per_week": fasting_goal_target,
+        "planned_strength_today": planned_strength,
+        "recent_dailies": daily,
+        "recent_alerts": await _recent_alerts_ctx(db),
+        "top_correlations": _top_correlations(daily),
+        "wow_deltas": _wow_deltas(daily),
+    }
+
+
+async def fasting_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
+    """'Should I fast today?' structured card."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    payload = await build_fasting_coach_payload(db)
+    user_text = (
+        f"Read the user's vitals, goal, and fasting history and decide "
+        f"whether they should fast today via the `give_fasting_coach` "
+        f"tool:\n\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=600,
+        system=_cached_system(_fasting_coach_system(cfg.tone)),
+        tools=[FASTING_COACH_TOOL],
+        tool_choice={"type": "tool", "name": "give_fasting_coach"},
+        messages=[{"role": "user", "content": user_text}],
+    )
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use" and block.name == "give_fasting_coach":
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    if not tool_input:
+        tool_input = {
+            "recommendation": "eat_normally",
+            "tone": "neutral",
+            "protocol_suggestion": "",
+            "best_window": "",
+            "goal_alignment": "Not enough data to recommend a fast yet.",
+            "evidence": [],
+            "caveats": [],
+        }
+    # Religious-fast safeguard at the application layer too — belt and
+    # braces, in case the model ignores the prompt rule.
+    if payload.get("is_religious_active") and tool_input.get("recommendation") == "break_now":
+        tool_input["recommendation"] = "eat_normally"
+        tool_input.setdefault("caveats", []).append(
+            "Religious fast active — break_now suppressed by safeguard."
+        )
+    _normalize_array_field(tool_input, "evidence")
+    _normalize_array_field(tool_input, "caveats")
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )
+
+
 async def build_workout_coach_payload(db: AsyncSession) -> dict[str, Any]:
     """Multi-signal payload — reuses cardio + deload signals."""
     from ..analytics.cardio import cardio_summary

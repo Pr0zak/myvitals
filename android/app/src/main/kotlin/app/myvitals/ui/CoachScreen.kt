@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.DirectionsBike
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.FitnessCenter
+import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.GpsFixed
 import androidx.compose.material3.Icon
@@ -84,6 +85,11 @@ fun CoachScreen(
     var recoveryLoading by remember { mutableStateOf(false) }
     var recoveryErr by remember { mutableStateOf<String?>(null) }
 
+    var fastingOpen by remember { mutableStateOf(false) }
+    var fasting by remember { mutableStateOf<CoachCard?>(null) }
+    var fastingLoading by remember { mutableStateOf(false) }
+    var fastingErr by remember { mutableStateOf<String?>(null) }
+
     var goals by remember { mutableStateOf<List<app.myvitals.sync.AiGoal>>(emptyList()) }
 
     suspend fun fetchWorkout(refresh: Boolean) {
@@ -134,6 +140,18 @@ fun CoachScreen(
         } finally { recoveryLoading = false }
     }
 
+    suspend fun fetchFasting(refresh: Boolean) {
+        fastingLoading = true; fastingErr = null
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            fasting = if (refresh || fasting == null) {
+                withContext(Dispatchers.IO) { api.coachFasting() }
+            } else fasting
+        } catch (e: Exception) {
+            Timber.w(e, "fasting coach failed"); fastingErr = e.message?.take(160)
+        } finally { fastingLoading = false }
+    }
+
     // Preload the latest cached cards on mount so the user sees content
     // immediately without burning a Claude call. Goals load alongside —
     // they're cheap (no AI) and feed the read-only progress strip.
@@ -149,6 +167,8 @@ fun CoachScreen(
             if (s.isSuccessful) sleep = s.body()
             val r = withContext(Dispatchers.IO) { api.coachRecoveryLatest() }
             if (r.isSuccessful) recovery = r.body()
+            val f = withContext(Dispatchers.IO) { api.coachFastingLatest() }
+            if (f.isSuccessful) fasting = f.body()
             goals = withContext(Dispatchers.IO) {
                 runCatching { api.aiGoals() }.getOrDefault(emptyList())
             }
@@ -235,6 +255,47 @@ fun CoachScreen(
                 Pair("Recovery link", a["recovery_link"]?.toString() ?: "")
                 EvidenceList(a["evidence"])
                 LabeledPlan("Recommendation", a["recommendation"]?.toString() ?: "")
+            },
+        )
+
+        CoachCardBlock(
+            icon = Icons.Outlined.HourglassEmpty,
+            title = "Fasting coach",
+            subtitle = "should I fast · protocol · goal fit",
+            open = fastingOpen,
+            loading = fastingLoading,
+            error = fastingErr,
+            card = fasting,
+            onToggle = {
+                fastingOpen = !fastingOpen
+                if (fastingOpen && fasting == null) {
+                    scope.launch { fetchFasting(false) }
+                }
+            },
+            onRefresh = { scope.launch { fetchFasting(true) } },
+            renderBody = { c ->
+                val a = c.analysis
+                LabeledPlan(
+                    "Recommendation",
+                    (a["recommendation"]?.toString() ?: "eat normally")
+                        .replace('_', ' ')
+                        + (a["protocol_suggestion"]?.toString()?.takeIf { it.isNotBlank() }
+                              ?.let { " · $it" } ?: ""),
+                )
+                val window = a["best_window"]?.toString()
+                if (!window.isNullOrBlank()) {
+                    Pair("Best window", window)
+                }
+                Pair("Goal fit", a["goal_alignment"]?.toString() ?: "")
+                EvidenceList(a["evidence"])
+                val caveats = a["caveats"]
+                if (caveats != null) {
+                    @Suppress("UNCHECKED_CAST")
+                    val list = (caveats as? List<*>)?.map { it.toString() } ?: emptyList()
+                    if (list.isNotEmpty()) {
+                        LabeledPlan("Caveats", list.joinToString("\n• ", prefix = "• "))
+                    }
+                }
             },
         )
 

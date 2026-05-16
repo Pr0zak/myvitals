@@ -1124,6 +1124,14 @@ export const api = {
     const { data } = await http.get("/ai/coach/recovery/latest");
     return data;
   },
+  async coachFasting(): Promise<CoachCardOut> {
+    const { data } = await http.post("/ai/coach/fasting", {});
+    return data;
+  },
+  async coachFastingLatest(): Promise<CoachCardOut | null> {
+    const { data } = await http.get("/ai/coach/fasting/latest");
+    return data;
+  },
 
   async deviceStatusLatest(device_id = "pixel_watch_3"): Promise<{
     device_id: string;

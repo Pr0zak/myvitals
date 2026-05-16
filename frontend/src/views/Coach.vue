@@ -12,7 +12,7 @@
 import { onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import { api, type CoachCardOut } from "@/api/client";
-import { Activity, Bed, Dumbbell, HeartPulse, RefreshCw, Target } from "lucide-vue-next";
+import { Activity, Bed, Dumbbell, HeartPulse, Hourglass, RefreshCw, Target } from "lucide-vue-next";
 
 interface GoalProgress {
   id: number;
@@ -42,6 +42,7 @@ const cardio = ref<CardState>({ open: false, loading: false, data: null, error: 
 const workout = ref<CardState>({ open: false, loading: false, data: null, error: null });
 const sleep = ref<CardState>({ open: false, loading: false, data: null, error: null });
 const recovery = ref<CardState>({ open: false, loading: false, data: null, error: null });
+const fasting = ref<CardState>({ open: false, loading: false, data: null, error: null });
 
 async function preload() {
   try {
@@ -55,6 +56,9 @@ async function preload() {
   } catch { /* swallow */ }
   try {
     recovery.value.data = await api.coachRecoveryLatest();
+  } catch { /* swallow */ }
+  try {
+    fasting.value.data = await api.coachFastingLatest();
   } catch { /* swallow */ }
 }
 
@@ -102,10 +106,18 @@ async function toggleRecovery() {
   }
 }
 
+async function toggleFasting() {
+  fasting.value.open = !fasting.value.open;
+  if (fasting.value.open && fasting.value.data === null) {
+    await fetchCard(fasting.value, false, api.coachFasting);
+  }
+}
+
 function refreshCardio() { fetchCard(cardio.value, true, api.coachCardio); }
 function refreshWorkout() { fetchCard(workout.value, true, api.coachWorkout); }
 function refreshSleep() { fetchCard(sleep.value, true, api.coachSleep); }
 function refreshRecovery() { fetchCard(recovery.value, true, api.coachRecovery); }
+function refreshFasting() { fetchCard(fasting.value, true, api.coachFasting); }
 
 function tonePill(tone: string | undefined): string {
   return tone || "neutral";
@@ -276,6 +288,62 @@ onMounted(() => { preload(); loadGoals(); });
             <span class="muted">{{ fmtTime(sleep.data.generated_at) }} · {{ sleep.data.model }}
               <span v-if="sleep.data.cached">(cached)</span></span>
             <button class="ghost" :disabled="sleep.loading" @click="refreshSleep">
+              <RefreshCw :size="13"/> Refresh
+            </button>
+          </div>
+        </template>
+        <template v-else>
+          <p class="hint">No coach card cached yet — tap to generate.</p>
+        </template>
+      </div>
+    </section>
+
+    <!-- Fasting coach — "Should I fast today?" -->
+    <section class="card" :class="['tone-' + tonePill(fasting.data?.analysis?.tone as string | undefined)]">
+      <button class="head" @click="toggleFasting">
+        <Hourglass :size="18"/>
+        <span class="title">Fasting coach</span>
+        <span class="sub">should I fast · protocol · goal fit</span>
+        <span class="chev">{{ fasting.open ? "▾" : "▸" }}</span>
+      </button>
+      <div v-if="fasting.open" class="body">
+        <p v-if="fasting.loading" class="hint">Thinking…</p>
+        <p v-else-if="fasting.error" class="err">{{ fasting.error }}</p>
+        <template v-else-if="fasting.data?.analysis">
+          <p class="plan supporting">
+            <strong>Recommendation:</strong>
+            {{ String(fasting.data.analysis.recommendation).replace('_', ' ') }}
+            <span v-if="fasting.data.analysis.protocol_suggestion"
+                  class="muted"> · {{ fasting.data.analysis.protocol_suggestion }}</span>
+          </p>
+          <div v-if="fasting.data.analysis.best_window" class="grid">
+            <div>
+              <div class="lbl">Best window</div>
+              <p>{{ fasting.data.analysis.best_window }}</p>
+            </div>
+            <div>
+              <div class="lbl">Goal fit</div>
+              <p>{{ fasting.data.analysis.goal_alignment }}</p>
+            </div>
+          </div>
+          <div v-else>
+            <div class="lbl">Goal fit</div>
+            <p class="plan">{{ fasting.data.analysis.goal_alignment }}</p>
+          </div>
+          <div class="lbl">Evidence</div>
+          <ul class="bullets">
+            <li v-for="(e, i) in asLines(fasting.data.analysis.evidence)" :key="i">{{ e }}</li>
+          </ul>
+          <template v-if="asLines(fasting.data.analysis.caveats).length > 0">
+            <div class="lbl">Caveats</div>
+            <ul class="bullets">
+              <li v-for="(e, i) in asLines(fasting.data.analysis.caveats)" :key="i">{{ e }}</li>
+            </ul>
+          </template>
+          <div class="footer">
+            <span class="muted">{{ fmtTime(fasting.data.generated_at) }} · {{ fasting.data.model }}
+              <span v-if="fasting.data.cached">(cached)</span></span>
+            <button class="ghost" :disabled="fasting.loading" @click="refreshFasting">
               <RefreshCw :size="13"/> Refresh
             </button>
           </div>

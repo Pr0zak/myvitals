@@ -16,6 +16,7 @@ from ..db.session import get_session
 from ..integrations.claude import (
     ask,
     build_cardio_coach_payload,
+    build_fasting_coach_payload,
     build_recovery_coach_payload,
     build_sleep_coach_payload,
     build_summary_payload,
@@ -25,6 +26,7 @@ from ..integrations.claude import (
     explain_discovery,
     explain_legacy,
     explain_topic,
+    fasting_coach,
     hash_payload,
     pre_workout,
     recovery_coach,
@@ -1451,6 +1453,50 @@ async def coach_recovery_latest(
     row = (await db.execute(
         select(models.AiSummary)
         .where(models.AiSummary.range_kind == "coach_recovery")
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    import json as _json
+    try:
+        analysis = _json.loads(row.content)
+    except Exception:  # noqa: BLE001
+        analysis = {"raw": row.content}
+    return {
+        "analysis": analysis,
+        "generated_at": row.generated_at,
+        "model": row.model,
+        "cached": True,
+    }
+
+
+@router.post("/coach/fasting")
+async def coach_fasting_endpoint(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """AI fasting coach card — should I fast today, what protocol,
+    how does it tie into the active weight / fasting goal."""
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    payload = await build_fasting_coach_payload(db)
+    payload_hash = hash_payload({"kind": "coach_fasting", "tone": cfg.tone, "p": payload})
+    cached = await _coach_cached(db, "coach_fasting", payload_hash)
+    if cached is not None:
+        return cached
+    result = await fasting_coach(db, cfg)
+    cfg.calls_today += 1
+    return await _coach_persist(db, "coach_fasting", payload_hash, result)
+
+
+@router.get("/coach/fasting/latest")
+async def coach_fasting_latest(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any] | None:
+    """Most recent fasting-coach card without billing."""
+    row = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == "coach_fasting")
         .order_by(models.AiSummary.generated_at.desc())
         .limit(1)
     )).scalar_one_or_none()

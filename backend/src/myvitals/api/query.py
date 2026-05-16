@@ -135,30 +135,11 @@ async def get_steps(
     untagged ("unknown") rows."""
     start, end = _resolve_range(since, until, timedelta(hours=24))
 
-    sources_q = await db.execute(
-        select(
-            models.Steps.source,
-            func.coalesce(func.sum(models.Steps.count), 0).label("total"),
-        )
-        .where(models.Steps.time >= start)
-        .where(models.Steps.time <= end)
-        .where(models.Steps.source != "unknown")
-        .group_by(models.Steps.source)
-    )
-    source_totals: list[tuple[str, int]] = [
-        (s, int(t)) for s, t in sources_q.all() if s
-    ]
-
-    def _is_watch(name: str) -> bool:
-        n = name.lower()
-        return any(
-            tag in n
-            for tag in ("wearable", "fit.wearable", "fitbit", "watch", "wear")
-        )
-
-    canonical = next((s for s, _ in source_totals if _is_watch(s)), None)
-    if canonical is None and source_totals:
-        canonical = max(source_totals, key=lambda x: x[1])[0]
+    # Single shared helper picks the canonical watch source so this
+    # path, /summary/today, and the daily_summary nightly job all
+    # agree on which source to trust.
+    from ..analytics.jobs import pick_canonical_steps_source
+    canonical = await pick_canonical_steps_source(db, start, end)
 
     minute_col = func.date_trunc("minute", models.Steps.time)
     q = (

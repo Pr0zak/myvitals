@@ -63,6 +63,47 @@ async function loadHistory() {
 onMounted(() => { loadLive(); loadHistory(); });
 watch(range, loadHistory);
 
+// ── Hourly bar chart (today only) ──
+// Buckets the live per-minute series into hour-of-day bins (local TZ)
+// scoped to TODAY so the chart shows when steps actually accumulated
+// during the current day, not a rolling 24h window. Mirrors the
+// hour-by-hour view a user gets from the ASCII-bar diagnostic query.
+const hourlyOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  if (!live.value || live.value.points.length === 0) return null;
+  const buckets = new Array<number>(24).fill(0);
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  let totalToday = 0;
+  for (const p of live.value.points) {
+    const d = new Date(p.time);
+    if (d < todayStart) continue;
+    buckets[d.getHours()] += p.value;
+    totalToday += p.value;
+  }
+  if (totalToday === 0) return null;
+  const labels = Array.from({ length: 24 }, (_, h) =>
+    `${h.toString().padStart(2, "0")}:00`,
+  );
+  return {
+    grid: { left: 48, right: 12, top: 24, bottom: 32 },
+    xAxis: { type: "category", data: labels, axisLabel: { ...t.axisLabel, interval: 1 } },
+    yAxis: { type: "value", axisLabel: t.axisLabel, splitLine: t.splitLine },
+    tooltip: { trigger: "axis", ...t.tooltip,
+      formatter: (p: any) => {
+        const x = Array.isArray(p) ? p[0] : p;
+        return `${x.name}: ${Math.round(x.value).toLocaleString()} steps`;
+      },
+    },
+    series: [{
+      type: "bar", name: "Steps",
+      itemStyle: { color: t.palette.steps },
+      data: buckets.map((v) => Math.round(v)),
+    }],
+  };
+});
+
 // ── 24h trace option ──
 const traceOption = computed(() => {
   void chartTheme.value;
@@ -210,6 +251,10 @@ const stats = computed(() => {
           <span class="val">{{ stats.goalDays }} / {{ stats.totalDays }}</span>
         </div>
       </div>
+    </Card>
+
+    <Card v-if="hourlyOption" title="Today by hour">
+      <div class="chart"><VChart :option="hourlyOption" autoresize/></div>
     </Card>
 
     <Card v-if="traceOption" title="Last 24h">

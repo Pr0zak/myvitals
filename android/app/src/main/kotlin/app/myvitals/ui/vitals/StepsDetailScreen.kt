@@ -39,11 +39,15 @@ import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.DailySummary
+import app.myvitals.sync.TimePoint
 import app.myvitals.ui.MV
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
@@ -53,6 +57,7 @@ fun StepsDetailScreen(
 ) {
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
     var goal by remember { mutableStateOf(10_000) }
+    var hourly by remember { mutableStateOf<IntArray?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -64,6 +69,14 @@ fun StepsDetailScreen(
             runCatching { api.profile() }.getOrNull()?.let { goal = it.stepsGoal() }
             val since = LocalDate.now().minusDays(29).toString()
             rows = withContext(Dispatchers.IO) { api.summaryRange(since = since) }
+            // 24h trace from the canonical-source helper on the
+            // backend; bucket into local hour-of-day for the new
+            // "Today by hour" card.
+            val sinceIso = Instant.now().minusSeconds(24 * 3600).toString()
+            val series = withContext(Dispatchers.IO) {
+                runCatching { api.stepsSeries(since = sinceIso) }.getOrNull()
+            }
+            if (series != null) hourly = bucketByHour(series.points)
             Timber.i("steps detail: %d rows", rows.size)
         } catch (e: Exception) {
             Timber.w(e, "steps detail load failed")
@@ -93,6 +106,9 @@ fun StepsDetailScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 item { TodayHero(rows.lastOrNull(), goal, color) }
+                hourly?.let { hr ->
+                    if (hr.sum() > 0) item { HourlyColumns(hr, color) }
+                }
                 item { DailyColumns(rows, goal, color) }
                 item { StepsStats(rows, goal) }
             }
@@ -118,6 +134,59 @@ private fun TodayHero(today: DailySummary?, goal: Int, color: Color) {
             Spacer(Modifier.height(4.dp))
             Text("${(pct * 100).toInt()}% of ${"%,d".format(goal)} goal",
                 color = MV.OnSurfaceDim, fontSize = 11.sp)
+        }
+    }
+}
+
+/** Sum the per-minute series into 24 hour-of-day bins (local TZ),
+ *  scoped to TODAY so we show "when did I step today" rather than a
+ *  rolling 24h. Returns an IntArray of length 24. */
+private fun bucketByHour(points: List<TimePoint>): IntArray {
+    val out = IntArray(24)
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now(zone)
+    for (p in points) {
+        val ldt = runCatching {
+            Instant.parse(p.time).atZone(zone).toLocalDateTime()
+        }.getOrNull() ?: continue
+        if (ldt.toLocalDate() != today) continue
+        out[ldt.hour] += p.value.toInt()
+    }
+    return out
+}
+
+@Composable
+private fun HourlyColumns(hourly: IntArray, color: Color) {
+    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("TODAY BY HOUR", color = MV.OnSurfaceVariant,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(8.dp))
+            val maxV = (hourly.max().coerceAtLeast(1)).toFloat()
+            Box(Modifier.fillMaxWidth().height(120.dp)) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val gap = 1.5.dp.toPx()
+                    val barW = (size.width - gap * 23) / 24f
+                    for (h in 0 until 24) {
+                        val v = hourly[h].toFloat()
+                        val barH = (v / maxV) * size.height
+                        drawRect(
+                            color = if (v > 0) color else color.copy(alpha = 0.18f),
+                            topLeft = Offset(h * (barW + gap), size.height - barH),
+                            size = Size(barW, barH.coerceAtLeast(1f)),
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("00", color = MV.OnSurfaceDim, fontSize = 9.sp)
+                Text("06", color = MV.OnSurfaceDim, fontSize = 9.sp)
+                Text("12", color = MV.OnSurfaceDim, fontSize = 9.sp)
+                Text("18", color = MV.OnSurfaceDim, fontSize = 9.sp)
+                Text("23", color = MV.OnSurfaceDim, fontSize = 9.sp)
+            }
         }
     }
 }

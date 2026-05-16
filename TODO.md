@@ -53,25 +53,26 @@ recovered today? have I moved today?). The others are nice-to-haves.
 
 ---
 
-## #FAST-COACH — Fasting recommendations + goal + workout coupling (4 tasks · planning locked)
+## #FAST-COACH — Fasting recommendations + goal + workout coupling (DONE)
 
 **Plan:** [docs/FAST_COACH_PLAN.md](docs/FAST_COACH_PLAN.md)
 
-Closes three gaps in the shipped fasting feature: no "should I fast"
-recommendation, no goal kind for fast streaks, and the strength
-generator + coach payloads ignore in-progress fasts. Defaults are
-locked in the plan doc; no remaining open decisions before kickoff.
+All four tasks shipped 2026-05-15. Closes the three gaps in the
+fasting feature: "should I fast" recommendation, fast_streak as a
+first-class goal kind, and fasting-aware strength generation.
 
-| Mnemonic | Subject | Blocked by |
+| Mnemonic | Subject | Tag |
 |---|---|---|
-| FAST-19 | Plumb `fasting_status` into workout / recovery / verdict / summary coach payloads | — |
-| FAST-17 | `fast_streak` AiGoal kind + `user_profile.fasting_target_hours_per_week` + bidirectional sync | — |
-| FAST-16 | `POST /ai/coach/fasting` — "should I fast today?" structured card; web + phone | FAST-19 |
-| FAST-18 | Fasting-aware strength generation: rep-range routing + volume modulation + UI banner | FAST-19 |
+| ~~FAST-19~~ | `_fasting_status` enriched + plumbed into recovery + summary + verdict + workout coach payloads | v0.7.245 |
+| ~~FAST-17~~ | `fast_streak` AiGoal kind + `user_profile.fasting_target_hours_per_week` (migration 0037) + sync | v0.7.246 |
+| ~~FAST-16~~ | `POST /ai/coach/fasting` — recommendation enum + protocol + window + goal_alignment; web + phone | v0.7.247 |
+| ~~FAST-18~~ | `prescribe_slot` hard rule against fasted heavy lifts, -20% / -30% volume modulation, UI banner | v0.7.248 |
 
-**Recommended order:** FAST-19 first (plumbing), then FAST-17 (`fast_streak` only),
-then FAST-16 (coach card), then FAST-18 (generator integration). Each
-maps to a release tag.
+Suggested follow-ups if you decide to extend:
+- `fast_target` (N fasts ≥ X hours/week) and `fast_hours`
+  (cumulative period) Goal kinds — explicitly out of FAST-17 scope.
+- Cardio plan fasting-aware (today's modulation skips cardio because
+  the injury risk model doesn't apply).
 
 ---
 

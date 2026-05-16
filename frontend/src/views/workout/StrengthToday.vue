@@ -755,6 +755,25 @@ useVisibilityRefresh(loadAll);
         {{ busy === 'regen' ? 'Refreshing…' : 'Regenerate' }}
       </button>
     </div>
+    <!-- FAST-18 — fasted-training banner. Appears when the workout
+         was generated against an active fast that crossed the 18h
+         volume-modulation threshold. -->
+    <div v-if="workout?.fasting_context
+               && workout.fasting_context.active
+               && workout.fasting_context.modulation !== 'normal'"
+         class="fast-banner">
+      <span class="fast-icon">⏳</span>
+      <span class="fast-text">
+        You're <strong>{{ workout.fasting_context.current_hours.toFixed(0) }}h fasted</strong>
+        ({{ workout.fasting_context.stage.replace('_', ' ') }}) —
+        <template v-if="workout.fasting_context.modulation === 'volume_-20%'">
+          volume trimmed ~20%, rest +15s.
+        </template>
+        <template v-else>
+          volume trimmed ~30%, rest +30s. A Z2 cardio block alongside is a strong option.
+        </template>
+      </span>
+    </div>
     <!-- Why + Variety nudge moved below the exercise list. -->
 
     <CoachCard v-if="queryToken && workout
@@ -1565,6 +1584,16 @@ button.ghost:hover { color: var(--text); border-color: var(--accent, #ef4444); }
 }
 .stale-icon { color: #facc15; font-size: 1.05rem; }
 .stale-text { flex: 1; font-size: 0.83rem; line-height: 1.35; }
+.fast-banner {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.55rem 0.8rem; margin: 0 0 0.7rem;
+  background: rgba(245, 158, 11, 0.07);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-left: 3px solid #f59e0b;
+  border-radius: 8px; color: var(--text);
+}
+.fast-icon { color: #f59e0b; font-size: 1.05rem; }
+.fast-text { flex: 1; font-size: 0.83rem; line-height: 1.35; }
 
 /* Workout-complete confirmation dialog */
 .cd-backdrop {

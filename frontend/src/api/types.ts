@@ -236,5 +236,11 @@ export interface StrengthWorkoutDetail {
   completed_at: string | null;
   notes: string | null;
   recovery_stale?: boolean;
+  fasting_context?: {
+    active: boolean;
+    current_hours: number;
+    stage: string;
+    modulation: string;       // "normal" | "volume_-20%" | "volume_-30%_cardio_priority"
+  } | null;
   exercises: StrengthWorkoutExercise[];
 }

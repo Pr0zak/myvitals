@@ -233,6 +233,7 @@ data class StrengthWorkoutDetail(
     val status: String,
     val seed: String,
     @Json(name = "recovery_stale") val recoveryStale: Boolean = false,
+    @Json(name = "fasting_context") val fastingContext: FastingContext? = null,
     @Json(name = "recovery_score_used") val recoveryScoreUsed: Double? = null,
     @Json(name = "readiness_score_used") val readinessScoreUsed: Double? = null,
     @Json(name = "sleep_h_used") val sleepHUsed: Double? = null,
@@ -240,6 +241,14 @@ data class StrengthWorkoutDetail(
     @Json(name = "completed_at") val completedAt: String? = null,
     val notes: String? = null,
     val exercises: List<StrengthWorkoutExerciseRow> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class FastingContext(
+    val active: Boolean,
+    @Json(name = "current_hours") val currentHours: Double,
+    val stage: String,
+    val modulation: String,
 )
 
 @JsonClass(generateAdapter = true)

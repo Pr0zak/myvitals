@@ -218,6 +218,10 @@ class GeneratedPlan:
     rest_day_recommended: bool = False
     rest_day_reason: str | None = None
     notes: list[str] = field(default_factory=list)
+    # FAST-18 — active-fast snapshot the API surfaces to clients so
+    # they can render an amber "fasted training" banner. None when
+    # no fast is in progress at plan-generation time.
+    fasting_context: dict[str, Any] | None = None
 
 
 # ------------------------------------------------------------------
@@ -734,12 +738,25 @@ def _age_scale(
 def prescribe_slot(
     ex: dict[str, Any], slot_role: str, goal: str = "hypertrophy",
     age: int | None = None, bodyweight_lb: float | None = None,
+    fasted_hours: float | None = None,
 ) -> tuple[int, int, int, int]:
     """Reps-or-seconds prescription. When the exercise is marked
     `is_timed` in the catalog (planks, side bridges, isometric neck,
     …), the returned (reps_low, reps_high) are HOLD SECONDS, not rep
     counts. The UI keys on the same `is_timed` flag on the exercise to
-    label the field appropriately."""
+    label the field appropriately.
+
+    FAST-18 hard rule: at `fasted_hours >= 18` AND `goal=='strength'`
+    AND `slot_role=='main_compound'`, route to hypertrophy rep ranges
+    (8-12) instead of 3-6 strength ranges. Fasted heavy lifts under
+    near-max load carry an outsized injury risk; the rep-range bump
+    cuts the load enough to remove that risk while still letting the
+    user train."""
+    if (
+        goal == "strength" and slot_role == "main_compound"
+        and fasted_hours is not None and fasted_hours >= 18
+    ):
+        goal = "hypertrophy"  # downstream cascade picks 6-8 reps
     if ex.get("is_timed"):
         if slot_role == "main_compound":
             sets, rl, rh, rest = 3, 45, 60, 90
@@ -1277,6 +1294,60 @@ def build_cardio_plan(
     )
 
 
+_FASTING_STAGE_LABELS = (
+    "fed", "gut_rest", "glycogen_depleting", "ketosis",
+    "autophagy", "deep_autophagy", "extended_36", "extended_48", "extended_72",
+)
+
+
+async def _active_fasting_context(db: AsyncSession) -> dict[str, Any] | None:
+    """FAST-18 — read the in-progress fast (if any) and return a
+    bounded dict the generator + clients can both consume.
+
+    Shape:
+      - active: bool
+      - current_hours: float
+      - stage: str            (fed / ketosis / autophagy / ...)
+      - modulation: str       (normal / volume_-20% / volume_-30%_cardio_priority)
+
+    Returns None when no fast is in progress."""
+    row = (await db.execute(
+        select(models.FastingSession)
+        .where(models.FastingSession.ended_at.is_(None))
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    elapsed_h = (
+        datetime.now(timezone.utc) - row.started_at
+    ).total_seconds() / 3600.0
+    # Stage lookup mirrors api/fasting._stage_for thresholds.
+    thresholds = [
+        (72.0, "extended_72"), (48.0, "extended_48"),
+        (36.0, "extended_36"), (24.0, "deep_autophagy"),
+        (18.0, "autophagy"), (16.0, "ketosis"),
+        (12.0, "glycogen_depleting"), (4.0, "gut_rest"),
+        (0.0, "fed"),
+    ]
+    stage = "fed"
+    for thresh, label in thresholds:
+        if elapsed_h >= thresh:
+            stage = label
+            break
+    if elapsed_h >= 24:
+        modulation = "volume_-30%_cardio_priority"
+    elif elapsed_h >= 18:
+        modulation = "volume_-20%"
+    else:
+        modulation = "normal"
+    return {
+        "active": True,
+        "current_hours": round(elapsed_h, 1),
+        "stage": stage,
+        "modulation": modulation,
+    }
+
+
 async def generate_plan(
     db: AsyncSession,
     target_date: date,
@@ -1382,6 +1453,11 @@ async def generate_plan(
     recovery: RecoveryInputs | None = None
     if profile is None or profile.strength_recovery_aware:
         recovery = await read_recovery_inputs(db, target_date)
+
+    # Fasting integration (FAST-18) — affects prescribe_slot rep ranges
+    # via fasted_hours, and triggers volume trimming on the chosen list.
+    fasting_ctx = await _active_fasting_context(db)
+    fasted_hours = fasting_ctx["current_hours"] if fasting_ctx else None
 
     notes: list[str] = []
     if recovery is not None and not force_no_rest:
@@ -1560,7 +1636,21 @@ async def generate_plan(
         sets, reps_lo, reps_hi, rest_s = prescribe_slot(
             ex, slot_role, goal=goal,
             age=user_age, bodyweight_lb=user_bodyweight_lb,
+            fasted_hours=fasted_hours,
         )
+        # FAST-18 volume modulation. -20% (≥18h) drops 1 set on every
+        # exercise. -30% (≥24h) drops 1 from compounds and 2 from
+        # isolation. Rest extends 15/30s respectively. Floor sets at 2
+        # so the user isn't doing single-set sessions.
+        if fasting_ctx and fasting_ctx["modulation"] == "volume_-20%":
+            sets = max(2, sets - 1)
+            rest_s += 15
+        elif fasting_ctx and fasting_ctx["modulation"] == "volume_-30%_cardio_priority":
+            if slot_role == "isolation":
+                sets = max(2, sets - 2)
+            else:
+                sets = max(2, sets - 1)
+            rest_s += 30
 
         # History-driven progression first, then starting weight.
         avg_rating, avg_weight = await last_target_weight_for_exercise(db, ex["id"])
@@ -1624,12 +1714,30 @@ async def generate_plan(
                 "Mobility block appended — 2 yoga poses, ~30 s hold each."
             )
 
+    # FAST-18 note — only when modulation actually changed the plan.
+    # The cue ties the trimmed sets / extended rest back to the active
+    # fast so the user understands why their volume looks lighter.
+    if fasting_ctx and fasting_ctx["modulation"] != "normal":
+        hrs = fasting_ctx["current_hours"]
+        if fasting_ctx["modulation"] == "volume_-20%":
+            notes.append(
+                f"Fasted {hrs:.0f}h — strength block scaled back ~20% "
+                f"(dropped 1 set per exercise, rest +15s)."
+            )
+        else:
+            notes.append(
+                f"Fasted {hrs:.0f}h — strength block scaled back ~30% "
+                f"(dropped 1-2 sets per exercise, rest +30s). "
+                f"A Z2 cardio block alongside is a strong option."
+            )
+
     return GeneratedPlan(
         seed=seed,
         split_focus=focus,
         exercises=plan_exs,
         recovery=recovery,
         notes=notes,
+        fasting_context=fasting_ctx,
     )
 
 

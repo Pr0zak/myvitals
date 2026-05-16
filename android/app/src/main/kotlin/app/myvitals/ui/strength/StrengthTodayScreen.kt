@@ -763,6 +763,42 @@ fun StrengthTodayScreen(
                     }
                 }
             }
+            // FAST-18 — fasted-training banner. Amber. Appears when an
+            // active fast crossed the 18h volume-modulation threshold
+            // at plan-generation time. Re-read live on every load so
+            // it fades once the user breaks the fast.
+            val fastCtx = plan.fastingContext
+            if (fastCtx != null && fastCtx.active && fastCtx.modulation != "normal") {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFF59E0B).copy(alpha = 0.08f),
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("⏳", color = Color(0xFFF59E0B), fontSize = 16.sp,
+                                modifier = Modifier.padding(end = 8.dp))
+                            val hrs = fastCtx.currentHours.toInt()
+                            val stage = fastCtx.stage.replace('_', ' ')
+                            val body = if (fastCtx.modulation == "volume_-20%") {
+                                "You're ${hrs}h fasted ($stage) — volume trimmed ~20%, rest +15s."
+                            } else {
+                                "You're ${hrs}h fasted ($stage) — volume trimmed ~30%, rest +30s. " +
+                                    "A Z2 cardio block alongside is a strong option."
+                            }
+                            Text(
+                                body,
+                                color = MV.OnSurface, fontSize = 12.sp,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+            }
             // Cardio / notes-only plans (split_focus == "cardio") come back
             // with exercises=[] and the prescription text in `notes`. Without
             // this card the screen looks blank between the Coach card and

@@ -578,6 +578,10 @@ class WorkoutOut(BaseModel):
     # usable but its deload factor / starting weights ignored the
     # last night's recovery.
     recovery_stale: bool = False
+    # FAST-18 — populated when the plan was generated against an
+    # active fast. Shape: {active, current_hours, stage, modulation}.
+    # Clients render an amber banner when modulation != "normal".
+    fasting_context: dict[str, Any] | None = None
     exercises: list[WorkoutExerciseOut] = []
 
 
@@ -688,6 +692,12 @@ async def _hydrate_workout(
         completed_at=w.completed_at,
         notes=w.notes,
         recovery_stale=await _workout_recovery_stale(db, w),
+        # FAST-18 — fasting context is read live on every request, not
+        # persisted on the workout row. The plan was generated against
+        # the fast that was active at the time, so this reflects how
+        # the fast looks *right now*; the UI can fade the banner once
+        # the user has broken the fast.
+        fasting_context=await strength_algo._active_fasting_context(db),
         exercises=[
             _wex_to_out(wex, sets_by_wex.get(wex.id, [])) for wex in wex_rows
         ],

@@ -53,6 +53,28 @@ recovered today? have I moved today?). The others are nice-to-haves.
 
 ---
 
+## #FAST-COACH — Fasting recommendations + goal + workout coupling (4 tasks · planning locked)
+
+**Plan:** [docs/FAST_COACH_PLAN.md](docs/FAST_COACH_PLAN.md)
+
+Closes three gaps in the shipped fasting feature: no "should I fast"
+recommendation, no goal kind for fast streaks, and the strength
+generator + coach payloads ignore in-progress fasts. Defaults are
+locked in the plan doc; no remaining open decisions before kickoff.
+
+| Mnemonic | Subject | Blocked by |
+|---|---|---|
+| FAST-19 | Plumb `fasting_status` into workout / recovery / verdict / summary coach payloads | — |
+| FAST-17 | `fast_streak` AiGoal kind + `user_profile.fasting_target_hours_per_week` + bidirectional sync | — |
+| FAST-16 | `POST /ai/coach/fasting` — "should I fast today?" structured card; web + phone | FAST-19 |
+| FAST-18 | Fasting-aware strength generation: rep-range routing + volume modulation + UI banner | FAST-19 |
+
+**Recommended order:** FAST-19 first (plumbing), then FAST-17 (`fast_streak` only),
+then FAST-16 (coach card), then FAST-18 (generator integration). Each
+maps to a release tag.
+
+---
+
 ## #FITBIT — Google Health migration (5 tasks · calendar-gated)
 
 **Plan:** `~/.claude/projects/-home-spider-health-app/memory/project_fitbit_google_health_migration.md`

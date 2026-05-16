@@ -94,39 +94,10 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
 
     # 2. Compute live values as a fallback / supplement.
     # Pick a single canonical step source so the dashboard matches the
-    # user's wrist. Pixel Watch 3 syncs via Fitbit, Wear OS via "wearable"
-    # apps, Samsung via "samsung.android.wearable" — match all three.
-    # Untagged ("unknown") rows are excluded outright; they're usually
-    # leftover backfill from before source tagging.
-    # If no watch-class source is present, fall back to the source with
-    # the highest total (closer to a single-device count than per-minute
-    # MAX across mixed sources, which over-counts when sources fire at
-    # different cadences).
-    sources_q = await db.execute(
-        select(
-            models.Steps.source,
-            func.coalesce(func.sum(models.Steps.count), 0).label("total"),
-        )
-        .where(models.Steps.time >= midnight_local)
-        .where(models.Steps.time <= end)
-        .where(models.Steps.source != "unknown")
-        .group_by(models.Steps.source)
-    )
-    source_totals: list[tuple[str, int]] = [
-        (s, int(t)) for s, t in sources_q.all() if s
-    ]
-
-    def _is_watch(name: str) -> bool:
-        n = name.lower()
-        return any(
-            tag in n
-            for tag in ("wearable", "fit.wearable", "fitbit", "watch", "wear")
-        )
-
-    canonical = next((s for s, _ in source_totals if _is_watch(s)), None)
-    if canonical is None and source_totals:
-        canonical = max(source_totals, key=lambda x: x[1])[0]
-
+    # user's wrist. Shared helper with the daily_summary nightly job —
+    # same logic both paths, no drift between persisted and live counts.
+    from ..analytics.jobs import pick_canonical_steps_source
+    canonical = await pick_canonical_steps_source(db, midnight_local, end)
     if canonical:
         single = await db.execute(
             select(func.coalesce(func.sum(models.Steps.count), 0))

@@ -18,6 +18,48 @@ from .sleep import sleep_score
 
 log = logging.getLogger(__name__)
 
+
+# Keywords identifying a wrist-worn-device step source (Pixel Watch via
+# Fitbit, Wear OS wearable apps, Samsung wearable). When multiple
+# sources cover a day, the watch wins — its count matches what the
+# user sees on the wrist, and the phone pedometer ("android" source)
+# tends to over-count when the phone moves in a pocket while walking.
+_WATCH_SOURCE_KEYWORDS = ("wearable", "fit.wearable", "fitbit", "watch", "wear")
+
+
+def _is_watch_source(name: str) -> bool:
+    n = (name or "").lower()
+    return any(k in n for k in _WATCH_SOURCE_KEYWORDS)
+
+
+async def pick_canonical_steps_source(
+    db: AsyncSession, start: datetime, end: datetime,
+) -> str | None:
+    """Pick the single source we trust for steps in [start, end].
+
+    Mirrors the live logic in /summary/today so the persisted
+    daily_summary row matches what the dashboard renders. Returns
+    None when no usable rows exist (caller falls back to 0)."""
+    rows = (await db.execute(
+        select(
+            models.Steps.source,
+            func.coalesce(func.sum(models.Steps.count), 0).label("total"),
+        )
+        .where(models.Steps.time >= start)
+        .where(models.Steps.time <= end)
+        .where(models.Steps.source != "unknown")
+        .group_by(models.Steps.source)
+    )).all()
+    totals = [(s, int(t)) for s, t in rows if s]
+    if not totals:
+        return None
+    watch = next((s for s, _ in totals if _is_watch_source(s)), None)
+    if watch is not None:
+        return watch
+    # Multi-source day with no watch — pick the largest. Single-source
+    # days fall through here too (only one entry, that's the answer).
+    return max(totals, key=lambda x: x[1])[0]
+
 # An RHR jump above the rolling baseline by this many bpm fires an alert.
 RHR_DRIFT_BPM = 5.0
 
@@ -52,18 +94,28 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
             _local = timezone.utc
         day_start = datetime.combine(target, time.min, tzinfo=_local)
         day_end = datetime.combine(target, time.max, tzinfo=_local)
-        minute_col = func.date_trunc("minute", models.Steps.time)
-        per_min_subq = (
-            select(func.max(models.Steps.count).label("mx"))
-            .where(models.Steps.time >= day_start)
-            .where(models.Steps.time <= day_end)
-            .group_by(minute_col)
-            .subquery()
-        )
-        steps_result = await db.execute(
-            select(func.coalesce(func.sum(per_min_subq.c.mx), 0))
-        )
-        steps_total = int(steps_result.scalar() or 0) or None
+        # Pick a SINGLE canonical source (watch when present) and sum
+        # per-minute MAX within it. Crossing sources here over-counts
+        # because the phone pedometer and the watch rarely fire on the
+        # same minute boundary — what looks like per-minute MAX
+        # de-duping turns into "add both totals together".
+        canonical_src = await pick_canonical_steps_source(db, day_start, day_end)
+        if canonical_src is None:
+            steps_total = None
+        else:
+            minute_col = func.date_trunc("minute", models.Steps.time)
+            per_min_subq = (
+                select(func.max(models.Steps.count).label("mx"))
+                .where(models.Steps.time >= day_start)
+                .where(models.Steps.time <= day_end)
+                .where(models.Steps.source == canonical_src)
+                .group_by(minute_col)
+                .subquery()
+            )
+            steps_result = await db.execute(
+                select(func.coalesce(func.sum(per_min_subq.c.mx), 0))
+            )
+            steps_total = int(steps_result.scalar() or 0) or None
 
         # Body metrics — last reading on this day wins (daily weigh-in pattern).
         body_row = await db.execute(

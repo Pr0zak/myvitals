@@ -26,7 +26,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends
 
-from ..auth import require_query
+from ..auth import require_any
 
 # NOTE: prefix is `/update`, NOT `/api/update`. The Caddy frontend
 # does `uri strip_prefix /api` on incoming `/api/*` requests before
@@ -35,7 +35,13 @@ from ..auth import require_query
 # get double-stripped and 404 through Caddy. Phone clients hitting
 # port 8000 directly use the same path: `http://host:8000/update/check`
 # (with explicit `/api` only when going via the web frontend).
-router = APIRouter(prefix="/update", dependencies=[Depends(require_query)])
+#
+# Auth: require_any (ingest OR query token). The phone Settings →
+# "Backend updates" section reads /update/check too, and the phone
+# only stores an ingest token. Same pattern as the sober endpoints —
+# either token is sufficient for read + trigger here because the
+# action gates aren't token-tier-aware.
+router = APIRouter(prefix="/update", dependencies=[Depends(require_any)])
 
 TRIGGER_FILE = Path("/var/lib/myvitals/update-requested")
 LOG_FILE = Path("/var/lib/myvitals/auto-update.log")

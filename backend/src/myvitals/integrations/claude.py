@@ -272,43 +272,91 @@ async def _correlations(db: AsyncSession, days: int = 90, top_n: int = 5) -> lis
     return out[:top_n]
 
 
+_RELIGIOUS_PROTOCOLS = ("ramadan", "lent", "yom_kippur")
+
+
 async def _fasting_status(db: AsyncSession) -> dict[str, Any] | None:
-    """Active fast + last 7 days of fasting hours, as a tiny dict
+    """Active fast + last-7-day fasting summary, as a bounded dict
     for AI payloads. Returns None on empty history so the AI doesn't
     waste tokens on a "no fasts" placeholder.
 
-    Keep this BOUNDED — single ints/floats only, no per-session rows.
-    The Claude payload budget is enforced; ballooning this is how the
-    cache-hash spreads + cost climbs."""
+    Shape (FAST-19):
+      - weekly_fasting_hours: float  (sum of daily_summary.fasting_hours)
+      - last_7d_fast_count: int      (completed fasts in trailing 7d)
+      - last_7d_longest_h: float     (longest completed fast in 7d)
+      - is_religious: bool           (any fast row this week is religious)
+      - active_fast: {...} | absent  (when a fast is in progress)
+          - protocol, elapsed_h, target_h, current_stage, is_religious
+
+    KEEP BOUNDED — single ints/floats + the active dict only, no
+    per-session rows. The Claude payload budget matters; ballooning
+    this is how the cache-hash spreads + cost climbs."""
     try:
+        from datetime import timedelta as _td
+        from ..api.fasting import _stage_for
+
         active = (await db.execute(
             select(models.FastingSession)
             .where(models.FastingSession.ended_at.is_(None))
             .limit(1)
         )).scalar_one_or_none()
-        # Sum fasting_hours from daily_summary over the last 7 days as a
-        # cheap proxy for "how much is the user actually fasting".
-        from datetime import date as _date
-        since = _date.today().isoformat()  # placeholder; computed below
+
         today_d = datetime.now(timezone.utc).date()
-        from datetime import timedelta as _td
         seven_ago = today_d - _td(days=6)
+
         rows = (await db.execute(
             select(models.DailySummary.fasting_hours)
             .where(models.DailySummary.date >= seven_ago)
             .where(models.DailySummary.date <= today_d)
         )).all()
         weekly_h = round(sum(r[0] or 0 for r in rows), 1)
-        if active is None and weekly_h == 0:
+
+        # Per-session aggregate over the trailing 7d for richer signal
+        # (the daily_summary roll-up doesn't preserve per-fast length).
+        seven_ago_dt = datetime.now(timezone.utc) - _td(days=7)
+        sessions = (await db.execute(
+            select(models.FastingSession)
+            .where(models.FastingSession.ended_at.is_not(None))
+            .where(models.FastingSession.started_at >= seven_ago_dt)
+        )).scalars().all()
+        completed_count = len(sessions)
+        longest_h = 0.0
+        religious_in_7d = False
+        for s in sessions:
+            if s.ended_at is not None:
+                dur_h = (s.ended_at - s.started_at).total_seconds() / 3600.0
+                longest_h = max(longest_h, dur_h)
+            if (s.protocol or "").lower() in _RELIGIOUS_PROTOCOLS:
+                religious_in_7d = True
+
+        # Early-out only when there's truly nothing to say.
+        if active is None and weekly_h == 0 and completed_count == 0:
             return None
-        out: dict[str, Any] = {"weekly_fasting_hours": weekly_h}
+
+        out: dict[str, Any] = {
+            "weekly_fasting_hours": weekly_h,
+            "last_7d_fast_count": completed_count,
+            "last_7d_longest_h": round(longest_h, 1),
+            "is_religious": religious_in_7d,
+        }
         if active is not None:
-            secs = (datetime.now(timezone.utc) - active.started_at).total_seconds()
+            elapsed_h = (
+                datetime.now(timezone.utc) - active.started_at
+            ).total_seconds() / 3600.0
+            stage, _next_at = _stage_for(elapsed_h)
+            active_is_religious = (
+                (active.protocol or "").lower() in _RELIGIOUS_PROTOCOLS
+            )
             out["active_fast"] = {
                 "protocol": active.protocol,
-                "elapsed_h": round(secs / 3600.0, 1),
+                "elapsed_h": round(elapsed_h, 1),
                 "target_h": active.target_hours,
+                "current_stage": stage,
+                "is_religious": active_is_religious,
             }
+            # An active religious fast trumps history for the top-level flag.
+            if active_is_religious:
+                out["is_religious"] = True
         return out
     except Exception:  # noqa: BLE001
         return None
@@ -2009,6 +2057,14 @@ def _workout_coach_system(tone: str) -> str:
 - wow_deltas — last-7d vs prior-7d mean + percent change per metric.
   Quote the pct_change figure in evidence ("HRV +8% vs last week")
   rather than hand-computing from the dailies.
+- fasting — null when the user isn't doing intermittent fasting,
+  otherwise weekly_fasting_hours / last_7d_fast_count /
+  last_7d_longest_h / is_religious / optional active_fast block.
+  IMPORTANT: long fasts compress HRV and lower RHR without indicating
+  overtraining. If `fasting.weekly_fasting_hours` is ≥ 70 OR
+  `last_7d_fast_count` ≥ 3, suppressed HRV / RHR readings are likely
+  fasting-driven, not training-driven — do NOT recommend a deload on
+  HRV grounds alone. Check sleep_debt and missed sets too.
 
 {_tone_line(tone)}
 
@@ -2209,6 +2265,7 @@ async def build_sleep_coach_payload(db: AsyncSession) -> dict[str, Any]:
         "recent_dailies": daily,
         "stage_breakdown_7d": await _sleep_stage_breakdown(db, days=7),
         "overnight_env_7d": await _overnight_env_readings(db, days=7),
+        "fasting_status": await _fasting_status(db),
         "recent_alerts": await _recent_alerts_ctx(db),
         "top_correlations": _top_correlations(daily),
         "wow_deltas": _wow_deltas(daily),
@@ -2329,6 +2386,14 @@ def _recovery_coach_system(tone: str) -> str:
   to make causal-sounding claims defensible)
 - recent_alerts the anomaly scanner already raised (high RHR, suppressed
   HRV, skin-temp clusters, illness risk)
+- fasting_status — null when not fasting, otherwise weekly_fasting_hours
+  / last_7d_fast_count / last_7d_longest_h / is_religious / optional
+  active_fast block. IMPORTANT: long fasts compress HRV and lower RHR
+  WITHOUT being overtraining. If `fasting_status.weekly_fasting_hours`
+  is ≥ 70 OR `last_7d_fast_count` ≥ 3, an HRV/RHR drift in the
+  trailing 7d is most likely autonomic-fasting rather than declining
+  recovery. Distinguish in `hrv_assessment` / `rhr_assessment` —
+  don't call it a declining trend on autonomic data alone.
 - profile.tone preference
 
 {_tone_line(tone)}

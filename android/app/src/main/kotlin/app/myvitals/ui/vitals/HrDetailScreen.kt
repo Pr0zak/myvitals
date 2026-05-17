@@ -75,6 +75,7 @@ data class HrEventBand(
 
 @Composable
 fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var range by remember { mutableStateOf(VitalRange.DAY) }
     var live by remember { mutableStateOf<List<TimePoint>>(emptyList()) }
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
@@ -83,12 +84,26 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
         mutableStateOf<List<app.myvitals.sync.Annotation>>(emptyList())
     }
     var loading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var maxHr by remember { mutableStateOf(190) }
 
-    LaunchedEffect(range) {
-        if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return@LaunchedEffect }
-        loading = true; error = null
+    val rowsType = com.squareup.moshi.Types.newParameterizedType(
+        List::class.java, DailySummary::class.java,
+    )
+
+    // SWR: read last-rendered rows + live points for the current range
+    // and render them so the screen never shows a spinner on a warm
+    // launch. Fresh fetch overwrites once it lands.
+    suspend fun maybeShowCache() {
+        val rowsKey = "hr_detail_rows_${range.name.lowercase()}"
+        app.myvitals.data.JsonCache.read<List<DailySummary>>(context, rowsKey, rowsType)
+            ?.let { rows = it.value; loading = false }
+    }
+
+    suspend fun fetch() {
+        if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return }
+        error = null
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             // Profile drives zone thresholds. Re-fetch on every load so a
@@ -191,7 +206,13 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     rows = emptyList()
                 } else {
                     val since = LocalDate.now().minusDays(range.days.toLong() - 1).toString()
-                    rows = withContext(Dispatchers.IO) { api.summaryRange(since = since) }
+                    val fresh = withContext(Dispatchers.IO) { api.summaryRange(since = since) }
+                    rows = fresh
+                    app.myvitals.data.JsonCache.write(
+                        context,
+                        "hr_detail_rows_${range.name.lowercase()}",
+                        rowsType, fresh,
+                    )
                     live = emptyList()
                 }
             }
@@ -200,6 +221,11 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
             Timber.w(e, "HR detail load failed")
             error = e.message?.take(160)
         } finally { loading = false }
+    }
+
+    LaunchedEffect(range) {
+        maybeShowCache()
+        fetch()
     }
 
     Column(Modifier.fillMaxSize().background(MV.Bg)) {
@@ -232,8 +258,16 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
         when {
             loading -> Text("Loading…", color = MV.OnSurfaceVariant,
                 modifier = Modifier.padding(16.dp))
-            error != null -> Text(error!!, color = MV.Red, modifier = Modifier.padding(16.dp))
-            else -> LazyColumn(
+            error != null && rows.isEmpty() && live.isEmpty() ->
+                Text(error!!, color = MV.Red, modifier = Modifier.padding(16.dp))
+            else -> app.myvitals.ui.common.PullableMetricBox(
+                refreshing = refreshing,
+                onRefresh = {
+                    refreshing = true
+                    try { fetch() } finally { refreshing = false }
+                },
+            ) {
+            LazyColumn(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -245,6 +279,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     item { RestingHrTrend(rows, range) }
                     item { WeekdayPattern(rows) }
                 }
+            }
             }
         }
     }

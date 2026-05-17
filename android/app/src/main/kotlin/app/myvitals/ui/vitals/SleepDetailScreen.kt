@@ -72,14 +72,23 @@ fun SleepDetailScreen(
     settings: SettingsRepository,
     onBack: () -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var nights by remember { mutableStateOf<List<SleepNight>>(emptyList()) }
     var lastRaw by remember { mutableStateOf<List<SleepRawSegment>>(emptyList()) }
     var goalH by remember { mutableStateOf(8.0) }
     var loading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return@LaunchedEffect }
+    val nightsType = com.squareup.moshi.Types.newParameterizedType(
+        List::class.java, SleepNight::class.java,
+    )
+    val rawType = com.squareup.moshi.Types.newParameterizedType(
+        List::class.java, SleepRawSegment::class.java,
+    )
+
+    suspend fun fetch() {
+        if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             runCatching { api.profile() }.getOrNull()?.let { goalH = it.sleepGoalH() }
@@ -88,14 +97,27 @@ fun SleepDetailScreen(
             coroutineScope {
                 val nightsD = async(Dispatchers.IO) { api.sleepRange(since = since) }
                 val rawD = async(Dispatchers.IO) { api.sleepRaw(since = rawSince) }
-                nights = nightsD.await()
-                lastRaw = rawD.await()
+                val n = nightsD.await()
+                val r = rawD.await()
+                nights = n
+                lastRaw = r
+                app.myvitals.data.JsonCache.write(context, "sleep_detail_nights", nightsType, n)
+                app.myvitals.data.JsonCache.write(context, "sleep_detail_raw", rawType, r)
             }
+            error = null
             Timber.i("sleep detail: %d nights, %d raw segments", nights.size, lastRaw.size)
         } catch (e: Exception) {
             Timber.w(e, "sleep detail load failed")
             error = e.message?.take(160)
         } finally { loading = false }
+    }
+
+    LaunchedEffect(Unit) {
+        app.myvitals.data.JsonCache.read<List<SleepNight>>(context, "sleep_detail_nights", nightsType)
+            ?.let { nights = it.value; loading = false }
+        app.myvitals.data.JsonCache.read<List<SleepRawSegment>>(context, "sleep_detail_raw", rawType)
+            ?.let { lastRaw = it.value }
+        fetch()
     }
 
     Column(Modifier.fillMaxSize().background(MV.Bg)) {
@@ -113,16 +135,25 @@ fun SleepDetailScreen(
         when {
             loading -> Text("Loading…", color = MV.OnSurfaceVariant,
                 modifier = Modifier.padding(16.dp))
-            error != null -> Text(error!!, color = MV.Red, modifier = Modifier.padding(16.dp))
-            else -> LazyColumn(
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+            error != null && nights.isEmpty() ->
+                Text(error!!, color = MV.Red, modifier = Modifier.padding(16.dp))
+            else -> app.myvitals.ui.common.PullableMetricBox(
+                refreshing = refreshing,
+                onRefresh = {
+                    refreshing = true
+                    try { fetch() } finally { refreshing = false }
+                },
             ) {
-                item { LastNightHero(nights.lastOrNull()) }
-                item { Hypnogram(lastRaw) }
-                item { StageBreakdownChart(nights.takeLast(14)) }
-                item { DurationTrend(nights.takeLast(14), goalH) }
-                item { StageLegend() }
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    item { LastNightHero(nights.lastOrNull()) }
+                    item { Hypnogram(lastRaw) }
+                    item { StageBreakdownChart(nights.takeLast(14)) }
+                    item { DurationTrend(nights.takeLast(14), goalH) }
+                    item { StageLegend() }
+                }
             }
         }
     }

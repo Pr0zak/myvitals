@@ -37,10 +37,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
+import app.myvitals.data.JsonCache
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.DailySummary
 import app.myvitals.sync.TimePoint
 import app.myvitals.ui.MV
+import app.myvitals.ui.common.PullableMetricBox
+import com.squareup.moshi.Types
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -55,33 +58,55 @@ fun StepsDetailScreen(
     settings: SettingsRepository,
     onBack: () -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
     var goal by remember { mutableStateOf(10_000) }
     var hourly by remember { mutableStateOf<IntArray?>(null) }
     var loading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return@LaunchedEffect }
+    // Stale-while-revalidate: render last-known rows immediately so the
+    // screen never shows a spinner on slow mobile connections, then
+    // fetch fresh data in parallel. Cache key + type live next to the
+    // load() call site for grep-ability.
+    val rowsType = Types.newParameterizedType(List::class.java, DailySummary::class.java)
+    val hourlyType = IntArray::class.java
+
+    suspend fun load(force: Boolean) {
+        if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-            // Pull user-configured step goal from the server profile.
             runCatching { api.profile() }.getOrNull()?.let { goal = it.stepsGoal() }
             val since = LocalDate.now().minusDays(29).toString()
-            rows = withContext(Dispatchers.IO) { api.summaryRange(since = since) }
-            // 24h trace from the canonical-source helper on the
-            // backend; bucket into local hour-of-day for the new
-            // "Today by hour" card.
+            val freshRows = withContext(Dispatchers.IO) { api.summaryRange(since = since) }
+            rows = freshRows
+            JsonCache.write(context, "steps_detail_rows", rowsType, freshRows)
             val sinceIso = Instant.now().minusSeconds(24 * 3600).toString()
             val series = withContext(Dispatchers.IO) {
                 runCatching { api.stepsSeries(since = sinceIso) }.getOrNull()
             }
-            if (series != null) hourly = bucketByHour(series.points)
-            Timber.i("steps detail: %d rows", rows.size)
+            if (series != null) {
+                val h = bucketByHour(series.points)
+                hourly = h
+                JsonCache.write(context, "steps_detail_hourly", hourlyType, h)
+            }
+            error = null
+            Timber.i("steps detail: %d rows (force=%s)", rows.size, force)
         } catch (e: Exception) {
             Timber.w(e, "steps detail load failed")
             error = e.message?.take(160)
         } finally { loading = false }
+    }
+
+    LaunchedEffect(Unit) {
+        // 1. Read cache → render immediately (no spinner if there's anything)
+        JsonCache.read<List<DailySummary>>(context, "steps_detail_rows", rowsType)
+            ?.let { rows = it.value; loading = false }
+        JsonCache.read<IntArray>(context, "steps_detail_hourly", hourlyType)
+            ?.let { hourly = it.value }
+        // 2. Always fetch fresh in parallel — render swaps when it lands.
+        load(force = false)
     }
 
     val color = Vital.STEPS.color
@@ -100,17 +125,26 @@ fun StepsDetailScreen(
         when {
             loading -> Text("Loading…", color = MV.OnSurfaceVariant,
                 modifier = Modifier.padding(16.dp))
-            error != null -> Text(error!!, color = MV.Red, modifier = Modifier.padding(16.dp))
-            else -> LazyColumn(
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+            error != null && rows.isEmpty() -> Text(error!!, color = MV.Red,
+                modifier = Modifier.padding(16.dp))
+            else -> PullableMetricBox(
+                refreshing = refreshing,
+                onRefresh = {
+                    refreshing = true
+                    try { load(force = true) } finally { refreshing = false }
+                },
             ) {
-                item { TodayHero(rows.lastOrNull(), goal, color) }
-                hourly?.let { hr ->
-                    if (hr.sum() > 0) item { HourlyColumns(hr, color) }
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    item { TodayHero(rows.lastOrNull(), goal, color) }
+                    hourly?.let { hr ->
+                        if (hr.sum() > 0) item { HourlyColumns(hr, color) }
+                    }
+                    item { DailyColumns(rows, goal, color) }
+                    item { StepsStats(rows, goal) }
                 }
-                item { DailyColumns(rows, goal, color) }
-                item { StepsStats(rows, goal) }
             }
         }
     }

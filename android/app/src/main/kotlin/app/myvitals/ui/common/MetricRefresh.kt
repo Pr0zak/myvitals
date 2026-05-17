@@ -36,7 +36,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun PullableMetricBox(
     refreshing: Boolean,
-    onRefresh: () -> Unit,
+    onRefresh: suspend () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {

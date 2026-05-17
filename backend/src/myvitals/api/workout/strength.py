@@ -715,6 +715,9 @@ async def list_workouts(
     response includes lightweight aggregate stats (set count, total
     volume, total reps, avg/max HR over the workout window) so the
     web/phone activities feed can render them inline."""
+    # Sweep stale planned rows before listing so yesterday's missed
+    # workout shows as skipped in the feed, not as still-planned.
+    await strength_algo.auto_skip_stale_workouts(db, _local_today())
     stmt = select(models.StrengthWorkout).order_by(
         models.StrengthWorkout.date.desc(),
         models.StrengthWorkout.generated_at.desc(),
@@ -1175,6 +1178,8 @@ async def get_today(
     to bump the seed and rebuild.
     """
     today = _local_today()
+    # Sweep past-dated planned/in_progress rows to skipped. Idempotent.
+    await strength_algo.auto_skip_stale_workouts(db, today)
     existing = await _existing_workout_for(db, today)
     if existing is not None:
         return await _hydrate_workout(db, existing)
@@ -1425,7 +1430,10 @@ async def get_workout_by_date(
         d = _date.fromisoformat(date_iso)
     except ValueError as e:
         raise HTTPException(400, f"invalid date: {e}") from e
-    today = _date.today()
+    today = _local_today()
+    # Sweep stale planned rows before reading so a past date returns
+    # status="skipped" rather than a stuck "planned".
+    await strength_algo.auto_skip_stale_workouts(db, today)
     existing = await _existing_workout_for(db, d)
     if existing is not None:
         wo = await _hydrate_workout(db, existing)

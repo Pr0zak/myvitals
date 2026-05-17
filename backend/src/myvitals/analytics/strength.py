@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import random
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -823,7 +824,51 @@ async def read_recovery_inputs(
     )
 
 
+log = logging.getLogger(__name__)
+
+
 _ROTATION_FOCUSES = ("push", "pull", "legs", "upper", "lower", "full_body")
+
+
+async def auto_skip_stale_workouts(
+    db: AsyncSession, today_local: date,
+) -> int:
+    """Mark any past-dated planned/in_progress workouts as skipped.
+
+    Lazy-triggered from the read endpoints (/today, /workouts, /by-date)
+    so the user doesn't see yesterday's "still planned" card hanging
+    around. Idempotent — the WHERE clause filters to the exact rows
+    that need flipping, so repeated calls are no-ops once cleaned up.
+
+    Returns the number of rows updated (for log visibility).
+
+    Excludes the cardio-day rows that get auto-completed by activity
+    sync (those go directly planned → completed). Anything still in
+    planned/in_progress past midnight in the user's TZ is treated as
+    a missed session by definition.
+
+    Downstream:
+    - `last_split_for_user` already filters to completed/in_progress
+      so skipped rows are correctly ignored for rotation.
+    - Day-spacing check (the no-back-to-back-strength guard in
+      generate_plan) only counts completed, so a skipped Saturday
+      doesn't gate Sunday's plan as a rest day.
+    - No need to eagerly regenerate future days — `/today` is
+      lazy-generating per call, and the next call will pick the right
+      split given the (now correct) last-completed history.
+    """
+    from sqlalchemy import update as _update
+    res = await db.execute(
+        _update(models.StrengthWorkout)
+        .where(models.StrengthWorkout.date < today_local)
+        .where(models.StrengthWorkout.status.in_(("planned", "in_progress")))
+        .values(status="skipped")
+    )
+    n = res.rowcount or 0
+    if n > 0:
+        await db.commit()
+        log.info("auto-skipped %d stale planned workout(s)", n)
+    return n
 
 
 async def last_split_for_user(

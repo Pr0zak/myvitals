@@ -206,11 +206,12 @@ async def get_last_sleep(
             else:
                 clamped = min(dur, max(0, int((eff_end - ts).total_seconds())))
             by_stage[stage] = by_stage.get(stage, 0) + clamped
+        asleep_s = sum(v for k, v in by_stage.items() if k != "awake")
         return SleepNight(
             date=sess.start_at.date(),
             start=sess.start_at,
             end=eff_end,
-            total_s=int((eff_end - sess.start_at).total_seconds()),
+            total_s=asleep_s or int((eff_end - sess.start_at).total_seconds()),
             stages=[SleepStageBucket(stage=k, duration_s=v) for k, v in by_stage.items()],
         )
 
@@ -253,14 +254,15 @@ async def get_last_sleep(
             clamped = dur
         by_stage[stage] = by_stage.get(stage, 0) + clamped
 
-    # Wall-clock total beats summed-stages for accuracy when stages overlap.
-    total_s = max(int((end_t - start_t).total_seconds()), sum(by_stage.values()))
-
+    # Asleep time only — matches daily_summary.sleep_duration_s so the
+    # tile and the detail screen show the same number.
+    asleep_s = sum(v for k, v in by_stage.items() if k != "awake")
+    fallback = max(int((end_t - start_t).total_seconds()), sum(by_stage.values()))
     return SleepNight(
         date=start_t.date(),
         start=start_t,
         end=end_t,
-        total_s=total_s,
+        total_s=asleep_s or fallback,
         stages=[SleepStageBucket(stage=k, duration_s=v) for k, v in by_stage.items()],
     )
 
@@ -320,11 +322,12 @@ async def get_sleep_range(
                 else:
                     clamped = min(dur, max(0, int((s.end_at - ts).total_seconds())))
                 by_stage[stage] = by_stage.get(stage, 0) + clamped
+            asleep_s = sum(v for k, v in by_stage.items() if k != "awake")
             out.append(SleepNight(
                 date=s.start_at.date(),
                 start=s.start_at,
                 end=s.end_at,
-                total_s=int((s.end_at - s.start_at).total_seconds()),
+                total_s=asleep_s or int((s.end_at - s.start_at).total_seconds()),
                 stages=[SleepStageBucket(stage=k, duration_s=v) for k, v in by_stage.items()],
             ))
         return out
@@ -364,12 +367,13 @@ async def get_sleep_range(
             else:
                 clamped = dur
             by_stage[stage] = by_stage.get(stage, 0) + clamped
-        total_s = max(int((end_t - start_t).total_seconds()), sum(by_stage.values()))
+        asleep_s = sum(v for k, v in by_stage.items() if k != "awake")
+        fallback = max(int((end_t - start_t).total_seconds()), sum(by_stage.values()))
         out.append(SleepNight(
             date=start_t.date(),
             start=start_t,
             end=end_t,
-            total_s=total_s,
+            total_s=asleep_s or fallback,
             stages=[SleepStageBucket(stage=k, duration_s=v) for k, v in by_stage.items()],
         ))
     return out

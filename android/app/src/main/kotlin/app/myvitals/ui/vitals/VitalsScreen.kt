@@ -166,6 +166,18 @@ fun VitalsScreen(
             loading = false
             refreshing = true
         }
+        // Cache the profile too so the user's preferred tile order
+        // renders on the first frame. Without this, `tiles =
+        // remember(profile)` recomputes when /profile lands and the
+        // grid visibly rearranges from the canonical default into
+        // the user's order ~1s after launch.
+        val cachedProfile = app.myvitals.data.JsonCache.read<ProfileResponse>(
+            context, "vitals_profile",
+            app.myvitals.sync.ProfileResponse::class.java,
+        )
+        if (cachedProfile != null) {
+            profile = cachedProfile.value
+        }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val since30 = LocalDate.now().minusDays(29).toString()
@@ -276,6 +288,12 @@ fun VitalsScreen(
                     app.myvitals.data.JsonCache.write(
                         context, "vitals_today",
                         app.myvitals.sync.DailySummary::class.java, it,
+                    )
+                }
+                profile?.let {
+                    app.myvitals.data.JsonCache.write(
+                        context, "vitals_profile",
+                        app.myvitals.sync.ProfileResponse::class.java, it,
                     )
                 }
             }

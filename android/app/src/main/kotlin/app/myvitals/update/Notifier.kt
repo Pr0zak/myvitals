@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import app.myvitals.R
 
 object Notifier {
 
@@ -90,7 +91,7 @@ object Notifier {
         val title = "Fasting: $stageLabel"
         val body = "${"%.0f".format(elapsedH)}h in — ${"%.0f".format(targetH - elapsedH)}h to your target."
         val notif = NotificationCompat.Builder(context, FASTING_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_stat_fasting)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -173,7 +174,7 @@ object Notifier {
         } catch (e: Exception) { /* sound failed — non-critical */ }
 
         val notif = NotificationCompat.Builder(context, REST_TIMER_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setSmallIcon(R.drawable.ic_stat_rest_timer)
             .setContentTitle("Rest done")
             .setContentText("${secondsRested}s rest complete — start your next set.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -201,7 +202,7 @@ object Notifier {
             else -> "Was $fromStatus, now $toStatus"
         }
         val notif = NotificationCompat.Builder(context, TRAIL_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_notification_overlay)
+            .setSmallIcon(R.drawable.ic_stat_trail)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -235,13 +236,13 @@ object Notifier {
             context, alertId.toInt(), deepLink,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val icon = when (severity) {
-            "bad"  -> android.R.drawable.stat_sys_warning
-            "good" -> android.R.drawable.stat_notify_more
-            else   -> android.R.drawable.stat_notify_sync
-        }
+        // Severity used to swap glyphs (warning / + / refresh) — Android
+        // renders status-bar icons by alpha only, so the silhouette is
+        // the same colour regardless. Severity is now expressed through
+        // the title text and the channel-accent colour; the silhouette
+        // is the consistent brand sparkle.
         val notif = NotificationCompat.Builder(context, AI_ALERT_CHANNEL_ID)
-            .setSmallIcon(icon)
+            .setSmallIcon(R.drawable.ic_stat_ai_alert)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -282,7 +283,7 @@ object Notifier {
         )
 
         val notif = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setSmallIcon(R.drawable.ic_stat_update)
             .setContentTitle("myvitals ${release.tagName} available")
             .setContentText("Tap to download and install")
             .setContentIntent(pi)

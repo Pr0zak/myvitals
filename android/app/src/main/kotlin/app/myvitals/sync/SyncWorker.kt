@@ -78,6 +78,36 @@ class SyncWorker(
         } finally {
             persistFlags()
             sendHeartbeat(attemptAt)
+            kickAlertPollers()
+        }
+    }
+
+    /** Enqueue one-shot trail + AI alert polls so any backend alerts
+     *  surface within the same 15-min sync cycle instead of waiting
+     *  for the next periodic tick (avg latency 7.5 min lower).
+     *  Idempotent — WorkManager dedupes by unique name. */
+    private fun kickAlertPollers() {
+        try {
+            val mgr = androidx.work.WorkManager.getInstance(applicationContext)
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
+            mgr.enqueueUniqueWork(
+                app.myvitals.trails.TrailAlertWorker.UNIQUE_NAME + "_oneshot",
+                androidx.work.ExistingWorkPolicy.REPLACE,
+                androidx.work.OneTimeWorkRequestBuilder<
+                    app.myvitals.trails.TrailAlertWorker>()
+                    .setConstraints(constraints).build(),
+            )
+            mgr.enqueueUniqueWork(
+                app.myvitals.ai.AiAlertWorker.UNIQUE_NAME + "_oneshot",
+                androidx.work.ExistingWorkPolicy.REPLACE,
+                androidx.work.OneTimeWorkRequestBuilder<
+                    app.myvitals.ai.AiAlertWorker>()
+                    .setConstraints(constraints).build(),
+            )
+        } catch (e: Exception) {
+            Timber.w(e, "kickAlertPollers failed")
         }
     }
 

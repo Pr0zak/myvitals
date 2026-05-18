@@ -84,13 +84,18 @@ class MyVitalsApp : Application() {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
-        val request = PeriodicWorkRequestBuilder<TrailAlertWorker>(30, TimeUnit.MINUTES)
+        // 15-min cadence matches SyncWorker so alerts surface inside
+        // the same window as the rest of the sync data. UPDATE policy
+        // (not KEEP) ensures existing installs reschedule on the next
+        // launch instead of sticking with whatever they were enqueued
+        // with on first install.
+        val request = PeriodicWorkRequestBuilder<TrailAlertWorker>(15, TimeUnit.MINUTES)
             .setConstraints(constraints)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 60, TimeUnit.SECONDS)
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             TrailAlertWorker.UNIQUE_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
     }
@@ -99,13 +104,13 @@ class MyVitalsApp : Application() {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
-        val request = PeriodicWorkRequestBuilder<AiAlertWorker>(30, TimeUnit.MINUTES)
+        val request = PeriodicWorkRequestBuilder<AiAlertWorker>(15, TimeUnit.MINUTES)
             .setConstraints(constraints)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 60, TimeUnit.SECONDS)
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             AiAlertWorker.UNIQUE_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
     }

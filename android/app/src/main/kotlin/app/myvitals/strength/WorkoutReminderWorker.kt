@@ -9,6 +9,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import app.myvitals.R
 import app.myvitals.MainActivity
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
@@ -80,7 +81,7 @@ class WorkoutReminderWorker(
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             val notif = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_menu_today)
+                .setSmallIcon(R.drawable.ic_stat_workout)
                 .setContentTitle(title)
                 .setContentText("$sets sets · ${plan.exercises.size} exercises")
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))

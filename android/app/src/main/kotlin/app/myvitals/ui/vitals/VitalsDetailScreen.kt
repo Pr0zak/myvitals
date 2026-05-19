@@ -86,7 +86,7 @@ fun VitalsDetailScreen(
 
     val seriesType = remember { VitalsSeries::class.java as java.lang.reflect.Type }
 
-    fun pushSeries(xs: List<Double>, ys: List<Double>) {
+    suspend fun pushSeries(xs: List<Double>, ys: List<Double>) {
         if (xs.isNotEmpty() && ys.isNotEmpty()) {
             producer.runTransaction { lineSeries { series(x = xs, y = ys) } }
             val realY = ys.filter { it.isFinite() }

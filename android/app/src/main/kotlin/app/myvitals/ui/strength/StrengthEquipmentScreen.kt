@@ -67,11 +67,24 @@ fun StrengthEquipmentScreen(
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    val equipmentType = remember { EquipmentPayload::class.java as java.lang.reflect.Type }
+
     LaunchedEffect(Unit) {
+        app.myvitals.data.JsonCache.read<EquipmentPayload>(
+            context, "strength_equipment", equipmentType,
+        )?.let {
+            equipment = it.value
+            loading = false
+        }
         try {
-            equipment = repo.equipment().payload
+            val fresh = repo.equipment().payload
+            equipment = fresh
+            app.myvitals.data.JsonCache.write(
+                context, "strength_equipment", equipmentType, fresh,
+            )
         } catch (e: Exception) {
-            Timber.w(e, "load equipment failed"); error = e.message?.take(160)
+            Timber.w(e, "load equipment failed")
+            if (equipment == null) error = e.message?.take(160)
         } finally { loading = false }
     }
 

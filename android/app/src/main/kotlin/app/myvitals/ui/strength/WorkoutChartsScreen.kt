@@ -65,6 +65,7 @@ fun WorkoutChartsScreen(
     settings: SettingsRepository,
     onBack: () -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var days by remember { mutableStateOf(90) }
     var stats by remember { mutableStateOf<StrengthStats?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -74,16 +75,27 @@ fun WorkoutChartsScreen(
         if (!settings.isConfigured()) {
             error = "Backend not configured."; loading = false; return@LaunchedEffect
         }
-        loading = true; error = null
+        val cacheKey = "strength_stats_${days}d"
+        app.myvitals.data.JsonCache.read<StrengthStats>(
+            context, cacheKey, StrengthStats::class.java,
+        )?.let {
+            stats = it.value
+            loading = false
+        }
+        if (stats == null) { loading = true }
+        error = null
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-            stats = withContext(Dispatchers.IO) { api.strengthStats(days = days) }
+            val fresh = withContext(Dispatchers.IO) { api.strengthStats(days = days) }
+            stats = fresh
+            app.myvitals.data.JsonCache.write(
+                context, cacheKey, StrengthStats::class.java, fresh,
+            )
             Timber.i("strength stats: %dd → %d workouts, %d sets, %.0f lb",
-                days, stats?.nWorkouts ?: 0,
-                stats?.nSets ?: 0, stats?.totalVolumeLb ?: 0.0)
+                days, fresh.nWorkouts, fresh.nSets, fresh.totalVolumeLb)
         } catch (e: Exception) {
             Timber.w(e, "strength stats load failed")
-            error = e.message?.take(160)
+            if (stats == null) error = e.message?.take(160)
         } finally { loading = false }
     }
 

@@ -542,7 +542,7 @@ fun StrengthTodayScreen(
                 // user why instead.
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MV.SurfaceVariant),
+                    colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(

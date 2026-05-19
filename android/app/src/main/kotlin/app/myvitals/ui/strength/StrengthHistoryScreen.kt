@@ -69,13 +69,29 @@ fun StrengthHistoryScreen(
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    val rowsType = remember { app.myvitals.data.JsonCache.listType(StrengthWorkoutSummary::class.java) }
+
     LaunchedEffect(Unit) {
+        // SWR: render cached history immediately so the screen survives
+        // offline opens and feels instant on cold launches.
+        app.myvitals.data.JsonCache.read<List<StrengthWorkoutSummary>>(
+            context, "strength_history_rows", rowsType,
+        )?.let {
+            rows = it.value
+            loading = false
+        }
         try {
-            rows = repo.history()
+            val fresh = repo.history()
+            if (fresh.isNotEmpty()) {
+                rows = fresh
+                app.myvitals.data.JsonCache.write(
+                    context, "strength_history_rows", rowsType, fresh,
+                )
+            }
             catalog = repo.catalog()
         } catch (e: Exception) {
             Timber.w(e, "history load failed")
-            error = e.message?.take(160)
+            if (rows.isEmpty()) error = e.message?.take(160)
         } finally { loading = false }
     }
 

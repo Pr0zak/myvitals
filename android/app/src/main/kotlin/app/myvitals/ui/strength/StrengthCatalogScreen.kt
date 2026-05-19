@@ -93,7 +93,20 @@ fun StrengthCatalogScreen(
     var sortBy by remember { mutableStateOf("name") }
     var sortMenuOpen by remember { mutableStateOf(false) }
 
+    val equipmentType = remember { EquipmentPayload::class.java as java.lang.reflect.Type }
+
     LaunchedEffect(Unit) {
+        // Catalog has its own cache in StrengthPlanCache; equipment did
+        // not. SWR-render cached equipment immediately so the catalog
+        // renders availability flags correctly offline.
+        app.myvitals.data.JsonCache.read<EquipmentPayload>(
+            context, "strength_equipment", equipmentType,
+        )?.let {
+            equipment = it.value
+            prefs.clear()
+            prefs.putAll(it.value.exercisePrefs)
+            loading = false
+        }
         try {
             val cat = repo.catalog()
             catalog = cat.values.sortedBy { it.name }
@@ -101,13 +114,16 @@ fun StrengthCatalogScreen(
             equipment = eq.payload
             prefs.clear()
             prefs.putAll(eq.payload.exercisePrefs)
+            app.myvitals.data.JsonCache.write(
+                context, "strength_equipment", equipmentType, eq.payload,
+            )
             // Non-critical: fetch per-exercise stats for pill + sort.
             val ss = repo.exercisesStatsSummary()
             statsSummary.clear()
             statsSummary.putAll(ss)
         } catch (e: Exception) {
             Timber.w(e, "catalog load failed")
-            error = e.message?.take(160)
+            if (catalog.isEmpty() && equipment == null) error = e.message?.take(160)
         } finally { loading = false }
     }
 

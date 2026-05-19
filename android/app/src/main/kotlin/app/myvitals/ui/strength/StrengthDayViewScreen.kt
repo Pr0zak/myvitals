@@ -52,6 +52,7 @@ fun StrengthDayViewScreen(
     dateIso: String,
     onBack: () -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -59,19 +60,33 @@ fun StrengthDayViewScreen(
 
     LaunchedEffect(dateIso) {
         if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return@LaunchedEffect }
+        val cacheKey = "strength_day_$dateIso"
+        app.myvitals.data.JsonCache.read<StrengthWorkoutDetail>(
+            context, cacheKey, StrengthWorkoutDetail::class.java,
+        )?.let {
+            workout = it.value
+            loading = false
+        }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val resp = withContext(Dispatchers.IO) { api.strengthWorkoutByDate(dateIso) }
             when {
-                resp.isSuccessful -> workout = resp.body()
-                resp.code() == 404 -> notFound = true
-                else -> error = "Load failed (HTTP ${resp.code()})"
+                resp.isSuccessful -> {
+                    workout = resp.body()
+                    workout?.let {
+                        app.myvitals.data.JsonCache.write(
+                            context, cacheKey, StrengthWorkoutDetail::class.java, it,
+                        )
+                    }
+                }
+                resp.code() == 404 -> if (workout == null) notFound = true
+                else -> if (workout == null) error = "Load failed (HTTP ${resp.code()})"
             }
             Timber.i("workout-day-view %s: status=%d hasBody=%s",
                 dateIso, resp.code(), workout != null)
         } catch (e: Exception) {
             Timber.w(e, "workout-day-view load failed")
-            error = e.message?.take(160)
+            if (workout == null) error = e.message?.take(160)
         } finally { loading = false }
     }
 

@@ -667,27 +667,51 @@ async function completeWorkout() {
   }
 }
 
-// Cardio-day "Log this workout" — captures label + duration, posts to
-// complete-cardio which mints a manual Activity row that flows through
-// the activity feed, HR chart markers, and cardio coach payload.
+// Cardio-day "Log this workout" — captures label + duration + ended-at,
+// posts to complete-cardio which mints a manual Activity row that flows
+// through the activity feed, HR chart markers, and cardio coach payload.
 const showCardioLog = ref(false);
 const cardioLabel = ref("");
 const cardioDuration = ref(30);
+// Ended-at picker: HH:MM in local time, default = current minute. Lets
+// the user backdate a session so the HR-sample scan window covers the
+// real workout instead of "right now".
+const cardioEndedAt = ref("");
+function localTimeNow(): string {
+  const d = new Date();
+  const hh = d.getHours().toString().padStart(2, "0");
+  const mm = d.getMinutes().toString().padStart(2, "0");
+  return `${hh}:${mm}`;
+}
 function openCardioLog() {
   cardioLabel.value = "";
   cardioDuration.value = 30;
+  cardioEndedAt.value = localTimeNow();
   showCardioLog.value = true;
+}
+function endedAtIso(): string {
+  // Compose a same-day datetime from the user's HH:MM. If their picked
+  // time is in the future (e.g. they pick 11:30 PM but it's 1 AM), roll
+  // it back a day — feels less surprising than dropping a future Activity.
+  const [hh, mm] = cardioEndedAt.value.split(":").map(Number);
+  const d = new Date();
+  d.setHours(hh, mm, 0, 0);
+  if (d.getTime() > Date.now()) d.setDate(d.getDate() - 1);
+  return d.toISOString();
 }
 async function submitCardioLog() {
   if (!workout.value) return;
   const label = cardioLabel.value.trim();
   const mins = Number(cardioDuration.value);
   if (!label || !mins || mins <= 0 || mins > 1440) return;
+  const endedMs = new Date(endedAtIso()).getTime();
+  const startIso = new Date(endedMs - mins * 60_000).toISOString();
   busy.value = "complete";
   try {
     await api.completeStrengthCardio(workout.value.id, {
       label,
       duration_minutes: mins,
+      start_at: startIso,
     });
     showCardioLog.value = false;
     await loadAll();
@@ -956,6 +980,15 @@ useVisibilityRefresh(loadAll);
             <span>Duration (minutes)</span>
             <input v-model.number="cardioDuration" type="number"
                    min="1" max="1440" :disabled="busy === 'complete'" />
+          </label>
+          <label class="field">
+            <span>Ended at</span>
+            <input v-model="cardioEndedAt" type="time"
+                   :disabled="busy === 'complete'" />
+            <small class="hint" style="margin: 0.2rem 0 0;">
+              Adjust if you're logging this later — the HR sample window
+              anchors to this end time minus the duration above.
+            </small>
           </label>
           <div class="modal-actions">
             <button class="ghost" :disabled="busy === 'complete'"

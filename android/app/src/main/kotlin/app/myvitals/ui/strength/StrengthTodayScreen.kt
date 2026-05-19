@@ -270,14 +270,20 @@ fun StrengthTodayScreen(
             defaultDurationMin = 30,
             submitting = cardioLogging,
             onDismiss = { if (!cardioLogging) showCardioLog = false },
-            onSubmit = { label, durationMin ->
+            onSubmit = { label, durationMin, endedMinAgo ->
                 scope.launch {
                     cardioLogging = true
                     try {
+                        // Anchor the HR window: end = now - endedMinAgo,
+                        // start = end - duration. Lets the user backdate
+                        // a session whose HR is in the past minute range.
+                        val startAt = java.time.Instant.now()
+                            .minusSeconds((endedMinAgo + durationMin) * 60L)
                         workout = repo.completeCardio(
                             workoutId = workout!!.id,
                             label = label,
                             durationMinutes = durationMin.toDouble(),
+                            startAt = startAt,
                         )
                         showCardioLog = false
                         reload()
@@ -2925,12 +2931,18 @@ private fun CardioLogDialog(
     defaultDurationMin: Int,
     submitting: Boolean,
     onDismiss: () -> Unit,
-    onSubmit: (label: String, durationMin: Int) -> Unit,
+    onSubmit: (label: String, durationMin: Int, endedMinAgo: Int) -> Unit,
 ) {
     var label by remember { mutableStateOf(defaultLabel) }
     var durationStr by remember { mutableStateOf(defaultDurationMin.toString()) }
+    // Minutes-ago slider: defaults to 0 ("just now"). User adjusts if
+    // logging a session that finished a while back — keeps the HR
+    // sample scan window over the real workout instead of right now.
+    var endedMinAgoStr by remember { mutableStateOf("0") }
     val duration = durationStr.toIntOrNull()
-    val canSubmit = label.isNotBlank() && duration != null && duration in 1..1440 && !submitting
+    val endedMinAgo = endedMinAgoStr.toIntOrNull() ?: 0
+    val canSubmit = label.isNotBlank() && duration != null && duration in 1..1440 &&
+        endedMinAgo in 0..2880 && !submitting
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Log this workout") },
@@ -2964,12 +2976,39 @@ private fun CardioLogDialog(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !submitting,
                 )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = endedMinAgoStr,
+                    onValueChange = { endedMinAgoStr = it.take(4).filter(Char::isDigit) },
+                    label = { Text("Ended (min ago)") },
+                    placeholder = { Text("0 = just now") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !submitting,
+                )
+                if (duration != null && endedMinAgo > 0) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "HR will be scanned from ${endedMinAgo + duration} min " +
+                        "ago to $endedMinAgo min ago.",
+                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                    )
+                }
             }
         },
         confirmButton = {
             androidx.compose.material3.TextButton(
                 enabled = canSubmit,
-                onClick = { onSubmit(label.trim(), duration ?: defaultDurationMin) },
+                onClick = {
+                    onSubmit(
+                        label.trim(),
+                        duration ?: defaultDurationMin,
+                        endedMinAgo,
+                    )
+                },
             ) { Text(if (submitting) "Logging…" else "Log workout", color = MV.Green) }
         },
         dismissButton = {

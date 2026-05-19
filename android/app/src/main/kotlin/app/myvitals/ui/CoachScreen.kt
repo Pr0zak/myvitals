@@ -64,6 +64,7 @@ fun CoachScreen(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     var workoutOpen by remember { mutableStateOf(false) }
     var workout by remember { mutableStateOf<CoachCard?>(null) }
@@ -155,22 +156,79 @@ fun CoachScreen(
     // Preload the latest cached cards on mount so the user sees content
     // immediately without burning a Claude call. Goals load alongside —
     // they're cheap (no AI) and feed the read-only progress strip.
+    //
+    // SWR: every card + goals also persists to JsonCache so a cold-start
+    // offline open renders the last-known cards instead of empty rows.
+    val goalsType = remember {
+        app.myvitals.data.JsonCache.listType(app.myvitals.sync.AiGoal::class.java)
+    }
     LaunchedEffect(Unit) {
+        // Hydrate from local cache first (offline-safe). Per-card.
+        app.myvitals.data.JsonCache.read<CoachCard>(
+            context, "coach_workout_latest", CoachCard::class.java,
+        )?.let { workout = it.value }
+        app.myvitals.data.JsonCache.read<CoachCard>(
+            context, "coach_cardio_latest", CoachCard::class.java,
+        )?.let { cardio = it.value }
+        app.myvitals.data.JsonCache.read<CoachCard>(
+            context, "coach_sleep_latest", CoachCard::class.java,
+        )?.let { sleep = it.value }
+        app.myvitals.data.JsonCache.read<CoachCard>(
+            context, "coach_recovery_latest", CoachCard::class.java,
+        )?.let { recovery = it.value }
+        app.myvitals.data.JsonCache.read<CoachCard>(
+            context, "coach_fasting_latest", CoachCard::class.java,
+        )?.let { fasting = it.value }
+        app.myvitals.data.JsonCache.read<List<app.myvitals.sync.AiGoal>>(
+            context, "coach_goals", goalsType,
+        )?.let { goals = it.value }
+
         if (!settings.isConfigured()) return@LaunchedEffect
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val w = withContext(Dispatchers.IO) { api.coachWorkoutLatest() }
-            if (w.isSuccessful) workout = w.body()
+            if (w.isSuccessful) w.body()?.let {
+                workout = it
+                app.myvitals.data.JsonCache.write(
+                    context, "coach_workout_latest", CoachCard::class.java, it,
+                )
+            }
             val c = withContext(Dispatchers.IO) { api.coachCardioLatest() }
-            if (c.isSuccessful) cardio = c.body()
+            if (c.isSuccessful) c.body()?.let {
+                cardio = it
+                app.myvitals.data.JsonCache.write(
+                    context, "coach_cardio_latest", CoachCard::class.java, it,
+                )
+            }
             val s = withContext(Dispatchers.IO) { api.coachSleepLatest() }
-            if (s.isSuccessful) sleep = s.body()
+            if (s.isSuccessful) s.body()?.let {
+                sleep = it
+                app.myvitals.data.JsonCache.write(
+                    context, "coach_sleep_latest", CoachCard::class.java, it,
+                )
+            }
             val r = withContext(Dispatchers.IO) { api.coachRecoveryLatest() }
-            if (r.isSuccessful) recovery = r.body()
+            if (r.isSuccessful) r.body()?.let {
+                recovery = it
+                app.myvitals.data.JsonCache.write(
+                    context, "coach_recovery_latest", CoachCard::class.java, it,
+                )
+            }
             val f = withContext(Dispatchers.IO) { api.coachFastingLatest() }
-            if (f.isSuccessful) fasting = f.body()
-            goals = withContext(Dispatchers.IO) {
+            if (f.isSuccessful) f.body()?.let {
+                fasting = it
+                app.myvitals.data.JsonCache.write(
+                    context, "coach_fasting_latest", CoachCard::class.java, it,
+                )
+            }
+            val freshGoals = withContext(Dispatchers.IO) {
                 runCatching { api.aiGoals() }.getOrDefault(emptyList())
+            }
+            if (freshGoals.isNotEmpty()) {
+                goals = freshGoals
+                app.myvitals.data.JsonCache.write(
+                    context, "coach_goals", goalsType, freshGoals,
+                )
             }
         } catch (_: Exception) { /* preload best-effort */ }
     }

@@ -53,14 +53,24 @@ private data class WPoint(val ms: Long, val kg: Double)
 
 @Composable
 fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var range by remember { mutableStateOf(VitalRange.MONTH) }
     var pts by remember { mutableStateOf<List<WPoint>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    val ptsType = remember {
+        app.myvitals.data.JsonCache.listType(WPoint::class.java)
+    }
+
     LaunchedEffect(range) {
+        val cacheKey = "weight_detail_${range.name.lowercase()}"
+        app.myvitals.data.JsonCache.read<List<WPoint>>(
+            context, cacheKey, ptsType,
+        )?.let { pts = it.value; loading = false }
         if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return@LaunchedEffect }
-        loading = true; error = null
+        if (pts.isEmpty()) loading = true
+        error = null
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val since = LocalDate.now().minusDays(range.days.toLong() - 1).toString()
@@ -76,10 +86,13 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                 runCatching { out += WPoint(Instant.parse(t).toEpochMilli(), w) }
             }
             pts = out
+            if (pts.isNotEmpty()) {
+                app.myvitals.data.JsonCache.write(context, cacheKey, ptsType, pts)
+            }
             Timber.i("weight detail: range=%s points=%d", range, pts.size)
         } catch (e: Exception) {
             Timber.w(e, "weight detail load failed")
-            error = e.message?.take(160)
+            if (pts.isEmpty()) error = e.message?.take(160)
         } finally { loading = false }
     }
 

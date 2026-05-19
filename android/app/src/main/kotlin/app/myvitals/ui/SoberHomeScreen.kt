@@ -69,6 +69,7 @@ fun SoberHomeScreen(
     onBack: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     var current by remember { mutableStateOf<SoberCurrentResponse?>(null) }
     var history by remember { mutableStateOf<List<app.myvitals.sync.SoberStreak>>(emptyList()) }
@@ -76,6 +77,10 @@ fun SoberHomeScreen(
     var loadError by remember { mutableStateOf<String?>(null) }
     var resetting by remember { mutableStateOf(false) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    val historyType = remember {
+        app.myvitals.data.JsonCache.listType(app.myvitals.sync.SoberStreak::class.java)
+    }
 
     suspend fun doReset() {
         if (!settings.isConfigured()) { loadError = "Backend not configured"; return }
@@ -101,22 +106,42 @@ fun SoberHomeScreen(
         loadError = null
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-            current = withContext(Dispatchers.IO) { api.soberCurrent() }
+            val fresh = withContext(Dispatchers.IO) { api.soberCurrent() }
+            current = fresh
+            app.myvitals.data.JsonCache.write(
+                context, "sober_current", SoberCurrentResponse::class.java, fresh,
+            )
             // History is non-critical — log + continue if it fails so the
             // counter still renders.
-            history = runCatching {
+            val freshHist = runCatching {
                 withContext(Dispatchers.IO) { api.soberHistory(limit = 100) }
             }.getOrElse {
                 Timber.w(it, "soberHistory failed")
                 emptyList()
             }
+            if (freshHist.isNotEmpty()) {
+                history = freshHist
+                app.myvitals.data.JsonCache.write(
+                    context, "sober_history", historyType, freshHist,
+                )
+            }
         } catch (e: Exception) {
             Timber.w(e, "soberCurrent failed")
-            loadError = e.message?.take(160) ?: "Network error"
+            if (current == null) loadError = e.message?.take(160) ?: "Network error"
         }
     }
 
-    LaunchedEffect(Unit) { fetch() }
+    LaunchedEffect(Unit) {
+        // SWR hydrate: render last-known streak counter immediately so
+        // an offline open shows the current streak instead of a spinner.
+        app.myvitals.data.JsonCache.read<SoberCurrentResponse>(
+            context, "sober_current", SoberCurrentResponse::class.java,
+        )?.let { current = it.value }
+        app.myvitals.data.JsonCache.read<List<app.myvitals.sync.SoberStreak>>(
+            context, "sober_history", historyType,
+        )?.let { history = it.value }
+        fetch()
+    }
     app.myvitals.ui.common.LifecycleResumeEffect {
         scope.launch { fetch() }
     }

@@ -128,6 +128,9 @@ fun FastingScreen(
     var logSaving by remember { mutableStateOf(false) }
     var logMsg by remember { mutableStateOf<String?>(null) }
 
+    val historyType = remember {
+        app.myvitals.data.JsonCache.listType(FastingSession::class.java)
+    }
     suspend fun loadAll() {
         if (!settings.isConfigured()) {
             error = "Backend not configured — set URL + token in Settings."
@@ -140,18 +143,50 @@ fun FastingScreen(
             // Endpoint returns 200 + null body for "no active fast". Retrofit
             // surfaces that as a successful Response with body() == null.
             current = if (resp.isSuccessful) resp.body() else null
-            history = withContext(Dispatchers.IO) { api.fastingHistory(20) }
-            stats = withContext(Dispatchers.IO) { api.fastingStats(90) }
+            // Persist current-fast snapshot only when present (null is a
+            // valid state but we don't want to overwrite the cached
+            // hostsesion with null on a transient network blip).
+            current?.let {
+                app.myvitals.data.JsonCache.write(
+                    context, "fasting_current", FastingSession::class.java, it,
+                )
+            }
+            val freshHist = withContext(Dispatchers.IO) { api.fastingHistory(20) }
+            history = freshHist
+            if (freshHist.isNotEmpty()) {
+                app.myvitals.data.JsonCache.write(
+                    context, "fasting_history", historyType, freshHist,
+                )
+            }
+            val freshStats = withContext(Dispatchers.IO) { api.fastingStats(90) }
+            stats = freshStats
+            app.myvitals.data.JsonCache.write(
+                context, "fasting_stats", FastingStats::class.java, freshStats,
+            )
             error = null
         } catch (e: Exception) {
             Timber.w(e, "fasting load failed")
-            error = e.message?.take(160)
+            if (history.isEmpty() && current == null && stats == null) {
+                error = e.message?.take(160)
+            }
         } finally {
             loading = false
         }
     }
 
-    LaunchedEffect(Unit) { loadAll() }
+    LaunchedEffect(Unit) {
+        // SWR: hydrate from cache first so the screen renders offline.
+        app.myvitals.data.JsonCache.read<FastingSession>(
+            context, "fasting_current", FastingSession::class.java,
+        )?.let { current = it.value }
+        app.myvitals.data.JsonCache.read<List<FastingSession>>(
+            context, "fasting_history", historyType,
+        )?.let { history = it.value; loading = false }
+        app.myvitals.data.JsonCache.read<FastingStats>(
+            context, "fasting_stats", FastingStats::class.java,
+        )?.let { stats = it.value }
+        loadAll()
+    }
     LaunchedEffect(Unit) {
         while (true) {
             delay(1_000)

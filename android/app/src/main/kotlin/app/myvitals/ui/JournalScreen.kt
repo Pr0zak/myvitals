@@ -93,24 +93,37 @@ private val QUICK_ADDS = listOf(
 @Composable
 fun JournalScreen(settings: SettingsRepository, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var rows by remember { mutableStateOf<List<Annotation>>(emptyList()) }
     var busy by remember { mutableStateOf<String?>(null) }
     var flash by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    val rowsType = remember {
+        app.myvitals.data.JsonCache.listType(Annotation::class.java)
+    }
     suspend fun reload() {
         if (!settings.isConfigured()) return
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-            rows = withContext(Dispatchers.IO) { api.journalList(limit = 30) }
+            val fresh = withContext(Dispatchers.IO) { api.journalList(limit = 30) }
+            rows = fresh
+            app.myvitals.data.JsonCache.write(
+                context, "journal_rows", rowsType, fresh,
+            )
             error = null
         } catch (e: Exception) {
             Timber.w(e, "journal list failed")
-            error = e.message?.take(160)
+            if (rows.isEmpty()) error = e.message?.take(160)
         }
     }
 
-    LaunchedEffect(Unit) { reload() }
+    LaunchedEffect(Unit) {
+        app.myvitals.data.JsonCache.read<List<Annotation>>(
+            context, "journal_rows", rowsType,
+        )?.let { rows = it.value }
+        reload()
+    }
 
     fun quickAdd(q: QuickAdd) {
         if (busy != null) return

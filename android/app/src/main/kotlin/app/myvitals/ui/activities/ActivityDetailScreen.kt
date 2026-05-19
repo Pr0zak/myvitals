@@ -66,6 +66,7 @@ fun ActivityDetailScreen(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var activity by remember { mutableStateOf<ActivityRow?>(null) }
     var trails by remember { mutableStateOf<List<Trail>>(emptyList()) }
     var hrPoints by remember {
@@ -77,9 +78,20 @@ fun ActivityDetailScreen(
     var showPicker by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
 
+    val cacheKey = remember(source, sourceId) { "activity_detail_${source}_${sourceId}" }
+
     suspend fun load() {
+        // Serve cached activity immediately so the screen renders offline.
+        app.myvitals.data.JsonCache.read<ActivityRow>(
+            context, cacheKey, ActivityRow::class.java,
+        )?.let {
+            activity = it.value
+            loading = false
+        }
         if (!settings.isConfigured()) {
-            error = "Backend not configured."; loading = false; return
+            if (activity == null) error = "Backend not configured."
+            loading = false
+            return
         }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
@@ -87,6 +99,9 @@ fun ActivityDetailScreen(
                 Pair(api.activity(source, sourceId), api.trails())
             }
             activity = a
+            app.myvitals.data.JsonCache.write(
+                context, cacheKey, ActivityRow::class.java, a,
+            )
             runCatching {
                 withContext(Dispatchers.IO) { api.profile() }
             }.getOrNull()?.let { maxHr = it.maxHr() }
@@ -115,7 +130,7 @@ fun ActivityDetailScreen(
             }
         } catch (e: Exception) {
             Timber.w(e, "activity load failed for %s/%s", source, sourceId)
-            error = e.message?.take(160)
+            if (activity == null) error = e.message?.take(160)
         } finally { loading = false }
     }
 

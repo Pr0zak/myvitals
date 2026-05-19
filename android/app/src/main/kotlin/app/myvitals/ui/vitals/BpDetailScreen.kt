@@ -55,11 +55,20 @@ private data class BpReading(val ms: Long, val sys: Int, val dia: Int)
 
 @Composable
 fun BpDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var pts by remember { mutableStateOf<List<BpReading>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    val ptsType = remember {
+        app.myvitals.data.JsonCache.listType(BpReading::class.java)
+    }
+
     LaunchedEffect(Unit) {
+        // SWR hydrate
+        app.myvitals.data.JsonCache.read<List<BpReading>>(
+            context, "bp_detail_points", ptsType,
+        )?.let { pts = it.value; loading = false }
         if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return@LaunchedEffect }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
@@ -77,10 +86,15 @@ fun BpDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                 runCatching { out += BpReading(Instant.parse(t).toEpochMilli(), sys, dia) }
             }
             pts = out.sortedBy { it.ms }
+            if (pts.isNotEmpty()) {
+                app.myvitals.data.JsonCache.write(
+                    context, "bp_detail_points", ptsType, pts,
+                )
+            }
             Timber.i("BP detail: %d readings", pts.size)
         } catch (e: Exception) {
             Timber.w(e, "BP detail load failed")
-            error = e.message?.take(160)
+            if (pts.isEmpty()) error = e.message?.take(160)
         } finally { loading = false }
     }
 

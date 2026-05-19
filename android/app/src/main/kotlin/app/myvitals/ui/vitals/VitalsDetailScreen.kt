@@ -59,6 +59,8 @@ enum class VitalRange(val label: String, val days: Int) {
     DAY("24h", 1), WEEK("7d", 7), MONTH("30d", 30), QUARTER("90d", 90),
 }
 
+internal data class VitalsSeries(val xs: List<Double>, val ys: List<Double>)
+
 @Composable
 fun VitalsDetailScreen(
     settings: SettingsRepository,
@@ -74,39 +76,62 @@ fun VitalsDetailScreen(
         else -> {}
     }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var range by remember { mutableStateOf(VitalRange.MONTH) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     val producer = remember { CartesianChartModelProducer() }
     var stats by remember { mutableStateOf(Triple<Float?, Float?, Float?>(null, null, null)) }
+    var haveSeries by remember { mutableStateOf(false) }
+
+    val seriesType = remember { VitalsSeries::class.java as java.lang.reflect.Type }
+
+    fun pushSeries(xs: List<Double>, ys: List<Double>) {
+        if (xs.isNotEmpty() && ys.isNotEmpty()) {
+            producer.runTransaction { lineSeries { series(x = xs, y = ys) } }
+            val realY = ys.filter { it.isFinite() }
+            stats = Triple(
+                realY.minOrNull()?.toFloat(),
+                realY.maxOrNull()?.toFloat(),
+                if (realY.isEmpty()) null else realY.average().toFloat(),
+            )
+            haveSeries = true
+        } else {
+            producer.runTransaction { lineSeries { series(x = listOf(0.0), y = listOf(0.0)) } }
+            stats = Triple(null, null, null)
+        }
+    }
 
     suspend fun load() {
-        if (!settings.isConfigured()) {
-            error = "Backend not configured."; loading = false; return
+        val cacheKey = "vitals_series_${vital.name.lowercase()}_${range.name.lowercase()}"
+        app.myvitals.data.JsonCache.read<VitalsSeries>(
+            context, cacheKey, seriesType,
+        )?.let {
+            pushSeries(it.value.xs, it.value.ys)
+            loading = false
         }
-        loading = true; error = null
+        if (!settings.isConfigured()) {
+            if (!haveSeries) { error = "Backend not configured."; loading = false }
+            return
+        }
+        if (!haveSeries) loading = true
+        error = null
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val (xs, ys) = withContext(Dispatchers.IO) { fetchSeries(api, vital, range) }
+            pushSeries(xs, ys)
             if (xs.isNotEmpty() && ys.isNotEmpty()) {
-                producer.runTransaction { lineSeries { series(x = xs, y = ys) } }
-                val realY = ys.filter { it.isFinite() }
-                stats = Triple(
-                    realY.minOrNull()?.toFloat(),
-                    realY.maxOrNull()?.toFloat(),
-                    if (realY.isEmpty()) null else realY.average().toFloat(),
+                app.myvitals.data.JsonCache.write(
+                    context, cacheKey, seriesType, VitalsSeries(xs, ys),
                 )
-            } else {
-                producer.runTransaction { lineSeries { series(x = listOf(0.0), y = listOf(0.0)) } }
-                stats = Triple(null, null, null)
             }
         } catch (e: Exception) {
             Timber.w(e, "vitals detail fetch failed")
-            error = e.message?.take(160)
+            if (!haveSeries) error = e.message?.take(160)
         } finally { loading = false }
     }
 
-    LaunchedEffect(range) { load() }
+    LaunchedEffect(range) { haveSeries = false; load() }
 
     Column(Modifier.fillMaxSize().background(MV.Bg)) {
         Row(

@@ -816,6 +816,17 @@ data class WorkoutPatchRequest(
     val notes: String? = null,
 )
 
+/** POST /workout/strength/workouts/{id}/complete-cardio. Mints a manual
+ *  Activity row + marks the cardio-day strength workout complete. */
+@JsonClass(generateAdapter = true)
+data class CompleteCardioRequest(
+    val label: String,
+    @Json(name = "duration_minutes") val durationMinutes: Double,
+    @Json(name = "start_at") val startAt: String? = null,
+    val type: String = "manual_cardio",
+    val notes: String? = null,
+)
+
 @JsonClass(generateAdapter = true)
 data class AiGoal(
     val id: Int,

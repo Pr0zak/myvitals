@@ -149,6 +149,33 @@ class StrengthRepository(
             ),
         )
 
+    /** Cardio-day completion that also mints a manual Activity row so
+     *  the session shows up in the feed, on HR chart markers, and in
+     *  the weekly cardio dose. No offline buffering — needs the
+     *  backend to scan HR samples and link the activity. The dialog
+     *  shows a clear "needs network" error if the call fails. */
+    suspend fun completeCardio(
+        workoutId: Long,
+        label: String,
+        durationMinutes: Double,
+        startAt: java.time.Instant? = null,
+        type: String = "manual_cardio",
+        notes: String? = null,
+    ): StrengthWorkoutDetail = withContext(Dispatchers.IO) {
+        val resp = api().completeCardioWorkout(
+            workoutId,
+            app.myvitals.sync.CompleteCardioRequest(
+                label = label,
+                durationMinutes = durationMinutes,
+                startAt = startAt?.toString(),
+                type = type,
+                notes = notes,
+            ),
+        )
+        planCache.savePlan(resp)
+        resp
+    }
+
     suspend fun aiReview(workoutId: Long): app.myvitals.sync.StrengthReviewResponse =
         withContext(Dispatchers.IO) { api().strengthReview(workoutId) }
 

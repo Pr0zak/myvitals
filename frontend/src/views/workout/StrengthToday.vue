@@ -667,6 +667,37 @@ async function completeWorkout() {
   }
 }
 
+// Cardio-day "Log this workout" — captures label + duration, posts to
+// complete-cardio which mints a manual Activity row that flows through
+// the activity feed, HR chart markers, and cardio coach payload.
+const showCardioLog = ref(false);
+const cardioLabel = ref("");
+const cardioDuration = ref(30);
+function openCardioLog() {
+  cardioLabel.value = "";
+  cardioDuration.value = 30;
+  showCardioLog.value = true;
+}
+async function submitCardioLog() {
+  if (!workout.value) return;
+  const label = cardioLabel.value.trim();
+  const mins = Number(cardioDuration.value);
+  if (!label || !mins || mins <= 0 || mins > 1440) return;
+  busy.value = "complete";
+  try {
+    await api.completeStrengthCardio(workout.value.id, {
+      label,
+      duration_minutes: mins,
+    });
+    showCardioLog.value = false;
+    await loadAll();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy.value = "";
+  }
+}
+
 function fmtRest(s: number): string {
   const m = Math.floor(s / 60);
   const sec = s % 60;
@@ -882,24 +913,60 @@ useVisibilityRefresh(loadAll);
       </div>
 
       <!-- Cardio prescription — no exercise list, notes-only.
-           Renders the suggestion text + a "Complete cardio" button. -->
+           Renders the suggestion text + a "Log this workout" button
+           that opens a dialog for label + duration so the session
+           appears in the activity feed, on HR chart markers, and in
+           the weekly cardio dose. -->
       <div v-if="workout.split_focus === 'cardio' && workout.exercises.length === 0"
            class="cardio-card">
         <h3>Cardio session</h3>
         <p class="cardio-notes">{{ workout.notes }}</p>
         <p class="hint">
-          The session itself syncs from the activity provider (Concept2 for
-          rowing, Strava for biking). Once it lands in /activities you can
-          mark today complete here.
+          Watch-tracked rides (Concept2, Strava) auto-link to today's
+          plan. For anything that doesn't push (Les Mills VR, treadmill,
+          outdoor walk without a watch), use "Log this workout" to add a
+          named session with duration — it'll show up in your activity
+          feed and on HR charts.
         </p>
         <button v-if="workout.status === 'planned' || workout.status === 'in_progress'"
                 class="primary" :disabled="busy === 'complete'"
-                @click="completeWorkout">
-          {{ busy === 'complete' ? 'Saving…' : 'Mark cardio complete' }}
+                @click="openCardioLog">
+          Log this workout
         </button>
         <p v-else-if="workout.status === 'completed'" class="ok">
           ✓ Cardio session marked complete.
         </p>
+      </div>
+
+      <!-- Cardio log dialog -->
+      <div v-if="showCardioLog" class="modal-backdrop" @click.self="showCardioLog = false">
+        <div class="modal">
+          <h3>Log this workout</h3>
+          <p class="hint">
+            The session will appear in your activity feed, as a marker
+            on HR charts, and count toward your weekly cardio dose.
+          </p>
+          <label class="field">
+            <span>Workout name</span>
+            <input v-model="cardioLabel" type="text" maxlength="120"
+                   placeholder="e.g. Les Mills VR"
+                   :disabled="busy === 'complete'" />
+          </label>
+          <label class="field">
+            <span>Duration (minutes)</span>
+            <input v-model.number="cardioDuration" type="number"
+                   min="1" max="1440" :disabled="busy === 'complete'" />
+          </label>
+          <div class="modal-actions">
+            <button class="ghost" :disabled="busy === 'complete'"
+                    @click="showCardioLog = false">Cancel</button>
+            <button class="primary"
+                    :disabled="busy === 'complete' || !cardioLabel.trim() || !cardioDuration || cardioDuration <= 0"
+                    @click="submitCardioLog">
+              {{ busy === 'complete' ? 'Logging…' : 'Log workout' }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Exercise list -->
@@ -1253,6 +1320,25 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 .cardio-notes { color: var(--text); line-height: 1.5; margin: 0 0 0.6rem; }
 .cardio-card .hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.8rem; }
 .cardio-card .ok { color: var(--good); margin: 0; }
+
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100; padding: 1rem;
+}
+.modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 1.2rem; max-width: 420px; width: 100%;
+}
+.modal h3 { margin: 0 0 0.5rem; }
+.modal .hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem; }
+.modal .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.8rem; }
+.modal .field span { font-size: 0.8rem; color: var(--muted); }
+.modal .field input {
+  background: var(--bg-1); border: 1px solid var(--line); color: var(--text);
+  padding: 0.5rem 0.7rem; border-radius: 6px; font-size: 0.95rem;
+}
+.modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
 
 .ex-card {
   border: 1px solid var(--line); border-radius: 10px;

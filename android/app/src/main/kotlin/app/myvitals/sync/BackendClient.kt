@@ -115,6 +115,11 @@ interface BackendApi {
         @Path("id") id: Long, @Body body: WorkoutPatchRequest,
     ): StrengthWorkoutDetail
 
+    @POST("workout/strength/workouts/{id}/complete-cardio")
+    suspend fun completeCardioWorkout(
+        @Path("id") id: Long, @Body body: CompleteCardioRequest,
+    ): StrengthWorkoutDetail
+
     @POST("workout/strength/sets")
     suspend fun logStrengthSet(@Body body: LogSetRequest): StrengthSetRow
 

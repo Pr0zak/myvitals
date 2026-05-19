@@ -12,7 +12,7 @@ backend, ~200 entries, no need to involve the DB.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -597,6 +597,25 @@ class WorkoutPatch(BaseModel):
     notes: str | None = None
 
 
+class CompleteCardioBody(BaseModel):
+    """Body for `POST /workouts/{id}/complete-cardio`. Used when the user
+    finished a cardio session that didn't come through Strava / Concept2 /
+    Health Connect — e.g. Les Mills VR, an outdoor walk without a watch
+    track, a treadmill that doesn't ANT+ broadcast. We mint a manual
+    Activity row, link the strength workout to it, and the activity then
+    flows through the existing feed + chart-marker + cardio-coach
+    pipelines."""
+    label: str = Field(min_length=1, max_length=120,
+                       description="User-supplied name shown in the feed and chart marker.")
+    duration_minutes: float = Field(gt=0, le=24 * 60)
+    # When omitted: start = now - duration. Lets the user complete a
+    # cardio session retroactively (e.g. they forgot to tap before
+    # starting and the HR window is in the past).
+    start_at: datetime | None = None
+    type: str = Field(default="manual_cardio", max_length=64)
+    notes: str | None = Field(default=None, max_length=400)
+
+
 def _set_to_out(s: models.StrengthSet) -> SetOut:
     return SetOut(
         id=s.id,
@@ -867,6 +886,80 @@ async def patch_workout(
     data = body.model_dump(exclude_unset=True)
     for field, value in data.items():
         setattr(w, field, value)
+    await db.commit()
+    await db.refresh(w)
+    return await _hydrate_workout(db, w)
+
+
+@router.post("/workouts/{workout_id}/complete-cardio", response_model=WorkoutOut)
+async def complete_cardio_with_activity(
+    workout_id: int,
+    body: CompleteCardioBody,
+    db: AsyncSession = Depends(get_session),
+) -> WorkoutOut:
+    """Mark a cardio-day strength workout complete AND mint a manual
+    Activity row so the session shows up in the activity feed, on HR
+    chart markers (existing activity-window overlay), and counts toward
+    the weekly cardio dose in the cardio coach payload.
+
+    Use case: user does Les Mills VR or a treadmill jog that doesn't
+    push to Strava/Concept2/Health Connect. Without this, completing
+    the workout marks it done but leaves the cardio dose payload
+    showing zero minutes for the week.
+    """
+    w = await db.get(models.StrengthWorkout, workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="workout not found")
+    if w.split_focus not in ("cardio", "active_recovery", "yoga"):
+        # Strength sessions already have a different completion path
+        # (sets logged). Don't widen the door here.
+        raise HTTPException(
+            status_code=400,
+            detail=f"complete-cardio is for cardio/recovery/yoga splits, "
+                   f"not split_focus={w.split_focus!r}",
+        )
+
+    now = datetime.now(timezone.utc)
+    duration_s = int(body.duration_minutes * 60)
+    start_at = body.start_at or (now - timedelta(seconds=duration_s))
+    if start_at.tzinfo is None:
+        start_at = start_at.replace(tzinfo=timezone.utc)
+    end_at = start_at + timedelta(seconds=duration_s)
+
+    # Pull HR samples in the activity window and compute summary stats.
+    hr_rows = (await db.execute(
+        select(models.HeartRate.value)
+        .where(models.HeartRate.time >= start_at)
+        .where(models.HeartRate.time <= end_at)
+    )).scalars().all()
+    avg_hr = (sum(hr_rows) / len(hr_rows)) if hr_rows else None
+    max_hr = max(hr_rows) if hr_rows else None
+
+    # source_id needs to be stable + unique. Pair the workout id with
+    # the start timestamp so a regenerate / accidental double-tap can't
+    # collide. 64 chars max in the column.
+    source_id = f"workout-{workout_id}-{int(start_at.timestamp())}"
+
+    activity = models.Activity(
+        source="manual",
+        source_id=source_id,
+        type=body.type,
+        name=body.label,
+        start_at=start_at,
+        duration_s=duration_s,
+        avg_hr=avg_hr,
+        max_hr=max_hr,
+        notes=body.notes,
+    )
+    db.add(activity)
+
+    w.status = "completed"
+    w.completed_at = now
+    w.completed_by_activity_source = "manual"
+    w.completed_by_activity_source_id = source_id
+    if body.notes:
+        w.notes = body.notes
+
     await db.commit()
     await db.refresh(w)
     return await _hydrate_workout(db, w)

@@ -159,6 +159,10 @@ fun StrengthTodayScreen(
     var swapping by remember { mutableStateOf(false) }
     var customSheetOpen by remember { mutableStateOf(false) }
     var customGenerating by remember { mutableStateOf(false) }
+    // Cardio-day "Log this workout" flow — see the dialog at the bottom
+    // of the file. Opens when split_focus is cardio/yoga/active_recovery.
+    var showCardioLog by remember { mutableStateOf(false) }
+    var cardioLogging by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     // Offline plumbing — banner above the workout shows "offline" when
     // network is down or "N pending sync" when set logs are buffered.
@@ -254,6 +258,34 @@ fun StrengthTodayScreen(
                         completeDialogDismissed = true
                     },
                 ) { Text("Keep going") }
+            },
+        )
+    }
+
+    // Cardio-day completion dialog: ask the user for a label + duration,
+    // then call complete-cardio which mints a manual Activity row.
+    if (showCardioLog && workout != null) {
+        CardioLogDialog(
+            defaultLabel = "",
+            defaultDurationMin = 30,
+            submitting = cardioLogging,
+            onDismiss = { if (!cardioLogging) showCardioLog = false },
+            onSubmit = { label, durationMin ->
+                scope.launch {
+                    cardioLogging = true
+                    try {
+                        workout = repo.completeCardio(
+                            workoutId = workout!!.id,
+                            label = label,
+                            durationMinutes = durationMin.toDouble(),
+                        )
+                        showCardioLog = false
+                        reload()
+                    } catch (e: Exception) {
+                        Timber.w(e, "completeCardio failed")
+                        error = "Couldn't log cardio: ${e.message?.take(120)}"
+                    } finally { cardioLogging = false }
+                }
             },
         )
     }
@@ -931,18 +963,30 @@ fun StrengthTodayScreen(
             }
             item {
                 if (plan.status != "completed") {
+                    // Cardio-day (no exercises) gets a dialog flow so the
+                    // user can name the session + log duration; that mints
+                    // an Activity row which feeds the activity feed, HR
+                    // chart markers, and the cardio coach dose.
+                    val isCardioDay = plan.exercises.isEmpty() &&
+                        plan.splitFocus in listOf("cardio", "active_recovery", "yoga")
                     Button(
                         onClick = {
-                            scope.launch {
-                                try { workout = repo.completeWorkout(plan.id); reload() }
-                                catch (e: Exception) { error = e.message?.take(160) }
+                            if (isCardioDay) {
+                                showCardioLog = true
+                            } else {
+                                scope.launch {
+                                    try { workout = repo.completeWorkout(plan.id); reload() }
+                                    catch (e: Exception) { error = e.message?.take(160) }
+                                }
                             }
                         },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MV.Green),
-                    ) { Text("Complete workout") }
+                    ) {
+                        Text(if (isCardioDay) "Log this workout" else "Complete workout")
+                    }
                 }
                 if (plan.status == "completed") {
                     Card(
@@ -2868,4 +2912,70 @@ private fun openYouTube(context: android.content.Context, slug: String, name: St
             Timber.w(e, "no browser to open YouTube fallback")
         }
     }
+}
+
+/** Dialog shown when the user taps "Log this workout" on a cardio /
+ *  yoga / active-recovery day. Captures a label (e.g. "Les Mills VR",
+ *  "Treadmill Z2", "Evening walk") and a duration in minutes. Submits
+ *  via /workout/strength/workouts/{id}/complete-cardio which mints a
+ *  manual Activity row + marks the strength workout complete. */
+@Composable
+private fun CardioLogDialog(
+    defaultLabel: String,
+    defaultDurationMin: Int,
+    submitting: Boolean,
+    onDismiss: () -> Unit,
+    onSubmit: (label: String, durationMin: Int) -> Unit,
+) {
+    var label by remember { mutableStateOf(defaultLabel) }
+    var durationStr by remember { mutableStateOf(defaultDurationMin.toString()) }
+    val duration = durationStr.toIntOrNull()
+    val canSubmit = label.isNotBlank() && duration != null && duration in 1..1440 && !submitting
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Log this workout") },
+        text = {
+            Column {
+                Text(
+                    "What did you do? The session will appear in your " +
+                    "activity feed, as a marker on HR charts, and count " +
+                    "toward your weekly cardio dose.",
+                    color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it.take(120) },
+                    label = { Text("Workout name") },
+                    placeholder = { Text("e.g. Les Mills VR") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !submitting,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = durationStr,
+                    onValueChange = { durationStr = it.take(4).filter(Char::isDigit) },
+                    label = { Text("Duration (minutes)") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !submitting,
+                )
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                enabled = canSubmit,
+                onClick = { onSubmit(label.trim(), duration ?: defaultDurationMin) },
+            ) { Text(if (submitting) "Logging…" else "Log workout", color = MV.Green) }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(
+                onClick = onDismiss, enabled = !submitting,
+            ) { Text("Cancel") }
+        },
+    )
 }

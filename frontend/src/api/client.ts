@@ -748,6 +748,20 @@ export const api = {
     return data;
   },
 
+  async completeStrengthCardio(id: number, body: {
+    label: string;
+    duration_minutes: number;
+    start_at?: string | null;
+    type?: string;
+    notes?: string | null;
+  }): Promise<import("./types").StrengthWorkoutDetail> {
+    const { data } = await http.post(
+      `/workout/strength/workouts/${id}/complete-cardio`,
+      body,
+    );
+    return data;
+  },
+
   async deleteStrengthWorkout(id: number): Promise<void> {
     await http.delete(`/workout/strength/workouts/${id}`);
   },

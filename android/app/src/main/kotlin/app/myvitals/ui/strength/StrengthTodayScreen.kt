@@ -535,6 +535,31 @@ fun StrengthTodayScreen(
                         }
                     },
                 )
+            } else if (!online) {
+                // No cached plan + offline. Generating requires the
+                // backend (recovery context + RNG), so we can't surface
+                // the Generate button — it would just fail. Tell the
+                // user why instead.
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MV.SurfaceVariant),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            "Offline — workout not cached yet",
+                            color = MV.OnSurface,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Today's plan needs the server to generate (recovery + history). " +
+                            "Reconnect and the workout will load. Logged sets from offline " +
+                            "sessions will sync automatically.",
+                            color = MV.OnSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
             } else {
                 Button(
                     onClick = {

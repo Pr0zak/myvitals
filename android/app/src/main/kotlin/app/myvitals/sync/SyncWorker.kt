@@ -82,6 +82,26 @@ class SyncWorker(
         }
     }
 
+    /** Drain offline strength buffers — set logs + workout status
+     *  patches + exercise-pref toggles. Best-effort: a network failure
+     *  inside StrengthRepository.flush* just leaves the rows for the
+     *  next tick. The reason this is here (and not screen-only) is so
+     *  buffered writes sync even if the user never re-opens the
+     *  workout screen while back online. */
+    private suspend fun flushStrengthBuffers() {
+        try {
+            val repo = app.myvitals.strength.StrengthRepository(applicationContext, settings)
+            val sets = repo.flushBufferedSets()
+            val writes = repo.flushBufferedWorkoutWrites()
+            if (sets > 0 || writes > 0) {
+                Timber.i("Flushed strength buffers: %d sets, %d writes", sets, writes)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "flushStrengthBuffers failed")
+            state.errors += "strength flush: ${e.javaClass.simpleName}"
+        }
+    }
+
     /** Enqueue one-shot trail + AI alert polls so any backend alerts
      *  surface within the same 15-min sync cycle instead of waiting
      *  for the next periodic tick (avg latency 7.5 min lower).
@@ -118,6 +138,14 @@ class SyncWorker(
             state.errors += msg
             return Result.success()
         }
+        // Drain offline strength buffers (set logs + status patches +
+        // pref toggles). These are independent of the HC ingest pipeline
+        // and can flush even when HC perms are missing — they only need
+        // the backend URL + token. Without this, a user who logged sets
+        // offline must re-open the workout screen while online for them
+        // to sync.
+        flushStrengthBuffers()
+
         if (!gateway.isAvailable()) {
             val msg = "Skipping sync: Health Connect not available on this device"
             Timber.w(msg)

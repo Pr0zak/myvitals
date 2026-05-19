@@ -928,7 +928,7 @@ async def complete_cardio_with_activity(
 
     # Pull HR samples in the activity window and compute summary stats.
     hr_rows = (await db.execute(
-        select(models.HeartRate.value)
+        select(models.HeartRate.bpm)
         .where(models.HeartRate.time >= start_at)
         .where(models.HeartRate.time <= end_at)
     )).scalars().all()

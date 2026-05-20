@@ -778,53 +778,11 @@ fun StrengthTodayScreen(
                     )
                 }
             }
-            // Soft warning when the plan was generated before today's
-            // sleep data was ingested. Plan still usable, but its
-            // deload + load decisions ignored last night's recovery.
-            if (plan.recoveryStale) {
-                item {
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = Color(0xFFFACC15).copy(alpha = 0.08f),
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text("↻", color = Color(0xFFFACC15), fontSize = 16.sp,
-                                modifier = Modifier.padding(end = 8.dp))
-                            Text(
-                                "Plan generated before today's sleep data " +
-                                    "was synced — tap Regenerate to refresh.",
-                                color = MV.OnSurface, fontSize = 12.sp,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            OutlinedButton(
-                                onClick = {
-                                    scope.launch {
-                                        generating = true
-                                        try {
-                                            workout = repo.regenerate(true); reload()
-                                            bumpDeload()
-                                        } catch (e: Exception) {
-                                            error = e.message?.take(160)
-                                        } finally { generating = false }
-                                    }
-                                },
-                                enabled = !generating,
-                            ) {
-                                Text(
-                                    if (generating) "Refreshing…" else "Regenerate",
-                                    fontSize = 10.sp,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            // recovery_stale banner was removed in v0.7.268. The user
+            // found it noisy — pop a regenerate prompt every time the
+            // plan was made before HC sync was a daily annoyance with
+            // marginal value. Backend still populates the flag in case
+            // we want to resurrect it; clients just ignore it.
             // FAST-18 — fasted-training banner. Amber. Appears when an
             // active fast crossed the 18h volume-modulation threshold
             // at plan-generation time. Re-read live on every load so

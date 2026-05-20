@@ -795,21 +795,9 @@ useVisibilityRefresh(loadAll);
 
     <p v-if="workout?.notes" class="hint subtle">{{ workout.notes }}</p>
 
-    <!-- Soft warning when the plan was generated before today's sleep
-         data was ingested. Plan is still usable but its deload + load
-         decisions ignored last night's recovery. Surface a "Regenerate
-         to refresh" prompt so the user can grab the fresh-data plan. -->
-    <div v-if="workout?.recovery_stale" class="stale-banner">
-      <span class="stale-icon">↻</span>
-      <span class="stale-text">
-        Plan generated before today's sleep data was synced —
-        tap Regenerate to refresh with fresh recovery context.
-      </span>
-      <button class="ghost small" :disabled="busy === 'regen'"
-              @click="regenerate(true)">
-        {{ busy === 'regen' ? 'Refreshing…' : 'Regenerate' }}
-      </button>
-    </div>
+    <!-- recovery_stale banner removed in v0.7.268 — see phone screen
+         comment for the rationale. Backend keeps the flag in case we
+         want to bring it back; clients ignore it. -->
     <!-- FAST-18 — fasted-training banner. Appears when the workout
          was generated against an active fast that crossed the 18h
          volume-modulation threshold. -->

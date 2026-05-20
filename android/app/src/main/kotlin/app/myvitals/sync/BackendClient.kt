@@ -266,6 +266,7 @@ interface BackendApi {
     suspend fun heartRateSeries(
         @retrofit2.http.Query("since") since: String? = null,
         @retrofit2.http.Query("until") until: String? = null,
+        @retrofit2.http.Query("bucket_seconds") bucketSeconds: Int? = null,
     ): TimeSeries
 
     @GET("query/hrv")

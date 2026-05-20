@@ -79,17 +79,38 @@ def _resolve_range(
 async def get_heartrate(
     since: datetime | None = Query(None),
     until: datetime | None = Query(None),
+    bucket_seconds: int | None = Query(None, ge=10, le=3600),
     db: AsyncSession = Depends(get_session),
 ) -> HeartRateSeries:
+    """Returns raw HR samples for the window. When `bucket_seconds` is
+    set the points are aggregated server-side via TimescaleDB's
+    `time_bucket()` so a 24h window collapses from ~5k raw samples
+    (~1 every 15s on Pixel Watch) into a few hundred bucket averages.
+    The phone chart already downsamples to ~600 points; sending the
+    pre-bucketed series cuts the network payload + JSON parse time
+    roughly 5-10x with no visible chart fidelity loss."""
     start, end = _resolve_range(since, until, timedelta(hours=24))
-    result = await db.execute(
-        select(models.HeartRate.time, models.HeartRate.bpm)
-        .where(models.HeartRate.time >= start)
-        .where(models.HeartRate.time <= end)
-        .order_by(models.HeartRate.time)
-    )
-    rows = result.all()
-    points = [TimePoint(time=t, value=v) for t, v in rows]
+    if bucket_seconds:
+        from sqlalchemy import text
+        rows = (await db.execute(
+            text(
+                "SELECT time_bucket(make_interval(secs => :bs), time) AS bucket, "
+                "       avg(bpm) AS bpm "
+                "FROM vitals_heartrate "
+                "WHERE time >= :start AND time <= :end "
+                "GROUP BY bucket ORDER BY bucket"
+            ),
+            {"bs": bucket_seconds, "start": start, "end": end},
+        )).all()
+        points = [TimePoint(time=t, value=v) for t, v in rows]
+    else:
+        result = await db.execute(
+            select(models.HeartRate.time, models.HeartRate.bpm)
+            .where(models.HeartRate.time >= start)
+            .where(models.HeartRate.time <= end)
+            .order_by(models.HeartRate.time)
+        )
+        points = [TimePoint(time=t, value=v) for t, v in result.all()]
 
     if not points:
         return HeartRateSeries(points=[])

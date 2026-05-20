@@ -126,7 +126,14 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     val sinceIso = dayStart.toString()
                     val untilIso = dayEnd.toString()
                     val liveD = async(Dispatchers.IO) {
-                        api.heartRateSeries(since = sinceIso, until = untilIso)
+                        // 2-min buckets — ~720 points/day instead of ~5k
+                        // raw samples. Chart was already downsampling
+                        // client-side; doing it server-side cuts the
+                        // payload + JSON parse 5-10x.
+                        api.heartRateSeries(
+                            since = sinceIso, until = untilIso,
+                            bucketSeconds = 120,
+                        )
                     }
                     val activitiesD = async(Dispatchers.IO) {
                         runCatching { api.activities(limit = 30) }.getOrDefault(emptyList())

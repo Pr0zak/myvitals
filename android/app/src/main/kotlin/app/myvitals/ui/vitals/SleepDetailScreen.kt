@@ -74,11 +74,14 @@ fun SleepDetailScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var nights by remember { mutableStateOf<List<SleepNight>>(emptyList()) }
-    var lastRaw by remember { mutableStateOf<List<SleepRawSegment>>(emptyList()) }
+    var selectedRaw by remember { mutableStateOf<List<SleepRawSegment>>(emptyList()) }
     var goalH by remember { mutableStateOf(8.0) }
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Night picker — defaults to today (the most-recent night). Tapping
+    // back/forward scrolls through past nights' hypnogram + stats.
+    var selectedDay by remember { mutableStateOf(LocalDate.now()) }
 
     val nightsType = com.squareup.moshi.Types.newParameterizedType(
         List::class.java, SleepNight::class.java,
@@ -87,25 +90,49 @@ fun SleepDetailScreen(
         List::class.java, SleepRawSegment::class.java,
     )
 
+    // Match nights list to the selected day. Sleep that *ended* on this
+    // date is what the user expects to see (e.g. today = last night).
+    fun nightForDay(day: LocalDate): SleepNight? =
+        nights.firstOrNull { it.date == day.toString() }
+            ?: nights.lastOrNull()
+
+    suspend fun fetchRawForDay(day: LocalDate) {
+        // Pull raw stage segments scoped to the night ending on `day`.
+        // Window: 18:00 prev-day → 14:00 day (matches the backend's
+        // canonical "night ending on" boundary).
+        val zone = ZoneId.systemDefault()
+        val cacheKey = "sleep_detail_raw_$day"
+        app.myvitals.data.JsonCache.read<List<SleepRawSegment>>(
+            context, cacheKey, rawType,
+        )?.let { selectedRaw = it.value }
+        if (!settings.isConfigured()) return
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val start = day.minusDays(1).atTime(18, 0).atZone(zone).toInstant().toString()
+            val end = day.atTime(14, 0).atZone(zone).toInstant().toString()
+            val r = withContext(Dispatchers.IO) {
+                api.sleepRaw(since = start, until = end)
+            }
+            selectedRaw = r
+            app.myvitals.data.JsonCache.write(context, cacheKey, rawType, r)
+        } catch (e: Exception) {
+            Timber.w(e, "sleep raw load failed for %s", day)
+        }
+    }
+
     suspend fun fetch() {
         if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             runCatching { api.profile() }.getOrNull()?.let { goalH = it.sleepGoalH() }
             val since = LocalDate.now().minusDays(13).toString()
-            val rawSince = Instant.now().minusSeconds(48 * 3600).toString()
-            coroutineScope {
-                val nightsD = async(Dispatchers.IO) { api.sleepRange(since = since) }
-                val rawD = async(Dispatchers.IO) { api.sleepRaw(since = rawSince) }
-                val n = nightsD.await()
-                val r = rawD.await()
-                nights = n
-                lastRaw = r
-                app.myvitals.data.JsonCache.write(context, "sleep_detail_nights", nightsType, n)
-                app.myvitals.data.JsonCache.write(context, "sleep_detail_raw", rawType, r)
-            }
+            val n = withContext(Dispatchers.IO) { api.sleepRange(since = since) }
+            nights = n
+            app.myvitals.data.JsonCache.write(context, "sleep_detail_nights", nightsType, n)
+            fetchRawForDay(selectedDay)
             error = null
-            Timber.i("sleep detail: %d nights, %d raw segments", nights.size, lastRaw.size)
+            Timber.i("sleep detail: %d nights, %d raw segments for %s",
+                nights.size, selectedRaw.size, selectedDay)
         } catch (e: Exception) {
             Timber.w(e, "sleep detail load failed")
             error = e.message?.take(160)
@@ -115,9 +142,11 @@ fun SleepDetailScreen(
     LaunchedEffect(Unit) {
         app.myvitals.data.JsonCache.read<List<SleepNight>>(context, "sleep_detail_nights", nightsType)
             ?.let { nights = it.value; loading = false }
-        app.myvitals.data.JsonCache.read<List<SleepRawSegment>>(context, "sleep_detail_raw", rawType)
-            ?.let { lastRaw = it.value }
         fetch()
+    }
+    // Refetch raw segments whenever the picked night changes.
+    LaunchedEffect(selectedDay) {
+        if (nights.isNotEmpty()) fetchRawForDay(selectedDay)
     }
 
     Column(Modifier.fillMaxSize().background(MV.Bg)) {
@@ -132,6 +161,10 @@ fun SleepDetailScreen(
             Text("Sleep", color = MV.OnSurface, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
+        app.myvitals.ui.common.DayNav(
+            selected = selectedDay,
+            onSelectedChange = { selectedDay = it },
+        )
         when {
             loading -> Text("Loading…", color = MV.OnSurfaceVariant,
                 modifier = Modifier.padding(16.dp))
@@ -148,8 +181,9 @@ fun SleepDetailScreen(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    item { LastNightHero(nights.lastOrNull()) }
-                    item { Hypnogram(lastRaw) }
+                    val isToday = selectedDay == LocalDate.now()
+                    item { LastNightHero(nightForDay(selectedDay), isToday = isToday) }
+                    item { Hypnogram(selectedRaw) }
                     item { StageBreakdownChart(nights.takeLast(14)) }
                     item { DurationTrend(nights.takeLast(14), goalH) }
                     item { StageLegend() }
@@ -160,10 +194,11 @@ fun SleepDetailScreen(
 }
 
 @Composable
-private fun LastNightHero(n: SleepNight?) {
+private fun LastNightHero(n: SleepNight?, isToday: Boolean = true) {
     Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("LAST NIGHT", color = MV.OnSurfaceVariant,
+            Text(if (isToday) "LAST NIGHT" else "NIGHT OF " + (n?.date ?: "—"),
+                color = MV.OnSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             if (n == null) {
                 Text("—", color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)

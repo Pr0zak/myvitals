@@ -87,7 +87,7 @@ fun StepsDetailScreen(
                 runCatching { api.stepsSeries(since = start, until = end) }.getOrNull()
             }
             if (series != null) {
-                val h = bucketByHour(series.points)
+                val h = bucketByHour(series.points, day)
                 hourly = h
                 JsonCache.write(context, cacheKey, hourlyType, h)
             }
@@ -167,7 +167,12 @@ fun StepsDetailScreen(
                         TodayHero(dayRow, goal, color)
                     }
                     hourly?.let { hr ->
-                        if (hr.sum() > 0) item { HourlyColumns(hr, color) }
+                        if (hr.sum() > 0) item {
+                            HourlyColumns(
+                                hr, color,
+                                isToday = selectedDay == LocalDate.now(),
+                            )
+                        }
                     }
                     item { DailyColumns(rows, goal, color) }
                     item { StepsStats(rows, goal) }
@@ -200,27 +205,27 @@ private fun TodayHero(today: DailySummary?, goal: Int, color: Color) {
 }
 
 /** Sum the per-minute series into 24 hour-of-day bins (local TZ),
- *  scoped to TODAY so we show "when did I step today" rather than a
- *  rolling 24h. Returns an IntArray of length 24. */
-private fun bucketByHour(points: List<TimePoint>): IntArray {
+ *  scoped to the given calendar day so the chart shows "when did I
+ *  step on this day". Returns an IntArray of length 24. */
+private fun bucketByHour(points: List<TimePoint>, day: LocalDate): IntArray {
     val out = IntArray(24)
     val zone = ZoneId.systemDefault()
-    val today = LocalDate.now(zone)
     for (p in points) {
         val ldt = runCatching {
             Instant.parse(p.time).atZone(zone).toLocalDateTime()
         }.getOrNull() ?: continue
-        if (ldt.toLocalDate() != today) continue
+        if (ldt.toLocalDate() != day) continue
         out[ldt.hour] += p.value.toInt()
     }
     return out
 }
 
 @Composable
-private fun HourlyColumns(hourly: IntArray, color: Color) {
+private fun HourlyColumns(hourly: IntArray, color: Color, isToday: Boolean) {
     Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("TODAY BY HOUR", color = MV.OnSurfaceVariant,
+            Text(if (isToday) "TODAY BY HOUR" else "BY HOUR",
+                color = MV.OnSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             val maxV = (hourly.max().coerceAtLeast(1)).toFloat()

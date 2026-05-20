@@ -323,6 +323,7 @@ interface BackendApi {
     @GET("journal")
     suspend fun journalList(
         @retrofit2.http.Query("since") since: String? = null,
+        @retrofit2.http.Query("until") until: String? = null,
         @retrofit2.http.Query("type") type: String? = null,
         @retrofit2.http.Query("limit") limit: Int = 50,
     ): List<Annotation>

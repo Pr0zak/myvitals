@@ -57,6 +57,7 @@ async def create_annotation(
 @router.get("/journal", response_model=list[AnnotationOut])
 async def list_annotations(
     since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
     type: str | None = Query(None, description="filter by annotation type"),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_session),
@@ -68,6 +69,8 @@ async def list_annotations(
         .order_by(models.Annotation.ts.desc())
         .limit(limit)
     )
+    if until is not None:
+        stmt = stmt.where(models.Annotation.ts <= until)
     if type:
         stmt = stmt.where(models.Annotation.type == type)
 

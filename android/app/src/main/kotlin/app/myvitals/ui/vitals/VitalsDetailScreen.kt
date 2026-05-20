@@ -78,6 +78,9 @@ fun VitalsDetailScreen(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     var range by remember { mutableStateOf(VitalRange.MONTH) }
+    // Day selector only meaningful at DAY range; resets to today
+    // whenever range changes to a multi-day filter.
+    var selectedDay by remember { mutableStateOf(java.time.LocalDate.now()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     val producer = remember { CartesianChartModelProducer() }
@@ -103,7 +106,11 @@ fun VitalsDetailScreen(
     }
 
     suspend fun load() {
-        val cacheKey = "vitals_series_${vital.name.lowercase()}_${range.name.lowercase()}"
+        // DAY range cache key includes the selected day so revisiting
+        // past days is instant; multi-day ranges keep their flat keys.
+        val daySuffix = if (range == VitalRange.DAY) "_$selectedDay" else ""
+        val cacheKey =
+            "vitals_series_${vital.name.lowercase()}_${range.name.lowercase()}$daySuffix"
         app.myvitals.data.JsonCache.read<VitalsSeries>(
             context, cacheKey, seriesType,
         )?.let {
@@ -118,7 +125,9 @@ fun VitalsDetailScreen(
         error = null
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-            val (xs, ys) = withContext(Dispatchers.IO) { fetchSeries(api, vital, range) }
+            val (xs, ys) = withContext(Dispatchers.IO) {
+                fetchSeries(api, vital, range, selectedDay)
+            }
             pushSeries(xs, ys)
             if (xs.isNotEmpty() && ys.isNotEmpty()) {
                 app.myvitals.data.JsonCache.write(
@@ -131,7 +140,7 @@ fun VitalsDetailScreen(
         } finally { loading = false }
     }
 
-    LaunchedEffect(range) { haveSeries = false; load() }
+    LaunchedEffect(range, selectedDay) { haveSeries = false; load() }
 
     Column(Modifier.fillMaxSize().background(MV.Bg)) {
         Row(
@@ -157,7 +166,10 @@ fun VitalsDetailScreen(
             VitalRange.entries.forEach { r ->
                 FilterChip(
                     selected = r == range,
-                    onClick = { range = r },
+                    onClick = {
+                        range = r
+                        if (r != VitalRange.DAY) selectedDay = java.time.LocalDate.now()
+                    },
                     label = { Text(r.label) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = vital.color.copy(alpha = 0.20f),
@@ -165,6 +177,12 @@ fun VitalsDetailScreen(
                     ),
                 )
             }
+        }
+        if (range == VitalRange.DAY) {
+            app.myvitals.ui.common.DayNav(
+                selected = selectedDay,
+                onSelectedChange = { selectedDay = it },
+            )
         }
 
         Card(
@@ -231,14 +249,20 @@ private fun fmtForVital(v: Float, vital: Vital): String = when (vital) {
 
 private suspend fun fetchSeries(
     api: app.myvitals.sync.BackendApi, vital: Vital, range: VitalRange,
+    selectedDay: java.time.LocalDate = java.time.LocalDate.now(),
 ): Pair<List<Double>, List<Double>> {
     val isDayRange = range == VitalRange.DAY
+    val zone = java.time.ZoneId.systemDefault()
+    val dayStartIso = selectedDay.atStartOfDay(zone).toInstant().toString()
+    val dayEndIso = run {
+        val isToday = selectedDay == java.time.LocalDate.now()
+        if (isToday) Instant.now().toString()
+        else selectedDay.plusDays(1).atStartOfDay(zone).toInstant().toString()
+    }
     when (vital) {
         Vital.HR -> {
             if (isDayRange) {
-                val s = api.heartRateSeries(
-                    since = Instant.now().minusSeconds(86_400).toString(),
-                )
+                val s = api.heartRateSeries(since = dayStartIso, until = dayEndIso)
                 return tsXY(s.points)
             }
             val rows = dailyRows(api, range)
@@ -246,7 +270,7 @@ private suspend fun fetchSeries(
         }
         Vital.HRV -> {
             if (isDayRange) {
-                val s = api.hrvSeries(since = Instant.now().minusSeconds(86_400).toString())
+                val s = api.hrvSeries(since = dayStartIso, until = dayEndIso)
                 return tsXY(s.points)
             }
             val rows = dailyRows(api, range)
@@ -254,7 +278,7 @@ private suspend fun fetchSeries(
         }
         Vital.STEPS -> {
             if (isDayRange) {
-                val s = api.stepsSeries(since = Instant.now().minusSeconds(86_400).toString())
+                val s = api.stepsSeries(since = dayStartIso, until = dayEndIso)
                 return tsXY(s.points)
             }
             return summaryXY(dailyRows(api, range)) { it.stepsTotal?.toDouble() }

@@ -77,6 +77,9 @@ data class HrEventBand(
 fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var range by remember { mutableStateOf(VitalRange.DAY) }
+    // Day selector — only visible when range == DAY. Drives the 24h
+    // window so the user can scroll back through prior days.
+    var selectedDay by remember { mutableStateOf(java.time.LocalDate.now()) }
     var live by remember { mutableStateOf<List<TimePoint>>(emptyList()) }
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
     var bands by remember { mutableStateOf<List<HrEventBand>>(emptyList()) }
@@ -111,10 +114,19 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
             runCatching { api.profile() }.getOrNull()?.let { maxHr = it.maxHr() }
             coroutineScope {
                 if (range == VitalRange.DAY) {
+                    // Anchor the 24h window to selectedDay (local midnight
+                    // → next local midnight) so past-day views render the
+                    // right HR data, not a sliding "last 24 hours".
+                    val zone = java.time.ZoneId.systemDefault()
+                    val now = Instant.now()
+                    val isToday = selectedDay == java.time.LocalDate.now()
+                    val dayEnd = if (isToday) now
+                        else selectedDay.plusDays(1).atStartOfDay(zone).toInstant()
+                    val dayStart = selectedDay.atStartOfDay(zone).toInstant()
+                    val sinceIso = dayStart.toString()
+                    val untilIso = dayEnd.toString()
                     val liveD = async(Dispatchers.IO) {
-                        api.heartRateSeries(
-                            since = Instant.now().minusSeconds(86_400).toString(),
-                        )
+                        api.heartRateSeries(since = sinceIso, until = untilIso)
                     }
                     val activitiesD = async(Dispatchers.IO) {
                         runCatching { api.activities(limit = 30) }.getOrDefault(emptyList())
@@ -126,25 +138,20 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     }
                     val wearD = async(Dispatchers.IO) {
                         runCatching {
-                            api.deviceStatusSeries(
-                                since = Instant.now().minusSeconds(86_400).toString(),
-                            )
+                            api.deviceStatusSeries(since = sinceIso, until = untilIso)
                         }.getOrNull()
                     }
                     val annoD = async(Dispatchers.IO) {
                         runCatching {
-                            api.journalList(
-                                since = Instant.now().minusSeconds(86_400).toString(),
-                                limit = 50,
-                            )
+                            api.journalList(since = sinceIso, until = untilIso, limit = 50)
                         }.getOrDefault(emptyList())
                     }
                     live = liveD.await().points
                     annotations = annoD.await()
 
-                    // Build event bands for the 24h window.
-                    val windowStart = Instant.now().minusSeconds(86_400).toEpochMilli()
-                    val windowEnd = Instant.now().toEpochMilli()
+                    // Build event bands for the day's window.
+                    val windowStart = dayStart.toEpochMilli()
+                    val windowEnd = dayEnd.toEpochMilli()
                     val list = mutableListOf<HrEventBand>()
                     // Off-wrist bands (WATCH-2): consecutive samples where is_worn
                     // is false get a single grey band so the user reads gaps in HR
@@ -223,7 +230,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
         } finally { loading = false }
     }
 
-    LaunchedEffect(range) {
+    LaunchedEffect(range, selectedDay) {
         maybeShowCache()
         fetch()
     }
@@ -246,7 +253,10 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
             VitalRange.entries.forEach { r ->
                 FilterChip(
                     selected = r == range,
-                    onClick = { range = r },
+                    onClick = {
+                        range = r
+                        if (r != VitalRange.DAY) selectedDay = java.time.LocalDate.now()
+                    },
                     label = { Text(r.label) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = Vital.HR.color.copy(alpha = 0.20f),
@@ -254,6 +264,12 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     ),
                 )
             }
+        }
+        if (range == VitalRange.DAY) {
+            app.myvitals.ui.common.DayNav(
+                selected = selectedDay,
+                onSelectedChange = { selectedDay = it },
+            )
         }
         when {
             loading -> Text("Loading…", color = MV.OnSurfaceVariant,

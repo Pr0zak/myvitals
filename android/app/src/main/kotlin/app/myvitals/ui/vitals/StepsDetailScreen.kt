@@ -65,13 +65,36 @@ fun StepsDetailScreen(
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Day selector — scrolls the hourly chart + hero through past days
+    // without losing the day-of layout. Default = today.
+    var selectedDay by remember { mutableStateOf(LocalDate.now()) }
 
-    // Stale-while-revalidate: render last-known rows immediately so the
-    // screen never shows a spinner on slow mobile connections, then
-    // fetch fresh data in parallel. Cache key + type live next to the
-    // load() call site for grep-ability.
     val rowsType = Types.newParameterizedType(List::class.java, DailySummary::class.java)
     val hourlyType = IntArray::class.java
+
+    suspend fun loadHourly(day: LocalDate) {
+        // Per-day hourly fetch: window = local 00:00 → 23:59 of `day`.
+        // Cache keyed by date so revisiting a past day is instant.
+        val cacheKey = "steps_detail_hourly_$day"
+        JsonCache.read<IntArray>(context, cacheKey, hourlyType)?.let { hourly = it.value }
+        if (!settings.isConfigured()) return
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val zone = java.time.ZoneId.systemDefault()
+            val start = day.atStartOfDay(zone).toInstant().toString()
+            val end = day.plusDays(1).atStartOfDay(zone).toInstant().toString()
+            val series = withContext(Dispatchers.IO) {
+                runCatching { api.stepsSeries(since = start, until = end) }.getOrNull()
+            }
+            if (series != null) {
+                val h = bucketByHour(series.points)
+                hourly = h
+                JsonCache.write(context, cacheKey, hourlyType, h)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "steps hourly load failed for %s", day)
+        }
+    }
 
     suspend fun load(force: Boolean) {
         if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return }
@@ -82,17 +105,9 @@ fun StepsDetailScreen(
             val freshRows = withContext(Dispatchers.IO) { api.summaryRange(since = since) }
             rows = freshRows
             JsonCache.write(context, "steps_detail_rows", rowsType, freshRows)
-            val sinceIso = Instant.now().minusSeconds(24 * 3600).toString()
-            val series = withContext(Dispatchers.IO) {
-                runCatching { api.stepsSeries(since = sinceIso) }.getOrNull()
-            }
-            if (series != null) {
-                val h = bucketByHour(series.points)
-                hourly = h
-                JsonCache.write(context, "steps_detail_hourly", hourlyType, h)
-            }
+            loadHourly(selectedDay)
             error = null
-            Timber.i("steps detail: %d rows (force=%s)", rows.size, force)
+            Timber.i("steps detail: %d rows day=%s (force=%s)", rows.size, selectedDay, force)
         } catch (e: Exception) {
             Timber.w(e, "steps detail load failed")
             error = e.message?.take(160)
@@ -103,10 +118,12 @@ fun StepsDetailScreen(
         // 1. Read cache → render immediately (no spinner if there's anything)
         JsonCache.read<List<DailySummary>>(context, "steps_detail_rows", rowsType)
             ?.let { rows = it.value; loading = false }
-        JsonCache.read<IntArray>(context, "steps_detail_hourly", hourlyType)
-            ?.let { hourly = it.value }
         // 2. Always fetch fresh in parallel — render swaps when it lands.
         load(force = false)
+    }
+    // Reload hourly whenever the selected day changes.
+    LaunchedEffect(selectedDay) {
+        if (rows.isNotEmpty()) loadHourly(selectedDay)
     }
 
     val color = Vital.STEPS.color
@@ -122,6 +139,10 @@ fun StepsDetailScreen(
             Text("Steps", color = MV.OnSurface, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
+        app.myvitals.ui.common.DayNav(
+            selected = selectedDay,
+            onSelectedChange = { selectedDay = it },
+        )
         when {
             loading -> Text("Loading…", color = MV.OnSurfaceVariant,
                 modifier = Modifier.padding(16.dp))
@@ -138,7 +159,13 @@ fun StepsDetailScreen(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    item { TodayHero(rows.lastOrNull(), goal, color) }
+                    item {
+                        // Pick the row matching selectedDay; fall back to
+                        // the last row when there's no summary yet.
+                        val dayRow = rows.firstOrNull { it.date == selectedDay.toString() }
+                            ?: rows.lastOrNull()
+                        TodayHero(dayRow, goal, color)
+                    }
                     hourly?.let { hr ->
                         if (hr.sum() > 0) item { HourlyColumns(hr, color) }
                     }

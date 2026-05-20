@@ -270,15 +270,14 @@ fun StrengthTodayScreen(
             defaultDurationMin = 30,
             submitting = cardioLogging,
             onDismiss = { if (!cardioLogging) showCardioLog = false },
-            onSubmit = { label, durationMin, endedMinAgo ->
+            onSubmit = { label, durationMin, endedAt ->
                 scope.launch {
                     cardioLogging = true
                     try {
-                        // Anchor the HR window: end = now - endedMinAgo,
-                        // start = end - duration. Lets the user backdate
-                        // a session whose HR is in the past minute range.
-                        val startAt = java.time.Instant.now()
-                            .minusSeconds((endedMinAgo + durationMin) * 60L)
+                        // Anchor the HR window to the user's picked end
+                        // time: start = end - duration.
+                        val startAt = endedAt
+                            .minusSeconds(durationMin * 60L)
                         workout = repo.completeCardio(
                             workoutId = workout!!.id,
                             label = label,
@@ -2931,18 +2930,31 @@ private fun CardioLogDialog(
     defaultDurationMin: Int,
     submitting: Boolean,
     onDismiss: () -> Unit,
-    onSubmit: (label: String, durationMin: Int, endedMinAgo: Int) -> Unit,
+    onSubmit: (label: String, durationMin: Int, endedAt: java.time.Instant) -> Unit,
 ) {
     var label by remember { mutableStateOf(defaultLabel) }
     var durationStr by remember { mutableStateOf(defaultDurationMin.toString()) }
-    // Minutes-ago slider: defaults to 0 ("just now"). User adjusts if
-    // logging a session that finished a while back — keeps the HR
-    // sample scan window over the real workout instead of right now.
-    var endedMinAgoStr by remember { mutableStateOf("0") }
+    // Default end-time = right now in local zone. User can tap to pick a
+    // different time so the HR sample scan window matches the real
+    // workout instead of the moment they happened to log it.
+    val initialNow = remember { java.time.LocalDateTime.now() }
+    var endedHour by remember { mutableStateOf(initialNow.hour) }
+    var endedMinute by remember { mutableStateOf(initialNow.minute) }
+    var showTimePicker by remember { mutableStateOf(false) }
     val duration = durationStr.toIntOrNull()
-    val endedMinAgo = endedMinAgoStr.toIntOrNull() ?: 0
-    val canSubmit = label.isNotBlank() && duration != null && duration in 1..1440 &&
-        endedMinAgo in 0..2880 && !submitting
+    val canSubmit = label.isNotBlank() && duration != null && duration in 1..1440 && !submitting
+
+    if (showTimePicker) {
+        app.myvitals.ui.common.EndedTimePickerDialog(
+            initialHour = endedHour,
+            initialMinute = endedMinute,
+            onConfirm = { h, m ->
+                endedHour = h; endedMinute = m; showTimePicker = false
+            },
+            onDismiss = { showTimePicker = false },
+        )
+    }
+
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Log this workout") },
@@ -2977,26 +2989,25 @@ private fun CardioLogDialog(
                     enabled = !submitting,
                 )
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = endedMinAgoStr,
-                    onValueChange = { endedMinAgoStr = it.take(4).filter(Char::isDigit) },
-                    label = { Text("Ended (min ago)") },
-                    placeholder = { Text("0 = just now") },
-                    singleLine = true,
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !submitting,
+                Text(
+                    "Ended at",
+                    color = MV.OnSurfaceVariant, fontSize = 12.sp,
                 )
-                if (duration != null && endedMinAgo > 0) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "HR will be scanned from ${endedMinAgo + duration} min " +
-                        "ago to $endedMinAgo min ago.",
-                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
-                    )
+                Spacer(Modifier.height(2.dp))
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { if (!submitting) showTimePicker = true },
+                    enabled = !submitting,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("%02d:%02d".format(endedHour, endedMinute),
+                         color = MV.OnSurface, fontSize = 16.sp)
                 }
+                Text(
+                    "Tap to change if you're logging this later. " +
+                    "HR is scanned from this time minus the duration.",
+                    color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
         },
         confirmButton = {
@@ -3006,7 +3017,9 @@ private fun CardioLogDialog(
                     onSubmit(
                         label.trim(),
                         duration ?: defaultDurationMin,
-                        endedMinAgo,
+                        app.myvitals.ui.common.composeEndedInstant(
+                            endedHour, endedMinute, anchorDate = null,
+                        ),
                     )
                 },
             ) { Text(if (submitting) "Logging…" else "Log workout", color = MV.Green) }
@@ -3018,3 +3031,4 @@ private fun CardioLogDialog(
         },
     )
 }
+

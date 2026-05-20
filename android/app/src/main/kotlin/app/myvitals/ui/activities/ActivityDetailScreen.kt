@@ -337,22 +337,41 @@ private fun ActivityEditDialog(
     onDismiss: () -> Unit,
     onSubmit: (name: String, durationMin: Int, startAtIso: String) -> Unit,
 ) {
-    // Initial "minutes ago it ended" derived from current start_at +
-    // duration so re-opening the dialog reflects the row's real anchor.
-    val initialEndedMinAgo = remember(initialStartAtIso, initialDurationMin) {
+    // Derive initial ended-at + anchor date from the activity's real
+    // start_at + duration. Editing a 3-day-old entry keeps it on that
+    // day; only the picked HH:MM changes.
+    val zone = remember { java.time.ZoneId.systemDefault() }
+    val initialEndedLocal = remember(initialStartAtIso, initialDurationMin) {
         runCatching {
-            val startMs = java.time.Instant.parse(initialStartAtIso).toEpochMilli()
-            val endMs = startMs + initialDurationMin * 60_000L
-            ((System.currentTimeMillis() - endMs) / 60_000L).coerceAtLeast(0L).toInt()
-        }.getOrDefault(0)
+            val startInstant = java.time.Instant.parse(initialStartAtIso)
+            val endInstant = startInstant.plusSeconds(initialDurationMin * 60L)
+            endInstant.atZone(zone).toLocalDateTime()
+        }.getOrNull() ?: java.time.LocalDateTime.now()
+    }
+    val anchorDate = remember(initialStartAtIso) {
+        runCatching {
+            java.time.Instant.parse(initialStartAtIso).atZone(zone).toLocalDate()
+        }.getOrNull() ?: java.time.LocalDate.now()
     }
     var name by remember { mutableStateOf(initialName) }
     var durationStr by remember { mutableStateOf(initialDurationMin.toString()) }
-    var endedMinAgoStr by remember { mutableStateOf(initialEndedMinAgo.toString()) }
+    var endedHour by remember { mutableStateOf(initialEndedLocal.hour) }
+    var endedMinute by remember { mutableStateOf(initialEndedLocal.minute) }
+    var showTimePicker by remember { mutableStateOf(false) }
     val duration = durationStr.toIntOrNull()
-    val endedMinAgo = endedMinAgoStr.toIntOrNull() ?: 0
-    val canSubmit = name.isNotBlank() && duration != null && duration in 1..1440 &&
-        endedMinAgo in 0..7200 && !submitting
+    val canSubmit = name.isNotBlank() && duration != null && duration in 1..1440 && !submitting
+
+    if (showTimePicker) {
+        app.myvitals.ui.common.EndedTimePickerDialog(
+            initialHour = endedHour,
+            initialMinute = endedMinute,
+            onConfirm = { h, m ->
+                endedHour = h; endedMinute = m; showTimePicker = false
+            },
+            onDismiss = { showTimePicker = false },
+        )
+    }
+
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit activity") },
@@ -379,25 +398,28 @@ private fun ActivityEditDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
-                androidx.compose.material3.OutlinedTextField(
-                    value = endedMinAgoStr,
-                    onValueChange = { endedMinAgoStr = it.take(5).filter(Char::isDigit) },
-                    label = { Text("Ended (min ago)") },
-                    singleLine = true,
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
-                    ),
+                Text(
+                    "Ended at",
+                    color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(2.dp))
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { if (!submitting) showTimePicker = true },
                     enabled = !submitting,
                     modifier = Modifier.fillMaxWidth(),
-                )
-                if (duration != null) {
-                    Spacer(Modifier.height(4.dp))
+                ) {
                     Text(
-                        "HR will be re-scanned from ${endedMinAgo + duration} min " +
-                        "ago to $endedMinAgo min ago.",
-                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                        "%02d:%02d".format(endedHour, endedMinute) +
+                        "  ·  " + anchorDate.toString(),
+                        color = MV.OnSurface, fontSize = 16.sp,
                     )
                 }
+                Text(
+                    "Anchored to the activity's original date. " +
+                    "HR is re-scanned for the new window.",
+                    color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
         },
         confirmButton = {
@@ -405,8 +427,10 @@ private fun ActivityEditDialog(
                 enabled = canSubmit,
                 onClick = {
                     val dur = duration ?: initialDurationMin
-                    val startAt = java.time.Instant.now()
-                        .minusSeconds((endedMinAgo + dur) * 60L)
+                    val endAt = app.myvitals.ui.common.composeEndedInstant(
+                        endedHour, endedMinute, anchorDate = anchorDate,
+                    )
+                    val startAt = endAt.minusSeconds(dur * 60L)
                     onSubmit(name.trim(), dur, startAt.toString())
                 },
             ) { Text(if (submitting) "Saving…" else "Save", color = MV.Green) }

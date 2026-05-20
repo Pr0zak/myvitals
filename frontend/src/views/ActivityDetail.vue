@@ -553,6 +553,56 @@ async function applyTrailLink() {
     linkingTrail.value = false;
   }
 }
+
+// Edit dialog for manual activities. Server-side guard restricts the
+// PATCH to source=manual rows so imported activities stay locked.
+const showEdit = ref(false);
+const editName = ref("");
+const editDuration = ref(30);
+const editEndedAt = ref("");
+const editing = ref(false);
+function localHHMM(d: Date): string {
+  return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+}
+function openEdit() {
+  if (!activity.value) return;
+  editName.value = activity.value.name ?? "";
+  editDuration.value = Math.max(1, Math.round(activity.value.duration_s / 60));
+  const start = new Date(activity.value.start_at);
+  const end = new Date(start.getTime() + activity.value.duration_s * 1000);
+  editEndedAt.value = localHHMM(end);
+  showEdit.value = true;
+}
+function editedEndedAtIso(): string {
+  // Anchor the picked HH:MM to the activity's original calendar date,
+  // not "today" — editing a 3-day-old entry shouldn't yank it to today.
+  const startDate = new Date(activity.value!.start_at);
+  const [hh, mm] = editEndedAt.value.split(":").map(Number);
+  const d = new Date(startDate);
+  d.setHours(hh, mm, 0, 0);
+  return d.toISOString();
+}
+async function submitEdit() {
+  if (!activity.value) return;
+  const name = editName.value.trim();
+  const mins = Number(editDuration.value);
+  if (!name || !mins || mins <= 0 || mins > 1440) return;
+  editing.value = true;
+  try {
+    const endedMs = new Date(editedEndedAtIso()).getTime();
+    const startIso = new Date(endedMs - mins * 60_000).toISOString();
+    const updated = await api.editActivity(
+      activity.value.source, activity.value.source_id,
+      { name, duration_minutes: mins, start_at: startIso },
+    );
+    activity.value = updated;
+    showEdit.value = false;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    editing.value = false;
+  }
+}
 </script>
 
 <template>
@@ -574,7 +624,47 @@ async function applyTrailLink() {
             {{ fmtDur(activity.duration_s) }}
           </p>
         </div>
+        <button v-if="activity.source === 'manual'" class="edit-btn"
+                @click="openEdit">Edit</button>
       </header>
+
+      <!-- Edit dialog (manual activities only) -->
+      <div v-if="showEdit" class="modal-backdrop" @click.self="showEdit = false">
+        <div class="modal">
+          <h3>Edit activity</h3>
+          <p class="hint">
+            Adjust name, duration, or end time. Avg/max HR will be
+            re-scanned over the new window.
+          </p>
+          <label class="field">
+            <span>Name</span>
+            <input v-model="editName" type="text" maxlength="120"
+                   :disabled="editing" />
+          </label>
+          <label class="field">
+            <span>Duration (minutes)</span>
+            <input v-model.number="editDuration" type="number"
+                   min="1" max="1440" :disabled="editing" />
+          </label>
+          <label class="field">
+            <span>Ended at</span>
+            <input v-model="editEndedAt" type="time" :disabled="editing" />
+            <small class="hint" style="margin: 0.2rem 0 0;">
+              Anchored to {{ fmtDateTime(activity.start_at).split(',')[0] }}
+              — change if you mis-timed it.
+            </small>
+          </label>
+          <div class="modal-actions">
+            <button class="ghost" :disabled="editing"
+                    @click="showEdit = false">Cancel</button>
+            <button class="primary"
+                    :disabled="editing || !editName.trim() || !editDuration || editDuration <= 0"
+                    @click="submitEdit">
+              {{ editing ? 'Saving…' : 'Save' }}
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div class="grid">
         <Card title="Stats">
@@ -720,8 +810,40 @@ async function applyTrailLink() {
   background: transparent; color: var(--accent); border: 0; cursor: pointer;
   padding: 0.4rem 0; font-size: 0.9rem; margin-bottom: 0.5rem;
 }
-.head { margin-bottom: 1rem; }
+.head { margin-bottom: 1rem; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 .head h1 { margin: 0; }
+.edit-btn {
+  background: transparent; border: 1px solid var(--line, #2a3445);
+  color: var(--text, #e6eaf2); padding: 0.4rem 0.9rem; border-radius: 6px;
+  cursor: pointer; font-size: 0.85rem;
+}
+.edit-btn:hover { background: rgba(255, 255, 255, 0.06); }
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100; padding: 1rem;
+}
+.modal {
+  background: var(--surface, #151d29); border: 1px solid var(--border, #1f2937);
+  border-radius: 10px; padding: 1.2rem; max-width: 420px; width: 100%;
+}
+.modal h3 { margin: 0 0 0.5rem; }
+.modal .hint { color: var(--muted, #94a3b8); font-size: 0.85rem; margin: 0 0 1rem; }
+.modal .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.8rem; }
+.modal .field > span { font-size: 0.8rem; color: var(--muted, #94a3b8); }
+.modal .field input {
+  background: var(--bg-1, #0f1620); border: 1px solid var(--line, #2a3445);
+  color: var(--text, #e6eaf2);
+  padding: 0.5rem 0.7rem; border-radius: 6px; font-size: 0.95rem;
+}
+.modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
+.modal-actions button.primary, .modal-actions button.ghost {
+  padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;
+  font-size: 0.9rem; border: 1px solid var(--line, #2a3445);
+}
+.modal-actions button.primary { background: var(--accent, #ef4444); color: #fff; border-color: var(--accent, #ef4444); }
+.modal-actions button.ghost { background: transparent; color: var(--text, #e6eaf2); }
+.modal-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 .meta { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.9rem; }
 .type { color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem; }
 

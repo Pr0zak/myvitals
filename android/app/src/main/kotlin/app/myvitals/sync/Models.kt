@@ -703,6 +703,17 @@ data class ActivityLinkTrailBody(
     @Json(name = "trail_id") val trailId: Long?,
 )
 
+/** PATCH /activities/{source}/{sourceId}. Only set fields are applied;
+ *  backend re-scans HR samples when start_at or duration changes. */
+@JsonClass(generateAdapter = true)
+data class ActivityEditBody(
+    val name: String? = null,
+    val type: String? = null,
+    @Json(name = "duration_minutes") val durationMinutes: Double? = null,
+    @Json(name = "start_at") val startAt: String? = null,
+    val notes: String? = null,
+)
+
 @JsonClass(generateAdapter = true)
 data class DailySummary(
     val date: String,

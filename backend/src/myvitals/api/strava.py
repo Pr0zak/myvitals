@@ -1,9 +1,9 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,6 +64,18 @@ class ActivityOut(BaseModel):
 class ActivityNotesIn(BaseModel):
     notes: str | None = None
     tags: list[str] | None = None
+
+
+class ActivityEditIn(BaseModel):
+    """PATCH body for manual (source=manual) Activity edits. All fields
+    optional — only set keys are applied. Server validates and re-runs
+    the HR-sample scan when start_at or duration_minutes changes so the
+    avg/max HR stay anchored to the user's window."""
+    name: str | None = Field(default=None, max_length=255)
+    type: str | None = Field(default=None, max_length=64)
+    duration_minutes: float | None = Field(default=None, gt=0, le=24 * 60)
+    start_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=400)
 
 
 class ActivityLinkTrailIn(BaseModel):
@@ -331,6 +343,70 @@ async def link_activity_trail(
         "source": a.source, "source_id": a.source_id,
         "trail_id": a.trail_id,
     }
+
+
+@router.patch("/activities/{source}/{source_id}",
+              response_model=ActivityOut,
+              dependencies=[Depends(require_any)])
+async def edit_activity(
+    source: str,
+    source_id: str,
+    body: ActivityEditIn,
+    db: AsyncSession = Depends(get_session),
+) -> ActivityOut:
+    """Edit a manually-logged Activity row. Restricted to source=manual
+    so re-syncs from Strava / Concept2 / Health Connect can't be quietly
+    overwritten (they'd just bounce back to source values on the next
+    sync, surprising the user). When the time window changes we re-scan
+    HeartRate samples so avg_hr/max_hr stay anchored to reality."""
+    if source != "manual":
+        raise HTTPException(
+            status_code=403,
+            detail=f"only manual activities are editable, "
+                   f"got source={source!r}",
+        )
+    a = (await db.execute(
+        select(models.Activity)
+        .where(models.Activity.source == source)
+        .where(models.Activity.source_id == source_id)
+    )).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(404, "activity not found")
+
+    data = body.model_dump(exclude_unset=True)
+    if "name" in data: a.name = data["name"]
+    if "type" in data: a.type = data["type"] or a.type
+    if "notes" in data: a.notes = data["notes"]
+
+    window_changed = False
+    if "start_at" in data and data["start_at"] is not None:
+        sa = data["start_at"]
+        if sa.tzinfo is None:
+            sa = sa.replace(tzinfo=timezone.utc)
+        a.start_at = sa
+        window_changed = True
+    if "duration_minutes" in data and data["duration_minutes"] is not None:
+        a.duration_s = int(data["duration_minutes"] * 60)
+        window_changed = True
+
+    if window_changed:
+        end_at = a.start_at + timedelta(seconds=a.duration_s)
+        hr_rows = (await db.execute(
+            select(models.HeartRate.bpm)
+            .where(models.HeartRate.time >= a.start_at)
+            .where(models.HeartRate.time <= end_at)
+        )).scalars().all()
+        a.avg_hr = (sum(hr_rows) / len(hr_rows)) if hr_rows else None
+        a.max_hr = max(hr_rows) if hr_rows else None
+
+    await db.commit()
+    await db.refresh(a)
+    trail_name: str | None = None
+    if a.trail_id is not None:
+        t = await db.get(models.Trail, a.trail_id)
+        if t is not None:
+            trail_name = t.name
+    return _activity_to_out(a, trail_name=trail_name)
 
 
 @router.post("/activities/{source}/{source_id}/notes",

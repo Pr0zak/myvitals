@@ -300,6 +300,13 @@ interface BackendApi {
         @Body body: ActivityLinkTrailBody,
     ): Response<okhttp3.ResponseBody>
 
+    @retrofit2.http.PATCH("activities/{source}/{sourceId}")
+    suspend fun editActivity(
+        @Path("source") source: String,
+        @Path("sourceId") sourceId: String,
+        @Body body: ActivityEditBody,
+    ): ActivityRow
+
     @POST("trails/fetch-all-osm-paths")
     suspend fun fetchAllTrailOsmPaths(
         @retrofit2.http.Query("radius_m") radiusM: Double = 500.0,

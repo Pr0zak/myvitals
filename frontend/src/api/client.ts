@@ -528,6 +528,16 @@ export const api = {
     return data;
   },
 
+  async editActivity(source: string, sourceId: string, body: {
+    name?: string; type?: string;
+    duration_minutes?: number; start_at?: string; notes?: string;
+  }): Promise<import("./types").Activity> {
+    const { data } = await http.patch(
+      `/activities/${source}/${sourceId}`, body,
+    );
+    return data;
+  },
+
   async getProfile(): Promise<{
     id: number; birth_date: string | null; sex: string | null;
     height_cm: number | null; weight_goal_kg: number | null;

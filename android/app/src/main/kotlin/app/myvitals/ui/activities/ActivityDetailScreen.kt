@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -77,6 +78,8 @@ fun ActivityDetailScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var showPicker by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
+    var showEdit by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
 
     val cacheKey = remember(source, sourceId) { "activity_detail_${source}_${sourceId}" }
 
@@ -169,6 +172,17 @@ fun ActivityDetailScreen(
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
             )
+            // Manual-source activities are user-authored — let the user
+            // edit name / duration / start. Strava / Concept2 / HC rows
+            // are read-only because their source is authoritative.
+            if (activity?.source == "manual") {
+                IconButton(onClick = { showEdit = true }) {
+                    Icon(
+                        Icons.Outlined.Edit, contentDescription = "Edit",
+                        tint = MV.OnSurface,
+                    )
+                }
+            }
         }
 
         when {
@@ -266,7 +280,143 @@ fun ActivityDetailScreen(
                 }
             }
         }
+
+        if (showEdit && activity != null) {
+            val a = activity!!
+            ActivityEditDialog(
+                initialName = a.name.orEmpty(),
+                initialDurationMin = (a.durationS / 60).coerceAtLeast(1),
+                initialStartAtIso = a.startAt,
+                submitting = editing,
+                onDismiss = { if (!editing) showEdit = false },
+                onSubmit = { name, durationMin, startAtIso ->
+                    scope.launch {
+                        editing = true
+                        try {
+                            val api = BackendClient.create(
+                                settings.backendUrl, settings.bearerToken,
+                            )
+                            val updated = kotlinx.coroutines.withContext(
+                                kotlinx.coroutines.Dispatchers.IO
+                            ) {
+                                api.editActivity(
+                                    source = a.source, sourceId = a.sourceId,
+                                    body = app.myvitals.sync.ActivityEditBody(
+                                        name = name,
+                                        durationMinutes = durationMin.toDouble(),
+                                        startAt = startAtIso,
+                                    ),
+                                )
+                            }
+                            activity = updated
+                            // Refresh HR window too — backend re-scanned.
+                            app.myvitals.data.JsonCache.write(
+                                context,
+                                "activity_detail_${a.source}_${a.sourceId}",
+                                ActivityRow::class.java, updated,
+                            )
+                            showEdit = false
+                            load()
+                        } catch (e: Exception) {
+                            Timber.w(e, "editActivity failed")
+                            error = "Edit failed: ${e.message?.take(120)}"
+                        } finally { editing = false }
+                    }
+                },
+            )
+        }
     }
+}
+
+@Composable
+private fun ActivityEditDialog(
+    initialName: String,
+    initialDurationMin: Int,
+    initialStartAtIso: String,
+    submitting: Boolean,
+    onDismiss: () -> Unit,
+    onSubmit: (name: String, durationMin: Int, startAtIso: String) -> Unit,
+) {
+    // Initial "minutes ago it ended" derived from current start_at +
+    // duration so re-opening the dialog reflects the row's real anchor.
+    val initialEndedMinAgo = remember(initialStartAtIso, initialDurationMin) {
+        runCatching {
+            val startMs = java.time.Instant.parse(initialStartAtIso).toEpochMilli()
+            val endMs = startMs + initialDurationMin * 60_000L
+            ((System.currentTimeMillis() - endMs) / 60_000L).coerceAtLeast(0L).toInt()
+        }.getOrDefault(0)
+    }
+    var name by remember { mutableStateOf(initialName) }
+    var durationStr by remember { mutableStateOf(initialDurationMin.toString()) }
+    var endedMinAgoStr by remember { mutableStateOf(initialEndedMinAgo.toString()) }
+    val duration = durationStr.toIntOrNull()
+    val endedMinAgo = endedMinAgoStr.toIntOrNull() ?: 0
+    val canSubmit = name.isNotBlank() && duration != null && duration in 1..1440 &&
+        endedMinAgo in 0..7200 && !submitting
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit activity") },
+        text = {
+            Column {
+                androidx.compose.material3.OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(120) },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    enabled = !submitting,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                androidx.compose.material3.OutlinedTextField(
+                    value = durationStr,
+                    onValueChange = { durationStr = it.take(4).filter(Char::isDigit) },
+                    label = { Text("Duration (minutes)") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                    ),
+                    enabled = !submitting,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                androidx.compose.material3.OutlinedTextField(
+                    value = endedMinAgoStr,
+                    onValueChange = { endedMinAgoStr = it.take(5).filter(Char::isDigit) },
+                    label = { Text("Ended (min ago)") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                    ),
+                    enabled = !submitting,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (duration != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "HR will be re-scanned from ${endedMinAgo + duration} min " +
+                        "ago to $endedMinAgo min ago.",
+                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                enabled = canSubmit,
+                onClick = {
+                    val dur = duration ?: initialDurationMin
+                    val startAt = java.time.Instant.now()
+                        .minusSeconds((endedMinAgo + dur) * 60L)
+                    onSubmit(name.trim(), dur, startAt.toString())
+                },
+            ) { Text(if (submitting) "Saving…" else "Save", color = MV.Green) }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(
+                onClick = onDismiss, enabled = !submitting,
+            ) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable

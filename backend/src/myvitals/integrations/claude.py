@@ -1415,9 +1415,11 @@ async def build_deload_payload(db: AsyncSession) -> dict[str, Any]:
         vals = [r[key] for r in rows if r.get(key) is not None]
         return round(sum(vals) / len(vals), 2) if vals else None
 
+    # sleep_h / sleep_debt_h intentionally absent — Pixel Watch sleep
+    # duration is unreliable enough that we don't want the deload model
+    # weighing it. v0.7.269.
     trends: dict[str, dict[str, Any]] = {}
-    for k in ("rhr", "hrv", "recovery", "sleep_h", "sleep_debt_h",
-              "readiness", "tsb", "ctl", "atl"):
+    for k in ("rhr", "hrv", "recovery", "readiness", "tsb", "ctl", "atl"):
         cur = _mean(recent, k)
         base = _mean(baseline, k)
         trends[k] = {

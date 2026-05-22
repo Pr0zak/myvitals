@@ -168,10 +168,17 @@ ANTAGONIST_PAIRS: list[tuple[str, str]] = [
 
 @dataclass
 class RecoveryInputs:
-    """Per-day signals from daily_summary (when strength_recovery_aware=True)."""
+    """Per-day signals from daily_summary (when strength_recovery_aware=True).
+
+    Sleep was previously a direct input here (rest-day if <4h, deload if
+    <5h). Removed in v0.7.269 — Pixel Watch sleep duration is unreliable
+    enough that it was flipping legitimate strength days into yoga
+    flows. Field stays on the dataclass so `sleep_h_used` persistence
+    on StrengthWorkout doesn't break; just no longer drives decisions.
+    """
     recovery_score: float | None = None
     readiness_score: float | None = None
-    sleep_h: float | None = None
+    sleep_h: float | None = None  # informational only — see class docstring
 
     def is_blocking(self) -> tuple[bool, str | None]:
         """Should we recommend a rest day outright?"""
@@ -179,8 +186,6 @@ class RecoveryInputs:
             return True, f"recovery score {self.recovery_score:.0f} (very low)"
         if self.readiness_score is not None and self.readiness_score < 20:
             return True, f"readiness {self.readiness_score:.0f} (very low)"
-        if self.sleep_h is not None and self.sleep_h < 4:
-            return True, f"sleep {self.sleep_h:.1f}h (severely under-slept)"
         return False, None
 
     def deload_factor(self) -> float:
@@ -191,8 +196,6 @@ class RecoveryInputs:
                 f *= 0.85
             elif self.recovery_score < 60:
                 f *= 0.92
-        if self.sleep_h is not None and self.sleep_h < 5:
-            f *= 0.92
         if self.readiness_score is not None and self.readiness_score < 30:
             f *= 0.90
         return round(f, 3)
@@ -812,15 +815,19 @@ def prescribe_slot(
 async def read_recovery_inputs(
     db: AsyncSession, target_date: date
 ) -> RecoveryInputs:
-    """Pull the day's daily_summary and project to RecoveryInputs."""
+    """Pull the day's daily_summary and project to RecoveryInputs.
+
+    Sleep duration is intentionally NOT projected — see RecoveryInputs
+    docstring. Pixel Watch sleep duration was unreliable enough to flip
+    legitimate strength days; recovery_score / readiness_score still
+    capture sleep indirectly via the HRV/RHR they're derived from.
+    """
     row = await db.get(models.DailySummary, target_date)
     if row is None:
         return RecoveryInputs()
-    sleep_h = (row.sleep_duration_s or 0) / 3600.0 if row.sleep_duration_s else None
     return RecoveryInputs(
         recovery_score=row.recovery_score,
         readiness_score=row.readiness_score,
-        sleep_h=sleep_h,
     )
 
 

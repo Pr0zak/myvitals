@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -2180,6 +2182,19 @@ private fun ExerciseCard(
         val h = it.fold(0) { acc, c -> (acc * 31 + c.code) % 360 }
         Color(android.graphics.Color.HSVToColor(floatArrayOf(h.toFloat(), 0.55f, 0.85f)))
     }
+    // Tap-icon-for-bigger-view + instructions. The 40dp icon in the
+    // card header is too small to actually read the silhouette; the
+    // dialog renders a larger image and the catalog's how-to steps.
+    var showInfo by remember { mutableStateOf(false) }
+    if (showInfo && info != null) {
+        ExerciseInfoDialog(
+            info = info,
+            name = name,
+            backendBaseUrl = backendBaseUrl,
+            onYouTube = { onYouTube(wex.exerciseId, name) },
+            onDismiss = { showInfo = false },
+        )
+    }
     Card(
         colors = CardDefaults.cardColors(
             containerColor = if (done) MV.SurfaceContainerLow else MV.SurfaceContainer
@@ -2227,7 +2242,8 @@ private fun ExerciseCard(
                             Modifier
                                 .size(40.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0x14A78BFA)),
+                                .background(Color(0x14A78BFA))
+                                .clickable { showInfo = true },
                             contentAlignment = Alignment.Center,
                         ) {
                             AsyncImage(
@@ -2249,7 +2265,8 @@ private fun ExerciseCard(
                         Modifier
                             .size(40.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0x14A78BFA)),
+                            .background(Color(0x14A78BFA))
+                            .clickable { showInfo = true },
                         contentAlignment = Alignment.Center,
                     ) {
                         app.myvitals.ui.YogaPoseIcon(
@@ -2986,6 +3003,140 @@ private fun CardioLogDialog(
             androidx.compose.material3.TextButton(
                 onClick = onDismiss, enabled = !submitting,
             ) { Text("Cancel") }
+        },
+    )
+}
+
+/** Bigger view of an exercise — full-width image + name + muscle
+ *  targets + the catalog's how-to instructions. Opens when the user
+ *  taps the small 40dp icon in an ExerciseCard. */
+@Composable
+private fun ExerciseInfoDialog(
+    info: StrengthExerciseInfo,
+    name: String,
+    backendBaseUrl: String,
+    onYouTube: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val isPhoto = info.imageFront?.lowercase()?.let {
+        it.endsWith(".jpg") || it.endsWith(".jpeg")
+    } ?: false
+    val isMobilityYoga = info.movementPattern == "mobility" &&
+        app.myvitals.ui.hasYogaPoseIcon(info.id)
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(name) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(
+                    androidx.compose.foundation.rememberScrollState(),
+                ),
+            ) {
+                // Big-image area — 200dp tall, fills the dialog width.
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0x14A78BFA)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when {
+                        info.imageFront != null && backendBaseUrl.isNotEmpty() -> {
+                            AsyncImage(
+                                model = backendBaseUrl + info.imageFront,
+                                contentDescription = name,
+                                modifier = if (isPhoto) Modifier.fillMaxWidth()
+                                           else Modifier.size(160.dp),
+                                colorFilter = if (isPhoto) null
+                                              else ColorFilter.tint(Color(0xFFA78BFA)),
+                            )
+                        }
+                        isMobilityYoga -> {
+                            app.myvitals.ui.YogaPoseIcon(
+                                id = info.id, size = 160.dp,
+                                tint = Color(0xFFA78BFA),
+                            )
+                        }
+                        else -> {
+                            Text("No image", color = MV.OnSurfaceVariant, fontSize = 13.sp)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                // Muscle targets row — primary + secondary chips.
+                Text(
+                    "Targets",
+                    color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
+                )
+                Spacer(Modifier.height(4.dp))
+                val targets = buildList {
+                    add(info.primaryMuscle.replace('_', ' '))
+                    addAll(info.secondaryMuscles.map { it.replace('_', ' ') })
+                }
+                Text(
+                    targets.joinToString(" · "),
+                    color = MV.OnSurface, fontSize = 13.sp,
+                )
+                if (info.equipment.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Equipment",
+                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        info.equipment.joinToString(" · ") { it.replace('_', ' ') },
+                        color = MV.OnSurface, fontSize = 13.sp,
+                    )
+                }
+                if (info.instructions.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "How to",
+                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    for ((idx, step) in info.instructions.withIndex()) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Text(
+                                "${idx + 1}.",
+                                color = MV.OnSurfaceVariant,
+                                fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.width(22.dp),
+                            )
+                            Text(
+                                step,
+                                color = MV.OnSurface, fontSize = 13.sp,
+                                lineHeight = 18.sp,
+                            )
+                        }
+                    }
+                } else {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "No how-to instructions for this exercise in " +
+                        "the catalog. Tap YouTube below for a demo.",
+                        color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                onYouTube(); onDismiss()
+            }) { Text("YouTube ↗", color = MV.OnSurfaceVariant) }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
         },
     )
 }

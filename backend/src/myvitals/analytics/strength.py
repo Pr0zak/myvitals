@@ -903,6 +903,46 @@ async def last_split_for_user(
     return row.split_focus if row else None
 
 
+async def missed_strength_carryover(
+    db: AsyncSession, target_date: date, lookback_days: int = 2,
+) -> tuple[str, date] | None:
+    """If the most recent past-date plan was a skipped rotation-strength
+    workout (within `lookback_days`), return (split_focus, missed_date).
+
+    Lets the user override today's scheduled day-type (cardio / yoga)
+    with the strength session they skipped yesterday. Lookback default
+    of 2 days handles the Fri-pull → Sat-yoga → Sun case so a Friday
+    miss still carries through Sunday.
+
+    Returns None when:
+    - No skipped row in the lookback window
+    - A more-recent completed rotation-strength row exists (the missed
+      workout was effectively superseded)
+    - The most recent past-date row was already cardio / yoga / rest
+      (nothing to carry)
+    """
+    since = target_date - timedelta(days=lookback_days)
+    rows = (await db.execute(
+        select(models.StrengthWorkout)
+        .where(models.StrengthWorkout.date >= since)
+        .where(models.StrengthWorkout.date < target_date)
+        .order_by(models.StrengthWorkout.date.desc())
+    )).scalars().all()
+    for row in rows:
+        if row.split_focus not in _ROTATION_FOCUSES:
+            continue  # skip cardio/yoga/rest — they don't carry
+        if row.status in ("completed", "in_progress"):
+            return None  # already done, no carryover needed
+        if row.status == "skipped":
+            return row.split_focus, row.date
+        # planned / regenerated rows in the past shouldn't happen
+        # (auto_skip_stale_workouts flips them to skipped), but treat
+        # them as "still to do" if encountered.
+        if row.status == "planned":
+            return row.split_focus, row.date
+    return None
+
+
 async def recent_ratings_by_exercise(
     db: AsyncSession, since_days: int = 14,
 ) -> dict[str, float]:
@@ -1452,6 +1492,23 @@ async def generate_plan(
     if latest_bw is not None and latest_bw.weight_kg:
         user_bodyweight_lb = float(latest_bw.weight_kg) * 2.20462
 
+    # Missed-strength carry-over — if yesterday (or within the lookback
+    # window) was a skipped rotation-strength workout, pin today's split
+    # to that focus so the user doesn't lose the rotation slot to a
+    # weekend yoga day. Acts like a soft override_split: bypasses the
+    # day-type cardio/yoga dispatch but still respects override_split
+    # set explicitly via /today/swap-type.
+    carryover_note: str | None = None
+    if not override_split:
+        carry = await missed_strength_carryover(db, target_date)
+        if carry is not None:
+            override_split = carry[0]
+            carryover_note = (
+                f"Carried over from {carry[1].isoformat()}'s missed "
+                f"{carry[0]} session — schedule slot would have been "
+                "rest/cardio/yoga today."
+            )
+
     # Day-type allocation by weekday — runs before recovery / rest
     # checks. If today's slot is cardio or yoga (auto), we short-circuit
     # to that plan instead of building a strength session. Override
@@ -1636,6 +1693,8 @@ async def generate_plan(
     notes.extend(sel_notes)
     if freq_advisory_note:
         notes.append(freq_advisory_note)
+    if carryover_note:
+        notes.append(carryover_note)
     auto_avoid_count = sum(
         1 for r in recent_ratings.values() if r is not None and r <= 2.0
     )

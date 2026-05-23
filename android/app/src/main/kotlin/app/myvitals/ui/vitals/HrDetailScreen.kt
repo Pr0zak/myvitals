@@ -143,11 +143,6 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                             api.strengthWorkouts().workouts.filter { it.startedAt != null }
                         }.getOrDefault(emptyList())
                     }
-                    val wearD = async(Dispatchers.IO) {
-                        runCatching {
-                            api.deviceStatusSeries(since = sinceIso, until = untilIso)
-                        }.getOrNull()
-                    }
                     val annoD = async(Dispatchers.IO) {
                         runCatching {
                             api.journalList(since = sinceIso, until = untilIso, limit = 50)
@@ -156,45 +151,13 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     live = liveD.await().points
                     annotations = annoD.await()
 
-                    // Build event bands for the day's window.
+                    // Build event bands for the day's window. Off-wrist
+                    // bands were removed in v0.7.272 — wear-state timing
+                    // from HA was unreliable enough that bands often
+                    // covered actual on-wrist periods.
                     val windowStart = dayStart.toEpochMilli()
                     val windowEnd = dayEnd.toEpochMilli()
                     val list = mutableListOf<HrEventBand>()
-                    // Off-wrist bands (WATCH-2): consecutive samples where is_worn
-                    // is false get a single grey band so the user reads gaps in HR
-                    // as "watch was off" rather than a missing-data anomaly. Runs
-                    // shorter than 60s are filtered out — those are typically
-                    // accelerometer flutter at the wear-detection threshold.
-                    wearD.await()?.let { wear ->
-                        val pts = wear.points.mapNotNull { p ->
-                            val t = runCatching { Instant.parse(p.time).toEpochMilli() }
-                                .getOrNull() ?: return@mapNotNull null
-                            t to p.isWorn
-                        }.sortedBy { it.first }
-                        var runStart: Long? = null
-                        for (pair in pts) {
-                            val (t, worn) = pair
-                            if (worn == false) {
-                                if (runStart == null) runStart = t
-                            } else if (runStart != null) {
-                                if (t - runStart >= 60_000L) {
-                                    list += HrEventBand(runStart, t,
-                                        label = "off wrist",
-                                        color = Color(0x4894A3B8))
-                                }
-                                runStart = null
-                            }
-                        }
-                        // Close any still-open run at the last sample's timestamp.
-                        if (runStart != null && pts.isNotEmpty()) {
-                            val last = pts.last().first
-                            if (last - runStart >= 60_000L) {
-                                list += HrEventBand(runStart, last,
-                                    label = "off wrist",
-                                    color = Color(0x4894A3B8))
-                            }
-                        }
-                    }
                     for (a in activitiesD.await()) {
                         val s = runCatching { Instant.parse(a.startAt).toEpochMilli() }
                             .getOrNull() ?: continue

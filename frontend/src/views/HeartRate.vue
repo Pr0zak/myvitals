@@ -19,7 +19,7 @@ import type {
 } from "@/api/types";
 import { chartTheme } from "@/theme";
 import {
-  annotationMarkPoint, meanMarkLine, offBodyMarkArea, sleepMarkArea,
+  annotationMarkPoint, meanMarkLine, sleepMarkArea,
   soberResetMarkLine, timeAxisFormatter, workoutMarkArea,
 } from "@/components/charts/chartHelpers";
 import type { SleepNight } from "@/api/types";
@@ -37,10 +37,6 @@ const cur = computed(() => RANGES.find((r) => r.key === range.value)!);
 
 const hr24 = ref<HeartRateSeries | null>(null);
 const hrv24 = ref<HrvSeries | null>(null);
-// Off-wrist context for the 24h trace (WATCH-2). Stored as the raw
-// device_status points so chartHelpers can compute markArea bands.
-const wearPoints24 = ref<Array<{ time: string; is_worn: boolean | null }>>([]);
-const onBodyPct24 = ref<number | null>(null);
 // Journal annotations in the 24h window (LOG-4). Surfaced as emoji
 // markpoints on the HR trace so caffeine / alcohol / mood / food /
 // meds events line up against the HR curve they actually affected.
@@ -66,24 +62,17 @@ async function loadTrace() {
   try {
     const since = new Date(Date.now() - 24 * 3600 * 1000);
     const sinceMs = since.getTime();
-    const [liveHr, liveHrv, acts, sleep, swo, sbHist, wear, anns] = await Promise.all([
+    const [liveHr, liveHrv, acts, sleep, swo, sbHist, anns] = await Promise.all([
       api.heartRate({ since }),
       api.hrv({ since }),
       api.activities({ since, limit: 30 }),
       api.lastSleep().catch(() => null),
       api.strengthWorkouts({ limit: 5 }).catch(() => ({ count: 0, workouts: [] })),
       api.soberHistory(50).catch(() => []),
-      api.deviceStatusSeries({ since }).catch(() => null),
       api.listAnnotations({ since, limit: 50 }).catch(() => [] as Annotation[]),
     ]);
     hr24.value = liveHr;
     hrv24.value = liveHrv;
-    if (wear) {
-      wearPoints24.value = wear.points.map((p) => ({
-        time: p.time, is_worn: p.is_worn,
-      }));
-      onBodyPct24.value = wear.on_body_pct;
-    }
     annotations24.value = anns;
 
     // Merge strength workouts that overlap the 24h window into the
@@ -255,18 +244,10 @@ const traceOption = computed(() => {
     },
   ];
 
-  // Third host series for the off-wrist bands so a missing HR run
-  // is visibly attributed to the watch being off rather than to a
-  // sync gap. markArea is one-per-series, so we keep this separate
-  // from the workout/sleep host series.
-  const offBodyArea = offBodyMarkArea(wearPoints24.value);
-  if (offBodyArea) {
-    series.push({
-      type: "line", name: "Off wrist",
-      data: [], showSymbol: false, silent: true,
-      markArea: offBodyArea,
-    });
-  }
+  // Off-wrist mark-area removed in v0.7.272 — wear-state timing from
+  // HA was unreliable enough that bands often covered actual on-wrist
+  // periods. The helper still exists in chartHelpers.ts in case we
+  // want to revive it with a better signal.
 
   // Second host series for the sleep band (markArea is one-per-series).
   const sleepArea = sleepMarkArea(

@@ -1,4 +1,4 @@
-"""Streaming parsers for Fitbit (Google Takeout) and Garmin Connect ZIP exports.
+"""Streaming parsers for Fitbit / Google Health (Google Takeout) and Garmin Connect ZIP exports.
 
 Both parsers are **generators** that yield ``(stream_name, [samples])``
 tuples while walking the ZIP. The HTTP endpoint flushes each yielded chunk
@@ -267,6 +267,15 @@ def _parse_fitbit_weight(zf, name, weight_unit) -> Iterator[tuple[str, list[dict
 
 
 def _parse_fitbit_wrist_temp(zf, name) -> Iterator[tuple[str, list[dict[str, Any]]]]:
+    """LEGACY (Fitbit-era) wrist-temperature parser.
+
+    Google explicitly removed minute-by-minute skin-temperature data
+    from the rebranded Google Health app on 2026-05-19; only the
+    daily/weekly trend remains. New Google Takeout ZIPs won't include
+    these files, so this parser only fires on archived Fitbit exports.
+    Kept for historical-data backfill — do not extend.
+    """
+    fired = False
     batch: list[dict[str, Any]] = []
     for row in _safe_load_csv(zf, name):
         ts = _parse_iso_ts(row.get("recorded_time") or row.get("timestamp") or row.get("date"))
@@ -275,11 +284,18 @@ def _parse_fitbit_wrist_temp(zf, name) -> Iterator[tuple[str, list[dict[str, Any
         if ts and delta:
             try:
                 batch.append({"time": ts, "celsius_delta": float(delta)})
+                fired = True
             except ValueError:
                 continue
             if len(batch) >= MAX_BATCH:
                 yield ("skin_temp", batch)
                 batch = []
+    if fired:
+        log.info(
+            "legacy fitbit wrist-temp file parsed (%s) — Google Health no "
+            "longer exports minute-level skin temp post-2026-05-19",
+            name,
+        )
     yield from _emit("skin_temp", batch)
 
 

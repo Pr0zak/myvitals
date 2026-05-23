@@ -20,11 +20,22 @@ log = logging.getLogger(__name__)
 
 
 # Keywords identifying a wrist-worn-device step source (Pixel Watch via
-# Fitbit, Wear OS wearable apps, Samsung wearable). When multiple
-# sources cover a day, the watch wins — its count matches what the
-# user sees on the wrist, and the phone pedometer ("android" source)
-# tends to over-count when the phone moves in a pocket while walking.
-_WATCH_SOURCE_KEYWORDS = ("wearable", "fit.wearable", "fitbit", "watch", "wear")
+# Fitbit / Google Health, Wear OS wearable apps, Samsung wearable).
+# When multiple sources cover a day, the watch wins — its count
+# matches what the user sees on the wrist, and the phone pedometer
+# ("android" source) tends to over-count when the phone moves in a
+# pocket while walking.
+#
+# Includes "googlehealth" and "googlefit" for the May 2026 Fitbit →
+# Google Health rebrand. HC source attribution post-rebrand still
+# carries `com.fitbit.FitbitMobile` per Google's "no action required"
+# messaging, but new HC step counter (June 2026 SPN switch) may emit
+# a generic `com.google.android.apps.healthdata` source — keyword
+# match catches that too.
+_WATCH_SOURCE_KEYWORDS = (
+    "wearable", "fit.wearable", "fitbit", "watch", "wear",
+    "googlehealth", "googlefit", "healthdata",
+)
 
 
 def _is_watch_source(name: str) -> bool:

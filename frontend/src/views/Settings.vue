@@ -1412,11 +1412,13 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
       </p>
       <div class="imports">
         <div class="import-card">
-          <strong>Fitbit</strong>
+          <strong>Fitbit / Google Health</strong>
           <p class="muted">
-            Request your archive from
-            <a href="https://www.fitbit.com/settings/data/export" target="_blank" rel="noreferrer">fitbit.com/settings/data/export</a>
-            (or via Google Takeout if your account migrated). Upload the unmodified ZIP.
+            The Fitbit app became <strong>Google Health</strong> on
+            2026-05-19. Request your archive from
+            <a href="https://takeout.google.com/" target="_blank" rel="noreferrer">takeout.google.com</a>
+            (pick "Fitbit"). Legacy fitbit.com exports still work too.
+            Upload the unmodified ZIP.
           </p>
           <div class="unit-row">
             <span class="muted">Weight unit in this archive:</span>
@@ -1424,7 +1426,7 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
             <label><input type="radio" value="lb" v-model="fitbitWeightUnit"/> lb</label>
           </div>
           <button class="ghost" :disabled="!!importBusy" @click="pickImportFile('fitbit')">
-            {{ importBusy === 'fitbit' ? 'Uploading…' : 'Upload Fitbit ZIP' }}
+            {{ importBusy === 'fitbit' ? 'Uploading…' : 'Upload Fitbit / Google Health ZIP' }}
           </button>
         </div>
         <div class="import-card">

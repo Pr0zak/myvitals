@@ -196,12 +196,26 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
 
     # Strava sync — always schedule; sync_recent is a no-op if creds
     # aren't configured, so the user can connect Strava without restart.
+    #
+    # next_run_time: 30s after boot so a deploy doesn't push the next
+    # fire 1h out. Without this, frequent deploys could starve the job
+    # entirely — that's how a token expired Mar 15 and went unrefreshed
+    # for 9 days (the user saw "where's my ride?"). sync_recent has its
+    # own 30-min self-throttle guard so back-to-back restarts within
+    # a single hour don't slam the Strava API.
+    #
+    # Interval dropped from 6h → 1h so rides land closer to real time.
+    # Strava rate limit is 100req/15min and a typical incremental sync
+    # is 1 request, so 1h cadence is comfortably under budget.
     scheduler.add_job(
         strava_int.sync_recent,
-        trigger="interval", hours=6,
+        trigger="interval", hours=1,
         id="strava_sync", replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+        coalesce=True,
+        misfire_grace_time=600,
     )
-    log.info("Strava poll scheduled every 6h (no-op until configured)")
+    log.info("Strava poll scheduled every 1h (first run in ~30s)")
 
     # Weekly AI digest — Sun 22:00 local. No-op if user hasn't opted in.
     from ..main import _weekly_ai_digest

@@ -271,8 +271,17 @@ async def upsert_activities(db: AsyncSession, payloads: list[dict[str, Any]]) ->
     return len(rows)
 
 
-async def sync_recent(after_ts: int | None = None) -> int:
-    """Pull activities since [after_ts] (or since last_sync_at) and upsert."""
+async def sync_recent(
+    after_ts: int | None = None, force: bool = False,
+) -> int:
+    """Pull activities since [after_ts] (or since last_sync_at) and upsert.
+
+    Self-throttles: if last_sync_at is within the last 30 minutes,
+    return 0 without an API call. Lets the scheduler fire on every
+    worker boot (so a rapid deploy cluster doesn't starve the job
+    interval) without slamming Strava's rate limits. Pass force=True
+    to bypass (the manual /strava/sync endpoint does this).
+    """
     async with SessionLocal() as db:
         app_creds = await get_app_credentials(db)
         if app_creds is None:
@@ -281,6 +290,12 @@ async def sync_recent(after_ts: int | None = None) -> int:
         user_creds = await get_credentials(db)
         if user_creds is None:
             return 0
+
+        if not force and user_creds.last_sync_at is not None:
+            since = datetime.now(timezone.utc) - user_creds.last_sync_at
+            if since < timedelta(minutes=30):
+                log.debug("Strava sync skipped — last %s ago", since)
+                return 0
 
         cutoff_ts = after_ts
         if cutoff_ts is None and user_creds.last_sync_at is not None:
@@ -292,6 +307,6 @@ async def sync_recent(after_ts: int | None = None) -> int:
         user_creds.last_sync_at = datetime.now(timezone.utc)
         await db.commit()
 
-        if n:
-            log.info("Strava: upserted %d activities", n)
+        log.info("Strava: upserted %d activities (since=%s)",
+                 n, user_creds.last_sync_at)
         return n

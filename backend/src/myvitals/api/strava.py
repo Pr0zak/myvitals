@@ -182,8 +182,12 @@ async def strava_status(db: AsyncSession = Depends(get_session)) -> StravaStatus
 async def strava_sync(
     days: int = Query(90, ge=1, le=3650),
 ) -> dict[str, int]:
+    """Manual Strava pull — bypasses the 30-min self-throttle inside
+    sync_recent. The scheduled 1-hourly poll uses the throttle; this
+    endpoint exists so the user can hit "Sync now" and get an
+    immediate refresh."""
     after_ts = int(datetime.now(timezone.utc).timestamp()) - days * 86400
-    count = await strava.sync_recent(after_ts=after_ts)
+    count = await strava.sync_recent(after_ts=after_ts, force=True)
     return {"upserted": count, "days": days}
 
 

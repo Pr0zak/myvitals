@@ -42,6 +42,9 @@ services:
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
       STRAVA_CALLBACK_URL: ${STRAVA_CALLBACK_URL:-}
+      # SCS-6: Fernet key for encrypting the stored Strava password.
+      # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      STRAVA_CREDS_KEY: ${STRAVA_CREDS_KEY:-}
     ports:
       - "8000:8000"
     volumes:

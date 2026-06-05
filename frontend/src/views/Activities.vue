@@ -122,7 +122,7 @@ async function load() {
     // sort, group, filter, and render alongside the rest of the feed.
     const sinceDate = params.since ?? new Date(0);
     const synthStrength: Activity[] = sw.workouts
-      .filter((w) => w.status !== "regenerated" && w.status !== "planned")
+      .filter((w) => w.status !== "regenerated" && w.status !== "planned" && w.status !== "skipped")
       // Skip cardio days auto-completed by an Activity (Concept2 row,
       // Strava bike). The underlying activity is already in the feed —
       // showing the StrengthWorkout too would duplicate the row.

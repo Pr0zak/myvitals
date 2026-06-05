@@ -136,7 +136,7 @@ fun ActivitiesScreen(
                 val woD = async(Dispatchers.IO) {
                     runCatching {
                         api.strengthWorkouts().workouts
-                            .filter { it.status != "regenerated" }
+                            .filter { it.status != "regenerated" && it.status != "planned" && it.status != "skipped" }
                             // Drop cardio days auto-completed by an Activity
                             // (Concept2 row, Strava bike). The underlying
                             // activity is already in the feed — would dupe.

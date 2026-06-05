@@ -40,6 +40,139 @@ log = logging.getLogger(__name__)
 _UA = "myvitals/1.0 (self-hosted; cookie-session)"
 _STRAVA = "https://www.strava.com"
 
+
+# ─── Fernet encryption for the stored password (SCS-6) ──────────────
+
+def _fernet() -> "Fernet | None":  # type: ignore[name-defined]
+    """Lazy-load Fernet to keep cryptography optional. Returns None
+    when STRAVA_CREDS_KEY env var isn't set — auto-login then disabled."""
+    from ..config import settings as _s
+    if not _s.strava_creds_key:
+        return None
+    try:
+        from cryptography.fernet import Fernet
+        return Fernet(_s.strava_creds_key.encode())
+    except Exception as e:  # noqa: BLE001
+        log.error("STRAVA_CREDS_KEY is set but invalid: %s", e)
+        return None
+
+
+def encrypt_password(plain: str) -> str:
+    """Encrypt the user's Strava password with the Fernet key from .env.
+    Returns the base64 ciphertext for DB storage. Raises RuntimeError
+    when the key isn't configured (caller should refuse to save the row)."""
+    f = _fernet()
+    if f is None:
+        raise RuntimeError("STRAVA_CREDS_KEY not set — auto-login disabled")
+    return f.encrypt(plain.encode()).decode()
+
+
+def decrypt_password(blob: str) -> str:
+    f = _fernet()
+    if f is None:
+        raise RuntimeError("STRAVA_CREDS_KEY not set")
+    return f.decrypt(blob.encode()).decode()
+
+
+def auto_login_available() -> bool:
+    """Surface this on /strava/cookie status so the UI can show / hide
+    the email + password fields based on whether the key is configured."""
+    return _fernet() is not None
+
+
+# ─── Playwright-driven auto-login ──────────────────────────────────
+
+@dataclass
+class LoginResult:
+    ok: bool
+    remember_token: str | None = None
+    sid_cookie: str | None = None
+    athlete_id: int | None = None
+    athlete_name: str | None = None
+    error: str | None = None
+
+
+async def auto_login(email: str, password: str) -> LoginResult:
+    """Drive a headless Chromium to log into strava.com with the given
+    credentials and extract the session cookies. Password lives only on
+    the function stack — we don't log it, persist it, or pass it to any
+    downstream call.
+
+    Returns ok=False with `error` populated on:
+    - Wrong email/password (Strava redirects back to /login)
+    - Captcha / Cloudflare challenge (Strava's bot detection kicks in)
+    - Network errors / Playwright not installed
+    """
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        return LoginResult(ok=False, error="playwright not installed on backend")
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            try:
+                context = await browser.new_context(user_agent=_UA)
+                page = await context.new_page()
+                await page.goto(f"{_STRAVA}/login", wait_until="domcontentloaded", timeout=30_000)
+
+                # Strava's login form: input[name="email"], input[name="password"], button[type="submit"]
+                await page.fill('input[name="email"]', email)
+                await page.fill('input[name="password"]', password)
+
+                # Submit and wait for either successful redirect to /dashboard
+                # or any other navigation (failed login redirects back to /login
+                # with a flash; captcha bounces to a challenge page).
+                async with page.expect_navigation(timeout=30_000):
+                    await page.click('button[type="submit"]')
+
+                # Allow a beat for client-side redirects + cookie write.
+                await page.wait_for_load_state("networkidle", timeout=15_000)
+
+                url = page.url
+                if "/login" in url:
+                    # Still on /login = wrong creds or captcha.
+                    body = (await page.content())[:4000]
+                    err = "login failed"
+                    if "captcha" in body.lower() or "challenge" in body.lower():
+                        err = "captcha — Strava is challenging the login. Try manual cookie paste."
+                    elif "incorrect" in body.lower() or "invalid" in body.lower():
+                        err = "incorrect email or password"
+                    return LoginResult(ok=False, error=err)
+
+                # Extract cookies from the context.
+                cookies = await context.cookies(_STRAVA)
+                remember = next(
+                    (c["value"] for c in cookies if c["name"] == "strava_remember_token"),
+                    None,
+                )
+                sid = next(
+                    (c["value"] for c in cookies if c["name"] == "_strava4_session"),
+                    None,
+                )
+                if not remember:
+                    return LoginResult(ok=False,
+                                       error="no remember_token in response — Strava login flow changed?")
+
+                # Pull identity from the dashboard HTML we already have.
+                athlete_id = _extract_athlete_id(await page.content())
+                athlete_name = _extract_athlete_name(await page.content())
+
+                return LoginResult(
+                    ok=True,
+                    remember_token=remember,
+                    sid_cookie=sid,
+                    athlete_id=athlete_id,
+                    athlete_name=athlete_name,
+                )
+            finally:
+                await browser.close()
+    except Exception as e:  # noqa: BLE001
+        return LoginResult(ok=False, error=f"playwright error: {e}")
+
 # Strava cookies you need from devtools → Application → Cookies → strava.com:
 #   - strava_remember_token  (long-lived, months — the important one)
 #   - _strava4_session       (short-lived session cookie; optional)

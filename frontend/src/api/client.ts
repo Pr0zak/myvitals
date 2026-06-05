@@ -465,13 +465,28 @@ export const api = {
     athlete_name: string | null;
     last_sync_at: string | null;
     last_error: string | null;
+    auto_login_available: boolean;
+    auto_login_enabled: boolean;
+    email: string | null;
+    last_auto_login_at: string | null;
   }> {
     const { data } = await http.get("/strava/cookie");
     return data;
   },
 
-  async stravaCookieSet(body: { remember_token: string; sid_cookie?: string | null }) {
+  async stravaCookieSet(body: {
+    remember_token?: string;
+    sid_cookie?: string | null;
+    email?: string;
+    password?: string;
+    auto_login_enabled?: boolean;
+  }) {
     const { data } = await http.put("/strava/cookie", body);
+    return data;
+  },
+
+  async stravaCookieRefresh() {
+    const { data } = await http.post("/strava/cookie/refresh");
     return data;
   },
 

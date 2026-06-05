@@ -256,12 +256,19 @@ class StravaCookieCreds(Base):
     """
     __tablename__ = "strava_cookie_creds"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    remember_token: Mapped[str] = mapped_column(Text)
+    remember_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     sid_cookie: Mapped[str | None] = mapped_column(Text, nullable=True)
     athlete_id_cached: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     athlete_name_cached: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # SCS-6 auto-login. Email is plain; password is Fernet-encrypted
+    # with settings.strava_creds_key. Both nullable so the row can
+    # still hold paste-only cookies when auto-login is off.
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    auto_login_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_auto_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

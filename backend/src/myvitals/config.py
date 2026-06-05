@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     # match the host of this URL.
     strava_callback_url: str = "http://localhost:8080/auth/strava/callback"
 
+    # SCS-6 — encryption key for the stored Strava password (cookie-mode
+    # auto-login). Fernet base64 key, 32 raw bytes. Generate with:
+    #
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    #
+    # If unset, auto-login is disabled and the user must paste cookies
+    # manually. Setting this once in .env is the only "code-side"
+    # secret — the email and password themselves live in the DB row
+    # set from the Settings UI, never in code.
+    strava_creds_key: str | None = None
+
     @property
     def database_url(self) -> str:
         return (

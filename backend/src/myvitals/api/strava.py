@@ -473,11 +473,22 @@ class StravaCookieStatus(BaseModel):
     athlete_name: str | None = None
     last_sync_at: datetime | None = None
     last_error: str | None = None
+    # SCS-6: surfaced so the UI knows whether to show the email +
+    # password form. False when STRAVA_CREDS_KEY isn't set in .env.
+    auto_login_available: bool = False
+    auto_login_enabled: bool = False
+    email: str | None = None
+    last_auto_login_at: datetime | None = None
 
 
 class StravaCookieIn(BaseModel):
-    remember_token: str = Field(min_length=10)
+    # Either cookie fields OR email+password is required. Cookies stay
+    # optional so the user can paste just creds and have us auto-login.
+    remember_token: str | None = None
     sid_cookie: str | None = None
+    email: str | None = None
+    password: str | None = None
+    auto_login_enabled: bool = True
 
 
 class StravaCookieSyncOut(BaseModel):
@@ -499,13 +510,20 @@ async def get_cookie_status(
 ) -> StravaCookieStatus:
     row = await strava_web.get_cookie_creds(db)
     if row is None:
-        return StravaCookieStatus(configured=False)
+        return StravaCookieStatus(
+            configured=False,
+            auto_login_available=strava_web.auto_login_available(),
+        )
     return StravaCookieStatus(
-        configured=True,
+        configured=row.remember_token is not None,
         athlete_id=row.athlete_id_cached,
         athlete_name=row.athlete_name_cached,
         last_sync_at=row.last_sync_at,
         last_error=row.last_error,
+        auto_login_available=strava_web.auto_login_available(),
+        auto_login_enabled=row.auto_login_enabled,
+        email=row.email,
+        last_auto_login_at=row.last_auto_login_at,
     )
 
 
@@ -515,43 +533,150 @@ async def set_cookie(
     body: StravaCookieIn,
     db: AsyncSession = Depends(get_session),
 ) -> StravaCookieStatus:
-    """Validate the cookie via a live request, then persist.
+    """Persist either a pasted cookie or stored email+password (or both).
 
-    Tries `check_cookie` first so we surface a 400 on stale/invalid
-    cookies before writing them to the DB. Returns the athlete name
-    we resolved from the dashboard so the user sees confirmation it
-    landed on the right account.
+    - If email + password given: encrypts password with Fernet key,
+      runs a Playwright auto-login *now* to validate the credentials
+      and capture an initial cookie. Returns 400 on captcha / wrong
+      creds / Playwright failure.
+    - If only cookie given: validates with check_cookie() and persists.
+    - If both given: runs auto-login first (captures fresh cookie) and
+      stores credentials for the next refresh.
     """
-    chk = await strava_web.check_cookie(body.remember_token, body.sid_cookie)
-    if not chk.ok:
-        raise HTTPException(400, detail=f"cookie check failed: {chk.error}")
     now = datetime.now(timezone.utc)
     row = await strava_web.get_cookie_creds(db)
+    have_creds = bool(body.email and body.password)
+    have_cookie = bool(body.remember_token)
+
+    if not have_creds and not have_cookie:
+        raise HTTPException(400, detail="provide either cookie or email+password")
+
+    new_remember: str | None = body.remember_token
+    new_sid: str | None = body.sid_cookie
+    athlete_id: int | None = None
+    athlete_name: str | None = None
+    new_password_enc: str | None = None
+
+    if have_creds:
+        if not strava_web.auto_login_available():
+            raise HTTPException(
+                400,
+                detail="STRAVA_CREDS_KEY not configured in .env — cannot store password",
+            )
+        login = await strava_web.auto_login(body.email, body.password)
+        if not login.ok:
+            raise HTTPException(400, detail=f"auto-login failed: {login.error}")
+        new_remember = login.remember_token
+        new_sid = login.sid_cookie
+        athlete_id = login.athlete_id
+        athlete_name = login.athlete_name
+        new_password_enc = strava_web.encrypt_password(body.password)
+
+    if have_cookie and not have_creds:
+        chk = await strava_web.check_cookie(body.remember_token, body.sid_cookie)
+        if not chk.ok:
+            raise HTTPException(400, detail=f"cookie check failed: {chk.error}")
+        athlete_id = chk.athlete_id
+        athlete_name = chk.athlete_name
+
     if row is None:
         row = models.StravaCookieCreds(
             id=1,
-            remember_token=body.remember_token,
-            sid_cookie=body.sid_cookie,
-            athlete_id_cached=chk.athlete_id,
-            athlete_name_cached=chk.athlete_name,
+            remember_token=new_remember,
+            sid_cookie=new_sid,
+            athlete_id_cached=athlete_id,
+            athlete_name_cached=athlete_name,
+            email=body.email,
+            password_encrypted=new_password_enc,
+            auto_login_enabled=body.auto_login_enabled and bool(new_password_enc),
+            last_auto_login_at=now if have_creds else None,
             created_at=now,
             updated_at=now,
         )
         db.add(row)
     else:
-        row.remember_token = body.remember_token
-        row.sid_cookie = body.sid_cookie
-        row.athlete_id_cached = chk.athlete_id
-        row.athlete_name_cached = chk.athlete_name
+        if new_remember:
+            row.remember_token = new_remember
+        if new_sid:
+            row.sid_cookie = new_sid
+        row.athlete_id_cached = athlete_id or row.athlete_id_cached
+        row.athlete_name_cached = athlete_name or row.athlete_name_cached
+        if body.email:
+            row.email = body.email
+        if new_password_enc:
+            row.password_encrypted = new_password_enc
+        row.auto_login_enabled = body.auto_login_enabled and bool(row.password_encrypted)
+        if have_creds:
+            row.last_auto_login_at = now
         row.last_error = None
         row.updated_at = now
     await db.commit()
+
     return StravaCookieStatus(
         configured=True,
         athlete_id=row.athlete_id_cached,
         athlete_name=row.athlete_name_cached,
         last_sync_at=row.last_sync_at,
         last_error=None,
+        auto_login_available=strava_web.auto_login_available(),
+        auto_login_enabled=row.auto_login_enabled,
+        email=row.email,
+        last_auto_login_at=row.last_auto_login_at,
+    )
+
+
+async def _refresh_cookie_via_auto_login(
+    db: AsyncSession,
+    row: "models.StravaCookieCreds",
+) -> bool:
+    """Re-run auto-login using the stored email+password. Returns True
+    on success (row updated, db commit not yet performed — caller commits)."""
+    if not row.auto_login_enabled or not row.email or not row.password_encrypted:
+        return False
+    try:
+        plain = strava_web.decrypt_password(row.password_encrypted)
+    except Exception as e:  # noqa: BLE001
+        log.warning("password decrypt failed (key rotated?): %s", e)
+        row.last_error = "password decrypt failed (rotate the password from Settings)"
+        return False
+    login = await strava_web.auto_login(row.email, plain)
+    if not login.ok:
+        row.last_error = f"auto-login failed: {login.error}"
+        return False
+    row.remember_token = login.remember_token
+    if login.sid_cookie:
+        row.sid_cookie = login.sid_cookie
+    if login.athlete_id:
+        row.athlete_id_cached = login.athlete_id
+    if login.athlete_name:
+        row.athlete_name_cached = login.athlete_name
+    row.last_auto_login_at = datetime.now(timezone.utc)
+    row.last_error = None
+    return True
+
+
+@router.post("/strava/cookie/refresh", response_model=StravaCookieStatus,
+             dependencies=[Depends(require_query)])
+async def refresh_cookie(db: AsyncSession = Depends(get_session)) -> StravaCookieStatus:
+    """Manually re-run auto-login using stored credentials. Useful when
+    you suspect a cookie is stale ahead of the next 401."""
+    row = await strava_web.get_cookie_creds(db)
+    if row is None:
+        raise HTTPException(404, detail="no creds row")
+    ok = await _refresh_cookie_via_auto_login(db, row)
+    await db.commit()
+    if not ok:
+        raise HTTPException(400, detail=row.last_error or "auto-login not configured")
+    return StravaCookieStatus(
+        configured=True,
+        athlete_id=row.athlete_id_cached,
+        athlete_name=row.athlete_name_cached,
+        last_sync_at=row.last_sync_at,
+        last_error=None,
+        auto_login_available=strava_web.auto_login_available(),
+        auto_login_enabled=row.auto_login_enabled,
+        email=row.email,
+        last_auto_login_at=row.last_auto_login_at,
     )
 
 
@@ -574,10 +699,41 @@ async def _run_cookie_sync(
     row = await strava_web.get_cookie_creds(db)
     if row is None:
         return StravaCookieSyncOut(upserted=0, error="no cookie configured")
-    try:
+    if not row.remember_token:
+        # Row exists with creds but never logged in — try once now.
+        if not await _refresh_cookie_via_auto_login(db, row):
+            await db.commit()
+            return StravaCookieSyncOut(
+                upserted=0,
+                error=row.last_error or "no cookie and auto-login disabled",
+            )
+        await db.commit()
+
+    async def _list_with_auto_relogin():
+        """Call list_recent_activities; if the cookie is dead, run
+        auto-login once and retry. Returns stubs or raises."""
         stubs = await strava_web.list_recent_activities(
             row.remember_token, row.sid_cookie, since=since,
         )
+        if stubs or since is None:
+            return stubs
+        # Empty result on an incremental sync with a fresh-looking
+        # last_sync is suspicious — could be a silent cookie expiry
+        # (Strava returns empty JSON when unauthorized). Verify with
+        # a quick check_cookie() and re-login if it's dead.
+        chk = await strava_web.check_cookie(row.remember_token, row.sid_cookie)
+        if chk.ok:
+            return stubs
+        log.info("cookie stale (%s) — attempting auto-login refresh", chk.error)
+        if await _refresh_cookie_via_auto_login(db, row):
+            await db.commit()
+            return await strava_web.list_recent_activities(
+                row.remember_token, row.sid_cookie, since=since,
+            )
+        return stubs
+
+    try:
+        stubs = await _list_with_auto_relogin()
     except Exception as e:  # noqa: BLE001
         row.last_error = f"list error: {e}"[:400]
         await db.commit()

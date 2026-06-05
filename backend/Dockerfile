@@ -5,11 +5,20 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
-    PATH="/app/.venv/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH" \
+    PLAYWRIGHT_BROWSERS_PATH=/app/.ms-playwright
 
 COPY pyproject.toml ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project
+
+# SCS-6: Playwright headless Chromium for Strava auto-login. Run AFTER
+# the venv exists so `playwright install` finds the package. --with-deps
+# pulls the apt libs Chromium needs (libnss, libatk, etc.) ~250MB total.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    .venv/bin/playwright install --with-deps chromium
 
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \

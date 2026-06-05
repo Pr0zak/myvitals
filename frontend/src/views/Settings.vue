@@ -65,13 +65,21 @@ interface StravaCookieStatus {
   athlete_name: string | null;
   last_sync_at: string | null;
   last_error: string | null;
+  auto_login_available: boolean;
+  auto_login_enabled: boolean;
+  email: string | null;
+  last_auto_login_at: string | null;
 }
 const cookieStatus = ref<StravaCookieStatus | null>(null);
 const cookieRememberInput = ref("");
 const cookieSidInput = ref("");
+const cookieEmailInput = ref("");
+const cookiePasswordInput = ref("");
+const cookieAutoLoginEnabled = ref(true);
 const cookieEditing = ref(false);
 const cookieSaving = ref(false);
 const cookieSyncing = ref(false);
+const cookieRefreshing = ref(false);
 const cookieResult = ref<string>("");
 const cookieBulkDays = ref(30);
 const cookieBulkLimit = ref<number | null>(null);
@@ -87,23 +95,53 @@ async function loadCookieStatus() {
 }
 
 async function saveCookie() {
-  if (!cookieRememberInput.value.trim()) return;
+  const haveCookie = !!cookieRememberInput.value.trim();
+  const haveCreds = !!cookieEmailInput.value.trim() && !!cookiePasswordInput.value;
+  if (!haveCookie && !haveCreds) {
+    cookieResult.value = "Provide either cookie or email + password.";
+    return;
+  }
   cookieSaving.value = true;
   cookieResult.value = "";
   try {
-    const r = await api.stravaCookieSet({
-      remember_token: cookieRememberInput.value.trim(),
-      sid_cookie: cookieSidInput.value.trim() || undefined,
-    });
+    const body: Parameters<typeof api.stravaCookieSet>[0] = {
+      auto_login_enabled: cookieAutoLoginEnabled.value,
+    };
+    if (haveCookie) {
+      body.remember_token = cookieRememberInput.value.trim();
+      if (cookieSidInput.value.trim()) body.sid_cookie = cookieSidInput.value.trim();
+    }
+    if (haveCreds) {
+      body.email = cookieEmailInput.value.trim();
+      body.password = cookiePasswordInput.value;
+    }
+    const r = await api.stravaCookieSet(body);
     cookieStatus.value = r;
-    cookieResult.value = `Connected as ${r.athlete_name ?? r.athlete_id}.`;
+    cookieResult.value = haveCreds
+      ? `Auto-login OK — connected as ${r.athlete_name ?? r.athlete_id}.`
+      : `Cookie saved — connected as ${r.athlete_name ?? r.athlete_id}.`;
     cookieEditing.value = false;
     cookieRememberInput.value = "";
     cookieSidInput.value = "";
+    cookiePasswordInput.value = "";
   } catch (e) {
     cookieResult.value = `Save failed: ${e instanceof Error ? e.message : String(e)}`;
   } finally {
     cookieSaving.value = false;
+  }
+}
+
+async function refreshCookieNow() {
+  cookieRefreshing.value = true;
+  cookieResult.value = "";
+  try {
+    const r = await api.stravaCookieRefresh();
+    cookieStatus.value = r;
+    cookieResult.value = "Cookie refreshed via auto-login.";
+  } catch (e) {
+    cookieResult.value = `Refresh failed: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    cookieRefreshing.value = false;
   }
 }
 
@@ -1655,6 +1693,12 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           <p class="ok-text">
             ✓ Connected as <strong>{{ cookieStatus.athlete_name ?? cookieStatus.athlete_id }}</strong><br/>
             <span class="muted">Last sync: {{ cookieStatus.last_sync_at ? fmt(cookieStatus.last_sync_at) : "never" }}</span>
+            <span v-if="cookieStatus.auto_login_enabled" class="muted" style="display: block;">
+              Auto-login: ✓ enabled
+              <span v-if="cookieStatus.last_auto_login_at">
+                · last refresh {{ fmt(cookieStatus.last_auto_login_at) }}
+              </span>
+            </span>
             <span v-if="cookieStatus.last_error" class="err" style="display: block;">
               Last error: {{ cookieStatus.last_error }}
             </span>
@@ -1663,7 +1707,11 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
             <button class="primary" :disabled="cookieSyncing" @click="syncCookieNow">
               {{ cookieSyncing ? "Syncing…" : "Sync now" }}
             </button>
-            <button class="ghost" @click="cookieEditing = true">Update cookie</button>
+            <button v-if="cookieStatus.auto_login_enabled" class="ghost"
+                    :disabled="cookieRefreshing" @click="refreshCookieNow">
+              {{ cookieRefreshing ? "Refreshing…" : "Refresh cookie" }}
+            </button>
+            <button class="ghost" @click="cookieEditing = true">Update credentials</button>
             <button class="ghost danger" @click="disconnectCookie">Disconnect</button>
           </div>
 
@@ -1688,8 +1736,44 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
         </template>
 
         <template v-else>
+          <!-- SCS-6: auto-login form. Shown when backend has the
+               STRAVA_CREDS_KEY env var so it can encrypt + store the
+               password. Recommended path — fully automatic. -->
+          <div v-if="cookieStatus?.auto_login_available" class="auto-login-block">
+            <p class="hint">
+              <strong>Auto-login (recommended).</strong> Email + password
+              are stored encrypted in your local DB; backend re-runs the
+              login automatically whenever the cookie expires. Password
+              never appears in the codebase.
+            </p>
+            <div class="form">
+              <label>
+                <span>Strava email</span>
+                <input v-model="cookieEmailInput" type="email"
+                       placeholder="you@example.com" autocomplete="username"/>
+              </label>
+              <label>
+                <span>Strava password</span>
+                <input v-model="cookiePasswordInput" type="password"
+                       placeholder="••••••••" autocomplete="current-password"/>
+              </label>
+              <label class="checkbox">
+                <input v-model="cookieAutoLoginEnabled" type="checkbox"/>
+                <span>Auto-refresh cookie when it expires</span>
+              </label>
+            </div>
+          </div>
+          <div v-else class="hint" style="background: rgba(255, 196, 0, 0.08); border-left: 3px solid #fbbf24; padding: 0.6rem 0.8rem; margin-bottom: 0.8rem;">
+            ⚠ Auto-login disabled — backend's <code>STRAVA_CREDS_KEY</code>
+            env var isn't set. Generate one and add to <code>.env</code> to
+            enable the email/password flow:
+            <pre style="margin: 0.4rem 0 0;">python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"</pre>
+          </div>
+
           <details class="howto" :open="cookieHowtoOpen" @toggle="cookieHowtoOpen = ($event.target as HTMLDetailsElement).open">
-            <summary class="muted">How to grab your Strava cookie</summary>
+            <summary class="muted">
+              {{ cookieStatus?.auto_login_available ? "Or paste a cookie manually" : "Paste a cookie manually" }}
+            </summary>
             <ol class="howto-steps">
               <li>Sign in at <a href="https://www.strava.com/login" target="_blank" rel="noreferrer">strava.com/login</a> in Chrome / Firefox.</li>
               <li>Open DevTools (<kbd>F12</kbd> or <kbd>Cmd+Opt+I</kbd>).</li>
@@ -1697,23 +1781,23 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
               <li>Copy the value of <code>strava_remember_token</code>. Optionally also copy <code>_strava4_session</code> (helps with edge-case redirects).</li>
               <li>Paste below and Save. Cookie stays valid for months until you log out of strava.com.</li>
             </ol>
+            <div class="form">
+              <label>
+                <span>strava_remember_token</span>
+                <input v-model="cookieRememberInput" type="password" placeholder="long base64-ish string" autocomplete="off"/>
+              </label>
+              <label>
+                <span>_strava4_session <em class="opt">(optional)</em></span>
+                <input v-model="cookieSidInput" type="password" placeholder="session cookie" autocomplete="off"/>
+              </label>
+            </div>
           </details>
 
-          <div class="form">
-            <label>
-              <span>strava_remember_token</span>
-              <input v-model="cookieRememberInput" type="password" placeholder="long base64-ish string" autocomplete="off"/>
-            </label>
-            <label>
-              <span>_strava4_session <em class="opt">(optional)</em></span>
-              <input v-model="cookieSidInput" type="password" placeholder="session cookie" autocomplete="off"/>
-            </label>
-            <div class="actions">
-              <button class="primary" :disabled="cookieSaving || !cookieRememberInput.trim()" @click="saveCookie">
-                {{ cookieSaving ? "Validating…" : "Save & test" }}
-              </button>
-              <button v-if="cookieEditing" class="ghost" @click="cookieEditing = false">Cancel</button>
-            </div>
+          <div class="actions">
+            <button class="primary" :disabled="cookieSaving" @click="saveCookie">
+              {{ cookieSaving ? "Validating…" : "Save & test" }}
+            </button>
+            <button v-if="cookieEditing" class="ghost" @click="cookieEditing = false">Cancel</button>
           </div>
         </template>
 

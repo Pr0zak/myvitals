@@ -200,7 +200,10 @@ class CookieCheckResult:
     error: str | None = None
 
 
-async def check_cookie(remember_token: str, sid_cookie: str | None = None) -> CookieCheckResult:
+async def check_cookie(
+    remember_token: str | None,
+    sid_cookie: str | None = None,
+) -> CookieCheckResult:
     """Hit the athlete dashboard with the cookie and parse the user's
     identity out of the response. Returns ok=False if the cookie is
     expired / wrong / Strava is shielding behind Cloudflare."""
@@ -251,7 +254,7 @@ class ActivityStub:
 
 
 async def list_recent_activities(
-    remember_token: str,
+    remember_token: str | None,
     sid_cookie: str | None,
     since: datetime | None = None,
     max_pages: int = 20,
@@ -324,7 +327,7 @@ def _row_to_stub(row: dict[str, Any]) -> ActivityStub | None:
 # ─── Original file download ─────────────────────────────────────────
 
 async def download_activity_original(
-    remember_token: str,
+    remember_token: str | None,
     sid_cookie: str | None,
     activity_id: int,
 ) -> bytes:
@@ -466,13 +469,19 @@ def _encode_polyline(points: list[tuple[float, float]]) -> str:
 # ─── Header builder ─────────────────────────────────────────────────
 
 def _headers(
-    remember_token: str,
+    remember_token: str | None,
     sid_cookie: str | None,
     json_accept: bool = False,
 ) -> dict[str, str]:
-    cookies = [f"strava_remember_token={remember_token}"]
+    # SCS-8: either cookie alone is enough. OTC accounts don't get
+    # strava_remember_token, so we accept _strava4_session-only.
+    cookies: list[str] = []
+    if remember_token:
+        cookies.append(f"strava_remember_token={remember_token}")
     if sid_cookie:
         cookies.append(f"_strava4_session={sid_cookie}")
+    if not cookies:
+        raise ValueError("at least one of remember_token / sid_cookie required")
     h = {
         "Cookie": "; ".join(cookies),
         "User-Agent": _UA,

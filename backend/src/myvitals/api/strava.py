@@ -504,7 +504,7 @@ def _mask(s: str | None) -> str | None:
 
 
 @router.get("/strava/cookie", response_model=StravaCookieStatus,
-            dependencies=[Depends(require_query)])
+            dependencies=[Depends(require_any)])
 async def get_cookie_status(
     db: AsyncSession = Depends(get_session),
 ) -> StravaCookieStatus:
@@ -515,7 +515,7 @@ async def get_cookie_status(
             auto_login_available=strava_web.auto_login_available(),
         )
     return StravaCookieStatus(
-        configured=row.remember_token is not None,
+        configured=bool(row.remember_token or row.sid_cookie),
         athlete_id=row.athlete_id_cached,
         athlete_name=row.athlete_name_cached,
         last_sync_at=row.last_sync_at,
@@ -546,7 +546,15 @@ async def set_cookie(
     now = datetime.now(timezone.utc)
     row = await strava_web.get_cookie_creds(db)
     have_creds = bool(body.email and body.password)
-    have_cookie = bool(body.remember_token)
+    # SCS-8: either cookie alone is enough — OTC accounts only get
+    # _strava4_session, never a long-lived remember_token.
+    have_cookie = bool(body.remember_token or body.sid_cookie)
+    log.info(
+        "PUT /strava/cookie have_creds=%s have_cookie=%s remember_len=%d sid_len=%d",
+        have_creds, have_cookie,
+        len(body.remember_token or ""),
+        len(body.sid_cookie or ""),
+    )
 
     if not have_creds and not have_cookie:
         raise HTTPException(400, detail="provide either cookie or email+password")
@@ -577,6 +585,7 @@ async def set_cookie(
     if have_cookie and not have_creds:
         chk = await strava_web.check_cookie(body.remember_token, body.sid_cookie)
         if not chk.ok:
+            log.warning("cookie check failed: %s", chk.error)
             raise HTTPException(400, detail=f"cookie check failed: {chk.error}")
         athlete_id = chk.athlete_id
         athlete_name = chk.athlete_name
@@ -708,7 +717,7 @@ async def _run_cookie_sync(
     row = await strava_web.get_cookie_creds(db)
     if row is None:
         return StravaCookieSyncOut(upserted=0, error="no cookie configured")
-    if not row.remember_token:
+    if not (row.remember_token or row.sid_cookie):
         # Row exists with creds but never logged in — try once now.
         if not await _refresh_cookie_via_auto_login(db, row):
             await db.commit()

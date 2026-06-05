@@ -143,19 +143,28 @@ SPLIT_SLOTS: dict[str, list[dict[str, Any]]] = {
         {"role": "isolation",          "pattern": "isolation_leg",    "muscles": ["hamstrings", "glutes"],  "superset_group": "A"},
         {"role": "isolation",          "pattern": "isolation_core",   "muscles": ["abdominals"],            "superset_group": None},
     ],
-    "push": [  # chest + front/side delts + triceps. NEVER biceps.
+    # WP-5E (v0.7.281) — push trimmed 6→5: dropped 2nd triceps iso.
+    # Triceps secondary stimulus from chest pressing (~4-5 fractional
+    # sets from 3 press slots) compounded with 1 direct iso (3 sets)
+    # is plenty. The 6-slot version was landing triceps at 26 sets/wk,
+    # well above the 14-set MAV. Freed slot becomes the WP-5F finisher
+    # budget when an under-MEV muscle calls for one.
+    "push": [
         {"role": "main_compound",      "pattern": "horizontal_push",  "muscles": ["chest"],                 "superset_group": None},
         {"role": "secondary_compound", "pattern": "vertical_push",    "muscles": ["shoulders", "chest"],    "superset_group": None},
         {"role": "secondary_compound", "pattern": "horizontal_push",  "muscles": ["chest", "triceps"],      "superset_group": None},
         {"role": "isolation",          "pattern": "isolation_shoulder","muscles": ["shoulders"],            "superset_group": "A"},
         {"role": "isolation",          "pattern": "isolation_arm",    "muscles": ["triceps"],               "superset_group": "A"},
-        {"role": "isolation",          "pattern": "isolation_arm",    "muscles": ["triceps"],               "superset_group": None},
     ],
-    "pull": [  # back + lats + rear delts + biceps + forearms. NEVER triceps.
+    # WP-5E (v0.7.281) — pull trimmed 6→5: dropped rear-delt iso.
+    # Shoulders were 34 sets/wk vs 16-set MAV. Direct rear-delt work
+    # is nice but every horizontal pull hits rear delts at 0.5× secondary
+    # already (~4 fractional sets across 3 pull slots), and OHP on push
+    # day covers front/side delts. Freed slot reserved for WP-5F.
+    "pull": [
         {"role": "main_compound",      "pattern": "horizontal_pull",  "muscles": ["back", "lats"],          "superset_group": None},
         {"role": "secondary_compound", "pattern": "vertical_pull",    "muscles": ["lats", "back"],          "superset_group": None},
         {"role": "secondary_compound", "pattern": "horizontal_pull",  "muscles": ["back", "lats", "traps"], "superset_group": None},
-        {"role": "isolation",          "pattern": "isolation_shoulder","muscles": ["shoulders"],            "superset_group": "A"},  # rear-delt slot — catalog has only one shoulder bucket
         {"role": "isolation",          "pattern": "isolation_arm",    "muscles": ["biceps"],                "superset_group": "A"},
         {"role": "isolation",          "pattern": "isolation_arm",    "muscles": ["biceps", "forearms"],    "superset_group": None},
     ],
@@ -1827,6 +1836,96 @@ async def generate_plan(
             ),
         ))
 
+    # WP-5F (v0.7.281) — adaptive MEV-filler finisher slots.
+    # If the trailing 7-day audit shows a muscle is meaningfully under
+    # its MEV (≥3 sets short), append a 2-set isolation finisher for
+    # the worst-offending muscle that has a matching pattern available
+    # for this split. Capped at 2 finishers per session so the freed
+    # WP-5E budget (push/pull went 6→5 main slots) translates back into
+    # productive volume without overshooting session length. Skip on
+    # cardio / yoga / mobility-only days — they reach this point only
+    # for strength splits.
+    if focus in SPLIT_SLOTS:
+        # Audit BEFORE today's plan goes in (the workout isn't logged
+        # yet). Project today's contribution: each main slot is ~3 sets.
+        try:
+            current_volume = await weekly_muscle_volume(db, days=7)
+        except Exception:  # noqa: BLE001
+            current_volume = {}
+        # Pre-credit today's main slots so finishers don't double-count
+        # muscles we're already hitting hard.
+        projected = {m: v["sets"] for m, v in current_volume.items()}
+        for ex_row in chosen:
+            n = 3  # main-slot working sets, close enough
+            pm = ex_row.get("primary_muscle")
+            if pm in projected:
+                projected[pm] += n
+            for sm in ex_row.get("secondary_muscles") or []:
+                if sm in projected:
+                    projected[sm] += n * 0.5
+
+        # Rank under-MEV muscles by absolute gap (worst first), then
+        # filter to ones we can actually train with an isolation pattern.
+        FINISHER_PATTERNS: dict[str, str] = {
+            "calves":      "isolation_leg",
+            "abdominals":  "isolation_core",
+            "hamstrings":  "isolation_leg",
+            "glutes":      "isolation_leg",
+            "quadriceps":  "isolation_leg",
+            "biceps":      "isolation_arm",
+            "triceps":     "isolation_arm",
+            "forearms":    "isolation_arm",
+            "shoulders":   "isolation_shoulder",
+            "lats":        "vertical_pull",  # substitutes to pullover via WP-5D
+        }
+        gaps: list[tuple[float, str]] = []
+        for muscle, payload in current_volume.items():
+            mev = payload["mev"]
+            sets_now = projected.get(muscle, 0)
+            gap = mev - sets_now
+            if gap >= 3 and muscle in FINISHER_PATTERNS:
+                gaps.append((gap, muscle))
+        gaps.sort(reverse=True)  # widest gap first
+
+        finishers_added: list[str] = []
+        already_chosen_ids = {e["id"] for e in chosen}
+        finisher_seed_rng = random.Random(seed + "::finishers")
+        for _gap, muscle in gaps:
+            if len(finishers_added) >= 2:
+                break
+            pattern = FINISHER_PATTERNS[muscle]
+            candidates = _exercises_for_pattern(catalog, pattern, level, [muscle])
+            candidates = [c for c in candidates if c["id"] not in already_chosen_ids]
+            if not candidates:
+                continue
+            # Use rotation pressure (low frequency wins) for variety.
+            candidates = sorted(
+                candidates,
+                key=lambda e: recent_frequency.get(e["id"], 0),
+            )
+            pick = finisher_seed_rng.choice(candidates[:min(3, len(candidates))])
+            already_chosen_ids.add(pick["id"])
+            # Reps: 12-15 light pump range for isolation finishers.
+            # 2 sets keeps the time cost low (~3-5 min per finisher).
+            plan_exs.append(ExerciseInPlan(
+                exercise_id=pick["id"],
+                order_index=len(plan_exs),
+                superset_id=None,
+                target_sets=2,
+                target_reps_low=12,
+                target_reps_high=15,
+                target_weight_lb=None,  # let the user pick a light DB
+                target_rest_s=45,
+            ))
+            finishers_added.append(muscle)
+
+        if finishers_added:
+            notes.append(
+                f"+{len(finishers_added)} finisher slot"
+                f"{'s' if len(finishers_added) > 1 else ''} added "
+                f"to chip away at weekly volume gap: {', '.join(finishers_added)}."
+            )
+
     # Mobility / yoga block — append 2 poses tagged movement_pattern=mobility
     # to the end of the plan when the user has opted in. Reps are interpreted
     # as seconds-to-hold by the UI; sets=1, weight=null, rest=15.
@@ -1849,7 +1948,7 @@ async def generate_plan(
                     )
                 plan_exs.append(ExerciseInPlan(
                     exercise_id=ex["id"],
-                    order_index=len(chosen) + j,
+                    order_index=len(plan_exs),  # auto-counts finishers (WP-5F)
                     superset_id=None,
                     target_sets=2 if bilateral else 1,
                     target_reps_low=rl, target_reps_high=rh,

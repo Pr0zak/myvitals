@@ -1736,15 +1736,15 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
         </template>
 
         <template v-else>
-          <!-- SCS-6: auto-login form. Shown when backend has the
-               STRAVA_CREDS_KEY env var so it can encrypt + store the
-               password. Recommended path — fully automatic. -->
-          <div v-if="cookieStatus?.auto_login_available" class="auto-login-block">
+          <!-- Auto-login (recommended). Encryption key is auto-
+               generated on first save and stored in the DB row, so no
+               .env shell session is needed. -->
+          <div class="auto-login-block">
             <p class="hint">
               <strong>Auto-login (recommended).</strong> Email + password
               are stored encrypted in your local DB; backend re-runs the
-              login automatically whenever the cookie expires. Password
-              never appears in the codebase.
+              login automatically whenever the cookie expires. Encryption
+              key is auto-generated on save.
             </p>
             <div class="form">
               <label>
@@ -1763,17 +1763,9 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
               </label>
             </div>
           </div>
-          <div v-else class="hint" style="background: rgba(255, 196, 0, 0.08); border-left: 3px solid #fbbf24; padding: 0.6rem 0.8rem; margin-bottom: 0.8rem;">
-            ⚠ Auto-login disabled — backend's <code>STRAVA_CREDS_KEY</code>
-            env var isn't set. Generate one and add to <code>.env</code> to
-            enable the email/password flow:
-            <pre style="margin: 0.4rem 0 0;">python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"</pre>
-          </div>
 
           <details class="howto" :open="cookieHowtoOpen" @toggle="cookieHowtoOpen = ($event.target as HTMLDetailsElement).open">
-            <summary class="muted">
-              {{ cookieStatus?.auto_login_available ? "Or paste a cookie manually" : "Paste a cookie manually" }}
-            </summary>
+            <summary class="muted">Or paste a cookie manually</summary>
             <ol class="howto-steps">
               <li>Sign in at <a href="https://www.strava.com/login" target="_blank" rel="noreferrer">strava.com/login</a> in Chrome / Firefox.</li>
               <li>Open DevTools (<kbd>F12</kbd> or <kbd>Cmd+Opt+I</kbd>).</li>

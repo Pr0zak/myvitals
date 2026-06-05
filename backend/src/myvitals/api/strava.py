@@ -557,12 +557,8 @@ async def set_cookie(
     athlete_name: str | None = None
     new_password_enc: str | None = None
 
+    new_key_b64: str | None = None
     if have_creds:
-        if not strava_web.auto_login_available():
-            raise HTTPException(
-                400,
-                detail="STRAVA_CREDS_KEY not configured in .env — cannot store password",
-            )
         login = await strava_web.auto_login(body.email, body.password)
         if not login.ok:
             raise HTTPException(400, detail=f"auto-login failed: {login.error}")
@@ -570,7 +566,13 @@ async def set_cookie(
         new_sid = login.sid_cookie
         athlete_id = login.athlete_id
         athlete_name = login.athlete_name
-        new_password_enc = strava_web.encrypt_password(body.password)
+        # Resolve the key: existing row's > env var > newly minted.
+        from ..config import settings as _s
+        existing_key = row.creds_key_b64 if row else None
+        key_b64 = _s.strava_creds_key or existing_key or strava_web.generate_key_b64()
+        if not existing_key and not _s.strava_creds_key:
+            new_key_b64 = key_b64  # we minted it; persist below
+        new_password_enc = strava_web.encrypt_password(body.password, key_b64)
 
     if have_cookie and not have_creds:
         chk = await strava_web.check_cookie(body.remember_token, body.sid_cookie)
@@ -588,6 +590,7 @@ async def set_cookie(
             athlete_name_cached=athlete_name,
             email=body.email,
             password_encrypted=new_password_enc,
+            creds_key_b64=new_key_b64,
             auto_login_enabled=body.auto_login_enabled and bool(new_password_enc),
             last_auto_login_at=now if have_creds else None,
             created_at=now,
@@ -605,6 +608,8 @@ async def set_cookie(
             row.email = body.email
         if new_password_enc:
             row.password_encrypted = new_password_enc
+        if new_key_b64:
+            row.creds_key_b64 = new_key_b64
         row.auto_login_enabled = body.auto_login_enabled and bool(row.password_encrypted)
         if have_creds:
             row.last_auto_login_at = now
@@ -633,11 +638,15 @@ async def _refresh_cookie_via_auto_login(
     on success (row updated, db commit not yet performed — caller commits)."""
     if not row.auto_login_enabled or not row.email or not row.password_encrypted:
         return False
+    key_b64 = strava_web._resolve_key(row.creds_key_b64)
+    if not key_b64:
+        row.last_error = "no encryption key (re-save email + password from Settings)"
+        return False
     try:
-        plain = strava_web.decrypt_password(row.password_encrypted)
+        plain = strava_web.decrypt_password(row.password_encrypted, key_b64)
     except Exception as e:  # noqa: BLE001
         log.warning("password decrypt failed (key rotated?): %s", e)
-        row.last_error = "password decrypt failed (rotate the password from Settings)"
+        row.last_error = "password decrypt failed (re-save password from Settings)"
         return False
     login = await strava_web.auto_login(row.email, plain)
     if not login.ok:

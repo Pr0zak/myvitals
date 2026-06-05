@@ -41,43 +41,54 @@ _UA = "myvitals/1.0 (self-hosted; cookie-session)"
 _STRAVA = "https://www.strava.com"
 
 
-# ─── Fernet encryption for the stored password (SCS-6) ──────────────
+# ─── Fernet encryption for the stored password ──────────────────────
+#
+# SCS-7 — the key lives in the strava_cookie_creds row itself (auto-
+# generated on first save). The legacy STRAVA_CREDS_KEY env var still
+# wins when set, so existing deployments don't break. New deployments
+# never need to touch .env.
 
-def _fernet() -> "Fernet | None":  # type: ignore[name-defined]
-    """Lazy-load Fernet to keep cryptography optional. Returns None
-    when STRAVA_CREDS_KEY env var isn't set — auto-login then disabled."""
+def _resolve_key(creds_row_key_b64: str | None) -> str | None:
+    """Pick the key to use. Env var wins (back-compat); else DB row's."""
     from ..config import settings as _s
-    if not _s.strava_creds_key:
+    return _s.strava_creds_key or creds_row_key_b64
+
+
+def _fernet(key_b64: str | None):
+    if not key_b64:
         return None
     try:
         from cryptography.fernet import Fernet
-        return Fernet(_s.strava_creds_key.encode())
+        return Fernet(key_b64.encode())
     except Exception as e:  # noqa: BLE001
-        log.error("STRAVA_CREDS_KEY is set but invalid: %s", e)
+        log.error("Fernet key invalid: %s", e)
         return None
 
 
-def encrypt_password(plain: str) -> str:
-    """Encrypt the user's Strava password with the Fernet key from .env.
-    Returns the base64 ciphertext for DB storage. Raises RuntimeError
-    when the key isn't configured (caller should refuse to save the row)."""
-    f = _fernet()
+def generate_key_b64() -> str:
+    """Auto-mint a fresh Fernet key for a new creds row."""
+    from cryptography.fernet import Fernet
+    return Fernet.generate_key().decode()
+
+
+def encrypt_password(plain: str, key_b64: str) -> str:
+    f = _fernet(key_b64)
     if f is None:
-        raise RuntimeError("STRAVA_CREDS_KEY not set — auto-login disabled")
+        raise RuntimeError("encryption key invalid")
     return f.encrypt(plain.encode()).decode()
 
 
-def decrypt_password(blob: str) -> str:
-    f = _fernet()
+def decrypt_password(blob: str, key_b64: str) -> str:
+    f = _fernet(key_b64)
     if f is None:
-        raise RuntimeError("STRAVA_CREDS_KEY not set")
+        raise RuntimeError("encryption key invalid")
     return f.decrypt(blob.encode()).decode()
 
 
 def auto_login_available() -> bool:
-    """Surface this on /strava/cookie status so the UI can show / hide
-    the email + password fields based on whether the key is configured."""
-    return _fernet() is not None
+    """Always true now — the key is DB-resident and auto-generated
+    on first save. Kept for back-compat with the existing UI plumbing."""
+    return True
 
 
 # ─── Playwright-driven auto-login ──────────────────────────────────

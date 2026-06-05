@@ -269,6 +269,10 @@ class StravaCookieCreds(Base):
     password_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     auto_login_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     last_auto_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # SCS-7: Fernet key for encrypting password_encrypted, auto-generated
+    # on first save. DB-resident so setup is fully Settings-UI-driven,
+    # no .env shell session required.
+    creds_key_b64: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

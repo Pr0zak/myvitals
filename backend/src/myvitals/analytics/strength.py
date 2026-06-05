@@ -531,6 +531,7 @@ def select_exercises_for_split(
     exercise_prefs: dict[str, str] | None = None,
     recent_ratings: dict[str, float] | None = None,
     recent_frequency: dict[str, int] | None = None,
+    muscle_volume: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """Pick exercises for the focus's slot list, in slot order.
 
@@ -553,6 +554,31 @@ def select_exercises_for_split(
     ratings = recent_ratings or {}
     freq = recent_frequency or {}
     slots = SPLIT_SLOTS.get(focus) or SPLIT_SLOTS["full_body"]
+
+    # WP-5C (v0.7.282) — muscle-balance pressure. When the slot allows
+    # multiple muscle options (e.g. legs hinge → ["hamstrings", "glutes",
+    # "lower_back"]), prefer candidates whose primary_muscle has the
+    # widest weekly MEV gap so volume rotates instead of pigeonholing
+    # the same muscle every regenerate. Reuses the volume snapshot
+    # generate_plan already computes for WP-5F.
+    vol = muscle_volume or {}
+
+    def _balance_score(e: dict[str, Any]) -> int:
+        """Higher = more preferred. 0 if no snapshot or muscle is in
+        range; positive (1..N) when the muscle is under MEV by that gap;
+        negative when at/over MAV so we soft-deprioritise."""
+        m = e.get("primary_muscle")
+        snap = vol.get(m) if m else None
+        if not snap:
+            return 0
+        sets = int(snap.get("sets", 0))
+        mev = int(snap.get("mev", 0))
+        mav = int(snap.get("mav", 0))
+        if sets >= mav:
+            return -1
+        if sets >= mev:
+            return 0
+        return mev - sets
 
     # Auto-avoid: exercises the user has rated consistently low over the
     # last few weeks (≤2 avg). Treated like a soft 'avoid' pref unless
@@ -596,7 +622,7 @@ def select_exercises_for_split(
             if favs:
                 candidates = favs
             else:
-                def _sort_key(e: dict[str, Any]) -> tuple[int, int]:
+                def _sort_key(e: dict[str, Any]) -> tuple[int, int, int]:
                     eid = e["id"]
                     if prefs.get(eid) == "avoid":
                         avoid_bucket = 2
@@ -604,8 +630,11 @@ def select_exercises_for_split(
                         avoid_bucket = 1
                     else:
                         avoid_bucket = 0
-                    # Secondary key: 4-week frequency. Lower count → front.
-                    return (avoid_bucket, freq.get(eid, 0))
+                    # WP-5C: muscle-balance pressure between avoid and
+                    # frequency. Negate so higher gap = lower sort value
+                    # = front of list.
+                    bal = -_balance_score(e)
+                    return (avoid_bucket, bal, freq.get(eid, 0))
                 candidates = sorted(candidates, key=_sort_key)
 
         if not candidates:
@@ -1727,11 +1756,19 @@ async def generate_plan(
     )
     recent_ratings = await recent_ratings_by_exercise(db, since_days=14)
     recent_frequency = await recent_frequency_by_exercise(db, since_days=28)
+    # WP-5C/F: snapshot weekly muscle volume once. select_exercises_for_split
+    # uses it as muscle-balance pressure; the finisher block below uses
+    # it to decide which gaps to fill.
+    try:
+        current_volume = await weekly_muscle_volume(db, days=7)
+    except Exception:  # noqa: BLE001
+        current_volume = {}
     chosen, chosen_slots, sel_notes = select_exercises_for_split(
         catalog, focus, level, rng,
         exercise_prefs=exercise_prefs,
         recent_ratings=recent_ratings,
         recent_frequency=recent_frequency,
+        muscle_volume=current_volume,
     )
     notes.extend(sel_notes)
     if freq_advisory_note:
@@ -1846,12 +1883,7 @@ async def generate_plan(
     # cardio / yoga / mobility-only days — they reach this point only
     # for strength splits.
     if focus in SPLIT_SLOTS:
-        # Audit BEFORE today's plan goes in (the workout isn't logged
-        # yet). Project today's contribution: each main slot is ~3 sets.
-        try:
-            current_volume = await weekly_muscle_volume(db, days=7)
-        except Exception:  # noqa: BLE001
-            current_volume = {}
+        # `current_volume` was fetched up-front (used by WP-5C as well).
         # Pre-credit today's main slots so finishers don't double-count
         # muscles we're already hitting hard.
         projected = {m: v["sets"] for m, v in current_volume.items()}

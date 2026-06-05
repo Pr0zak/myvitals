@@ -48,6 +48,29 @@ if _CATALOG_SUPPLEMENT_PATH.exists():
         CATALOG.extend(json.load(_f))
 CATALOG_BY_ID: dict[str, dict[str, Any]] = {e["id"]: e for e in CATALOG}
 
+# #WP-5 (SCS-9 D) — catalog overrides for entries whose upstream tagging
+# disagrees with how the exercise is universally programmed. Free-
+# exercise-db tags Bent-Arm / Straight-Arm Dumbbell Pullover as
+# primary=chest, but every coaching tradition (Schoenfeld, Helms,
+# Heafner) treats it as a lat exercise — the long head of lats is the
+# prime mover through the shoulder-extension arc. Without this fix
+# users without a pull-up bar permanently show lats=untrained because
+# the planner substitutes pullovers into the vertical_pull slot and
+# the audit gives credit to chest instead.
+_CATALOG_OVERRIDES: dict[str, dict[str, Any]] = {
+    "Bent-Arm_Dumbbell_Pullover": {
+        "primary_muscle": "lats",
+        "secondary_muscles": ["chest", "shoulders", "triceps"],
+    },
+    "Straight-Arm_Dumbbell_Pullover": {
+        "primary_muscle": "lats",
+        "secondary_muscles": ["chest", "shoulders", "triceps"],
+    },
+}
+for _eid, _patch in _CATALOG_OVERRIDES.items():
+    if _eid in CATALOG_BY_ID:
+        CATALOG_BY_ID[_eid].update(_patch)
+
 
 # ------------------------------------------------------------------
 # Defaults — pull from user_equipment.payload['training'] when set,
@@ -985,8 +1008,12 @@ async def recent_ratings_by_exercise(
 # #WP-4 — research-backed weekly direct-set targets per muscle group.
 # Sources: Schoenfeld 2017 SR + Helms / Wolf / Israetel volume framework.
 # Tuple is (minimum_effective_volume, maximum_adaptive_volume).
-# Counts WORKING sets per muscle's PRIMARY mover only — secondary
-# stimulus (e.g. triceps from bench) is acknowledged in MEV/MAV ranges.
+# WP-5 (SCS-9 A): the audit now credits secondary movers at 0.5×, so
+# muscles that mostly receive secondary stimulus (forearms from rows,
+# traps from deadlifts, lower_back from hinges) have their MEV/MAV
+# halved relative to a direct-only count. Neck dropped — no PPL/UL/FB
+# template trains it directly and few home gyms have neck-specific
+# equipment; report a permanent "untrained" was noise, not signal.
 MUSCLE_VOLUME_TARGETS: dict[str, tuple[int, int]] = {
     "chest":       (10, 20),
     "back":        (10, 20),
@@ -999,10 +1026,9 @@ MUSCLE_VOLUME_TARGETS: dict[str, tuple[int, int]] = {
     "glutes":      (10, 18),
     "calves":      (8,  14),
     "abdominals":  (8,  16),
-    "forearms":    (4,  10),
-    "traps":       (4,  10),
-    "lower_back":  (4,  10),
-    "neck":        (2,  6),
+    "forearms":    (2,  8),
+    "traps":       (2,  8),
+    "lower_back":  (2,  8),
 }
 
 
@@ -1044,19 +1070,27 @@ async def weekly_muscle_volume(
         .group_by(models.StrengthWorkoutExercise.exercise_id)
     )).all()
 
-    sets_by_muscle: dict[str, int] = {}
+    # WP-5 (SCS-9 A): credit primary mover at 1.0× and each catalog-tagged
+    # secondary mover at 0.5× — Helms/Wolf "fractional sets" convention.
+    # Without this, a back squat with `primary=quadriceps` left glutes/
+    # hamstrings/lower-back at 0 despite obvious training stress.
+    SECONDARY_WEIGHT = 0.5
+    sets_by_muscle: dict[str, float] = {}
     for ex_id, n_sets in rows:
         info = CATALOG_BY_ID.get(ex_id)
         if info is None:
             continue
-        muscle = info.get("primary_muscle")
-        if not muscle:
-            continue
-        sets_by_muscle[muscle] = sets_by_muscle.get(muscle, 0) + int(n_sets)
+        n = int(n_sets)
+        primary = info.get("primary_muscle")
+        if primary:
+            sets_by_muscle[primary] = sets_by_muscle.get(primary, 0.0) + n
+        for sec in info.get("secondary_muscles") or []:
+            sets_by_muscle[sec] = sets_by_muscle.get(sec, 0.0) + n * SECONDARY_WEIGHT
 
     out: dict[str, dict[str, Any]] = {}
     for muscle in MUSCLE_VOLUME_TARGETS:
-        sets = sets_by_muscle.get(muscle, 0)
+        raw = sets_by_muscle.get(muscle, 0.0)
+        sets = round(raw)
         mev, mav = MUSCLE_VOLUME_TARGETS[muscle]
         if sets == 0:
             status = "untrained"

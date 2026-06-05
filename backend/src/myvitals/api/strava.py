@@ -1,5 +1,8 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -11,6 +14,7 @@ from ..auth import require_any, require_query
 from ..db import models
 from ..db.session import get_session
 from ..integrations import strava
+from ..integrations import strava_web
 
 router = APIRouter()
 
@@ -456,3 +460,175 @@ async def list_activities(
         stmt = stmt.where(models.Activity.type == type)
     result = await db.execute(stmt)
     return [_activity_to_out(a) for a in result.scalars().all()]
+
+
+# ─────────────────────────────────────────────────────────────────
+# Cookie-session ingest (SCS family) — replaces OAuth path that
+# Strava is paywalling on 2026-06-30 for Standard Tier developers.
+# ─────────────────────────────────────────────────────────────────
+
+class StravaCookieStatus(BaseModel):
+    configured: bool
+    athlete_id: int | None = None
+    athlete_name: str | None = None
+    last_sync_at: datetime | None = None
+    last_error: str | None = None
+
+
+class StravaCookieIn(BaseModel):
+    remember_token: str = Field(min_length=10)
+    sid_cookie: str | None = None
+
+
+class StravaCookieSyncOut(BaseModel):
+    upserted: int
+    activity_ids: list[int] = []
+    error: str | None = None
+
+
+def _mask(s: str | None) -> str | None:
+    if not s:
+        return None
+    return s[:4] + "…" + s[-4:] if len(s) > 12 else "…"
+
+
+@router.get("/strava/cookie", response_model=StravaCookieStatus,
+            dependencies=[Depends(require_query)])
+async def get_cookie_status(
+    db: AsyncSession = Depends(get_session),
+) -> StravaCookieStatus:
+    row = await strava_web.get_cookie_creds(db)
+    if row is None:
+        return StravaCookieStatus(configured=False)
+    return StravaCookieStatus(
+        configured=True,
+        athlete_id=row.athlete_id_cached,
+        athlete_name=row.athlete_name_cached,
+        last_sync_at=row.last_sync_at,
+        last_error=row.last_error,
+    )
+
+
+@router.put("/strava/cookie", response_model=StravaCookieStatus,
+            dependencies=[Depends(require_query)])
+async def set_cookie(
+    body: StravaCookieIn,
+    db: AsyncSession = Depends(get_session),
+) -> StravaCookieStatus:
+    """Validate the cookie via a live request, then persist.
+
+    Tries `check_cookie` first so we surface a 400 on stale/invalid
+    cookies before writing them to the DB. Returns the athlete name
+    we resolved from the dashboard so the user sees confirmation it
+    landed on the right account.
+    """
+    chk = await strava_web.check_cookie(body.remember_token, body.sid_cookie)
+    if not chk.ok:
+        raise HTTPException(400, detail=f"cookie check failed: {chk.error}")
+    now = datetime.now(timezone.utc)
+    row = await strava_web.get_cookie_creds(db)
+    if row is None:
+        row = models.StravaCookieCreds(
+            id=1,
+            remember_token=body.remember_token,
+            sid_cookie=body.sid_cookie,
+            athlete_id_cached=chk.athlete_id,
+            athlete_name_cached=chk.athlete_name,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+    else:
+        row.remember_token = body.remember_token
+        row.sid_cookie = body.sid_cookie
+        row.athlete_id_cached = chk.athlete_id
+        row.athlete_name_cached = chk.athlete_name
+        row.last_error = None
+        row.updated_at = now
+    await db.commit()
+    return StravaCookieStatus(
+        configured=True,
+        athlete_id=row.athlete_id_cached,
+        athlete_name=row.athlete_name_cached,
+        last_sync_at=row.last_sync_at,
+        last_error=None,
+    )
+
+
+@router.delete("/strava/cookie", status_code=204,
+               dependencies=[Depends(require_query)])
+async def delete_cookie(db: AsyncSession = Depends(get_session)) -> None:
+    row = await strava_web.get_cookie_creds(db)
+    if row is not None:
+        await db.delete(row)
+        await db.commit()
+
+
+async def _run_cookie_sync(
+    db: AsyncSession,
+    *,
+    since: datetime | None,
+    max_activities: int | None = None,
+) -> StravaCookieSyncOut:
+    """Shared body for both /cookie-sync and /cookie-bulk."""
+    row = await strava_web.get_cookie_creds(db)
+    if row is None:
+        return StravaCookieSyncOut(upserted=0, error="no cookie configured")
+    try:
+        stubs = await strava_web.list_recent_activities(
+            row.remember_token, row.sid_cookie, since=since,
+        )
+    except Exception as e:  # noqa: BLE001
+        row.last_error = f"list error: {e}"[:400]
+        await db.commit()
+        return StravaCookieSyncOut(upserted=0, error=row.last_error)
+    if max_activities is not None:
+        stubs = stubs[:max_activities]
+
+    upserted_ids: list[int] = []
+    for stub in stubs:
+        try:
+            blob = await strava_web.download_activity_original(
+                row.remember_token, row.sid_cookie, stub.id,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("download %s failed: %s", stub.id, e)
+            continue
+        parsed = strava_web.parse_fit_bytes(blob)
+        try:
+            await strava_web.upsert_activity_from_fit(db, stub, parsed)
+            upserted_ids.append(stub.id)
+        except Exception as e:  # noqa: BLE001
+            log.warning("upsert %s failed: %s", stub.id, e)
+            continue
+
+    row.last_sync_at = datetime.now(timezone.utc)
+    row.last_error = None
+    await db.commit()
+    return StravaCookieSyncOut(upserted=len(upserted_ids), activity_ids=upserted_ids)
+
+
+@router.post("/strava/cookie-sync", response_model=StravaCookieSyncOut,
+             dependencies=[Depends(require_any)])
+async def cookie_sync(
+    db: AsyncSession = Depends(get_session),
+) -> StravaCookieSyncOut:
+    """Pull new activities since the last sync. Phone-friendly (require_any
+    accepts ingest token) so the phone's Activities sync button works."""
+    row = await strava_web.get_cookie_creds(db)
+    since = row.last_sync_at if row else None
+    return await _run_cookie_sync(db, since=since)
+
+
+@router.post("/strava/cookie-bulk", response_model=StravaCookieSyncOut,
+             dependencies=[Depends(require_query)])
+async def cookie_bulk(
+    since_days: int = Query(30, ge=1, le=3650),
+    limit: int | None = Query(None, ge=1, le=1000),
+    db: AsyncSession = Depends(get_session),
+) -> StravaCookieSyncOut:
+    """Bulk import N days of history. Bounded by `limit` (defaults to
+    no limit; pass 100-ish during testing). require_query so only
+    the dashboard can fire it — bulk import is not phone-friendly."""
+    since = datetime.now(timezone.utc) - timedelta(days=since_days)
+    return await _run_cookie_sync(db, since=since, max_activities=limit)

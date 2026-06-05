@@ -42,6 +42,33 @@ const strengthWorkouts = ref<Array<{
 const loading = ref(false);
 const error = ref<string | null>(null);
 
+// SCS-4: Manual Strava sync trigger in the Activities header.
+// Hits the cookie-mode endpoint added in v0.7.275; if no cookie
+// is configured the call returns { error: "no cookie configured" }
+// which we surface as the toast.
+const syncing = ref(false);
+const syncToast = ref<string>("");
+async function syncStravaNow() {
+  syncing.value = true;
+  syncToast.value = "";
+  try {
+    const r = await api.stravaCookieSync();
+    if (r.error) {
+      syncToast.value = `Sync error: ${r.error}`;
+    } else {
+      syncToast.value = r.upserted === 0
+        ? "No new rides since last sync."
+        : `Synced ${r.upserted} new ${r.upserted === 1 ? "ride" : "rides"}.`;
+      if (r.upserted > 0) await load();
+    }
+  } catch (e) {
+    syncToast.value = `Sync failed: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    syncing.value = false;
+    setTimeout(() => { syncToast.value = ""; }, 4000);
+  }
+}
+
 // YTD + same-period-last-year — independent of the range selector so
 // "year-over-year" stays available even when the user is filtering 30d.
 const ytdActivities = ref<Activity[]>([]);
@@ -465,6 +492,10 @@ const monthLabel = (key: string) =>
     <header class="head">
       <h1>Activities</h1>
       <div class="controls">
+        <button class="sync-btn" :disabled="syncing" @click="syncStravaNow"
+                title="Pull new Strava activities since the last sync">
+          {{ syncing ? "Syncing…" : "↻ Sync Strava" }}
+        </button>
         <div class="ranges">
           <button v-for="r in RANGES" :key="r.key"
                   :class="{ active: range === r.key }" @click="range = r.key">{{ r.label }}</button>
@@ -473,6 +504,7 @@ const monthLabel = (key: string) =>
         <RouterLink to="/activities/compare" class="map-link"><GitCompareArrows :size="14"/> Compare</RouterLink>
       </div>
     </header>
+    <div v-if="syncToast" class="sync-toast">{{ syncToast }}</div>
 
     <!-- Stats banner -->
     <Card v-if="stats && !loading" :title="`Stats — ${stats.period_label}`">
@@ -792,6 +824,17 @@ h1 { margin: 0; }
 .ranges button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .map-link { color: var(--accent); text-decoration: none; font-size: 0.9rem; padding: 0.3rem 0.6rem; border: 1px solid var(--border); border-radius: 4px; }
 .map-link:hover { border-color: var(--accent); }
+.sync-btn {
+  background: transparent; color: var(--text); border: 1px solid var(--border);
+  padding: 0.3rem 0.7rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem;
+}
+.sync-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.sync-toast {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); padding: 0.5rem 0.8rem;
+  border-radius: 4px; margin-bottom: 0.8rem; font-size: 0.9rem;
+}
 
 /* Stats banner */
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; }

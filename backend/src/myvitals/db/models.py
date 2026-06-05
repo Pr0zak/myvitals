@@ -240,6 +240,32 @@ class StravaCredentials(Base):
     connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class StravaCookieCreds(Base):
+    """Single-row table (id=1) for cookie-session Strava ingestion.
+
+    Strava's June 2026 policy puts the OAuth API behind a paid Strava
+    subscription. As a free-tier hedge we let the user paste their
+    `strava_remember_token` cookie (and optionally `_strava4_session`)
+    and pull activities via the same authenticated session their
+    browser uses. Each ride's original FIT file carries the
+    chest-strap HR stream that the OAuth API would otherwise gate.
+
+    No automatic background poll — sync is user-triggered (button on
+    Activities / Today / Settings). Cookie staleness manifests as a
+    401 on the next sync; user re-pastes from chrome devtools.
+    """
+    __tablename__ = "strava_cookie_creds"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    remember_token: Mapped[str] = mapped_column(Text)
+    sid_cookie: Mapped[str | None] = mapped_column(Text, nullable=True)
+    athlete_id_cached: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    athlete_name_cached: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class Concept2Credentials(Base):
     """Single-row table (id=1) for the Concept2 Logbook API. Long-lived
     personal tokens (issued from the Concept2 dev console) cover the

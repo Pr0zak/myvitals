@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.DownhillSkiing
 import androidx.compose.material.icons.outlined.Hiking
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.FitnessCenter
+import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Rowing
 import androidx.compose.material.icons.outlined.SelfImprovement
@@ -93,6 +94,12 @@ fun ActivitiesScreen(
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    // SCS-4 Strava cookie-mode manual sync state.
+    var stravaSyncing by remember { mutableStateOf(false) }
+    var syncToast by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(syncToast) {
+        if (syncToast != null) { delay(4000); syncToast = null }
+    }
     val context = androidx.compose.ui.platform.LocalContext.current
 
     suspend fun load() {
@@ -195,9 +202,54 @@ fun ActivitiesScreen(
                     color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
                 )
             }
-            IconButton(onClick = { scope.launch { loading = true; load() } }, enabled = !loading) {
-                Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = MV.OnSurface)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            stravaSyncing = true
+                            try {
+                                val api = app.myvitals.sync.BackendClient.create(
+                                    settings.backendUrl, settings.bearerToken,
+                                )
+                                val r = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    api.stravaCookieSync()
+                                }
+                                syncToast = when {
+                                    r.error != null -> "Strava: ${r.error}"
+                                    r.upserted == 0 -> "Strava: up to date"
+                                    else -> "Strava: synced ${r.upserted}"
+                                }
+                                if (r.upserted > 0) { loading = true; load() }
+                            } catch (e: Exception) {
+                                syncToast = "Strava sync failed: ${e.message?.take(60)}"
+                            } finally { stravaSyncing = false }
+                        }
+                    },
+                    enabled = !stravaSyncing,
+                ) {
+                    if (stravaSyncing) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp), strokeWidth = 2.dp,
+                            color = MV.OnSurface,
+                        )
+                    } else {
+                        Icon(Icons.Outlined.CloudDownload,
+                            contentDescription = "Sync Strava",
+                            tint = MV.OnSurface)
+                    }
+                }
+                IconButton(onClick = { scope.launch { loading = true; load() } }, enabled = !loading) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = MV.OnSurface)
+                }
             }
+        }
+        // Strava sync toast — fades after 4s.
+        syncToast?.let {
+            Text(
+                it,
+                color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
         }
 
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(

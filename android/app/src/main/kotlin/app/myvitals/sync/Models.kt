@@ -913,3 +913,20 @@ data class DeviceStatusSeriesResponse(
     @Json(name = "off_body_seconds") val offBodySeconds: Double = 0.0,
     @Json(name = "unknown_seconds") val unknownSeconds: Double = 0.0,
 )
+
+// SCS-4 — cookie-mode Strava sync responses.
+@JsonClass(generateAdapter = true)
+data class StravaCookieSyncResponse(
+    val upserted: Int,
+    @Json(name = "activity_ids") val activityIds: List<Long> = emptyList(),
+    val error: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class StravaCookieStatusResponse(
+    val configured: Boolean,
+    @Json(name = "athlete_id") val athleteId: Long? = null,
+    @Json(name = "athlete_name") val athleteName: String? = null,
+    @Json(name = "last_sync_at") val lastSyncAt: String? = null,
+    @Json(name = "last_error") val lastError: String? = null,
+)

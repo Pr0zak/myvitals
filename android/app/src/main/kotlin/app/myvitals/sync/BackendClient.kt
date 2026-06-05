@@ -340,6 +340,14 @@ interface BackendApi {
         @retrofit2.http.Query("active_only") activeOnly: Boolean = true,
     ): List<AiGoal>
 
+    /** SCS-4: trigger cookie-mode Strava sync from the phone. Uses
+     *  `require_any` on the backend so the ingest token is accepted. */
+    @POST("strava/cookie-sync")
+    suspend fun stravaCookieSync(): StravaCookieSyncResponse
+
+    @GET("strava/cookie")
+    suspend fun stravaCookieStatus(): StravaCookieStatusResponse
+
     @GET("update/check")
     suspend fun updateCheck(): UpdateCheck
 

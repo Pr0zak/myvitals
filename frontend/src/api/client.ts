@@ -456,6 +456,45 @@ export const api = {
     return data;
   },
 
+  // ── Cookie-session ingest (SCS family) — replaces OAuth path
+  // that Strava is paywalling 2026-06-30. Single-user, single
+  // singleton row. ────────────────────────────────────────────
+  async stravaCookieStatus(): Promise<{
+    configured: boolean;
+    athlete_id: number | null;
+    athlete_name: string | null;
+    last_sync_at: string | null;
+    last_error: string | null;
+  }> {
+    const { data } = await http.get("/strava/cookie");
+    return data;
+  },
+
+  async stravaCookieSet(body: { remember_token: string; sid_cookie?: string | null }) {
+    const { data } = await http.put("/strava/cookie", body);
+    return data;
+  },
+
+  async stravaCookieDelete(): Promise<void> {
+    await http.delete("/strava/cookie");
+  },
+
+  async stravaCookieSync(): Promise<{
+    upserted: number; activity_ids: number[]; error: string | null;
+  }> {
+    const { data } = await http.post("/strava/cookie-sync");
+    return data;
+  },
+
+  async stravaCookieBulk(since_days: number, limit?: number): Promise<{
+    upserted: number; activity_ids: number[]; error: string | null;
+  }> {
+    const params: Record<string, number> = { since_days };
+    if (limit) params.limit = limit;
+    const { data } = await http.post("/strava/cookie-bulk", null, { params });
+    return data;
+  },
+
   async concept2Status(): Promise<{
     connected: boolean;
     user_id?: number | null;

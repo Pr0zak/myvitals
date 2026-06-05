@@ -57,6 +57,103 @@ const stravaError = ref<string | null>(null);
 const stravaSyncing = ref(false);
 const stravaSyncResult = ref<string>("");
 
+// SCS family — cookie-session ingest. Replaces OAuth path that
+// Strava is paywalling 2026-06-30 for Standard Tier developers.
+interface StravaCookieStatus {
+  configured: boolean;
+  athlete_id: number | null;
+  athlete_name: string | null;
+  last_sync_at: string | null;
+  last_error: string | null;
+}
+const cookieStatus = ref<StravaCookieStatus | null>(null);
+const cookieRememberInput = ref("");
+const cookieSidInput = ref("");
+const cookieEditing = ref(false);
+const cookieSaving = ref(false);
+const cookieSyncing = ref(false);
+const cookieResult = ref<string>("");
+const cookieBulkDays = ref(30);
+const cookieBulkLimit = ref<number | null>(null);
+const cookieHowtoOpen = ref(false);
+const showLegacyOAuth = ref(false);
+
+async function loadCookieStatus() {
+  try {
+    cookieStatus.value = await api.stravaCookieStatus();
+  } catch (e) {
+    cookieResult.value = `Status check failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+async function saveCookie() {
+  if (!cookieRememberInput.value.trim()) return;
+  cookieSaving.value = true;
+  cookieResult.value = "";
+  try {
+    const r = await api.stravaCookieSet({
+      remember_token: cookieRememberInput.value.trim(),
+      sid_cookie: cookieSidInput.value.trim() || undefined,
+    });
+    cookieStatus.value = r;
+    cookieResult.value = `Connected as ${r.athlete_name ?? r.athlete_id}.`;
+    cookieEditing.value = false;
+    cookieRememberInput.value = "";
+    cookieSidInput.value = "";
+  } catch (e) {
+    cookieResult.value = `Save failed: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    cookieSaving.value = false;
+  }
+}
+
+async function disconnectCookie() {
+  if (!confirm("Disconnect cookie-mode Strava? Activities already synced stay; the stored cookie is wiped.")) return;
+  try {
+    await api.stravaCookieDelete();
+    await loadCookieStatus();
+    cookieResult.value = "Cookie cleared.";
+  } catch (e) {
+    cookieResult.value = `Disconnect failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+async function syncCookieNow() {
+  cookieSyncing.value = true;
+  cookieResult.value = "";
+  try {
+    const r = await api.stravaCookieSync();
+    if (r.error) {
+      cookieResult.value = `Sync error: ${r.error}`;
+    } else {
+      cookieResult.value = `Synced ${r.upserted} ${r.upserted === 1 ? "activity" : "activities"}.`;
+    }
+    await loadCookieStatus();
+  } catch (e) {
+    cookieResult.value = `Sync failed: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    cookieSyncing.value = false;
+  }
+}
+
+async function syncCookieBulk() {
+  cookieSyncing.value = true;
+  cookieResult.value = "";
+  try {
+    const r = await api.stravaCookieBulk(cookieBulkDays.value, cookieBulkLimit.value ?? undefined);
+    if (r.error) {
+      cookieResult.value = `Bulk import error: ${r.error}`;
+    } else {
+      cookieResult.value = `Bulk imported ${r.upserted} activities over the last ${cookieBulkDays.value} days.`;
+    }
+    await loadCookieStatus();
+  } catch (e) {
+    cookieResult.value = `Bulk import failed: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    cookieSyncing.value = false;
+  }
+}
+
 // UPDATE-1: release check + apply trigger
 interface UpdateCheck {
   current: string;
@@ -744,7 +841,7 @@ async function test() {
     await api.health();
     await api.lastSync();
     status.value = "ok";
-    await Promise.all([loadStrava(), loadTrailCfg(), loadConcept2(), loadHaStatus()]);
+    await Promise.all([loadStrava(), loadCookieStatus(), loadTrailCfg(), loadConcept2(), loadHaStatus()]);
   } catch (e: unknown) {
     status.value = "fail";
     if (e && typeof e === "object" && "response" in e) {
@@ -1540,80 +1637,166 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
       <h2>Strava</h2>
       <div v-if="stravaError" class="err">{{ stravaError }}</div>
 
-      <template v-if="strava && stravaConfig">
-        <!-- OAuth credentials block -->
-        <div class="block">
-          <p v-if="!stravaConfig.configured" class="hint">
-            Create an app at
-            <a href="https://www.strava.com/settings/api" target="_blank" rel="noreferrer">strava.com/settings/api</a>
-            (Authorization Callback Domain = host of this dashboard, no port). Then paste the Client ID + Client Secret.
-          </p>
-          <p v-else class="muted">
-            OAuth app credentials: <code>{{ stravaConfig.client_id_masked }}</code>
-            <span class="muted"> · source: {{ stravaConfig.source }}</span><br/>
-            <span class="muted">Callback: {{ stravaConfig.callback_url }}</span>
-          </p>
+      <!-- Cookie-session ingest (SCS family) — Strava's June 2026
+           policy paywalls OAuth API access on 2026-06-30. Cookie
+           mode keeps free-tier users working. -->
+      <div class="block">
+        <h3 style="margin-top: 0;">Cookie-mode (recommended)</h3>
+        <p class="hint">
+          Strava's June 2026 API policy paywalls the OAuth path on
+          <strong>2026-06-30</strong> for free accounts. Cookie mode pulls
+          rides directly from <code>strava.com</code> using the same
+          login your browser uses — no subscription required, and the
+          chest-strap HR stream embedded in the FIT comes through
+          intact.
+        </p>
 
-          <div v-if="!stravaConfig.configured || editingCreds" class="form">
-            <label>
-              <span>Client ID</span>
-              <input v-model="cidInput" placeholder="e.g. 123456" autocomplete="off"/>
-            </label>
-            <label>
-              <span>Client Secret</span>
-              <input v-model="secretInput" type="password" placeholder="40-char hex" autocomplete="off"/>
-            </label>
-            <label>
-              <span>Callback URL <em class="opt">(optional)</em></span>
-              <input v-model="callbackInput" placeholder="http://your-server:8080/auth/strava/callback" autocomplete="off"/>
-            </label>
-            <div class="actions">
-              <button class="primary" :disabled="credsSaving" @click="saveStravaCreds">
-                {{ credsSaving ? "Saving…" : "Save credentials" }}
-              </button>
-              <button v-if="editingCreds" class="ghost" @click="editingCreds = false">Cancel</button>
-            </div>
-            <div v-if="credsResult" class="hint">{{ credsResult }}</div>
-          </div>
-
-          <div v-else class="actions">
-            <button class="ghost" @click="editingCreds = true">Edit credentials</button>
-            <button v-if="stravaConfig.source === 'db'" class="ghost danger" @click="clearStravaCreds">
-              Clear stored credentials
+        <template v-if="cookieStatus && cookieStatus.configured && !cookieEditing">
+          <p class="ok-text">
+            ✓ Connected as <strong>{{ cookieStatus.athlete_name ?? cookieStatus.athlete_id }}</strong><br/>
+            <span class="muted">Last sync: {{ cookieStatus.last_sync_at ? fmt(cookieStatus.last_sync_at) : "never" }}</span>
+            <span v-if="cookieStatus.last_error" class="err" style="display: block;">
+              Last error: {{ cookieStatus.last_error }}
+            </span>
+          </p>
+          <div class="actions">
+            <button class="primary" :disabled="cookieSyncing" @click="syncCookieNow">
+              {{ cookieSyncing ? "Syncing…" : "Sync now" }}
             </button>
+            <button class="ghost" @click="cookieEditing = true">Update cookie</button>
+            <button class="ghost danger" @click="disconnectCookie">Disconnect</button>
           </div>
-        </div>
 
-        <!-- Connection block (only meaningful once OAuth app is configured) -->
-        <div v-if="stravaConfig.configured" class="block">
-          <template v-if="strava.connected">
-            <p class="ok-text">
-              <Check :size="14"/> Connected as <strong>{{ strava.athlete_name ?? strava.athlete_id }}</strong>
-              <span class="muted"> · scope: {{ strava.scope }}</span><br/>
-              <span class="muted">Last sync: {{ fmt(strava.last_sync_at) }}</span>
-            </p>
+          <details style="margin-top: 1rem;">
+            <summary class="muted">Bulk import history</summary>
+            <div class="form" style="margin-top: 0.6rem;">
+              <label>
+                <span>Days back</span>
+                <input v-model.number="cookieBulkDays" type="number" min="1" max="3650" />
+              </label>
+              <label>
+                <span>Limit <em class="opt">(blank = no limit)</em></span>
+                <input v-model.number="cookieBulkLimit" type="number" min="1" max="1000" placeholder="e.g. 100" />
+              </label>
+              <div class="actions">
+                <button class="primary" :disabled="cookieSyncing" @click="syncCookieBulk">
+                  {{ cookieSyncing ? "Importing…" : `Bulk import (${cookieBulkDays}d)` }}
+                </button>
+              </div>
+            </div>
+          </details>
+        </template>
+
+        <template v-else>
+          <details class="howto" :open="cookieHowtoOpen" @toggle="cookieHowtoOpen = ($event.target as HTMLDetailsElement).open">
+            <summary class="muted">How to grab your Strava cookie</summary>
+            <ol class="howto-steps">
+              <li>Sign in at <a href="https://www.strava.com/login" target="_blank" rel="noreferrer">strava.com/login</a> in Chrome / Firefox.</li>
+              <li>Open DevTools (<kbd>F12</kbd> or <kbd>Cmd+Opt+I</kbd>).</li>
+              <li>Application tab → Storage → Cookies → <code>https://www.strava.com</code>.</li>
+              <li>Copy the value of <code>strava_remember_token</code>. Optionally also copy <code>_strava4_session</code> (helps with edge-case redirects).</li>
+              <li>Paste below and Save. Cookie stays valid for months until you log out of strava.com.</li>
+            </ol>
+          </details>
+
+          <div class="form">
+            <label>
+              <span>strava_remember_token</span>
+              <input v-model="cookieRememberInput" type="password" placeholder="long base64-ish string" autocomplete="off"/>
+            </label>
+            <label>
+              <span>_strava4_session <em class="opt">(optional)</em></span>
+              <input v-model="cookieSidInput" type="password" placeholder="session cookie" autocomplete="off"/>
+            </label>
             <div class="actions">
-              <button class="primary" :disabled="stravaSyncing" @click="syncStrava(90)">
-                {{ stravaSyncing ? "Syncing…" : "Sync last 90 days" }}
+              <button class="primary" :disabled="cookieSaving || !cookieRememberInput.trim()" @click="saveCookie">
+                {{ cookieSaving ? "Validating…" : "Save & test" }}
               </button>
-              <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(30)">Sync 30d</button>
-              <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(365)">Sync 1y</button>
-              <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(3650)">Sync all</button>
-              <button class="ghost danger" @click="disconnectStrava">Disconnect</button>
+              <button v-if="cookieEditing" class="ghost" @click="cookieEditing = false">Cancel</button>
             </div>
-            <div v-if="stravaSyncResult" class="hint">{{ stravaSyncResult }}</div>
-          </template>
+          </div>
+        </template>
 
-          <template v-else>
-            <p class="hint">Authorize myvitals to read your activities (rides, runs, etc.).</p>
-            <div class="actions">
-              <button class="primary" @click="connectStrava">Connect Strava</button>
+        <div v-if="cookieResult" class="hint" style="margin-top: 0.6rem;">{{ cookieResult }}</div>
+      </div>
+
+      <!-- Legacy OAuth path — Strava paywalls it 2026-06-30; keep
+           reachable for users on a paid Strava sub who prefer it. -->
+      <div class="block">
+        <details :open="showLegacyOAuth" @toggle="showLegacyOAuth = ($event.target as HTMLDetailsElement).open">
+          <summary class="muted">Legacy: Strava OAuth (requires paid subscription after 2026-06-30)</summary>
+          <template v-if="strava && stravaConfig">
+            <p v-if="!stravaConfig.configured" class="hint">
+              Create an app at
+              <a href="https://www.strava.com/settings/api" target="_blank" rel="noreferrer">strava.com/settings/api</a>
+              (Authorization Callback Domain = host of this dashboard, no port). Then paste the Client ID + Client Secret.
+            </p>
+            <p v-else class="muted">
+              OAuth app credentials: <code>{{ stravaConfig.client_id_masked }}</code>
+              <span class="muted"> · source: {{ stravaConfig.source }}</span><br/>
+              <span class="muted">Callback: {{ stravaConfig.callback_url }}</span>
+            </p>
+
+            <div v-if="!stravaConfig.configured || editingCreds" class="form">
+              <label>
+                <span>Client ID</span>
+                <input v-model="cidInput" placeholder="e.g. 123456" autocomplete="off"/>
+              </label>
+              <label>
+                <span>Client Secret</span>
+                <input v-model="secretInput" type="password" placeholder="40-char hex" autocomplete="off"/>
+              </label>
+              <label>
+                <span>Callback URL <em class="opt">(optional)</em></span>
+                <input v-model="callbackInput" placeholder="http://your-server:8080/auth/strava/callback" autocomplete="off"/>
+              </label>
+              <div class="actions">
+                <button class="primary" :disabled="credsSaving" @click="saveStravaCreds">
+                  {{ credsSaving ? "Saving…" : "Save credentials" }}
+                </button>
+                <button v-if="editingCreds" class="ghost" @click="editingCreds = false">Cancel</button>
+              </div>
+              <div v-if="credsResult" class="hint">{{ credsResult }}</div>
+            </div>
+
+            <div v-else class="actions">
+              <button class="ghost" @click="editingCreds = true">Edit credentials</button>
+              <button v-if="stravaConfig.source === 'db'" class="ghost danger" @click="clearStravaCreds">
+                Clear stored credentials
+              </button>
+            </div>
+
+            <div v-if="stravaConfig.configured" style="margin-top: 0.8rem;">
+              <template v-if="strava.connected">
+                <p class="ok-text">
+                  <Check :size="14"/> Connected as <strong>{{ strava.athlete_name ?? strava.athlete_id }}</strong>
+                  <span class="muted"> · scope: {{ strava.scope }}</span><br/>
+                  <span class="muted">Last sync: {{ fmt(strava.last_sync_at) }}</span>
+                </p>
+                <div class="actions">
+                  <button class="primary" :disabled="stravaSyncing" @click="syncStrava(90)">
+                    {{ stravaSyncing ? "Syncing…" : "Sync last 90 days" }}
+                  </button>
+                  <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(30)">Sync 30d</button>
+                  <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(365)">Sync 1y</button>
+                  <button class="ghost" :disabled="stravaSyncing" @click="syncStrava(3650)">Sync all</button>
+                  <button class="ghost danger" @click="disconnectStrava">Disconnect</button>
+                </div>
+                <div v-if="stravaSyncResult" class="hint">{{ stravaSyncResult }}</div>
+              </template>
+
+              <template v-else>
+                <p class="hint">Authorize myvitals to read your activities (rides, runs, etc.).</p>
+                <div class="actions">
+                  <button class="primary" @click="connectStrava">Connect Strava</button>
+                </div>
+              </template>
             </div>
           </template>
-        </div>
-      </template>
+        </details>
+      </div>
 
-      <div v-else-if="!stravaError" class="hint">Loading…</div>
+      <div v-if="!strava && !cookieStatus && !stravaError" class="hint">Loading…</div>
     </section>
 
     <!-- ── Fasting preferences ── -->

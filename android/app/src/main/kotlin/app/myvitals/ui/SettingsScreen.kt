@@ -418,6 +418,105 @@ fun SettingsScreen(
             }
         }
 
+        // ── Strava (cookie mode, SCS-5) ──
+        item {
+            var stravaStatus by remember {
+                mutableStateOf<app.myvitals.sync.StravaCookieStatusResponse?>(null)
+            }
+            var stravaLoading by remember { mutableStateOf(false) }
+            var stravaSyncing by remember { mutableStateOf(false) }
+            var stravaToast by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(Unit) {
+                if (settings.isConfigured()) {
+                    stravaLoading = true
+                    runCatching {
+                        val api = app.myvitals.sync.BackendClient.create(
+                            settings.backendUrl, settings.bearerToken,
+                        )
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            api.stravaCookieStatus()
+                        }
+                    }.getOrNull()?.let { stravaStatus = it }
+                    stravaLoading = false
+                }
+            }
+            LaunchedEffect(stravaToast) {
+                if (stravaToast != null) {
+                    kotlinx.coroutines.delay(4000); stravaToast = null
+                }
+            }
+            Section(title = "Strava") {
+                Card {
+                    Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                        val s = stravaStatus
+                        when {
+                            stravaLoading -> Text("Loading…",
+                                color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                            s == null || !s.configured -> Text(
+                                "Not configured. Open the web Settings → Strava " +
+                                "to paste the cookie. Cookie mode replaces the " +
+                                "OAuth API that Strava paywalls 2026-06-30.",
+                                color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                            )
+                            else -> {
+                                Text(
+                                    "Connected as ${s.athleteName ?: s.athleteId}",
+                                    color = MV.OnSurface, fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    "Last sync: ${s.lastSyncAt ?: "never"}",
+                                    color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                                )
+                                s.lastError?.let {
+                                    Spacer(Modifier.height(2.dp))
+                                    Text("Last error: $it", color = MV.Red, fontSize = 11.sp)
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                androidx.compose.material3.Button(
+                                    onClick = {
+                                        scope.launch {
+                                            stravaSyncing = true
+                                            try {
+                                                val api = app.myvitals.sync.BackendClient.create(
+                                                    settings.backendUrl, settings.bearerToken,
+                                                )
+                                                val r = kotlinx.coroutines.withContext(
+                                                    kotlinx.coroutines.Dispatchers.IO,
+                                                ) { api.stravaCookieSync() }
+                                                stravaToast = when {
+                                                    r.error != null -> "Error: ${r.error}"
+                                                    r.upserted == 0 -> "Up to date."
+                                                    else -> "Synced ${r.upserted} new."
+                                                }
+                                                // Refresh status to pick up new last_sync_at.
+                                                runCatching {
+                                                    kotlinx.coroutines.withContext(
+                                                        kotlinx.coroutines.Dispatchers.IO,
+                                                    ) { api.stravaCookieStatus() }
+                                                }.getOrNull()?.let { stravaStatus = it }
+                                            } catch (e: Exception) {
+                                                stravaToast = "Sync failed: ${e.message?.take(60)}"
+                                            } finally { stravaSyncing = false }
+                                        }
+                                    },
+                                    enabled = !stravaSyncing,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(if (stravaSyncing) "Syncing…" else "Sync Strava now")
+                                }
+                                stravaToast?.let {
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(it, color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // ── Workout reminders ──
         item {
             Section(title = "Workout reminders") {

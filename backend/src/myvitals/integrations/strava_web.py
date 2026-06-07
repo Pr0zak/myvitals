@@ -279,7 +279,18 @@ async def list_recent_activities(
             except Exception:
                 log.warning("training_activities page=%d not JSON (cookie expired?)", page)
                 break
-            rows = payload.get("models") or payload if isinstance(payload, list) else []
+            # NB: the response is a dict {"models": [...], "page", ...};
+            # a bare list is tolerated for robustness. The old one-liner
+            # `payload.get("models") or payload if isinstance(payload, list)
+            # else []` parsed as `(... ) if isinstance(payload, list) else []`
+            # — always [] for the dict Strava actually returns, so the
+            # cookie sync never imported anything (fixed v0.7.284).
+            if isinstance(payload, dict):
+                rows = payload.get("models") or []
+            elif isinstance(payload, list):
+                rows = payload
+            else:
+                rows = []
             if not rows:
                 break
             keep_paging = False
@@ -314,7 +325,11 @@ def _row_to_stub(row: dict[str, Any]) -> ActivityStub | None:
         return ActivityStub(
             id=aid,
             name=row.get("name"),
-            type=row.get("type") or row.get("activity_type"),
+            # training_activities rows carry the canonical Strava type in
+            # `sport_type` (e.g. "EBikeRide") — `type`/`activity_type` are
+            # null there. Lowercased it matches the OAuth-era convention
+            # ("ebikeride") that cardio analytics / icons / map colors key on.
+            type=row.get("type") or row.get("activity_type") or row.get("sport_type"),
             start_at=start_dt,
             distance_m=row.get("distance_raw") or row.get("distance"),
             duration_s=row.get("elapsed_time_raw") or row.get("moving_time_raw"),
@@ -416,7 +431,12 @@ def parse_fit_bytes(blob: bytes) -> ParsedFit:
         if ts is not None and bpm is not None and bpm > 30:
             hr_samples.append((ts, bpm))
         if lat is not None and lon is not None:
-            gps_points.append((lat, lon))
+            # Records written before GPS lock carry 0 semicircles →
+            # (0.0, 0.0) "Null Island". One bad leading point becomes
+            # the start marker and stretches the route map across the
+            # Atlantic. Drop those + anything out of range.
+            if (lat, lon) != (0.0, 0.0) and abs(lat) <= 90 and abs(lon) <= 180:
+                gps_points.append((lat, lon))
 
     result.hr_samples = hr_samples
     if result.avg_hr is None and hr_samples:
@@ -522,7 +542,9 @@ async def upsert_activity_from_fit(
     values = {
         "source": "strava",
         "source_id": str(stub.id),
-        "type": (parsed.type_hint or stub.type or "ride").lower(),
+        # Strava's own type wins over the FIT sport hint — FIT says
+        # "e_biking" where every downstream consumer expects "ebikeride".
+        "type": (stub.type or parsed.type_hint or "ride").lower(),
         "name": stub.name,
         "start_at": start_at,
         "duration_s": duration_s,
@@ -561,12 +583,21 @@ async def upsert_activity_from_fit(
             .where(models.HeartRate.time >= first_ts)
             .where(models.HeartRate.time <= last_ts)
         )
+        # FIT records can repeat a timestamp (pause/resume, >1 record
+        # per second) and the PK is `time` alone — de-dupe keeping the
+        # last sample per ts or the batch insert conflicts with itself
+        # (the window delete above can't help with intra-batch dupes).
+        by_ts = {ts: bpm for ts, bpm in parsed.hr_samples}
         hr_values = [
             {"time": ts, "bpm": bpm, "source": "strava_fit"}
-            for ts, bpm in parsed.hr_samples
+            for ts, bpm in sorted(by_ts.items())
         ]
-        # On second sync of the same activity we just removed the
-        # prior strava_fit rows in the delete above; insert is safe.
-        await db.execute(pg_insert(models.HeartRate).values(hr_values))
+        # Prior strava_fit rows were removed by the delete above; the
+        # on-conflict guards against a watch-ingest race in the window.
+        ins = pg_insert(models.HeartRate).values(hr_values)
+        await db.execute(ins.on_conflict_do_update(
+            index_elements=["time"],
+            set_={"bpm": ins.excluded.bpm, "source": ins.excluded.source},
+        ))
 
     return True

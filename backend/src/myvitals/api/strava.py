@@ -771,9 +771,16 @@ async def _run_cookie_sync(
         parsed = strava_web.parse_fit_bytes(blob)
         try:
             await strava_web.upsert_activity_from_fit(db, stub, parsed)
+            # Commit per activity so one bad FIT doesn't roll back the
+            # rides that already landed in this run.
+            await db.commit()
             upserted_ids.append(stub.id)
         except Exception as e:  # noqa: BLE001
             log.warning("upsert %s failed: %s", stub.id, e)
+            # A failed statement aborts the whole session — without a
+            # rollback every later statement (next upserts, the
+            # last_sync_at bump) dies with InFailedSQLTransaction.
+            await db.rollback()
             continue
 
     row.last_sync_at = datetime.now(timezone.utc)
@@ -790,7 +797,16 @@ async def cookie_sync(
     """Pull new activities since the last sync. Phone-friendly (require_any
     accepts ingest token) so the phone's Activities sync button works."""
     row = await strava_web.get_cookie_creds(db)
-    since = row.last_sync_at if row else None
+    # Watermark = newest strava activity already in the DB, not the time
+    # the last sync ran. A ride that reaches Strava after a sync has
+    # already bumped last_sync_at past its start time would otherwise be
+    # skipped forever. Upsert is idempotent (PK source+source_id), so a
+    # conservative watermark only costs a re-download.
+    latest = (await db.execute(
+        select(func.max(models.Activity.start_at))
+        .where(models.Activity.source == "strava")
+    )).scalar()
+    since = latest or (row.last_sync_at if row else None)
     return await _run_cookie_sync(db, since=since)
 
 

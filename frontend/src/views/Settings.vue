@@ -117,9 +117,11 @@ async function saveCookie() {
     }
     const r = await api.stravaCookieSet(body);
     cookieStatus.value = r;
+    // SCS-8 sid-only saves may not resolve the athlete — don't say "null".
+    const who = r.athlete_name ?? r.athlete_id ?? "Strava";
     cookieResult.value = haveCreds
-      ? `Auto-login OK — connected as ${r.athlete_name ?? r.athlete_id}.`
-      : `Cookie saved — connected as ${r.athlete_name ?? r.athlete_id}.`;
+      ? `Auto-login OK — connected as ${who}.`
+      : `Cookie saved — connected as ${who}.`;
     cookieEditing.value = false;
     cookieRememberInput.value = "";
     cookieSidInput.value = "";
@@ -1122,6 +1124,7 @@ function fmt(ts: string | null): string {
 
 onMounted(() => {
   loadStrava();
+  loadCookieStatus();
   loadConcept2();
   loadTrailCfg();
   loadProfile();
@@ -1691,7 +1694,7 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
 
         <template v-if="cookieStatus && cookieStatus.configured && !cookieEditing">
           <p class="ok-text">
-            ✓ Connected as <strong>{{ cookieStatus.athlete_name ?? cookieStatus.athlete_id }}</strong><br/>
+            ✓ Connected as <strong>{{ cookieStatus.athlete_name ?? cookieStatus.athlete_id ?? "Strava (cookie session)" }}</strong><br/>
             <span class="muted">Last sync: {{ cookieStatus.last_sync_at ? fmt(cookieStatus.last_sync_at) : "never" }}</span>
             <span v-if="cookieStatus.auto_login_enabled" class="muted" style="display: block;">
               Auto-login: ✓ enabled

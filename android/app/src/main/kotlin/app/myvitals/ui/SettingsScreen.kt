@@ -460,7 +460,8 @@ fun SettingsScreen(
                             )
                             else -> {
                                 Text(
-                                    "Connected as ${s.athleteName ?: s.athleteId}",
+                                    // SCS-8 sid-only saves may not resolve the athlete
+                                    "Connected as ${s.athleteName ?: s.athleteId ?: "Strava (cookie session)"}",
                                     color = MV.OnSurface, fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
                                 )

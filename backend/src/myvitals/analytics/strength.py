@@ -524,6 +524,17 @@ _BAR_REQUIRED_EXERCISES: frozenset[str] = frozenset({
     "Wide-Grip_Rear_Pull-Up",
 })
 
+# Same catalog quirk, different gate: these need a *waist-height* bar to
+# pull under (barbell in a rack, Smith, or rings/suspension), NOT an
+# overhead pull-up bar. free-exercise-db tags them equipment=['bodyweight']
+# so they'd otherwise leak into a dumbbell-only home gym (e.g. Inverted_Row
+# showing up as the pull-day main compound for someone with no bar at all).
+# Gated on barbell OR squat_rack OR pull_up_bar — any of which can rig a low
+# bar / rings — rather than pull_up_bar alone (a doorway bar is too high).
+_LOW_BAR_REQUIRED_EXERCISES: frozenset[str] = frozenset({
+    "Inverted_Row",
+})
+
 
 def filter_catalog_for_equipment(
     catalog: list[dict[str, Any]], equipment: dict[str, Any]
@@ -548,9 +559,18 @@ def filter_catalog_for_equipment(
     )
     db_owned = equipment.get("dumbbells", {}).get("type", "none") != "none"
     bar_owned = bool(equipment.get("pull_up_bar"))
+    # A waist-height bar can be rigged from any of these; a doorway
+    # pull-up bar alone (bar_owned) is too high for inverted rows.
+    low_bar_owned = bool(
+        equipment.get("barbell")
+        or equipment.get("squat_rack")
+        or equipment.get("pull_up_bar")
+    )
 
     def can_do(ex: dict[str, Any]) -> bool:
         if not bar_owned and ex["id"] in _BAR_REQUIRED_EXERCISES:
+            return False
+        if not low_bar_owned and ex["id"] in _LOW_BAR_REQUIRED_EXERCISES:
             return False
         for tag in ex["equipment"]:
             if tag == "bodyweight":

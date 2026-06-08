@@ -77,17 +77,38 @@ class TestFilterCatalog:
         equipment=['bodyweight'] in free-exercise-db (the body is the
         load), but the bar is the gate — filter_catalog_for_equipment
         drops them by id when pull_up_bar=false."""
-        from myvitals.analytics.strength import _BAR_REQUIRED_EXERCISES
+        from myvitals.analytics.strength import (
+            _BAR_REQUIRED_EXERCISES, _LOW_BAR_REQUIRED_EXERCISES,
+        )
         before_set = {e["id"] for e in filter_catalog_for_equipment(CATALOG, user_equipment)}
         after_set = {e["id"] for e in filter_catalog_for_equipment(CATALOG, equipment_with_pullup_bar)}
         unlocked = after_set - before_set
-        assert unlocked == _BAR_REQUIRED_EXERCISES & {e["id"] for e in CATALOG}, (
-            f"expected bar to unlock exactly {_BAR_REQUIRED_EXERCISES}, "
-            f"got {unlocked}"
+        catalog_ids = {e["id"] for e in CATALOG}
+        # A pull-up bar unlocks the overhead-bar moves AND (as a rig point
+        # for rings / a low bar) the waist-height inverted row.
+        expected = (_BAR_REQUIRED_EXERCISES | _LOW_BAR_REQUIRED_EXERCISES) & catalog_ids
+        assert unlocked == expected, (
+            f"expected bar to unlock exactly {expected}, got {unlocked}"
         )
         assert "Pullups" not in before_set, "Pullups leaked without a bar"
         assert "Pullups" in after_set, "Pullups missing when bar present"
         assert len(after_set) > len(before_set), "bar should strictly expand the catalog"
+
+    def test_inverted_row_needs_a_low_bar(self, user_equipment):
+        """Inverted_Row is tagged equipment=['bodyweight'] but needs a
+        waist-height bar (rack / Smith / rings) — it must NOT leak into a
+        dumbbell-only home gym. A barbell or squat rack unlocks it even
+        without a pull-up bar."""
+        kept = {e["id"] for e in filter_catalog_for_equipment(CATALOG, user_equipment)}
+        assert "Inverted_Row" not in kept, "inverted row leaked with no bar"
+        with_barbell = {**user_equipment, "barbell": True}
+        assert "Inverted_Row" in {
+            e["id"] for e in filter_catalog_for_equipment(CATALOG, with_barbell)
+        }, "barbell should unlock the inverted row"
+        with_rack = {**user_equipment, "squat_rack": True}
+        assert "Inverted_Row" in {
+            e["id"] for e in filter_catalog_for_equipment(CATALOG, with_rack)
+        }, "squat rack should unlock the inverted row"
 
 
 class TestSelectExercisesForSplit:

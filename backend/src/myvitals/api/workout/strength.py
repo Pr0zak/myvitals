@@ -572,6 +572,10 @@ class WorkoutOut(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     notes: str | None
+    # WP-14 pause/resume. `paused_at` is non-null only while the session
+    # is paused; `total_paused_s` is the running sum of paused intervals.
+    paused_at: datetime | None = None
+    total_paused_s: int = 0
     # True when the plan was generated before today's sleep data was
     # available AND fresh sleep has since landed. Surface a banner +
     # "Regenerate to refresh" prompt on the UI; the plan is still
@@ -590,7 +594,8 @@ class WorkoutPatch(BaseModel):
     # but takes it out of the "today's current workout" query so the
     # screen falls through to whatever was previously today's plan.
     status: Literal[
-        "planned", "in_progress", "completed", "skipped", "regenerated",
+        "planned", "in_progress", "paused", "completed", "skipped",
+        "regenerated",
     ] | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -710,6 +715,8 @@ async def _hydrate_workout(
         started_at=w.started_at,
         completed_at=w.completed_at,
         notes=w.notes,
+        paused_at=w.paused_at,
+        total_paused_s=w.total_paused_s or 0,
         recovery_stale=await _workout_recovery_stale(db, w),
         # FAST-18 — fasting context is read live on every request, not
         # persisted on the workout row. The plan was generated against
@@ -884,6 +891,29 @@ async def patch_workout(
     if w is None:
         raise HTTPException(status_code=404, detail="workout not found")
     data = body.model_dump(exclude_unset=True)
+
+    # WP-14 pause/resume accounting. Pause/resume ride on the generic
+    # status patch (so the phone's offline write-buffer covers them for
+    # free), but the paused_at / total_paused_s bookkeeping is derived
+    # server-side from the transition rather than trusted from the client.
+    new_status = data.get("status")
+    if new_status is not None and new_status != w.status:
+        now = datetime.now(timezone.utc)
+        if new_status == "paused":
+            # Entering pause: stamp the start of this paused interval.
+            # started_at may be null if the user pauses before logging a
+            # set — backfill it so duration math has a left edge.
+            if w.started_at is None:
+                w.started_at = now
+            w.paused_at = now
+        elif w.paused_at is not None:
+            # Leaving pause (resume / complete / skip): fold the elapsed
+            # paused interval into the accumulator and clear the marker.
+            w.total_paused_s = (w.total_paused_s or 0) + max(
+                0, int((now - w.paused_at).total_seconds())
+            )
+            w.paused_at = None
+
     for field, value in data.items():
         setattr(w, field, value)
     await db.commit()

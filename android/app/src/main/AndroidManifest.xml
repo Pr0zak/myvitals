@@ -117,6 +117,10 @@
                 android:resource="@xml/fasting_widget_info" />
         </receiver>
 
+        <!-- WP-14 — Resume / Complete actions on the "workout paused"
+             notification. Not exported; only our own PendingIntents fire it. -->
+        <receiver android:name=".strength.WorkoutActionReceiver" android:exported="false" />
+
         <!-- WIDGET family. All share WidgetsRefreshWorker (15-min cadence)
              scheduled by MyVitalsApp.onCreate(). -->
         <receiver android:name=".widget.SoberWidgetProvider" android:exported="false">

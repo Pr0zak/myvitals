@@ -1014,8 +1014,9 @@ async def auto_skip_stale_workouts(
     res = await db.execute(
         _update(models.StrengthWorkout)
         .where(models.StrengthWorkout.date < today_local)
-        .where(models.StrengthWorkout.status.in_(("planned", "in_progress")))
-        .values(status="skipped")
+        .where(models.StrengthWorkout.status.in_(
+            ("planned", "in_progress", "paused")))
+        .values(status="skipped", paused_at=None)
     )
     n = res.rowcount or 0
     if n > 0:

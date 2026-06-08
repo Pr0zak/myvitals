@@ -21,6 +21,8 @@ object Notifier {
     private const val FASTING_NOTIF_BASE = 4000
     const val AI_ALERT_CHANNEL_ID = "ai_alerts"
     private const val AI_ALERT_NOTIF_BASE = 5000
+    const val WORKOUT_PAUSED_CHANNEL_ID = "workout_paused"
+    private const val WORKOUT_PAUSED_NOTIF_ID = 3100
 
     fun ensureChannel(context: Context) {
         val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -77,7 +79,82 @@ object Notifier {
                 }
             )
         }
+        if (mgr.getNotificationChannel(WORKOUT_PAUSED_CHANNEL_ID) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    WORKOUT_PAUSED_CHANNEL_ID,
+                    "Workout paused",
+                    // LOW: a persistent state indicator, not an alert — no
+                    // sound or vibration each time it refreshes.
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = "Ongoing reminder while a strength workout is paused"
+                    setShowBadge(false)
+                }
+            )
+        }
     }
+
+    /** WP-14 — ongoing "workout paused" notification with Resume / Complete
+     *  actions. Sticky (setOngoing) so it stays in the shade as a reminder
+     *  that a session is mid-flight; tapping the body reopens the workout
+     *  screen, the actions hit WorkoutActionReceiver (which works even if
+     *  the app process is gone). Re-posting with the same id refreshes in
+     *  place. */
+    fun postWorkoutPaused(context: Context, workoutId: Long, splitFocus: String) {
+        ensureChannel(context)
+        val day = splitFocus.replaceFirstChar { it.uppercase() }.replace('_', ' ')
+
+        fun actionPi(action: String, reqCode: Int): PendingIntent {
+            val i = Intent(context, Class.forName(
+                "app.myvitals.strength.WorkoutActionReceiver"
+            )).apply {
+                this.action = action
+                putExtra("workout_id", workoutId)
+            }
+            return PendingIntent.getBroadcast(
+                context, reqCode, i,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        }
+
+        // Tap body → reopen the app on the Workout tab.
+        val openIntent = Intent(
+            context, Class.forName("app.myvitals.MainActivity"),
+        ).apply {
+            putExtra("shortcut_route", "workout/today")
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val openPi = PendingIntent.getActivity(
+            context, 3100, openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val notif = NotificationCompat.Builder(context, WORKOUT_PAUSED_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_workout)
+            .setContentTitle("Workout paused")
+            .setContentText("$day day — resume when you're ready.")
+            .setContentIntent(openPi)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(R.drawable.ic_stat_workout, "Resume",
+                       actionPi(WORKOUT_RESUME, 3101))
+            .addAction(R.drawable.ic_stat_workout, "Complete",
+                       actionPi(WORKOUT_COMPLETE, 3102))
+            .build()
+        try {
+            NotificationManagerCompat.from(context)
+                .notify(WORKOUT_PAUSED_NOTIF_ID, notif)
+        } catch (_: SecurityException) { /* permission revoked */ }
+    }
+
+    fun cancelWorkoutPaused(context: Context) {
+        NotificationManagerCompat.from(context).cancel(WORKOUT_PAUSED_NOTIF_ID)
+    }
+
+    const val WORKOUT_RESUME = "app.myvitals.action.WORKOUT_RESUME"
+    const val WORKOUT_COMPLETE = "app.myvitals.action.WORKOUT_COMPLETE"
 
     /** Fire a fasting-stage milestone notification.
      *  notifKey makes the id stable per (session, stage) so re-posting

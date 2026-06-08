@@ -803,7 +803,7 @@ export const api = {
   },
 
   async patchStrengthWorkout(id: number, body: {
-    status?: "planned" | "in_progress" | "completed" | "skipped";
+    status?: "planned" | "in_progress" | "paused" | "completed" | "skipped";
     started_at?: string | null;
     completed_at?: string | null;
     notes?: string | null;

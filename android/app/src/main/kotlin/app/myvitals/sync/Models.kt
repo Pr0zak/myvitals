@@ -239,6 +239,8 @@ data class StrengthWorkoutDetail(
     @Json(name = "sleep_h_used") val sleepHUsed: Double? = null,
     @Json(name = "started_at") val startedAt: String? = null,
     @Json(name = "completed_at") val completedAt: String? = null,
+    @Json(name = "paused_at") val pausedAt: String? = null,
+    @Json(name = "total_paused_s") val totalPausedS: Int = 0,
     val notes: String? = null,
     val exercises: List<StrengthWorkoutExerciseRow> = emptyList(),
 )

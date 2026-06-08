@@ -194,6 +194,15 @@ class StrengthRepository(
     suspend fun unskipWorkout(workoutId: Long): StrengthWorkoutDetail =
         patchWithBuffer(workoutId, WorkoutPatchRequest(status = "planned"))
 
+    /** WP-14 — pause the active session. Backend stamps paused_at and
+     *  (on resume) folds the interval into total_paused_s, so net
+     *  duration excludes time away. Buffered offline like other patches. */
+    suspend fun pauseWorkout(workoutId: Long): StrengthWorkoutDetail =
+        patchWithBuffer(workoutId, WorkoutPatchRequest(status = "paused"))
+
+    suspend fun resumeWorkout(workoutId: Long): StrengthWorkoutDetail =
+        patchWithBuffer(workoutId, WorkoutPatchRequest(status = "in_progress"))
+
     suspend fun equipment(): app.myvitals.sync.EquipmentResponse =
         withContext(Dispatchers.IO) { api().strengthEquipment() }
 

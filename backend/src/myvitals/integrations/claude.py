@@ -1087,7 +1087,11 @@ async def build_strength_review_payload(
             "sleep_h": (round(workout.sleep_h_used, 1)
                         if workout.sleep_h_used is not None else None),
             "duration_min": (
-                int((workout.completed_at - workout.started_at).total_seconds() / 60)
+                # Net of any paused intervals (WP-14).
+                int((
+                    (workout.completed_at - workout.started_at).total_seconds()
+                    - (workout.total_paused_s or 0)
+                ) / 60)
                 if workout.completed_at and workout.started_at else None
             ),
             "exercises": exercises_payload,

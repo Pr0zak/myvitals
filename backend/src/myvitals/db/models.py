@@ -456,6 +456,11 @@ class StrengthWorkout(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed_by_activity_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
     completed_by_activity_source_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # WP-14 pause/resume. `paused_at` is set when status flips to
+    # "paused" and cleared on resume; `total_paused_s` accumulates the
+    # paused intervals so net training duration excludes time away.
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    total_paused_s: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class StrengthWorkoutExercise(Base):

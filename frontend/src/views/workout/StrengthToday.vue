@@ -292,6 +292,7 @@ let tickHandle: number | null = null;
 
 function timerKey(wexId: number, n: number) { return `${wexId}-${n}`; }
 function startTimer(wex: StrengthWorkoutExercise, n: number) {
+  if (isPaused.value) return;  // WP-14: resume before starting a hold
   const seconds = wex.target_reps_low;
   const k = timerKey(wex.id, n);
   timers.value = {
@@ -581,6 +582,7 @@ async function logFailed(wex: StrengthWorkoutExercise, setNum: number) {
 }
 
 async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = false) {
+  if (isPaused.value) return;  // WP-14: resume before logging
   const e = entry(wex.id, setNum, wex.target_reps_low, wex.target_weight_lb);
   busy.value = `set-${wex.id}-${setNum}`;
   try {
@@ -660,6 +662,38 @@ async function completeWorkout() {
     });
     await loadAll();
     stopRest();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy.value = "";
+  }
+}
+
+// WP-14 pause/resume. Paused gates set logging until the user resumes;
+// the backend folds the paused interval into total_paused_s so net
+// training duration excludes time away.
+const isPaused = computed(() => workout.value?.status === "paused");
+
+async function pauseWorkout() {
+  if (!workout.value) return;
+  busy.value = "pause";
+  try {
+    await api.patchStrengthWorkout(workout.value.id, { status: "paused" });
+    await loadAll();
+    stopRest();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy.value = "";
+  }
+}
+
+async function resumeWorkout() {
+  if (!workout.value) return;
+  busy.value = "resume";
+  try {
+    await api.patchStrengthWorkout(workout.value.id, { status: "in_progress" });
+    await loadAll();
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -816,6 +850,19 @@ useVisibilityRefresh(loadAll);
           volume trimmed ~30%, rest +30s. A Z2 cardio block alongside is a strong option.
         </template>
       </span>
+    </div>
+
+    <!-- WP-14 paused banner. Logging is gated until the user resumes. -->
+    <div v-if="isPaused" class="paused-banner">
+      <span class="paused-icon"><Pause :size="16" /></span>
+      <span class="paused-text">
+        <strong>Workout paused.</strong> Resume to keep logging sets — the
+        time away won't count toward your session length.
+      </span>
+      <button class="primary small" :disabled="busy === 'resume'"
+              @click="resumeWorkout">
+        <Play :size="14" /> Resume
+      </button>
     </div>
     <!-- Why + Variety nudge moved below the exercise list. -->
 
@@ -1164,13 +1211,26 @@ useVisibilityRefresh(loadAll);
         </div>
       </div>
 
-      <!-- Complete CTA -->
-      <div v-if="workout.status !== 'completed'" class="bottom">
-        <button class="primary big-btn" :disabled="completedSetsCount === 0 || busy === 'complete'"
-                @click="completeWorkout">
-          Complete workout
-          <small>({{ completedSetsCount }}/{{ totalSetsCount }} sets)</small>
-        </button>
+      <!-- Complete / Pause / Resume CTA -->
+      <div v-if="workout.status !== 'completed' && workout.status !== 'skipped'"
+           class="bottom">
+        <template v-if="isPaused">
+          <button class="primary big-btn" :disabled="busy === 'resume'"
+                  @click="resumeWorkout">
+            <Play :size="16" /> Resume workout
+          </button>
+        </template>
+        <template v-else>
+          <button class="primary big-btn" :disabled="completedSetsCount === 0 || busy === 'complete'"
+                  @click="completeWorkout">
+            Complete workout
+            <small>({{ completedSetsCount }}/{{ totalSetsCount }} sets)</small>
+          </button>
+          <button v-if="completedSetsCount > 0" class="ghost big-btn"
+                  :disabled="busy === 'pause'" @click="pauseWorkout">
+            <Pause :size="16" /> Pause
+          </button>
+        </template>
       </div>
       <!-- Swap-exercise modal -->
       <div v-if="swapWexId !== null" class="overlay" @click.self="closeSwap">
@@ -1589,6 +1649,7 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
 .status-pip.s-completed { color: #22c55e; border-color: rgba(34,197,94,0.3); }
 .status-pip.s-skipped { color: #94a3b8; border-color: rgba(148,163,184,0.3); }
 .status-pip.s-in_progress { color: #f59e0b; border-color: rgba(245,158,11,0.3); }
+.status-pip.s-paused { color: #38bdf8; border-color: rgba(56,189,248,0.35); }
 .swap-divider { height: 1px; background: var(--line); margin: 4px 2px; }
 .hint.subtle { font-size: 0.78rem; color: var(--muted); margin: 0 0 0.5rem; }
 .ctx-meta {
@@ -1679,6 +1740,18 @@ button.primary.small { padding: 0.25rem 0.6rem; font-size: 0.78rem; }
 button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 button.ghost { background: transparent; color: var(--text-soft); }
 button.ghost:hover { color: var(--text); border-color: var(--accent, #ef4444); }
+
+/* WP-14 paused banner */
+.paused-banner {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.6rem 0.85rem; margin: 0 0 0.7rem;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-left: 3px solid #38bdf8;
+  border-radius: 8px; color: var(--text);
+}
+.paused-icon { color: #38bdf8; display: inline-flex; }
+.paused-text { flex: 1; font-size: 0.9rem; }
 
 /* Soft sleep-stale warning banner */
 .stale-banner {

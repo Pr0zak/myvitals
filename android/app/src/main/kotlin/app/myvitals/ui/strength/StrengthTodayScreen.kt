@@ -328,6 +328,20 @@ fun StrengthTodayScreen(
         }
     }
 
+    // WP-14 — keep the ongoing "workout paused" notification in sync with
+    // status. Posted while paused so it survives leaving the screen (and
+    // even the process); cancelled on resume / complete / skip. The
+    // notification's Resume / Complete actions route through
+    // WorkoutActionReceiver, which works whether or not this screen is alive.
+    LaunchedEffect(workout?.status, workout?.id) {
+        val w = workout
+        if (w != null && w.status == "paused") {
+            Notifier.postWorkoutPaused(context, w.id, w.splitFocus)
+        } else {
+            Notifier.cancelWorkoutPaused(context)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -821,6 +835,44 @@ fun StrengthTodayScreen(
                     }
                 }
             }
+            // WP-14 paused banner. Set logging is gated until resume.
+            if (plan.status == "paused") {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFF38BDF8).copy(alpha = 0.10f),
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Workout paused",
+                                    color = MV.OnSurface, fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold)
+                                Text("Resume to keep logging — time away won't " +
+                                    "count toward your session length.",
+                                    color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                            }
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        try {
+                                            workout = repo.resumeWorkout(plan.id); reload()
+                                        } catch (e: Exception) {
+                                            error = e.message?.take(160)
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF38BDF8)),
+                            ) { Text("Resume") }
+                        }
+                    }
+                }
+            }
             // Cardio / notes-only plans (split_focus == "cardio") come back
             // with exercises=[] and the prescription text in `notes`. Without
             // this card the screen looks blank between the Coach card and
@@ -861,7 +913,13 @@ fun StrengthTodayScreen(
                     info = catalog[wex.exerciseId],
                     inputs = setInputs,
                     canSwap = canSwap,
-                    onLogSet = { setNum, weight, reps, rating ->
+                    onLogSet = onLogSet@{ setNum, weight, reps, rating ->
+                        // WP-14: resume before logging — a paused session
+                        // shouldn't accept new sets.
+                        if (workout?.status == "paused") {
+                            error = "Workout paused — tap Resume to keep logging."
+                            return@onLogSet
+                        }
                         scope.launch {
                             val ok = repo.logSet(LogSetRequest(
                                 workoutExerciseId = wex.id,
@@ -927,30 +985,57 @@ fun StrengthTodayScreen(
                 )
             }
             item {
-                if (plan.status != "completed") {
+                if (plan.status != "completed" && plan.status != "skipped") {
                     // Cardio-day (no exercises) gets a dialog flow so the
                     // user can name the session + log duration; that mints
                     // an Activity row which feeds the activity feed, HR
                     // chart markers, and the cardio coach dose.
                     val isCardioDay = plan.exercises.isEmpty() &&
                         plan.splitFocus in listOf("cardio", "active_recovery", "yoga")
-                    Button(
-                        onClick = {
-                            if (isCardioDay) {
-                                showCardioLog = true
-                            } else {
+                    if (plan.status == "paused") {
+                        // WP-14 — resume is the primary action while paused.
+                        Button(
+                            onClick = {
                                 scope.launch {
-                                    try { workout = repo.completeWorkout(plan.id); reload() }
+                                    try { workout = repo.resumeWorkout(plan.id); reload() }
                                     catch (e: Exception) { error = e.message?.take(160) }
                                 }
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MV.Green),
-                    ) {
-                        Text(if (isCardioDay) "Log this workout" else "Complete workout")
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
+                        ) { Text("Resume workout") }
+                    } else {
+                        Button(
+                            onClick = {
+                                if (isCardioDay) {
+                                    showCardioLog = true
+                                } else {
+                                    scope.launch {
+                                        try { workout = repo.completeWorkout(plan.id); reload() }
+                                        catch (e: Exception) { error = e.message?.take(160) }
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MV.Green),
+                        ) {
+                            Text(if (isCardioDay) "Log this workout" else "Complete workout")
+                        }
+                        // WP-14 — Pause, for strength sessions already underway.
+                        val started = completedSets > 0 || plan.status == "in_progress"
+                        if (!isCardioDay && started) {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        try { workout = repo.pauseWorkout(plan.id); reload() }
+                                        catch (e: Exception) { error = e.message?.take(160) }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 12.dp),
+                            ) { Text("Pause workout") }
+                        }
                     }
                 }
                 if (plan.status == "completed") {
@@ -2763,6 +2848,7 @@ private fun WeekStrip(
             val dotColor = when {
                 effectiveStatus == "completed" -> Color(0xFF22C55E)
                 effectiveStatus == "in_progress" -> MV.Amber
+                effectiveStatus == "paused" -> Color(0xFF38BDF8)
                 effectiveStatus == "skipped" -> MV.OnSurfaceVariant
                 effectiveStatus == "planned" -> MV.BrandRed
                 projected -> Color.Transparent

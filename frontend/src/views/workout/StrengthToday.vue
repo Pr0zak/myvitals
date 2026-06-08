@@ -481,19 +481,18 @@ const weekStrip = computed<DayCell[]>(() => {
   return out;
 });
 
-// Rating helper text — Fitbod-style RIR (Reps In Reserve)
-function ratingShort(r: number): string {
-  return ["", "fail", "0-1", "2-3", "4-5", "6+"][r] ?? "";
-}
-function ratingTitle(r: number): string {
-  return [
-    "",
-    "1 — Failed: missed reps or had to rack early",
-    "2 — Very hard: 0–1 more reps possible (RIR 0–1)",
-    "3 — Hard: 2–3 reps in reserve (RIR 2–3)",
-    "4 — Moderate: 4–5 reps in reserve (RIR 4–5)",
-    "5 — Easy: 6+ reps in reserve, ready to bump weight (RIR 6+)",
-  ][r] ?? "";
+// WP-16 — four-button rating. "Failed" is the dedicated red action in
+// the row; the chooser offers the three non-failed outcomes. Values map
+// onto the backend progression thresholds (Hard=2 hold, Good=4 +rep,
+// Easy=5 +weight); historical 1–5 RPE data still renders via ratingLabel.
+const RATING_CHOICES: { v: number; label: string; title: string }[] = [
+  { v: 2, label: "Hard", title: "Hard — finished it with nothing in the tank. Weight stays next time." },
+  { v: 4, label: "Good", title: "Good — solid, a couple reps left. Adds a rep next time." },
+  { v: 5, label: "Easy", title: "Easy — several reps left. Adds weight once you top the rep range." },
+];
+function ratingLabel(r: number | null): string {
+  if (r == null) return "—";
+  return { 1: "Failed", 2: "Hard", 3: "Good", 4: "Good", 5: "Easy" }[r] ?? `RPE ${r}`;
 }
 
 function entryKey(wexId: number, setNum: number) { return `${wexId}-${setNum}`; }
@@ -1063,7 +1062,7 @@ useVisibilityRefresh(loadAll);
                 :key="s.set_number"
                 class="set-chip"
                 :class="s.skipped ? 'fail' : 'ok'"
-                :title="`Set ${s.set_number} · RPE ${s.rating ?? '?'}`"
+                :title="`Set ${s.set_number} · ${ratingLabel(s.rating)}`"
                 :data-r="s.rating ?? 0">
             <template v-if="s.skipped">fail</template>
             <template v-else>{{ s.actual_weight_lb ?? '—' }}×{{ s.actual_reps }}</template>
@@ -1131,15 +1130,14 @@ useVisibilityRefresh(loadAll);
                   </td>
                   <td class="rating-cell">
                     <button
-                      v-for="r in 5" :key="r"
-                      class="rating" :data-r="r"
-                      :class="{ on: entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).rating === r }"
+                      v-for="opt in RATING_CHOICES" :key="opt.v"
+                      class="rating" :data-r="opt.v"
+                      :class="{ on: entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).rating === opt.v }"
                       :disabled="isSetLogged(wex, n)"
-                      :title="ratingTitle(r)"
-                      @click="setRating(wex.id, n, r)"
+                      :title="opt.title"
+                      @click="setRating(wex.id, n, opt.v)"
                     >
-                      <span class="num">{{ r }}</span>
-                      <span class="rir">{{ ratingShort(r) }}</span>
+                      <span class="num">{{ opt.label }}</span>
                     </button>
                   </td>
                   <td>
@@ -1202,7 +1200,7 @@ useVisibilityRefresh(loadAll);
               </tbody>
             </table>
             <p v-if="!isTimedExercise(wex)" class="rating-legend">
-              <span class="lbl">RIR scale: how many more reps you could've done. 1 = failed → 5 = easy</span>
+              <span class="lbl">How did the set feel? <b>Hard</b> = stays the same · <b>Good</b> = +1 rep next time · <b>Easy</b> = +weight. Or tap <b>Failed</b> if you missed reps.</span>
             </p>
             <p v-else class="rating-legend">
               <span class="lbl">Hold each pose for the configured time. Tap Start; auto-logs at zero.</span>
@@ -1482,13 +1480,13 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 .rating-cell { display: flex; gap: 0.2rem; }
 .rating {
   display: inline-flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 1px;
-  width: 2.6rem; min-height: 2.4rem; padding: 3px 0;
+  justify-content: center; gap: 1px; flex: 1 1 0;
+  min-width: 3.1rem; min-height: 2.4rem; padding: 3px 4px;
   border-radius: 6px; cursor: pointer;
   border: 1px solid var(--line); background: var(--bg-2);
   color: var(--muted); font-family: ui-sans-serif, system-ui;
 }
-.rating .num { font-weight: 700; font-size: 0.9rem; line-height: 1; }
+.rating .num { font-weight: 700; font-size: 0.82rem; line-height: 1; }
 .rating .rir { font-size: 0.6rem; color: var(--muted-2); line-height: 1;
   font-family: 'Geist Mono', ui-monospace, monospace; }
 .rating:hover:not(:disabled) { transform: translateY(-1px); }

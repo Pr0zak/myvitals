@@ -2531,7 +2531,7 @@ private fun TimedSetRow(
 
     // Three-state row: rating prompt, running countdown, or idle Start button.
     if (pendingElapsed != null) {
-        // Rate the set: 💪 easy = RPE 5, ✓ smooth = 4, ✗ failed = 1.
+        // Rate the hold (WP-16 labels): 💪 Easy = 5, ✓ Good = 4, ✗ Failed = 1.
         // Logs (elapsed, rating); the SetEntry on next render will be
         // skipped because the parent moves to the next set.
         Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
@@ -2556,7 +2556,7 @@ private fun TimedSetRow(
                 RateButton("Easy", "💪", Color(0xFF22C55E)) {
                     onComplete(pendingElapsed!!, 5); pendingElapsed = null
                 }
-                RateButton("Smooth", "✓", Color(0xFFA78BFA)) {
+                RateButton("Good", "✓", Color(0xFFA78BFA)) {
                     onComplete(pendingElapsed!!, 4); pendingElapsed = null
                 }
                 RateButton("Failed", "✗", Color(0xFFEF4444)) {
@@ -2665,7 +2665,7 @@ private fun LoggedSetRow(n: Int, weightLb: Double?, reps: Int, rating: Int,
             color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f),
         )
-        Text("RPE $rating", color = ratingColor(rating), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(ratingLabel(rating), color = ratingColor(rating), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.width(8.dp))
         Text("✓", color = MV.Green, fontWeight = FontWeight.Bold)
     }
@@ -2724,9 +2724,12 @@ private fun SetEntryRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            for (r in 1..5) {
-                val on = input.rating == r
-                val color = ratingColor(r)
+            // WP-16 — three non-failed buttons (Failed is the dedicated
+            // action below). Values map to backend thresholds: Hard=2 hold,
+            // Good=4 +rep, Easy=5 +weight.
+            for ((value, label) in listOf(2 to "Hard", 4 to "Good", 5 to "Easy")) {
+                val on = input.rating == value
+                val color = ratingColor(value)
                 Box(
                     Modifier
                         .weight(1f)
@@ -2736,27 +2739,18 @@ private fun SetEntryRow(
                         .border(1.dp,
                             if (on) color else color.copy(alpha = 0.45f),
                             RoundedCornerShape(8.dp))
-                        .clickable { onRating(r) },
+                        .clickable { onRating(value) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("$r",
-                            color = if (on) MV.OnSurface else color,
-                            fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text(
-                            when (r) {
-                                1 -> "fail"; 2 -> "0-1"; 3 -> "2-3"
-                                4 -> "4-5"; 5 -> "6+"; else -> ""
-                            },
-                            color = if (on) MV.OnSurface.copy(alpha = 0.85f) else MV.OnSurfaceDim,
-                            fontSize = 9.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        )
-                    }
+                    Text(label,
+                        color = if (on) MV.OnSurface else color,
+                        fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
             }
         }
         Text(
-            "Reps in reserve — how many more you could've done. 1 = failed, 5 = easy",
+            "Hard = stays · Good = +1 rep · Easy = +weight next time. " +
+                "Tap Failed if you missed reps.",
             color = MV.OnSurfaceDim, fontSize = 10.sp, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
         )
@@ -2898,6 +2892,11 @@ private fun ratingColor(r: Int) = when (r) {
     4 -> androidx.compose.ui.graphics.Color(0xFF84CC16)
     5 -> MV.Green
     else -> MV.OnSurfaceDim
+}
+
+// WP-16 — four-button labels; historical 1–5 RPE data still maps cleanly.
+private fun ratingLabel(r: Int) = when (r) {
+    1 -> "Failed"; 2 -> "Hard"; 3, 4 -> "Good"; 5 -> "Easy"; else -> "RPE $r"
 }
 
 @Composable

@@ -377,12 +377,19 @@ def round_weight(
 # Pure: starting weight + rating-driven progression
 # ------------------------------------------------------------------
 
-# Rating scale is RPE-style (1 failed … 5 easy/RIR 6+; see ratingTitle
-# in StrengthToday.vue). These gates are shared by progress_from_rating
-# (weight policy) and double_progression (rep+weight policy).
-FAIL_THRESHOLD = 2.5   # ≤ this → cut weight next session
+# Rating scale (WP-16): the UI presents four buttons that map to these
+# numeric values — Failed=1, Hard=2, Good=4, Easy=5. The thresholds below
+# split that into the four progression actions; historical 1–5 RPE data
+# still interprets correctly under the same gates. Shared by
+# progress_from_rating (weight) and double_progression (rep+weight).
+#   Failed (1) → deload      (≤ FAIL_THRESHOLD)
+#   Hard   (2) → hold        (FAIL < r < REP_PROGRESS_MIN)
+#   Good   (4) → add a rep   (REP_PROGRESS_MIN ≤ r < EASY)
+#   Easy   (5) → add weight  (≥ EASY_THRESHOLD, at top of rep range)
+FAIL_THRESHOLD = 1.5   # ≤ this → cut weight next session (mostly-failed)
 EASY_THRESHOLD = 4.5   # ≥ this → the rating policy wants a weight jump
-REP_PROGRESS_MIN = 3.0  # ≥ this (RIR ≳2) → safe to add a rep
+REP_PROGRESS_MIN = 3.0  # ≥ this → solid set, add a rep (double progression)
+AUTO_AVOID_THRESHOLD = 1.5  # 14d avg ≤ this → rotate the exercise out
 
 
 def starting_weight_lb(movement_pattern: str, level: str) -> float | None:
@@ -400,9 +407,9 @@ def progress_from_rating(
 ) -> float:
     """Apply Fitbod-style RPE-driven progression, modulated by goal.
 
-    Fail handling is goal-agnostic: rating ≤ 2.5 → -7.5%.
-    Hold zone: 2.5 < rating < easy_threshold → no change.
-    Easy zone (rating ≥ easy_threshold) → goal-specific jump.
+    Fail handling is goal-agnostic: rating ≤ FAIL_THRESHOLD → -7.5%.
+    Hold zone: FAIL_THRESHOLD < rating < EASY_THRESHOLD → no change.
+    Easy zone (rating ≥ EASY_THRESHOLD) → goal-specific jump.
 
     Strength favours bigger weight jumps because neural adaptation
     benefits from heavier loads; hypertrophy uses moderate jumps so
@@ -685,13 +692,14 @@ def select_exercises_for_split(
             return 0
         return mev - sets
 
-    # Auto-avoid: exercises the user has rated consistently low over the
-    # last few weeks (≤2 avg). Treated like a soft 'avoid' pref unless
-    # explicitly favorited. Lets the algo learn from feedback without
-    # the user having to manage a preferences list manually.
+    # Auto-avoid: exercises the user keeps FAILING over the last few weeks
+    # (14d avg ≤ AUTO_AVOID_THRESHOLD). Treated like a soft 'avoid' pref
+    # unless explicitly favorited. Post WP-16 "Hard" (2) is a normal
+    # productive rating, so the bar sits at the failing end — only a lift
+    # you can't complete gets rotated out.
     auto_avoid = {
         eid for eid, avg in ratings.items()
-        if avg is not None and avg <= 2.0
+        if avg is not None and avg <= AUTO_AVOID_THRESHOLD
         and prefs.get(eid) != "favorite"
     }
 
@@ -1889,12 +1897,13 @@ async def generate_plan(
     if carryover_note:
         notes.append(carryover_note)
     auto_avoid_count = sum(
-        1 for r in recent_ratings.values() if r is not None and r <= 2.0
+        1 for r in recent_ratings.values()
+        if r is not None and r <= AUTO_AVOID_THRESHOLD
     )
     if auto_avoid_count:
         notes.append(
-            f"{auto_avoid_count} exercise(s) auto-avoided based on recent "
-            f"ratings ≤2 over the last 14 days. Override by marking them "
+            f"{auto_avoid_count} exercise(s) auto-avoided — you kept failing "
+            f"them over the last 14 days. Override by marking them "
             f"'favorite' in the catalog if you want them back."
         )
 

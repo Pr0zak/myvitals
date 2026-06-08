@@ -107,13 +107,17 @@ class TestRoundWeight:
 
 class TestProgressFromRating:
     def test_failed_set_drops_75pct(self):
-        # Fail behaviour is goal-agnostic — pre-WP-12 invariant.
-        assert progress_from_rating(100, 1.5, is_compound=True) == pytest.approx(92.5)
-        assert progress_from_rating(100, 2.0, is_compound=False) == pytest.approx(92.5)
-        assert progress_from_rating(100, 1.5, is_compound=True, goal="strength") == pytest.approx(92.5)
-        assert progress_from_rating(100, 1.5, is_compound=True, goal="general") == pytest.approx(92.5)
+        # Fail behaviour is goal-agnostic. WP-16 lowered FAIL_THRESHOLD to
+        # 1.5 so only a mostly-failed session (Failed=1) deloads; "Hard"
+        # (=2) now holds.
+        assert progress_from_rating(100, 1.0, is_compound=True) == pytest.approx(92.5)
+        assert progress_from_rating(100, 1.5, is_compound=False) == pytest.approx(92.5)
+        assert progress_from_rating(100, 1.0, is_compound=True, goal="strength") == pytest.approx(92.5)
+        assert progress_from_rating(100, 1.0, is_compound=True, goal="general") == pytest.approx(92.5)
 
     def test_hard_holds_weight(self):
+        # WP-16: "Hard" (2) is a hold, not a deload.
+        assert progress_from_rating(100, 2.0, is_compound=True) == 100
         assert progress_from_rating(50, 3.0, is_compound=True) == 50
         assert progress_from_rating(50, 4.0, is_compound=False) == 50
 
@@ -146,6 +150,28 @@ class TestDoubleProgression:
     # The reported case: 10 lb pullover, 5 lb dumbbell steps, NO micro-loaders.
     FIXED = dict(pairs_lb=[5, 10, 15, 20, 25, 30, 35, 40, 45, 50],
                  wrist_weights_lb=[])
+
+    def test_wp16_four_button_mapping(self):
+        """The four UI buttons map to four distinct actions at mid-range
+        (not at top, so Easy adds a rep rather than weight). Failed=1
+        deloads, Hard=2 holds, Good=4 and Easy=5 add a rep."""
+        def run(rating):
+            return double_progression(
+                base_reps_lo=8, base_reps_hi=10, last_weight_lb=30.0,
+                last_avg_rating=rating, last_avg_reps=8.0, is_compound=False,
+                goal="hypertrophy", **self.FIXED)
+        # Failed → deload (30 * 0.925 = 27.75 → rounds to 30 nearest? -> 25)
+        w, lo, hi, _ = run(1)
+        assert w == 25.0 and (lo, hi) == (8, 10)
+        # Hard → hold weight + base reps (no progression)
+        w, lo, hi, _ = run(2)
+        assert w == 30.0 and (lo, hi) == (8, 10)
+        # Good → add a rep, hold weight
+        w, lo, hi, _ = run(4)
+        assert w == 30.0 and (lo, hi) == (9, 10)
+        # Easy below top → still adds a rep (weight only at the top)
+        w, lo, hi, _ = run(5)
+        assert w == 30.0 and (lo, hi) == (9, 10)
 
     def test_easy_below_top_adds_a_rep_not_weight(self):
         # rating 5, did 8 reps in an 8–10 range → hold 10 lb, push to 9–10.

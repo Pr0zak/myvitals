@@ -9,6 +9,7 @@ import pytest
 
 from myvitals.analytics.strength import (
     round_weight, valid_dumbbell_loads, progress_from_rating,
+    double_progression,
 )
 
 
@@ -136,6 +137,84 @@ class TestProgressFromRating:
         """Avg rating of 4.4 = hold (still moderate); 4.5 = bump."""
         assert progress_from_rating(100, 4.4, is_compound=True) == 100
         assert progress_from_rating(100, 4.5, is_compound=True) == pytest.approx(107.5)
+
+
+class TestDoubleProgression:
+    """Fill the rep range before adding weight — unsticks light fixed-pair
+    dumbbells whose percentage jump rounds back to the same load."""
+
+    # The reported case: 10 lb pullover, 5 lb dumbbell steps, NO micro-loaders.
+    FIXED = dict(pairs_lb=[5, 10, 15, 20, 25, 30, 35, 40, 45, 50],
+                 wrist_weights_lb=[])
+
+    def test_easy_below_top_adds_a_rep_not_weight(self):
+        # rating 5, did 8 reps in an 8–10 range → hold 10 lb, push to 9–10.
+        w, lo, hi, adv = double_progression(
+            base_reps_lo=8, base_reps_hi=10, last_weight_lb=10.0,
+            last_avg_rating=5.0, last_avg_reps=8.0, is_compound=False,
+            goal="hypertrophy", **self.FIXED)
+        assert w == 10.0
+        assert (lo, hi) == (9, 10)
+        assert adv is None
+
+    def test_moderate_below_top_still_adds_a_rep(self):
+        # rating 4 (RIR 4–5) is below the weight-jump bar but well clear of
+        # failure → double progression advances reps. This is the 06-01 case.
+        w, lo, hi, adv = double_progression(
+            base_reps_lo=8, base_reps_hi=10, last_weight_lb=10.0,
+            last_avg_rating=4.0, last_avg_reps=8.0, is_compound=False,
+            goal="hypertrophy", **self.FIXED)
+        assert w == 10.0
+        assert (lo, hi) == (9, 10)
+
+    def test_top_of_range_but_rack_too_coarse_flags_plateau(self):
+        # At the top (10 reps), rating it easy, but +5% on 10 lb rounds back
+        # to 10 → weight-locked. Hold at top, surface the micro-loader nudge.
+        w, lo, hi, adv = double_progression(
+            base_reps_lo=8, base_reps_hi=10, last_weight_lb=10.0,
+            last_avg_rating=5.0, last_avg_reps=10.0, is_compound=False,
+            goal="hypertrophy", **self.FIXED)
+        assert w == 10.0
+        assert (lo, hi) == (10, 10)
+        assert adv is not None and "micro" in adv.lower()
+
+    def test_top_of_range_with_loadable_jump_adds_weight_resets_reps(self):
+        # 50 lb at the top: +5% = 52.5, and WITH micro-loaders the rack can
+        # deliver it → weight moves, reps reset to the bottom of the range.
+        w, lo, hi, adv = double_progression(
+            base_reps_lo=8, base_reps_hi=10, last_weight_lb=50.0,
+            last_avg_rating=5.0, last_avg_reps=10.0, is_compound=False,
+            goal="hypertrophy",
+            pairs_lb=[5, 10, 15, 20, 25, 30, 35, 40, 45, 50],
+            wrist_weights_lb=[1, 1.5, 2, 3])
+        assert w == pytest.approx(52.5)
+        assert (lo, hi) == (8, 10)
+        assert adv is None
+
+    def test_failure_cuts_weight_resets_reps(self):
+        w, lo, hi, adv = double_progression(
+            base_reps_lo=8, base_reps_hi=10, last_weight_lb=30.0,
+            last_avg_rating=1.0, last_avg_reps=6.0, is_compound=False,
+            goal="hypertrophy", **self.FIXED)
+        assert w == 25.0  # 30 * 0.925 = 27.75 → rounds to 25 on 5 lb steps
+        assert (lo, hi) == (8, 10)
+
+    def test_near_failure_holds_everything(self):
+        # rating 2 (RIR 0–1) is above the deload cut but below REP_PROGRESS_MIN
+        # → don't pile on reps; hold weight and the base range.
+        w, lo, hi, adv = double_progression(
+            base_reps_lo=8, base_reps_hi=10, last_weight_lb=10.0,
+            last_avg_rating=2.6, last_avg_reps=8.0, is_compound=False,
+            goal="hypertrophy", **self.FIXED)
+        assert w == 10.0
+        assert (lo, hi) == (8, 10)
+
+    def test_no_rep_history_holds_base_range(self):
+        w, lo, hi, adv = double_progression(
+            base_reps_lo=8, base_reps_hi=10, last_weight_lb=10.0,
+            last_avg_rating=5.0, last_avg_reps=None, is_compound=False,
+            goal="hypertrophy", **self.FIXED)
+        assert (lo, hi) == (8, 10)
 
 
 class TestPrescribeSlotAgeAndBodyweight:

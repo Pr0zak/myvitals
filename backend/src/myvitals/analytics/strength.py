@@ -377,6 +377,14 @@ def round_weight(
 # Pure: starting weight + rating-driven progression
 # ------------------------------------------------------------------
 
+# Rating scale is RPE-style (1 failed … 5 easy/RIR 6+; see ratingTitle
+# in StrengthToday.vue). These gates are shared by progress_from_rating
+# (weight policy) and double_progression (rep+weight policy).
+FAIL_THRESHOLD = 2.5   # ≤ this → cut weight next session
+EASY_THRESHOLD = 4.5   # ≥ this → the rating policy wants a weight jump
+REP_PROGRESS_MIN = 3.0  # ≥ this (RIR ≳2) → safe to add a rep
+
+
 def starting_weight_lb(movement_pattern: str, level: str) -> float | None:
     """First-session weight when no history exists. Returns None for
     movement patterns we don't seed (caller falls back to bodyweight)."""
@@ -406,10 +414,9 @@ def progress_from_rating(
         hypertrophy → compound +7.5%, isolation +5%,   easy_thr=4.5
         general     → compound +5%,   isolation +2.5%, easy_thr=4.5
     """
-    if avg_rating <= 2.5:
+    if avg_rating <= FAIL_THRESHOLD:
         return last_weight_lb * 0.925
-    easy_thr = 4.5
-    if avg_rating < easy_thr:
+    if avg_rating < EASY_THRESHOLD:
         return last_weight_lb
     if goal == "strength":
         return last_weight_lb * (1.10 if is_compound else 1.075)
@@ -417,6 +424,84 @@ def progress_from_rating(
         return last_weight_lb * (1.05 if is_compound else 1.025)
     # hypertrophy default
     return last_weight_lb * (1.075 if is_compound else 1.05)
+
+
+def double_progression(
+    *,
+    base_reps_lo: int,
+    base_reps_hi: int,
+    last_weight_lb: float,
+    last_avg_rating: float,
+    last_avg_reps: float | None,
+    is_compound: bool,
+    goal: str,
+    pairs_lb: list[float],
+    wrist_weights_lb: list[float],
+    deload: float = 1.0,
+) -> tuple[float | None, int, int, str | None]:
+    """Double progression for weighted lifts: add REPS toward the top of
+    the range, and only add WEIGHT once you're at the top.
+
+    Solves the fixed-dumbbell dead zone. A +5% isolation jump on a light
+    DB (10 → 10.5 lb) rounds straight back to 10 when the rack steps in
+    5 lb and no micro-loaders are owned, so weight-only progression
+    freezes a lift you could do for 6+ RIR. Here the rep range carries
+    the progression until the weight can actually move.
+
+    Returns (target_weight_lb, reps_lo, reps_hi, advisory). reps_lo may
+    be shifted up from the base to encode "do more reps at this weight".
+    `advisory` is a non-None note string only for the weight-locked
+    plateau case (at the top of the range, rating it easy, but the rack
+    can't deliver a heavier load → suggest micro-loaders).
+
+    `progress_from_rating` stays the weight oracle (deload / hold / jump);
+    this layers reps on top, so the swap path that still calls
+    progress_from_rating directly is unaffected.
+    """
+    def _round(w: float) -> float | None:
+        return round_weight(w * deload, pairs_lb, wrist_weights_lb)
+
+    base_reps_lo = min(base_reps_lo, base_reps_hi)
+    held = _round(last_weight_lb)
+
+    # 1. Failure → cut weight, reset to the base rep range.
+    if last_avg_rating <= FAIL_THRESHOLD:
+        cut = _round(progress_from_rating(
+            last_weight_lb, last_avg_rating, is_compound, goal=goal))
+        return cut, base_reps_lo, base_reps_hi, None
+
+    at_top = last_avg_reps is not None and last_avg_reps >= base_reps_hi
+    jumped = _round(progress_from_rating(
+        last_weight_lb, last_avg_rating, is_compound, goal=goal))
+
+    # 2. At the top of the range AND the rating wants a jump AND the rack
+    #    can deliver it → add weight, reset reps to the bottom.
+    if at_top and jumped is not None and held is not None and jumped > held:
+        return jumped, base_reps_lo, base_reps_hi, None
+
+    # 3. Not yet at the top (and not near-failure) → add a rep, hold weight.
+    if (
+        last_avg_reps is not None
+        and last_avg_reps < base_reps_hi
+        and last_avg_rating >= REP_PROGRESS_MIN
+    ):
+        next_lo = max(base_reps_lo, min(int(last_avg_reps) + 1, base_reps_hi))
+        return held, next_lo, base_reps_hi, None
+
+    # 4. At the top, rating it easy, but the rack can't add weight →
+    #    weight-locked plateau. Keep them at the top and flag it.
+    if at_top and last_avg_rating >= EASY_THRESHOLD:
+        advisory = None
+        if jumped is not None and held is not None and jumped <= held:
+            advisory = (
+                "weight-locked: maxing the rep range but the dumbbell "
+                "step is too coarse to add load — add wrist/micro weights "
+                "in Equipment to keep progressing."
+            )
+        return held, base_reps_hi, base_reps_hi, advisory
+
+    # 5. Hold zone (moderate rating, mid-range) → hold weight + base reps.
+    return held, base_reps_lo, base_reps_hi, None
 
 
 # ------------------------------------------------------------------
@@ -1273,11 +1358,13 @@ def adjust_mobility_target(
 
 async def last_target_weight_for_exercise(
     db: AsyncSession, exercise_id: str
-) -> tuple[float | None, float | None]:
-    """Find the most recent (avg_rating, avg_actual_weight_lb) for an exercise.
+) -> tuple[float | None, float | None, float | None]:
+    """Find the most recent (avg_rating, avg_actual_weight_lb,
+    avg_actual_reps) for an exercise.
 
-    Used to compute next-session weight: if you crushed 25 lb x 8 last
-    session (avg_rating 4.8), this session should prescribe ~30 lb.
+    Used to compute next-session prescription: if you crushed 25 lb x 8
+    last session (avg_rating 4.8), this session should prescribe ~30 lb;
+    avg_reps feeds the double-progression rep ladder.
     """
     wex = (await db.execute(
         select(models.StrengthWorkoutExercise)
@@ -1291,7 +1378,7 @@ async def last_target_weight_for_exercise(
         .limit(1)
     )).scalar_one_or_none()
     if wex is None:
-        return None, None
+        return None, None, None
 
     sets = (await db.execute(
         select(models.StrengthSet)
@@ -1299,16 +1386,21 @@ async def last_target_weight_for_exercise(
         .where(models.StrengthSet.skipped.is_(False))
     )).scalars().all()
     if not sets:
-        return None, None
+        return None, None, None
 
     rated = [s for s in sets if s.rating is not None]
     weighted = [s for s in sets if s.actual_weight_lb is not None]
+    repped = [s for s in sets if s.actual_reps is not None]
     avg_rating = sum(s.rating for s in rated) / len(rated) if rated else None
     avg_weight = (
         sum(s.actual_weight_lb for s in weighted) / len(weighted)
         if weighted else None
     )
-    return avg_rating, avg_weight
+    avg_reps = (
+        sum(s.actual_reps for s in repped) / len(repped)
+        if repped else None
+    )
+    return avg_rating, avg_weight, avg_reps
 
 
 # ------------------------------------------------------------------
@@ -1816,6 +1908,7 @@ async def generate_plan(
     plan_exs: list[ExerciseInPlan] = []
     pairs_lb = (equipment.get("dumbbells") or {}).get("pairs_lb") or []
     wrist = equipment.get("wrist_weights_lb") or []
+    dp_plateau_names: list[str] = []
 
     for i, ex in enumerate(chosen):
         if i == 0:
@@ -1844,16 +1937,35 @@ async def generate_plan(
             rest_s += 30
 
         # History-driven progression first, then starting weight.
-        avg_rating, avg_weight = await last_target_weight_for_exercise(db, ex["id"])
-        if avg_rating is not None and avg_weight is not None:
-            target = progress_from_rating(
-                avg_weight, avg_rating, ex["is_compound"], goal=goal,
+        avg_rating, avg_weight, avg_reps = await last_target_weight_for_exercise(
+            db, ex["id"])
+        is_weighted = "dumbbell" in ex["equipment"] and not ex.get("is_timed")
+
+        if avg_rating is not None and avg_weight is not None and is_weighted:
+            # Double progression: fill the rep range, then add weight. This
+            # is the path that unsticks light fixed-pair dumbbells whose
+            # +5% jump would otherwise round straight back to the same load.
+            target, reps_lo, reps_hi, advisory = double_progression(
+                base_reps_lo=reps_lo, base_reps_hi=reps_hi,
+                last_weight_lb=avg_weight, last_avg_rating=avg_rating,
+                last_avg_reps=avg_reps, is_compound=ex["is_compound"],
+                goal=goal, pairs_lb=pairs_lb, wrist_weights_lb=wrist,
+                deload=deload,
+            )
+            if advisory:
+                dp_plateau_names.append(ex["name"])
+        elif avg_rating is not None and avg_weight is not None:
+            # Non-dumbbell-but-rated (e.g. timed holds carrying a load) —
+            # keep the weight-only policy; reps/seconds handled elsewhere.
+            target = round_weight(
+                progress_from_rating(
+                    avg_weight, avg_rating, ex["is_compound"], goal=goal,
+                ) * deload, pairs_lb, wrist,
             )
         else:
             target = starting_weight_lb(ex["movement_pattern"], level)
-
-        if target is not None:
-            target = round_weight(target * deload, pairs_lb, wrist)
+            if target is not None:
+                target = round_weight(target * deload, pairs_lb, wrist)
 
         # Bodyweight-only exercise (or no DBs owned): leave weight null,
         # progress by reps.
@@ -1872,6 +1984,14 @@ async def generate_plan(
                 DEFAULT_REST_S_SUPERSET_AFTER if ex["id"] in superset_map else rest_s
             ),
         ))
+
+    if dp_plateau_names:
+        names = ", ".join(dp_plateau_names[:3])
+        notes.append(
+            f"Weight-locked on {names} — you're maxing the rep range but the "
+            f"dumbbell jump is too coarse to add load. Add wrist/micro weights "
+            f"in Equipment to keep progressing."
+        )
 
     # WP-5F (v0.7.281) — adaptive MEV-filler finisher slots.
     # If the trailing 7-day audit shows a muscle is meaningfully under

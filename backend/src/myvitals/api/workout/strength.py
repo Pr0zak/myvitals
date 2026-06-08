@@ -1196,8 +1196,10 @@ async def swap_exercise(
     pairs = (equip.get("dumbbells") or {}).get("pairs_lb") or []
     wrist = equip.get("wrist_weights_lb") or []
 
-    # Recompute target weight from history (if any) or starting table
-    avg_rating, avg_weight = await strength_algo.last_target_weight_for_exercise(
+    # Recompute target weight from history (if any) or starting table.
+    # Swap keeps the slot's existing rep range, so we use the weight-only
+    # policy here; double progression lives in full plan generation.
+    avg_rating, avg_weight, _avg_reps = await strength_algo.last_target_weight_for_exercise(
         db, body.exercise_id,
     )
     if avg_rating is not None and avg_weight is not None:

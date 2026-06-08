@@ -1,0 +1,17 @@
+# myvitals — weekly Docker reclaim for the CT (PRUNE-1).
+#
+# Install on the CT:
+#   sudo cp deploy/myvitals-docker-prune.cron /etc/cron.d/myvitals-docker-prune
+#   sudo chmod 644 /etc/cron.d/myvitals-docker-prune
+#   sudo systemctl restart cron
+#
+# Logs: /var/log/docker-prune.log
+#
+# Removes unused images + build cache only. Running containers keep
+# their images; the TimescaleDB named volume is preserved (no --volumes).
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Sundays 04:00 — quiet hour, well clear of the Sun 22:00 weekly AI digest.
+0 4 * * 0 root /opt/myvitals/deploy/docker-prune.sh

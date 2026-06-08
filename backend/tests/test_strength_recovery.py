@@ -20,13 +20,14 @@ class TestIsBlocking:
         """40 is below the deload threshold but not the rest-day threshold."""
         assert RecoveryInputs(recovery_score=40).is_blocking()[0] is False
 
-    def test_severe_sleep_deficit_blocks(self):
-        blocked, reason = RecoveryInputs(sleep_h=3.5).is_blocking()
-        assert blocked is True
-        assert "sleep" in reason.lower()
+    def test_sleep_deficit_no_longer_blocks(self):
+        """v0.7.269: sleep was removed as a rest-day driver — Pixel Watch
+        sleep duration was unreliable enough to flip legitimate strength
+        days into yoga. Even a severe deficit is informational only now."""
+        assert RecoveryInputs(sleep_h=3.5).is_blocking() == (False, None)
 
     def test_5h_sleep_does_not_block(self):
-        """Triggers a deload but not a rest day."""
+        """Sleep drives neither a block nor a deload post-v0.7.269."""
         assert RecoveryInputs(sleep_h=5.0).is_blocking()[0] is False
 
 
@@ -42,10 +43,11 @@ class TestDeloadFactor:
         f = RecoveryInputs(recovery_score=55).deload_factor()
         assert f == pytest.approx(0.92)
 
-    def test_low_sleep_compounds_with_low_recovery(self):
-        """Both a recovery deload AND a sleep deload — multiply."""
+    def test_sleep_no_longer_affects_deload(self):
+        """v0.7.269: sleep dropped as a deload input. A recovery-only
+        deload (55 → 0.92) is unchanged by any sleep_h value."""
         f = RecoveryInputs(recovery_score=55, sleep_h=4.5).deload_factor()
-        assert f == pytest.approx(0.92 * 0.92, abs=0.001)
+        assert f == pytest.approx(0.92, abs=0.001)
 
     def test_low_readiness_drops_10pct(self):
         f = RecoveryInputs(readiness_score=25).deload_factor()

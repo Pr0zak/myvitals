@@ -283,37 +283,36 @@ class TestPrescribeSlotAgeAndBodyweight:
         """#WP-7: select_exercises_for_split should down-rank exercises
         the user has done a lot recently in favour of less-used ones.
 
-        Build a 2-exercise catalog for a single slot, mark one as
-        heavily-used (count=4) and one as unseen (absent from freq
-        map). The seeded picker should consistently choose the unseen
-        one even though the rank_key would otherwise tie them.
+        Rotation sorts low-frequency candidates ahead, then the picker
+        chooses from the top 3. So a heavily-used lift is excluded only
+        when there are enough fresh alternatives to push it out of that
+        top-3 window. (The "pull" split has TWO isolation_arm slots, so a
+        2-exercise catalog can never exclude either — both slots must be
+        filled. Give rotation real room: 1 heavily-used + 4 unseen.)
         """
         from myvitals.analytics.strength import select_exercises_for_split
         import random
-        a = {
-            "id": "Heavily_Used", "movement_pattern": "isolation_arm",
-            "primary_muscle": "biceps", "is_compound": False,
-            "level": "intermediate", "equipment": ["dumbbell"],
-        }
-        b = {
-            "id": "Fresh_Pick", "movement_pattern": "isolation_arm",
-            "primary_muscle": "biceps", "is_compound": False,
-            "level": "intermediate", "equipment": ["dumbbell"],
-        }
-        catalog = [a, b]
-        # Frequency: Heavily_Used picked 4 times in last 4w, Fresh_Pick 0.
+
+        def _arm(eid: str) -> dict:
+            return {
+                "id": eid, "movement_pattern": "isolation_arm",
+                "primary_muscle": "biceps", "is_compound": False,
+                "level": "intermediate", "equipment": ["dumbbell"],
+            }
+
+        fresh = [_arm(f"Fresh_{i}") for i in range(4)]
+        catalog = [_arm("Heavily_Used"), *fresh]
+        # Heavily_Used picked 4x in the last 4w; the Fresh_* are unseen.
         freq = {"Heavily_Used": 4}
-        # We need a focus whose slot list has at least one
-        # isolation_arm pattern entry. "pull" includes one.
         rng = random.Random(0)
         chosen, _, _ = select_exercises_for_split(
             catalog, "pull", "intermediate", rng,
             recent_frequency=freq,
         )
         ids = [c["id"] for c in chosen]
-        # Fresh_Pick should be picked over Heavily_Used on the
-        # isolation_arm slot.
-        assert "Fresh_Pick" in ids
+        # Both arm slots get filled by unseen lifts; the heavily-used one
+        # is sorted behind all four and never enters the top-3 pick window.
+        assert any(i.startswith("Fresh_") for i in ids)
         assert "Heavily_Used" not in ids
 
     def test_weighted_exercise_ignores_bodyweight(self):

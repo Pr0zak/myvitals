@@ -133,11 +133,19 @@ fun StrengthTrainingPrefsScreen(
                     onSelect = { update(t.copy(splitPreference = it)) },
                 )
 
-                Section("Target session length (min)")
+                Section("Exercises per workout")
                 Segmented(
-                    options = listOf("30", "40", "50", "60", "75"),
-                    selected = t.workoutMinutes.toString(),
-                    onSelect = { update(t.copy(workoutMinutes = it.toInt())) },
+                    options = listOf("Auto", "4", "5", "6", "7", "8"),
+                    selected = t.exercisesPerWorkout?.toString() ?: "Auto",
+                    // "Auto".toIntOrNull() == null → auto sizing (WP-17).
+                    onSelect = { update(t.copy(exercisesPerWorkout = it.toIntOrNull())) },
+                )
+                Text(
+                    "More adds accessory work for your under-trained muscles " +
+                        "(core favored). Auto sizes each day to its split plus " +
+                        "smart finishers. Mobility poses don't count.",
+                    color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 6.dp),
                 )
 
                 Spacer(Modifier.height(20.dp))

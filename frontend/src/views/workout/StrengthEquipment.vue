@@ -316,13 +316,25 @@ onMounted(() => { equip.value = defaultEquip(); load(); });
         </p>
 
         <label class="train-row">
-          <span>Target session length</span>
-          <input type="number" min="20" max="120" step="5"
-                 :value="ensureTraining(equip).workout_minutes"
-                 @input="ensureTraining(equip).workout_minutes = parseInt(($event.target as HTMLInputElement).value, 10) || 50"
-                 style="width: 5rem"/>
-          <span class="muted-suffix">min</span>
+          <span>Exercises per workout</span>
+          <label class="auto-chk">
+            <input type="checkbox"
+                   :checked="ensureTraining(equip).exercises_per_workout == null"
+                   @change="ensureTraining(equip).exercises_per_workout = ($event.target as HTMLInputElement).checked ? null : 6"/>
+            Auto
+          </label>
         </label>
+        <div v-if="ensureTraining(equip).exercises_per_workout != null" class="train-row slider-row">
+          <input type="range" min="4" max="8" step="1"
+                 :value="ensureTraining(equip).exercises_per_workout ?? 6"
+                 @input="ensureTraining(equip).exercises_per_workout = parseInt(($event.target as HTMLInputElement).value, 10)"/>
+          <span class="mono">{{ ensureTraining(equip).exercises_per_workout }}</span>
+        </div>
+        <p class="hint" style="margin: -0.4rem 0 0.6rem;">
+          More exercises adds accessory work for your under-trained muscles
+          (core favored). <strong>Auto</strong> sizes each day to its split
+          plus smart finishers. Mobility poses don't count toward this.
+        </p>
 
         <label class="train-row toggle">
           <input type="checkbox"
@@ -413,6 +425,9 @@ h1 { margin: 0 0 0.6rem; }
   margin: 0; font-size: 0.78rem; color: var(--muted);
 }
 .muted-suffix { color: var(--muted); font-size: 0.8rem; }
+.auto-chk { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.82rem; color: var(--muted); }
+.slider-row input[type="range"] { flex: 1; min-width: 8rem; }
+.slider-row .mono { min-width: 1.4rem; text-align: center; font-weight: 700; color: var(--text); font-family: 'Geist Mono', ui-monospace, monospace; }
 .seg { display: inline-flex; gap: 0.25rem; flex-wrap: wrap; }
 .seg button {
   padding: 0.32rem 0.7rem; font-size: 0.8rem;

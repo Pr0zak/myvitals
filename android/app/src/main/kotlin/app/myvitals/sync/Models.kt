@@ -469,7 +469,8 @@ data class TrainingPreferences(
     val level: String = "intermediate",                   // beginner | intermediate | advanced
     @Json(name = "days_per_week") val daysPerWeek: Int = 3,
     @Json(name = "split_preference") val splitPreference: String = "auto",
-    @Json(name = "workout_minutes") val workoutMinutes: Int = 50,
+    @Json(name = "workout_minutes") val workoutMinutes: Int = 50,  // deprecated (WP-17)
+    @Json(name = "exercises_per_workout") val exercisesPerWorkout: Int? = null,  // WP-17 — null = auto
     @Json(name = "include_mobility") val includeMobility: Boolean = true,
     @Json(name = "yoga_on_rest_days") val yogaOnRestDays: Boolean = true,
     @Json(name = "cardio_days_per_week") val cardioDaysPerWeek: Int = 2,

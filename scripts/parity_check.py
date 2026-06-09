@@ -36,7 +36,12 @@ PAIRS: list[tuple[str, str, str]] = [
      "Strength catalog rows + filter chips"),
     ("frontend/src/views/workout/StrengthEquipment.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/strength/StrengthEquipmentScreen.kt",
-     "Equipment editor (training prefs paired separately via StrengthTrainingPrefsScreen.kt)"),
+     "Equipment editor"),
+    # Web keeps training prefs inside the equipment page; phone splits them
+    # into a dedicated screen. Either phone file satisfies the web pair.
+    ("frontend/src/views/workout/StrengthEquipment.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/strength/StrengthTrainingPrefsScreen.kt",
+     "Training preferences (level / split / goal / exercises-per-workout)"),
     ("frontend/src/views/Fasting.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/FastingScreen.kt",
      "Fasting protocol picker + active fast + history (#FAST family)"),
@@ -128,26 +133,42 @@ def main() -> int:
     print(f"  phone: {len(phone)}")
     print(f"  other: {len(other)}\n")
 
+    # A web file can map to several phone files (and vice-versa) when one
+    # surface splits a page the other keeps unified. Use OR semantics: a
+    # changed web file is satisfied if ANY of its phone counterparts also
+    # changed. Iterating pairs independently would false-flag the other
+    # counterparts as "web-only".
+    from collections import defaultdict
+    web_to_phones: dict[str, list[str]] = defaultdict(list)
+    phone_to_webs: dict[str, list[str]] = defaultdict(list)
+    note_by_pair: dict[tuple[str, str], str] = {}
+    for web_path, phone_path, note in PAIRS:
+        web_to_phones[web_path].append(phone_path)
+        phone_to_webs[phone_path].append(web_path)
+        note_by_pair[(web_path, phone_path)] = note
+
     issues: list[str] = []
     matched_pairs: list[str] = []
-    for web_path, phone_path, note in PAIRS:
-        web_changed = web_path in changed
-        phone_changed = phone_path in changed
-        if web_changed and phone_changed:
+    for (web_path, phone_path), note in note_by_pair.items():
+        if web_path in changed and phone_path in changed:
             matched_pairs.append(f"  {note}")
-        elif web_changed and not phone_changed:
-            if web_path in WEB_ONLY_OK:
-                continue
+
+    for web_path, phone_paths in web_to_phones.items():
+        if web_path not in changed or web_path in WEB_ONLY_OK:
+            continue
+        if not any(p in changed for p in phone_paths):
             issues.append(
                 f"  WEB-ONLY: {web_path}\n"
-                f"     expected paired change in: {phone_path}\n"
-                f"     note: {note}"
+                f"     expected paired change in: {' OR '.join(phone_paths)}"
             )
-        elif phone_changed and not web_changed:
+
+    for phone_path, web_paths in phone_to_webs.items():
+        if phone_path not in changed:
+            continue
+        if not any(w in changed for w in web_paths):
             issues.append(
                 f"  PHONE-ONLY: {phone_path}\n"
-                f"     expected paired change in: {web_path}\n"
-                f"     note: {note}"
+                f"     expected paired change in: {' OR '.join(web_paths)}"
             )
 
     if matched_pairs:

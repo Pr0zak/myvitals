@@ -1669,6 +1669,12 @@ async def generate_plan(
     yoga_on_rest = bool(training.get("yoga_on_rest_days", True))
     cardio_per_week = int(training.get("cardio_days_per_week", 2))
     goal = training.get("goal", "hypertrophy")
+    # WP-17 — target working-exercise count. None = auto (split template
+    # size + up to 2 adaptive finishers). When set, clamp to a sane band.
+    _epw = training.get("exercises_per_workout")
+    target_exercises = (
+        max(3, min(9, int(_epw))) if _epw not in (None, 0) else None
+    )
 
     # Age + bodyweight context for prescribe_slot — drives age-scaled
     # rest / volume and bodyweight-scaled rep targets on BW exercises.
@@ -1924,16 +1930,21 @@ async def generate_plan(
         )
     if difficulty and difficulty != "normal":
         notes.append(f"Ad-hoc session — difficulty: {difficulty}.")
-    # Ad-hoc duration: rough rule = 8 min per exercise (incl. rest).
-    # Trim or extend the chosen list. Default plans run 5-6 exercises.
+    # WP-17 — target working-exercise count. The ad-hoc custom-workout
+    # path passes duration_minutes (≈8 min/exercise); the daily path uses
+    # the user's exercises_per_workout preference. Trim here when over the
+    # target; the accessory filler below tops up when under.
+    target_count: int | None = None
     if duration_minutes is not None:
         target_count = max(3, min(10, duration_minutes // 8))
-        if len(chosen) > target_count:
-            chosen = chosen[:target_count]
-            chosen_slots = chosen_slots[:target_count]
-            notes.append(
-                f"Trimmed to {target_count} exercises for ~{duration_minutes} min session."
-            )
+    elif target_exercises is not None:
+        target_count = target_exercises
+    if target_count is not None and len(chosen) > target_count:
+        chosen = chosen[:target_count]
+        chosen_slots = chosen_slots[:target_count]
+        notes.append(
+            f"Trimmed to {target_count} exercises per your preference."
+        )
 
     plan_exs: list[ExerciseInPlan] = []
     pairs_lb = (equipment.get("dumbbells") or {}).get("pairs_lb") or []
@@ -2060,20 +2071,40 @@ async def generate_plan(
             "shoulders":   "isolation_shoulder",
             "lats":        "vertical_pull",  # substitutes to pullover via WP-5D
         }
-        gaps: list[tuple[float, str]] = []
+        # WP-17 — how many accessory slots to add, and how strict to be.
+        # Auto (no target): up to 2 finishers, only for real gaps (≥3).
+        # Target set: top up to exactly the requested count, relaxing the
+        # gap floor to 1 and, if still short, padding with core (favored).
+        if target_count is not None:
+            max_accessory = max(0, min(target_count - len(chosen), 9 - len(chosen)))
+            gap_floor = 1
+        else:
+            max_accessory = 2
+            gap_floor = 3
+
+        gaps: list[tuple[float, float, str]] = []
         for muscle, payload in current_volume.items():
             mev = payload["mev"]
             sets_now = projected.get(muscle, 0)
             gap = mev - sets_now
-            if gap >= 3 and muscle in FINISHER_PATTERNS:
-                gaps.append((gap, muscle))
-        gaps.sort(reverse=True)  # widest gap first
+            if gap >= gap_floor and muscle in FINISHER_PATTERNS:
+                # Core is the preferred filler — nudge abdominals up so
+                # close gaps default to core (WP-17 user choice).
+                rank = gap + (1.5 if muscle == "abdominals" else 0.0)
+                gaps.append((rank, gap, muscle))
+        gaps.sort(reverse=True)  # widest (core-weighted) gap first
+        fill_order = [m for _r, _g, m in gaps]
+        # Target-driven and still short on under-MEV muscles? Pad with core
+        # so the slider always delivers real, sensible volume.
+        if target_count is not None:
+            while len(fill_order) < max_accessory:
+                fill_order.append("abdominals")
 
         finishers_added: list[str] = []
         already_chosen_ids = {e["id"] for e in chosen}
         finisher_seed_rng = random.Random(seed + "::finishers")
-        for _gap, muscle in gaps:
-            if len(finishers_added) >= 2:
+        for muscle in fill_order:
+            if len(finishers_added) >= max_accessory:
                 break
             pattern = FINISHER_PATTERNS[muscle]
             candidates = _exercises_for_pattern(catalog, pattern, level, [muscle])
@@ -2102,11 +2133,21 @@ async def generate_plan(
             finishers_added.append(muscle)
 
         if finishers_added:
-            notes.append(
-                f"+{len(finishers_added)} finisher slot"
-                f"{'s' if len(finishers_added) > 1 else ''} added "
-                f"to chip away at weekly volume gap: {', '.join(finishers_added)}."
-            )
+            # Dedupe for the note — target padding can repeat a muscle
+            # (e.g. two core slots) but we only want to name it once.
+            muscles_named = list(dict.fromkeys(finishers_added))
+            n = len(finishers_added)
+            if target_count is not None:
+                notes.append(
+                    f"+{n} accessory slot{'s' if n > 1 else ''} added to hit "
+                    f"your {target_count}-exercise target: "
+                    f"{', '.join(muscles_named)}."
+                )
+            else:
+                notes.append(
+                    f"+{n} finisher slot{'s' if n > 1 else ''} added "
+                    f"to chip away at weekly volume gap: {', '.join(muscles_named)}."
+                )
 
     # Mobility / yoga block — append 2 poses tagged movement_pattern=mobility
     # to the end of the plan when the user has opted in. Reps are interpreted

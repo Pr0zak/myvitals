@@ -94,9 +94,14 @@ class TrainingPreferences(BaseModel):
     # 2-6 sessions per week — drives "auto" split selection
     days_per_week: int = 3
     split_preference: Literal["auto", "full_body", "upper_lower", "ppl"] = "auto"
-    # Target session length in minutes (informational; not yet used by
-    # the generator — placeholder for v0.8 progressive shortening logic)
+    # Deprecated (WP-17): the minutes knob was never wired into daily
+    # generation. Kept so old stored payloads still validate; ignored.
     workout_minutes: int = 50
+    # WP-17 — target number of working exercises per strength workout.
+    # None = auto (the split template's natural size + adaptive finishers).
+    # When set, generate_plan trims to it, or appends accessory slots for
+    # under-MEV muscles (core favored) to reach it. Clamped 3-9.
+    exercises_per_workout: int | None = None
     # Append a 2-pose mobility cool-down at the end of each strength
     # workout. Defaults on — the post-exercise window is when stretching
     # yields the most flexibility benefit (Behm 2011 SR), and 2 poses
@@ -235,7 +240,7 @@ async def put_equipment(
     watched_fields = (
         "level", "days_per_week", "split_preference", "workout_minutes",
         "cardio_days_per_week", "include_mobility", "yoga_on_rest_days",
-        "goal",
+        "goal", "exercises_per_workout",
     )
     training_changed = any(
         prior_training.get(f) != new_training.get(f) for f in watched_fields

@@ -60,6 +60,11 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/views/Activities.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/activities/ActivitiesScreen.kt",
      "Activities list"),
+    # Web keeps the activity type→icon resolver in a shared component;
+    # phone keeps it inline in ActivitiesScreen.kt (iconForType).
+    ("frontend/src/components/ActivityIcon.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/activities/ActivitiesScreen.kt",
+     "Activity type→icon resolver"),
     ("frontend/src/views/Today.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/vitals/VitalsScreen.kt",
      "Today / vitals dashboard"),

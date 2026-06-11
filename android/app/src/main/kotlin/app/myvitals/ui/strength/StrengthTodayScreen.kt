@@ -41,6 +41,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.IconButton
@@ -268,11 +270,11 @@ fun StrengthTodayScreen(
     // then call complete-cardio which mints a manual Activity row.
     if (showCardioLog && workout != null) {
         CardioLogDialog(
-            defaultLabel = "",
+            defaultLabel = "Les Mills VR",
             defaultDurationMin = 30,
             submitting = cardioLogging,
             onDismiss = { if (!cardioLogging) showCardioLog = false },
-            onSubmit = { label, durationMin, endedAt ->
+            onSubmit = { label, type, durationMin, endedAt ->
                 scope.launch {
                     cardioLogging = true
                     try {
@@ -285,6 +287,7 @@ fun StrengthTodayScreen(
                             label = label,
                             durationMinutes = durationMin.toDouble(),
                             startAt = startAt,
+                            type = type,
                         )
                         showCardioLog = false
                         reload()
@@ -2990,9 +2993,29 @@ private fun CardioLogDialog(
     defaultDurationMin: Int,
     submitting: Boolean,
     onDismiss: () -> Unit,
-    onSubmit: (label: String, durationMin: Int, endedAt: java.time.Instant) -> Unit,
+    onSubmit: (label: String, type: String, durationMin: Int, endedAt: java.time.Instant) -> Unit,
 ) {
-    var label by remember { mutableStateOf(defaultLabel) }
+    // Common cardio presets — (display label, canonical type). The type
+    // is stored on the Activity and drives the feed icon + analytics;
+    // "Other" keeps it generic and lets the user type a custom name.
+    val presets = remember {
+        listOf(
+            "Les Mills VR" to "les_mills_vr",
+            "Other VR" to "vr",
+            "Rowing" to "rowing",
+            "Cycling" to "cycling",
+            "Elliptical" to "elliptical",
+            "Walk" to "walk",
+            "Other" to "manual_cardio",
+        )
+    }
+    var selected by remember {
+        mutableStateOf(presets.firstOrNull { it.first == defaultLabel } ?: presets[0])
+    }
+    var typeMenuOpen by remember { mutableStateOf(false) }
+    var label by remember {
+        mutableStateOf(defaultLabel.ifBlank { presets[0].first })
+    }
     var durationStr by remember { mutableStateOf(defaultDurationMin.toString()) }
     // Default end-time = right now in local zone. User can tap to pick a
     // different time so the HR sample scan window matches the real
@@ -3027,6 +3050,33 @@ private fun CardioLogDialog(
                     color = MV.OnSurfaceVariant, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 12.dp),
                 )
+                // Type dropdown — autofills the name; "Other" lets the
+                // user type a custom one.
+                Box {
+                    OutlinedButton(
+                        onClick = { if (!submitting) typeMenuOpen = true },
+                        enabled = !submitting,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Type: ${selected.first}", color = MV.OnSurface)
+                    }
+                    DropdownMenu(
+                        expanded = typeMenuOpen,
+                        onDismissRequest = { typeMenuOpen = false },
+                    ) {
+                        presets.forEach { p ->
+                            DropdownMenuItem(
+                                text = { Text(p.first) },
+                                onClick = {
+                                    selected = p
+                                    label = if (p.second == "manual_cardio") "" else p.first
+                                    typeMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it.take(120) },
@@ -3076,6 +3126,7 @@ private fun CardioLogDialog(
                 onClick = {
                     onSubmit(
                         label.trim(),
+                        selected.second,
                         duration ?: defaultDurationMin,
                         app.myvitals.ui.common.composeEndedInstant(
                             endedHour, endedMinute, anchorDate = null,

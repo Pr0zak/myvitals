@@ -703,7 +703,21 @@ async function resumeWorkout() {
 // Cardio-day "Log this workout" — captures label + duration + ended-at,
 // posts to complete-cardio which mints a manual Activity row that flows
 // through the activity feed, HR chart markers, and cardio coach payload.
+// Common cardio presets for the "Log this workout" dropdown. `type` is
+// the canonical token stored on the Activity (drives the feed icon +
+// analytics); `label` is the default display name (still editable).
+// "Other" keeps type generic and lets the user type a custom name.
+const CARDIO_PRESETS: { label: string; type: string }[] = [
+  { label: "Les Mills VR", type: "les_mills_vr" },
+  { label: "Other VR", type: "vr" },
+  { label: "Rowing", type: "rowing" },
+  { label: "Cycling", type: "cycling" },
+  { label: "Elliptical", type: "elliptical" },
+  { label: "Walk", type: "walk" },
+  { label: "Other", type: "manual_cardio" },
+];
 const showCardioLog = ref(false);
+const cardioType = ref("les_mills_vr");
 const cardioLabel = ref("");
 const cardioDuration = ref(30);
 // Ended-at picker: HH:MM in local time, default = current minute. Lets
@@ -717,10 +731,16 @@ function localTimeNow(): string {
   return `${hh}:${mm}`;
 }
 function openCardioLog() {
-  cardioLabel.value = "";
+  cardioType.value = "les_mills_vr";
+  cardioLabel.value = "Les Mills VR";
   cardioDuration.value = 30;
   cardioEndedAt.value = localTimeNow();
   showCardioLog.value = true;
+}
+function onCardioPreset() {
+  const p = CARDIO_PRESETS.find((x) => x.type === cardioType.value);
+  // Autofill the name from the preset, except "Other" (custom free-text).
+  cardioLabel.value = p && p.type !== "manual_cardio" ? p.label : "";
 }
 function endedAtIso(): string {
   // Compose a same-day datetime from the user's HH:MM. If their picked
@@ -745,6 +765,7 @@ async function submitCardioLog() {
       label,
       duration_minutes: mins,
       start_at: startIso,
+      type: cardioType.value,
     });
     showCardioLog.value = false;
     await loadAll();
@@ -1004,6 +1025,15 @@ useVisibilityRefresh(loadAll);
             The session will appear in your activity feed, as a marker
             on HR charts, and count toward your weekly cardio dose.
           </p>
+          <label class="field">
+            <span>Type</span>
+            <select v-model="cardioType" :disabled="busy === 'complete'"
+                    @change="onCardioPreset">
+              <option v-for="p in CARDIO_PRESETS" :key="p.type" :value="p.type">
+                {{ p.label }}
+              </option>
+            </select>
+          </label>
           <label class="field">
             <span>Workout name</span>
             <input v-model="cardioLabel" type="text" maxlength="120"

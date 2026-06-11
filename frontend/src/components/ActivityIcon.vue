@@ -5,7 +5,7 @@
  */
 import { computed } from "vue";
 import {
-  Activity, Bike, Dot, Dumbbell, Flame, Footprints, Mountain,
+  Activity, Bike, Dot, Dumbbell, Flame, Footprints, Gamepad2, Mountain,
   PersonStanding, Sailboat, Snowflake, TentTree, User, Waves, Wind,
 } from "lucide-vue-next";
 
@@ -13,6 +13,9 @@ const props = defineProps<{ type: string; size?: number }>();
 
 const icon = computed(() => {
   const t = props.type.toLowerCase();
+  // VR fitness (Les Mills VR, Supernatural, etc.) — check first so the
+  // "vr" token isn't swallowed by a broader match.
+  if (t.includes("vr")) return Gamepad2;
   // Cycling family
   if (t.includes("ride") || t.includes("bike") || t === "cycling" || t === "ebikeride")
     return Bike;
@@ -45,6 +48,9 @@ const icon = computed(() => {
   if (t.includes("indoor_cardio") || t.includes("treadmill") || t.includes("elliptical"))
     return Wind;
   if (t.includes("indoor")) return Activity;
+  // Generic manual cardio (e.g. type="manual_cardio") — a neutral cardio
+  // glyph beats a misleading bike or a meaningless dot.
+  if (t.includes("cardio")) return Activity;
   return Dot;
 });
 </script>

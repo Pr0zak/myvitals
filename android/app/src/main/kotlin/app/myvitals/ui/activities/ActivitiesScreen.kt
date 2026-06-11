@@ -30,8 +30,10 @@ import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Rowing
 import androidx.compose.material.icons.outlined.SelfImprovement
+import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -445,13 +447,19 @@ private fun ActivityListRow(a: ActivityRow, nowMs: Long, onClick: () -> Unit) {
 }
 
 internal fun iconForType(type: String): ImageVector = when {
+    // VR fitness (Les Mills VR, Supernatural, …) — check first so "vr"
+    // isn't swallowed by a broader match.
+    type.contains("vr", ignoreCase = true) -> Icons.Outlined.SportsEsports
     type.contains("Ride", ignoreCase = true) -> Icons.AutoMirrored.Outlined.DirectionsBike
+    type.contains("cycl", ignoreCase = true) -> Icons.AutoMirrored.Outlined.DirectionsBike
     type.contains("Run", ignoreCase = true) -> Icons.AutoMirrored.Outlined.DirectionsRun
     type.contains("Hike", ignoreCase = true) -> Icons.Outlined.Hiking
     type.contains("Walk", ignoreCase = true) -> Icons.AutoMirrored.Outlined.DirectionsWalk
     type.contains("Row", ignoreCase = true) -> Icons.Outlined.Rowing
     type.contains("Ski", ignoreCase = true) -> Icons.Outlined.DownhillSkiing
-    else -> Icons.AutoMirrored.Outlined.DirectionsBike
+    // Generic cardio (manual_cardio, elliptical, …) — a heart-rate glyph
+    // beats defaulting every unknown to a bike (the Les Mills bug).
+    else -> Icons.Outlined.MonitorHeart
 }
 
 internal fun prettyType(type: String): String =

@@ -5,14 +5,24 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Tracks whether the device has any usable network. Returns a State
@@ -71,4 +81,50 @@ private fun initialOnline(ctx: Context): Boolean {
     val active = cm.activeNetwork ?: return false
     val caps = cm.getNetworkCapabilities(active) ?: return false
     return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+}
+
+/**
+ * Slim app-wide status bar shown above the nav content. Tells the user
+ * why they might be seeing saved data:
+ *   - device offline → "Offline — showing saved data…"
+ *   - online but the backend isn't answering (the ServerStatus signal,
+ *     updated by the OkHttp interceptor on connect/timeout failures) →
+ *     "Can't reach server…"
+ * Renders nothing when everything's healthy, so it's invisible in the
+ * normal case.
+ */
+@Composable
+fun ConnectionBanner() {
+    val online by rememberOnlineState()
+    val server by app.myvitals.sync.ServerStatus.state.collectAsState()
+
+    val (text, bg) = when {
+        !online -> "Offline — showing saved data. Changes sync when you reconnect." to
+            androidx.compose.ui.graphics.Color(0xFFF59E0B)
+        server == app.myvitals.sync.ServerStatus.State.UNREACHABLE ->
+            "Can't reach server — showing saved data, retrying…" to
+                androidx.compose.ui.graphics.Color(0xFFEF4444)
+        else -> return
+    }
+
+    androidx.compose.foundation.layout.Row(
+        modifier = androidx.compose.ui.Modifier
+            .fillMaxWidth()
+            .background(bg.copy(alpha = 0.16f))
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        androidx.compose.foundation.layout.Box(
+            androidx.compose.ui.Modifier
+                .size(7.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(bg),
+        )
+        androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.width(8.dp))
+        androidx.compose.material3.Text(
+            text,
+            color = app.myvitals.ui.MV.OnSurface,
+            fontSize = 12.sp,
+        )
+    }
 }

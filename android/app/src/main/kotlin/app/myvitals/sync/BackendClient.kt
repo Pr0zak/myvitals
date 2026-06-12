@@ -366,12 +366,31 @@ object BackendClient {
             chain.proceed(req)
         }
 
-        // 30-day backfills can move ~10 MB of JSON over slow phone wifi.
-        // Default OkHttp writeTimeout is 10 s — far too short. Bump everything.
+        // Track backend reachability so the app-level banner can tell the
+        // user "can't reach server" vs "device offline". Any response →
+        // OK; any IOException (connect refused / timeout / DNS) → UNREACHABLE.
+        val statusTracker = Interceptor { chain ->
+            try {
+                val resp = chain.proceed(chain.request())
+                ServerStatus.markOk()
+                resp
+            } catch (e: java.io.IOException) {
+                ServerStatus.markUnreachable()
+                throw e
+            }
+        }
+
+        // Fail FAST so a slow/unreachable server falls back to cached data
+        // in seconds, not minutes. connect 6 s discovers an unreachable
+        // host quickly; read 30 s still covers AI generation. writeTimeout
+        // stays long — a 30-day backfill can push ~10 MB of JSON over slow
+        // wifi — and callTimeout is just a backstop the granular timeouts
+        // hit first for interactive reads.
         val http = OkHttpClient.Builder()
             .addInterceptor(auth)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
+            .addInterceptor(statusTracker)
+            .connectTimeout(6, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)
             .callTimeout(180, TimeUnit.SECONDS)
             .build()

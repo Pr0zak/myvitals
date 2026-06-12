@@ -166,10 +166,16 @@ class MainActivity : ComponentActivity() {
                     bottomBar = { BottomBar(nav) },
                     containerColor = MV.Bg,
                 ) { padding ->
+                  androidx.compose.foundation.layout.Column(
+                      modifier = Modifier.fillMaxSize().padding(padding),
+                  ) {
+                    // App-wide offline / can't-reach-server status bar so
+                    // the user always knows why they're seeing saved data.
+                    app.myvitals.ui.common.ConnectionBanner()
                     NavHost(
                         navController = nav,
                         startDestination = Routes.VITALS,
-                        modifier = Modifier.fillMaxSize().padding(padding)
+                        modifier = Modifier.fillMaxSize().weight(1f)
                             .swipeBetweenTopTabs(nav),
                     ) {
                         composable(Routes.VITALS) {
@@ -356,6 +362,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                  }
                 }
             }
         }

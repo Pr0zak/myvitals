@@ -45,6 +45,11 @@ class StrengthRepository(
     private val planCache = StrengthPlanCache(context, moshi)
 
     suspend fun today(): StrengthWorkoutDetail? = withContext(Dispatchers.IO) {
+        // Offline → serve cache instantly instead of waiting on a doomed
+        // call to time out.
+        if (!app.myvitals.sync.NetworkStatus.isOnline(context)) {
+            return@withContext planCache.loadPlan()
+        }
         try {
             val resp = api().strengthToday()
             if (resp.isSuccessful) {
@@ -114,30 +119,45 @@ class StrengthRepository(
     private suspend fun patchWithBuffer(
         workoutId: Long, body: WorkoutPatchRequest,
     ): StrengthWorkoutDetail = withContext(Dispatchers.IO) {
+        // Offline → buffer immediately + optimistic local update, so the
+        // UI reflects the change instantly instead of hanging on a timeout.
+        if (!app.myvitals.sync.NetworkStatus.isOnline(context)) {
+            return@withContext bufferWorkoutPatch(workoutId, body)
+        }
         try {
             val updated = api().patchStrengthWorkout(workoutId, body)
             planCache.savePlan(updated)
             updated
         } catch (e: Exception) {
             Timber.w(e, "patchStrengthWorkout %s buffered: %s", workoutId, body)
-            AppDatabase.get(context).bufferedWorkoutWrites().insert(
-                app.myvitals.data.BufferedWorkoutWrite(
-                    kind = "patch_workout",
-                    path = workoutId.toString(),
-                    jsonBody = patchAdapter.toJson(body),
-                    createdAtEpochS = System.currentTimeMillis() / 1000,
-                ),
-            )
-            // Optimistic local update so the screen flips status without
-            // waiting for the next online sync.
-            val cached = planCache.loadPlan() ?: return@withContext throw e
-            val mutated = cached.copy(
-                status = body.status ?: cached.status,
-                completedAt = body.completedAt ?: cached.completedAt,
-            )
-            planCache.savePlan(mutated)
-            mutated
+            bufferWorkoutPatch(workoutId, body)
         }
+    }
+
+    /** Persist a workout patch to the Room replay buffer and apply it
+     *  optimistically to the cached plan. Shared by the offline
+     *  short-circuit and the network-failure fallback. */
+    private suspend fun bufferWorkoutPatch(
+        workoutId: Long, body: WorkoutPatchRequest,
+    ): StrengthWorkoutDetail {
+        AppDatabase.get(context).bufferedWorkoutWrites().insert(
+            app.myvitals.data.BufferedWorkoutWrite(
+                kind = "patch_workout",
+                path = workoutId.toString(),
+                jsonBody = patchAdapter.toJson(body),
+                createdAtEpochS = System.currentTimeMillis() / 1000,
+            ),
+        )
+        // Optimistic local update so the screen flips status without
+        // waiting for the next online sync.
+        val cached = planCache.loadPlan()
+            ?: throw IllegalStateException("no cached plan to update offline")
+        val mutated = cached.copy(
+            status = body.status ?: cached.status,
+            completedAt = body.completedAt ?: cached.completedAt,
+        )
+        planCache.savePlan(mutated)
+        return mutated
     }
 
     suspend fun completeWorkout(workoutId: Long): StrengthWorkoutDetail =
@@ -248,18 +268,25 @@ class StrengthRepository(
      * Returns true if it landed on the backend, false if buffered.
      */
     suspend fun logSet(req: LogSetRequest): Boolean = withContext(Dispatchers.IO) {
+        suspend fun buffer() {
+            AppDatabase.get(context).bufferedStrengthSets().insert(
+                BufferedStrengthSet(
+                    jsonBody = logSetAdapter.toJson(req),
+                    createdAtEpochS = System.currentTimeMillis() / 1000,
+                )
+            )
+        }
+        // Offline → buffer instantly; mid-workout set logging must never
+        // block on a timeout (gym wifi is the whole point of buffering).
+        if (!app.myvitals.sync.NetworkStatus.isOnline(context)) {
+            buffer(); return@withContext false
+        }
         try {
             api().logStrengthSet(req)
             true
         } catch (e: Exception) {
             Timber.w(e, "logSet network error — buffering")
-            val json = logSetAdapter.toJson(req)
-            AppDatabase.get(context).bufferedStrengthSets().insert(
-                BufferedStrengthSet(
-                    jsonBody = json,
-                    createdAtEpochS = System.currentTimeMillis() / 1000,
-                )
-            )
+            buffer()
             false
         }
     }

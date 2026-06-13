@@ -366,6 +366,8 @@ const emit = defineEmits<{ (e: "navigate"): void }>();
           :class="{ active: isGroupActive(g) }"
           :to="g.to"
           :title="collapsed ? g.label : undefined"
+          :aria-expanded="g.children ? String(!!expanded[g.id]) : undefined"
+          :aria-label="collapsed ? g.label : undefined"
           @click="g.children ? toggle(g.id) : emit('navigate')">
           <component :is="g.icon" :size="14" class="group-icon"/>
           <template v-if="!collapsed">

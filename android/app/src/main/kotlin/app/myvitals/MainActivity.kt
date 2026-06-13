@@ -330,7 +330,7 @@ class MainActivity : ComponentActivity() {
                             SettingsScreen(
                                 settings = settings,
                                 isHealthConnectAvailable = gateway.isAvailable(),
-                                hasPermissions = { gateway.hasAllPermissions() },
+                                hasPermissions = { gateway.hasAllPermissionsAsync() },
                                 onRequestPermissions = {
                                     Timber.d("Requesting HC permissions: %s", gateway.requiredPermissions)
                                     permissionLauncher.launch(gateway.requiredPermissions)

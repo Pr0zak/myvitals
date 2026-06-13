@@ -143,6 +143,10 @@ async def _check_and_bump_quota(db: AsyncSession, cfg: models.AiConfig) -> None:
     if cfg.calls_today_date != today:
         cfg.calls_today = 0
         cfg.calls_today_date = today
+        # Persist the rollover now. Otherwise a request that returns a cached
+        # result (no later commit) rolls the reset back, so the counter only
+        # actually rolls over on the first *uncached* call of the day.
+        await db.commit()
     if cfg.calls_today >= cfg.daily_call_limit:
         raise HTTPException(
             status_code=429,

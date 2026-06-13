@@ -223,24 +223,36 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
         )
         await db.execute(stmt)
 
-        # RHR drift alert
+        # RHR drift alert. Dedup per target date: compute_daily_summary now
+        # runs lazily on every /summary read, so without this guard a day with
+        # drift would mint a fresh rhr_drift alert on each recompute (and a
+        # concurrent double-compute would double-insert). Other alert kinds
+        # already suppress via _alert_recently_fired; this is the per-date
+        # equivalent keyed on the payload date.
         if rhr is not None and rhr_baseline is not None:
             delta = rhr - rhr_baseline
             if delta >= RHR_DRIFT_BPM:
-                db.add(models.Alert(
-                    ts=datetime.now(timezone.utc),
-                    kind="rhr_drift",
-                    payload={
-                        "date": target.isoformat(),
-                        "rhr": rhr,
-                        "baseline": rhr_baseline,
-                        "delta_bpm": delta,
-                    },
-                ))
-                log.warning(
-                    "RHR drift alert for %s: %.1f bpm above baseline %.1f",
-                    target, delta, rhr_baseline,
-                )
+                already = (await db.execute(
+                    select(func.count())
+                    .select_from(models.Alert)
+                    .where(models.Alert.kind == "rhr_drift")
+                    .where(models.Alert.payload["date"].astext == target.isoformat())
+                )).scalar() or 0
+                if not already:
+                    db.add(models.Alert(
+                        ts=datetime.now(timezone.utc),
+                        kind="rhr_drift",
+                        payload={
+                            "date": target.isoformat(),
+                            "rhr": rhr,
+                            "baseline": rhr_baseline,
+                            "delta_bpm": delta,
+                        },
+                    ))
+                    log.warning(
+                        "RHR drift alert for %s: %.1f bpm above baseline %.1f",
+                        target, delta, rhr_baseline,
+                    )
 
         # Phase 3 alerts (BP / weight trend / skin temp anomaly).
         await _emit_health_alerts(db, target)

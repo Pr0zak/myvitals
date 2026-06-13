@@ -2,7 +2,6 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import { createRouter, createWebHistory } from "vue-router";
 
-import "./echarts";  // side-effect: registers ECharts modules
 import "./theme";    // side-effect: applies theme on startup
 import App from "./App.vue";
 
@@ -24,7 +23,6 @@ const router = createRouter({
     { path: "/trends", name: "trends", component: () => import("./views/Trends.vue") },
     { path: "/sleep", name: "sleep", component: () => import("./views/Sleep.vue") },
     { path: "/heart-rate", name: "heart-rate", component: () => import("./views/HeartRate.vue") },
-    { path: "/yoga-icon-samples", name: "yoga-icon-samples", component: () => import("./views/YogaIconSamples.vue") },
     { path: "/weight", name: "weight", component: () => import("./views/Weight.vue") },
     { path: "/steps", name: "steps", component: () => import("./views/Steps.vue") },
     { path: "/hrv", name: "hrv", component: () => import("./views/Hrv.vue") },

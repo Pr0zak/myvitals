@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import VChart from "vue-echarts";
+import VChart from "@/echarts";
 import polylineDecoder from "@mapbox/polyline";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";

@@ -34,7 +34,9 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -72,7 +74,7 @@ import java.time.format.DateTimeFormatter
 fun SettingsScreen(
     settings: SettingsRepository,
     isHealthConnectAvailable: Boolean,
-    hasPermissions: () -> Boolean,
+    hasPermissions: suspend () -> Boolean,
     onRequestPermissions: () -> Unit,
     onSyncNow: () -> Unit,
     onSyncLogs: () -> Unit,
@@ -80,6 +82,17 @@ fun SettingsScreen(
     onOpenLogs: () -> Unit,
     onClearBuffer: () -> Unit,
 ) {
+    // Resolve HC permission state OFF the main thread. This used to be a
+    // `hasPermissions()` call straight in the composable body, which wrapped a
+    // Health Connect binder IPC in runBlocking and janked the UI on every
+    // recomposition. produceState does it on a coroutine; LifecycleResumeEffect
+    // re-checks when the user returns from the grant sheet so the label updates.
+    var permRefreshTick by remember { mutableIntStateOf(0) }
+    app.myvitals.ui.common.LifecycleResumeEffect(staleAfterMs = 0L) { permRefreshTick++ }
+    val permsGranted by produceState(
+        initialValue = false, isHealthConnectAvailable, permRefreshTick,
+    ) { value = hasPermissions() }
+
     var url by remember { mutableStateOf(settings.backendUrl) }
     var token by remember { mutableStateOf(settings.bearerToken) }
     var updateStatus by remember { mutableStateOf("") }
@@ -280,7 +293,7 @@ fun SettingsScreen(
         item {
             Section(title = "Health Connect") {
                 Card {
-                    val perms = hasPermissions()
+                    val perms = permsGranted
                     StatusListItem(
                         label = "Health Connect",
                         ok = isHealthConnectAvailable,
@@ -336,7 +349,7 @@ fun SettingsScreen(
                     ActionRow {
                         FilledPill(
                             label = "Sync now",
-                            enabled = settings.isConfigured() && hasPermissions(),
+                            enabled = settings.isConfigured() && permsGranted,
                             onClick = {
                                 onSyncNow()
                                 Toast.makeText(context, "Sync queued", Toast.LENGTH_SHORT).show()

@@ -135,12 +135,27 @@ async def _anomaly_scan() -> None:
 async def _weekly_ai_digest() -> None:
     """Generate a weekly AI summary if the user has opted in. Cheap and
     cached — runs once on Sunday night, idempotent if data hasn't moved."""
-    from datetime import datetime, timezone
-    from sqlalchemy import select
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import delete, select
     from .db import models, session as _session
-    from .integrations.claude import build_summary_payload, explain, hash_payload
+    from .integrations.claude import build_summary_payload, explain_legacy, hash_payload
 
     async with _session.SessionLocal() as db:
+        # Retention: ai_summaries is append-only on every AI call and never
+        # pruned otherwise. Keep ~120 days; cache hits past that are vanishingly
+        # rare (the underlying payload has long since changed) and the content
+        # blobs accumulate forever. Runs weekly regardless of AI being enabled.
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=120)
+            res = await db.execute(
+                delete(models.AiSummary).where(models.AiSummary.generated_at < cutoff)
+            )
+            await db.commit()
+            if res.rowcount:
+                log.info("ai_summaries retention: pruned %d rows older than 120d", res.rowcount)
+        except Exception as e:  # noqa: BLE001
+            log.warning("ai_summaries retention prune failed: %s", e)
+
         cfg = await db.get(models.AiConfig, 1)
         if not cfg or not cfg.enabled or not cfg.weekly_digest_enabled or not cfg.anthropic_api_key:
             log.debug("weekly AI digest: not configured / disabled, skipping")
@@ -157,7 +172,7 @@ async def _weekly_ai_digest() -> None:
             if cached is not None:
                 log.info("weekly AI digest: cache hit, no API call needed")
                 return
-            result = await explain(db, "week", cfg)
+            result = await explain_legacy(db, "week", cfg)
             cfg.calls_today = (cfg.calls_today or 0) + 1
             db.add(models.AiSummary(
                 generated_at=datetime.now(timezone.utc),

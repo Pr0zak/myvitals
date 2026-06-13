@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import VChart from "vue-echarts";
+import VChart from "@/echarts";
 import { Pencil, Trash2, X, Check, RotateCcw, Award, Calendar as CalIcon, TrendingUp } from "lucide-vue-next";
 import Card from "@/components/Card.vue";
 import Skeleton from "@/components/Skeleton.vue";

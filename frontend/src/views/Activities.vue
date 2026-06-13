@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
-import VChart from "vue-echarts";
+import VChart from "@/echarts";
 import { Trophy, Mountain, Flame, Map as MapIcon, GitCompareArrows } from "lucide-vue-next";
 import Card from "@/components/Card.vue";
 import ActivityIcon from "@/components/ActivityIcon.vue";

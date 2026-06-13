@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import require_any
@@ -15,6 +15,12 @@ from ..schemas import TodaySummary
 
 router = APIRouter(dependencies=[Depends(require_any)])
 log = logging.getLogger(__name__)
+
+# Serializes lazy compute_daily_summary recomputes triggered on read. Phone +
+# web both hit /summary/today on load; without this they each run the recompute
+# (wasted work, and a window for double-inserting alerts). Single-user app, so
+# one global lock is plenty — recompute is fast and rare.
+_lazy_compute_lock = asyncio.Lock()
 
 
 async def _today_row_is_stale(
@@ -80,17 +86,24 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     # underlying tables have data, recompute on-demand. Replaces the
     # cron-only model where a 03:00 row missed late-morning sleep data.
     if await _today_row_is_stale(db, saved, today_local, midnight_local, day_end):
-        try:
-            from ..analytics.jobs import compute_daily_summary
-            await compute_daily_summary(today_local)
-            # Re-read the now-updated row.
-            saved = (await db.execute(
-                select(models.DailySummary)
-                .where(models.DailySummary.date == today_local)
-            )).scalar_one_or_none()
-            log.info("recomputed stale daily_summary for %s", today_local)
-        except Exception as e:  # noqa: BLE001
-            log.warning("on-demand daily_summary recompute failed: %s", e)
+        async with _lazy_compute_lock:
+            try:
+                # Re-read under the lock — another request may have just
+                # recomputed while we waited, making our compute redundant.
+                saved = (await db.execute(
+                    select(models.DailySummary)
+                    .where(models.DailySummary.date == today_local)
+                )).scalar_one_or_none()
+                if await _today_row_is_stale(db, saved, today_local, midnight_local, day_end):
+                    from ..analytics.jobs import compute_daily_summary
+                    await compute_daily_summary(today_local)
+                    saved = (await db.execute(
+                        select(models.DailySummary)
+                        .where(models.DailySummary.date == today_local)
+                    )).scalar_one_or_none()
+                    log.info("recomputed stale daily_summary for %s", today_local)
+            except Exception as e:  # noqa: BLE001
+                log.warning("on-demand daily_summary recompute failed: %s", e)
 
     # 2. Compute live values as a fallback / supplement.
     # Pick a single canonical step source so the dashboard matches the
@@ -195,29 +208,52 @@ async def summary_range(
     #   - row's sleep_duration_s is null but sleep_stages has data → recompute
     #   - row's hrv_avg is null but vitals_hrv has data → recompute
     #   (same heuristic as _today_row_is_stale, applied per date)
+    # Batched staleness scan: instead of firing up to 2 count() queries per
+    # day (O(days) round-trips — ~730 on a 1-year Trends load), pull the set
+    # of local dates that have *any* sleep_stage / hrv sample across the whole
+    # window in two GROUP-BY queries, then decide per-day in Python. Same
+    # heuristic as _today_row_is_stale, just hoisted out of the loop.
     from datetime import timedelta as _td
+    tzname = settings.tz if local_tz is not timezone.utc else "UTC"
+    window_start = datetime.combine(since, datetime.min.time(), tzinfo=local_tz)
+    window_end = datetime.combine(end, datetime.max.time(), tzinfo=local_tz)
+
+    sleep_days: set[date] = set((await db.execute(
+        select(cast(func.timezone(tzname, models.SleepStage.time), Date))
+        .where(models.SleepStage.time >= window_start)
+        .where(models.SleepStage.time <= window_end)
+        .distinct()
+    )).scalars().all())
+    hrv_days: set[date] = set((await db.execute(
+        select(cast(func.timezone(tzname, models.Hrv.time), Date))
+        .where(models.Hrv.time >= window_start)
+        .where(models.Hrv.time <= window_end)
+        .distinct()
+    )).scalars().all())
+
     cur = since
     needs_recompute: list[date] = []
     while cur <= end:
         row = by_date.get(cur)
-        day_start = datetime.combine(cur, datetime.min.time(), tzinfo=local_tz)
-        day_end = datetime.combine(cur, datetime.max.time(), tzinfo=local_tz)
-        if await _today_row_is_stale(db, row, cur, day_start, day_end):
+        if (row is None or row.sleep_duration_s is None) and cur in sleep_days:
+            needs_recompute.append(cur)
+        elif (row is None or row.hrv_avg is None) and cur in hrv_days:
             needs_recompute.append(cur)
         cur = cur + _td(days=1)
 
     if needs_recompute:
-        try:
-            from ..analytics.jobs import compute_daily_summary
-            for d in needs_recompute:
-                try:
-                    await compute_daily_summary(d)
-                except Exception as e:  # noqa: BLE001
-                    log.warning("recompute %s failed: %s", d, e)
-            log.info("/summary/range recomputed %d stale days",
-                     len(needs_recompute))
-        except Exception as e:  # noqa: BLE001
-            log.warning("on-demand summary_range recompute failed: %s", e)
+        async with _lazy_compute_lock:
+            try:
+                from ..analytics.jobs import compute_daily_summary
+                for d in needs_recompute:
+                    try:
+                        await compute_daily_summary(d)
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("recompute %s failed: %s", d, e)
+                log.info("/summary/range recomputed %d stale days",
+                         len(needs_recompute))
+            except Exception as e:  # noqa: BLE001
+                log.warning("on-demand summary_range recompute failed: %s", e)
 
     result = await db.execute(
         select(models.DailySummary)

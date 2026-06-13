@@ -180,6 +180,37 @@ body { margin: 0; }
   color: var(--text);
   font-size: 14px;
   line-height: 1.5;
+
+  /* Structural design tokens (theme-independent). These give the app a
+   * single spacing/radius/type/elevation vocabulary instead of the magic
+   * numbers (0.85rem, 20px 32px, ...) scattered per-view. New/refactored
+   * styles should reach for these; existing literals migrate opportunistically. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --r-pill: 999px;
+
+  --text-xs: 11px;
+  --text-sm: 12.5px;
+  --text-md: 14px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.20);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.28);
+
+  --focus-ring: 2px solid var(--accent);
+
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
 }
 
 .mono {
@@ -198,6 +229,27 @@ body { margin: 0; }
   color: var(--muted-2); font-weight: 600;
 }
 .focus-num { font-variant-numeric: tabular-nums; }
+
+/* ── Accessibility baseline ──────────────────────────────────────────
+ * Keyboard focus was invisible app-wide (no :focus-visible anywhere) and
+ * the looping alert/skeleton animations ignored reduced-motion. These two
+ * global rules fix both without per-component edits. */
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+/* Mouse users keep the clean look; only keyboard focus shows the ring. */
+:focus:not(:focus-visible) { outline: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* Layout shell */
 .app {

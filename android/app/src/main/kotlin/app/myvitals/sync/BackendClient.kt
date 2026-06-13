@@ -356,50 +356,59 @@ interface BackendApi {
 }
 
 object BackendClient {
-    fun create(baseUrl: String, bearerToken: String): BackendApi {
-        val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
 
-        val auth = Interceptor { chain ->
-            val req = chain.request().newBuilder()
-                .header("Authorization", "Bearer $bearerToken")
-                .build()
-            chain.proceed(req)
+    // Track backend reachability so the app-level banner can tell the
+    // user "can't reach server" vs "device offline". Any response →
+    // OK; any IOException (connect refused / timeout / DNS) → UNREACHABLE.
+    private val statusTracker = Interceptor { chain ->
+        try {
+            val resp = chain.proceed(chain.request())
+            ServerStatus.markOk()
+            resp
+        } catch (e: java.io.IOException) {
+            ServerStatus.markUnreachable()
+            throw e
         }
+    }
 
-        // Track backend reachability so the app-level banner can tell the
-        // user "can't reach server" vs "device offline". Any response →
-        // OK; any IOException (connect refused / timeout / DNS) → UNREACHABLE.
-        val statusTracker = Interceptor { chain ->
-            try {
-                val resp = chain.proceed(chain.request())
-                ServerStatus.markOk()
-                resp
-            } catch (e: java.io.IOException) {
-                ServerStatus.markUnreachable()
-                throw e
-            }
-        }
-
-        // Fail FAST so a slow/unreachable server falls back to cached data
-        // in seconds, not minutes. connect 6 s discovers an unreachable
-        // host quickly; read 30 s still covers AI generation. writeTimeout
-        // stays long — a 30-day backfill can push ~10 MB of JSON over slow
-        // wifi — and callTimeout is just a backstop the granular timeouts
-        // hit first for interactive reads.
-        val http = OkHttpClient.Builder()
-            .addInterceptor(auth)
+    // ONE shared client for the whole app → one connection pool + one
+    // dispatcher thread pool. Previously create() built a fresh OkHttpClient on
+    // every call (every repo method, every screen fetch, every ingest chunk),
+    // so connections were never kept alive and the dispatcher's ExecutorService
+    // churned. Per-(baseUrl, token) APIs derive from this via newBuilder(),
+    // which reuses the pool/dispatcher instead of allocating new ones.
+    //
+    // Timeouts: fail FAST so a slow/unreachable server falls back to cached
+    // data in seconds, not minutes. writeTimeout stays long — a 30-day backfill
+    // can push ~10 MB of JSON over slow wifi.
+    private val baseHttp: OkHttpClient by lazy {
+        OkHttpClient.Builder()
             .addInterceptor(statusTracker)
             .connectTimeout(6, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)
             .callTimeout(180, TimeUnit.SECONDS)
             .build()
-
-        return Retrofit.Builder()
-            .baseUrl(if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/")
-            .client(http)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
-            .build()
-            .create(BackendApi::class.java)
     }
+
+    private val apiCache = java.util.concurrent.ConcurrentHashMap<String, BackendApi>()
+
+    fun create(baseUrl: String, bearerToken: String): BackendApi =
+        apiCache.getOrPut("$baseUrl|$bearerToken") {
+            val auth = Interceptor { chain ->
+                chain.proceed(
+                    chain.request().newBuilder()
+                        .header("Authorization", "Bearer $bearerToken")
+                        .build()
+                )
+            }
+            val http = baseHttp.newBuilder().addInterceptor(auth).build()
+            Retrofit.Builder()
+                .baseUrl(if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/")
+                .client(http)
+                .addConverterFactory(MoshiConverterFactory.create(moshi))
+                .build()
+                .create(BackendApi::class.java)
+        }
 }

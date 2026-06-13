@@ -381,7 +381,9 @@ async def _sober_status(db: AsyncSession) -> dict[str, Any] | None:
             for s in all_streaks if s.end_at is not None
         ]
         return {
-            "addiction": active.addiction,
+            # NOTE: `active.addiction` is deliberately NOT sent — the column can
+            # hold the user's real name (see CLAUDE.md privacy notes). Durations
+            # alone are enough for the model to narrate streak progress.
             "current_days": round(secs / 86400.0, 1),
             "total_resets": len(durations),
             "longest_days": round(max(durations), 1) if durations else None,
@@ -708,7 +710,8 @@ async def activity_summary(
         "activity": {
             "date": str(act.start_at.date()),
             "type": act.type,
-            "name": act.name,
+            # `act.name` (Strava free-text title) is omitted on purpose — titles
+            # routinely embed locations ("Morning Ride from <home>"). type only.
             "duration_min": int((act.duration_s or 0) / 60),
             "distance_km": round((act.distance_m or 0) / 1000, 1) if act.distance_m else None,
             "elev_m": int(act.elevation_gain_m) if act.elevation_gain_m else None,

@@ -9,7 +9,7 @@
  * behaviour, not a sync issue.
  */
 import { computed, onMounted, ref, watch } from "vue";
-import VChart from "vue-echarts";
+import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import type { HrvSeries, TodaySummary } from "@/api/types";

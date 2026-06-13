@@ -56,6 +56,23 @@ class HealthConnectGateway(private val context: Context) {
     fun permissionContract() =
         PermissionController.createRequestPermissionResultContract()
 
+    /**
+     * Suspending permission check — the correct one for any coroutine/UI
+     * caller. Talks to Health Connect over a binder; must NOT run on the main
+     * thread. SettingsScreen resolves it via produceState; SyncWorker awaits it
+     * directly. See [hasAllPermissions] for the legacy blocking variant.
+     */
+    suspend fun hasAllPermissionsAsync(): Boolean {
+        if (!isAvailable()) return false
+        val granted = client().permissionController.getGrantedPermissions()
+        return granted.containsAll(requiredPermissions)
+    }
+
+    /**
+     * Blocking variant. Retained for any non-coroutine caller, but prefer
+     * [hasAllPermissionsAsync] — wrapping the binder IPC in runBlocking on the
+     * main thread janks the UI (and risks an ANR if HC is cold).
+     */
     fun hasAllPermissions(): Boolean {
         if (!isAvailable()) return false
         val granted = runBlocking { client().permissionController.getGrantedPermissions() }

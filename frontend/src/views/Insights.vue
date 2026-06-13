@@ -17,7 +17,7 @@ function daysFromRoute(fallback: number): number {
   return (v && RANGE_TO_DAYS[v]) ? RANGE_TO_DAYS[v] : fallback;
 }
 import { RouterLink } from "vue-router";
-import VChart from "vue-echarts";
+import VChart from "@/echarts";
 import { ArrowRightLeft, ChevronDown, ArrowDown, ArrowUp } from "lucide-vue-next";
 import Card from "@/components/Card.vue";
 import { apiBase, queryToken } from "@/config";

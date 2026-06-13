@@ -1,10 +1,19 @@
+import secrets
+
 from fastapi import Header, HTTPException, status
 
 from .config import settings
 
 
+def _eq(a: str, b: str) -> bool:
+    """Constant-time token comparison — avoids leaking token length/prefix
+    via response timing. Matches the secrets.compare_digest used for the
+    Concept2 webhook secret elsewhere."""
+    return bool(a) and bool(b) and secrets.compare_digest(a, b)
+
+
 def _check(token: str, expected: str) -> None:
-    if not token or token != expected:
+    if not _eq(token, expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid token",
@@ -34,7 +43,7 @@ def require_any(authorization: str = Header(...)) -> None:
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="bearer required")
-    if token != settings.ingest_token and token != settings.query_token:
+    if not _eq(token, settings.ingest_token) and not _eq(token, settings.query_token):
         raise HTTPException(
             status_code=401,
             detail="invalid token",

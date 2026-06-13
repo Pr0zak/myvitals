@@ -9,7 +9,7 @@
  * with AiGoal kind=steps by GOALS-1).
  */
 import { computed, onMounted, ref, watch } from "vue";
-import VChart from "vue-echarts";
+import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import type { StepsSeries, TodaySummary } from "@/api/types";

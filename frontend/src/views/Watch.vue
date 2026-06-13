@@ -11,7 +11,7 @@
  */
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
-import VChart from "vue-echarts";
+import VChart from "@/echarts";
 import WatchStatus from "@/components/today/WatchStatus.vue";
 import { api } from "@/api/client";
 import { chartTheme } from "@/theme";

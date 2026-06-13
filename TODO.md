@@ -9,6 +9,21 @@ re-instantiate via TaskCreate with the right blockedBy edges.
 
 ---
 
+## #SPO2 — wire SpO2 end-to-end (deferred, v0.7.292 review)
+
+The phone declares `READ_OXYGEN_SATURATION` (manifest + `requiredPermissions`),
+prompts for it, and counts it in the "12/12 granted" inventory — but
+`SyncWorker.runSync` never reads `OxygenSaturationRecord`, `DataMapper.toBatch`
+has no spo2 param, and `IngestBatch` has no spo2 field. So SpO2 never leaves the
+phone even on a healthy device. Deferred this session because (a) it needs a full
+chain — `safeRead` → `SpO2Sample` model → `IngestBatch.spo2` field → backend
+ingest column + migration → query/UI — and (b) the PW3/PW4 firmware bug (see
+CLAUDE.md) currently zeroes SpO2 anyway, so wiring it yields no data until Google
+ships the sensor-permission fix. **When that firmware fix lands, do the full
+wiring.** Until then the inventory count is mildly misleading.
+
+---
+
 ## #FITBIT — Google Health migration (1 task remaining)
 
 **Plan:** local Claude memory: `project_fitbit_google_health_migration.md`

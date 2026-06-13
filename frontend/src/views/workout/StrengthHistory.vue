@@ -6,7 +6,7 @@
  * Phase 2: read-only. Active-workout / set-logging UI lands in Phase 4.
  */
 import { computed, onMounted, ref } from "vue";
-import VChart from "vue-echarts";
+import VChart from "@/echarts";
 import { api } from "@/api/client";
 import { queryToken } from "@/config";
 import Card from "@/components/Card.vue";

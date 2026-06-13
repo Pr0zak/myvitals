@@ -303,9 +303,17 @@ class StrengthRepository(
                 dao.delete(row.id)
                 flushed++
             } catch (e: Exception) {
+                if (shouldDropBuffered(e, row.attempts)) {
+                    // 4xx (bad body) or too many failed attempts → this row will
+                    // never succeed. Drop it and keep going so one poisoned set
+                    // can't permanently jam every newer gym-logged set behind it.
+                    Timber.w(e, "Dropping poisoned buffered set id=${row.id} (attempts=${row.attempts})")
+                    dao.delete(row.id)
+                    continue
+                }
                 Timber.w(e, "flushBufferedSets failed at id=${row.id}")
                 dao.bumpAttempts(row.id)
-                break  // bail to avoid hammering on a persistent error
+                break  // transient (IO / 5xx) — preserve order, retry next tick
             }
         }
         flushed
@@ -338,6 +346,11 @@ class StrengthRepository(
                 dao.delete(row.id)
                 flushed++
             } catch (e: Exception) {
+                if (shouldDropBuffered(e, row.attempts)) {
+                    Timber.w(e, "Dropping poisoned buffered write id=${row.id} kind=${row.kind} (attempts=${row.attempts})")
+                    dao.delete(row.id)
+                    continue
+                }
                 Timber.w(e, "flushBufferedWorkoutWrites failed at id=${row.id}")
                 dao.bumpAttempts(row.id)
                 break
@@ -350,5 +363,24 @@ class StrengthRepository(
     suspend fun bufferedCount(): Int = withContext(Dispatchers.IO) {
         AppDatabase.get(context).bufferedStrengthSets().count() +
             AppDatabase.get(context).bufferedWorkoutWrites().count()
+    }
+
+    companion object {
+        /** Drop a buffered write after this many transient failures so a
+         *  permanently-failing row can't block the queue forever. A touch more
+         *  generous than the ingest buffer's 3 — gym logs are user-entered. */
+        private const val MAX_FLUSH_ATTEMPTS = 5
+
+        /**
+         * Decide whether a failed buffered replay should be dropped (vs retried).
+         * A 4xx (except 408/429) means the server rejects this exact body and
+         * always will — drop immediately. Otherwise it's transient (IO / 5xx /
+         * timeout): drop only once it has burned through MAX_FLUSH_ATTEMPTS.
+         */
+        private fun shouldDropBuffered(e: Throwable, attempts: Int): Boolean {
+            val code = (e as? retrofit2.HttpException)?.code()
+            if (code != null && code in 400..499 && code != 408 && code != 429) return true
+            return attempts + 1 >= MAX_FLUSH_ATTEMPTS
+        }
     }
 }

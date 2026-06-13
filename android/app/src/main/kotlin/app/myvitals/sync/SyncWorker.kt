@@ -172,7 +172,7 @@ class SyncWorker(
             state.errors += "perm inventory: ${e.javaClass.simpleName}: ${e.message?.take(160)}"
         }
 
-        if (!gateway.hasAllPermissions()) {
+        if (!gateway.hasAllPermissionsAsync()) {
             val msg = "Skipping sync: HC permissions not granted (missing=${state.permsMissing ?: "?"})"
             Timber.w(msg)
             state.errors += msg

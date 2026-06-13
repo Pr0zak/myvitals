@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import VChart from "vue-echarts";
+import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import Skeleton from "@/components/Skeleton.vue";

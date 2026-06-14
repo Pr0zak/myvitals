@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -30,6 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics.trends import compute_badges
 from ..db import models
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -201,7 +204,8 @@ async def _activities(db: AsyncSession, days: int) -> list[dict[str, Any]]:
             .order_by(models.Activity.start_at.desc())
             .limit(40)
         )).scalars().all()
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        log.warning("claude._activities query failed: %s", e)
         return []
     out: list[dict[str, Any]] = []
     for r in rows:
@@ -250,7 +254,8 @@ async def _annotations(db: AsyncSession, days: int) -> list[dict[str, Any]]:
 async def _correlations(db: AsyncSession, days: int = 90, top_n: int = 5) -> list[dict[str, Any]]:
     try:
         from ..api.analytics import _DAILY_SUMMARY_METRICS, _daily_summary_metric, _pearson
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        log.warning("claude._correlations: analytics import failed: %s", e)
         return []
     today = datetime.now(timezone.utc).date()
     since = today - timedelta(days=days)
@@ -358,7 +363,8 @@ async def _fasting_status(db: AsyncSession) -> dict[str, Any] | None:
             if active_is_religious:
                 out["is_religious"] = True
         return out
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        log.warning("claude._fasting_status failed: %s", e)
         return None
 
 
@@ -389,7 +395,8 @@ async def _sober_status(db: AsyncSession) -> dict[str, Any] | None:
             "longest_days": round(max(durations), 1) if durations else None,
             "avg_days": round(sum(durations) / len(durations), 1) if durations else None,
         }
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        log.warning("claude._sober_status failed: %s", e)
         return None
 
 
@@ -773,7 +780,8 @@ async def goal_check(
                  "body_fat_pct": w.body_fat_pct}
                 for w in wts
             ]
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            log.warning("claude goal-context weight fetch failed: %s", e)
             relevant = []
     elif goal.kind == "sober":
         s = await _sober_status(db)
@@ -1646,7 +1654,8 @@ async def build_focus_cue_payload(
         if ls is not None:
             try:
                 days_ago = (workout.date - date.fromisoformat(ls)).days
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
+                log.debug("focus-cue last-seen parse failed for %r: %s", ls, e)
                 days_ago = None
         history[ex_id] = {
             "avg_rating": round(sum(ratings) / len(ratings), 2) if ratings else None,

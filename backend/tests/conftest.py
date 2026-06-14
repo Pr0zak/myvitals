@@ -1,5 +1,17 @@
-"""Pytest fixtures shared across the strength algorithm tests."""
+"""Pytest fixtures + shared test setup."""
 from __future__ import annotations
+
+# The config layer (`myvitals.config.Settings`) reads required secrets from the
+# environment at import time, so any test importing `myvitals.auth` /
+# `myvitals.api.*` needs them present. Set harmless dummies before those imports
+# happen. `setdefault` so a real CI env wins.
+import os
+
+os.environ.setdefault("POSTGRES_USER", "test")
+os.environ.setdefault("POSTGRES_PASSWORD", "test")
+os.environ.setdefault("POSTGRES_DB", "test")
+os.environ.setdefault("INGEST_TOKEN", "ingest-test-token-0001")
+os.environ.setdefault("QUERY_TOKEN", "query-test-token-0002")
 
 import pytest
 

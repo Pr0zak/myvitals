@@ -11,6 +11,9 @@
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
+import PageHeader from "@/components/PageHeader.vue";
+import RangeTabs from "@/components/RangeTabs.vue";
+import StatCard from "@/components/StatCard.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
@@ -543,62 +546,37 @@ const minHrInWindow = computed(() => hr24.value?.min_bpm ?? null);
 
 <template>
   <section class="hr">
-    <header class="page-head">
-      <h1>Heart rate</h1>
-      <div class="ranges">
-        <PatternsLink metric="resting_hr" label="resting HR"/>
-        <button v-for="r in RANGES" :key="r.key"
-                :class="{ pill: true, active: range === r.key }"
-                @click="range = r.key">{{ r.label }}</button>
-      </div>
-    </header>
+    <PageHeader title="Heart rate">
+      <RangeTabs v-model="range" :options="RANGES" aria-label="Heart-rate time range">
+        <template #before>
+          <PatternsLink metric="resting_hr" label="resting HR"/>
+        </template>
+      </RangeTabs>
+    </PageHeader>
 
     <p v-if="error" class="err">{{ error }}</p>
 
     <!-- Headline cards always render once history is loaded -->
     <div v-if="!loading" class="cards">
-      <Card title="Resting HR" :flat="true">
-        <div class="big">
-          {{ periodAvgRhr != null ? Math.round(periodAvgRhr) : "—" }}
-          <span class="unit">bpm</span>
-        </div>
-        <div class="delta" :class="rhrDelta != null && rhrDelta < 0 ? 'good' : (rhrDelta != null && rhrDelta > 0 ? 'bad' : '')">
-          <template v-if="rhrDelta != null">
-            {{ rhrDelta < 0 ? "▼" : "▲" }} {{ Math.abs(rhrDelta).toFixed(1) }} vs prior
-          </template>
-          <template v-else>—</template>
-        </div>
-      </Card>
+      <StatCard title="Resting HR"
+                :value="periodAvgRhr != null ? Math.round(periodAvgRhr) : '—'"
+                unit="bpm" :delta="rhrDelta" delta-good-when="down" />
 
-      <Card title="HRV (RMSSD)" :flat="true">
-        <div class="big">
-          {{ periodAvgHrv != null ? Math.round(periodAvgHrv) : "—" }}
-          <span class="unit">ms</span>
-        </div>
-        <div class="delta" :class="hrvDelta != null && hrvDelta > 0 ? 'good' : (hrvDelta != null && hrvDelta < 0 ? 'bad' : '')">
-          <template v-if="hrvDelta != null">
-            {{ hrvDelta > 0 ? "▲" : "▼" }} {{ Math.abs(hrvDelta).toFixed(1) }} vs prior
-          </template>
-          <template v-else>—</template>
-        </div>
-      </Card>
+      <StatCard title="HRV (RMSSD)"
+                :value="periodAvgHrv != null ? Math.round(periodAvgHrv) : '—'"
+                unit="ms" :delta="hrvDelta" delta-good-when="up" />
 
-      <Card title="Max HR (24h)" :flat="true">
-        <div class="big">
-          {{ maxHrInWindow != null ? Math.round(maxHrInWindow) : "—" }}
-          <span class="unit">bpm</span>
-        </div>
-        <div class="muted-sm" v-if="profile?.max_hr_estimated">
+      <StatCard title="Max HR (24h)"
+                :value="maxHrInWindow != null ? Math.round(maxHrInWindow) : '—'"
+                unit="bpm">
+        <span v-if="profile?.max_hr_estimated" class="muted">
           est max {{ profile.max_hr_estimated }}
-        </div>
-      </Card>
+        </span>
+      </StatCard>
 
-      <Card title="Min HR (24h)" :flat="true">
-        <div class="big">
-          {{ minHrInWindow != null ? Math.round(minHrInWindow) : "—" }}
-          <span class="unit">bpm</span>
-        </div>
-      </Card>
+      <StatCard title="Min HR (24h)"
+                :value="minHrInWindow != null ? Math.round(minHrInWindow) : '—'"
+                unit="bpm" />
     </div>
 
     <p v-if="loading" class="muted">Loading…</p>
@@ -652,22 +630,8 @@ const minHrInWindow = computed(() => hr24.value?.min_bpm ?? null);
 
 <style scoped>
 .hr { max-width: 1100px; margin: 0 auto; padding: 1rem; }
-.page-head { display: flex; align-items: center; justify-content: space-between;
-             margin-bottom: 1rem; flex-wrap: wrap; gap: 0.6rem; }
-.page-head h1 { margin: 0; font-size: 1.4rem; }
-.ranges { display: flex; gap: 0.3rem; flex-wrap: wrap; }
-.pill { background: var(--surface); color: var(--muted); border: 1px solid var(--border);
-        border-radius: 999px; padding: 0.3rem 0.85rem; cursor: pointer; font-size: 0.8rem; }
-.pill.active { background: var(--accent); color: var(--surface); border-color: var(--accent); }
-
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
          gap: 0.6rem; margin-bottom: 0.8rem; }
-.big { font-size: 1.7rem; font-weight: 600; font-feature-settings: "tnum"; line-height: 1.1; }
-.unit { font-size: 0.8rem; color: var(--muted); font-weight: 500; margin-left: 0.2rem; }
-.delta { font-size: 0.78rem; color: var(--muted); margin-top: 0.2rem; font-feature-settings: "tnum"; }
-.delta.good { color: #22c55e; }
-.delta.bad  { color: #ef4444; }
-.muted-sm { font-size: 0.75rem; color: var(--muted); margin-top: 0.2rem; }
 
 .chart    { width: 100%; height: 260px; }
 .chart-sm { width: 100%; height: 220px; }

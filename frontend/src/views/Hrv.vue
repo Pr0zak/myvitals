@@ -11,6 +11,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
+import PageHeader from "@/components/PageHeader.vue";
+import RangeTabs from "@/components/RangeTabs.vue";
 import { api } from "@/api/client";
 import type { HrvSeries, TodaySummary } from "@/api/types";
 import { chartTheme } from "@/theme";
@@ -156,17 +158,13 @@ const stats = computed(() => {
 
 <template>
   <div class="hrv-view">
-    <header class="hdr">
-      <h1>HRV</h1>
-      <div class="hdr-actions">
-        <PatternsLink metric="hrv_avg" label="HRV"/>
-        <div class="seg-toggle">
-          <button v-for="r in RANGES" :key="r.key"
-                  :class="{ active: range === r.key }"
-                  @click="range = r.key">{{ r.label }}</button>
-        </div>
-      </div>
-    </header>
+    <PageHeader title="HRV">
+      <RangeTabs v-model="range" :options="RANGES" aria-label="HRV time range">
+        <template #before>
+          <PatternsLink metric="hrv_avg" label="HRV"/>
+        </template>
+      </RangeTabs>
+    </PageHeader>
 
     <p v-if="error" class="err">{{ error }}</p>
 
@@ -213,25 +211,9 @@ const stats = computed(() => {
 
 <style scoped>
 .hrv-view { max-width: 1080px; margin: 0 auto; padding: 1rem 1.25rem 2rem; }
-.hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; gap: 12px; }
-.hdr-actions { display: flex; align-items: center; gap: 10px; }
-h1 { margin: 0; }
 .err { color: #ef4444; }
 .dim { color: var(--muted); font-size: 0.85rem; }
 .small { font-size: 0.78rem; margin-top: 0.5rem; }
-
-.seg-toggle {
-  display: inline-flex; border: 1px solid var(--outline); border-radius: 999px;
-  overflow: hidden;
-}
-.seg-toggle button {
-  appearance: none; border: 0; background: transparent;
-  padding: 6px 14px; font-size: 12px; color: var(--on-surface-2);
-  cursor: pointer;
-}
-.seg-toggle button.active {
-  background: var(--surface); color: var(--on-surface);
-}
 
 .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 @media (max-width: 720px) {

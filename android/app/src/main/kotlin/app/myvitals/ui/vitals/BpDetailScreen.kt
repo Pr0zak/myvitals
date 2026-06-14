@@ -58,18 +58,19 @@ fun BpDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var pts by remember { mutableStateOf<List<BpReading>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     val ptsType = remember {
         app.myvitals.data.JsonCache.listType(BpReading::class.java)
     }
 
-    LaunchedEffect(Unit) {
+    suspend fun load() {
         // SWR hydrate
         app.myvitals.data.JsonCache.read<List<BpReading>>(
             context, "bp_detail_points", ptsType,
         )?.let { pts = it.value; loading = false }
-        if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return@LaunchedEffect }
+        if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val since = LocalDate.now().minusDays(89).toString()
@@ -97,6 +98,7 @@ fun BpDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
             if (pts.isEmpty()) error = e.message?.take(160)
         } finally { loading = false }
     }
+    LaunchedEffect(Unit) { load() }
 
     Column(Modifier.fillMaxSize().background(MV.Bg)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -117,14 +119,22 @@ fun BpDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
             error != null -> Text(error!!, color = MV.Red, modifier = Modifier.padding(16.dp))
             pts.isEmpty() -> Text("No readings in the last 90 days.",
                 color = MV.OnSurfaceVariant, modifier = Modifier.padding(16.dp))
-            else -> LazyColumn(
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+            else -> app.myvitals.ui.common.PullableMetricBox(
+                refreshing = refreshing,
+                onRefresh = {
+                    refreshing = true
+                    try { load() } finally { refreshing = false }
+                },
             ) {
-                item { BpHero(pts.last()) }
-                if (pts.size >= 2) item { BpChart(pts) }
-                item { BpStats(pts) }
-                item { BpHistoryList(pts.takeLast(10).reversed()) }
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    item { BpHero(pts.last()) }
+                    if (pts.size >= 2) item { BpChart(pts) }
+                    item { BpStats(pts) }
+                    item { BpHistoryList(pts.takeLast(10).reversed()) }
+                }
             }
         }
     }

@@ -1,6 +1,8 @@
 package app.myvitals.ui.vitals
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,6 +84,7 @@ fun VitalsDetailScreen(
     // whenever range changes to a multi-day filter.
     var selectedDay by remember { mutableStateOf(java.time.LocalDate.now()) }
     var loading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val producer = remember { CartesianChartModelProducer() }
     var stats by remember { mutableStateOf(Triple<Float?, Float?, Float?>(null, null, null)) }
@@ -185,36 +188,53 @@ fun VitalsDetailScreen(
             )
         }
 
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
+        app.myvitals.ui.common.PullableMetricBox(
+            refreshing = refreshing,
+            onRefresh = {
+                refreshing = true
+                try { load() } finally { refreshing = false }
+            },
         ) {
-            if (loading) {
-                Text("Loading…", Modifier.padding(20.dp), color = MV.OnSurfaceVariant)
-            } else if (error != null) {
-                Text(error!!, Modifier.padding(20.dp), color = MV.Red)
-            } else {
-                Column(Modifier.padding(8.dp)) {
-                    CartesianChartHost(
-                        chart = rememberCartesianChart(
-                            rememberLineCartesianLayer(),
-                            startAxis = VerticalAxis.rememberStart(),
-                            bottomAxis = HorizontalAxis.rememberBottom(),
-                        ),
-                        modelProducer = producer,
-                        scrollState = rememberVicoScrollState(),
-                        zoomState = rememberVicoZoomState(),
-                        modifier = Modifier.fillMaxWidth().height(240.dp),
-                    )
+            // verticalScroll makes the (otherwise short, non-scrolling) content
+            // a nested-scroll source so the pull-to-refresh gesture registers,
+            // matching the LazyColumn-based detail screens.
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                ) {
+                    if (loading) {
+                        Text("Loading…", Modifier.padding(20.dp), color = MV.OnSurfaceVariant)
+                    } else if (error != null) {
+                        Text(error!!, Modifier.padding(20.dp), color = MV.Red)
+                    } else {
+                        Column(Modifier.padding(8.dp)) {
+                            CartesianChartHost(
+                                chart = rememberCartesianChart(
+                                    rememberLineCartesianLayer(),
+                                    startAxis = VerticalAxis.rememberStart(),
+                                    bottomAxis = HorizontalAxis.rememberBottom(),
+                                ),
+                                modelProducer = producer,
+                                scrollState = rememberVicoScrollState(),
+                                zoomState = rememberVicoZoomState(),
+                                modifier = Modifier.fillMaxWidth().height(240.dp),
+                            )
 
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Stat("Min", stats.first, vital)
-                        Stat("Avg", stats.third, vital)
-                        Stat("Max", stats.second, vital)
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Stat("Min", stats.first, vital)
+                                Stat("Avg", stats.third, vital)
+                                Stat("Max", stats.second, vital)
+                            }
+                        }
                     }
                 }
             }

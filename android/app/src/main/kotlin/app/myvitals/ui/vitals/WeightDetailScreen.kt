@@ -57,18 +57,19 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     var range by remember { mutableStateOf(VitalRange.MONTH) }
     var pts by remember { mutableStateOf<List<WPoint>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     val ptsType = remember {
         app.myvitals.data.JsonCache.listType(WPoint::class.java)
     }
 
-    LaunchedEffect(range) {
+    suspend fun load() {
         val cacheKey = "weight_detail_${range.name.lowercase()}"
         app.myvitals.data.JsonCache.read<List<WPoint>>(
             context, cacheKey, ptsType,
         )?.let { pts = it.value; loading = false }
-        if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return@LaunchedEffect }
+        if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return }
         if (pts.isEmpty()) loading = true
         error = null
         try {
@@ -95,6 +96,7 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
             if (pts.isEmpty()) error = e.message?.take(160)
         } finally { loading = false }
     }
+    LaunchedEffect(range) { load() }
 
     Column(Modifier.fillMaxSize().background(MV.Bg)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -129,13 +131,21 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
             error != null -> Text(error!!, color = MV.Red, modifier = Modifier.padding(16.dp))
             pts.size < 2 -> Text("Need at least 2 weight readings in this window.",
                 color = MV.OnSurfaceVariant, modifier = Modifier.padding(16.dp))
-            else -> LazyColumn(
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+            else -> app.myvitals.ui.common.PullableMetricBox(
+                refreshing = refreshing,
+                onRefresh = {
+                    refreshing = true
+                    try { load() } finally { refreshing = false }
+                },
             ) {
-                item { WeightHero(pts) }
-                item { WeightChart(pts, Vital.WEIGHT.color) }
-                item { WeightStats(pts) }
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    item { WeightHero(pts) }
+                    item { WeightChart(pts, Vital.WEIGHT.color) }
+                    item { WeightStats(pts) }
+                }
             }
         }
     }

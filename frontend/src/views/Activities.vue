@@ -4,6 +4,9 @@ import { RouterLink } from "vue-router";
 import VChart from "@/echarts";
 import { Trophy, Mountain, Flame, Map as MapIcon, GitCompareArrows } from "lucide-vue-next";
 import Card from "@/components/Card.vue";
+import PageHeader from "@/components/PageHeader.vue";
+import RangeTabs from "@/components/RangeTabs.vue";
+import EmptyState from "@/components/EmptyState.vue";
 import ActivityIcon from "@/components/ActivityIcon.vue";
 import PolylineThumbnail from "@/components/PolylineThumbnail.vue";
 import { api } from "@/api/client";
@@ -489,21 +492,15 @@ const monthLabel = (key: string) =>
 
 <template>
   <div class="activities">
-    <header class="head">
-      <h1>Activities</h1>
-      <div class="controls">
-        <button class="sync-btn" :disabled="syncing" @click="syncStravaNow"
-                title="Pull new Strava activities since the last sync">
-          {{ syncing ? "Syncing…" : "↻ Sync Strava" }}
-        </button>
-        <div class="ranges">
-          <button v-for="r in RANGES" :key="r.key"
-                  :class="{ active: range === r.key }" @click="range = r.key">{{ r.label }}</button>
-        </div>
-        <RouterLink to="/activities/map" class="map-link"><MapIcon :size="14"/> Map view</RouterLink>
-        <RouterLink to="/activities/compare" class="map-link"><GitCompareArrows :size="14"/> Compare</RouterLink>
-      </div>
-    </header>
+    <PageHeader title="Activities">
+      <button class="sync-btn" :disabled="syncing" @click="syncStravaNow"
+              title="Pull new Strava activities since the last sync">
+        {{ syncing ? "Syncing…" : "↻ Sync Strava" }}
+      </button>
+      <RangeTabs v-model="range" :options="RANGES" aria-label="Activities time range" />
+      <RouterLink to="/activities/map" class="map-link"><MapIcon :size="14"/> Map view</RouterLink>
+      <RouterLink to="/activities/compare" class="map-link"><GitCompareArrows :size="14"/> Compare</RouterLink>
+    </PageHeader>
     <div v-if="syncToast" class="sync-toast">{{ syncToast }}</div>
 
     <!-- Stats banner -->
@@ -691,10 +688,10 @@ const monthLabel = (key: string) =>
     </Card>
 
     <div v-if="error" class="err">{{ error }}</div>
-    <div v-if="loading" class="empty">Loading…</div>
-    <div v-else-if="sorted.length === 0" class="empty">
+    <EmptyState v-if="loading" message="Loading…" />
+    <EmptyState v-else-if="sorted.length === 0">
       No activities matching the current filters.
-    </div>
+    </EmptyState>
 
     <!-- Grouped or flat -->
     <template v-else>
@@ -816,12 +813,6 @@ const monthLabel = (key: string) =>
 .strength-list .status.skipped { color: var(--muted); }
 .strength-list .status.planned { color: var(--accent, #ef4444); }
 
-.head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
-h1 { margin: 0; }
-.controls { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
-.ranges { display: flex; gap: 0.25rem; }
-.ranges button { background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0.3rem 0.6rem; cursor: pointer; font-size: 0.8rem; }
-.ranges button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .map-link { color: var(--accent); text-decoration: none; font-size: 0.9rem; padding: 0.3rem 0.6rem; border: 1px solid var(--border); border-radius: 4px; }
 .map-link:hover { border-color: var(--accent); }
 .sync-btn {
@@ -957,6 +948,5 @@ dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
 .row-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-stat { color: var(--muted); font-variant-numeric: tabular-nums; }
 
-.empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 </style>

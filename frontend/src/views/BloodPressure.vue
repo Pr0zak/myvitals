@@ -4,6 +4,7 @@ import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import RangeTabs from "@/components/RangeTabs.vue";
+import EmptyState from "@/components/EmptyState.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { chartTheme } from "@/theme";
@@ -187,10 +188,10 @@ function categoryLabel(s: number, d: number): string {
       </RangeTabs>
     </PageHeader>
 
-    <div v-if="loading" class="empty">Loading…</div>
-    <div v-else-if="sorted.length === 0" class="empty">
+    <EmptyState v-if="loading" message="Loading…" />
+    <EmptyState v-else-if="sorted.length === 0">
       No BP readings yet. Pair OMRON Connect → Health Connect, or log manually below.
-    </div>
+    </EmptyState>
 
     <template v-else>
       <!-- KPI banner -->
@@ -328,6 +329,5 @@ function categoryLabel(s: number, d: number): string {
 .hist .m { color: var(--muted); font-size: 0.85rem; }
 .muted { color: var(--muted); font-size: 0.85rem; padding: 0.6rem; }
 
-.empty { color: var(--muted-2); padding: 2rem; text-align: center; }
 .err { color: var(--bad); padding: 0.4rem 0.6rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin-top: 0.4rem; }
 </style>

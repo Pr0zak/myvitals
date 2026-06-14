@@ -4,6 +4,7 @@ import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import RangeTabs from "@/components/RangeTabs.vue";
+import EmptyState from "@/components/EmptyState.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
@@ -318,10 +319,10 @@ function deltaCls(kg: number | null, lowerIsBetter = true): string {
       </RangeTabs>
     </PageHeader>
 
-    <div v-if="loading" class="empty">Loading…</div>
-    <div v-else-if="!stats" class="empty">
+    <EmptyState v-if="loading" message="Loading…" />
+    <EmptyState v-else-if="!stats">
       No weight data yet. Import a Fitbit/Garmin ZIP from Settings, or pair a smart scale with Health Connect.
-    </div>
+    </EmptyState>
 
     <template v-else>
       <!-- KPI banner -->
@@ -428,5 +429,4 @@ function deltaCls(kg: number | null, lowerIsBetter = true): string {
 .hist .m { color: var(--muted); font-size: 0.85rem; }
 .muted { color: var(--muted); font-size: 0.85rem; padding: 0.6rem; }
 
-.empty { color: var(--muted-2); padding: 2rem; text-align: center; }
 </style>

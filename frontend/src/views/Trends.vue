@@ -3,6 +3,9 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
+import PageHeader from "@/components/PageHeader.vue";
+import RangeTabs from "@/components/RangeTabs.vue";
+import EmptyState from "@/components/EmptyState.vue";
 import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
 import { chartTheme } from "@/theme";
@@ -552,19 +555,15 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
 
 <template>
   <div class="trends">
-    <header class="head">
-      <h1>Trends</h1>
-      <div class="picker">
-        <button v-for="r in RANGES" :key="r.key"
-                :class="{ active: range === r.key }" @click="range = r.key">{{ r.label }}</button>
-      </div>
-    </header>
+    <PageHeader title="Trends">
+      <RangeTabs v-model="range" :options="RANGES" aria-label="Trends time range" />
+    </PageHeader>
 
     <div v-if="error" class="err">{{ error }}</div>
-    <div v-if="loading" class="empty">Loading…</div>
-    <div v-else-if="!hasData" class="empty">
+    <EmptyState v-if="loading" message="Loading…" />
+    <EmptyState v-else-if="!hasData">
       No daily summaries yet for this range. The analytics job runs at 03:00 local each night.
-    </div>
+    </EmptyState>
 
     <div v-else class="grid">
       <div id="rhr"></div>
@@ -604,9 +603,9 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
       </Card>
 
       <Card title="Body weight">
-        <div v-if="!hasWeight" class="empty-mini">
+        <EmptyState v-if="!hasWeight" mini>
           No weight data yet. Import a Fitbit/Garmin ZIP from Settings, or POST to /ingest/batch.
-        </div>
+        </EmptyState>
         <template v-else>
           <div class="weight-stats">
             <span><strong>{{ fmtWeight(weightStats.latest_kg) }}</strong> latest</span>
@@ -653,12 +652,6 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
 </template>
 
 <style scoped>
-.head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 1rem; }
-h1 { margin: 0; }
-.picker { display: flex; gap: 0.4rem; }
-.picker button { background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.8rem; cursor: pointer; font-size: 0.85rem; }
-.picker button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-
 .grid { display: grid; gap: 1rem; margin-top: 1rem; }
 .chart { width: 100%; height: 280px; }
 .chart > * { width: 100%; height: 100%; }
@@ -677,8 +670,6 @@ h1 { margin: 0; }
   border-radius: 4px; padding: 0.15rem 0.4rem; width: 80px; font-family: inherit;
 }
 
-.empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
-.empty-mini { color: var(--muted-2); padding: 1.2rem 0; text-align: center; font-size: 0.85rem; }
 .weight-stats { display: flex; gap: 1rem; align-items: baseline; margin-bottom: 0.5rem; font-size: 0.95rem; }
 .weight-stats .muted { color: var(--muted); font-size: 0.8rem; }
 .goal-row { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; font-size: 0.8rem; }

@@ -2,6 +2,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
+import PageHeader from "@/components/PageHeader.vue";
+import RangeTabs from "@/components/RangeTabs.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { chartTheme } from "@/theme";
@@ -177,14 +179,13 @@ function categoryLabel(s: number, d: number): string {
 
 <template>
   <div class="bp">
-    <header class="head">
-      <h1>Blood pressure</h1>
-      <div class="picker">
-        <PatternsLink metric="bp_systolic_avg" label="BP"/>
-        <button v-for="r in RANGES" :key="r.key"
-                :class="{ active: range === r.key }" @click="range = r.key">{{ r.label }}</button>
-      </div>
-    </header>
+    <PageHeader title="Blood pressure">
+      <RangeTabs v-model="range" :options="RANGES" aria-label="Blood-pressure time range">
+        <template #before>
+          <PatternsLink metric="bp_systolic_avg" label="BP"/>
+        </template>
+      </RangeTabs>
+    </PageHeader>
 
     <div v-if="loading" class="empty">Loading…</div>
     <div v-else-if="sorted.length === 0" class="empty">
@@ -295,11 +296,6 @@ function categoryLabel(s: number, d: number): string {
 
 <style scoped>
 .bp { max-width: 1200px; }
-.head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
-h1 { margin: 0; }
-.picker { display: flex; gap: 0.25rem; }
-.picker button { background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0.4rem 0.8rem; cursor: pointer; font-size: 0.85rem; }
-.picker button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.6rem; margin-bottom: 1rem; }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem; }

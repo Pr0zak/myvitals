@@ -2,6 +2,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
+import PageHeader from "@/components/PageHeader.vue";
+import RangeTabs from "@/components/RangeTabs.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
@@ -298,20 +300,23 @@ function deltaCls(kg: number | null, lowerIsBetter = true): string {
 
 <template>
   <div class="weight">
-    <header class="head">
-      <h1>Weight
+    <PageHeader>
+      <template #title>
+        Weight
         <span v-if="recomp" class="recomp" :class="recomp.cls">· {{ recomp.label }}</span>
-      </h1>
-      <div class="picker">
-        <PatternsLink metric="weight_kg" label="weight"/>
-        <button v-for="r in RANGES" :key="r.key"
-                :class="{ active: range === r.key, dim: yoy }"
-                :disabled="yoy" @click="range = r.key">{{ r.label }}</button>
-        <label class="yoy-tog">
-          <input type="checkbox" v-model="yoy"/> Year-over-year
-        </label>
-      </div>
-    </header>
+      </template>
+      <RangeTabs v-model="range" :options="RANGES" :disabled="yoy"
+                 aria-label="Weight time range">
+        <template #before>
+          <PatternsLink metric="weight_kg" label="weight"/>
+        </template>
+        <template #after>
+          <label class="yoy-tog">
+            <input type="checkbox" v-model="yoy"/> Year-over-year
+          </label>
+        </template>
+      </RangeTabs>
+    </PageHeader>
 
     <div v-if="loading" class="empty">Loading…</div>
     <div v-else-if="!stats" class="empty">
@@ -398,12 +403,6 @@ function deltaCls(kg: number | null, lowerIsBetter = true): string {
 
 <style scoped>
 .weight { max-width: 1200px; }
-.head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
-h1 { margin: 0; }
-.picker { display: flex; gap: 0.25rem; }
-.picker button { background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0.4rem 0.8rem; cursor: pointer; font-size: 0.85rem; }
-.picker button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-.picker button.dim { opacity: 0.4; }
 .yoy-tog { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 0.6rem; font-size: 0.85rem; color: var(--muted); cursor: pointer; }
 .recomp { font-size: 0.7em; color: var(--muted); margin-left: 0.5rem; font-weight: 400; }
 .recomp.good { color: #22c55e; }

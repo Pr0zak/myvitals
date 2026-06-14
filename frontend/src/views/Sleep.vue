@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
+import PageHeader from "@/components/PageHeader.vue";
+import RangeTabs from "@/components/RangeTabs.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import { api } from "@/api/client";
@@ -27,6 +29,12 @@ const lastNightRaw = ref<{ time: string; stage: string; duration_s: number }[]>(
 const loading = ref(true);
 const error = ref<string | null>(null);
 const range = ref<7 | 30 | 90>(30);
+const SLEEP_RANGES: ReadonlyArray<{ key: 7 | 30 | 90; label: string }> = [
+  { key: 7, label: "7 days" },
+  { key: 30, label: "30 days" },
+  { key: 90, label: "90 days" },
+];
+watch(range, load);
 // Sleep target from profile (GOALS-2). Drives the markLine on the
 // stacked-nights chart so the user can see at a glance which nights
 // hit their goal.
@@ -277,16 +285,13 @@ function fmtNightDate(n: SleepNight): string {
 
 <template>
   <div class="sleep">
-    <header class="head">
-      <h1>Sleep</h1>
-      <div class="picker">
-        <PatternsLink metric="sleep_score" label="sleep"/>
-        <button v-for="r in [7, 30, 90]" :key="r"
-                :class="{ active: range === r }" @click="range = r as 7 | 30 | 90; load()">
-          {{ r }} days
-        </button>
-      </div>
-    </header>
+    <PageHeader title="Sleep">
+      <RangeTabs v-model="range" :options="SLEEP_RANGES" aria-label="Sleep time range">
+        <template #before>
+          <PatternsLink metric="sleep_score" label="sleep"/>
+        </template>
+      </RangeTabs>
+    </PageHeader>
 
     <div v-if="error" class="err">{{ error }}</div>
     <div v-if="loading" class="sleep-skel">
@@ -372,11 +377,6 @@ function fmtNightDate(n: SleepNight): string {
 </template>
 
 <style scoped>
-.head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
-h1 { margin: 0; }
-.picker { display: flex; gap: 0.4rem; }
-.picker button { background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.8rem; cursor: pointer; font-size: 0.85rem; }
-.picker button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 
 .grid { display: grid; gap: 1rem; margin-top: 1rem; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
 .chart { width: 100%; height: 280px; }

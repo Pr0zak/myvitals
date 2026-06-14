@@ -18,6 +18,9 @@ defineProps<{
   modelValue: T;
   options: ReadonlyArray<{ key: T; label: string }>;
   ariaLabel?: string;
+  /** Greys out + disables the whole row (e.g. Weight's year-over-year mode,
+   *  where the range pills don't apply). */
+  disabled?: boolean;
 }>();
 defineEmits<{ (e: "update:modelValue", v: T): void }>();
 </script>
@@ -30,8 +33,9 @@ defineEmits<{ (e: "update:modelValue", v: T): void }>();
       :key="String(o.key)"
       type="button"
       class="range-pill"
-      :class="{ active: o.key === modelValue }"
+      :class="{ active: o.key === modelValue, dim: disabled }"
       :aria-pressed="o.key === modelValue"
+      :disabled="disabled"
       @click="$emit('update:modelValue', o.key)"
     >{{ o.label }}</button>
     <slot name="after" />
@@ -51,4 +55,6 @@ defineEmits<{ (e: "update:modelValue", v: T): void }>();
 .range-pill.active {
   background: var(--accent); color: var(--surface); border-color: var(--accent);
 }
+.range-pill.dim { opacity: 0.45; cursor: not-allowed; }
+.range-pill.dim:hover { color: var(--muted); }
 </style>

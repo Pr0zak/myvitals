@@ -167,6 +167,34 @@ async def _daily_summary_metric(
     return {d: v for d, v in result.all() if v is not None}
 
 
+async def all_daily_summary_metrics(
+    db: AsyncSession, since: date, until: date,
+) -> dict[str, dict[date, float]]:
+    """Every daily-summary metric series in ONE query.
+
+    `_correlations` used to call `_daily_summary_metric` once per metric — ~19
+    round-trips selecting different columns from the same rows over the same
+    window, on every weekly/monthly AI read. This pulls all the columns in a
+    single SELECT and pivots in Python. Returns {metric: {date: value}} with
+    NULLs dropped; metrics sorted for deterministic ordering downstream.
+    """
+    metrics = sorted(_DAILY_SUMMARY_METRICS)
+    cols = [getattr(models.DailySummary, m) for m in metrics]
+    result = await db.execute(
+        select(models.DailySummary.date, *cols)
+        .where(models.DailySummary.date >= since)
+        .where(models.DailySummary.date <= until)
+    )
+    out: dict[str, dict[date, float]] = {m: {} for m in metrics}
+    for row in result.all():
+        d = row[0]
+        for i, m in enumerate(metrics):
+            v = row[i + 1]
+            if v is not None:
+                out[m][d] = v
+    return out
+
+
 async def _activity_duration_per_day(
     db: AsyncSession, since: date, until: date,
 ) -> dict[date, float]:

@@ -253,17 +253,16 @@ async def _annotations(db: AsyncSession, days: int) -> list[dict[str, Any]]:
 
 async def _correlations(db: AsyncSession, days: int = 90, top_n: int = 5) -> list[dict[str, Any]]:
     try:
-        from ..api.analytics import _DAILY_SUMMARY_METRICS, _daily_summary_metric, _pearson
+        from ..api.analytics import all_daily_summary_metrics, _pearson
     except Exception as e:  # noqa: BLE001
         log.warning("claude._correlations: analytics import failed: %s", e)
         return []
     today = datetime.now(timezone.utc).date()
     since = today - timedelta(days=days)
-    cache: dict[str, dict[date, float]] = {}
-    for m in _DAILY_SUMMARY_METRICS:
-        cache[m] = await _daily_summary_metric(db, m, since, today)
+    # One query for every metric series (was one query per metric).
+    cache = await all_daily_summary_metrics(db, since, today)
     out: list[dict[str, Any]] = []
-    keys = list(_DAILY_SUMMARY_METRICS)
+    keys = list(cache.keys())  # already sorted → deterministic pairing
     for i, x in enumerate(keys):
         for y in keys[i + 1:]:
             xs_d, ys_d = cache[x], cache[y]

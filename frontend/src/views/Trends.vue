@@ -6,6 +6,7 @@ import Card from "@/components/Card.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import RangeTabs from "@/components/RangeTabs.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import LoadState from "@/components/LoadState.vue";
 import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
 import { chartTheme } from "@/theme";
@@ -560,7 +561,7 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
     </PageHeader>
 
     <div v-if="error" class="err">{{ error }}</div>
-    <EmptyState v-if="loading" message="Loading…" />
+    <LoadState v-if="loading" />
     <EmptyState v-else-if="!hasData">
       No daily summaries yet for this range. The analytics job runs at 03:00 local each night.
     </EmptyState>

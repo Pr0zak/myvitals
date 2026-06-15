@@ -5,6 +5,7 @@ import Card from "@/components/Card.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import RangeTabs from "@/components/RangeTabs.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import LoadState from "@/components/LoadState.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { chartTheme } from "@/theme";
@@ -188,7 +189,7 @@ function categoryLabel(s: number, d: number): string {
       </RangeTabs>
     </PageHeader>
 
-    <EmptyState v-if="loading" message="Loading…" />
+    <LoadState v-if="loading" />
     <EmptyState v-else-if="sorted.length === 0">
       No BP readings yet. Pair OMRON Connect → Health Connect, or log manually below.
     </EmptyState>

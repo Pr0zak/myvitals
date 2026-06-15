@@ -14,6 +14,7 @@ import Card from "@/components/Card.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import RangeTabs from "@/components/RangeTabs.vue";
 import StatCard from "@/components/StatCard.vue";
+import LoadState from "@/components/LoadState.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
@@ -579,7 +580,7 @@ const minHrInWindow = computed(() => hr24.value?.min_bpm ?? null);
                 unit="bpm" />
     </div>
 
-    <p v-if="loading" class="muted">Loading…</p>
+    <LoadState v-if="loading" />
 
     <template v-if="!loading">
       <!-- 24h trace -->

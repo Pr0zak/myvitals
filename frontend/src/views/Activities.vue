@@ -7,6 +7,7 @@ import Card from "@/components/Card.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import RangeTabs from "@/components/RangeTabs.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import LoadState from "@/components/LoadState.vue";
 import ActivityIcon from "@/components/ActivityIcon.vue";
 import PolylineThumbnail from "@/components/PolylineThumbnail.vue";
 import { api } from "@/api/client";
@@ -688,7 +689,7 @@ const monthLabel = (key: string) =>
     </Card>
 
     <div v-if="error" class="err">{{ error }}</div>
-    <EmptyState v-if="loading" message="Loading…" />
+    <LoadState v-if="loading" variant="list" />
     <EmptyState v-else-if="sorted.length === 0">
       No activities matching the current filters.
     </EmptyState>

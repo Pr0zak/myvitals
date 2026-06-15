@@ -5,6 +5,7 @@ import Card from "@/components/Card.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import RangeTabs from "@/components/RangeTabs.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import LoadState from "@/components/LoadState.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
@@ -319,7 +320,7 @@ function deltaCls(kg: number | null, lowerIsBetter = true): string {
       </RangeTabs>
     </PageHeader>
 
-    <EmptyState v-if="loading" message="Loading…" />
+    <LoadState v-if="loading" />
     <EmptyState v-else-if="!stats">
       No weight data yet. Import a Fitbit/Garmin ZIP from Settings, or pair a smart scale with Health Connect.
     </EmptyState>

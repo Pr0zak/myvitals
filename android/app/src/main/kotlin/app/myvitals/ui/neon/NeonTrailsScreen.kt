@@ -20,6 +20,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -194,18 +197,20 @@ private fun RefreshButton(spinning: Boolean, onClick: () -> Unit) {
 
     Box(
         modifier = Modifier
-            .size(42.dp)
+            .size(48.dp)
             .clip(CircleShape)
-            .background(NeonMV.Card)
-            .border(1.dp, NeonMV.Track, CircleShape)
+            .background(NeonMV.Cyan.copy(alpha = 0.14f))
+            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.45f), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            "↻",
-            color = NeonMV.Cyan,
-            fontSize = 20.sp,
-            modifier = Modifier.graphicsLayer { rotationZ = rotation },
+        Icon(
+            imageVector = Icons.Outlined.Refresh,
+            contentDescription = "Refresh trail status",
+            tint = NeonMV.Cyan,
+            modifier = Modifier
+                .size(26.dp)
+                .graphicsLayer { rotationZ = rotation },
         )
     }
 }

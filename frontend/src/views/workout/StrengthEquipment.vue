@@ -440,4 +440,106 @@ h1 { margin: 0 0 0.6rem; }
   background: var(--accent, #ef4444); color: #fff; font-weight: 600;
   border-color: var(--accent, #ef4444);
 }
+
+/* ===== Vitality Neon — scoped, neon-theme-only overrides ===== */
+html[data-theme="neon"] .strength-equipment {
+  --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  --rn-cyan: #28e6ff; --rn-lime: #5dff3b; --rn-mag: #ff3ad8;
+  --rn-amber: #ffb52e; --rn-track: #272a3b;
+  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 1.25rem 1.5rem 2rem;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+
+html[data-theme="neon"] .strength-equipment h1 {
+  color: var(--rn-ink); letter-spacing: -0.5px;
+}
+
+/* Section sub-headers + hints → neon muted, Space Grotesk caps */
+html[data-theme="neon"] .strength-equipment .sub {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  letter-spacing: 0.12em; color: var(--rn-mut);
+}
+html[data-theme="neon"] .strength-equipment .hint { color: var(--rn-mut); }
+html[data-theme="neon"] .strength-equipment .hint strong { color: var(--rn-ink); }
+
+/* ---- Selectable chips (DB pairs) → neon card surface, lime when owned ---- */
+html[data-theme="neon"] .strength-equipment .chip {
+  background: var(--rn-card); border-color: #21243480;
+  color: var(--rn-mut);
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  border-radius: 9px;
+}
+html[data-theme="neon"] .strength-equipment .chip:hover {
+  color: var(--rn-ink); border-color: rgba(40, 230, 255, 0.45);
+}
+html[data-theme="neon"] .strength-equipment .chip.on {
+  background: rgba(93, 255, 59, 0.14); color: var(--rn-lime);
+  border-color: rgba(93, 255, 59, 0.55);
+  text-shadow: 0 0 8px rgba(93, 255, 59, 0.40);
+}
+
+/* ---- Micro-loader / wrist-weight chips → lime (owned = good/completed,
+       matching the DB-pair chips; magenta is reserved for sleep/sober) ---- */
+html[data-theme="neon"] .strength-equipment .chip.small.on {
+  background: rgba(93, 255, 59, 0.14); color: var(--rn-lime);
+  border-color: rgba(93, 255, 59, 0.55);
+  text-shadow: 0 0 8px rgba(93, 255, 59, 0.40);
+}
+html[data-theme="neon"] .strength-equipment .wrist-add input,
+html[data-theme="neon"] .strength-equipment .adj-grid input {
+  background: var(--rn-card); border: 1px solid #21243480;
+  color: var(--rn-ink); border-radius: 8px;
+}
+html[data-theme="neon"] .strength-equipment .adj-grid label,
+html[data-theme="neon"] .strength-equipment .auto-chk,
+html[data-theme="neon"] .strength-equipment .train-row > span:first-child {
+  color: var(--rn-mut);
+}
+
+/* ---- Ghost button (Add custom) ---- */
+html[data-theme="neon"] .strength-equipment .ghost {
+  background: rgba(40, 230, 255, 0.08); color: var(--rn-cyan);
+  border: 1px solid rgba(40, 230, 255, 0.32); border-radius: 8px;
+}
+
+/* ---- Status indicators: radios / checkboxes / range tint to neon cyan ---- */
+html[data-theme="neon"] .strength-equipment input[type="checkbox"],
+html[data-theme="neon"] .strength-equipment input[type="radio"],
+html[data-theme="neon"] .strength-equipment input[type="range"] {
+  accent-color: var(--rn-cyan);
+}
+html[data-theme="neon"] .strength-equipment .db-type label,
+html[data-theme="neon"] .strength-equipment .checks label,
+html[data-theme="neon"] .strength-equipment .train-row {
+  color: var(--rn-ink);
+}
+html[data-theme="neon"] .strength-equipment .train-row.toggle .toggle-text strong {
+  color: var(--rn-ink);
+}
+html[data-theme="neon"] .strength-equipment .slider-row .mono {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  color: var(--rn-cyan); text-shadow: 0 0 8px rgba(40, 230, 255, 0.40);
+}
+
+/* ---- Segmented toggles (training prefs) → cyan when selected ---- */
+html[data-theme="neon"] .strength-equipment .seg button {
+  background: var(--rn-card); border-color: #21243480;
+  color: var(--rn-mut);
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+}
+html[data-theme="neon"] .strength-equipment .seg button:hover {
+  color: var(--rn-ink); border-color: rgba(40, 230, 255, 0.45);
+}
+html[data-theme="neon"] .strength-equipment .seg button.on {
+  background: rgba(40, 230, 255, 0.16); color: var(--rn-cyan);
+  border-color: rgba(40, 230, 255, 0.55);
+  text-shadow: 0 0 8px rgba(40, 230, 255, 0.40);
+}
+
+/* ---- Primary save button → cyan with glow ---- */
+html[data-theme="neon"] .strength-equipment .actions .primary {
+  background: var(--rn-cyan); color: #0f1118; font-weight: 700;
+  box-shadow: 0 0 16px rgba(40, 230, 255, 0.40);
+}
 </style>

@@ -2422,4 +2422,101 @@ tr.job-failed { background: rgba(239, 68, 68, 0.05); }
   max-height: 180px; overflow: auto;
   white-space: pre-wrap;
 }
+
+/* ───────────────────────── Vitality Neon overrides ─────────────────────────
+   Scoped to html[data-theme="neon"] so classic light/dark themes are byte-for-
+   byte unchanged. Neon palette: cyan #28e6ff, magenta #ff3ad8, lime #5dff3b,
+   amber #ffb52e, red #ff5d7a, periwinkle #6f7bff, track #272a3b, card #181b27,
+   ink #ececf5, muted #9b9bb0. Reference idiom: Body.vue. */
+html[data-theme="neon"] .settings {
+  --rn-cyan: #28e6ff; --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-amber: #ffb52e;
+  --rn-red: #ff5d7a; --rn-peri: #6f7bff; --rn-track: #272a3b;
+  --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 32px 22px 40px;
+  max-width: none;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+}
+/* re-cap the content column the classic max-width used to give */
+html[data-theme="neon"] .settings > * { max-width: 800px; }
+
+/* Rounded neon cards + subtle inset highlight */
+html[data-theme="neon"] .settings .settings-pane,
+html[data-theme="neon"] .settings .import-card,
+html[data-theme="neon"] .settings .release-notes {
+  background: var(--rn-card);
+  border: 1px solid #21243450;
+  border-radius: 18px;
+}
+html[data-theme="neon"] .settings .settings-pane { box-shadow: inset 0 1px 0 #ffffff08; }
+
+/* Big readouts → Space Grotesk numerics */
+html[data-theme="neon"] .settings h1,
+html[data-theme="neon"] .settings .update-versions .mono,
+html[data-theme="neon"] .settings .derived,
+html[data-theme="neon"] .settings .zone {
+  font-family: 'Space Grotesk', 'Geist Mono', ui-monospace, monospace;
+  letter-spacing: -0.3px;
+}
+
+/* Primary accent → cyan with glow */
+html[data-theme="neon"] .settings .primary { background: var(--rn-cyan); color: #0f1118; }
+html[data-theme="neon"] .settings input:focus,
+html[data-theme="neon"] .settings select:focus { border-color: var(--rn-cyan); }
+html[data-theme="neon"] .settings .hint a,
+html[data-theme="neon"] .settings .release-link { color: var(--rn-cyan); }
+
+/* HR-zone badges z1..z5 → periwinkle / cyan / lime / amber / red */
+html[data-theme="neon"] .settings .zone-1 { background: rgba(111, 123, 255, 0.20); color: var(--rn-peri); }
+html[data-theme="neon"] .settings .zone-2 { background: rgba(40, 230, 255, 0.18); color: var(--rn-cyan); }
+html[data-theme="neon"] .settings .zone-3 { background: rgba(93, 255, 59, 0.18); color: var(--rn-lime); }
+html[data-theme="neon"] .settings .zone-4 { background: rgba(255, 181, 46, 0.18); color: var(--rn-amber); }
+html[data-theme="neon"] .settings .zone-5 { background: rgba(255, 93, 122, 0.20); color: var(--rn-red); }
+
+/* OK / error state blocks */
+html[data-theme="neon"] .settings .ok {
+  color: var(--rn-lime); background: rgba(93, 255, 59, 0.10); border-left-color: var(--rn-lime);
+}
+html[data-theme="neon"] .settings .ok-text { color: var(--rn-lime); }
+html[data-theme="neon"] .settings .err {
+  color: var(--rn-red); background: rgba(255, 93, 122, 0.10); border-left-color: var(--rn-red);
+}
+html[data-theme="neon"] .settings .danger { color: var(--rn-red); }
+
+/* Badges — "new" (cyan) / "ok" (lime) */
+html[data-theme="neon"] .settings .badge-new { background: rgba(40, 230, 255, 0.18); color: var(--rn-cyan); }
+html[data-theme="neon"] .settings .badge-ok  { background: rgba(93, 255, 59, 0.16); color: var(--rn-lime); }
+
+/* Import-job status dots */
+html[data-theme="neon"] .settings .dot-running { background: var(--rn-cyan); box-shadow: 0 0 8px var(--rn-cyan); }
+html[data-theme="neon"] .settings .dot-done   { background: var(--rn-lime); box-shadow: 0 0 6px rgba(93, 255, 59, 0.55); }
+html[data-theme="neon"] .settings .dot-failed { background: var(--rn-red); box-shadow: 0 0 6px rgba(255, 93, 122, 0.55); }
+html[data-theme="neon"] .settings tr.job-running { background: rgba(40, 230, 255, 0.04); }
+html[data-theme="neon"] .settings tr.job-failed  { background: rgba(255, 93, 122, 0.05); }
+
+/* Cron status dots — ok → lime, bad → amber, both glowing */
+html[data-theme="neon"] .settings .cron-dot.ok  { background: var(--rn-lime); box-shadow: 0 0 7px rgba(93, 255, 59, 0.55); }
+html[data-theme="neon"] .settings .cron-dot.bad { background: var(--rn-amber); box-shadow: 0 0 7px rgba(255, 181, 46, 0.55); }
+
+/* Live apply progress — phase tints + dots */
+html[data-theme="neon"] .settings .apply-progress {
+  background: rgba(40, 230, 255, 0.06); border-color: rgba(40, 230, 255, 0.25);
+}
+html[data-theme="neon"] .settings .apply-progress.phase-done {
+  background: rgba(93, 255, 59, 0.08); border-color: rgba(93, 255, 59, 0.35);
+}
+html[data-theme="neon"] .settings .apply-progress.phase-failed {
+  background: rgba(255, 93, 122, 0.08); border-color: rgba(255, 93, 122, 0.35);
+}
+html[data-theme="neon"] .settings .apply-dot {
+  background: var(--rn-cyan); box-shadow: 0 0 6px rgba(40, 230, 255, 0.55);
+}
+html[data-theme="neon"] .settings .apply-dot.phase-done {
+  background: var(--rn-lime); box-shadow: 0 0 6px rgba(93, 255, 59, 0.55);
+}
+html[data-theme="neon"] .settings .apply-dot.phase-failed {
+  background: var(--rn-red); box-shadow: 0 0 6px rgba(255, 93, 122, 0.55);
+}
+html[data-theme="neon"] .settings .apply-steps li.done::before { color: var(--rn-lime); }
+html[data-theme="neon"] .settings .apply-steps li.current,
+html[data-theme="neon"] .settings .apply-steps li.current::before { color: var(--rn-cyan); }
 </style>

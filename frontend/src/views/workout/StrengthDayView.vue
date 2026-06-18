@@ -164,4 +164,66 @@ function fmtDate(iso: string): string {
 .rpe-3 { color: #fbbf24; }
 .rpe-4 { color: #84cc16; }
 .rpe-5 { color: #22c55e; }
+
+/* ── Vitality Neon ─────────────────────────────────────────────
+   Neon-only overrides — scoped + gated behind data-theme="neon"
+   so classic light/dark render byte-for-byte unchanged. */
+html[data-theme="neon"] .day-view {
+  --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-cyan: #28e6ff; --rn-amber: #ffb52e;
+  --rn-red: #ff5d7a; --rn-track: #272a3b;
+  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 54px 22px 32px;
+  max-width: none; box-sizing: border-box;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  color: var(--rn-ink); font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+html[data-theme="neon"] .day-view .page-head { max-width: 720px; margin: 0 auto 1rem; }
+html[data-theme="neon"] .day-view .page-head h1 {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 800;
+  letter-spacing: -0.5px; color: var(--rn-ink);
+}
+html[data-theme="neon"] .day-view .back { color: var(--rn-mut); }
+html[data-theme="neon"] .day-view .back:hover { color: var(--rn-cyan); }
+
+html[data-theme="neon"] .day-view > :not(.page-head) { max-width: 720px; margin-left: auto; margin-right: auto; }
+
+html[data-theme="neon"] .day-view .preview-pip {
+  background: rgba(255, 181, 46, 0.16); color: var(--rn-amber);
+  border: 1px solid rgba(255, 181, 46, 0.32);
+}
+html[data-theme="neon"] .day-view .muted,
+html[data-theme="neon"] .day-view .not-found { color: var(--rn-mut); }
+html[data-theme="neon"] .day-view .err { color: var(--rn-red); }
+
+html[data-theme="neon"] .day-view .hero,
+html[data-theme="neon"] .day-view .ex-card,
+html[data-theme="neon"] .day-view .not-found {
+  background: var(--rn-card); border: 1px solid #21243450; border-radius: 18px;
+}
+html[data-theme="neon"] .day-view .split {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-ink);
+}
+html[data-theme="neon"] .day-view .muscles { color: var(--rn-mut); }
+
+html[data-theme="neon"] .day-view .status-pip.completed { color: var(--rn-lime); }
+html[data-theme="neon"] .day-view .status-pip.in_progress { color: var(--rn-amber); }
+html[data-theme="neon"] .day-view .status-pip.skipped { color: var(--rn-mut); }
+html[data-theme="neon"] .day-view .status-pip.planned { color: var(--rn-cyan); }
+
+html[data-theme="neon"] .day-view .ex-name { color: var(--rn-ink); }
+html[data-theme="neon"] .day-view .ex-target {
+  color: var(--rn-mut); font-family: 'Space Grotesk', 'Geist Mono', monospace;
+}
+html[data-theme="neon"] .day-view .sets .num { color: var(--rn-mut); }
+html[data-theme="neon"] .day-view .sets .result {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-ink);
+}
+
+html[data-theme="neon"] .day-view .rpe-1 { color: var(--rn-red); }
+html[data-theme="neon"] .day-view .rpe-2 { color: var(--rn-amber); }
+html[data-theme="neon"] .day-view .rpe-3 { color: var(--rn-amber); }
+html[data-theme="neon"] .day-view .rpe-4 { color: var(--rn-lime); }
+html[data-theme="neon"] .day-view .rpe-5 {
+  color: var(--rn-lime); text-shadow: 0 0 6px rgba(93, 255, 59, 0.45);
+}
 </style>

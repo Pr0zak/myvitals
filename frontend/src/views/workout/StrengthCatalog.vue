@@ -779,4 +779,160 @@ header h1 { margin: 0; }
 @media (max-width: 540px) {
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ============================================================
+   Vitality Neon overrides — scoped to html[data-theme="neon"].
+   Classic light/dark themes are untouched (additive only).
+   Palette: cyan #28e6ff, magenta #ff3ad8, lime #5dff3b,
+   amber #ffb52e, red #ff5d7a, periwinkle #6f7bff,
+   track #272a3b, card #181b27, ink #ececf5, muted #9b9bb0.
+   ============================================================ */
+html[data-theme="neon"] .catalog {
+  --rn-cyan: #28e6ff; --rn-mag: #ff3ad8; --rn-lime: #5dff3b;
+  --rn-amber: #ffb52e; --rn-red: #ff5d7a; --rn-peri: #6f7bff;
+  --rn-track: #272a3b; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 28px 22px 32px;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  color: var(--rn-ink);
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+html[data-theme="neon"] .catalog header h1 {
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+  font-weight: 800; letter-spacing: -0.5px; color: var(--rn-ink);
+}
+
+/* Group headers → Space Grotesk mono-numeric heading rhythm */
+html[data-theme="neon"] .group h2 {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  color: var(--rn-mut); letter-spacing: 0.11em;
+}
+
+/* Search + selects on the obsidian card surface */
+html[data-theme="neon"] .search-input,
+html[data-theme="neon"] .clear-btn,
+html[data-theme="neon"] .muscle-select {
+  background: var(--rn-card); color: var(--rn-ink);
+  border-color: #21243450;
+}
+html[data-theme="neon"] .search-input::placeholder { color: var(--rn-mut); }
+html[data-theme="neon"] .search-input:focus,
+html[data-theme="neon"] .muscle-select:focus {
+  border-color: var(--rn-cyan);
+  box-shadow: 0 0 0 1px rgba(40, 230, 255, 0.35), 0 0 14px rgba(40, 230, 255, 0.18);
+}
+
+/* Filter / category chips — active state glows cyan */
+html[data-theme="neon"] .cat-chip {
+  background: var(--rn-card); color: var(--rn-mut);
+  border-color: #21243450;
+}
+html[data-theme="neon"] .cat-chip:hover {
+  color: var(--rn-ink); border-color: rgba(40, 230, 255, 0.45);
+}
+html[data-theme="neon"] .cat-chip.on {
+  background: rgba(40, 230, 255, 0.14); color: var(--rn-cyan);
+  border-color: rgba(40, 230, 255, 0.5);
+  box-shadow: 0 0 12px rgba(40, 230, 255, 0.22);
+}
+html[data-theme="neon"] .cat-chip.clear { color: var(--rn-mut); }
+
+/* Hints / errors */
+html[data-theme="neon"] .hint { color: var(--rn-mut); }
+html[data-theme="neon"] .hint strong { color: var(--rn-ink); }
+html[data-theme="neon"] .err { color: var(--rn-red); }
+
+/* Row cards on the obsidian surface */
+html[data-theme="neon"] .list li {
+  background: var(--rn-card); border-color: #21243450;
+}
+html[data-theme="neon"] .row-tap:hover .meta strong { color: var(--rn-cyan); }
+html[data-theme="neon"] .meta strong { color: var(--rn-ink); }
+html[data-theme="neon"] .tags {
+  color: var(--rn-mut);
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+}
+
+/* Status accent rails — neon palette */
+html[data-theme="neon"] .list li.fav { border-left-color: var(--rn-amber); }
+html[data-theme="neon"] .list li.disabled { border-left-color: var(--rn-red); }
+html[data-theme="neon"] .list li.avoid { border-left-color: var(--rn-peri); }
+
+/* Muscle-group accents → magenta glyphs / periwinkle yoga */
+html[data-theme="neon"] .list .thumb-mask,
+html[data-theme="neon"] .detail-head .thumb-mask.big {
+  background: var(--rn-mag);
+  box-shadow: inset 0 0 0 999px rgba(255, 58, 216, 0.10);
+}
+html[data-theme="neon"] .muscle-mask { background: var(--rn-mag); }
+html[data-theme="neon"] .muscle-chip { color: var(--rn-mag); }
+html[data-theme="neon"] .list .ph {
+  background: #141726; border-color: #21243450; color: var(--rn-mut);
+}
+html[data-theme="neon"] .list .ph.yoga-ph,
+html[data-theme="neon"] .detail-head .ph.big.yoga-ph {
+  background: rgba(111, 123, 255, 0.10);
+  border: 1px solid rgba(111, 123, 255, 0.30);
+}
+
+/* Done pill → lime "performed", muted "never" */
+html[data-theme="neon"] .done-pill {
+  background: rgba(93, 255, 59, 0.16); color: var(--rn-lime);
+  border-color: rgba(93, 255, 59, 0.35);
+}
+html[data-theme="neon"] .done-pill.never {
+  background: rgba(155, 155, 176, 0.14); color: var(--rn-mut);
+  border-color: rgba(155, 155, 176, 0.28);
+}
+
+/* Action buttons — active states recolored to neon */
+html[data-theme="neon"] .act {
+  background: #141726; border-color: #21243450; color: var(--rn-mut);
+}
+html[data-theme="neon"] .act:hover { color: var(--rn-ink); }
+html[data-theme="neon"] .act.vid:hover { color: var(--rn-cyan); border-color: rgba(40, 230, 255, 0.4); }
+html[data-theme="neon"] .act.fav.on {
+  background: rgba(255, 181, 46, 0.16); color: var(--rn-amber);
+  border-color: rgba(255, 181, 46, 0.4);
+}
+html[data-theme="neon"] .act.avoid.on {
+  background: rgba(111, 123, 255, 0.18); color: var(--rn-peri);
+  border-color: rgba(111, 123, 255, 0.4);
+}
+html[data-theme="neon"] .act.dis.on {
+  background: rgba(255, 93, 122, 0.16); color: var(--rn-red);
+  border-color: rgba(255, 93, 122, 0.4);
+}
+
+/* Detail overlay → neon card chrome */
+html[data-theme="neon"] .detail-panel {
+  background: var(--rn-card); border-color: #21243450;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+}
+html[data-theme="neon"] .detail-close { color: var(--rn-mut); }
+html[data-theme="neon"] .detail-close:hover { color: var(--rn-ink); }
+html[data-theme="neon"] .detail-title h2 { color: var(--rn-ink); }
+html[data-theme="neon"] .detail-tags {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-mut);
+}
+html[data-theme="neon"] .detail-muscles strong { color: var(--rn-ink); }
+html[data-theme="neon"] .detail-section h3 { color: var(--rn-mut); }
+html[data-theme="neon"] .link-btn {
+  background: #141726; color: var(--rn-ink); border-color: #21243450;
+}
+html[data-theme="neon"] .link-btn:hover { color: var(--rn-cyan); border-color: rgba(40, 230, 255, 0.4); }
+html[data-theme="neon"] .detail-head .ph.big {
+  background: #141726; border-color: #21243450; color: var(--rn-mut);
+}
+
+/* Stat tiles → Space Grotesk numerics on the card surface */
+html[data-theme="neon"] .stat {
+  background: #141726; border-color: #21243450;
+}
+html[data-theme="neon"] .stat-label { color: var(--rn-mut); }
+html[data-theme="neon"] .stat-val.mono {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-ink);
+}
+html[data-theme="neon"] .unit-s { color: var(--rn-mut); }
+html[data-theme="neon"] .dim { color: var(--rn-mut); }
+html[data-theme="neon"] .instructions li { color: var(--rn-ink); }
 </style>

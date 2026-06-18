@@ -8,6 +8,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { Play, Pause, RotateCw, Plus, SkipForward, Timer, Check } from "lucide-vue-next";
 import { api } from "@/api/client";
+import { isNeon } from "@/theme";
 import { apiBase, queryToken } from "@/config";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import Card from "@/components/Card.vue";
@@ -633,6 +634,12 @@ function supersetColor(superId: string | null): string {
   // Stable hash → hue
   let h = 0;
   for (let i = 0; i < superId.length; i++) h = (h * 31 + superId.charCodeAt(i)) % 360;
+  if (isNeon.value) {
+    // Neon: map the stable hash onto the accent palette so superset
+    // markers stay on-theme instead of landing on muddy HSL hues.
+    const NEON_SS = ["#28e6ff", "#ff3ad8", "#5dff3b", "#ffb52e", "#6f7bff"];
+    return NEON_SS[h % NEON_SS.length];
+  }
   return `hsl(${h}, 65%, 55%)`;
 }
 function supersetNextUp(wex: StrengthWorkoutExercise): number | null {
@@ -1818,4 +1825,364 @@ button.ghost:hover { color: var(--text); border-color: var(--accent, #ef4444); }
 .cd-sub { color: var(--text-soft); font-size: 0.88rem; line-height: 1.45;
           margin: 0 0 1rem; }
 .cd-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+
+/* ======================================================================
+   Vitality Neon overrides — scoped + neon-only. Classic light/dark are
+   untouched: every rule below is gated on html[data-theme="neon"].
+   Palette: cyan #28e6ff · magenta #ff3ad8 · lime #5dff3b · amber #ffb52e
+   · red #ff5d7a · periwinkle #6f7bff · track #272a3b · card #181b27
+   · ink #ececf5 · muted #9b9bb0.
+   ====================================================================== */
+html[data-theme="neon"] .strength-today {
+  --rn-cyan: #28e6ff; --rn-mag: #ff3ad8; --rn-lime: #5dff3b;
+  --rn-amber: #ffb52e; --rn-red: #ff5d7a; --rn-peri: #6f7bff;
+  --rn-track: #272a3b; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  margin: -1.25rem -1.5rem; padding: 1.25rem 1.5rem 2rem;
+  min-height: 100vh;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  color: var(--rn-ink);
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+html[data-theme="neon"] .strength-today .err { color: #ff5d7a; }
+
+/* Eyebrow + title */
+html[data-theme="neon"] .page-head.compact .eyebrow {
+  color: var(--rn-cyan); font-family: 'Space Grotesk', monospace;
+}
+html[data-theme="neon"] .page-head h1 { color: var(--rn-ink); letter-spacing: -0.3px; }
+html[data-theme="neon"] .head-pip {
+  background: rgba(40,230,255,0.08); color: var(--rn-cyan);
+  border-color: rgba(40,230,255,0.30);
+  font-family: 'Space Grotesk', monospace;
+}
+html[data-theme="neon"] .head-actions .ghost {
+  color: var(--rn-mut); border-color: var(--rn-track);
+  background: rgba(255,255,255,0.02);
+}
+html[data-theme="neon"] .head-actions .ghost:hover {
+  color: var(--rn-cyan); border-color: rgba(40,230,255,0.45);
+}
+html[data-theme="neon"] .swap-menu {
+  background: #161a26; border-color: var(--rn-track);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+}
+html[data-theme="neon"] .swap-item { color: var(--rn-ink); }
+html[data-theme="neon"] .swap-item:hover { background: rgba(40,230,255,0.07); }
+html[data-theme="neon"] .swap-item .dim { color: var(--rn-mut); }
+html[data-theme="neon"] .swap-divider { background: var(--rn-track); }
+
+/* Status pips → neon palette */
+html[data-theme="neon"] .status-pip {
+  background: rgba(255,255,255,0.03); color: var(--rn-mut);
+  border-color: var(--rn-track);
+}
+html[data-theme="neon"] .status-pip.s-completed {
+  color: var(--rn-lime); border-color: rgba(93,255,59,0.35);
+}
+html[data-theme="neon"] .status-pip.s-skipped {
+  color: var(--rn-mut); border-color: rgba(155,155,176,0.35);
+}
+html[data-theme="neon"] .status-pip.s-in_progress {
+  color: var(--rn-amber); border-color: rgba(255,181,46,0.35);
+}
+html[data-theme="neon"] .status-pip.s-paused {
+  color: var(--rn-cyan); border-color: rgba(40,230,255,0.40);
+}
+
+/* Week strip */
+html[data-theme="neon"] .week-strip .day {
+  background: var(--rn-card); border-color: #21243450;
+}
+html[data-theme="neon"] .week-strip .day .dow { color: var(--rn-mut); }
+html[data-theme="neon"] .week-strip .day .dot { background: var(--rn-track); }
+html[data-theme="neon"] .week-strip .day.today {
+  border-color: rgba(40,230,255,0.55);
+  box-shadow: 0 0 0 1px rgba(40,230,255,0.25), 0 0 14px rgba(40,230,255,0.18);
+}
+html[data-theme="neon"] .week-strip .day.today .dow { color: var(--rn-ink); }
+html[data-theme="neon"] .week-strip .day.completed .dot {
+  background: var(--rn-lime); box-shadow: 0 0 6px rgba(93,255,59,0.6);
+}
+html[data-theme="neon"] .week-strip .day.in_progress .dot {
+  background: var(--rn-amber); box-shadow: 0 0 6px rgba(255,181,46,0.6);
+}
+html[data-theme="neon"] .week-strip .day.skipped .dot { background: var(--rn-mut); }
+html[data-theme="neon"] .week-strip .day.planned .dot {
+  background: var(--rn-cyan); box-shadow: 0 0 6px rgba(40,230,255,0.6);
+}
+html[data-theme="neon"] .week-strip .day.projected .dot {
+  background: transparent; border-color: var(--rn-cyan);
+}
+
+/* Rest timer — cyan glow active, lime on done */
+html[data-theme="neon"] .rest-timer {
+  background: rgba(40,230,255,0.06);
+  border-color: rgba(40,230,255,0.30);
+  box-shadow: 0 0 16px rgba(40,230,255,0.10);
+}
+html[data-theme="neon"] .rest-timer .icon-block {
+  background: rgba(40,230,255,0.10); border-color: rgba(40,230,255,0.30);
+  color: var(--rn-cyan);
+}
+html[data-theme="neon"] .rest-timer .big-time {
+  font-family: 'Space Grotesk', monospace; color: var(--rn-ink);
+}
+html[data-theme="neon"] .rest-timer .of { color: var(--rn-mut); }
+html[data-theme="neon"] .rest-timer.done {
+  background: rgba(93,255,59,0.10); border-color: rgba(93,255,59,0.50);
+  box-shadow: 0 0 18px rgba(93,255,59,0.16);
+}
+html[data-theme="neon"] .rest-timer.done .icon-block {
+  background: rgba(93,255,59,0.14); border-color: rgba(93,255,59,0.45);
+  color: var(--rn-lime);
+}
+html[data-theme="neon"] .rest-timer.done .done-text { color: var(--rn-lime); }
+html[data-theme="neon"] .rest-timer .rt-btn {
+  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
+  color: var(--rn-ink);
+}
+html[data-theme="neon"] .rest-timer .rt-btn.ghost { color: var(--rn-mut); }
+html[data-theme="neon"] .rest-timer .rt-btn:hover {
+  color: var(--rn-cyan); border-color: rgba(40,230,255,0.45);
+}
+
+/* Exercise cards */
+html[data-theme="neon"] .ex-card {
+  background: var(--rn-card); border-color: #21243450;
+}
+html[data-theme="neon"] .ex-card.current {
+  border-color: rgba(40,230,255,0.55);
+  box-shadow: 0 0 0 1px rgba(40,230,255,0.20), 0 0 16px rgba(40,230,255,0.12);
+}
+html[data-theme="neon"] .ex-card h3 { color: var(--rn-ink); }
+html[data-theme="neon"] .ss-banner strong { color: var(--rn-ink); }
+html[data-theme="neon"] .prescription {
+  color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
+}
+html[data-theme="neon"] .prescription .rest { color: var(--rn-mut); }
+
+/* Media — neon-tinted exercise silhouette */
+html[data-theme="neon"] .media .ex-thumb {
+  background: var(--rn-cyan);
+  box-shadow: inset 0 0 0 999px rgba(40,230,255,0.10);
+}
+html[data-theme="neon"] .yt { color: var(--rn-mut); }
+html[data-theme="neon"] .yt:hover { color: var(--rn-cyan); }
+html[data-theme="neon"] .swap-btn {
+  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
+  color: var(--rn-mut);
+}
+html[data-theme="neon"] .swap-btn:hover {
+  color: var(--rn-cyan); border-color: rgba(40,230,255,0.45);
+}
+
+/* Sets table — Space Grotesk numerics */
+html[data-theme="neon"] .sets table { font-family: 'Space Grotesk', monospace; }
+html[data-theme="neon"] .sets th { color: var(--rn-mut); border-color: var(--rn-track); }
+html[data-theme="neon"] .sets input {
+  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
+  color: var(--rn-ink); font-family: 'Space Grotesk', monospace;
+}
+html[data-theme="neon"] .sets input:disabled {
+  color: var(--rn-mut); border-color: var(--rn-track);
+}
+
+/* Rating buttons — Hard amber, Good lime, Easy cyan; Failed red */
+html[data-theme="neon"] .rating {
+  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
+  color: var(--rn-mut);
+}
+html[data-theme="neon"] .rating[data-r="1"] { border-color: rgba(255,93,122,0.45); }
+html[data-theme="neon"] .rating[data-r="1"] .num { color: var(--rn-red); }
+html[data-theme="neon"] .rating[data-r="2"] { border-color: rgba(255,181,46,0.45); }
+html[data-theme="neon"] .rating[data-r="2"] .num { color: var(--rn-amber); }
+html[data-theme="neon"] .rating[data-r="3"] { border-color: rgba(255,181,46,0.45); }
+html[data-theme="neon"] .rating[data-r="3"] .num { color: var(--rn-amber); }
+html[data-theme="neon"] .rating[data-r="4"] { border-color: rgba(93,255,59,0.45); }
+html[data-theme="neon"] .rating[data-r="4"] .num { color: var(--rn-lime); }
+html[data-theme="neon"] .rating[data-r="5"] { border-color: rgba(40,230,255,0.45); }
+html[data-theme="neon"] .rating[data-r="5"] .num { color: var(--rn-cyan); }
+
+html[data-theme="neon"] .rating.on[data-r="1"] {
+  background: rgba(255,93,122,0.22); border-color: var(--rn-red);
+  box-shadow: 0 0 12px rgba(255,93,122,0.30);
+}
+html[data-theme="neon"] .rating.on[data-r="1"] .num,
+html[data-theme="neon"] .rating.on[data-r="1"] .rir { color: #fff; }
+html[data-theme="neon"] .rating.on[data-r="2"],
+html[data-theme="neon"] .rating.on[data-r="3"] {
+  background: rgba(255,181,46,0.22); border-color: var(--rn-amber);
+  box-shadow: 0 0 12px rgba(255,181,46,0.30);
+}
+html[data-theme="neon"] .rating.on[data-r="2"] .num,
+html[data-theme="neon"] .rating.on[data-r="2"] .rir,
+html[data-theme="neon"] .rating.on[data-r="3"] .num,
+html[data-theme="neon"] .rating.on[data-r="3"] .rir { color: #0f1118; }
+html[data-theme="neon"] .rating.on[data-r="4"] {
+  background: rgba(93,255,59,0.22); border-color: var(--rn-lime);
+  box-shadow: 0 0 12px rgba(93,255,59,0.30);
+}
+html[data-theme="neon"] .rating.on[data-r="4"] .num,
+html[data-theme="neon"] .rating.on[data-r="4"] .rir { color: #0f1118; }
+html[data-theme="neon"] .rating.on[data-r="5"] {
+  background: rgba(40,230,255,0.22); border-color: var(--rn-cyan);
+  box-shadow: 0 0 12px rgba(40,230,255,0.30);
+}
+html[data-theme="neon"] .rating.on[data-r="5"] .num,
+html[data-theme="neon"] .rating.on[data-r="5"] .rir { color: #0f1118; }
+
+html[data-theme="neon"] .rating-legend { color: var(--rn-mut); }
+html[data-theme="neon"] button.ghost.small.fail {
+  color: var(--rn-red); border-color: rgba(255,93,122,0.35);
+}
+html[data-theme="neon"] button.ghost.small.fail:hover {
+  color: #fff; background: var(--rn-red); border-color: var(--rn-red);
+}
+html[data-theme="neon"] .ok { color: var(--rn-lime); }
+
+/* Done-state chips — rating-tinted */
+html[data-theme="neon"] .done-summary { border-color: var(--rn-track); }
+html[data-theme="neon"] .set-chip {
+  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
+  color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
+}
+html[data-theme="neon"] .set-chip.fail {
+  color: var(--rn-red); border-color: rgba(255,93,122,0.35);
+  background: rgba(255,93,122,0.08);
+}
+html[data-theme="neon"] .set-chip.ok[data-r="1"] {
+  color: var(--rn-red); border-color: rgba(255,93,122,0.35);
+}
+html[data-theme="neon"] .set-chip.ok[data-r="2"],
+html[data-theme="neon"] .set-chip.ok[data-r="3"] {
+  color: var(--rn-amber); border-color: rgba(255,181,46,0.35);
+}
+html[data-theme="neon"] .set-chip.ok[data-r="4"] {
+  color: var(--rn-lime); border-color: rgba(93,255,59,0.35);
+}
+html[data-theme="neon"] .set-chip.ok[data-r="5"] {
+  color: var(--rn-cyan); border-color: rgba(40,230,255,0.35);
+}
+
+/* Timed (yoga) countdown — periwinkle/cyan glow + Space Grotesk */
+html[data-theme="neon"] .countdown-block {
+  background: rgba(111,123,255,0.14);
+  border-color: rgba(111,123,255,0.40);
+  box-shadow: 0 0 14px rgba(111,123,255,0.18);
+}
+html[data-theme="neon"] .countdown {
+  color: var(--rn-peri); font-family: 'Space Grotesk', monospace;
+}
+html[data-theme="neon"] .dim.small { color: var(--rn-mut); }
+
+/* Cardio prescription card */
+html[data-theme="neon"] .cardio-card {
+  background: var(--rn-card); border-color: #21243450;
+  border-left-color: var(--rn-cyan);
+}
+html[data-theme="neon"] .cardio-card h3 { color: var(--rn-ink); }
+html[data-theme="neon"] .cardio-notes { color: var(--rn-ink); }
+html[data-theme="neon"] .cardio-card .hint { color: var(--rn-mut); }
+html[data-theme="neon"] .cardio-card .ok { color: var(--rn-lime); }
+
+/* Modals + drawers */
+html[data-theme="neon"] .modal,
+html[data-theme="neon"] .cd-card {
+  background: #161a26; border-color: var(--rn-track);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+html[data-theme="neon"] .modal h3,
+html[data-theme="neon"] .cd-card h2 { color: var(--rn-ink); }
+html[data-theme="neon"] .modal .hint,
+html[data-theme="neon"] .cd-sub { color: var(--rn-mut); }
+html[data-theme="neon"] .modal .field span { color: var(--rn-mut); }
+html[data-theme="neon"] .modal .field input,
+html[data-theme="neon"] .modal .field select {
+  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
+  color: var(--rn-ink);
+}
+html[data-theme="neon"] .drawer.swap-drawer {
+  background: #11141d; border-left-color: var(--rn-track);
+}
+html[data-theme="neon"] .drawer.swap-drawer h2 { color: var(--rn-ink); }
+html[data-theme="neon"] .alts li {
+  background: var(--rn-card); border-color: var(--rn-track);
+}
+html[data-theme="neon"] .alts li:hover { border-color: rgba(40,230,255,0.45); }
+html[data-theme="neon"] .alts li strong { color: var(--rn-ink); }
+html[data-theme="neon"] .alts li .tags {
+  color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
+}
+
+/* Buttons */
+html[data-theme="neon"] button.primary {
+  background: var(--rn-cyan); color: #0f1118; border-color: var(--rn-cyan);
+  box-shadow: 0 0 14px rgba(40,230,255,0.25);
+}
+html[data-theme="neon"] button.primary:hover { box-shadow: 0 0 18px rgba(40,230,255,0.40); }
+html[data-theme="neon"] button.ghost {
+  color: var(--rn-ink); border-color: var(--rn-track);
+}
+html[data-theme="neon"] button.ghost:hover {
+  color: var(--rn-cyan); border-color: rgba(40,230,255,0.45);
+}
+html[data-theme="neon"] .big-btn small { color: rgba(15,17,24,0.7); }
+
+/* Banners */
+html[data-theme="neon"] .paused-banner {
+  background: rgba(40,230,255,0.07);
+  border-color: rgba(40,230,255,0.35);
+  border-left-color: var(--rn-cyan);
+  color: var(--rn-ink);
+}
+html[data-theme="neon"] .paused-icon { color: var(--rn-cyan); }
+html[data-theme="neon"] .stale-banner {
+  background: rgba(255,181,46,0.07);
+  border-color: rgba(255,181,46,0.35);
+  border-left-color: var(--rn-amber);
+  color: var(--rn-ink);
+}
+html[data-theme="neon"] .stale-icon { color: var(--rn-amber); }
+html[data-theme="neon"] .fast-banner {
+  background: rgba(255,181,46,0.08);
+  border-color: rgba(255,181,46,0.38);
+  border-left: 3px solid var(--rn-amber);
+  border-radius: 8px;
+  color: var(--rn-ink);
+  box-shadow: 0 0 14px rgba(255,181,46,0.10);
+}
+html[data-theme="neon"] .fast-icon { color: var(--rn-amber); }
+html[data-theme="neon"] .fast-text strong { color: var(--rn-amber); }
+html[data-theme="neon"] .skip-banner { border-left-color: var(--rn-mut); }
+
+/* Review card tones */
+html[data-theme="neon"] .review-card {
+  background: var(--rn-card); border-color: var(--rn-track);
+}
+html[data-theme="neon"] .review-card.tone-good { border-color: rgba(93,255,59,0.40); }
+html[data-theme="neon"] .review-card.tone-warn { border-color: rgba(255,181,46,0.45); }
+html[data-theme="neon"] .review-card.tone-bad { border-color: rgba(255,93,122,0.45); }
+html[data-theme="neon"] .review-card h3 { color: var(--rn-ink); }
+html[data-theme="neon"] .review-card .cn { color: var(--rn-amber); }
+html[data-theme="neon"] .review-card .cached {
+  color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
+}
+
+/* Upcoming cards */
+html[data-theme="neon"] .upcoming h3 { color: var(--rn-mut); }
+html[data-theme="neon"] .up-card {
+  background: var(--rn-card); border-color: var(--rn-track);
+}
+html[data-theme="neon"] .up-head strong { color: var(--rn-ink); }
+html[data-theme="neon"] .up-head .focus {
+  color: var(--rn-cyan); font-family: 'Space Grotesk', monospace;
+}
+html[data-theme="neon"] .up-card .more { color: var(--rn-mut); }
+
+/* Misc text */
+html[data-theme="neon"] .hint,
+html[data-theme="neon"] .hint.subtle,
+html[data-theme="neon"] .ctx-meta,
+html[data-theme="neon"] .dim { color: var(--rn-mut); }
+html[data-theme="neon"] .big { color: var(--rn-ink); }
 </style>

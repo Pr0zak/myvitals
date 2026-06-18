@@ -7,7 +7,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
-import { chartTheme } from "@/theme";
+import { chartTheme, isNeon } from "@/theme";
 
 const days = ref<number>(90);
 const loading = ref(true);
@@ -44,13 +44,15 @@ watch(stats, (s) => {
   }
 });
 
-// Match the existing dashboard's volume colour
-const VOLUME_COLOR = "#a855f7";
+// Match the existing dashboard's volume colour (neon → magenta).
+const VOLUME_COLOR = computed(() => (isNeon.value ? "#ff3ad8" : "#a855f7"));
 
 const dailyOption = computed(() => {
   const t = chartTheme.value;
   const s = stats.value;
+  void isNeon.value;
   if (!s || s.daily.length < 2) return null;
+  const vol = VOLUME_COLOR.value;
   return {
     grid: { left: 56, right: 16, top: 24, bottom: 32 },
     tooltip: { trigger: "axis", ...t.tooltip },
@@ -66,9 +68,9 @@ const dailyOption = computed(() => {
       name: "Volume", type: "line",
       smooth: true, symbol: "circle", symbolSize: 4,
       data: s.daily.map((d) => d.volume_lb),
-      lineStyle: { color: VOLUME_COLOR, width: 2 },
-      itemStyle: { color: VOLUME_COLOR },
-      areaStyle: { color: VOLUME_COLOR, opacity: 0.18 },
+      lineStyle: { color: vol, width: 2 },
+      itemStyle: { color: vol },
+      areaStyle: { color: vol, opacity: 0.18 },
     }],
   };
 });
@@ -80,13 +82,22 @@ const MUSCLE_COLOURS: Record<string, string> = {
   calves: "#84cc16", abdominals: "#fbbf24",
   forearms: "#94a3b8", lats: "#3b82f6", traps: "#3b82f6",
 };
+const MUSCLE_COLOURS_NEON: Record<string, string> = {
+  chest: "#ff5d7a", back: "#28e6ff", shoulders: "#ffb52e",
+  biceps: "#ff3ad8", triceps: "#6f7bff",
+  quadriceps: "#5dff3b", hamstrings: "#28e6ff", glutes: "#ff3ad8",
+  calves: "#5dff3b", abdominals: "#ffb52e",
+  forearms: "#9b9bb0", lats: "#28e6ff", traps: "#28e6ff",
+};
 function muscleColor(m: string): string {
-  return MUSCLE_COLOURS[m.toLowerCase()] ?? "#64748b";
+  const map = isNeon.value ? MUSCLE_COLOURS_NEON : MUSCLE_COLOURS;
+  return map[m.toLowerCase()] ?? (isNeon.value ? "#6f7bff" : "#64748b");
 }
 
 const muscleOption = computed(() => {
   const t = chartTheme.value;
   const s = stats.value;
+  void isNeon.value;
   if (!s || !s.per_muscle.length) return null;
   return {
     grid: { left: 100, right: 24, top: 8, bottom: 24 },
@@ -112,9 +123,11 @@ const muscleOption = computed(() => {
 const progressionOption = computed(() => {
   const t = chartTheme.value;
   const s = stats.value;
+  void isNeon.value;
   if (!s || !selectedExercise.value) return null;
   const pts = s.progression[selectedExercise.value] ?? [];
   if (pts.length < 2) return null;
+  const prog = isNeon.value ? "#ff5d7a" : "#ef4444";
   return {
     grid: { left: 56, right: 16, top: 24, bottom: 32 },
     tooltip: { trigger: "axis", ...t.tooltip,
@@ -128,8 +141,8 @@ const progressionOption = computed(() => {
       name: "Top weight", type: "line",
       smooth: false, symbol: "circle", symbolSize: 6,
       data: pts.map((p) => p.top_weight_lb),
-      lineStyle: { color: "#ef4444", width: 2 },
-      itemStyle: { color: "#ef4444" },
+      lineStyle: { color: prog, width: 2 },
+      itemStyle: { color: prog },
     }],
   };
 });
@@ -221,4 +234,38 @@ header h1 { margin: 0; font-size: 1.25rem; }
 .picker select { background: var(--bg-2); color: var(--text);
                  border: 1px solid var(--line);
                  padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.85rem; }
+
+/* ---- Vitality Neon (neon-only; classic themes untouched) ---- */
+html[data-theme="neon"] .charts {
+  --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  --rn-mag: #ff3ad8; --rn-track: #272a3b;
+  min-height: 100vh; max-width: 880px; margin: -1.25rem auto 0;
+  padding: 1.5rem 1.5rem 2rem;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  color: var(--rn-ink);
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+html[data-theme="neon"] .charts header h1 {
+  font-weight: 800; letter-spacing: -0.5px; color: var(--rn-ink);
+}
+html[data-theme="neon"] .charts .range {
+  border: 1px solid #ffffff14; background: #ffffff08; color: var(--rn-mut);
+  border-radius: 999px;
+}
+html[data-theme="neon"] .charts .range.on {
+  background: rgba(255, 58, 216, 0.16); color: var(--rn-mag);
+  border-color: rgba(255, 58, 216, 0.45);
+  box-shadow: 0 0 12px rgba(255, 58, 216, 0.28);
+}
+html[data-theme="neon"] .charts .muted,
+html[data-theme="neon"] .charts .lbl { color: var(--rn-mut); }
+html[data-theme="neon"] .charts .err { color: #ff5d7a; }
+html[data-theme="neon"] .charts .val {
+  font-family: 'Space Grotesk', 'Geist Mono', ui-monospace, monospace;
+  letter-spacing: -0.5px; color: var(--rn-ink);
+}
+html[data-theme="neon"] .charts .picker select {
+  background: #ffffff08; color: var(--rn-ink);
+  border: 1px solid #ffffff14; border-radius: 10px;
+}
 </style>

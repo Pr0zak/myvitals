@@ -11,7 +11,7 @@ import { api } from "@/api/client";
 import { queryToken } from "@/config";
 import Card from "@/components/Card.vue";
 import MuscleVolume from "@/components/MuscleVolume.vue";
-import { chartTheme } from "@/theme";
+import { chartTheme, isNeon } from "@/theme";
 import type { StrengthExercise, StrengthWorkoutDetail } from "@/api/types";
 
 interface ListItem {
@@ -98,6 +98,13 @@ const FOCUS_COLOR: Record<string, string> = {
   cardio: "#38bdf8",
 };
 function focusColor(focus: string): string {
+  // Neon: strength→magenta, yoga→periwinkle, cardio→cyan. Classic
+  // values preserved byte-for-byte when not in the neon skin.
+  if (isNeon.value) {
+    if (focus.toLowerCase() === "yoga") return "#6f7bff";
+    if (focus.toLowerCase() === "cardio") return "#28e6ff";
+    return "#ff3ad8"; // strength split
+  }
   if (focus.toLowerCase() === "yoga") return FOCUS_COLOR.yoga;
   if (focus.toLowerCase() === "cardio") return FOCUS_COLOR.cardio;
   return "#ef4444"; // strength split
@@ -105,7 +112,9 @@ function focusColor(focus: string): string {
 
 const calendarOption = computed(() => {
   void chartTheme.value;
+  void isNeon.value;
   const t = chartTheme.value;
+  const neon = isNeon.value;
   const completed = items.value.filter((it) => it.status === "completed");
   if (completed.length === 0) return null;
   // Encode a small numeric offset per day so the visualMap can map it
@@ -127,8 +136,9 @@ const calendarOption = computed(() => {
     cellSize: ["auto", 14] as [string, number],
     range: y,
     itemStyle: {
-      color: "#1a2332",
-      borderColor: "rgba(148, 163, 184, 0.12)", borderWidth: 1,
+      color: neon ? "#181b27" : "#1a2332",
+      borderColor: neon ? "rgba(39, 42, 59, 0.9)" : "rgba(148, 163, 184, 0.12)",
+      borderWidth: 1,
     },
     splitLine: { show: false },
     yearLabel: { show: true, color: t.axisLabel.color, fontSize: 11,
@@ -154,11 +164,17 @@ const calendarOption = computed(() => {
     },
     visualMap: {
       type: "piecewise" as const,
-      pieces: [
-        { value: 1, color: "#ef4444", label: "Strength" },
-        { value: 2, color: "#a78bfa", label: "Yoga" },
-        { value: 3, color: "#38bdf8", label: "Cardio" },
-      ],
+      pieces: neon
+        ? [
+            { value: 1, color: "#ff3ad8", label: "Strength" },
+            { value: 2, color: "#6f7bff", label: "Yoga" },
+            { value: 3, color: "#28e6ff", label: "Cardio" },
+          ]
+        : [
+            { value: 1, color: "#ef4444", label: "Strength" },
+            { value: 2, color: "#a78bfa", label: "Yoga" },
+            { value: 3, color: "#38bdf8", label: "Cardio" },
+          ],
       orient: "horizontal", show: true, top: 0, right: 12,
       textStyle: { color: t.axisLabel.color, fontSize: 11 },
       itemWidth: 12, itemHeight: 12,
@@ -343,4 +359,88 @@ h2 { margin: 1.2rem 0 0.6rem; font-size: 0.85rem;
 .rating[data-r="4"] { background: rgba(132,204,22,0.2); color: #84cc16; }
 .rating[data-r="5"] { background: rgba(34,197,94,0.2); color: #22c55e; }
 .unit { color: var(--muted); }
+
+/* ============================================================
+   Vitality Neon — scoped overrides (html[data-theme="neon"] only).
+   Classic / light / dark themes are byte-for-byte unchanged.
+   ============================================================ */
+html[data-theme="neon"] .strength-history {
+  --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  --rn-cyan: #28e6ff; --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-amber: #ffb52e;
+  --rn-red: #ff5d7a; --rn-peri: #6f7bff; --rn-track: #272a3b;
+  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 1.25rem 1.5rem;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui; color: var(--rn-ink);
+}
+html[data-theme="neon"] .strength-history h1 { color: var(--rn-ink); }
+html[data-theme="neon"] .strength-history h2 { color: var(--rn-mut); }
+html[data-theme="neon"] .strength-history .hint { color: var(--rn-mut); }
+html[data-theme="neon"] .strength-history .err { color: var(--rn-red); }
+
+/* Session rows — obsidian cards with faint neon edge, cyan on hover */
+html[data-theme="neon"] .strength-history .list li {
+  background: var(--rn-card); border-color: #21243450; border-radius: 14px;
+}
+html[data-theme="neon"] .strength-history .list li:hover {
+  border-color: rgba(40, 230, 255, 0.45);
+}
+html[data-theme="neon"] .strength-history .list li.status-in_progress {
+  border-color: rgba(40, 230, 255, 0.55);
+}
+html[data-theme="neon"] .strength-history .date strong {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  letter-spacing: -0.3px; color: var(--rn-ink);
+}
+html[data-theme="neon"] .strength-history .meta { color: var(--rn-mut); }
+
+/* Status swatches → neon zone palette
+   completed→lime · in_progress→cyan · skipped→amber · planned→muted */
+html[data-theme="neon"] .strength-history .list li.status-completed .status,
+html[data-theme="neon"] .strength-history .ctx .status.status-completed { color: var(--rn-lime); }
+html[data-theme="neon"] .strength-history .list li.status-in_progress .status,
+html[data-theme="neon"] .strength-history .ctx .status.status-in_progress { color: var(--rn-cyan); }
+html[data-theme="neon"] .strength-history .list li.status-skipped .status,
+html[data-theme="neon"] .strength-history .ctx .status.status-skipped { color: var(--rn-amber); }
+html[data-theme="neon"] .strength-history .list li.status-planned .status,
+html[data-theme="neon"] .strength-history .ctx .status.status-planned { color: var(--rn-mut); }
+
+/* Detail drawer → obsidian surfaces */
+html[data-theme="neon"] .strength-history .drawer {
+  background: var(--rn-bg);
+  border-left-color: rgba(40, 230, 255, 0.18);
+}
+html[data-theme="neon"] .strength-history .drawer header h2 { color: var(--rn-ink); }
+html[data-theme="neon"] .strength-history .drawer header h2 small { color: var(--rn-mut); }
+html[data-theme="neon"] .strength-history .close { color: var(--rn-mut); }
+html[data-theme="neon"] .strength-history .ctx { color: var(--rn-mut); }
+html[data-theme="neon"] .strength-history .ctx .status {
+  background: var(--rn-card); border-color: #21243450;
+}
+html[data-theme="neon"] .strength-history .ctx .metric {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-ink);
+}
+html[data-theme="neon"] .strength-history .ex { border-bottom-color: #21243450; }
+html[data-theme="neon"] .strength-history .ex h3 { color: var(--rn-ink); }
+html[data-theme="neon"] .strength-history .ex h3 small { color: var(--rn-mut); }
+html[data-theme="neon"] .strength-history .target { color: var(--rn-mut); }
+html[data-theme="neon"] .strength-history .target .rest { color: var(--rn-mut); }
+html[data-theme="neon"] .strength-history .sets {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+}
+html[data-theme="neon"] .strength-history .sets thead th {
+  color: var(--rn-mut); border-bottom-color: #21243450;
+}
+html[data-theme="neon"] .strength-history .unit { color: var(--rn-mut); }
+
+/* Set-rating swatches → neon ramp (red→amber→lime, failed→good) */
+html[data-theme="neon"] .strength-history .rating[data-r="1"] {
+  background: rgba(255, 93, 122, 0.18); color: var(--rn-red); }
+html[data-theme="neon"] .strength-history .rating[data-r="2"] {
+  background: rgba(255, 181, 46, 0.18); color: var(--rn-amber); }
+html[data-theme="neon"] .strength-history .rating[data-r="3"] {
+  background: rgba(255, 181, 46, 0.18); color: var(--rn-amber); }
+html[data-theme="neon"] .strength-history .rating[data-r="4"] {
+  background: rgba(93, 255, 59, 0.18); color: var(--rn-lime); }
+html[data-theme="neon"] .strength-history .rating[data-r="5"] {
+  background: rgba(93, 255, 59, 0.18); color: var(--rn-lime); }
 </style>

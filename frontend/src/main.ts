@@ -20,6 +20,7 @@ const router = createRouter({
   },
   routes: [
     { path: "/", name: "today", component: () => import("./views/Today.vue") },
+    { path: "/rings", name: "rings", component: () => import("./views/Rings.vue") },
     { path: "/trends", name: "trends", component: () => import("./views/Trends.vue") },
     { path: "/sleep", name: "sleep", component: () => import("./views/Sleep.vue") },
     { path: "/heart-rate", name: "heart-rate", component: () => import("./views/HeartRate.vue") },

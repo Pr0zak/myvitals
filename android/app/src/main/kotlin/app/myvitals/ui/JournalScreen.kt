@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
+import app.myvitals.ui.neon.NeonMV
 import app.myvitals.sync.Annotation
 import app.myvitals.sync.AnnotationCreate
 import app.myvitals.sync.BackendClient
@@ -92,6 +93,15 @@ private val QUICK_ADDS = listOf(
 
 @Composable
 fun JournalScreen(settings: SettingsRepository, onBack: () -> Unit) {
+    val neon = settings.neonShellEnabled
+    val bg      = if (neon) NeonMV.Bg    else MV.Bg
+    val card    = if (neon) NeonMV.Card  else MV.SurfaceContainer
+    val ink     = if (neon) NeonMV.Ink   else MV.OnSurface
+    val muted   = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val dim     = if (neon) NeonMV.Muted else MV.OnSurfaceDim
+    val accent  = if (neon) NeonMV.Cyan  else MV.BrandRed
+    val errorColor = if (neon) NeonMV.Bad else MV.Red
+
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     var rows by remember { mutableStateOf<List<Annotation>>(emptyList()) }
@@ -148,28 +158,28 @@ fun JournalScreen(settings: SettingsRepository, onBack: () -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(MV.Bg)) {
+    Column(Modifier.fillMaxSize().background(bg)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = MV.OnSurface)
+                    tint = ink)
             }
-            Icon(Icons.Outlined.Note, contentDescription = null, tint = MV.OnSurface,
+            Icon(Icons.Outlined.Note, contentDescription = null, tint = ink,
                 modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Journal", color = MV.OnSurface, fontSize = 16.sp,
+            Text("Journal", color = ink, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+            colors = CardDefaults.cardColors(containerColor = card),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         ) {
             Column(Modifier.padding(14.dp)) {
-                Text("QUICK LOG", color = MV.OnSurfaceVariant,
+                Text("QUICK LOG", color = if (neon) accent else muted,
                     fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                 Spacer(Modifier.height(10.dp))
                 // Wrap by row of three so labels stay readable on narrow screens.
@@ -184,6 +194,7 @@ fun JournalScreen(settings: SettingsRepository, onBack: () -> Unit) {
                                 flash = flash == q.kind,
                                 enabled = busy == null,
                                 onClick = { quickAdd(q) },
+                                neon = neon,
                                 modifier = Modifier.weight(1f),
                             )
                         }
@@ -193,7 +204,7 @@ fun JournalScreen(settings: SettingsRepository, onBack: () -> Unit) {
                 }
                 if (error != null) {
                     Spacer(Modifier.height(8.dp))
-                    Text(error!!, color = MV.Red, fontSize = 11.sp)
+                    Text(error!!, color = errorColor, fontSize = 11.sp)
                 }
             }
         }
@@ -207,12 +218,12 @@ fun JournalScreen(settings: SettingsRepository, onBack: () -> Unit) {
             if (rows.isEmpty()) {
                 item {
                     Text("No entries yet — tap a quick-log above.",
-                        color = MV.OnSurfaceDim, fontSize = 12.sp,
+                        color = dim, fontSize = 12.sp,
                         modifier = Modifier.padding(8.dp))
                 }
             } else {
                 items(rows, key = { it.id }) { a ->
-                    JournalRow(a)
+                    JournalRow(a, neon = neon)
                 }
             }
         }
@@ -226,14 +237,19 @@ private fun QuickButton(
     flash: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
+    neon: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val flashFill   = if (neon) NeonMV.Lime.copy(alpha = 0.16f) else Color(0x2922C55E)
+    val flashBorder = if (neon) NeonMV.Lime.copy(alpha = 0.55f) else Color(0x8C22C55E)
     val bg = when {
-        flash -> Color(0x2922C55E)
-        busy  -> MV.SurfaceContainerHigh
-        else  -> MV.SurfaceContainerLow
+        flash -> flashFill
+        busy  -> if (neon) NeonMV.CardHigh else MV.SurfaceContainerHigh
+        else  -> if (neon) NeonMV.Card     else MV.SurfaceContainerLow
     }
-    val borderColor = if (flash) Color(0x8C22C55E) else MV.OutlineVariant
+    val borderColor = if (flash) flashBorder
+        else if (neon) NeonMV.Line else MV.OutlineVariant
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
     Card(
         colors = CardDefaults.cardColors(containerColor = bg),
         modifier = modifier
@@ -246,17 +262,21 @@ private fun QuickButton(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(q.icon, contentDescription = q.label, tint = MV.OnSurface,
+            Icon(q.icon, contentDescription = q.label, tint = ink,
                 modifier = Modifier.size(18.dp))
             Spacer(Modifier.height(3.dp))
-            Text(q.label, color = MV.OnSurface, fontSize = 10.sp,
+            Text(q.label, color = ink, fontSize = 10.sp,
                 fontWeight = FontWeight.Medium, maxLines = 1)
         }
     }
 }
 
 @Composable
-private fun JournalRow(a: Annotation) {
+private fun JournalRow(a: Annotation, neon: Boolean) {
+    val card  = if (neon) NeonMV.Card  else MV.SurfaceContainer
+    val ink   = if (neon) NeonMV.Ink   else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val dim   = if (neon) NeonMV.Muted else MV.OnSurfaceDim
     val whenLabel = remember(a.ts) {
         runCatching {
             val t = Instant.parse(a.ts).toEpochMilli()
@@ -281,23 +301,33 @@ private fun JournalRow(a: Annotation) {
         "meds"     -> Icons.Outlined.MedicalServices
         else        -> Icons.Outlined.Note
     }
+    // Under neon, give each entry-type pill a domain-semantic accent;
+    // classic keeps the flat muted tint byte-for-byte.
+    val iconTint = if (neon) when (a.type) {
+        "caffeine" -> NeonMV.Cyan
+        "alcohol"  -> NeonMV.Amber
+        "food"     -> NeonMV.Amber
+        "mood"     -> NeonMV.Magenta
+        "meds"     -> NeonMV.Cyan
+        else        -> NeonMV.Muted
+    } else MV.OnSurfaceVariant
     Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        colors = CardDefaults.cardColors(containerColor = card),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = null, tint = MV.OnSurfaceVariant,
+            Icon(icon, contentDescription = null, tint = iconTint,
                 modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(a.type.replaceFirstChar { it.titlecase() },
-                    color = MV.OnSurface, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                Text(summary, color = MV.OnSurfaceVariant, fontSize = 11.sp, maxLines = 1)
+                    color = ink, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(summary, color = muted, fontSize = 11.sp, maxLines = 1)
             }
-            Text(whenLabel, color = MV.OnSurfaceDim, fontSize = 11.sp)
+            Text(whenLabel, color = dim, fontSize = 11.sp)
         }
     }
 }

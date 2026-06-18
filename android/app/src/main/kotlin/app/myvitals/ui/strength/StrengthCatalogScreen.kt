@@ -59,6 +59,7 @@ import app.myvitals.strength.StrengthRepository
 import app.myvitals.sync.EquipmentPayload
 import app.myvitals.sync.StrengthExerciseInfo
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonMV
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -73,6 +74,26 @@ fun StrengthCatalogScreen(
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember(settings) { StrengthRepository(context, settings) }
+
+    // Vitality Neon — when the neon shell is active these screens adopt the
+    // neon palette; when it's off every color stays byte-for-byte classic.
+    val neon = settings.neonShellEnabled
+    val accent      = if (neon) NeonMV.Cyan    else MV.BrandRed
+    val bg          = if (neon) NeonMV.Bg      else MV.Bg
+    val card        = if (neon) NeonMV.Card    else MV.SurfaceContainer
+    val cardHigh    = if (neon) NeonMV.CardHigh else MV.SurfaceContainerHigh
+    val cardLow     = if (neon) NeonMV.Bg      else MV.SurfaceContainerLow
+    val ink         = if (neon) NeonMV.Ink     else MV.OnSurface
+    val muted       = if (neon) NeonMV.Muted   else MV.OnSurfaceVariant
+    val dim         = if (neon) NeonMV.Muted   else MV.OnSurfaceDim
+    val outline     = if (neon) NeonMV.Line    else MV.OutlineVariant
+    val good        = if (neon) NeonMV.Lime    else MV.Green
+    val favColor    = if (neon) NeonMV.Amber   else MV.Amber
+    val badColor    = if (neon) NeonMV.Bad     else MV.Red
+    // Exercise tag / muscle / icon tint — violet silhouettes become cyan
+    // under neon to cohere with the heart/info accent family.
+    val iconTint    = if (neon) NeonMV.Cyan    else Color(0xFFA78BFA)
+    val iconTintBg  = if (neon) NeonMV.Cyan.copy(alpha = 0.08f) else Color(0x14A78BFA)
 
     var catalog by remember { mutableStateOf<List<StrengthExerciseInfo>>(emptyList()) }
     var equipment by remember { mutableStateOf<EquipmentPayload?>(null) }
@@ -252,22 +273,22 @@ fun StrengthCatalogScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(MV.Bg).padding(horizontal = 16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().background(bg).padding(horizontal = 16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MV.OnSurface)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = ink)
             }
             Text(
                 "Workout catalog",
-                color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                color = ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
             )
         }
         Text(
             "⭐ favorite · 👎 avoid · 🚫 disabled · tap to toggle",
-            color = MV.OnSurfaceDim, fontSize = 11.sp,
+            color = dim, fontSize = 11.sp,
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
         )
 
@@ -275,19 +296,19 @@ fun StrengthCatalogScreen(
             value = search,
             onValueChange = { search = it },
             placeholder = { Text("Search by name, muscle, equipment…",
-                fontSize = 13.sp, color = MV.OnSurfaceVariant) },
+                fontSize = 13.sp, color = muted) },
             singleLine = true,
             trailingIcon = if (search.isNotEmpty()) {
                 {
                     IconButton(onClick = { search = "" }) {
                         Icon(Icons.Outlined.Close, contentDescription = "Clear",
-                            tint = MV.OnSurfaceVariant)
+                            tint = muted)
                     }
                 }
             } else null,
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             textStyle = androidx.compose.ui.text.TextStyle(
-                color = MV.OnSurface, fontSize = 14.sp,
+                color = ink, fontSize = 14.sp,
             ),
         )
 
@@ -313,9 +334,9 @@ fun StrengthCatalogScreen(
                 Box(
                     Modifier
                         .clip(RoundedCornerShape(50))
-                        .background(if (on) MV.BrandRed.copy(alpha = 0.18f) else MV.SurfaceContainer)
+                        .background(if (on) accent.copy(alpha = 0.18f) else card)
                         .border(1.dp,
-                            if (on) MV.BrandRed.copy(alpha = 0.5f) else MV.OutlineVariant,
+                            if (on) accent.copy(alpha = 0.5f) else outline,
                             RoundedCornerShape(50))
                         .clickable {
                             activeCategories[key] = !(activeCategories[key] ?: false)
@@ -323,7 +344,7 @@ fun StrengthCatalogScreen(
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                 ) {
                     Text(label,
-                        color = if (on) MV.BrandRed else MV.OnSurfaceVariant,
+                        color = if (on) accent else muted,
                         fontSize = 11.sp)
                 }
             }
@@ -340,7 +361,7 @@ fun StrengthCatalogScreen(
                     if (muscleFilter.isEmpty()) "All muscle groups"
                     else if (muscleFilter == "flexibility") "yoga / mobility"
                     else muscleFilter.replace('_', ' '),
-                    color = MV.OnSurface, fontSize = 13.sp,
+                    color = ink, fontSize = 13.sp,
                 )
             }
             DropdownMenu(
@@ -380,7 +401,7 @@ fun StrengthCatalogScreen(
                 Text(
                     sortLabels.firstOrNull { it.first == sortBy }?.second
                         ?: "Sort: A-Z by muscle",
-                    color = MV.OnSurface, fontSize = 13.sp,
+                    color = ink, fontSize = 13.sp,
                 )
             }
             DropdownMenu(
@@ -397,15 +418,15 @@ fun StrengthCatalogScreen(
         }
 
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant)
-            error != null -> Text(error!!, color = MV.Red)
+            loading -> Text("Loading…", color = muted)
+            error != null -> Text(error!!, color = badColor)
             visible.isEmpty() && search.isNotBlank() -> Text(
                 "No matches for \"$search\".",
-                color = MV.OnSurfaceVariant,
+                color = muted,
             )
             visible.isEmpty() -> Text(
                 "No available exercises — check your equipment in Settings.",
-                color = MV.OnSurfaceVariant,
+                color = muted,
             )
             else -> LazyColumn(
                 contentPadding = PaddingValues(bottom = 24.dp),
@@ -416,9 +437,9 @@ fun StrengthCatalogScreen(
                     Card(
                         colors = CardDefaults.cardColors(
                             containerColor = when (pref) {
-                                "favorite" -> MV.SurfaceContainerHigh
-                                "disabled" -> MV.SurfaceContainerLow
-                                else -> MV.SurfaceContainer
+                                "favorite" -> cardHigh
+                                "disabled" -> cardLow
+                                else -> card
                             },
                         ),
                         modifier = Modifier
@@ -426,9 +447,9 @@ fun StrengthCatalogScreen(
                             .border(
                                 width = if (pref != null) 2.dp else 0.dp,
                                 color = when (pref) {
-                                    "favorite" -> MV.Amber
-                                    "disabled" -> MV.Red
-                                    "avoid" -> MV.OnSurfaceVariant
+                                    "favorite" -> favColor
+                                    "disabled" -> badColor
+                                    "avoid" -> muted
                                     else -> Color.Transparent
                                 },
                                 shape = RoundedCornerShape(12.dp),
@@ -473,7 +494,7 @@ fun StrengthCatalogScreen(
                                     Modifier
                                         .size(36.dp)
                                         .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0x14A78BFA)),
+                                        .background(iconTintBg),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     AsyncImage(
@@ -482,7 +503,7 @@ fun StrengthCatalogScreen(
                                         modifier = if (isPhoto) Modifier.size(36.dp)
                                                    else Modifier.size(28.dp),
                                         colorFilter = if (isPhoto) null
-                                                      else ColorFilter.tint(Color(0xFFA78BFA)),
+                                                      else ColorFilter.tint(iconTint),
                                     )
                                 }
                                 Spacer(Modifier.width(8.dp))
@@ -492,26 +513,27 @@ fun StrengthCatalogScreen(
                                     Modifier
                                         .size(36.dp)
                                         .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0x14A78BFA)),
+                                        .background(iconTintBg),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     app.myvitals.ui.YogaPoseIcon(
                                         id = ex.id, size = 26.dp,
-                                        tint = Color(0xFFA78BFA),
+                                        tint = iconTint,
                                     )
                                 }
                                 Spacer(Modifier.width(8.dp))
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(ex.name, color = MV.OnSurface, fontSize = 14.sp,
+                                    Text(ex.name, color = ink, fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         modifier = Modifier.weight(1f, fill = false))
                                     val count = statsSummary[ex.id]?.timesPerformed ?: 0
                                     val pillBg = if (count > 0)
-                                        Color(0x2D22C55E) else Color(0x26B0BEC5)
+                                        (if (neon) NeonMV.Lime.copy(alpha = 0.18f) else Color(0x2D22C55E))
+                                        else (if (neon) NeonMV.Muted.copy(alpha = 0.15f) else Color(0x26B0BEC5))
                                     val pillFg = if (count > 0)
-                                        Color(0xFF22C55E) else MV.OnSurfaceVariant
+                                        good else muted
                                     Spacer(Modifier.width(6.dp))
                                     Box(
                                         Modifier
@@ -533,7 +555,7 @@ fun StrengthCatalogScreen(
                                             model = baseUrl + musclePath,
                                             contentDescription = null,
                                             modifier = Modifier.size(12.dp),
-                                            colorFilter = ColorFilter.tint(Color(0xFFA78BFA)),
+                                            colorFilter = ColorFilter.tint(iconTint),
                                         )
                                         Spacer(Modifier.width(3.dp))
                                     }
@@ -541,7 +563,7 @@ fun StrengthCatalogScreen(
                                         "${ex.movementPattern.replace('_', ' ')} · " +
                                           "${muscleIconLabel(ex.primaryMuscle).ifEmpty { ex.primaryMuscle }} · " +
                                           ex.level,
-                                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                                        color = muted, fontSize = 11.sp,
                                     )
                                 }
                             }
@@ -570,20 +592,23 @@ fun StrengthCatalogScreen(
                                 Icon(
                                     Icons.Filled.PlayArrow,
                                     contentDescription = "Watch on YouTube",
-                                    tint = MV.OnSurfaceVariant,
+                                    tint = muted,
                                 )
                             }
                             ActIcon(
                                 icon = Icons.Filled.Star, on = pref == "favorite",
-                                onColor = MV.Amber, onClick = { setPref(ex.id, "favorite") },
+                                onColor = favColor, offColor = muted,
+                                onClick = { setPref(ex.id, "favorite") },
                             )
                             ActIcon(
                                 icon = Icons.Filled.ThumbDown, on = pref == "avoid",
-                                onColor = MV.OnSurfaceVariant, onClick = { setPref(ex.id, "avoid") },
+                                onColor = muted, offColor = muted,
+                                onClick = { setPref(ex.id, "avoid") },
                             )
                             ActIcon(
                                 icon = Icons.Filled.Block, on = pref == "disabled",
-                                onColor = MV.Red, onClick = { setPref(ex.id, "disabled") },
+                                onColor = badColor, offColor = muted,
+                                onClick = { setPref(ex.id, "disabled") },
                             )
                         }
                     }
@@ -597,22 +622,22 @@ fun StrengthCatalogScreen(
         val ex = detailEx!!
         androidx.compose.material3.ModalBottomSheet(
             onDismissRequest = { detailEx = null; detailStats = null },
-            containerColor = MV.SurfaceContainer,
+            containerColor = card,
         ) {
             Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-                Text(ex.name, color = MV.OnSurface, fontSize = 18.sp,
+                Text(ex.name, color = ink, fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold)
                 Text(
                     "${ex.movementPattern.replace('_', ' ')} · ${ex.equipment.joinToString(" + ")} · ${ex.level}",
-                    color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                    color = muted, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 2.dp),
                 )
-                Text(ex.primaryMuscle, color = MV.OnSurface, fontSize = 13.sp,
+                Text(ex.primaryMuscle, color = ink, fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(top = 6.dp))
                 if (ex.secondaryMuscles.isNotEmpty()) {
                     Text("also: ${ex.secondaryMuscles.joinToString(", ")}",
-                        color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                        color = muted, fontSize = 12.sp,
                         modifier = Modifier.padding(top = 2.dp))
                 }
                 Spacer(Modifier.height(10.dp))
@@ -642,24 +667,24 @@ fun StrengthCatalogScreen(
                 }
 
                 Spacer(Modifier.height(16.dp))
-                Text("YOUR HISTORY", color = MV.OnSurfaceVariant,
+                Text("YOUR HISTORY", color = muted,
                     fontSize = 10.sp, fontWeight = FontWeight.Bold,
                     letterSpacing = 1.5.sp)
                 Spacer(Modifier.height(6.dp))
                 when {
                     detailStatsLoading -> Text("Loading…",
-                        color = MV.OnSurfaceDim, fontSize = 12.sp)
+                        color = dim, fontSize = 12.sp)
                     detailStats == null || detailStats!!.timesPerformed == 0 ->
                         Text("Not performed yet.",
-                            color = MV.OnSurfaceDim, fontSize = 12.sp)
+                            color = dim, fontSize = 12.sp)
                     else -> {
                         val s = detailStats!!
                         @Composable
                         fun statRow(label: String, value: String) {
                             Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                                Text(label, color = MV.OnSurfaceVariant,
+                                Text(label, color = muted,
                                     fontSize = 12.sp, modifier = Modifier.weight(1f))
-                                Text(value, color = MV.OnSurface,
+                                Text(value, color = ink,
                                     fontSize = 12.sp, fontWeight = FontWeight.Medium)
                             }
                         }
@@ -676,15 +701,15 @@ fun StrengthCatalogScreen(
 
                 if (ex.instructions.isNotEmpty()) {
                     Spacer(Modifier.height(16.dp))
-                    Text("HOW TO DO IT", color = MV.OnSurfaceVariant,
+                    Text("HOW TO DO IT", color = muted,
                         fontSize = 10.sp, fontWeight = FontWeight.Bold,
                         letterSpacing = 1.5.sp)
                     Spacer(Modifier.height(6.dp))
                     for ((i, line) in ex.instructions.withIndex()) {
                         Row(Modifier.padding(vertical = 3.dp)) {
-                            Text("${i + 1}.", color = MV.OnSurfaceVariant,
+                            Text("${i + 1}.", color = muted,
                                 fontSize = 12.sp, modifier = Modifier.width(20.dp))
-                            Text(line, color = MV.OnSurface, fontSize = 12.sp,
+                            Text(line, color = ink, fontSize = 12.sp,
                                 lineHeight = 18.sp)
                         }
                     }
@@ -698,7 +723,8 @@ fun StrengthCatalogScreen(
 @Composable
 private fun ActIcon(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    on: Boolean, onColor: Color, onClick: () -> Unit,
+    on: Boolean, onColor: Color, offColor: Color = MV.OnSurfaceVariant,
+    onClick: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -709,6 +735,6 @@ private fun ActIcon(
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = null,
-            tint = if (on) onColor else MV.OnSurfaceVariant)
+            tint = if (on) onColor else offColor)
     }
 }

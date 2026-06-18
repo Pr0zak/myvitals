@@ -44,17 +44,21 @@ import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.StrengthStats
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonMV
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottom
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStart
+import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLine
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
 import com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState
 import com.patrykandpatrick.vico.compose.cartesian.rememberVicoZoomState
+import com.patrykandpatrick.vico.compose.common.fill
 import com.patrykandpatrick.vico.core.cartesian.axis.HorizontalAxis
 import com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
+import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -66,6 +70,12 @@ fun WorkoutChartsScreen(
     onBack: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val neon = settings.neonShellEnabled
+    val bg = if (neon) NeonMV.Bg else MV.Bg
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val accent = if (neon) NeonMV.Cyan else MV.BrandRed
+    val bad = if (neon) NeonMV.Bad else MV.Red
     var days by remember { mutableStateOf(90) }
     var stats by remember { mutableStateOf<StrengthStats?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -99,16 +109,16 @@ fun WorkoutChartsScreen(
         } finally { loading = false }
     }
 
-    Column(Modifier.fillMaxSize().background(MV.Bg)) {
+    Column(Modifier.fillMaxSize().background(bg)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = MV.OnSurface)
+                    tint = ink)
             }
-            Text("Workout charts", color = MV.OnSurface, fontSize = 16.sp,
+            Text("Workout charts", color = ink, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
         Row(
@@ -121,18 +131,18 @@ fun WorkoutChartsScreen(
                     onClick = { days = d },
                     label = { Text(if (d >= 365) "1y" else "${d}d") },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MV.BrandRed.copy(alpha = 0.20f),
-                        selectedLabelColor = MV.OnSurface,
+                        selectedContainerColor = accent.copy(alpha = 0.20f),
+                        selectedLabelColor = ink,
                     ),
                 )
             }
         }
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant,
+            loading -> Text("Loading…", color = muted,
                 modifier = Modifier.padding(16.dp))
-            error != null -> Text(error!!, color = MV.Red,
+            error != null -> Text(error!!, color = bad,
                 modifier = Modifier.padding(16.dp))
-            stats == null -> Text("No data", color = MV.OnSurfaceVariant,
+            stats == null -> Text("No data", color = muted,
                 modifier = Modifier.padding(16.dp))
             else -> {
                 val s = stats!!
@@ -140,10 +150,10 @@ fun WorkoutChartsScreen(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    item { OverviewCard(s) }
-                    item { DailyVolumeCard(s) }
-                    item { MuscleGroupCard(s) }
-                    item { ProgressionCard(s) }
+                    item { OverviewCard(s, neon) }
+                    item { DailyVolumeCard(s, neon) }
+                    item { MuscleGroupCard(s, neon) }
+                    item { ProgressionCard(s, neon) }
                 }
             }
         }
@@ -151,31 +161,35 @@ fun WorkoutChartsScreen(
 }
 
 @Composable
-private fun OverviewCard(s: StrengthStats) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+private fun OverviewCard(s: StrengthStats, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    Card(colors = CardDefaults.cardColors(containerColor = card)) {
         Column(Modifier.padding(14.dp)) {
-            Text("OVERVIEW · ${s.days}d", color = MV.OnSurfaceVariant,
+            Text("OVERVIEW · ${s.days}d", color = muted,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                Stat("Workouts", "${s.nWorkouts}")
-                Stat("Sets", "${s.nSets}")
-                Stat("Volume", "%,.0f lb".format(s.totalVolumeLb))
-                s.rpeAvg?.let { Stat("Avg RPE", "%.1f".format(it)) }
+                Stat("Workouts", "${s.nWorkouts}", neon)
+                Stat("Sets", "${s.nSets}", neon)
+                Stat("Volume", "%,.0f lb".format(s.totalVolumeLb), neon)
+                s.rpeAvg?.let { Stat("Avg RPE", "%.1f".format(it), neon) }
             }
         }
     }
 }
 
 @Composable
-private fun DailyVolumeCard(s: StrengthStats) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+private fun DailyVolumeCard(s: StrengthStats, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    Card(colors = CardDefaults.cardColors(containerColor = card)) {
         Column(Modifier.padding(14.dp)) {
-            Text("DAILY VOLUME", color = MV.OnSurfaceVariant,
+            Text("DAILY VOLUME", color = muted,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             if (s.daily.size < 2) {
-                Text("Not enough sessions yet.", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                Text("Not enough sessions yet.", color = muted, fontSize = 12.sp)
                 return@Card
             }
             val producer = remember(s) { CartesianChartModelProducer() }
@@ -191,9 +205,25 @@ private fun DailyVolumeCard(s: StrengthStats) {
                 val ys = pairs.map { it.second }
                 producer.runTransaction { lineSeries { series(x = xs, y = ys) } }
             }
+            // Under neon the volume line + area adopt the lime "move" accent;
+            // classic keeps Vico's theme-default line untouched.
+            val lineLayer = if (neon) {
+                rememberLineCartesianLayer(
+                    LineCartesianLayer.LineProvider.series(
+                        LineCartesianLayer.rememberLine(
+                            fill = LineCartesianLayer.LineFill.single(fill(NeonMV.Lime)),
+                            areaFill = LineCartesianLayer.AreaFill.single(
+                                fill(NeonMV.Lime.copy(alpha = 0.18f)),
+                            ),
+                        ),
+                    ),
+                )
+            } else {
+                rememberLineCartesianLayer()
+            }
             CartesianChartHost(
                 chart = rememberCartesianChart(
-                    rememberLineCartesianLayer(),
+                    lineLayer,
                     startAxis = VerticalAxis.rememberStart(),
                     bottomAxis = HorizontalAxis.rememberBottom(),
                 ),
@@ -207,14 +237,18 @@ private fun DailyVolumeCard(s: StrengthStats) {
 }
 
 @Composable
-private fun MuscleGroupCard(s: StrengthStats) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+private fun MuscleGroupCard(s: StrengthStats, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val track = if (neon) NeonMV.Track else MV.SurfaceContainerLow
+    Card(colors = CardDefaults.cardColors(containerColor = card)) {
         Column(Modifier.padding(14.dp)) {
-            Text("VOLUME BY MUSCLE", color = MV.OnSurfaceVariant,
+            Text("VOLUME BY MUSCLE", color = muted,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             if (s.perMuscle.isEmpty()) {
-                Text("—", color = MV.OnSurfaceVariant, fontSize = 12.sp); return@Card
+                Text("—", color = muted, fontSize = 12.sp); return@Card
             }
             val total = s.perMuscle.sumOf { it.volumeLb }.coerceAtLeast(1.0)
             for (m in s.perMuscle.take(8)) {
@@ -222,22 +256,22 @@ private fun MuscleGroupCard(s: StrengthStats) {
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         m.muscle.replaceFirstChar { it.titlecase() },
-                        color = MV.OnSurface, fontSize = 12.sp,
+                        color = ink, fontSize = 12.sp,
                         modifier = Modifier.width(96.dp), maxLines = 1,
                     )
                     Box(Modifier.weight(1f).height(8.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(MV.SurfaceContainerLow)
+                        .background(track)
                     ) {
                         Box(
                             Modifier
                                 .fillMaxWidth(fraction = (m.volumeLb / total).toFloat())
                                 .height(8.dp)
-                                .background(muscleColor(m.muscle)),
+                                .background(muscleColor(m.muscle, neon)),
                         )
                     }
                     Spacer(Modifier.width(8.dp))
-                    Text("%,.0f".format(m.volumeLb), color = MV.OnSurfaceVariant,
+                    Text("%,.0f".format(m.volumeLb), color = muted,
                         fontSize = 11.sp, modifier = Modifier.width(60.dp))
                 }
             }
@@ -246,24 +280,28 @@ private fun MuscleGroupCard(s: StrengthStats) {
 }
 
 @Composable
-private fun ProgressionCard(s: StrengthStats) {
+private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
     if (s.progression.isEmpty()) return
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val dim = if (neon) NeonMV.Muted else MV.OnSurfaceDim
     var selected by remember(s) {
         mutableStateOf(s.progression.keys.firstOrNull() ?: "")
     }
     var menuOpen by remember { mutableStateOf(false) }
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    Card(colors = CardDefaults.cardColors(containerColor = card)) {
         Column(Modifier.padding(14.dp)) {
-            Text("WEIGHT PROGRESSION", color = MV.OnSurfaceVariant,
+            Text("WEIGHT PROGRESSION", color = muted,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(6.dp))
             Box {
                 TextButton(onClick = { menuOpen = true }) {
                     Text(
                         s.progressionNames[selected] ?: selected,
-                        color = MV.OnSurface, fontSize = 13.sp,
+                        color = ink, fontSize = 13.sp,
                     )
-                    Text(" ▾", color = MV.OnSurfaceDim, fontSize = 13.sp)
+                    Text(" ▾", color = dim, fontSize = 13.sp)
                 }
                 DropdownMenu(
                     expanded = menuOpen, onDismissRequest = { menuOpen = false },
@@ -279,7 +317,7 @@ private fun ProgressionCard(s: StrengthStats) {
             val pts = s.progression[selected] ?: emptyList()
             if (pts.size < 2) {
                 Text("Need at least 2 sessions for this exercise.",
-                    color = MV.OnSurfaceVariant, fontSize = 12.sp); return@Card
+                    color = muted, fontSize = 12.sp); return@Card
             }
             val producer = remember(selected, s) { CartesianChartModelProducer() }
             LaunchedEffect(selected, s) {
@@ -294,9 +332,25 @@ private fun ProgressionCard(s: StrengthStats) {
                 val ys = pairs.map { it.second }
                 producer.runTransaction { lineSeries { series(x = xs, y = ys) } }
             }
+            // Under neon the progression line + area adopt the amber "weight"
+            // accent; classic keeps Vico's theme-default line untouched.
+            val lineLayer = if (neon) {
+                rememberLineCartesianLayer(
+                    LineCartesianLayer.LineProvider.series(
+                        LineCartesianLayer.rememberLine(
+                            fill = LineCartesianLayer.LineFill.single(fill(NeonMV.Amber)),
+                            areaFill = LineCartesianLayer.AreaFill.single(
+                                fill(NeonMV.Amber.copy(alpha = 0.18f)),
+                            ),
+                        ),
+                    ),
+                )
+            } else {
+                rememberLineCartesianLayer()
+            }
             CartesianChartHost(
                 chart = rememberCartesianChart(
-                    rememberLineCartesianLayer(),
+                    lineLayer,
                     startAxis = VerticalAxis.rememberStart(),
                     bottomAxis = HorizontalAxis.rememberBottom(),
                 ),
@@ -310,25 +364,41 @@ private fun ProgressionCard(s: StrengthStats) {
 }
 
 @Composable
-private fun Stat(label: String, value: String) {
+private fun Stat(label: String, value: String, neon: Boolean) {
+    val dim = if (neon) NeonMV.Muted else MV.OnSurfaceDim
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
     Column {
-        Text(label, color = MV.OnSurfaceDim, fontSize = 10.sp,
+        Text(label, color = dim, fontSize = 10.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(value, color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(value, color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
-private fun muscleColor(m: String): Color = when (m.lowercase()) {
-    "chest" -> Color(0xFFEF4444)
-    "back", "lats" -> Color(0xFF3B82F6)
-    "shoulders" -> Color(0xFFF59E0B)
-    "biceps" -> Color(0xFFA855F7)
-    "triceps" -> Color(0xFFEC4899)
-    "quadriceps", "quads" -> Color(0xFF22C55E)
-    "hamstrings" -> Color(0xFF10B981)
-    "glutes" -> Color(0xFF14B8A6)
-    "calves" -> Color(0xFF84CC16)
-    "abdominals", "abs", "core" -> Color(0xFFFBBF24)
-    "forearms" -> Color(0xFF94A3B8)
-    else -> Color(0xFF64748B)
-}
+private fun muscleColor(m: String, neon: Boolean): Color =
+    if (neon) when (m.lowercase()) {
+        "chest" -> NeonMV.Bad
+        "back", "lats" -> NeonMV.Cyan
+        "shoulders" -> NeonMV.Amber
+        "biceps" -> NeonMV.Magenta
+        "triceps" -> NeonMV.Periwinkle
+        "quadriceps", "quads" -> NeonMV.Lime
+        "hamstrings" -> NeonMV.Lime
+        "glutes" -> NeonMV.Cyan
+        "calves" -> NeonMV.Lime
+        "abdominals", "abs", "core" -> NeonMV.Amber
+        "forearms" -> NeonMV.Muted
+        else -> NeonMV.Muted
+    } else when (m.lowercase()) {
+        "chest" -> Color(0xFFEF4444)
+        "back", "lats" -> Color(0xFF3B82F6)
+        "shoulders" -> Color(0xFFF59E0B)
+        "biceps" -> Color(0xFFA855F7)
+        "triceps" -> Color(0xFFEC4899)
+        "quadriceps", "quads" -> Color(0xFF22C55E)
+        "hamstrings" -> Color(0xFF10B981)
+        "glutes" -> Color(0xFF14B8A6)
+        "calves" -> Color(0xFF84CC16)
+        "abdominals", "abs", "core" -> Color(0xFFFBBF24)
+        "forearms" -> Color(0xFF94A3B8)
+        else -> Color(0xFF64748B)
+    }

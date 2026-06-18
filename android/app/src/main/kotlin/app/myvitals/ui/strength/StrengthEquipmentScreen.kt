@@ -41,6 +41,7 @@ import app.myvitals.data.SettingsRepository
 import app.myvitals.strength.StrengthRepository
 import app.myvitals.sync.EquipmentPayload
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonMV
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -60,6 +61,20 @@ fun StrengthEquipmentScreen(
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember(settings) { StrengthRepository(context, settings) }
+
+    val neon = settings.neonShellEnabled
+    // Hoisted palette: every neon value is `if (neon) … else <current>` so the
+    // classic shell stays byte-identical. Chip/segment accent = Cyan (selected),
+    // micro-loader (wrist weights) accent = Lime — passed explicitly below.
+    val bg = if (neon) NeonMV.Bg else MV.Bg
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val dim = if (neon) NeonMV.Muted else MV.OnSurfaceDim
+    val accent = if (neon) NeonMV.Cyan else MV.BrandRed
+    val good = if (neon) NeonMV.Lime else MV.Green
+    val bad = if (neon) NeonMV.Bad else MV.Red
+    // dark ink reads better on a bright neon fill; classic keeps the light text
+    val onAccent = if (neon) NeonMV.OnAccent else MV.OnSurface
 
     var equipment by remember { mutableStateOf<EquipmentPayload?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -108,7 +123,7 @@ fun StrengthEquipmentScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MV.Bg)
+            .background(bg)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
     ) {
@@ -118,19 +133,19 @@ fun StrengthEquipmentScreen(
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back", tint = MV.OnSurface)
+                    contentDescription = "Back", tint = ink)
             }
-            Text("Equipment", color = MV.OnSurface, fontSize = 18.sp,
+            Text("Equipment", color = ink, fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold)
         }
 
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant)
-            equipment == null -> Text(error ?: "Could not load.", color = MV.Red)
+            loading -> Text("Loading…", color = muted)
+            equipment == null -> Text(error ?: "Could not load.", color = bad)
             else -> {
                 val eq = equipment!!
 
-                EqSection("Dumbbells")
+                EqSection("Dumbbells", muted)
                 EqSegmented(
                     options = listOf("none", "fixed_pairs", "adjustable"),
                     selected = eq.dumbbells.type,
@@ -140,11 +155,12 @@ fun StrengthEquipmentScreen(
                             it.copy(dumbbells = it.dumbbells.copy(type = type))
                         }
                     },
+                    neon = neon,
                 )
 
                 if (eq.dumbbells.type == "fixed_pairs") {
                     Spacer(Modifier.height(8.dp))
-                    Text("Owned pairs (lb)", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    Text("Owned pairs (lb)", color = muted, fontSize = 11.sp)
                     Spacer(Modifier.height(4.dp))
                     val presets = listOf(
                         2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0,
@@ -156,6 +172,7 @@ fun StrengthEquipmentScreen(
                         items = presets,
                         selected = eq.dumbbells.pairsLb.toSet(),
                         label = { fmtLb(it) },
+                        neon = neon,
                         onToggle = { lb ->
                             mutate {
                                 val cur = it.dumbbells.pairsLb.toMutableList()
@@ -170,12 +187,15 @@ fun StrengthEquipmentScreen(
                 // The user can pick adjustable here; web still owns the numeric
                 // limits until we add Compose number-pickers in a follow-up.
 
-                EqSection("Wrist weights (lb)")
+                EqSection("Wrist weights (lb)", muted)
                 val wristPresets = listOf(1.0, 1.5, 2.0, 2.5, 3.0, 5.0)
                 ChipGrid(
                     items = wristPresets,
                     selected = eq.wristWeightsLb.toSet(),
                     label = { fmtLb(it) },
+                    neon = neon,
+                    // micro-loader rows use the Lime accent under neon
+                    accentColor = if (neon) NeonMV.Lime else MV.BrandRed,
                     onToggle = { lb ->
                         mutate {
                             val cur = it.wristWeightsLb.toMutableList()
@@ -186,36 +206,36 @@ fun StrengthEquipmentScreen(
                     },
                 )
 
-                EqSection("Bench")
-                SwitchRow("Flat", eq.bench.flat) { on ->
+                EqSection("Bench", muted)
+                SwitchRow("Flat", eq.bench.flat, neon) { on ->
                     mutate { it.copy(bench = it.bench.copy(flat = on)) }
                 }
-                SwitchRow("Incline", eq.bench.incline) { on ->
+                SwitchRow("Incline", eq.bench.incline, neon) { on ->
                     mutate { it.copy(bench = it.bench.copy(incline = on)) }
                 }
-                SwitchRow("Decline", eq.bench.decline) { on ->
+                SwitchRow("Decline", eq.bench.decline, neon) { on ->
                     mutate { it.copy(bench = it.bench.copy(decline = on)) }
                 }
 
-                EqSection("Bars")
-                SwitchRow("Pull-up bar", eq.pullUpBar) { on ->
+                EqSection("Bars", muted)
+                SwitchRow("Pull-up bar", eq.pullUpBar, neon) { on ->
                     mutate { it.copy(pullUpBar = on) }
                 }
 
-                EqSection("Cardio gear")
-                SwitchRow("Rower (Concept2)", eq.cardioRower) { on ->
+                EqSection("Cardio gear", muted)
+                SwitchRow("Rower (Concept2)", eq.cardioRower, neon) { on ->
                     mutate { it.copy(cardioRower = on) }
                 }
-                SwitchRow("Mountain bike (outdoor)", eq.cardioMtbOutdoor) { on ->
+                SwitchRow("Mountain bike (outdoor)", eq.cardioMtbOutdoor, neon) { on ->
                     mutate { it.copy(cardioMtbOutdoor = on) }
                 }
-                SwitchRow("Road bike (outdoor)", eq.cardioRoadBike) { on ->
+                SwitchRow("Road bike (outdoor)", eq.cardioRoadBike, neon) { on ->
                     mutate { it.copy(cardioRoadBike = on) }
                 }
-                SwitchRow("Indoor bike", eq.cardioBikeIndoor) { on ->
+                SwitchRow("Indoor bike", eq.cardioBikeIndoor, neon) { on ->
                     mutate { it.copy(cardioBikeIndoor = on) }
                 }
-                SwitchRow("Treadmill", eq.cardioTreadmill) { on ->
+                SwitchRow("Treadmill", eq.cardioTreadmill, neon) { on ->
                     mutate { it.copy(cardioTreadmill = on) }
                 }
 
@@ -224,20 +244,20 @@ fun StrengthEquipmentScreen(
                     onClick = ::save,
                     enabled = !saving,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MV.BrandRed, contentColor = MV.OnSurface,
+                        containerColor = accent, contentColor = onAccent,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(if (saving) "Saving…" else "Save equipment") }
-                status?.let { Text(it, color = MV.Green, fontSize = 12.sp,
+                status?.let { Text(it, color = good, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 6.dp)) }
-                error?.let { Text(it, color = MV.Red, fontSize = 12.sp,
+                error?.let { Text(it, color = bad, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 6.dp)) }
                 Spacer(Modifier.height(24.dp))
 
                 Text(
                     "Other gear (barbell, rack, cables, kettlebells, bands) " +
                         "still edits from the web dashboard for now.",
-                    color = MV.OnSurfaceDim, fontSize = 11.sp,
+                    color = dim, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
                 )
             }
@@ -249,10 +269,10 @@ private fun fmtLb(lb: Double): String =
     if (lb == lb.toLong().toDouble()) "${lb.toLong()}" else lb.toString()
 
 @Composable
-private fun EqSection(title: String) {
+private fun EqSection(title: String, labelColor: androidx.compose.ui.graphics.Color) {
     Text(
         title.uppercase(),
-        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+        color = labelColor, fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp,
         modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
     )
@@ -263,8 +283,14 @@ private fun EqSegmented(
     options: List<String>,
     selected: String,
     onSelect: (String) -> Unit,
+    neon: Boolean,
     labelMap: Map<String, String> = emptyMap(),
 ) {
+    val accent = if (neon) NeonMV.Cyan else MV.BrandRed
+    val unselectedBg = if (neon) NeonMV.Card else MV.SurfaceContainerLow
+    val outline = if (neon) NeonMV.Line else MV.OutlineVariant
+    val selectedInk = if (neon) NeonMV.OnAccent else MV.OnSurface
+    val unselectedInk = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -277,17 +303,17 @@ private fun EqSegmented(
                     .weight(1f)
                     .height(40.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (on) MV.BrandRed else MV.SurfaceContainerLow)
+                    .background(if (on) accent else unselectedBg)
                     .border(
                         1.dp,
-                        if (on) MV.BrandRed else MV.OutlineVariant,
+                        if (on) accent else outline,
                         RoundedCornerShape(8.dp),
                     )
                     .clickable { onSelect(opt) },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label,
-                    color = if (on) MV.OnSurface else MV.OnSurfaceVariant,
+                    color = if (on) selectedInk else unselectedInk,
                     fontSize = 12.sp,
                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                 )
@@ -297,7 +323,20 @@ private fun EqSegmented(
 }
 
 @Composable
-private fun SwitchRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun SwitchRow(
+    label: String,
+    checked: Boolean,
+    neon: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val accent = if (neon) NeonMV.Cyan else MV.BrandRed
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val track = if (neon) NeonMV.Card else MV.SurfaceContainerLow
+    val outline = if (neon) NeonMV.Line else MV.OutlineVariant
+    // thumb on the checked (accent) track stays light in classic; under neon
+    // a dark thumb reads on the bright Cyan fill
+    val checkedThumb = if (neon) NeonMV.OnAccent else MV.OnSurface
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -305,17 +344,17 @@ private fun SwitchRow(label: String, checked: Boolean, onCheckedChange: (Boolean
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = MV.OnSurface, fontSize = 14.sp,
+        Text(label, color = ink, fontSize = 14.sp,
             modifier = Modifier.weight(1f))
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = MV.OnSurface,
-                checkedTrackColor = MV.BrandRed,
-                uncheckedThumbColor = MV.OnSurfaceVariant,
-                uncheckedTrackColor = MV.SurfaceContainerLow,
-                uncheckedBorderColor = MV.OutlineVariant,
+                checkedThumbColor = checkedThumb,
+                checkedTrackColor = accent,
+                uncheckedThumbColor = muted,
+                uncheckedTrackColor = track,
+                uncheckedBorderColor = outline,
             ),
         )
     }
@@ -326,8 +365,17 @@ private fun <T> ChipGrid(
     items: List<T>,
     selected: Set<T>,
     label: (T) -> String,
+    neon: Boolean,
     onToggle: (T) -> Unit,
+    // selected-chip accent; defaults to Cyan under neon, Brand red classic.
+    // The micro-loader (wrist weights) grid passes Lime here.
+    accentColor: androidx.compose.ui.graphics.Color =
+        if (neon) NeonMV.Cyan else MV.BrandRed,
 ) {
+    val unselectedBg = if (neon) NeonMV.Card else MV.SurfaceContainerLow
+    val outline = if (neon) NeonMV.Line else MV.OutlineVariant
+    val selectedInk = if (neon) NeonMV.OnAccent else MV.OnSurface
+    val unselectedInk = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     // Simple flowing row of chips. Use FlowRow when material3 ships it
     // stable; for now wrap manually 4 per row to stay readable on narrow
     // phones without pulling extra deps.
@@ -343,17 +391,17 @@ private fun <T> ChipGrid(
                             .weight(1f)
                             .height(36.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (on) MV.BrandRed else MV.SurfaceContainerLow)
+                            .background(if (on) accentColor else unselectedBg)
                             .border(
                                 1.dp,
-                                if (on) MV.BrandRed else MV.OutlineVariant,
+                                if (on) accentColor else outline,
                                 RoundedCornerShape(8.dp),
                             )
                             .clickable { onToggle(item) },
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(label(item),
-                            color = if (on) MV.OnSurface else MV.OnSurfaceVariant,
+                            color = if (on) selectedInk else unselectedInk,
                             fontSize = 12.sp,
                             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                         )

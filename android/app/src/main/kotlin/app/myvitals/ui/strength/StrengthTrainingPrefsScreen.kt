@@ -39,6 +39,7 @@ import app.myvitals.strength.StrengthRepository
 import app.myvitals.sync.EquipmentPayload
 import app.myvitals.sync.TrainingPreferences
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonMV
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -50,6 +51,15 @@ fun StrengthTrainingPrefsScreen(
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember(settings) { StrengthRepository(context, settings) }
+
+    val neon = settings.neonShellEnabled
+    val accent = if (neon) NeonMV.Cyan else MV.BrandRed
+    val bg = if (neon) NeonMV.Bg else MV.Bg
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val good = if (neon) NeonMV.Lime else MV.Green
+    val bad = if (neon) NeonMV.Bad else MV.Red
+    val onAccent = if (neon) NeonMV.OnAccent else MV.OnSurface
 
     var equipment by remember { mutableStateOf<EquipmentPayload?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -94,57 +104,61 @@ fun StrengthTrainingPrefsScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(MV.Bg).padding(horizontal = 16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().background(bg).padding(horizontal = 16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MV.OnSurface)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = ink)
             }
-            Text("Training preferences", color = MV.OnSurface, fontSize = 18.sp,
+            Text("Training preferences", color = ink, fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold)
         }
 
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant)
-            equipment == null -> Text(error ?: "Could not load.", color = MV.Red)
+            loading -> Text("Loading…", color = muted)
+            equipment == null -> Text(error ?: "Could not load.", color = bad)
             else -> {
                 val t = equipment!!.training
-                Section("Experience level")
+                Section("Experience level", neon)
                 Segmented(
                     options = listOf("beginner", "intermediate", "advanced"),
                     selected = t.level,
                     onSelect = { update(t.copy(level = it)) },
+                    neon = neon,
                 )
 
-                Section("Days per week")
+                Section("Days per week", neon)
                 Segmented(
                     options = listOf("2", "3", "4", "5", "6"),
                     selected = t.daysPerWeek.toString(),
                     onSelect = { update(t.copy(daysPerWeek = it.toInt())) },
+                    neon = neon,
                 )
 
-                Section("Split preference")
+                Section("Split preference", neon)
                 Segmented(
                     options = listOf("auto", "full_body", "upper_lower", "ppl"),
                     selected = t.splitPreference,
                     labelMap = mapOf("full_body" to "full body", "upper_lower" to "upper-lower"),
                     onSelect = { update(t.copy(splitPreference = it)) },
+                    neon = neon,
                 )
 
-                Section("Exercises per workout")
+                Section("Exercises per workout", neon)
                 Segmented(
                     options = listOf("Auto", "4", "5", "6", "7", "8"),
                     selected = t.exercisesPerWorkout?.toString() ?: "Auto",
                     // "Auto".toIntOrNull() == null → auto sizing (WP-17).
                     onSelect = { update(t.copy(exercisesPerWorkout = it.toIntOrNull())) },
+                    neon = neon,
                 )
                 Text(
                     "More adds accessory work for your under-trained muscles " +
                         "(core favored). Auto sizes each day to its split plus " +
                         "smart finishers. Mobility poses don't count.",
-                    color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                    color = muted, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 6.dp),
                 )
 
@@ -153,13 +167,13 @@ fun StrengthTrainingPrefsScreen(
                     onClick = ::save,
                     enabled = !saving,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MV.BrandRed, contentColor = MV.OnSurface,
+                        containerColor = accent, contentColor = onAccent,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(if (saving) "Saving…" else "Save preferences") }
-                status?.let { Text(it, color = MV.Green, fontSize = 12.sp,
+                status?.let { Text(it, color = good, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 6.dp)) }
-                error?.let { Text(it, color = MV.Red, fontSize = 12.sp,
+                error?.let { Text(it, color = bad, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 6.dp)) }
             }
         }
@@ -167,10 +181,10 @@ fun StrengthTrainingPrefsScreen(
 }
 
 @Composable
-private fun Section(title: String) {
+private fun Section(title: String, neon: Boolean = false) {
     Text(
         title.uppercase(),
-        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+        color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant, fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp,
         modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
     )
@@ -182,7 +196,13 @@ private fun Segmented(
     selected: String,
     onSelect: (String) -> Unit,
     labelMap: Map<String, String> = emptyMap(),
+    neon: Boolean = false,
 ) {
+    val accent = if (neon) NeonMV.Cyan else MV.BrandRed
+    val cellBg = if (neon) NeonMV.Card else MV.SurfaceContainerLow
+    val cellBorder = if (neon) NeonMV.Line else MV.OutlineVariant
+    val onSel = if (neon) NeonMV.OnAccent else MV.OnSurface
+    val offText = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -195,17 +215,17 @@ private fun Segmented(
                     .weight(1f)
                     .height(40.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (on) MV.BrandRed else MV.SurfaceContainerLow)
+                    .background(if (on) accent else cellBg)
                     .border(
                         1.dp,
-                        if (on) MV.BrandRed else MV.OutlineVariant,
+                        if (on) accent else cellBorder,
                         RoundedCornerShape(8.dp),
                     )
                     .clickable { onSelect(opt) },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label,
-                    color = if (on) MV.OnSurface else MV.OnSurfaceVariant,
+                    color = if (on) onSel else offText,
                     fontSize = 12.sp,
                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                 )

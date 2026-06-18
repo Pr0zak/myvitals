@@ -77,6 +77,7 @@ import app.myvitals.sync.Trail
 import app.myvitals.sync.TrailLocationBody
 import app.myvitals.sync.TrailSubscribeBody
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonMV
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -89,6 +90,15 @@ import java.time.Instant
 fun TrailsScreen(settings: SettingsRepository) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val neon = settings.neonShellEnabled
+    val bg = if (neon) NeonMV.Bg else MV.Bg
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val cardLow = if (neon) NeonMV.Bg else MV.SurfaceContainerLow
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val dim = if (neon) NeonMV.Muted else MV.OnSurfaceDim
+    val accent = if (neon) NeonMV.Cyan else MV.BrandRed
+    val bad = if (neon) NeonMV.Bad else MV.Red
     var trails by remember { mutableStateOf<List<Trail>>(emptyList()) }
     var dnisUrl by remember { mutableStateOf<String?>(null) }
     var showOverviewMap by remember { mutableStateOf(false) }
@@ -318,7 +328,7 @@ fun TrailsScreen(settings: SettingsRepository) {
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().background(MV.Bg).padding(horizontal = 16.dp),
+        modifier = Modifier.fillMaxSize().background(bg).padding(horizontal = 16.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp),
@@ -328,7 +338,7 @@ fun TrailsScreen(settings: SettingsRepository) {
             Column {
                 Text(
                     "TRAILS",
-                    color = MV.OnSurfaceVariant,
+                    color = muted,
                     fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp,
                 )
                 Text(
@@ -338,7 +348,7 @@ fun TrailsScreen(settings: SettingsRepository) {
                         if (grouped.delayed.isNotEmpty()) "${grouped.delayed.size} delayed" else null,
                         "${grouped.closed.size} closed",
                     ).joinToString(" · "),
-                    color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                    color = ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
                 )
                 val mostRecentFetch = remember(trails) {
                     trails.mapNotNull { it.fetchedAt }.maxOrNull()
@@ -346,7 +356,7 @@ fun TrailsScreen(settings: SettingsRepository) {
                 if (mostRecentFetch != null) {
                     Text(
                         "synced ${fmtAge(mostRecentFetch, nowMs)}",
-                        color = MV.OnSurfaceDim, fontSize = 10.sp,
+                        color = dim, fontSize = 10.sp,
                     )
                 }
             }
@@ -356,7 +366,7 @@ fun TrailsScreen(settings: SettingsRepository) {
                     Icon(
                         Icons.Outlined.Map,
                         contentDescription = "Trail status map",
-                        tint = MV.OnSurfaceVariant,
+                        tint = muted,
                     )
                 }
                 // RainoutLine status board shortcut — same as web header.
@@ -374,18 +384,18 @@ fun TrailsScreen(settings: SettingsRepository) {
                         Icon(
                             Icons.AutoMirrored.Outlined.OpenInNew,
                             contentDescription = "Open RainoutLine status board",
-                            tint = MV.OnSurfaceVariant,
+                            tint = muted,
                         )
                     }
                 }
                 IconButton(onClick = { scope.launch { refreshNow() } }, enabled = !refreshing) {
-                    Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = MV.OnSurface)
+                    Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = ink)
                 }
                 var menuOpen by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Outlined.MoreVert, contentDescription = "More",
-                            tint = MV.OnSurface)
+                            tint = ink)
                     }
                     DropdownMenu(
                         expanded = menuOpen, onDismissRequest = { menuOpen = false },
@@ -406,7 +416,7 @@ fun TrailsScreen(settings: SettingsRepository) {
         }
         if (actionResult != null) {
             Card(
-                colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+                colors = CardDefaults.cardColors(containerColor = card),
                 modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
             ) {
                 Row(
@@ -415,9 +425,9 @@ fun TrailsScreen(settings: SettingsRepository) {
                 ) {
                     Text(actionResult!!,
                         modifier = Modifier.weight(1f),
-                        color = MV.OnSurface, fontSize = 12.sp)
+                        color = ink, fontSize = 12.sp)
                     TextButton(onClick = { actionResult = null }) {
-                        Text("OK", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                        Text("OK", color = muted, fontSize = 11.sp)
                     }
                 }
             }
@@ -429,16 +439,16 @@ fun TrailsScreen(settings: SettingsRepository) {
             modifier = Modifier.weight(1f),
         ) {
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant)
-            error != null -> Text(error!!, color = MV.Red)
+            loading -> Text("Loading…", color = muted)
+            error != null -> Text(error!!, color = bad)
             trails.isEmpty() -> Card(
-                colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+                colors = CardDefaults.cardColors(containerColor = card),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
                     "No trails seeded yet. The backend poller runs every 15 minutes; tap Refresh to trigger an immediate poll.",
                     modifier = Modifier.padding(14.dp),
-                    color = MV.OnSurfaceVariant,
+                    color = muted,
                 )
             }
             else -> LazyColumn(
@@ -446,9 +456,9 @@ fun TrailsScreen(settings: SettingsRepository) {
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 if (grouped.open.isNotEmpty()) {
-                    item { GroupHeader("Open · ${grouped.open.size}") }
+                    item { GroupHeader("Open · ${grouped.open.size}", neon) }
                     items(grouped.open, key = { it.id }) { t ->
-                        TrailRow(t, nowMs, osmCacheEpoch = osmCacheEpoch,
+                        TrailRow(t, nowMs, neon, osmCacheEpoch = osmCacheEpoch,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
@@ -456,9 +466,9 @@ fun TrailsScreen(settings: SettingsRepository) {
                     }
                 }
                 if (grouped.delayed.isNotEmpty()) {
-                    item { GroupHeader("Delayed · ${grouped.delayed.size}") }
+                    item { GroupHeader("Delayed · ${grouped.delayed.size}", neon) }
                     items(grouped.delayed, key = { it.id }) { t ->
-                        TrailRow(t, nowMs, osmCacheEpoch = osmCacheEpoch,
+                        TrailRow(t, nowMs, neon, osmCacheEpoch = osmCacheEpoch,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
@@ -466,9 +476,9 @@ fun TrailsScreen(settings: SettingsRepository) {
                     }
                 }
                 if (grouped.closed.isNotEmpty()) {
-                    item { GroupHeader("Closed · ${grouped.closed.size}") }
+                    item { GroupHeader("Closed · ${grouped.closed.size}", neon) }
                     items(grouped.closed, key = { it.id }) { t ->
-                        TrailRow(t, nowMs, osmCacheEpoch = osmCacheEpoch,
+                        TrailRow(t, nowMs, neon, osmCacheEpoch = osmCacheEpoch,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
@@ -476,9 +486,9 @@ fun TrailsScreen(settings: SettingsRepository) {
                     }
                 }
                 if (grouped.other.isNotEmpty()) {
-                    item { GroupHeader("Other · ${grouped.other.size}") }
+                    item { GroupHeader("Other · ${grouped.other.size}", neon) }
                     items(grouped.other, key = { it.id }) { t ->
-                        TrailRow(t, nowMs, osmCacheEpoch = osmCacheEpoch,
+                        TrailRow(t, nowMs, neon, osmCacheEpoch = osmCacheEpoch,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
@@ -487,9 +497,9 @@ fun TrailsScreen(settings: SettingsRepository) {
                 }
 
                 if (recentRides.isNotEmpty()) {
-                    item { GroupHeader("Recent rides · tap to link a trail") }
+                    item { GroupHeader("Recent rides · tap to link a trail", neon) }
                     items(recentRides, key = { "${it.source}-${it.sourceId}" }) { ride ->
-                        RideLinkRow(ride, nowMs, onTap = { linkTarget = ride })
+                        RideLinkRow(ride, nowMs, neon, onTap = { linkTarget = ride })
                     }
                 }
             }
@@ -501,18 +511,18 @@ fun TrailsScreen(settings: SettingsRepository) {
             val ride = linkTarget!!
             ModalBottomSheet(
                 onDismissRequest = { if (!linkSaving) linkTarget = null },
-                containerColor = MV.SurfaceContainer,
+                containerColor = card,
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Text("Link to trail", color = MV.OnSurface,
+                    Text("Link to trail", color = ink,
                         fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Text(rideSubtitle(ride), color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                    Text(rideSubtitle(ride), color = muted, fontSize = 12.sp)
                     if (ride.trailName != null) {
                         Text("Currently linked: ${ride.trailName}",
-                            color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                            color = muted, fontSize = 12.sp)
                     }
                     Spacer(Modifier.height(6.dp))
 
@@ -529,8 +539,8 @@ fun TrailsScreen(settings: SettingsRepository) {
                             Card(
                                 colors = CardDefaults.cardColors(
                                     containerColor =
-                                        if (isCurrent) MV.BrandRed.copy(alpha = 0.15f)
-                                        else MV.SurfaceContainerLow,
+                                        if (isCurrent) accent.copy(alpha = 0.15f)
+                                        else cardLow,
                                 ),
                                 modifier = Modifier.fillMaxWidth().clickable(enabled = !linkSaving) {
                                     scope.launch { setRideTrail(ride, t.id) }
@@ -541,10 +551,10 @@ fun TrailsScreen(settings: SettingsRepository) {
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(t.name, modifier = Modifier.weight(1f),
-                                        color = MV.OnSurface, fontSize = 14.sp)
+                                        color = ink, fontSize = 14.sp)
                                     val cityStr = listOfNotNull(t.city, t.state).joinToString(", ")
                                     if (cityStr.isNotEmpty()) {
-                                        Text(cityStr, color = MV.OnSurfaceDim, fontSize = 11.sp)
+                                        Text(cityStr, color = dim, fontSize = 11.sp)
                                     }
                                 }
                             }
@@ -576,17 +586,17 @@ fun TrailsScreen(settings: SettingsRepository) {
             val t = editTrail!!
             ModalBottomSheet(
                 onDismissRequest = { editTrail = null },
-                containerColor = MV.SurfaceContainer,
+                containerColor = card,
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text("Edit pin · ${t.name}",
-                        color = MV.OnSurface, fontSize = 16.sp,
+                        color = ink, fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold)
                     Text("Decimal degrees. Tip: tap & hold a spot in Google Maps and the lat/lon pair appears at the top.",
-                        color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                        color = muted, fontSize = 11.sp)
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
@@ -637,7 +647,7 @@ fun TrailsScreen(settings: SettingsRepository) {
                     ) { Text("🗺  Open in Maps to find coords") }
 
                     if (editError != null) {
-                        Text(editError!!, color = MV.Red, fontSize = 12.sp)
+                        Text(editError!!, color = bad, fontSize = 12.sp)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
@@ -671,7 +681,8 @@ fun TrailsScreen(settings: SettingsRepository) {
                             },
                             enabled = !editSaving,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = MV.BrandRed, contentColor = MV.OnSurface,
+                                containerColor = accent,
+                                contentColor = if (neon) NeonMV.OnAccent else MV.OnSurface,
                             ),
                             modifier = Modifier.weight(1f),
                         ) { Text(if (editSaving) "Saving…" else "Save") }
@@ -694,22 +705,23 @@ fun TrailsScreen(settings: SettingsRepository) {
                 usePlatformDefaultWidth = false,
             ),
         ) {
-            Box(modifier = Modifier.fillMaxSize().background(MV.Bg)) {
-                TrailsOverviewMap(trails, nowMs)
+            Box(modifier = Modifier.fillMaxSize().background(bg)) {
+                TrailsOverviewMap(trails, nowMs, neon)
                 IconButton(
                     onClick = { showOverviewMap = false },
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(8.dp)
                         .background(
-                            color = androidx.compose.ui.graphics.Color(0xCC0F1620),
+                            color = if (neon) androidx.compose.ui.graphics.Color(0xCC181B27)
+                                    else androidx.compose.ui.graphics.Color(0xCC0F1620),
                             shape = androidx.compose.foundation.shape.CircleShape,
                         ),
                 ) {
                     Icon(
                         Icons.Outlined.Close,
                         contentDescription = "Close map",
-                        tint = MV.OnSurface,
+                        tint = ink,
                     )
                 }
             }
@@ -718,9 +730,9 @@ fun TrailsScreen(settings: SettingsRepository) {
 }
 
 @Composable
-private fun GroupHeader(text: String) {
+private fun GroupHeader(text: String, neon: Boolean = false) {
     Text(
-        text, color = MV.OnSurfaceVariant,
+        text, color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant,
         fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
         modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
     )
@@ -730,6 +742,7 @@ private fun GroupHeader(text: String) {
 @Composable
 private fun TrailRow(
     t: Trail, nowMs: Long,
+    neon: Boolean = false,
     expanded: Boolean = false,
     osmCacheEpoch: Int = 0,
     onTap: () -> Unit,
@@ -737,15 +750,20 @@ private fun TrailRow(
     onLongPress: () -> Unit,
 ) {
     val context = LocalContext.current
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val dim = if (neon) NeonMV.Muted else MV.OnSurfaceDim
     val color = when (t.status) {
-        "open" -> Color(0xFF22C55E)
-        "closed" -> Color(0xFFEF4444)
-        "delayed" -> Color(0xFFEAB308)  // amber — RainoutLine "Delayed"
-        else -> MV.OnSurfaceVariant
+        "open" -> if (neon) NeonMV.Lime else Color(0xFF22C55E)
+        "closed" -> if (neon) NeonMV.Bad else Color(0xFFEF4444)
+        "delayed" -> if (neon) NeonMV.Amber else Color(0xFFEAB308)  // amber — RainoutLine "Delayed"
+        else -> muted
     }
     val hasLocation = t.latitude != null && t.longitude != null
     Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        colors = CardDefaults.cardColors(
+            containerColor = if (neon) NeonMV.Card else MV.SurfaceContainer,
+        ),
         modifier = Modifier.fillMaxWidth().combinedClickable(
             onClick = { if (hasLocation) onTap() },
             onLongClick = onLongPress,
@@ -759,27 +777,27 @@ private fun TrailRow(
                 Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(color))
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(t.name, color = MV.OnSurface, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(t.name, color = ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     if (!t.comment.isNullOrBlank()) {
-                        Text(t.comment, color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                        Text(t.comment, color = muted, fontSize = 12.sp)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val ageStr = remember(nowMs, t.sourceTs, t.fetchedAt) {
                             fmtAge(t.sourceTs ?: t.fetchedAt, nowMs)
                         }
                         if (ageStr.isNotEmpty()) {
-                            Text(ageStr, color = MV.OnSurfaceDim, fontSize = 11.sp)
+                            Text(ageStr, color = dim, fontSize = 11.sp)
                         }
                         val cityStr = listOfNotNull(t.city, t.state).joinToString(", ")
                         if (cityStr.isNotEmpty()) {
                             Text(
                                 "  ·  $cityStr",
-                                color = MV.OnSurfaceDim, fontSize = 11.sp,
+                                color = dim, fontSize = 11.sp,
                             )
                         }
                         if (t.visitsTotal > 0) {
-                            val visitColor = visitAgeColor(t.lastVisitAt, nowMs)
-                            Text("  ·  ", color = MV.OnSurfaceDim, fontSize = 11.sp)
+                            val visitColor = visitAgeColor(t.lastVisitAt, nowMs, neon)
+                            Text("  ·  ", color = dim, fontSize = 11.sp)
                             Icon(
                                 Icons.AutoMirrored.Outlined.DirectionsBike,
                                 contentDescription = "Visits",
@@ -794,7 +812,7 @@ private fun TrailRow(
                             if (t.lastVisitAt != null) {
                                 Text(
                                     " · ${fmtAge(t.lastVisitAt, nowMs)}",
-                                    color = MV.OnSurfaceDim, fontSize = 10.sp,
+                                    color = dim, fontSize = 10.sp,
                                 )
                             }
                         }
@@ -803,7 +821,7 @@ private fun TrailRow(
                             Icon(
                                 Icons.Outlined.Navigation,
                                 contentDescription = "Open mini map",
-                                tint = MV.OnSurfaceDim,
+                                tint = dim,
                                 modifier = Modifier.size(12.dp),
                             )
                         }
@@ -813,7 +831,7 @@ private fun TrailRow(
                     Icon(
                         if (t.subscribed) Icons.Outlined.Star else Icons.Outlined.StarBorder,
                         contentDescription = if (t.subscribed) "Unsubscribe" else "Subscribe",
-                        tint = if (t.subscribed) MV.Amber else MV.OnSurfaceVariant,
+                        tint = if (t.subscribed) (if (neon) NeonMV.Amber else MV.Amber) else muted,
                     )
                 }
             }
@@ -838,7 +856,7 @@ private fun TrailRow(
                         Timber.d(e, "trailOsmPaths(${t.id}) — no cache or fetch failed")
                     }
                 }
-                MiniMap(t.latitude, t.longitude, t.name, osmJson)
+                MiniMap(t.latitude, t.longitude, t.name, osmJson, neon)
                 Row(
                     Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -846,7 +864,8 @@ private fun TrailRow(
                     Button(
                         onClick = { openMapsNav(context, t) },
                         colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                            containerColor = MV.BrandRed, contentColor = MV.OnSurface,
+                            containerColor = if (neon) NeonMV.Cyan else MV.BrandRed,
+                            contentColor = if (neon) NeonMV.OnAccent else MV.OnSurface,
                         ),
                         modifier = Modifier.weight(1f),
                     ) {
@@ -866,13 +885,19 @@ private fun TrailRow(
 }
 
 @Composable
-private fun RideLinkRow(ride: ActivityRow, nowMs: Long, onTap: () -> Unit) {
+private fun RideLinkRow(ride: ActivityRow, nowMs: Long, neon: Boolean = false, onTap: () -> Unit) {
     val context = LocalContext.current
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val dim = if (neon) NeonMV.Muted else MV.OnSurfaceDim
+    val accent = if (neon) NeonMV.Cyan else MV.BrandRed
     val typeLabel = ride.type.replace("Ride", " ride", ignoreCase = true).trim()
     val ageStr = remember(nowMs, ride.startAt) { fmtAge(ride.startAt, nowMs) }
     val distStr = ride.distanceM?.let { "${"%.1f".format(it / 1609.34)} mi" } ?: "—"
     Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        colors = CardDefaults.cardColors(
+            containerColor = if (neon) NeonMV.Card else MV.SurfaceContainer,
+        ),
         modifier = Modifier.fillMaxWidth().clickable { onTap() },
     ) {
         Row(
@@ -882,30 +907,30 @@ private fun RideLinkRow(ride: ActivityRow, nowMs: Long, onTap: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text(
                     ride.name?.takeIf { it.isNotBlank() } ?: typeLabel.ifBlank { "Activity" },
-                    color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                 )
                 Row {
-                    Text("$ageStr  ·  $distStr", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    Text("$ageStr  ·  $distStr", color = muted, fontSize = 11.sp)
                     if (typeLabel.isNotEmpty()) {
-                        Text("  ·  $typeLabel", color = MV.OnSurfaceDim, fontSize = 11.sp)
+                        Text("  ·  $typeLabel", color = dim, fontSize = 11.sp)
                     }
                 }
             }
             if (ride.trailName != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.Link, contentDescription = "Linked trail",
-                        tint = MV.OnSurfaceVariant,
+                        tint = muted,
                         modifier = Modifier.size(12.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(
                         ride.trailName,
-                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                        color = muted, fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                     )
                 }
             } else {
-                Text("Link…", color = MV.BrandRed, fontSize = 12.sp,
+                Text("Link…", color = accent, fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold)
             }
         }
@@ -921,25 +946,29 @@ private fun rideSubtitle(ride: ActivityRow): String {
 }
 
 /** Visit-recency colour scale, matching the web's age-fresh → age-stale ramp. */
-private fun visitAgeColor(iso: String?, nowMs: Long): Color {
-    if (iso == null) return MV.OnSurfaceVariant
+private fun visitAgeColor(iso: String?, nowMs: Long, neon: Boolean = false): Color {
+    if (iso == null) return if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     val days = try { (nowMs - Instant.parse(iso).toEpochMilli()) / 86_400_000L }
-               catch (_: Exception) { return MV.OnSurfaceVariant }
+               catch (_: Exception) { return if (neon) NeonMV.Muted else MV.OnSurfaceVariant }
     return when {
-        days < 7   -> Color(0xFF22C55E)   // fresh — green
-        days < 30  -> Color(0xFF84CC16)   // recent — lime
-        days < 90  -> Color(0xFFF59E0B)   // medium — amber
-        days < 180 -> Color(0xFFFB923C)   // old — orange
-        else       -> Color(0xFF94A3B8)   // stale — slate
+        days < 7   -> if (neon) NeonMV.Lime else Color(0xFF22C55E)   // fresh — green
+        days < 30  -> if (neon) NeonMV.Lime else Color(0xFF84CC16)   // recent — lime
+        days < 90  -> if (neon) NeonMV.Amber else Color(0xFFF59E0B)  // medium — amber
+        days < 180 -> if (neon) NeonMV.Amber else Color(0xFFFB923C)  // old — orange
+        else       -> if (neon) NeonMV.Muted else Color(0xFF94A3B8)  // stale — slate
     }
 }
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun MiniMap(lat: Double, lon: Double, name: String, osmGeoJson: String? = null) {
+private fun MiniMap(lat: Double, lon: Double, name: String, osmGeoJson: String? = null, neon: Boolean = false) {
     val ctx = LocalContext.current
     val leafletCss = remember { app.myvitals.ui.common.LeafletAssets.css(ctx) }
     val leafletJs = remember { app.myvitals.ui.common.LeafletAssets.js(ctx) }
+    // Neon-aware web colours — byte-identical classic values when neon == false.
+    val mapBgHex = if (neon) "#0F1118" else "#0F1620"
+    val pinHex = if (neon) "#5DFF3B" else "#22C55E"
+    val osmLineHex = if (neon) "#9B9BB0" else "#94a3b8"
     val nameEsc = name
         .replace("\\", "\\\\")
         .replace("'", "\\'")
@@ -953,7 +982,7 @@ private fun MiniMap(lat: Double, lon: Double, name: String, osmGeoJson: String? 
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
 <style>$leafletCss
-html,body{margin:0;padding:0;background:#0F1620;overflow:hidden;}
+html,body{margin:0;padding:0;background:$mapBgHex;overflow:hidden;}
 #m{display:block;}</style>
 </head><body>
 <div id="m"></div>
@@ -983,7 +1012,7 @@ try {
   // default PNG marker can't resolve under loadDataWithBaseURL(null)).
   const pinIcon = L.divIcon({
     html: '<div style="width:18px;height:18px;border-radius:50%;'
-        + 'background:#22C55E;border:2px solid #FFFFFF;'
+        + 'background:$pinHex;border:2px solid #FFFFFF;'
         + 'box-shadow:0 2px 6px rgba(0,0,0,0.6);"></div>',
     className: 'mvpin', iconSize: [18,18], iconAnchor: [9,9],
   });
@@ -993,7 +1022,7 @@ try {
   let osmLayer = null;
   if (osm) {
     osmLayer = L.geoJSON(osm, {
-      style: {color:'#94a3b8', weight:3, opacity:0.9, dashArray:'6,4'}
+      style: {color:'$osmLineHex', weight:3, opacity:0.9, dashArray:'6,4'}
     }).addTo(window.map);
   }
   function fix() {
@@ -1027,20 +1056,23 @@ try {
  *  web /trails/map view. green=open, amber=delayed, red=closed,
  *  slate=unknown. Click a pin → popup with name + status + age. */
 @Composable
-private fun TrailsOverviewMap(trails: List<Trail>, nowMs: Long) {
+private fun TrailsOverviewMap(trails: List<Trail>, nowMs: Long, neon: Boolean = false) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val leafletCss = remember { app.myvitals.ui.common.LeafletAssets.css(ctx) }
     val leafletJs = remember { app.myvitals.ui.common.LeafletAssets.js(ctx) }
+    // Neon-aware web colours — byte-identical classic values when neon == false.
+    val mapBgHex = if (neon) "#0F1118" else "#0F1620"
+    val popAgeHex = if (neon) "#9B9BB0" else "#64748b"
     val pinned = trails.filter { it.latitude != null && it.longitude != null }
     val markersJs = buildString {
         append("[")
         for ((i, t) in pinned.withIndex()) {
             if (i > 0) append(",")
             val color = when (t.status) {
-                "open" -> "#22C55E"
-                "delayed" -> "#EAB308"
-                "closed" -> "#EF4444"
-                else -> "#94A3B8"
+                "open" -> if (neon) "#5DFF3B" else "#22C55E"
+                "delayed" -> if (neon) "#FFB52E" else "#EAB308"
+                "closed" -> if (neon) "#FF5D7A" else "#EF4444"
+                else -> if (neon) "#9B9BB0" else "#94A3B8"
             }
             val nameEsc = (t.name).replace("\\", "\\\\").replace("'", "\\'")
                 .replace("\n", " ").replace("\r", "")
@@ -1060,12 +1092,12 @@ private fun TrailsOverviewMap(trails: List<Trail>, nowMs: Long) {
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
 <style>$leafletCss
-html,body{margin:0;padding:0;background:#0F1620;overflow:hidden;}
+html,body{margin:0;padding:0;background:$mapBgHex;overflow:hidden;}
 #m{display:block;}
 .lpop{font-family:sans-serif;min-width:180px;}
 .lpop .nm{font-weight:600;margin-bottom:3px;}
 .lpop .st{font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;}
-.lpop .ag{color:#64748b;font-size:0.78rem;margin-top:2px;}
+.lpop .ag{color:$popAgeHex;font-size:0.78rem;margin-top:2px;}
 </style>
 </head><body>
 <div id="m"></div>

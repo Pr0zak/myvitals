@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.CoachCard
+import app.myvitals.ui.neon.NeonMV
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,6 +66,12 @@ fun CoachScreen(
 ) {
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
+    val neon = settings.neonShellEnabled
+
+    // Hoisted palette — classic byte-identical when neon is off.
+    val bg = if (neon) NeonMV.Bg else MV.Bg
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
 
     var workoutOpen by remember { mutableStateOf(false) }
     var workout by remember { mutableStateOf<CoachCard?>(null) }
@@ -236,7 +243,7 @@ fun CoachScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MV.Bg)
+            .background(bg)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
     ) {
@@ -245,18 +252,20 @@ fun CoachScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MV.OnSurface)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = ink)
             }
-            Text("Coach", color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text("Coach", color = ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         }
 
         Text(
             "AI cards that synthesize your data into specific guidance. Cards lazy-load on tap.",
-            color = MV.OnSurfaceVariant, fontSize = 12.sp,
+            color = muted, fontSize = 12.sp,
             modifier = Modifier.padding(bottom = 12.dp),
         )
 
         CoachCardBlock(
+            neon = neon,
+            accent = NeonMV.Cyan,
             icon = Icons.Outlined.FitnessCenter,
             title = "Workout coach",
             subtitle = "strength + cardio + recovery",
@@ -273,19 +282,21 @@ fun CoachScreen(
             onRefresh = { scope.launch { fetchWorkout(true) } },
             renderBody = { c ->
                 val a = c.analysis
-                Headline(a["headline"]?.toString() ?: "")
-                Pair("What's working", a["what_is_working"]?.toString() ?: "")
-                Pair("What to change", a["what_to_change"]?.toString() ?: "")
-                EvidenceList(a["evidence"])
-                LabeledPlan("This week's plan", a["weekly_plan_hint"]?.toString() ?: "")
+                Headline(a["headline"]?.toString() ?: "", neon, NeonMV.Cyan)
+                Pair("What's working", a["what_is_working"]?.toString() ?: "", neon)
+                Pair("What to change", a["what_to_change"]?.toString() ?: "", neon)
+                EvidenceList(a["evidence"], neon)
+                LabeledPlan("This week's plan", a["weekly_plan_hint"]?.toString() ?: "", neon)
             },
         )
 
         if (goals.isNotEmpty()) {
-            GoalsCard(goals)
+            GoalsCard(goals, neon)
         }
 
         CoachCardBlock(
+            neon = neon,
+            accent = NeonMV.Magenta,
             icon = Icons.Outlined.Bedtime,
             title = "Sleep coach",
             subtitle = "duration · consistency · stages · recovery link",
@@ -302,21 +313,24 @@ fun CoachScreen(
             onRefresh = { scope.launch { fetchSleep(true) } },
             renderBody = { c ->
                 val a = c.analysis
-                Headline(a["headline"]?.toString() ?: "")
+                Headline(a["headline"]?.toString() ?: "", neon, NeonMV.Magenta)
                 LabeledPlan(
                     "Supporting recovery",
                     (a["supporting_recovery"]?.toString() ?: "marginal"),
+                    neon,
                 )
-                Pair("Duration", a["duration_assessment"]?.toString() ?: "")
-                Pair("Consistency", a["consistency_assessment"]?.toString() ?: "")
-                Pair("Stages", a["stage_assessment"]?.toString() ?: "")
-                Pair("Recovery link", a["recovery_link"]?.toString() ?: "")
-                EvidenceList(a["evidence"])
-                LabeledPlan("Recommendation", a["recommendation"]?.toString() ?: "")
+                Pair("Duration", a["duration_assessment"]?.toString() ?: "", neon)
+                Pair("Consistency", a["consistency_assessment"]?.toString() ?: "", neon)
+                Pair("Stages", a["stage_assessment"]?.toString() ?: "", neon)
+                Pair("Recovery link", a["recovery_link"]?.toString() ?: "", neon)
+                EvidenceList(a["evidence"], neon)
+                LabeledPlan("Recommendation", a["recommendation"]?.toString() ?: "", neon)
             },
         )
 
         CoachCardBlock(
+            neon = neon,
+            accent = NeonMV.Cyan,
             icon = Icons.Outlined.HourglassEmpty,
             title = "Fasting coach",
             subtitle = "should I fast · protocol · goal fit",
@@ -339,25 +353,28 @@ fun CoachScreen(
                         .replace('_', ' ')
                         + (a["protocol_suggestion"]?.toString()?.takeIf { it.isNotBlank() }
                               ?.let { " · $it" } ?: ""),
+                    neon,
                 )
                 val window = a["best_window"]?.toString()
                 if (!window.isNullOrBlank()) {
-                    Pair("Best window", window)
+                    Pair("Best window", window, neon)
                 }
-                Pair("Goal fit", a["goal_alignment"]?.toString() ?: "")
-                EvidenceList(a["evidence"])
+                Pair("Goal fit", a["goal_alignment"]?.toString() ?: "", neon)
+                EvidenceList(a["evidence"], neon)
                 val caveats = a["caveats"]
                 if (caveats != null) {
                     @Suppress("UNCHECKED_CAST")
                     val list = (caveats as? List<*>)?.map { it.toString() } ?: emptyList()
                     if (list.isNotEmpty()) {
-                        LabeledPlan("Caveats", list.joinToString("\n• ", prefix = "• "))
+                        LabeledPlan("Caveats", list.joinToString("\n• ", prefix = "• "), neon)
                     }
                 }
             },
         )
 
         CoachCardBlock(
+            neon = neon,
+            accent = NeonMV.Cyan,
             icon = Icons.Outlined.Favorite,
             title = "Recovery coach",
             subtitle = "HRV · RHR · skin temp · readiness — multi-week trend",
@@ -374,21 +391,24 @@ fun CoachScreen(
             onRefresh = { scope.launch { fetchRecovery(true) } },
             renderBody = { c ->
                 val a = c.analysis
-                Headline(a["headline"]?.toString() ?: "")
+                Headline(a["headline"]?.toString() ?: "", neon, NeonMV.Cyan)
                 LabeledPlan(
                     "Trend",
                     (a["trend_direction"]?.toString() ?: "flat"),
+                    neon,
                 )
-                Pair("HRV", a["hrv_assessment"]?.toString() ?: "")
-                Pair("Resting HR", a["rhr_assessment"]?.toString() ?: "")
-                Pair("Skin temperature Δ", a["skin_temp_assessment"]?.toString() ?: "")
-                Pair("Readiness", a["readiness_assessment"]?.toString() ?: "")
-                EvidenceList(a["evidence"])
-                LabeledPlan("Recommendation", a["recommendation"]?.toString() ?: "")
+                Pair("HRV", a["hrv_assessment"]?.toString() ?: "", neon)
+                Pair("Resting HR", a["rhr_assessment"]?.toString() ?: "", neon)
+                Pair("Skin temperature Δ", a["skin_temp_assessment"]?.toString() ?: "", neon)
+                Pair("Readiness", a["readiness_assessment"]?.toString() ?: "", neon)
+                EvidenceList(a["evidence"], neon)
+                LabeledPlan("Recommendation", a["recommendation"]?.toString() ?: "", neon)
             },
         )
 
         CoachCardBlock(
+            neon = neon,
+            accent = NeonMV.Cyan,
             icon = Icons.Outlined.DirectionsBike,
             title = "Cardio coach",
             subtitle = "HR zones, dose, polarization",
@@ -405,11 +425,11 @@ fun CoachScreen(
             onRefresh = { scope.launch { fetchCardio(true) } },
             renderBody = { c ->
                 val a = c.analysis
-                Headline(a["headline"]?.toString() ?: "")
-                Pair("Polarization", a["polarized_assessment"]?.toString() ?: "")
-                Pair("Volume", a["volume_assessment"]?.toString() ?: "")
-                EvidenceList(a["evidence"])
-                LabeledPlan("Recommendation", a["recommendation"]?.toString() ?: "")
+                Headline(a["headline"]?.toString() ?: "", neon, NeonMV.Cyan)
+                Pair("Polarization", a["polarized_assessment"]?.toString() ?: "", neon)
+                Pair("Volume", a["volume_assessment"]?.toString() ?: "", neon)
+                EvidenceList(a["evidence"], neon)
+                LabeledPlan("Recommendation", a["recommendation"]?.toString() ?: "", neon)
             },
         )
 
@@ -419,6 +439,8 @@ fun CoachScreen(
 
 @Composable
 private fun CoachCardBlock(
+    neon: Boolean,
+    accent: Color,
     icon: ImageVector,
     title: String,
     subtitle: String,
@@ -430,19 +452,29 @@ private fun CoachCardBlock(
     onRefresh: () -> Unit,
     renderBody: @Composable (CoachCard) -> Unit,
 ) {
+    val card1 = if (neon) NeonMV.Card else MV.SurfaceContainerLow
+    val line = if (neon) NeonMV.Line else MV.OutlineVariant
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val dim = if (neon) NeonMV.Muted else MV.OnSurfaceDim
+    val errColor = if (neon) NeonMV.Bad else MV.Red
+    // The card icon carries the per-kind neon accent; classic keeps ink.
+    val iconTint = if (neon) accent else MV.OnSurface
     val toneColor = when ((card?.analysis?.get("tone") as? String)) {
-        "good" -> Color(0xFF22C55E)
-        "warn" -> Color(0xFFF59E0B)
-        "bad" -> Color(0xFFEF4444)
-        else -> MV.OutlineVariant
+        // Severity semantics: good=Lime, warn=Amber, bad=Bad under neon.
+        "good" -> if (neon) NeonMV.Lime else Color(0xFF22C55E)
+        "warn" -> if (neon) NeonMV.Amber else Color(0xFFF59E0B)
+        "bad" -> if (neon) NeonMV.Bad else Color(0xFFEF4444)
+        // Neutral tone falls back to the per-kind accent under neon.
+        else -> if (neon) accent else MV.OutlineVariant
     }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(MV.SurfaceContainerLow)
-            .border(1.dp, MV.OutlineVariant, RoundedCornerShape(12.dp)),
+            .background(card1)
+            .border(1.dp, line, RoundedCornerShape(12.dp)),
     ) {
         // Tone-tinted left border via overlay
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -455,23 +487,23 @@ private fun CoachCardBlock(
             ) {
                 Box(modifier = Modifier.size(4.dp, 24.dp).background(toneColor))
                 Spacer(Modifier.width(8.dp))
-                Icon(icon, contentDescription = title, tint = MV.OnSurface,
+                Icon(icon, contentDescription = title, tint = iconTint,
                     modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(title, color = MV.OnSurface, fontSize = 14.sp,
+                    Text(title, color = ink, fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold)
-                    Text(subtitle, color = MV.OnSurfaceDim, fontSize = 10.sp)
+                    Text(subtitle, color = dim, fontSize = 10.sp)
                 }
-                Text(if (open) "▾" else "▸", color = MV.OnSurfaceVariant, fontSize = 14.sp)
+                Text(if (open) "▾" else "▸", color = muted, fontSize = 14.sp)
             }
         }
 
         if (open) {
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 when {
-                    loading -> Text("Thinking…", color = MV.OnSurfaceVariant, fontSize = 12.sp)
-                    error != null -> Text(error, color = MV.Red, fontSize = 12.sp)
+                    loading -> Text("Thinking…", color = muted, fontSize = 12.sp)
+                    error != null -> Text(error, color = errColor, fontSize = 12.sp)
                     card != null -> {
                         renderBody(card)
                         Spacer(Modifier.height(10.dp))
@@ -479,17 +511,17 @@ private fun CoachCardBlock(
                             Text(
                                 "${card.generatedAt.take(16).replace("T", " ")} · ${card.model}" +
                                     if (card.cached) " (cached)" else "",
-                                color = MV.OnSurfaceDim, fontSize = 10.sp,
+                                color = dim, fontSize = 10.sp,
                                 modifier = Modifier.weight(1f),
                             )
                             IconButton(onClick = onRefresh, modifier = Modifier.size(28.dp)) {
                                 Icon(Icons.Outlined.Refresh, "Refresh",
-                                    tint = MV.OnSurfaceVariant,
+                                    tint = muted,
                                     modifier = Modifier.size(14.dp))
                             }
                         }
                     }
-                    else -> Text("Tap to generate.", color = MV.OnSurfaceDim, fontSize = 12.sp)
+                    else -> Text("Tap to generate.", color = dim, fontSize = 12.sp)
                 }
             }
         }
@@ -497,22 +529,25 @@ private fun CoachCardBlock(
 }
 
 @Composable
-private fun Headline(text: String) {
-    Text(text, color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+private fun Headline(text: String, neon: Boolean, accent: Color) {
+    // Under neon the headline carries the per-kind accent; classic keeps ink.
+    Text(text, color = if (neon) accent else MV.OnSurface,
+        fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(bottom = 6.dp))
 }
 
 @Composable
-private fun Pair(label: String, value: String) {
+private fun Pair(label: String, value: String, neon: Boolean) {
     if (value.isBlank()) return
-    Text(label.uppercase(), color = MV.OnSurfaceVariant, fontSize = 9.sp,
+    Text(label.uppercase(), color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant,
+        fontSize = 9.sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
-    Text(value, color = MV.OnSurface, fontSize = 12.sp)
+    Text(value, color = if (neon) NeonMV.Ink else MV.OnSurface, fontSize = 12.sp)
 }
 
 @Composable
-private fun EvidenceList(raw: Any?) {
+private fun EvidenceList(raw: Any?, neon: Boolean) {
     val items: List<String> = when (raw) {
         is List<*> -> raw.mapNotNull { it?.toString() }
         is String -> {
@@ -529,46 +564,52 @@ private fun EvidenceList(raw: Any?) {
         else -> emptyList()
     }
     if (items.isEmpty()) return
-    Text("EVIDENCE", color = MV.OnSurfaceVariant, fontSize = 9.sp,
+    Text("EVIDENCE", color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant,
+        fontSize = 9.sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
     items.forEach { line ->
-        Text("• $line", color = MV.OnSurface, fontSize = 12.sp,
+        Text("• $line", color = if (neon) NeonMV.Ink else MV.OnSurface, fontSize = 12.sp,
             modifier = Modifier.padding(bottom = 2.dp))
     }
 }
 
 @Composable
-private fun LabeledPlan(label: String, value: String) {
+private fun LabeledPlan(label: String, value: String, neon: Boolean) {
     if (value.isBlank()) return
     Spacer(Modifier.height(6.dp))
-    Text(label.uppercase(), color = MV.OnSurfaceVariant, fontSize = 9.sp,
+    Text(label.uppercase(), color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant,
+        fontSize = 9.sp,
         fontWeight = FontWeight.SemiBold)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 4.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(MV.SurfaceContainer)
+            .background(if (neon) NeonMV.CardHigh else MV.SurfaceContainer)
             .padding(8.dp),
     ) {
-        Text(value, color = MV.OnSurface, fontSize = 12.sp)
+        Text(value, color = if (neon) NeonMV.Ink else MV.OnSurface, fontSize = 12.sp)
     }
 }
 
 @Composable
-private fun GoalsCard(goals: List<app.myvitals.sync.AiGoal>) {
+private fun GoalsCard(goals: List<app.myvitals.sync.AiGoal>, neon: Boolean) {
     // Phone mirror of the web Coach.vue Goals card (GOALS-4 / GOALS-5).
     // Read-only — no AI call. Just renders the progress payload
     // already enriched on /ai/goals (GOALS-3).
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val line = if (neon) NeonMV.Line else MV.OutlineVariant
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 10.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(MV.SurfaceContainer)
+            .background(card)
             .border(
-                androidx.compose.foundation.BorderStroke(1.dp, MV.OutlineVariant),
+                androidx.compose.foundation.BorderStroke(1.dp, line),
                 RoundedCornerShape(10.dp),
             )
             .padding(12.dp),
@@ -577,17 +618,17 @@ private fun GoalsCard(goals: List<app.myvitals.sync.AiGoal>) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Outlined.GpsFixed, contentDescription = null,
-                    tint = MV.OnSurface, modifier = Modifier.size(18.dp),
+                    tint = ink, modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("Goals", color = MV.OnSurface, fontSize = 14.sp,
+                Text("Goals", color = ink, fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 Text("${goals.size} active",
-                    color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    color = muted, fontSize = 11.sp)
             }
             Spacer(Modifier.height(8.dp))
             goals.forEach { g ->
-                GoalRow(g)
+                GoalRow(g, neon)
                 Spacer(Modifier.height(8.dp))
             }
         }
@@ -595,23 +636,33 @@ private fun GoalsCard(goals: List<app.myvitals.sync.AiGoal>) {
 }
 
 @Composable
-private fun GoalRow(g: app.myvitals.sync.AiGoal) {
+private fun GoalRow(g: app.myvitals.sync.AiGoal, neon: Boolean) {
     val pct = (g.progressPct ?: 0.0).coerceIn(0.0, 100.0)
-    val barColor = if (pct >= 100.0) Color(0xFF22C55E) else Color(0xFF38BDF8)
+    // Completed=Lime, in-progress=Cyan under neon; sky-blue classic.
+    val barColor = if (pct >= 100.0) {
+        if (neon) NeonMV.Lime else Color(0xFF22C55E)
+    } else {
+        if (neon) NeonMV.Cyan else Color(0xFF38BDF8)
+    }
+    val pillFg = if (neon) NeonMV.Cyan else Color(0xFF38BDF8)
+    val pillBg = if (neon) NeonMV.Cyan.copy(alpha = 0.10f) else Color(0x1A38BDF8)
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val dim = if (neon) NeonMV.Muted else MV.OnSurfaceDim
+    val track = if (neon) NeonMV.Track else Color(0x14FFFFFF)
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                g.kind.replace('_', ' ').uppercase(), color = Color(0xFF38BDF8),
+                g.kind.replace('_', ' ').uppercase(), color = pillFg,
                 fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
-                    .background(Color(0x1A38BDF8), RoundedCornerShape(4.dp))
+                    .background(pillBg, RoundedCornerShape(4.dp))
                     .padding(horizontal = 5.dp, vertical = 1.dp),
             )
             Spacer(Modifier.width(8.dp))
-            Text(g.title, color = MV.OnSurface, fontSize = 13.sp,
+            Text(g.title, color = ink, fontSize = 13.sp,
                 modifier = Modifier.weight(1f))
             if (g.progressPct != null) {
-                Text("${pct.toInt()}%", color = MV.OnSurface,
+                Text("${pct.toInt()}%", color = ink,
                     fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
         }
@@ -621,7 +672,7 @@ private fun GoalRow(g: app.myvitals.sync.AiGoal) {
                 .fillMaxWidth()
                 .height(4.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(Color(0x14FFFFFF)),
+                .background(track),
         ) {
             Box(
                 modifier = Modifier
@@ -636,7 +687,7 @@ private fun GoalRow(g: app.myvitals.sync.AiGoal) {
                 "%.1f / %s %s".format(
                     g.currentValue, g.targetValue.toString(), g.targetUnit ?: "",
                 ),
-                color = MV.OnSurfaceDim, fontSize = 10.sp,
+                color = dim, fontSize = 10.sp,
             )
         }
     }

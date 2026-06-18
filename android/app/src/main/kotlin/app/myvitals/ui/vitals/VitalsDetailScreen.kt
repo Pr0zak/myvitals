@@ -38,17 +38,22 @@ import app.myvitals.sync.BackendClient
 import app.myvitals.sync.DailySummary
 import app.myvitals.sync.TimePoint
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonMV
+import androidx.compose.ui.graphics.Color
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottom
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStart
+import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLine
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
 import com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState
 import com.patrykandpatrick.vico.compose.cartesian.rememberVicoZoomState
+import com.patrykandpatrick.vico.compose.common.fill
 import com.patrykandpatrick.vico.core.cartesian.axis.HorizontalAxis
 import com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
+import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -145,19 +150,32 @@ fun VitalsDetailScreen(
 
     LaunchedEffect(range, selectedDay) { haveSeries = false; load() }
 
-    Column(Modifier.fillMaxSize().background(MV.Bg)) {
+    // Neon shell adoption: when the neon shell is active these shared detail
+    // screens must wear the neon palette; when it is off every color below is
+    // byte-identical to the classic theme via the `if (neon) … else <current>`
+    // branches. Domain accent maps HR/HRV/BP -> Cyan, Sleep -> Magenta,
+    // Steps -> Lime, Weight -> Amber (the rest reuse the classic vital.color).
+    val neon = settings.neonShellEnabled
+    val bg = if (neon) NeonMV.Bg else MV.Bg
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val bad = if (neon) NeonMV.Bad else MV.Red
+    val accent: Color = if (neon) neonDomainColor(vital) else vital.color
+
+    Column(Modifier.fillMaxSize().background(bg)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = MV.OnSurface)
+                    tint = ink)
             }
             Icon(vital.icon, contentDescription = null,
-                tint = vital.color, modifier = Modifier.width(20.dp).height(20.dp))
+                tint = accent, modifier = Modifier.width(20.dp).height(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text(vital.label, color = MV.OnSurface,
+            Text(vital.label, color = ink,
                 fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f))
         }
@@ -175,8 +193,8 @@ fun VitalsDetailScreen(
                     },
                     label = { Text(r.label) },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = vital.color.copy(alpha = 0.20f),
-                        selectedLabelColor = MV.OnSurface,
+                        selectedContainerColor = accent.copy(alpha = 0.20f),
+                        selectedLabelColor = ink,
                     ),
                 )
             }
@@ -204,18 +222,34 @@ fun VitalsDetailScreen(
                     .verticalScroll(rememberScrollState()),
             ) {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+                    colors = CardDefaults.cardColors(containerColor = card),
                     modifier = Modifier.fillMaxWidth().padding(12.dp),
                 ) {
                     if (loading) {
-                        Text("Loading…", Modifier.padding(20.dp), color = MV.OnSurfaceVariant)
+                        Text("Loading…", Modifier.padding(20.dp), color = muted)
                     } else if (error != null) {
-                        Text(error!!, Modifier.padding(20.dp), color = MV.Red)
+                        Text(error!!, Modifier.padding(20.dp), color = bad)
                     } else {
                         Column(Modifier.padding(8.dp)) {
+                            // Under neon the line + area adopt the domain accent;
+                            // classic keeps Vico's theme-default line untouched.
+                            val lineLayer = if (neon) {
+                                rememberLineCartesianLayer(
+                                    LineCartesianLayer.LineProvider.series(
+                                        LineCartesianLayer.rememberLine(
+                                            fill = LineCartesianLayer.LineFill.single(fill(accent)),
+                                            areaFill = LineCartesianLayer.AreaFill.single(
+                                                fill(accent.copy(alpha = 0.18f)),
+                                            ),
+                                        ),
+                                    ),
+                                )
+                            } else {
+                                rememberLineCartesianLayer()
+                            }
                             CartesianChartHost(
                                 chart = rememberCartesianChart(
-                                    rememberLineCartesianLayer(),
+                                    lineLayer,
                                     startAxis = VerticalAxis.rememberStart(),
                                     bottomAxis = HorizontalAxis.rememberBottom(),
                                 ),
@@ -230,9 +264,9 @@ fun VitalsDetailScreen(
                                 Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
-                                Stat("Min", stats.first, vital)
-                                Stat("Avg", stats.third, vital)
-                                Stat("Max", stats.second, vital)
+                                Stat("Min", stats.first, vital, neon)
+                                Stat("Avg", stats.third, vital, neon)
+                                Stat("Max", stats.second, vital, neon)
                             }
                         }
                     }
@@ -243,15 +277,32 @@ fun VitalsDetailScreen(
 }
 
 @Composable
-private fun Stat(label: String, value: Float?, vital: Vital) {
+private fun Stat(label: String, value: Float?, vital: Vital, neon: Boolean = false) {
+    val labelColor = if (neon) NeonMV.Muted else MV.OnSurfaceDim
+    val valueColor = if (neon) NeonMV.Ink else MV.OnSurface
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = MV.OnSurfaceDim, fontSize = 10.sp,
+        Text(label, color = labelColor, fontSize = 10.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         Text(
             value?.let { fmtForVital(it, vital) } ?: "—",
-            color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            color = valueColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
         )
     }
+}
+
+/**
+ * Domain accent for the neon shell. HR / HRV / BP -> Cyan (heart family),
+ * Sleep -> Magenta, Steps -> Lime (move), Weight -> Amber. Everything else
+ * falls back to the classic per-vital color so unmapped domains stay sane.
+ */
+private fun neonDomainColor(vital: Vital): Color = when (vital) {
+    Vital.HR, Vital.HRV, Vital.BP -> NeonMV.Cyan
+    Vital.SLEEP -> NeonMV.Magenta
+    Vital.STEPS -> NeonMV.Lime
+    Vital.WEIGHT -> NeonMV.Amber
+    Vital.SOBER -> NeonMV.Magenta
+    Vital.FASTING -> NeonMV.Cyan
+    else -> vital.color
 }
 
 private fun fmtForVital(v: Float, vital: Vital): String = when (vital) {

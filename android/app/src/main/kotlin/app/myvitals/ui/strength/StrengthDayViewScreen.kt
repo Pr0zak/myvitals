@@ -40,6 +40,7 @@ import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.StrengthWorkoutDetail
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonMV
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -53,6 +54,7 @@ fun StrengthDayViewScreen(
     onBack: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val neon = settings.neonShellEnabled
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -95,30 +97,36 @@ fun StrengthDayViewScreen(
     }
     val titleFmt = DateTimeFormatter.ofPattern("EEE, MMM d")
 
-    Column(Modifier.fillMaxSize().background(MV.Bg)) {
+    val bg = if (neon) NeonMV.Bg else MV.Bg
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val bad = if (neon) NeonMV.Bad else MV.Red
+
+    Column(Modifier.fillMaxSize().background(bg)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = MV.OnSurface)
+                    tint = ink)
             }
             Text(parsed?.format(titleFmt) ?: dateIso,
-                color = MV.OnSurface, fontSize = 16.sp,
+                color = ink, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant,
+            loading -> Text("Loading…", color = muted,
                 modifier = Modifier.padding(16.dp))
-            error != null -> Text(error!!, color = MV.Red,
+            error != null -> Text(error!!, color = bad,
                 modifier = Modifier.padding(16.dp))
             notFound -> Card(
-                colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+                colors = CardDefaults.cardColors(containerColor = card),
                 modifier = Modifier.padding(16.dp).fillMaxWidth(),
             ) {
                 Text("No workout recorded for this day.",
-                    color = MV.OnSurfaceVariant,
+                    color = muted,
                     modifier = Modifier.padding(14.dp), fontSize = 13.sp)
             }
             workout != null -> {
@@ -127,9 +135,9 @@ fun StrengthDayViewScreen(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    item { DayHeader(w) }
+                    item { DayHeader(w, neon) }
                     items(w.exercises, key = { it.id }) { wex ->
-                        DayExerciseCard(wex)
+                        DayExerciseCard(wex, neon)
                     }
                 }
             }
@@ -138,16 +146,19 @@ fun StrengthDayViewScreen(
 }
 
 @Composable
-private fun DayHeader(w: StrengthWorkoutDetail) {
+private fun DayHeader(w: StrengthWorkoutDetail, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     val isPreview = w.id < 0 || w.status == "preview"
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    Card(colors = CardDefaults.cardColors(containerColor = card)) {
         Column(Modifier.padding(14.dp)) {
             Text(w.splitFocus.replaceFirstChar { it.titlecase() }
                 + (if (isPreview) " · Preview" else ""),
-                color = MV.OnSurface, fontSize = 18.sp,
+                color = ink, fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold)
             Text(muscleGroupsFor(w.splitFocus),
-                color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                color = muted, fontSize = 12.sp)
             if (w.status != "preview") {
                 Spacer(Modifier.height(4.dp))
                 val pip = when (w.status) {
@@ -157,7 +168,16 @@ private fun DayHeader(w: StrengthWorkoutDetail) {
                     "planned" -> "Planned"
                     else -> w.status
                 }
-                Text(pip, color = MV.OnSurfaceDim, fontSize = 11.sp,
+                // Neon: status-semantic color (completed=Lime/open, in_progress=
+                // Cyan/info, skipped=Bad, planned=Muted). Classic: single dim ink.
+                val pipColor = if (neon) when (w.status) {
+                    "completed" -> NeonMV.Lime
+                    "in_progress" -> NeonMV.Cyan
+                    "skipped" -> NeonMV.Bad
+                    "planned" -> NeonMV.Muted
+                    else -> NeonMV.Muted
+                } else MV.OnSurfaceDim
+                Text(pip, color = pipColor, fontSize = 11.sp,
                     fontWeight = FontWeight.Bold)
             }
         }
@@ -165,27 +185,73 @@ private fun DayHeader(w: StrengthWorkoutDetail) {
 }
 
 @Composable
-private fun DayExerciseCard(wex: app.myvitals.sync.StrengthWorkoutExerciseRow) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+private fun DayExerciseCard(wex: app.myvitals.sync.StrengthWorkoutExerciseRow, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val setInk = if (neon) NeonMV.Muted else MV.OnSurfaceDim
+    Card(colors = CardDefaults.cardColors(containerColor = card)) {
         Column(Modifier.padding(12.dp)) {
             Text(wex.exerciseId.replace('_', ' '),
-                color = MV.OnSurface, fontSize = 15.sp,
+                color = ink, fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold)
             val rep = if (wex.targetRepsLow == wex.targetRepsHigh)
                 "${wex.targetRepsLow}" else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
             val w = wex.targetWeightLb?.let { " @ ${it}lb" } ?: ""
             Text("${wex.targetSets}×$rep$w",
-                color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                color = muted, fontSize = 12.sp)
             // Logged sets (if any)
             for (s in wex.sets.sortedBy { it.setNumber }) {
                 if (s.actualReps != null) {
                     Spacer(Modifier.height(2.dp))
-                    Text(
-                        "  set ${s.setNumber}: ${s.actualWeightLb ?: "—"}lb × ${s.actualReps}"
-                            + (s.rating?.let { " · RPE $it" } ?: ""),
-                        color = MV.OnSurfaceDim, fontSize = 11.sp,
-                    )
+                    if (neon && s.rating != null) {
+                        // Neon: split the rating off so it carries its own
+                        // set-rating semantic color (good/easy=Lime, hard=Amber,
+                        // failed=Bad), while the rest stays muted ink.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "  set ${s.setNumber}: ${s.actualWeightLb ?: "—"}lb × ${s.actualReps}",
+                                color = setInk, fontSize = 11.sp,
+                            )
+                            Text(
+                                " · RPE ${s.rating}",
+                                color = setRatingColor(s.rating),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    } else {
+                        Text(
+                            "  set ${s.setNumber}: ${s.actualWeightLb ?: "—"}lb × ${s.actualReps}"
+                                + (s.rating?.let { " · RPE $it" } ?: ""),
+                            color = setInk, fontSize = 11.sp,
+                        )
+                    }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Neon set-rating color. The four-button rating ladder is
+ * Failed / Hard / Good / Easy; legacy numeric RPE may also flow through.
+ * Good/Easy -> Lime, Hard -> Amber (caution), Failed -> Bad. Numeric RPE:
+ * high effort (>=9) -> Amber, very high (>=10) -> Bad, else Lime.
+ */
+private fun setRatingColor(rating: Any?): androidx.compose.ui.graphics.Color {
+    val label = rating?.toString()?.trim()?.lowercase() ?: return NeonMV.Muted
+    return when (label) {
+        "good", "easy" -> NeonMV.Lime
+        "hard" -> NeonMV.Amber
+        "failed", "fail" -> NeonMV.Bad
+        else -> {
+            val n = label.toDoubleOrNull()
+            when {
+                n == null -> NeonMV.Muted
+                n >= 10.0 -> NeonMV.Bad
+                n >= 9.0 -> NeonMV.Amber
+                else -> NeonMV.Lime
             }
         }
     }

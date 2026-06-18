@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
+import app.myvitals.ui.neon.NeonMV
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.SoberCurrentResponse
 import app.myvitals.sync.SoberResetRequest
@@ -77,6 +78,17 @@ fun SoberHomeScreen(
     var loadError by remember { mutableStateOf<String?>(null) }
     var resetting by remember { mutableStateOf(false) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    // Neon shell signal — when true this shared screen adopts the neon
+    // palette; when false every color stays byte-for-byte classic.
+    val neon = settings.neonShellEnabled
+    val bg     = if (neon) NeonMV.Bg    else MV.Bg
+    val ink    = if (neon) NeonMV.Ink   else MV.OnSurface
+    val muted  = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val dim    = if (neon) NeonMV.Muted else MV.OnSurfaceDim
+    // Sober domain accent — Magenta under neon, brand green classic.
+    val soberAccent = if (neon) NeonMV.Magenta else Color(0xFF22C55E)
+    val errorColor  = if (neon) NeonMV.Bad     else MV.Red
 
     val historyType = remember {
         app.myvitals.data.JsonCache.listType(app.myvitals.sync.SoberStreak::class.java)
@@ -174,7 +186,7 @@ fun SoberHomeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MV.Bg),
+            .background(bg),
     ) {
         Box(
             modifier = Modifier
@@ -184,8 +196,8 @@ fun SoberHomeScreen(
         ) {
             BrandMark(
                 dimension = 360.dp,
-                heart = MV.BrandRed.copy(alpha = 0.05f),
-                trace = MV.OnSurface.copy(alpha = 0.04f),
+                heart = (if (neon) NeonMV.Magenta else MV.BrandRed).copy(alpha = 0.05f),
+                trace = ink.copy(alpha = 0.04f),
             )
         }
 
@@ -208,7 +220,7 @@ fun SoberHomeScreen(
                     androidx.compose.material3.Icon(
                         Icons.AutoMirrored.Outlined.ArrowBack,
                         contentDescription = "Back",
-                        tint = MV.OnSurface,
+                        tint = ink,
                     )
                 }
             } else {
@@ -217,7 +229,7 @@ fun SoberHomeScreen(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 0.4.sp,
-                    color = MV.OnSurfaceVariant,
+                    color = muted,
                 )
             }
         }
@@ -232,14 +244,18 @@ fun SoberHomeScreen(
             verticalArrangement = Arrangement.Center,
         ) {
             if (active == null) {
-                EmptyState()
+                EmptyState(
+                    neon = neon,
+                    ink = ink,
+                    muted = muted,
+                )
             } else {
                 Text(
                     "SOBER TIME",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 3.6.sp,
-                    color = MV.OnSurfaceVariant,
+                    color = muted,
                 )
                 Spacer(Modifier.height(24.dp))
 
@@ -267,7 +283,7 @@ fun SoberHomeScreen(
                         val stroke = androidx.compose.ui.graphics.drawscope
                             .Stroke(width = 6.dp.toPx(),
                                     cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                        val ringColor = androidx.compose.ui.graphics.Color(0xFF22C55E)
+                        val ringColor = soberAccent
                         val bgColor = ringColor.copy(alpha = 0.10f)
                         val padding = stroke.width / 2f
                         val arcSize = androidx.compose.ui.geometry.Size(
@@ -292,7 +308,7 @@ fun SoberHomeScreen(
                             text = "$d",
                             fontSize = 96.sp,
                             fontWeight = FontWeight.Light,
-                            color = MV.OnSurface,
+                            color = if (neon) NeonMV.Magenta else MV.OnSurface,
                             style = androidx.compose.ui.text.TextStyle(
                                 fontFeatureSettings = "tnum",
                                 letterSpacing = (-3).sp,
@@ -301,14 +317,14 @@ fun SoberHomeScreen(
                         Text(
                             text = if (d == 1) "day" else "days",
                             fontSize = 18.sp,
-                            color = MV.OnSurface.copy(alpha = 0.92f),
+                            color = ink.copy(alpha = 0.92f),
                         )
                         Text(
                             text = if (mRemaining > 0)
                                 "%.1f d to ${mTarget}d".format(mRemaining)
                             else "All milestones cleared",
                             fontSize = 11.sp,
-                            color = MV.OnSurfaceVariant,
+                            color = muted,
                             modifier = Modifier.padding(top = 4.dp),
                         )
                     }
@@ -319,9 +335,9 @@ fun SoberHomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.Bottom,
                 ) {
-                    TickerSeg(value = h.toString(), unit = "h")
-                    TickerSeg(value = m.toString().padStart(2, '0'), unit = "m")
-                    TickerSeg(value = s.toString().padStart(2, '0'), unit = "s")
+                    TickerSeg(value = h.toString(), unit = "h", ink = ink, dim = dim)
+                    TickerSeg(value = m.toString().padStart(2, '0'), unit = "m", ink = ink, dim = dim)
+                    TickerSeg(value = s.toString().padStart(2, '0'), unit = "s", ink = ink, dim = dim)
                 }
 
                 Spacer(Modifier.height(18.dp))
@@ -335,7 +351,7 @@ fun SoberHomeScreen(
                 Text(
                     "since $sinceLabel",
                     fontSize = 13.sp,
-                    color = MV.OnSurfaceDim,
+                    color = dim,
                     letterSpacing = 0.2.sp,
                 )
             }
@@ -362,7 +378,7 @@ fun SoberHomeScreen(
                             "Hide past streaks"
                         else
                             "Past streaks (${pastStreaks.size}) ›",
-                        color = MV.OnSurfaceVariant,
+                        color = muted,
                         fontSize = 13.sp, fontWeight = FontWeight.Medium,
                     )
                 }
@@ -370,12 +386,12 @@ fun SoberHomeScreen(
                     Column(modifier = Modifier.fillMaxWidth()) {
                         val show = pastStreaks.take(20)
                         for (st in show) {
-                            StreakRow(streak = st)
+                            StreakRow(streak = st, ink = ink, dim = dim)
                         }
                         if (pastStreaks.size > show.size) {
                             Text(
                                 text = "+${pastStreaks.size - show.size} older",
-                                color = MV.OnSurfaceDim, fontSize = 11.sp,
+                                color = dim, fontSize = 11.sp,
                                 modifier = Modifier.padding(top = 4.dp),
                             )
                         }
@@ -392,13 +408,14 @@ fun SoberHomeScreen(
                     scope.launch { doReset() }
                 },
                 resetting = resetting,
+                neon = neon,
             )
         }
 
         AnimatedVisibility(visible = loadError != null) {
             Text(
                 text = loadError.orEmpty(),
-                color = MV.Red,
+                color = errorColor,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
@@ -413,7 +430,11 @@ fun SoberHomeScreen(
 }
 
 @Composable
-private fun StreakRow(streak: app.myvitals.sync.SoberStreak) {
+private fun StreakRow(
+    streak: app.myvitals.sync.SoberStreak,
+    ink: Color = MV.OnSurface,
+    dim: Color = MV.OnSurfaceDim,
+) {
     val df = remember { DateTimeFormatter.ofPattern("MMM d, yyyy") }
     val startStr = remember(streak.startAt) {
         runCatching {
@@ -436,66 +457,91 @@ private fun StreakRow(streak: app.myvitals.sync.SoberStreak) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = "${"%.1f".format(streak.days)} day${if (streak.days >= 2) "s" else ""}",
-                color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium,
             )
             Text(
                 text = if (endStr != null) "$startStr → $endStr" else startStr,
-                color = MV.OnSurfaceDim, fontSize = 11.sp,
+                color = dim, fontSize = 11.sp,
             )
         }
     }
 }
 
 @Composable
-private fun TickerSeg(value: String, unit: String) {
+private fun TickerSeg(
+    value: String,
+    unit: String,
+    ink: Color = MV.OnSurface,
+    dim: Color = MV.OnSurfaceDim,
+) {
     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             text = value,
             fontSize = 22.sp,
             fontWeight = FontWeight.Medium,
-            color = MV.OnSurface.copy(alpha = 0.85f),
+            color = ink.copy(alpha = 0.85f),
             style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
         )
         Text(
             text = unit,
             fontSize = 13.sp,
-            color = MV.OnSurfaceDim,
+            color = dim,
             modifier = Modifier.padding(end = 4.dp, bottom = 2.dp),
         )
     }
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(
+    neon: Boolean = false,
+    ink: Color = MV.OnSurface,
+    muted: Color = MV.OnSurfaceVariant,
+) {
     Box(
         modifier = Modifier
             .size(84.dp)
             .clip(RoundedCornerShape(50))
-            .border(1.5.dp, MV.Outline, RoundedCornerShape(50)),
+            .border(
+                1.5.dp,
+                if (neon) NeonMV.Track else MV.Outline,
+                RoundedCornerShape(50),
+            ),
         contentAlignment = Alignment.Center,
     ) { BrandMark(dimension = 40.dp) }
     Spacer(Modifier.height(24.dp))
     Text(
         "SOBER TIME",
         fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.6.sp,
-        color = MV.OnSurfaceVariant,
+        color = muted,
     )
     Spacer(Modifier.height(16.dp))
     Text(
         "No active streak yet",
         fontSize = 28.sp, fontWeight = FontWeight.Normal,
-        color = MV.OnSurface, textAlign = TextAlign.Center,
+        color = ink, textAlign = TextAlign.Center,
     )
     Spacer(Modifier.height(10.dp))
     Text(
         "Start counting from now, or pick a date in Settings.",
-        fontSize = 14.sp, color = MV.OnSurfaceVariant,
+        fontSize = 14.sp, color = muted,
         textAlign = TextAlign.Center,
     )
 }
 
 @Composable
-private fun ResetButton(hasActive: Boolean, onTriggered: () -> Unit, resetting: Boolean) {
+private fun ResetButton(
+    hasActive: Boolean,
+    onTriggered: () -> Unit,
+    resetting: Boolean,
+    neon: Boolean = false,
+) {
+    // Hold-to-reset is a caution/destructive action — Amber under neon,
+    // classic AmberDim/Amber/AmberOn otherwise.
+    val resetSurface = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val resetSurfaceInk = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val holdTrackColor = if (neon) NeonMV.Amber.copy(alpha = 0.45f) else MV.AmberDim
+    val holdFillColor = if (neon) NeonMV.Amber else MV.Amber
+    val holdInk = if (neon) NeonMV.OnAccent else MV.AmberOn
     // No-active-streak: simple tap, this is the lightweight "Start counting" path.
     if (!hasActive) {
         Box(
@@ -503,14 +549,14 @@ private fun ResetButton(hasActive: Boolean, onTriggered: () -> Unit, resetting: 
                 .fillMaxWidth()
                 .height(88.dp)
                 .clip(RoundedCornerShape(24.dp))
-                .background(MV.SurfaceContainer)
+                .background(resetSurface)
                 .pointerInput(Unit) { detectTapGestures(onTap = { onTriggered() }) },
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 "Start counting",
                 fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.5.sp, color = MV.OnSurfaceVariant,
+                letterSpacing = 0.5.sp, color = resetSurfaceInk,
             )
         }
         return
@@ -528,7 +574,7 @@ private fun ResetButton(hasActive: Boolean, onTriggered: () -> Unit, resetting: 
             .fillMaxWidth()
             .height(96.dp)
             .clip(RoundedCornerShape(28.dp))
-            .background(MV.AmberDim)
+            .background(holdTrackColor)
             .pointerInput(resetting) {
                 if (resetting) return@pointerInput
                 detectTapGestures(
@@ -558,7 +604,7 @@ private fun ResetButton(hasActive: Boolean, onTriggered: () -> Unit, resetting: 
             modifier = Modifier
                 .fillMaxHeight()
                 .fillMaxWidth(if (resetting) 1f else progress.floatValue.coerceAtLeast(if (holding) 0.001f else 1f))
-                .background(MV.Amber),
+                .background(holdFillColor),
         )
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
@@ -568,7 +614,7 @@ private fun ResetButton(hasActive: Boolean, onTriggered: () -> Unit, resetting: 
                     else -> "Press & hold to reset"
                 },
                 fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.6.sp, color = MV.AmberOn,
+                letterSpacing = 0.6.sp, color = holdInk,
             )
         }
     }

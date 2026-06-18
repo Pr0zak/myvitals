@@ -47,6 +47,7 @@ import app.myvitals.sync.StrengthExerciseInfo
 import app.myvitals.sync.StrengthWorkoutDetail
 import app.myvitals.sync.StrengthWorkoutSummary
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonMV
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,6 +63,12 @@ fun StrengthHistoryScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repo = remember(settings) { StrengthRepository(context, settings) }
+
+    val neon = settings.neonShellEnabled
+    val bg = if (neon) NeonMV.Bg else MV.Bg
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val errColor = if (neon) NeonMV.Bad else MV.Red
 
     var rows by remember { mutableStateOf<List<StrengthWorkoutSummary>>(emptyList()) }
     var detail by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
@@ -98,7 +105,7 @@ fun StrengthHistoryScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MV.Bg)
+            .background(bg)
             .padding(horizontal = 16.dp),
     ) {
         Row(
@@ -106,33 +113,33 @@ fun StrengthHistoryScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = if (detail != null) ({ detail = null }) else onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MV.OnSurface)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = ink)
             }
             Spacer(Modifier.width(4.dp))
             Text(
                 if (detail != null)
                     "${fmtDate(detail!!.date)} · ${detail!!.splitFocus.replace('_', ' ')}"
                 else "Workout history",
-                color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                color = ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
             )
         }
 
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant)
-            error != null -> Text(error!!, color = MV.Red)
-            detail != null -> DetailList(detail!!, catalog)
+            loading -> Text("Loading…", color = muted)
+            error != null -> Text(error!!, color = errColor)
+            detail != null -> DetailList(detail!!, catalog, neon)
             rows.isEmpty() -> Text(
                 "No workouts logged yet. Start one from the Today tab.",
-                color = MV.OnSurfaceVariant, modifier = Modifier.padding(16.dp),
+                color = muted, modifier = Modifier.padding(16.dp),
             )
             else -> LazyColumn(
                 contentPadding = PaddingValues(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                item { MuscleVolumeCard(settings = settings) }
-                item { WorkoutCalendar(rows) }
+                item { MuscleVolumeCard(settings = settings, neon = neon) }
+                item { WorkoutCalendar(rows, neon) }
                 items(rows, key = { it.id }) { r ->
-                    HistoryRow(r) {
+                    HistoryRow(r, neon) {
                         scope.launch {
                             try { detail = repo.workoutDetail(r.id) }
                             catch (e: Exception) { error = e.message?.take(160) }
@@ -148,7 +155,13 @@ fun StrengthHistoryScreen(
  *  the last 7 days, coloured by under/in-range/over vs research-backed
  *  MEV/MAV ranges. Mirrors web's MuscleVolume.vue. */
 @Composable
-private fun MuscleVolumeCard(settings: SettingsRepository) {
+private fun MuscleVolumeCard(settings: SettingsRepository, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val errColor = if (neon) NeonMV.Bad else MV.Red
+    val track = if (neon) NeonMV.Track else MV.SurfaceContainerLow
+
     var rows by remember { mutableStateOf<List<Pair<String, MuscleVolumeRow>>>(emptyList()) }
     var windowDays by remember { mutableStateOf(7) }
     var loading by remember { mutableStateOf(true) }
@@ -172,29 +185,29 @@ private fun MuscleVolumeCard(settings: SettingsRepository) {
     }
 
     Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        colors = CardDefaults.cardColors(containerColor = card),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(12.dp)) {
             Text(
                 "Weekly muscle volume",
-                color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
             )
             Text(
                 "Last $windowDays days vs research-backed MEV / MAV",
-                color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                color = muted, fontSize = 11.sp,
                 modifier = Modifier.padding(bottom = 6.dp),
             )
             when {
-                loading -> Text("Loading…", color = MV.OnSurfaceVariant, fontSize = 12.sp)
-                error != null -> Text(error!!, color = MV.Red, fontSize = 11.sp)
-                rows.isEmpty() -> Text("No data.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                loading -> Text("Loading…", color = muted, fontSize = 12.sp)
+                error != null -> Text(error!!, color = errColor, fontSize = 11.sp)
+                rows.isEmpty() -> Text("No data.", color = muted, fontSize = 11.sp)
                 else -> for ((muscle, r) in rows) {
                     val accent = when (r.status) {
-                        "under" -> Color(0xFFFACC15)
-                        "in_range" -> Color(0xFF22C55E)
-                        "over" -> Color(0xFFEF4444)
-                        else -> MV.OnSurfaceVariant
+                        "under" -> if (neon) NeonMV.Amber else Color(0xFFFACC15)
+                        "in_range" -> if (neon) NeonMV.Lime else Color(0xFF22C55E)
+                        "over" -> if (neon) NeonMV.Bad else Color(0xFFEF4444)
+                        else -> muted
                     }
                     val fillPct = if (r.mav > 0) {
                         (r.sets.toFloat() / r.mav.toFloat()).coerceAtMost(1f)
@@ -203,13 +216,13 @@ private fun MuscleVolumeCard(settings: SettingsRepository) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 muscle.replace('_', ' '),
-                                color = MV.OnSurface, fontSize = 12.sp,
+                                color = ink, fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
                                 "${r.sets} / ${r.mev}–${r.mav}",
-                                color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                                color = muted, fontSize = 11.sp,
                             )
                         }
                         Spacer(Modifier.height(2.dp))
@@ -218,7 +231,7 @@ private fun MuscleVolumeCard(settings: SettingsRepository) {
                                 .fillMaxWidth()
                                 .height(4.dp)
                                 .clip(RoundedCornerShape(2.dp))
-                                .background(MV.SurfaceContainerLow),
+                                .background(track),
                         ) {
                             Box(
                                 Modifier
@@ -240,7 +253,9 @@ private fun MuscleVolumeCard(settings: SettingsRepository) {
  *  color encodes split_focus (strength=red, yoga=violet, cardio=blue).
  *  Mirrors the web Workout-history calendar. */
 @Composable
-private fun WorkoutCalendar(rows: List<StrengthWorkoutSummary>) {
+private fun WorkoutCalendar(rows: List<StrengthWorkoutSummary>, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     val completed = remember(rows) {
         rows.filter { it.status == "completed" }
     }
@@ -253,7 +268,7 @@ private fun WorkoutCalendar(rows: List<StrengthWorkoutSummary>) {
     }
     androidx.compose.material3.Card(
         colors = androidx.compose.material3.CardDefaults.cardColors(
-            containerColor = MV.SurfaceContainer,
+            containerColor = card,
         ),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -261,19 +276,28 @@ private fun WorkoutCalendar(rows: List<StrengthWorkoutSummary>) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "WORKOUT CALENDAR",
-                    color = MV.OnSurfaceVariant,
+                    color = muted,
                     fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
                 )
                 Spacer(Modifier.width(8.dp))
-                LegendDot(color = androidx.compose.ui.graphics.Color(0xFFEF4444), label = "Strength")
+                LegendDot(
+                    color = if (neon) NeonMV.Lime else androidx.compose.ui.graphics.Color(0xFFEF4444),
+                    label = "Strength", neon = neon,
+                )
                 Spacer(Modifier.width(6.dp))
-                LegendDot(color = androidx.compose.ui.graphics.Color(0xFFA78BFA), label = "Yoga")
+                LegendDot(
+                    color = if (neon) NeonMV.Magenta else androidx.compose.ui.graphics.Color(0xFFA78BFA),
+                    label = "Yoga", neon = neon,
+                )
                 Spacer(Modifier.width(6.dp))
-                LegendDot(color = androidx.compose.ui.graphics.Color(0xFF38BDF8), label = "Cardio")
+                LegendDot(
+                    color = if (neon) NeonMV.Cyan else androidx.compose.ui.graphics.Color(0xFF38BDF8),
+                    label = "Cardio", neon = neon,
+                )
             }
             Spacer(Modifier.height(8.dp))
             for (y in years) {
-                YearStrip(year = y, byDate = byDate)
+                YearStrip(year = y, byDate = byDate, neon = neon)
                 Spacer(Modifier.height(8.dp))
             }
         }
@@ -281,7 +305,8 @@ private fun WorkoutCalendar(rows: List<StrengthWorkoutSummary>) {
 }
 
 @Composable
-private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String) {
+private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String, neon: Boolean) {
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     Row(verticalAlignment = Alignment.CenterVertically) {
         androidx.compose.foundation.layout.Box(
             modifier = Modifier
@@ -289,12 +314,12 @@ private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String) 
                 .background(color, androidx.compose.foundation.shape.CircleShape),
         )
         Spacer(Modifier.width(3.dp))
-        Text(label, color = MV.OnSurfaceVariant, fontSize = 9.sp)
+        Text(label, color = muted, fontSize = 9.sp)
     }
 }
 
 @Composable
-private fun YearStrip(year: String, byDate: Map<String, String>) {
+private fun YearStrip(year: String, byDate: Map<String, String>, neon: Boolean) {
     // Build a 53-column × 7-row grid for the year. Walk every day from
     // Jan 1 → Dec 31 and place cells by ISO week + day-of-week.
     val firstDay = remember(year) {
@@ -323,10 +348,10 @@ private fun YearStrip(year: String, byDate: Map<String, String>) {
                 val isoDate = date.toString()
                 val focus = byDate[isoDate]
                 val color = when (focus) {
-                    null -> androidx.compose.ui.graphics.Color(0x141A2332)
-                    "yoga" -> androidx.compose.ui.graphics.Color(0xFFA78BFA)
-                    "cardio" -> androidx.compose.ui.graphics.Color(0xFF38BDF8)
-                    else -> androidx.compose.ui.graphics.Color(0xFFEF4444)
+                    null -> if (neon) NeonMV.Track else androidx.compose.ui.graphics.Color(0x141A2332)
+                    "yoga" -> if (neon) NeonMV.Magenta else androidx.compose.ui.graphics.Color(0xFFA78BFA)
+                    "cardio" -> if (neon) NeonMV.Cyan else androidx.compose.ui.graphics.Color(0xFF38BDF8)
+                    else -> if (neon) NeonMV.Lime else androidx.compose.ui.graphics.Color(0xFFEF4444)
                 }
                 val x = originX + col * (cellPx + gapPx)
                 val y = row * (cellPx + gapPx)
@@ -339,7 +364,7 @@ private fun YearStrip(year: String, byDate: Map<String, String>) {
         }
         Text(
             year,
-            color = MV.OnSurfaceDim, fontSize = 9.sp,
+            color = if (neon) NeonMV.Muted else MV.OnSurfaceDim, fontSize = 9.sp,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(end = 4.dp),
@@ -348,14 +373,35 @@ private fun YearStrip(year: String, byDate: Map<String, String>) {
 }
 
 @Composable
-private fun HistoryRow(r: StrengthWorkoutSummary, onClick: () -> Unit) {
+private fun HistoryRow(r: StrengthWorkoutSummary, neon: Boolean, onClick: () -> Unit) {
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val container = if (neon) {
+        when (r.status) {
+            "in_progress" -> NeonMV.CardHigh
+            "skipped" -> NeonMV.Bg
+            else -> NeonMV.Card
+        }
+    } else {
+        when (r.status) {
+            "in_progress" -> MV.SurfaceContainerHigh
+            "skipped" -> MV.SurfaceContainerLow
+            else -> MV.SurfaceContainer
+        }
+    }
+    // Status badge gains a neon semantic color (completed=Lime, in_progress=
+    // Cyan, skipped=Amber); classic shell keeps the muted secondary tint.
+    val statusColor = if (neon) {
+        when (r.status) {
+            "completed" -> NeonMV.Lime
+            "in_progress" -> NeonMV.Cyan
+            "skipped" -> NeonMV.Amber
+            else -> NeonMV.Muted
+        }
+    } else MV.OnSurfaceVariant
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = when (r.status) {
-                "in_progress" -> MV.SurfaceContainerHigh
-                "skipped" -> MV.SurfaceContainerLow
-                else -> MV.SurfaceContainer
-            },
+            containerColor = container,
         ),
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
     ) {
@@ -363,19 +409,19 @@ private fun HistoryRow(r: StrengthWorkoutSummary, onClick: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     fmtDate(r.date),
-                    color = MV.OnSurface, fontSize = 16.sp,
+                    color = ink, fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     r.status.replace('_', ' ').uppercase(),
-                    color = MV.OnSurfaceVariant, fontSize = 10.sp,
+                    color = statusColor, fontSize = 10.sp,
                     letterSpacing = 1.sp, fontWeight = FontWeight.Bold,
                 )
             }
             Text(
                 r.splitFocus.replace('_', ' ').replaceFirstChar(Char::titlecase),
-                color = MV.OnSurfaceVariant, fontSize = 13.sp,
+                color = muted, fontSize = 13.sp,
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
@@ -383,31 +429,35 @@ private fun HistoryRow(r: StrengthWorkoutSummary, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DetailList(plan: StrengthWorkoutDetail, catalog: Map<String, StrengthExerciseInfo>) {
+private fun DetailList(plan: StrengthWorkoutDetail, catalog: Map<String, StrengthExerciseInfo>, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val dim = if (neon) NeonMV.Muted else MV.OnSurfaceDim
     LazyColumn(
         contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(plan.exercises, key = { it.id }) { wex ->
             Card(
-                colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+                colors = CardDefaults.cardColors(containerColor = card),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(Modifier.padding(12.dp)) {
                     Text(
                         "${wex.orderIndex + 1}. " +
                                 (catalog[wex.exerciseId]?.name ?: wex.exerciseId.replace('_', ' ')),
-                        color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                     )
                     for (s in wex.sets.sortedBy { it.setNumber }) {
                         Text(
                             "Set ${s.setNumber}: ${s.actualWeightLb ?: "—"}lb × ${s.actualReps ?: "—"}" +
                                     (s.rating?.let { " · RPE $it" } ?: ""),
-                            color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                            color = muted, fontSize = 12.sp,
                         )
                     }
                     if (wex.sets.isEmpty()) {
-                        Text("No sets logged.", color = MV.OnSurfaceDim, fontSize = 12.sp)
+                        Text("No sets logged.", color = dim, fontSize = 12.sp)
                     }
                 }
             }

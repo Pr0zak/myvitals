@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
+import app.myvitals.ui.neon.NeonMV
 import app.myvitals.fasting.FastingMilestoneWorker
 import app.myvitals.fasting.FastingWidgetProvider
 import app.myvitals.sync.BackendClient
@@ -197,10 +198,23 @@ fun FastingScreen(
     fun selectedSpec(): ProtocolSpec =
         PROTOCOLS.firstOrNull { it.slug == selected } ?: PROTOCOLS[0]
 
+    // Vitality Neon shell — branch every color so classic stays byte-identical.
+    val neon = settings.neonShellEnabled
+    val accent = if (neon) NeonMV.Cyan else MV.BrandRed       // ring fill / active stage / selected chip
+    val bg = if (neon) NeonMV.Bg else MV.Bg
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val dim = if (neon) NeonMV.Muted else MV.OnSurfaceDim
+    val chipBg = if (neon) NeonMV.Card else MV.SurfaceContainerLow
+    val chipBorder = if (neon) NeonMV.Line else MV.OutlineVariant
+    val bad = if (neon) NeonMV.Bad else MV.Red
+    val buttonBg = if (neon) NeonMV.Card else MV.SurfaceContainerLow
+    val onAccent = if (neon) NeonMV.OnAccent else MV.OnSurface  // text on a filled accent
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MV.Bg)
+            .background(bg)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
     ) {
@@ -209,26 +223,26 @@ fun FastingScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MV.OnSurface)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = ink)
             }
-            Text("Fasting", color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text("Fasting", color = ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.weight(1f))
             stats?.let {
                 Text(
                     "${it.currentStreakDays}d streak",
-                    color = MV.OnSurfaceVariant,
+                    color = muted,
                     fontSize = 12.sp,
                 )
             }
         }
 
         error?.let {
-            Text(it, color = MV.Red, fontSize = 12.sp,
+            Text(it, color = bad, fontSize = 12.sp,
                 modifier = Modifier.padding(vertical = 4.dp))
         }
 
         if (loading && current == null) {
-            Text("Loading…", color = MV.OnSurfaceVariant)
+            Text("Loading…", color = muted)
             return@Column
         }
 
@@ -249,46 +263,46 @@ fun FastingScreen(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
-                ProgressRing(progress = progress.toFloat())
+                ProgressRing(progress = progress.toFloat(), neon = neon)
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
                         fmtHours(elapsedH),
-                        color = MV.OnSurface,
+                        color = ink,
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
                         (STAGE_LABELS[cur.currentStage] ?: cur.currentStage).uppercase(),
-                        color = MV.BrandRed,
+                        color = accent,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                         letterSpacing = 1.5.sp,
                     )
                     Text(
                         "of ${targetH.toInt()}h target",
-                        color = MV.OnSurfaceVariant,
+                        color = muted,
                         fontSize = 11.sp,
                     )
                 }
             }
 
             Spacer(Modifier.height(20.dp))
-            Section("Details")
-            Kv("Protocol", cur.protocol)
+            Section("Details", neon)
+            Kv("Protocol", cur.protocol, neon)
             cur.nextStageAtH?.let { nxt ->
-                Kv("Next milestone", "${(nxt - elapsedH).coerceAtLeast(0.0).format1()}h")
+                Kv("Next milestone", "${(nxt - elapsedH).coerceAtLeast(0.0).format1()}h", neon)
             }
-            Kv("Started", cur.startedAt.take(16).replace("T", " "))
+            Kv("Started", cur.startedAt.take(16).replace("T", " "), neon)
 
             // ── Symptoms / hydration card (extended fasts or > 12h) ──
             if (cur.protocol.startsWith("extended_") || elapsedH >= 12.0) {
                 Spacer(Modifier.height(20.dp))
-                Section("How are you feeling?")
-                LogSlider("Hunger", logHunger) { logHunger = it }
-                LogSlider("Mood", logMood) { logMood = it }
+                Section("How are you feeling?", neon)
+                LogSlider("Hunger", logHunger, neon) { logHunger = it }
+                LogSlider("Mood", logMood, neon) { logMood = it }
                 androidx.compose.material3.OutlinedTextField(
                     value = logHydrationMl,
                     onValueChange = { v -> logHydrationMl = v.filter { it.isDigit() } },
@@ -296,8 +310,8 @@ fun FastingScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = MV.OnSurface,
-                        unfocusedTextColor = MV.OnSurface,
+                        focusedTextColor = ink,
+                        unfocusedTextColor = ink,
                     ),
                 )
                 androidx.compose.material3.OutlinedTextField(
@@ -307,8 +321,8 @@ fun FastingScreen(
                     minLines = 2,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = MV.OnSurface,
-                        unfocusedTextColor = MV.OnSurface,
+                        focusedTextColor = ink,
+                        unfocusedTextColor = ink,
                     ),
                 )
                 Button(
@@ -335,12 +349,12 @@ fun FastingScreen(
                     },
                     enabled = !logSaving,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MV.SurfaceContainerLow, contentColor = MV.OnSurface,
+                        containerColor = buttonBg, contentColor = ink,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(if (logSaving) "Saving…" else "Log entry") }
                 logMsg?.let {
-                    Text(it, color = MV.OnSurfaceDim, fontSize = 11.sp,
+                    Text(it, color = dim, fontSize = 11.sp,
                         modifier = Modifier.padding(top = 4.dp))
                 }
             }
@@ -368,7 +382,7 @@ fun FastingScreen(
                 },
                 enabled = !busy,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = MV.SurfaceContainerLow, contentColor = MV.Red,
+                    containerColor = buttonBg, contentColor = bad,
                 ),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -376,7 +390,7 @@ fun FastingScreen(
             }
         } else {
             // ── Idle / picker ──
-            Section("Start a new fast")
+            Section("Start a new fast", neon)
             val rows = PROTOCOLS.chunked(4)
             for (row in rows) {
                 Row(
@@ -385,15 +399,18 @@ fun FastingScreen(
                 ) {
                     for (p in row) {
                         val on = selected == p.slug
+                        // Selected chip text sits on the accent fill: classic
+                        // used OnSurface on red; neon uses dark OnAccent on cyan.
+                        val onChipInk = if (on) onAccent else muted
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(56.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (on) MV.BrandRed else MV.SurfaceContainerLow)
+                                .background(if (on) accent else chipBg)
                                 .border(
                                     1.dp,
-                                    if (on) MV.BrandRed else MV.OutlineVariant,
+                                    if (on) accent else chipBorder,
                                     RoundedCornerShape(8.dp),
                                 )
                                 .clickable { selected = p.slug },
@@ -401,12 +418,12 @@ fun FastingScreen(
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(p.label,
-                                    color = if (on) MV.OnSurface else MV.OnSurfaceVariant,
+                                    color = onChipInk,
                                     fontSize = 13.sp,
                                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                                 )
                                 Text("${p.targetH.toInt()}h",
-                                    color = if (on) MV.OnSurface.copy(alpha = 0.85f) else MV.OnSurfaceDim,
+                                    color = if (on) onChipInk.copy(alpha = 0.85f) else dim,
                                     fontSize = 10.sp,
                                 )
                             }
@@ -452,7 +469,7 @@ fun FastingScreen(
                 },
                 enabled = !busy,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = MV.BrandRed, contentColor = MV.OnSurface,
+                    containerColor = accent, contentColor = onAccent,
                 ),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -463,29 +480,29 @@ fun FastingScreen(
         stats?.let { s ->
             if (s.sessionsCount > 0) {
                 Spacer(Modifier.height(20.dp))
-                Section("Last 90 days")
-                Kv("Completed", "${s.completedCount} / ${s.sessionsCount}")
-                s.avgDurationH?.let { Kv("Avg", "${it.format1()}h") }
-                s.medianDurationH?.let { Kv("Median", "${it.format1()}h") }
-                s.longestH?.let { Kv("Longest", "${it.format1()}h") }
+                Section("Last 90 days", neon)
+                Kv("Completed", "${s.completedCount} / ${s.sessionsCount}", neon)
+                s.avgDurationH?.let { Kv("Avg", "${it.format1()}h", neon) }
+                s.medianDurationH?.let { Kv("Median", "${it.format1()}h", neon) }
+                s.longestH?.let { Kv("Longest", "${it.format1()}h", neon) }
             }
         }
 
         if (history.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
-            Section("Recent")
+            Section("Recent", neon)
             for (row in history) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(row.protocol, color = MV.OnSurface, fontSize = 13.sp,
+                    Text(row.protocol, color = ink, fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.width(80.dp))
-                    Text("${row.elapsedH.format1()}h", color = MV.OnSurface, fontSize = 13.sp)
+                    Text("${row.elapsedH.format1()}h", color = ink, fontSize = 13.sp)
                     Spacer(Modifier.weight(1f))
                     Text(row.startedAt.take(16).replace("T", " "),
-                        color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                        color = muted, fontSize = 11.sp)
                 }
             }
         }
@@ -495,14 +512,18 @@ fun FastingScreen(
 }
 
 @Composable
-private fun ProgressRing(progress: Float) {
+private fun ProgressRing(progress: Float, neon: Boolean = false) {
+    // Track: neon ring track vs classic outline. Fill: cyan (recovery/
+    // fasting domain) under neon, brand red under classic.
+    val trackColor = if (neon) NeonMV.Track else Color(0xFF1F2738)
+    val fillColor = if (neon) NeonMV.Cyan else Color(0xFFEF4444)
     Canvas(modifier = Modifier.size(200.dp)) {
         val stroke = 14.dp.toPx()
         val diam = size.minDimension - stroke
         val tl = Offset((size.width - diam) / 2f, (size.height - diam) / 2f)
         // Track
         drawArc(
-            color = Color(0xFF1F2738),
+            color = trackColor,
             startAngle = -90f,
             sweepAngle = 360f,
             useCenter = false,
@@ -512,7 +533,7 @@ private fun ProgressRing(progress: Float) {
         )
         // Fill
         drawArc(
-            color = Color(0xFFEF4444),
+            color = fillColor,
             startAngle = -90f,
             sweepAngle = 360f * progress.coerceIn(0f, 1f),
             useCenter = false,
@@ -524,10 +545,10 @@ private fun ProgressRing(progress: Float) {
 }
 
 @Composable
-private fun Section(title: String) {
+private fun Section(title: String, neon: Boolean = false) {
     Text(
         title.uppercase(),
-        color = MV.OnSurfaceVariant,
+        color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant,
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold,
         letterSpacing = 1.sp,
@@ -536,12 +557,12 @@ private fun Section(title: String) {
 }
 
 @Composable
-private fun LogSlider(label: String, value: Int, onChange: (Int) -> Unit) {
+private fun LogSlider(label: String, value: Int, neon: Boolean = false, onChange: (Int) -> Unit) {
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(label, color = MV.OnSurfaceVariant, fontSize = 12.sp,
+            Text(label, color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant, fontSize = 12.sp,
                 modifier = Modifier.weight(1f))
-            Text("$value / 10", color = MV.OnSurface, fontSize = 12.sp)
+            Text("$value / 10", color = if (neon) NeonMV.Ink else MV.OnSurface, fontSize = 12.sp)
         }
         androidx.compose.material3.Slider(
             value = value.toFloat(),
@@ -549,22 +570,22 @@ private fun LogSlider(label: String, value: Int, onChange: (Int) -> Unit) {
             valueRange = 0f..10f,
             steps = 9,
             colors = androidx.compose.material3.SliderDefaults.colors(
-                thumbColor = MV.BrandRed,
-                activeTrackColor = MV.BrandRed,
-                inactiveTrackColor = MV.OutlineVariant,
+                thumbColor = if (neon) NeonMV.Cyan else MV.BrandRed,
+                activeTrackColor = if (neon) NeonMV.Cyan else MV.BrandRed,
+                inactiveTrackColor = if (neon) NeonMV.Track else MV.OutlineVariant,
             ),
         )
     }
 }
 
 @Composable
-private fun Kv(label: String, value: String) {
+private fun Kv(label: String, value: String, neon: Boolean = false) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
     ) {
-        Text(label, color = MV.OnSurfaceVariant, fontSize = 13.sp,
+        Text(label, color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant, fontSize = 13.sp,
             modifier = Modifier.weight(1f))
-        Text(value, color = MV.OnSurface, fontSize = 13.sp)
+        Text(value, color = if (neon) NeonMV.Ink else MV.OnSurface, fontSize = 13.sp)
     }
 }
 

@@ -90,12 +90,50 @@ import app.myvitals.sync.StrengthReviewBody
 import app.myvitals.sync.StrengthWorkoutDetail
 import app.myvitals.sync.StrengthWorkoutExerciseRow
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonMV
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import app.myvitals.update.Notifier
 import coil.compose.AsyncImage
 import androidx.compose.ui.graphics.ColorFilter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
+
+/**
+ * Vitality Neon palette holder for this screen. Every value branches the
+ * classic MV token to its NeonMV analogue so that with `neon == false`
+ * the holder returns the *exact* current colors (byte-for-byte) and with
+ * `neon == true` the screen adopts the neon shell.
+ *
+ * Plumbed via a CompositionLocal so the top-level private helper
+ * composables (RestTimerBar, ExerciseCard, CoachCard, …) can read it
+ * without any signature change. `StrengthTodayScreen` reads
+ * `settings.neonShellEnabled` once and provides the resolved palette.
+ */
+internal class StrengthPalette(val neon: Boolean) {
+    // bg / surface / text
+    val bg = if (neon) NeonMV.Bg else MV.Bg
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val cardLow = if (neon) NeonMV.Card else MV.SurfaceContainerLow
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val dim = if (neon) NeonMV.Muted else MV.OnSurfaceDim
+    val outlineV = if (neon) NeonMV.Line else MV.OutlineVariant
+
+    // semantics
+    val accent = if (neon) NeonMV.Cyan else MV.BrandRed          // generic accent / log
+    val good = if (neon) NeonMV.Lime else MV.Green               // completed / open / CTA
+    val caution = if (neon) NeonMV.Amber else MV.Amber           // caution / elevated
+    val bad = if (neon) NeonMV.Bad else MV.Red                   // failed / destructive
+    val rest = if (neon) NeonMV.Cyan else MV.BrandRed            // rest-timer running ring
+    val info = if (neon) NeonMV.Cyan else Color(0xFF38BDF8)      // paused / focus / sky
+    val violet = if (neon) NeonMV.Magenta else Color(0xFFA78BFA) // superset / icon tint / variety
+    // set-rating button colors live in ratingColor(r, pal):
+    // Failed->Bad, Hard->Amber, Good->Lime, Easy->Cyan under neon.
+}
+
+internal val LocalStrengthPalette = staticCompositionLocalOf { StrengthPalette(false) }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -112,6 +150,12 @@ fun StrengthTodayScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repo = remember(settings) { StrengthRepository(context, settings) }
+
+    // THE SIGNAL — neon shell active? When false every color below is the
+    // current classic value, byte-for-byte. The palette is plumbed to the
+    // top-level helpers via LocalStrengthPalette.
+    val neon = settings.neonShellEnabled
+    val pal = remember(neon) { StrengthPalette(neon) }
 
     // Keep the screen awake during the active workout — phones go to
     // sleep mid-set otherwise. The flag is cleared on screen exit.
@@ -253,7 +297,7 @@ fun StrengthTodayScreen(
                             catch (e: Exception) { error = e.message?.take(160) }
                         }
                     },
-                ) { Text("Finish workout", color = MV.Green) }
+                ) { Text("Finish workout", color = pal.good) }
             },
             dismissButton = {
                 androidx.compose.material3.TextButton(
@@ -345,10 +389,11 @@ fun StrengthTodayScreen(
         }
     }
 
+    CompositionLocalProvider(LocalStrengthPalette provides pal) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MV.Bg)
+            .background(pal.bg)
             .padding(horizontal = 16.dp),
     ) {
         // Compact header — single 36dp row, eyebrow + title inline,
@@ -362,7 +407,7 @@ fun StrengthTodayScreen(
         ) {
             Text(
                 "WORKOUT",
-                color = MV.OnSurfaceVariant,
+                color = pal.muted,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.6.sp,
@@ -371,7 +416,7 @@ fun StrengthTodayScreen(
             Text(
                 workout?.splitFocus?.replace('_', ' ')?.replaceFirstChar(Char::titlecase)
                     ?: "Today",
-                color = MV.OnSurface,
+                color = pal.ink,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
@@ -383,11 +428,11 @@ fun StrengthTodayScreen(
                     .count { it.actualReps != null || it.skipped }
                 Box(
                     Modifier.clip(RoundedCornerShape(50))
-                        .background(MV.SurfaceContainerLow)
+                        .background(pal.cardLow)
                         .padding(horizontal = 8.dp, vertical = 3.dp),
                 ) {
                     Text("$done/$total sets",
-                        color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                        color = pal.muted, fontSize = 11.sp)
                 }
                 Spacer(Modifier.width(4.dp))
             }
@@ -413,7 +458,7 @@ fun StrengthTodayScreen(
                     Icon(
                         Icons.Filled.Refresh,
                         contentDescription = "Regenerate with latest signals",
-                        tint = MV.OnSurfaceVariant,
+                        tint = pal.muted,
                     )
                 }
             }
@@ -422,7 +467,7 @@ fun StrengthTodayScreen(
                     Icon(
                         Icons.Outlined.MoreVert,
                         contentDescription = "More",
-                        tint = MV.OnSurfaceVariant,
+                        tint = pal.muted,
                     )
                 }
                 androidx.compose.material3.DropdownMenu(
@@ -510,9 +555,9 @@ fun StrengthTodayScreen(
                         if (!anyLogged) {
                             androidx.compose.material3.DropdownMenuItem(
                                 text = { Text("Discard workout",
-                                    color = MV.OnSurface) },
+                                    color = pal.ink) },
                                 leadingIcon = { Icon(Icons.Outlined.Close, null,
-                                    modifier = Modifier.size(16.dp), tint = MV.OnSurface) },
+                                    modifier = Modifier.size(16.dp), tint = pal.ink) },
                                 onClick = {
                                     headerMenuOpen = false
                                     scope.launch {
@@ -526,9 +571,9 @@ fun StrengthTodayScreen(
                         }
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text("Skip workout day",
-                                color = MV.BrandRed) },
+                                color = pal.bad) },
                             leadingIcon = { Icon(Icons.Filled.SkipNext, null,
-                                modifier = Modifier.size(16.dp), tint = MV.BrandRed) },
+                                modifier = Modifier.size(16.dp), tint = pal.bad) },
                             onClick = {
                                 headerMenuOpen = false
                                 scope.launch {
@@ -567,11 +612,11 @@ fun StrengthTodayScreen(
         }
 
         if (loading) {
-            Text("Loading…", color = MV.OnSurfaceVariant, modifier = Modifier.padding(16.dp))
+            Text("Loading…", color = pal.muted, modifier = Modifier.padding(16.dp))
             return@Column
         }
 
-        error?.let { Text(it, color = MV.Red, modifier = Modifier.padding(8.dp)) }
+        error?.let { Text(it, color = pal.bad, modifier = Modifier.padding(8.dp)) }
 
         // States: rest day, no plan, or plan
         if (workout == null) {
@@ -598,12 +643,12 @@ fun StrengthTodayScreen(
                 // user why instead.
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+                    colors = CardDefaults.cardColors(containerColor = pal.card),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
                             "Offline — workout not cached yet",
-                            color = MV.OnSurface,
+                            color = pal.ink,
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Spacer(Modifier.height(6.dp))
@@ -611,7 +656,7 @@ fun StrengthTodayScreen(
                             "Today's plan needs the server to generate (recovery + history). " +
                             "Reconnect and the workout will load. Logged sets from offline " +
                             "sessions will sync automatically.",
-                            color = MV.OnSurfaceVariant,
+                            color = pal.muted,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
@@ -631,7 +676,7 @@ fun StrengthTodayScreen(
                     },
                     enabled = !generating,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MV.BrandRed, contentColor = MV.OnSurface,
+                        containerColor = pal.accent, contentColor = pal.ink,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -672,7 +717,7 @@ fun StrengthTodayScreen(
 
         if (plan.status == "skipped") {
             Card(
-                colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainerLow),
+                colors = CardDefaults.cardColors(containerColor = pal.cardLow),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(
@@ -681,9 +726,9 @@ fun StrengthTodayScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Skipped today's workout day.",
-                            color = MV.OnSurface, fontWeight = FontWeight.SemiBold)
+                            color = pal.ink, fontWeight = FontWeight.SemiBold)
                         Text("Tomorrow will generate fresh.",
-                            color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                            color = pal.muted, fontSize = 12.sp)
                     }
                     OutlinedButton(
                         onClick = {
@@ -809,9 +854,10 @@ fun StrengthTodayScreen(
             val fastCtx = plan.fastingContext
             if (fastCtx != null && fastCtx.active && fastCtx.modulation != "normal") {
                 item {
+                    val fastAmber = if (neon) NeonMV.Amber else Color(0xFFF59E0B)
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = Color(0xFFF59E0B).copy(alpha = 0.08f),
+                            containerColor = fastAmber.copy(alpha = 0.08f),
                         ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -819,7 +865,7 @@ fun StrengthTodayScreen(
                             Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text("⏳", color = Color(0xFFF59E0B), fontSize = 16.sp,
+                            Text("⏳", color = fastAmber, fontSize = 16.sp,
                                 modifier = Modifier.padding(end = 8.dp))
                             val hrs = fastCtx.currentHours.toInt()
                             val stage = fastCtx.stage.replace('_', ' ')
@@ -831,7 +877,7 @@ fun StrengthTodayScreen(
                             }
                             Text(
                                 body,
-                                color = MV.OnSurface, fontSize = 12.sp,
+                                color = pal.ink, fontSize = 12.sp,
                                 modifier = Modifier.weight(1f),
                             )
                         }
@@ -843,7 +889,7 @@ fun StrengthTodayScreen(
                 item {
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = Color(0xFF38BDF8).copy(alpha = 0.10f),
+                            containerColor = pal.info.copy(alpha = 0.10f),
                         ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -853,11 +899,11 @@ fun StrengthTodayScreen(
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text("Workout paused",
-                                    color = MV.OnSurface, fontSize = 14.sp,
+                                    color = pal.ink, fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold)
                                 Text("Resume to keep logging — time away won't " +
                                     "count toward your session length.",
-                                    color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                                    color = pal.muted, fontSize = 12.sp)
                             }
                             Button(
                                 onClick = {
@@ -870,7 +916,7 @@ fun StrengthTodayScreen(
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF38BDF8)),
+                                    containerColor = pal.info),
                             ) { Text("Resume") }
                         }
                     }
@@ -884,7 +930,7 @@ fun StrengthTodayScreen(
                 item {
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = MV.SurfaceContainer,
+                            containerColor = pal.card,
                         ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -897,13 +943,13 @@ fun StrengthTodayScreen(
                                     else -> plan.splitFocus
                                         .replaceFirstChar(Char::titlecase)
                                 },
-                                color = MV.OnSurface, fontSize = 14.sp,
+                                color = pal.ink, fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(bottom = 6.dp),
                             )
                             Text(
                                 plan.notes!!,
-                                color = MV.OnSurfaceVariant, fontSize = 13.sp,
+                                color = pal.muted, fontSize = 13.sp,
                             )
                         }
                     }
@@ -1005,7 +1051,7 @@ fun StrengthTodayScreen(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
+                            colors = ButtonDefaults.buttonColors(containerColor = pal.info),
                         ) { Text("Resume workout") }
                     } else {
                         Button(
@@ -1022,7 +1068,9 @@ fun StrengthTodayScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MV.Green),
+                            colors = if (neon) ButtonDefaults.buttonColors(
+                                containerColor = pal.good, contentColor = NeonMV.OnAccent,
+                            ) else ButtonDefaults.buttonColors(containerColor = MV.Green),
                         ) {
                             Text(if (isCardioDay) "Log this workout" else "Complete workout")
                         }
@@ -1043,14 +1091,14 @@ fun StrengthTodayScreen(
                 }
                 if (plan.status == "completed") {
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+                        colors = CardDefaults.cardColors(containerColor = pal.card),
                         modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     "✓ Workout complete — see you tomorrow",
-                                    color = MV.Green, fontSize = 15.sp,
+                                    color = pal.good, fontSize = 15.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier.weight(1f),
                                 )
@@ -1072,11 +1120,11 @@ fun StrengthTodayScreen(
                                 ) {
                                     Icon(
                                         Icons.Filled.Refresh, contentDescription = null,
-                                        tint = MV.OnSurfaceVariant,
+                                        tint = pal.muted,
                                         modifier = Modifier.size(14.dp),
                                     )
                                     Spacer(Modifier.width(4.dp))
-                                    Text("Redo", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                                    Text("Redo", color = pal.muted, fontSize = 12.sp)
                                 }
                             }
                             Spacer(Modifier.height(12.dp))
@@ -1125,25 +1173,25 @@ fun StrengthTodayScreen(
                 .take(12)
             androidx.compose.material3.ModalBottomSheet(
                 onDismissRequest = { swapWexId = null },
-                containerColor = MV.SurfaceContainer,
+                containerColor = pal.card,
             ) {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Text(
                         "Swap exercise",
-                        color = MV.OnSurface, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                        color = pal.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                     )
                     Text(
                         "Currently: ${current.name}",
-                        color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                        color = pal.muted, fontSize = 12.sp,
                         modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
                     )
                     if (alternatives.isEmpty()) {
                         Text("No alternatives in your equipment for this slot.",
-                            color = MV.OnSurfaceVariant, fontSize = 13.sp)
+                            color = pal.muted, fontSize = 13.sp)
                     } else {
                         alternatives.forEach { alt ->
                             Card(
-                                colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainerLow),
+                                colors = CardDefaults.cardColors(containerColor = pal.cardLow),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp)
@@ -1161,11 +1209,11 @@ fun StrengthTodayScreen(
                                     },
                             ) {
                                 Column(modifier = Modifier.padding(12.dp)) {
-                                    Text(alt.name, color = MV.OnSurface, fontSize = 14.sp,
+                                    Text(alt.name, color = pal.ink, fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold)
                                     Text(
                                         "${alt.movementPattern.replace('_', ' ')} · ${alt.primaryMuscle}",
-                                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                                        color = pal.muted, fontSize = 11.sp,
                                     )
                                 }
                             }
@@ -1212,6 +1260,7 @@ fun StrengthTodayScreen(
             },
         )
     }
+    }  // end CompositionLocalProvider(LocalStrengthPalette)
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -1221,22 +1270,23 @@ private fun CustomWorkoutSheet(
     onDismiss: () -> Unit,
     onGenerate: (type: String, durationMin: Int, difficulty: String) -> Unit,
 ) {
+    val pal = LocalStrengthPalette.current
     var type by remember { mutableStateOf("strength") }
     var difficulty by remember { mutableStateOf("normal") }
     var durationMin by remember { mutableIntStateOf(45) }
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = MV.SurfaceContainer,
+        containerColor = pal.card,
     ) {
         Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
             Text(
                 "Custom workout",
-                color = MV.OnSurface, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                color = pal.ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
             )
             Text(
                 "Generate a one-off session — the planner picks exercises sized to "
                 + "your duration + difficulty.",
-                color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                color = pal.muted, fontSize = 12.sp,
                 modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
             )
 
@@ -1287,8 +1337,8 @@ private fun CustomWorkoutSheet(
                 onClick = { onGenerate(type, durationMin, difficulty) },
                 enabled = !generating,
                 colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFA78BFA),
-                    contentColor = Color.White,
+                    containerColor = if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA),
+                    contentColor = if (pal.neon) NeonMV.OnAccent else Color.White,
                 ),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -1303,8 +1353,13 @@ private fun CustomWorkoutSheet(
 private fun OfflineBanner(
     online: Boolean, pending: Int, flushing: Boolean, onSyncNow: () -> Unit,
 ) {
-    val bg = if (!online) Color(0x33EAB308) else Color(0x33A78BFA)
-    val fg = if (!online) Color(0xFFEAB308) else Color(0xFFA78BFA)
+    val pal = LocalStrengthPalette.current
+    val bg = if (!online)
+        (if (pal.neon) NeonMV.Amber.copy(alpha = 0.20f) else Color(0x33EAB308))
+        else (if (pal.neon) NeonMV.Magenta.copy(alpha = 0.20f) else Color(0x33A78BFA))
+    val fg = if (!online)
+        (if (pal.neon) NeonMV.Amber else Color(0xFFEAB308))
+        else (if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA))
     val msg = when {
         !online && pending > 0 -> "Offline · $pending set${if (pending == 1) "" else "s"} buffered"
         !online -> "Offline · using cached workout"
@@ -1342,9 +1397,10 @@ private fun OfflineBanner(
 
 @Composable
 private fun SectionLabel(text: String) {
+    val pal = LocalStrengthPalette.current
     Text(
         text,
-        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+        color = pal.muted, fontSize = 11.sp,
         fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
         modifier = Modifier.padding(bottom = 6.dp),
     )
@@ -1352,15 +1408,20 @@ private fun SectionLabel(text: String) {
 
 @Composable
 private fun PillChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val pal = LocalStrengthPalette.current
+    val pillAccent = if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA)
     androidx.compose.foundation.layout.Box(
         modifier = Modifier
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(999.dp))
             .background(
-                if (selected) Color(0x33A78BFA) else Color(0x141A2332),
+                if (selected)
+                    (if (pal.neon) NeonMV.Magenta.copy(alpha = 0.20f) else Color(0x33A78BFA))
+                else (if (pal.neon) NeonMV.Card else Color(0x141A2332)),
             )
             .border(
                 width = 1.dp,
-                color = if (selected) Color(0xFFA78BFA) else Color(0x40A78BFA),
+                color = if (selected) pillAccent
+                        else (if (pal.neon) NeonMV.Magenta.copy(alpha = 0.25f) else Color(0x40A78BFA)),
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(999.dp),
             )
             .clickable(onClick = onClick)
@@ -1368,7 +1429,7 @@ private fun PillChip(label: String, selected: Boolean, onClick: () -> Unit) {
     ) {
         Text(
             label,
-            color = if (selected) Color(0xFFA78BFA) else MV.OnSurfaceVariant,
+            color = if (selected) pillAccent else pal.muted,
             fontSize = 13.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
         )
@@ -1379,15 +1440,16 @@ private fun PillChip(label: String, selected: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun RestDayCard(reason: String, generating: Boolean, onForceGenerate: () -> Unit) {
+    val pal = LocalStrengthPalette.current
     Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        colors = CardDefaults.cardColors(containerColor = pal.card),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("Rest day recommended",
-                color = MV.Amber, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                color = pal.caution, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
-            Text(reason, color = MV.OnSurfaceVariant, fontSize = 14.sp)
+            Text(reason, color = pal.muted, fontSize = 14.sp)
             Spacer(Modifier.height(12.dp))
             OutlinedButton(
                 onClick = onForceGenerate,
@@ -1400,6 +1462,7 @@ private fun RestDayCard(reason: String, generating: Boolean, onForceGenerate: ()
 
 @Composable
 private fun ContextRow(plan: StrengthWorkoutDetail, totalSets: Int) {
+    val pal = LocalStrengthPalette.current
     val completedSets = plan.exercises.flatMap { it.sets }
         .count { !it.skipped && it.actualReps != null }
     val target = plan.exercises.sumOf { it.targetSets }
@@ -1407,7 +1470,7 @@ private fun ContextRow(plan: StrengthWorkoutDetail, totalSets: Int) {
         Text(
             "${plan.splitFocus.replaceFirstChar { it.titlecase() }} day · "
                 + muscleGroupsFor(plan.splitFocus),
-            color = MV.OnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            color = pal.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ContextChip("$completedSets/$target sets")
@@ -1422,13 +1485,14 @@ internal fun WhyWorkoutCard(
     settings: SettingsRepository,
     workoutId: Long,
 ) {
+    val pal = LocalStrengthPalette.current
     var expanded by remember(workoutId) { mutableStateOf(false) }
     var explain by remember(workoutId) { mutableStateOf<app.myvitals.sync.StrengthExplain?>(null) }
     var loading by remember(workoutId) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainerLow),
+        colors = CardDefaults.cardColors(containerColor = pal.cardLow),
         modifier = Modifier.fillMaxWidth().clickable {
             expanded = !expanded
             if (expanded && explain == null && !loading && settings.isConfigured()) {
@@ -1451,16 +1515,16 @@ internal fun WhyWorkoutCard(
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Why this workout?",
-                    color = MV.OnSurface, fontSize = 13.sp,
+                    color = pal.ink, fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f))
                 Text(if (expanded) "▾" else "▸",
-                    color = MV.OnSurfaceVariant, fontSize = 14.sp)
+                    color = pal.muted, fontSize = 14.sp)
             }
             if (expanded) {
                 Spacer(Modifier.height(6.dp))
                 if (loading && explain == null) {
-                    Text("…", color = MV.OnSurfaceDim, fontSize = 12.sp)
+                    Text("…", color = pal.dim, fontSize = 12.sp)
                 } else if (explain != null) {
                     Spacer(Modifier.height(2.dp))
                     val lines = listOf(
@@ -1470,13 +1534,13 @@ internal fun WhyWorkoutCard(
                         Text(
                             // strip <strong> for plain phone display
                             line.replace("<strong>", "").replace("</strong>", ""),
-                            color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                            color = pal.muted, fontSize = 12.sp,
                         )
                         if (i < lines.lastIndex) Spacer(Modifier.height(4.dp))
                     }
                 } else {
                     Text("No rationale available.",
-                        color = MV.OnSurfaceDim, fontSize = 12.sp)
+                        color = pal.dim, fontSize = 12.sp)
                 }
             }
         }
@@ -1497,9 +1561,10 @@ internal fun VarietyNudgeCard(
     var failed by remember(workoutId) { mutableStateOf(false) }
     val dismissed = remember(workoutId) { mutableStateMapOf<String, Boolean>() }
     val scope = rememberCoroutineScope()
+    val pal = LocalStrengthPalette.current
 
     Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainerLow),
+        colors = CardDefaults.cardColors(containerColor = pal.cardLow),
         modifier = Modifier.fillMaxWidth().clickable {
             expanded = !expanded
             if (expanded && swaps == null && !loading && settings.isConfigured()) {
@@ -1526,26 +1591,26 @@ internal fun VarietyNudgeCard(
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("✦ Variety nudge",
-                    color = MV.OnSurface, fontSize = 13.sp,
+                    color = pal.ink, fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f))
                 val visibleCount = swaps?.count { dismissed[it.targetExerciseId] != true } ?: 0
                 if (!expanded && visibleCount > 0) {
-                    Text("$visibleCount", color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                    Text("$visibleCount", color = pal.muted, fontSize = 12.sp,
                         modifier = Modifier.padding(end = 6.dp))
                 }
                 Text(if (expanded) "▾" else "▸",
-                    color = MV.OnSurfaceVariant, fontSize = 14.sp)
+                    color = pal.muted, fontSize = 14.sp)
             }
             if (expanded) {
                 Spacer(Modifier.height(6.dp))
                 when {
-                    loading -> Text("Thinking…", color = MV.OnSurfaceDim, fontSize = 12.sp)
+                    loading -> Text("Thinking…", color = pal.dim, fontSize = 12.sp)
                     failed -> Text("AI nudge unavailable. Check Settings → AI.",
-                        color = MV.OnSurfaceDim, fontSize = 12.sp)
+                        color = pal.dim, fontSize = 12.sp)
                     swaps == null -> {}
                     swaps!!.isEmpty() -> Text("Plan looks balanced — no swaps suggested.",
-                        color = MV.OnSurfaceDim, fontSize = 12.sp)
+                        color = pal.dim, fontSize = 12.sp)
                     else -> {
                         for (s in swaps!!) {
                             if (dismissed[s.targetExerciseId] == true) continue
@@ -1553,22 +1618,22 @@ internal fun VarietyNudgeCard(
                             Column(
                                 Modifier.fillMaxWidth()
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(MV.SurfaceContainer)
+                                    .background(pal.card)
                                     .padding(10.dp),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(s.targetExerciseId.replace('_', ' ')
                                             .replaceFirstChar(Char::titlecase),
-                                        color = MV.OnSurface, fontSize = 12.sp,
+                                        color = pal.ink, fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold)
-                                    Text(" → ", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                                    Text(" → ", color = pal.muted, fontSize = 12.sp)
                                     Text(s.replacementExerciseId.replace('_', ' ')
                                             .replaceFirstChar(Char::titlecase),
-                                        color = MV.Green, fontSize = 12.sp,
+                                        color = pal.good, fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold)
                                 }
                                 Spacer(Modifier.height(2.dp))
-                                Text(s.reason, color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                                Text(s.reason, color = pal.muted, fontSize = 11.sp)
                                 Spacer(Modifier.height(6.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Button(
@@ -1577,8 +1642,8 @@ internal fun VarietyNudgeCard(
                                             dismissed[s.targetExerciseId] = true
                                         },
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = MV.BrandRed,
-                                            contentColor = MV.OnSurface,
+                                            containerColor = pal.accent,
+                                            contentColor = if (pal.neon) NeonMV.OnAccent else MV.OnSurface,
                                         ),
                                     ) { Text("Accept", fontSize = 11.sp) }
                                     OutlinedButton(
@@ -1605,6 +1670,8 @@ internal fun FocusCueCard(
     var failed by remember(workoutId) { mutableStateOf(false) }
     var expanded by remember(workoutId) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val pal = LocalStrengthPalette.current
+    val focusAccent = if (pal.neon) NeonMV.Cyan else Color(0xFFA78BFA)
 
     fun load() {
         if (loading || !settings.isConfigured()) return
@@ -1631,7 +1698,7 @@ internal fun FocusCueCard(
 
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = Color(0xFFA78BFA).copy(alpha = 0.10f)
+            containerColor = focusAccent.copy(alpha = 0.10f)
         ),
         modifier = Modifier.fillMaxWidth().clickable {
             if (cue == null) load() else expanded = !expanded
@@ -1639,11 +1706,11 @@ internal fun FocusCueCard(
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("◇", color = Color(0xFFA78BFA), fontSize = 14.sp,
+                Text("◇", color = focusAccent, fontSize = 14.sp,
                     modifier = Modifier.padding(end = 6.dp))
                 Text(
                     cue?.headline?.takeIf { it.isNotEmpty() } ?: "Focus cue",
-                    color = MV.OnSurface, fontSize = 13.sp,
+                    color = pal.ink, fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
@@ -1654,12 +1721,12 @@ internal fun FocusCueCard(
                         cue == null -> "Ask AI"
                         else -> if (expanded) "−" else "+"
                     },
-                    color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                    color = pal.muted, fontSize = 12.sp,
                 )
             }
             if (expanded && cue != null && cue!!.cue.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
-                Text(cue!!.cue, color = MV.OnSurface, fontSize = 12.sp)
+                Text(cue!!.cue, color = pal.ink, fontSize = 12.sp)
             }
         }
     }
@@ -1672,6 +1739,7 @@ internal fun DeloadBannerCard(settings: SettingsRepository, refreshKey: Int = 0)
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val pal = LocalStrengthPalette.current
 
     // Load latest cached judgment on first composition AND whenever
     // refreshKey changes — the workout screen bumps it after every
@@ -1707,14 +1775,14 @@ internal fun DeloadBannerCard(settings: SettingsRepository, refreshKey: Int = 0)
     if (j == null) {
         // Compact "ask AI" pill when nothing cached yet
         Card(
-            colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainerLow),
+            colors = CardDefaults.cardColors(containerColor = pal.cardLow),
             modifier = Modifier.fillMaxWidth().clickable { refresh() },
         ) {
             Row(
                 Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("▲ Deload check",
-                    color = MV.OnSurface, fontSize = 13.sp,
+                    color = pal.ink, fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 Text(
                     when {
@@ -1722,7 +1790,7 @@ internal fun DeloadBannerCard(settings: SettingsRepository, refreshKey: Int = 0)
                         failed -> "Unavailable"
                         else -> "Ask AI"
                     },
-                    color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                    color = pal.muted, fontSize = 12.sp,
                 )
             }
         }
@@ -1732,10 +1800,10 @@ internal fun DeloadBannerCard(settings: SettingsRepository, refreshKey: Int = 0)
     if (j.severity == "none") return  // no banner when AI says all clear
 
     val accent = when (j.severity) {
-        "light" -> Color(0xFFFACC15)
-        "moderate" -> Color(0xFFF97316)
-        "rest" -> Color(0xFFEF4444)
-        else -> MV.OnSurfaceVariant
+        "light" -> if (pal.neon) NeonMV.Amber else Color(0xFFFACC15)
+        "moderate" -> if (pal.neon) NeonMV.Amber else Color(0xFFF97316)
+        "rest" -> if (pal.neon) NeonMV.Bad else Color(0xFFEF4444)
+        else -> pal.muted
     }
     Card(
         colors = CardDefaults.cardColors(
@@ -1757,29 +1825,29 @@ internal fun DeloadBannerCard(settings: SettingsRepository, refreshKey: Int = 0)
                     modifier = Modifier.padding(end = 6.dp))
                 Text(
                     "Deload ${j.severity}",
-                    color = MV.OnSurface, fontSize = 13.sp,
+                    color = pal.ink, fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     j.headline,
-                    color = MV.OnSurface, fontSize = 12.sp,
+                    color = pal.ink, fontSize = 12.sp,
                     modifier = Modifier.weight(1f),
                 )
                 Text(if (expanded) "▾" else "▸",
-                    color = MV.OnSurfaceVariant, fontSize = 14.sp)
+                    color = pal.muted, fontSize = 14.sp)
             }
             if (expanded) {
                 Spacer(Modifier.height(6.dp))
                 for (e in j.evidence) {
-                    Text("• $e", color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                    Text("• $e", color = pal.muted, fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 1.dp))
                 }
                 if (j.recommendation.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
                     Text(
                         "What to do: ${j.recommendation}",
-                        color = MV.OnSurface, fontSize = 12.sp,
+                        color = pal.ink, fontSize = 12.sp,
                     )
                 }
                 Spacer(Modifier.height(8.dp))
@@ -1832,6 +1900,7 @@ internal fun CoachCard(
     onAcceptSwap: (targetExerciseId: String, replacementExerciseId: String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val pal = LocalStrengthPalette.current
 
     // Pre-fetch the cached deload judgment so its pill is right without a tap.
     LaunchedEffect(refreshKey, workoutId) {
@@ -1903,14 +1972,14 @@ internal fun CoachCard(
     val visibleSwaps = (state.swaps ?: emptyList())
         .filter { state.dismissed[it.targetExerciseId] != true }
     val sevColor = when (state.deload?.severity) {
-        "rest" -> Color(0xFFEF4444)
-        "moderate" -> Color(0xFFF97316)
-        "light" -> Color(0xFFFACC15)
+        "rest" -> if (pal.neon) NeonMV.Bad else Color(0xFFEF4444)
+        "moderate" -> if (pal.neon) NeonMV.Amber else Color(0xFFF97316)
+        "light" -> if (pal.neon) NeonMV.Amber else Color(0xFFFACC15)
         else -> null
     }
 
     Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        colors = CardDefaults.cardColors(containerColor = pal.card),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(10.dp)) {
@@ -1926,31 +1995,31 @@ internal fun CoachCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Coach", color = MV.OnSurface, fontSize = 14.sp,
+                    "Coach", color = pal.ink, fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
                 val sevPill = state.deload?.severity?.takeIf { it != "none" }
                 if (!state.cardOpen && sevPill != null) {
-                    val sevColor = when (sevPill) {
-                        "rest" -> Color(0xFFEF4444)
-                        "moderate" -> Color(0xFFF97316)
-                        "light" -> Color(0xFFFACC15)
-                        else -> MV.OnSurfaceVariant
+                    val sevColorPill = when (sevPill) {
+                        "rest" -> if (pal.neon) NeonMV.Bad else Color(0xFFEF4444)
+                        "moderate" -> if (pal.neon) NeonMV.Amber else Color(0xFFF97316)
+                        "light" -> if (pal.neon) NeonMV.Amber else Color(0xFFFACC15)
+                        else -> pal.muted
                     }
                     Text(
                         "Deload $sevPill",
-                        color = sevColor, fontSize = 11.sp,
+                        color = sevColorPill, fontSize = 11.sp,
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
-                            .background(sevColor.copy(alpha = 0.15f))
+                            .background(sevColorPill.copy(alpha = 0.15f))
                             .padding(horizontal = 8.dp, vertical = 2.dp),
                     )
                     Spacer(Modifier.width(4.dp))
                 }
                 Text(
                     if (state.cardOpen) "−" else "+",
-                    color = MV.OnSurfaceVariant, fontSize = 16.sp,
+                    color = pal.muted, fontSize = 16.sp,
                 )
             }
             if (!state.cardOpen) return@Column
@@ -1961,29 +2030,29 @@ internal fun CoachCard(
                 pill = state.deload?.severity?.takeIf { it != "none" }
                     ?: if (state.deload != null) "clear" else "tap to check",
                 pillColor = sevColor
-                    ?: if (state.deload != null) Color(0xFF22C55E) else MV.OnSurfaceVariant,
+                    ?: if (state.deload != null) pal.good else pal.muted,
                 expanded = state.openDeload,
                 accent = sevColor,
                 onToggle = { state.openDeload = !state.openDeload },
             ) {
                 val d = state.deload
                 if (d != null && d.severity != "none") {
-                    Text(d.headline, color = MV.OnSurface, fontSize = 12.sp,
+                    Text(d.headline, color = pal.ink, fontSize = 12.sp,
                         fontWeight = FontWeight.Medium)
                     Spacer(Modifier.height(4.dp))
                     for (e in d.evidence) {
-                        Text("• $e", color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                        Text("• $e", color = pal.muted, fontSize = 11.sp,
                             modifier = Modifier.padding(vertical = 1.dp))
                     }
                     if (d.recommendation.isNotEmpty()) {
                         Spacer(Modifier.height(4.dp))
                         Text("What to do: ${d.recommendation}",
-                            color = MV.OnSurface, fontSize = 11.sp)
+                            color = pal.ink, fontSize = 11.sp)
                     }
                 } else if (d != null) {
-                    Text("No deload needed.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    Text("No deload needed.", color = pal.muted, fontSize = 11.sp)
                 } else if (state.deloadLoading) {
-                    Text("Thinking…", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    Text("Thinking…", color = pal.muted, fontSize = 11.sp)
                 }
                 Spacer(Modifier.height(6.dp))
                 OutlinedButton(onClick = { reCheckDeload() }, enabled = !state.deloadLoading) {
@@ -1996,7 +2065,7 @@ internal fun CoachCard(
                 icon = "◇",
                 title = "Focus cue",
                 pill = if (state.focus != null) "ready" else "tap to load",
-                pillColor = if (state.focus != null) Color(0xFF38BDF8) else MV.OnSurfaceVariant,
+                pillColor = if (state.focus != null) pal.info else pal.muted,
                 expanded = state.openFocus,
                 accent = null,
                 onToggle = {
@@ -2006,16 +2075,16 @@ internal fun CoachCard(
             ) {
                 val f = state.focus
                 if (f != null) {
-                    Text(f.headline, color = MV.OnSurface, fontSize = 12.sp,
+                    Text(f.headline, color = pal.ink, fontSize = 12.sp,
                         fontWeight = FontWeight.Medium)
                     if (f.cue.isNotEmpty()) {
                         Spacer(Modifier.height(3.dp))
-                        Text(f.cue, color = MV.OnSurface, fontSize = 11.sp)
+                        Text(f.cue, color = pal.ink, fontSize = 11.sp)
                     }
                 } else if (state.focusLoading) {
-                    Text("Thinking…", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    Text("Thinking…", color = pal.muted, fontSize = 11.sp)
                 } else {
-                    Text("Tap to load.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    Text("Tap to load.", color = pal.muted, fontSize = 11.sp)
                 }
             }
 
@@ -2030,9 +2099,9 @@ internal fun CoachCard(
                     else -> "${visibleSwaps.size} swap${if (visibleSwaps.size == 1) "" else "s"}"
                 },
                 pillColor = if (state.swaps != null && visibleSwaps.isNotEmpty())
-                    Color(0xFFA78BFA)
-                else if (state.swaps != null) Color(0xFF22C55E)
-                else MV.OnSurfaceVariant,
+                    pal.violet
+                else if (state.swaps != null) pal.good
+                else pal.muted,
                 expanded = state.openVariety,
                 accent = null,
                 onToggle = {
@@ -2041,12 +2110,12 @@ internal fun CoachCard(
                 },
             ) {
                 if (state.swapsLoading) {
-                    Text("Thinking…", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    Text("Thinking…", color = pal.muted, fontSize = 11.sp)
                 } else if (state.swaps == null) {
-                    Text("Tap to load.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    Text("Tap to load.", color = pal.muted, fontSize = 11.sp)
                 } else if (visibleSwaps.isEmpty()) {
                     Text("Plan looks balanced — no swaps suggested.",
-                        color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                        color = pal.muted, fontSize = 11.sp)
                 } else {
                     for (s in visibleSwaps) {
                         Column(
@@ -2054,22 +2123,22 @@ internal fun CoachCard(
                                 .fillMaxWidth()
                                 .padding(top = 4.dp)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(MV.SurfaceContainerLow)
+                                .background(pal.cardLow)
                                 .padding(8.dp),
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(s.targetExerciseId.replace('_', ' ')
                                         .replaceFirstChar(Char::titlecase),
-                                    color = MV.OnSurface, fontSize = 11.sp,
+                                    color = pal.ink, fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold)
-                                Text(" → ", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                                Text(" → ", color = pal.muted, fontSize = 11.sp)
                                 Text(s.replacementExerciseId.replace('_', ' ')
                                         .replaceFirstChar(Char::titlecase),
-                                    color = MV.Green, fontSize = 11.sp,
+                                    color = pal.good, fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold)
                             }
                             Spacer(Modifier.height(2.dp))
-                            Text(s.reason, color = MV.OnSurfaceVariant, fontSize = 10.sp)
+                            Text(s.reason, color = pal.muted, fontSize = 10.sp)
                             Spacer(Modifier.height(4.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Button(
@@ -2079,8 +2148,8 @@ internal fun CoachCard(
                                         state.dismissed[s.targetExerciseId] = true
                                     },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = MV.BrandRed,
-                                        contentColor = MV.OnSurface,
+                                        containerColor = pal.accent,
+                                        contentColor = if (pal.neon) NeonMV.OnAccent else MV.OnSurface,
                                     ),
                                 ) { Text("Accept", fontSize = 10.sp) }
                                 OutlinedButton(
@@ -2109,7 +2178,7 @@ internal fun CoachCard(
                 icon = "?",
                 title = "Why this workout",
                 pill = if (state.explain != null) "loaded" else "tap to view",
-                pillColor = MV.OnSurfaceVariant,
+                pillColor = pal.muted,
                 expanded = state.openWhy,
                 accent = null,
                 onToggle = {
@@ -2119,18 +2188,18 @@ internal fun CoachCard(
             ) {
                 val ex = state.explain
                 if (state.explainLoading) {
-                    Text("…", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    Text("…", color = pal.muted, fontSize = 11.sp)
                 } else if (ex == null) {
-                    Text("Tap to load.", color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    Text("Tap to load.", color = pal.muted, fontSize = 11.sp)
                 } else {
-                    Text("WHY THIS SPLIT", color = MV.OnSurfaceVariant, fontSize = 9.sp)
-                    Text(ex.whySplit, color = MV.OnSurface, fontSize = 11.sp)
+                    Text("WHY THIS SPLIT", color = pal.muted, fontSize = 9.sp)
+                    Text(ex.whySplit, color = pal.ink, fontSize = 11.sp)
                     Spacer(Modifier.height(4.dp))
-                    Text("WHY THESE EXERCISES", color = MV.OnSurfaceVariant, fontSize = 9.sp)
-                    Text(ex.whyExercises, color = MV.OnSurface, fontSize = 11.sp)
+                    Text("WHY THESE EXERCISES", color = pal.muted, fontSize = 9.sp)
+                    Text(ex.whyExercises, color = pal.ink, fontSize = 11.sp)
                     Spacer(Modifier.height(4.dp))
-                    Text("WHY THESE TARGETS", color = MV.OnSurfaceVariant, fontSize = 9.sp)
-                    Text(ex.whyTargets, color = MV.OnSurface, fontSize = 11.sp)
+                    Text("WHY THESE TARGETS", color = pal.muted, fontSize = 9.sp)
+                    Text(ex.whyTargets, color = pal.ink, fontSize = 11.sp)
                 }
             }
         }
@@ -2148,6 +2217,7 @@ private fun CoachRow(
     onToggle: () -> Unit,
     body: @Composable () -> Unit,
 ) {
+    val pal = LocalStrengthPalette.current
     val borderMod = if (accent != null) {
         Modifier
             .background(accent.copy(alpha = 0.07f))
@@ -2168,9 +2238,9 @@ private fun CoachRow(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth().clickable { onToggle() },
         ) {
-            Text(icon, color = accent ?: MV.OnSurfaceVariant, fontSize = 12.sp,
+            Text(icon, color = accent ?: pal.muted, fontSize = 12.sp,
                 modifier = Modifier.padding(end = 6.dp).width(14.dp))
-            Text(title, color = MV.OnSurface, fontSize = 12.sp,
+            Text(title, color = pal.ink, fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             Text(
                 pill,
@@ -2182,7 +2252,7 @@ private fun CoachRow(
                     .padding(horizontal = 7.dp, vertical = 2.dp),
             )
             Spacer(Modifier.width(4.dp))
-            Text(if (expanded) "−" else "+", color = MV.OnSurfaceVariant, fontSize = 13.sp)
+            Text(if (expanded) "−" else "+", color = pal.muted, fontSize = 13.sp)
         }
         if (expanded) {
             Spacer(Modifier.height(4.dp))
@@ -2193,13 +2263,14 @@ private fun CoachRow(
 
 @Composable
 private fun ContextChip(text: String) {
+    val pal = LocalStrengthPalette.current
     Box(
         Modifier
             .clip(RoundedCornerShape(50))
-            .background(MV.SurfaceContainerLow)
-            .border(1.dp, MV.OutlineVariant, RoundedCornerShape(50))
+            .background(pal.cardLow)
+            .border(1.dp, pal.outlineV, RoundedCornerShape(50))
             .padding(horizontal = 10.dp, vertical = 4.dp),
-    ) { Text(text, color = MV.OnSurfaceVariant, fontSize = 12.sp) }
+    ) { Text(text, color = pal.muted, fontSize = 12.sp) }
 }
 
 @Composable
@@ -2207,10 +2278,15 @@ private fun RestTimerBar(
     remainingS: Long, totalS: Long,
     onAdd30: () -> Unit, onSkip: () -> Unit,
 ) {
+    val pal = LocalStrengthPalette.current
     val done = remainingS <= 0
+    // Rest-timer ring/readout: Cyan while running (rest semantics), good
+    // (lime/green) when done. Classic keeps brand-red running / green done.
+    val runningColor = pal.rest
+    val doneColor = pal.good
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = if (done) MV.Green.copy(alpha = 0.18f) else MV.BrandRed.copy(alpha = 0.18f)
+            containerColor = if (done) doneColor.copy(alpha = 0.18f) else runningColor.copy(alpha = 0.18f)
         ),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -2223,19 +2299,19 @@ private fun RestTimerBar(
             val ss = (remainingS % 60).toString().padStart(2, '0')
             Text(
                 "$mm:$ss",
-                color = if (done) MV.Green else MV.BrandRed,
+                color = if (done) doneColor else runningColor,
                 fontSize = 28.sp, fontWeight = FontWeight.Bold,
             )
             Text("/ ${totalS / 60}:${(totalS % 60).toString().padStart(2, '0')}",
-                color = MV.OnSurfaceVariant)
+                color = pal.muted)
             Spacer(Modifier.weight(1f))
             TextButton(onClick = onAdd30) {
-                Icon(Icons.Filled.Add, contentDescription = null, tint = MV.OnSurface)
-                Text(" 30s", color = MV.OnSurface)
+                Icon(Icons.Filled.Add, contentDescription = null, tint = pal.ink)
+                Text(" 30s", color = pal.ink)
             }
             TextButton(onClick = onSkip) {
-                Icon(Icons.Filled.SkipNext, contentDescription = null, tint = MV.OnSurface)
-                Text(" Skip", color = MV.OnSurface)
+                Icon(Icons.Filled.SkipNext, contentDescription = null, tint = pal.ink)
+                Text(" Skip", color = pal.ink)
             }
         }
     }
@@ -2260,6 +2336,10 @@ private fun ExerciseCard(
     partnerName: String? = null,
     backendBaseUrl: String = "",
 ) {
+    val pal = LocalStrengthPalette.current
+    // Violet icon-tint accent → Magenta under neon (exercise/silhouette tint).
+    val iconViolet = if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA)
+    val iconVioletBg = if (pal.neon) NeonMV.Magenta.copy(alpha = 0.12f) else Color(0x14A78BFA)
     val name = info?.name ?: wex.exerciseId.replace('_', ' ')
     val nextSet = (1..wex.targetSets).firstOrNull { n ->
         wex.sets.none { it.setNumber == n && (it.actualReps != null || it.skipped) }
@@ -2285,7 +2365,7 @@ private fun ExerciseCard(
     }
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = if (done) MV.SurfaceContainerLow else MV.SurfaceContainer
+            containerColor = if (done) pal.cardLow else pal.card
         ),
         modifier = Modifier
             .fillMaxWidth()
@@ -2298,7 +2378,7 @@ private fun ExerciseCard(
             if (wex.supersetId != null && partnerName != null) {
                 Text(
                     "⇄ Superset ${wex.supersetId} — alternate with $partnerName",
-                    color = supersetColor ?: MV.OnSurfaceVariant,
+                    color = supersetColor ?: pal.muted,
                     fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
@@ -2307,14 +2387,14 @@ private fun ExerciseCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         "${wex.orderIndex + 1}. $name",
-                        color = MV.OnSurface, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                        color = pal.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                     )
                     val rep = if (wex.targetRepsLow == wex.targetRepsHigh)
                         "${wex.targetRepsLow}" else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
                     val w = wex.targetWeightLb?.let { " @ ${it}lb" } ?: ""
                     Text(
                         "${wex.targetSets}×$rep$w  ·  ${wex.targetRestS}s rest",
-                        color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                        color = pal.muted, fontSize = 12.sp,
                     )
                 }
                 if (info?.imageFront != null) {
@@ -2330,7 +2410,7 @@ private fun ExerciseCard(
                             Modifier
                                 .size(40.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0x14A78BFA))
+                                .background(iconVioletBg)
                                 .clickable { showInfo = true },
                             contentAlignment = Alignment.Center,
                         ) {
@@ -2340,7 +2420,7 @@ private fun ExerciseCard(
                                 modifier = if (isPhoto) Modifier.size(40.dp)
                                            else Modifier.size(32.dp),
                                 colorFilter = if (isPhoto) null
-                                              else ColorFilter.tint(Color(0xFFA78BFA)),
+                                              else ColorFilter.tint(iconViolet),
                             )
                         }
                     }
@@ -2353,13 +2433,13 @@ private fun ExerciseCard(
                         Modifier
                             .size(40.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0x14A78BFA))
+                            .background(iconVioletBg)
                             .clickable { showInfo = true },
                         contentAlignment = Alignment.Center,
                     ) {
                         app.myvitals.ui.YogaPoseIcon(
                             id = wex.exerciseId, size = 28.dp,
-                            tint = Color(0xFFA78BFA),
+                            tint = iconViolet,
                         )
                     }
                 }
@@ -2368,13 +2448,13 @@ private fun ExerciseCard(
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { onYouTube(wex.exerciseId, name) }) {
-                    Text("YouTube ↗", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                    Text("YouTube ↗", color = pal.muted, fontSize = 12.sp)
                 }
                 if (canSwap) {
                     TextButton(onClick = onSwap) {
                         Icon(Icons.Filled.SwapHoriz, contentDescription = null,
-                            tint = MV.OnSurfaceVariant, modifier = Modifier.size(14.dp))
-                        Text(" Swap", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                            tint = pal.muted, modifier = Modifier.size(14.dp))
+                        Text(" Swap", color = pal.muted, fontSize = 12.sp)
                     }
                 }
                 Spacer(Modifier.weight(1f))
@@ -2391,12 +2471,12 @@ private fun ExerciseCard(
                             Modifier.fillMaxWidth().padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text("$n", color = MV.OnSurfaceVariant,
+                            Text("$n", color = pal.muted,
                                 modifier = Modifier.width(20.dp))
                             Text("Held ${logged.actualReps ?: 0}s",
-                                color = MV.OnSurface, fontSize = 14.sp,
+                                color = pal.ink, fontSize = 14.sp,
                                 modifier = Modifier.weight(1f))
-                            Text("✓", color = MV.Green, fontWeight = FontWeight.Bold)
+                            Text("✓", color = pal.good, fontWeight = FontWeight.Bold)
                         }
                     } else {
                         LoggedSetRow(
@@ -2510,6 +2590,9 @@ private fun TimedSetRow(
     sideLabel: String? = null,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val pal = LocalStrengthPalette.current
+    // Timed-hold accent (violet → Magenta under neon) + side-label color.
+    val holdViolet = if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA)
     var startedAt by remember { mutableLongStateOf(0L) }
     var endsAt by remember { mutableLongStateOf(0L) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -2541,13 +2624,13 @@ private fun TimedSetRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     sideLabel ?: "$n",
-                    color = if (sideLabel != null) Color(0xFFA78BFA) else MV.OnSurfaceVariant,
+                    color = if (sideLabel != null) holdViolet else pal.muted,
                     fontWeight = if (sideLabel != null) FontWeight.SemiBold else FontWeight.Normal,
                     modifier = Modifier.width(20.dp),
                 )
                 Text(
                     "${pendingElapsed}s held — how was it?",
-                    color = MV.OnSurface, fontSize = 13.sp,
+                    color = pal.ink, fontSize = 13.sp,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -2556,13 +2639,13 @@ private fun TimedSetRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.padding(start = 20.dp),
             ) {
-                RateButton("Easy", "💪", Color(0xFF22C55E)) {
+                RateButton("Easy", "💪", if (pal.neon) NeonMV.Cyan else Color(0xFF22C55E)) {
                     onComplete(pendingElapsed!!, 5); pendingElapsed = null
                 }
-                RateButton("Good", "✓", Color(0xFFA78BFA)) {
+                RateButton("Good", "✓", if (pal.neon) NeonMV.Lime else Color(0xFFA78BFA)) {
                     onComplete(pendingElapsed!!, 4); pendingElapsed = null
                 }
-                RateButton("Failed", "✗", Color(0xFFEF4444)) {
+                RateButton("Failed", "✗", if (pal.neon) NeonMV.Bad else Color(0xFFEF4444)) {
                     onComplete(pendingElapsed!!, 1); pendingElapsed = null
                 }
             }
@@ -2576,7 +2659,7 @@ private fun TimedSetRow(
     ) {
         Text(
             sideLabel ?: "$n",
-            color = if (sideLabel != null) Color(0xFFA78BFA) else MV.OnSurfaceVariant,
+            color = if (sideLabel != null) holdViolet else pal.muted,
             fontWeight = if (sideLabel != null) FontWeight.SemiBold else FontWeight.Normal,
             modifier = Modifier.width(20.dp),
         )
@@ -2585,19 +2668,19 @@ private fun TimedSetRow(
                 Modifier
                     .padding(horizontal = 8.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0x21A78BFA))
+                    .background(if (pal.neon) NeonMV.Magenta.copy(alpha = 0.13f) else Color(0x21A78BFA))
                     .padding(horizontal = 12.dp, vertical = 4.dp),
             ) {
                 Text(
                     if (remaining >= 60)
                         "${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}"
                     else "${remaining}s",
-                    color = Color(0xFFA78BFA), fontSize = 18.sp,
+                    color = holdViolet, fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
             Text("of ${holdSeconds}s",
-                color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                color = pal.muted, fontSize = 11.sp,
                 modifier = Modifier.weight(1f))
             TextButton(onClick = {
                 // "Done" — end the hold early but still capture it.
@@ -2605,15 +2688,15 @@ private fun TimedSetRow(
                 pendingElapsed = elapsed
                 endsAt = 0L
             }) {
-                Text("Done", color = Color(0xFFA78BFA),
+                Text("Done", color = holdViolet,
                      fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
             TextButton(onClick = { endsAt = 0L }) {
-                Text("Cancel", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                Text("Cancel", color = pal.muted, fontSize = 12.sp)
             }
         } else {
             Text("${holdSeconds}s hold",
-                color = MV.OnSurfaceVariant, fontSize = 13.sp,
+                color = pal.muted, fontSize = 13.sp,
                 modifier = Modifier.weight(1f))
             Button(
                 onClick = {
@@ -2621,7 +2704,8 @@ private fun TimedSetRow(
                     endsAt = startedAt + holdSeconds * 1000L
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFA78BFA), contentColor = Color.White,
+                    containerColor = holdViolet,
+                    contentColor = if (pal.neon) NeonMV.OnAccent else Color.White,
                 ),
             ) {
                 Icon(Icons.Filled.PlayArrow, contentDescription = null,
@@ -2653,40 +2737,43 @@ private fun RateButton(label: String, glyph: String, color: Color, onClick: () -
 @Composable
 private fun LoggedSetRow(n: Int, weightLb: Double?, reps: Int, rating: Int,
                           sideLabel: String? = null) {
+    val pal = LocalStrengthPalette.current
+    val sideColor = if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA)
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             sideLabel ?: "$n",
-            color = if (sideLabel != null) Color(0xFFA78BFA) else MV.OnSurfaceVariant,
+            color = if (sideLabel != null) sideColor else pal.muted,
             fontWeight = if (sideLabel != null) FontWeight.SemiBold else FontWeight.Normal,
             modifier = Modifier.width(20.dp),
         )
         Text(
             "${weightLb ?: "—"}lb × $reps",
-            color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+            color = pal.ink, fontSize = 14.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f),
         )
-        Text(ratingLabel(rating), color = ratingColor(rating), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(ratingLabel(rating), color = ratingColor(rating, pal), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.width(8.dp))
-        Text("✓", color = MV.Green, fontWeight = FontWeight.Bold)
+        Text("✓", color = pal.good, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
 private fun PendingSetRow(n: Int, sideLabel: String? = null) {
+    val pal = LocalStrengthPalette.current
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             sideLabel ?: "$n",
-            color = MV.OnSurfaceDim,
+            color = pal.dim,
             fontWeight = if (sideLabel != null) FontWeight.SemiBold else FontWeight.Normal,
             modifier = Modifier.width(20.dp),
         )
-        Text("waiting", color = MV.OnSurfaceDim, fontSize = 13.sp)
+        Text("waiting", color = pal.dim, fontSize = 13.sp)
     }
 }
 
@@ -2698,11 +2785,13 @@ private fun SetEntryRow(
     onLog: () -> Unit, onFailed: () -> Unit,
     sideLabel: String? = null,
 ) {
+    val pal = LocalStrengthPalette.current
+    val sideColor = if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA)
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 if (sideLabel != null) "$sideLabel side" else "Set $n",
-                color = if (sideLabel != null) Color(0xFFA78BFA) else MV.OnSurface,
+                color = if (sideLabel != null) sideColor else pal.ink,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.width(72.dp),
             )
@@ -2732,13 +2821,13 @@ private fun SetEntryRow(
             // Good=4 +rep, Easy=5 +weight.
             for ((value, label) in listOf(2 to "Hard", 4 to "Good", 5 to "Easy")) {
                 val on = input.rating == value
-                val color = ratingColor(value)
+                val color = ratingColor(value, pal)
                 Box(
                     Modifier
                         .weight(1f)
                         .height(48.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (on) color else MV.SurfaceContainerLow)
+                        .background(if (on) color else pal.cardLow)
                         .border(1.dp,
                             if (on) color else color.copy(alpha = 0.45f),
                             RoundedCornerShape(8.dp))
@@ -2746,7 +2835,7 @@ private fun SetEntryRow(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(label,
-                        color = if (on) MV.OnSurface else color,
+                        color = if (on) (if (pal.neon) NeonMV.OnAccent else MV.OnSurface) else color,
                         fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
             }
@@ -2754,7 +2843,7 @@ private fun SetEntryRow(
         Text(
             "Hard = stays · Good = +1 rep · Easy = +weight next time. " +
                 "Tap Failed if you missed reps.",
-            color = MV.OnSurfaceDim, fontSize = 10.sp, textAlign = TextAlign.Center,
+            color = pal.dim, fontSize = 10.sp, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
         )
         Row(
@@ -2764,7 +2853,9 @@ private fun SetEntryRow(
             Button(
                 onClick = onLog, enabled = canLog,
                 modifier = Modifier.weight(2f),
-                colors = ButtonDefaults.buttonColors(
+                colors = if (pal.neon) ButtonDefaults.buttonColors(
+                    containerColor = pal.accent, contentColor = NeonMV.OnAccent,
+                ) else ButtonDefaults.buttonColors(
                     containerColor = MV.BrandRed, contentColor = MV.OnSurface,
                 ),
             ) { Text("Log set $n") }
@@ -2783,29 +2874,30 @@ private fun ReviewBlock(
     error: String?,
     onLoad: () -> Unit,
 ) {
+    val pal = LocalStrengthPalette.current
     when {
-        loading -> Text("Generating review…", color = MV.OnSurfaceVariant)
-        error != null -> Text(error, color = MV.Red, fontSize = 12.sp)
+        loading -> Text("Generating review…", color = pal.muted)
+        error != null -> Text(error, color = pal.bad, fontSize = 12.sp)
         review == null -> OutlinedButton(
             onClick = onLoad, modifier = Modifier.fillMaxWidth(),
         ) { Text("Get AI workout review") }
         else -> Column {
             Text(
                 review.headline,
-                color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                color = pal.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
             )
             for (h in review.highlights) {
-                Text("• $h", color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                Text("• $h", color = pal.muted, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 4.dp))
             }
             for (c in review.concerns) {
-                Text("⚠ $c", color = MV.Amber, fontSize = 12.sp,
+                Text("⚠ $c", color = pal.caution, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 4.dp))
             }
             Spacer(Modifier.height(6.dp))
             Text(
                 "Next session: ${review.nextSessionSuggestion}",
-                color = MV.OnSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                color = pal.ink, fontSize = 12.sp, fontWeight = FontWeight.Medium,
             )
         }
     }
@@ -2818,6 +2910,7 @@ private fun WeekStrip(
     todayStatus: String,
     onDayClick: (dateIso: String) -> Unit = {},
 ) {
+    val pal = LocalStrengthPalette.current
     val today = java.time.LocalDate.now()
     val statusByDate = history.associate { it.date to it.status }
     // Mon-first weekday pattern; mirrors web strip
@@ -2843,13 +2936,13 @@ private fun WeekStrip(
                 && pattern.contains(monFirst(d.dayOfWeek.value % 7))
 
             val dotColor = when {
-                effectiveStatus == "completed" -> Color(0xFF22C55E)
-                effectiveStatus == "in_progress" -> MV.Amber
-                effectiveStatus == "paused" -> Color(0xFF38BDF8)
-                effectiveStatus == "skipped" -> MV.OnSurfaceVariant
-                effectiveStatus == "planned" -> MV.BrandRed
+                effectiveStatus == "completed" -> pal.good
+                effectiveStatus == "in_progress" -> pal.caution
+                effectiveStatus == "paused" -> pal.info
+                effectiveStatus == "skipped" -> pal.muted
+                effectiveStatus == "planned" -> pal.accent
                 projected -> Color.Transparent
-                else -> MV.OnSurfaceDim
+                else -> pal.dim
             }
 
             Column(
@@ -2858,10 +2951,10 @@ private fun WeekStrip(
                     .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
                     .border(
                         1.dp,
-                        if (isToday) MV.BrandRed else MV.OutlineVariant,
+                        if (isToday) pal.accent else pal.outlineV,
                         androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
                     )
-                    .background(MV.SurfaceContainerLow)
+                    .background(pal.cardLow)
                     .clickable(enabled = !isToday) { onDayClick(iso) }
                     .padding(vertical = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -2869,7 +2962,7 @@ private fun WeekStrip(
             ) {
                 Text(
                     if (isToday) "Today" else d.dayOfWeek.name.take(3),
-                    color = if (isToday) MV.OnSurface else MV.OnSurfaceVariant,
+                    color = if (isToday) pal.ink else pal.muted,
                     fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
                 )
                 Box(
@@ -2879,7 +2972,7 @@ private fun WeekStrip(
                         .background(dotColor)
                         .then(
                             if (projected) Modifier.border(
-                                1.5.dp, MV.BrandRed, CircleShape,
+                                1.5.dp, pal.accent, CircleShape,
                             ) else Modifier
                         ),
                 )
@@ -2888,13 +2981,15 @@ private fun WeekStrip(
     }
 }
 
-private fun ratingColor(r: Int) = when (r) {
-    1 -> MV.Red
-    2 -> androidx.compose.ui.graphics.Color(0xFFF97316)
-    3 -> MV.Amber
-    4 -> androidx.compose.ui.graphics.Color(0xFF84CC16)
-    5 -> MV.Green
-    else -> MV.OnSurfaceDim
+// Set-rating colors. Classic path returns the exact prior values; under
+// neon: Failed(1)->Bad, Hard(2)->Amber, Good(3/4)->Lime, Easy(5)->Cyan.
+private fun ratingColor(r: Int, pal: StrengthPalette) = when (r) {
+    1 -> if (pal.neon) NeonMV.Bad else MV.Red
+    2 -> if (pal.neon) NeonMV.Amber else androidx.compose.ui.graphics.Color(0xFFF97316)
+    3 -> if (pal.neon) NeonMV.Lime else MV.Amber
+    4 -> if (pal.neon) NeonMV.Lime else androidx.compose.ui.graphics.Color(0xFF84CC16)
+    5 -> if (pal.neon) NeonMV.Cyan else MV.Green
+    else -> if (pal.neon) NeonMV.Muted else MV.OnSurfaceDim
 }
 
 // WP-16 — four-button labels; historical 1–5 RPE data still maps cleanly.
@@ -2904,13 +2999,14 @@ private fun ratingLabel(r: Int) = when (r) {
 
 @Composable
 private fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
+    val pal = LocalStrengthPalette.current
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) {
             Icon(
                 Icons.Outlined.MoreVert,
                 contentDescription = "Exercise preference",
-                tint = MV.OnSurfaceVariant,
+                tint = pal.muted,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -2923,7 +3019,7 @@ private fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
                         Icons.Outlined.FavoriteBorder,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
-                        tint = MV.OnSurface,
+                        tint = pal.ink,
                     )
                 },
                 text = { Text("Favorite — show more often") },
@@ -2935,7 +3031,7 @@ private fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
                         Icons.Outlined.ThumbDownOffAlt,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
-                        tint = MV.OnSurface,
+                        tint = pal.ink,
                     )
                 },
                 text = { Text("Avoid — show less often") },
@@ -2947,7 +3043,7 @@ private fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
                         Icons.Outlined.Block,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
-                        tint = MV.OnSurface,
+                        tint = pal.ink,
                     )
                 },
                 text = { Text("Disable — never include") },
@@ -2959,7 +3055,7 @@ private fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
                         Icons.Outlined.Restore,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
-                        tint = MV.OnSurface,
+                        tint = pal.ink,
                     )
                 },
                 text = { Text("Reset to neutral") },
@@ -2995,6 +3091,7 @@ private fun CardioLogDialog(
     onDismiss: () -> Unit,
     onSubmit: (label: String, type: String, durationMin: Int, endedAt: java.time.Instant) -> Unit,
 ) {
+    val pal = LocalStrengthPalette.current
     // Common cardio presets — (display label, canonical type). The type
     // is stored on the Activity and drives the feed icon + analytics;
     // "Other" keeps it generic and lets the user type a custom name.
@@ -3047,7 +3144,7 @@ private fun CardioLogDialog(
                     "What did you do? The session will appear in your " +
                     "activity feed, as a marker on HR charts, and count " +
                     "toward your weekly cardio dose.",
-                    color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                    color = pal.muted, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 12.dp),
                 )
                 // Type dropdown — autofills the name; "Other" lets the
@@ -3058,7 +3155,7 @@ private fun CardioLogDialog(
                         enabled = !submitting,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Type: ${selected.first}", color = MV.OnSurface)
+                        Text("Type: ${selected.first}", color = pal.ink)
                     }
                     DropdownMenu(
                         expanded = typeMenuOpen,
@@ -3101,7 +3198,7 @@ private fun CardioLogDialog(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "Ended at",
-                    color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                    color = pal.muted, fontSize = 12.sp,
                 )
                 Spacer(Modifier.height(2.dp))
                 androidx.compose.material3.OutlinedButton(
@@ -3110,12 +3207,12 @@ private fun CardioLogDialog(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("%02d:%02d".format(endedHour, endedMinute),
-                         color = MV.OnSurface, fontSize = 16.sp)
+                         color = pal.ink, fontSize = 16.sp)
                 }
                 Text(
                     "Tap to change if you're logging this later. " +
                     "HR is scanned from this time minus the duration.",
-                    color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                    color = pal.muted, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
@@ -3133,7 +3230,7 @@ private fun CardioLogDialog(
                         ),
                     )
                 },
-            ) { Text(if (submitting) "Logging…" else "Log workout", color = MV.Green) }
+            ) { Text(if (submitting) "Logging…" else "Log workout", color = pal.good) }
         },
         dismissButton = {
             androidx.compose.material3.TextButton(
@@ -3154,6 +3251,9 @@ private fun ExerciseInfoDialog(
     onYouTube: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val pal = LocalStrengthPalette.current
+    val iconViolet = if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA)
+    val iconVioletBg = if (pal.neon) NeonMV.Magenta.copy(alpha = 0.12f) else Color(0x14A78BFA)
     val isPhoto = info.imageFront?.lowercase()?.let {
         it.endsWith(".jpg") || it.endsWith(".jpeg")
     } ?: false
@@ -3174,7 +3274,7 @@ private fun ExerciseInfoDialog(
                         .fillMaxWidth()
                         .height(200.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0x14A78BFA)),
+                        .background(iconVioletBg),
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
@@ -3185,17 +3285,17 @@ private fun ExerciseInfoDialog(
                                 modifier = if (isPhoto) Modifier.fillMaxWidth()
                                            else Modifier.size(160.dp),
                                 colorFilter = if (isPhoto) null
-                                              else ColorFilter.tint(Color(0xFFA78BFA)),
+                                              else ColorFilter.tint(iconViolet),
                             )
                         }
                         isMobilityYoga -> {
                             app.myvitals.ui.YogaPoseIcon(
                                 id = info.id, size = 160.dp,
-                                tint = Color(0xFFA78BFA),
+                                tint = iconViolet,
                             )
                         }
                         else -> {
-                            Text("No image", color = MV.OnSurfaceVariant, fontSize = 13.sp)
+                            Text("No image", color = pal.muted, fontSize = 13.sp)
                         }
                     }
                 }
@@ -3203,7 +3303,7 @@ private fun ExerciseInfoDialog(
                 // Muscle targets row — primary + secondary chips.
                 Text(
                     "Targets",
-                    color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                    color = pal.muted, fontSize = 11.sp,
                     fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
                 )
                 Spacer(Modifier.height(4.dp))
@@ -3213,26 +3313,26 @@ private fun ExerciseInfoDialog(
                 }
                 Text(
                     targets.joinToString(" · "),
-                    color = MV.OnSurface, fontSize = 13.sp,
+                    color = pal.ink, fontSize = 13.sp,
                 )
                 if (info.equipment.isNotEmpty()) {
                     Spacer(Modifier.height(10.dp))
                     Text(
                         "Equipment",
-                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                        color = pal.muted, fontSize = 11.sp,
                         fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
                         info.equipment.joinToString(" · ") { it.replace('_', ' ') },
-                        color = MV.OnSurface, fontSize = 13.sp,
+                        color = pal.ink, fontSize = 13.sp,
                     )
                 }
                 if (info.instructions.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))
                     Text(
                         "How to",
-                        color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                        color = pal.muted, fontSize = 11.sp,
                         fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
                     )
                     Spacer(Modifier.height(4.dp))
@@ -3243,13 +3343,13 @@ private fun ExerciseInfoDialog(
                         ) {
                             Text(
                                 "${idx + 1}.",
-                                color = MV.OnSurfaceVariant,
+                                color = pal.muted,
                                 fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.width(22.dp),
                             )
                             Text(
                                 step,
-                                color = MV.OnSurface, fontSize = 13.sp,
+                                color = pal.ink, fontSize = 13.sp,
                                 lineHeight = 18.sp,
                             )
                         }
@@ -3259,7 +3359,7 @@ private fun ExerciseInfoDialog(
                     Text(
                         "No how-to instructions for this exercise in " +
                         "the catalog. Tap YouTube below for a demo.",
-                        color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                        color = pal.muted, fontSize = 12.sp,
                     )
                 }
             }
@@ -3267,7 +3367,7 @@ private fun ExerciseInfoDialog(
         confirmButton = {
             androidx.compose.material3.TextButton(onClick = {
                 onYouTube(); onDismiss()
-            }) { Text("YouTube ↗", color = MV.OnSurfaceVariant) }
+            }) { Text("YouTube ↗", color = pal.muted) }
         },
         dismissButton = {
             androidx.compose.material3.TextButton(onClick = onDismiss) {

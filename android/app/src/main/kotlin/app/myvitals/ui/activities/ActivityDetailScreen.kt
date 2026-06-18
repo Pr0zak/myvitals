@@ -50,6 +50,7 @@ import app.myvitals.sync.ActivityRow
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.Trail
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonMV
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottom
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStart
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
@@ -66,6 +67,15 @@ fun ActivityDetailScreen(
     sourceId: String,
     onBack: () -> Unit,
 ) {
+    val neon = settings.neonShellEnabled
+    // Hoisted palette: each value is byte-identical to the classic shell when
+    // neon is off, neon token when on. Never drop the classic value.
+    val bg = if (neon) NeonMV.Bg else MV.Bg
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val errColor = if (neon) NeonMV.Bad else MV.Red
+
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     var activity by remember { mutableStateOf<ActivityRow?>(null) }
@@ -155,20 +165,20 @@ fun ActivityDetailScreen(
 
     LaunchedEffect(source, sourceId) { load() }
 
-    Column(Modifier.fillMaxSize().background(MV.Bg)) {
+    Column(Modifier.fillMaxSize().background(bg)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = MV.OnSurface)
+                    tint = ink)
             }
             Text(
                 activity?.name?.takeIf { it.isNotBlank() }
                     ?: activity?.let { prettyType(it.type) }
                     ?: "Activity",
-                color = MV.OnSurface, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                color = ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
             )
@@ -179,17 +189,17 @@ fun ActivityDetailScreen(
                 IconButton(onClick = { showEdit = true }) {
                     Icon(
                         Icons.Outlined.Edit, contentDescription = "Edit",
-                        tint = MV.OnSurface,
+                        tint = ink,
                     )
                 }
             }
         }
 
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant,
+            loading -> Text("Loading…", color = muted,
                 modifier = Modifier.padding(16.dp))
-            error != null -> Text(error!!, color = MV.Red, modifier = Modifier.padding(16.dp))
-            activity == null -> Text("Not found", color = MV.OnSurfaceVariant,
+            error != null -> Text(error!!, color = errColor, modifier = Modifier.padding(16.dp))
+            activity == null -> Text("Not found", color = muted,
                 modifier = Modifier.padding(16.dp))
             else -> {
                 val a = activity!!
@@ -197,23 +207,23 @@ fun ActivityDetailScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    item { StatsCard(a) }
+                    item { StatsCard(a, neon) }
                     if (!a.polyline.isNullOrBlank() ||
                         (a.trailId != null && trails.any { it.id == a.trailId && it.latitude != null })) {
-                        item { ActivityMap(a, trails) }
+                        item { ActivityMap(a, trails, neon) }
                     }
                     if (hrPoints.isNotEmpty()) {
                         item { ActivityHrChart(hrPoints, maxHr = maxHr) }
                     }
-                    item { TrailLinkCard(a, trails, onPick = { showPicker = true }) }
+                    item { TrailLinkCard(a, trails, neon, onPick = { showPicker = true }) }
                     if (!a.notes.isNullOrBlank()) {
                         item {
-                            Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+                            Card(colors = CardDefaults.cardColors(containerColor = card)) {
                                 Column(Modifier.padding(12.dp)) {
-                                    Text("Notes", color = MV.OnSurfaceVariant,
+                                    Text("Notes", color = muted,
                                         fontSize = 11.sp, fontWeight = FontWeight.Bold,
                                         letterSpacing = 1.5.sp)
-                                    Text(a.notes, color = MV.OnSurface, fontSize = 14.sp)
+                                    Text(a.notes, color = ink, fontSize = 14.sp)
                                 }
                             }
                         }
@@ -226,10 +236,10 @@ fun ActivityDetailScreen(
             val a = activity!!
             ModalBottomSheet(
                 onDismissRequest = { if (!saving) showPicker = false },
-                containerColor = MV.SurfaceContainer,
+                containerColor = card,
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    Text("Link to trail", color = MV.OnSurface,
+                    Text("Link to trail", color = ink,
                         fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(6.dp))
                     val pickable = remember(trails) {
@@ -245,7 +255,10 @@ fun ActivityDetailScreen(
                             Card(
                                 colors = CardDefaults.cardColors(
                                     containerColor =
-                                        if (isCurrent) MV.BrandRed.copy(alpha = 0.15f)
+                                        if (isCurrent)
+                                            (if (neon) NeonMV.Cyan else MV.BrandRed)
+                                                .copy(alpha = 0.15f)
+                                        else if (neon) NeonMV.BgElevated
                                         else MV.SurfaceContainerLow,
                                 ),
                                 modifier = Modifier.fillMaxWidth().clickable(enabled = !saving) {
@@ -255,10 +268,11 @@ fun ActivityDetailScreen(
                                 Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically) {
                                     Text(t.name, modifier = Modifier.weight(1f),
-                                        color = MV.OnSurface, fontSize = 14.sp)
+                                        color = ink, fontSize = 14.sp)
                                     val cs = listOfNotNull(t.city, t.state).joinToString(", ")
                                     if (cs.isNotEmpty()) {
-                                        Text(cs, color = MV.OnSurfaceDim, fontSize = 11.sp)
+                                        Text(cs, color = if (neon) NeonMV.Muted else MV.OnSurfaceDim,
+                                            fontSize = 11.sp)
                                     }
                                 }
                             }
@@ -284,6 +298,7 @@ fun ActivityDetailScreen(
         if (showEdit && activity != null) {
             val a = activity!!
             ActivityEditDialog(
+                neon = neon,
                 initialName = a.name.orEmpty(),
                 initialDurationMin = (a.durationS / 60).coerceAtLeast(1),
                 initialStartAtIso = a.startAt,
@@ -330,6 +345,7 @@ fun ActivityDetailScreen(
 
 @Composable
 private fun ActivityEditDialog(
+    neon: Boolean,
     initialName: String,
     initialDurationMin: Int,
     initialStartAtIso: String,
@@ -400,7 +416,7 @@ private fun ActivityEditDialog(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "Ended at",
-                    color = MV.OnSurfaceVariant, fontSize = 12.sp,
+                    color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant, fontSize = 12.sp,
                 )
                 Spacer(Modifier.height(2.dp))
                 androidx.compose.material3.OutlinedButton(
@@ -411,13 +427,13 @@ private fun ActivityEditDialog(
                     Text(
                         "%02d:%02d".format(endedHour, endedMinute) +
                         "  ·  " + anchorDate.toString(),
-                        color = MV.OnSurface, fontSize = 16.sp,
+                        color = if (neon) NeonMV.Ink else MV.OnSurface, fontSize = 16.sp,
                     )
                 }
                 Text(
                     "Anchored to the activity's original date. " +
                     "HR is re-scanned for the new window.",
-                    color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                    color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
@@ -433,7 +449,8 @@ private fun ActivityEditDialog(
                     val startAt = endAt.minusSeconds(dur * 60L)
                     onSubmit(name.trim(), dur, startAt.toString())
                 },
-            ) { Text(if (submitting) "Saving…" else "Save", color = MV.Green) }
+            ) { Text(if (submitting) "Saving…" else "Save",
+                color = if (neon) NeonMV.Lime else MV.Green) }
         },
         dismissButton = {
             androidx.compose.material3.TextButton(
@@ -444,24 +461,27 @@ private fun ActivityEditDialog(
 }
 
 @Composable
-private fun StatsCard(a: ActivityRow) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+private fun StatsCard(a: ActivityRow, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    Card(colors = CardDefaults.cardColors(containerColor = card)) {
         Column(Modifier.padding(14.dp)) {
-            Text(prettyType(a.type), color = MV.OnSurfaceVariant,
+            Text(prettyType(a.type), color = muted,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            Text(formatStartAt(a.startAt), color = MV.OnSurface, fontSize = 14.sp)
+            Text(formatStartAt(a.startAt), color = ink, fontSize = 14.sp)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                a.distanceM?.let { Stat("Distance", "%.2f mi".format(it / 1609.34)) }
-                Stat("Duration", "${a.durationS / 60}m")
-                a.elevationGainM?.let { Stat("Elev", "%.0f ft".format(it * 3.28084)) }
+                a.distanceM?.let { Stat("Distance", "%.2f mi".format(it / 1609.34), neon) }
+                Stat("Duration", "${a.durationS / 60}m", neon)
+                a.elevationGainM?.let { Stat("Elev", "%.0f ft".format(it * 3.28084), neon) }
             }
             if (a.avgHr != null || a.kcal != null) {
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                    a.avgHr?.let { Stat("Avg HR", "%.0f bpm".format(it)) }
-                    a.maxHr?.let { Stat("Max HR", "%.0f bpm".format(it)) }
-                    a.kcal?.let { Stat("kcal", "%.0f".format(it)) }
+                    a.avgHr?.let { Stat("Avg HR", "%.0f bpm".format(it), neon) }
+                    a.maxHr?.let { Stat("Max HR", "%.0f bpm".format(it), neon) }
+                    a.kcal?.let { Stat("kcal", "%.0f".format(it), neon) }
                 }
             }
         }
@@ -469,38 +489,43 @@ private fun StatsCard(a: ActivityRow) {
 }
 
 @Composable
-private fun Stat(label: String, value: String) {
+private fun Stat(label: String, value: String, neon: Boolean) {
     Column {
-        Text(label, color = MV.OnSurfaceDim, fontSize = 10.sp,
+        Text(label, color = if (neon) NeonMV.Muted else MV.OnSurfaceDim, fontSize = 10.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(value, color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(value, color = if (neon) NeonMV.Cyan else MV.OnSurface,
+            fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
 @Composable
-private fun TrailLinkCard(a: ActivityRow, trails: List<Trail>, onPick: () -> Unit) {
+private fun TrailLinkCard(a: ActivityRow, trails: List<Trail>, neon: Boolean, onPick: () -> Unit) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
     val linked = a.trailId?.let { id -> trails.firstOrNull { it.id == id } }
     Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        colors = CardDefaults.cardColors(containerColor = card),
         modifier = Modifier.fillMaxWidth().clickable { onPick() },
     ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.Link, contentDescription = null,
-                tint = MV.OnSurfaceVariant, modifier = Modifier.size(16.dp))
+                tint = if (neon) NeonMV.Cyan else MV.OnSurfaceVariant,
+                modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 if (linked != null) {
-                    Text("Linked to", color = MV.OnSurfaceVariant, fontSize = 11.sp)
-                    Text(linked.name, color = MV.OnSurface, fontSize = 14.sp,
+                    Text("Linked to", color = muted, fontSize = 11.sp)
+                    Text(linked.name, color = ink, fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold)
                     val visits = linked.visitsTotal
                     if (visits > 0) {
                         Text("${visits} all-time visit${if (visits == 1) "" else "s"}",
-                            color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                            color = muted, fontSize = 11.sp)
                     }
                 } else {
-                    Text("Not linked", color = MV.OnSurfaceVariant, fontSize = 11.sp)
-                    Text("Tap to link a trail", color = MV.OnSurface, fontSize = 14.sp,
+                    Text("Not linked", color = muted, fontSize = 11.sp)
+                    Text("Tap to link a trail", color = ink, fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold)
                 }
             }
@@ -510,10 +535,15 @@ private fun TrailLinkCard(a: ActivityRow, trails: List<Trail>, onPick: () -> Uni
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun ActivityMap(a: ActivityRow, trails: List<Trail>) {
+private fun ActivityMap(a: ActivityRow, trails: List<Trail>, neon: Boolean) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val leafletCss = remember { app.myvitals.ui.common.LeafletAssets.css(ctx) }
     val leafletJs = remember { app.myvitals.ui.common.LeafletAssets.js(ctx) }
+    // Map chrome colors: neon route = Cyan, open-trail marker = Lime, page
+    // bg = obsidian. Classic keeps the original brand-red / green / #0F1620.
+    val pageBgHex = if (neon) "#0F1118" else "#0F1620"
+    val routeHex = if (neon) "#28E6FF" else "#ef4444"
+    val markerHex = if (neon) "#5DFF3B" else "#22C55E"
     // Escape order matters: backslash FIRST, then quotes / control chars.
     // Google's polyline encoding uses backslash heavily, and a raw '\u'
     // in a JS string literal triggers a SyntaxError that aborts the page.
@@ -531,7 +561,7 @@ private fun ActivityMap(a: ActivityRow, trails: List<Trail>) {
 <html><head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width"/>
 <style>$leafletCss
-html,body{margin:0;padding:0;background:#0F1620;overflow:hidden;}
+html,body{margin:0;padding:0;background:$pageBgHex;overflow:hidden;}
 #m{display:block;}</style>
 </head><body>
 <div id="m"></div>
@@ -572,14 +602,14 @@ try {
   if (enc.length > 0) {
     const pts = decodePolyline(enc);
     if (pts.length > 1) {
-      const line = L.polyline(pts, {color:'#ef4444', weight:3, opacity:0.9}).addTo(window.map);
+      const line = L.polyline(pts, {color:'$routeHex', weight:3, opacity:0.9}).addTo(window.map);
       bounds = line.getBounds();
     }
   }
   ${if (trailLat != null && trailLon != null) """
   const pinIcon = L.divIcon({
     html: '<div style="width:16px;height:16px;border-radius:50%;'
-        + 'background:#22C55E;border:2px solid #FFFFFF;'
+        + 'background:$markerHex;border:2px solid #FFFFFF;'
         + 'box-shadow:0 2px 6px rgba(0,0,0,0.6);"></div>',
     className: 'mvpin', iconSize: [16,16], iconAnchor: [8,8],
   });
@@ -628,7 +658,7 @@ try {
                         return true
                     }
                 }
-                setBackgroundColor(android.graphics.Color.parseColor("#0F1620"))
+                setBackgroundColor(android.graphics.Color.parseColor(pageBgHex))
                 loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
                 tag = html
             }

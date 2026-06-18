@@ -112,4 +112,24 @@ function muscleLabel(m: string): string {
 .st-over      { color: #ef4444; border-left: 3px solid #ef4444; }
 .muted { color: var(--muted); }
 .muted.small { font-size: 0.85rem; }
+
+/* ============================================================
+   Vitality Neon — scoped overrides (html[data-theme="neon"] only).
+   Classic / light / dark themes are byte-for-byte unchanged.
+   Audit bands: below-MEV→amber, in-range→lime, above-MAV→red.
+   ============================================================ */
+html[data-theme="neon"] .mv-row {
+  background: #181b27; border-color: #21243450; border-radius: 12px;
+}
+html[data-theme="neon"] .mv-name { color: #ececf5; }
+html[data-theme="neon"] .mv-stat {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: #9b9bb0;
+}
+html[data-theme="neon"] .mv-bar { background: #272a3b; }
+html[data-theme="neon"] .mv-mev-tick { background: #9b9bb0; }
+html[data-theme="neon"] .st-untrained { color: #9b9bb0; }
+html[data-theme="neon"] .st-under     { color: #ffb52e; border-left-color: #ffb52e; }
+html[data-theme="neon"] .st-in_range  { color: #5dff3b; }
+html[data-theme="neon"] .st-over      { color: #ff5d7a; border-left-color: #ff5d7a; }
+html[data-theme="neon"] .muted { color: #9b9bb0; }
 </style>

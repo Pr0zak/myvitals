@@ -3,6 +3,7 @@ import { createPinia } from "pinia";
 import { createRouter, createWebHistory } from "vue-router";
 
 import "./theme";    // side-effect: applies theme on startup
+import { isNeon } from "./theme";
 import App from "./App.vue";
 
 const router = createRouter({
@@ -21,6 +22,10 @@ const router = createRouter({
   routes: [
     { path: "/", name: "today", component: () => import("./views/Today.vue") },
     { path: "/rings", name: "rings", component: () => import("./views/Rings.vue") },
+    { path: "/body", name: "body", component: () => import("./views/Body.vue") },
+    { path: "/train", name: "train", component: () => import("./views/Train.vue") },
+    { path: "/coach-hub", name: "coach-hub", component: () => import("./views/CoachHub.vue") },
+    { path: "/you", name: "you", component: () => import("./views/You.vue") },
     { path: "/trends", name: "trends", component: () => import("./views/Trends.vue") },
     { path: "/sleep", name: "sleep", component: () => import("./views/Sleep.vue") },
     { path: "/heart-rate", name: "heart-rate", component: () => import("./views/HeartRate.vue") },
@@ -57,6 +62,12 @@ const router = createRouter({
     // redirect home instead of rendering a blank page.
     { path: "/:pathMatch(.*)*", redirect: "/" },
   ],
+});
+
+// In the Vitality Neon shell the home is the Rings screen, not the classic
+// Today dashboard. (Classic themes keep "/" → Today.)
+router.beforeEach((to) => {
+  if (to.path === "/" && isNeon.value) return "/rings";
 });
 
 createApp(App).use(createPinia()).use(router).mount("#app");

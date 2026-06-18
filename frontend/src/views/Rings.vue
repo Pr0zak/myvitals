@@ -154,7 +154,7 @@ function fmt(n: number | null, d = 0): string {
 .rings-view {
   --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
   --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-cyan: #28e6ff; --rn-track: #272a3b;
-  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 54px 22px 32px;
+  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 54px 22px 104px;
   background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
   color: var(--rn-ink); font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
 }

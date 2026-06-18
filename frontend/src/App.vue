@@ -4,7 +4,9 @@ import { RouterView, useRoute, useRouter } from "vue-router";
 import { Menu as MenuIcon } from "lucide-vue-next";
 import { isConfigured } from "@/config";
 import { api } from "@/api/client";
+import { isNeon } from "@/theme";
 import SideNav from "@/components/SideNav.vue";
+import NeonNav from "@/components/NeonNav.vue";
 
 const sideNavOpen = ref(false);
 const route = useRoute();
@@ -77,13 +79,18 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="app">
-    <SideNav :class="{ open: sideNavOpen }" @navigate="sideNavOpen = false"/>
-    <button class="mobile-toggle" aria-label="Toggle navigation"
-            @click="sideNavOpen = !sideNavOpen">
-      <MenuIcon :size="18"/>
-    </button>
-    <div v-if="sideNavOpen" class="scrim" @click="sideNavOpen = false"/>
+  <div class="app" :class="{ neon: isNeon }">
+    <!-- Classic shell: 13-group side rail -->
+    <template v-if="!isNeon">
+      <SideNav :class="{ open: sideNavOpen }" @navigate="sideNavOpen = false"/>
+      <button class="mobile-toggle" aria-label="Toggle navigation"
+              @click="sideNavOpen = !sideNavOpen">
+        <MenuIcon :size="18"/>
+      </button>
+      <div v-if="sideNavOpen" class="scrim" @click="sideNavOpen = false"/>
+    </template>
+    <!-- Vitality Neon shell: 5-tab bottom bar / left rail -->
+    <NeonNav v-else />
 
     <div class="main-col">
       <RouterLink v-if="!isConfigured()" to="/settings" class="banner">
@@ -168,6 +175,36 @@ onMounted(async () => {
   --bad: #dc2626;
   --violet: #7c3aed;
   color-scheme: light;
+}
+
+/* Vitality Neon redesign skin. Maps the global token names to the neon
+ * palette so EVERY view picks up the obsidian-on-neon look for free; the
+ * dedicated redesign views (Rings/Body/Train/CoachHub/You) add full layouts
+ * on top. Domain colour language: cyan=recovery/heart, magenta=sleep/sober,
+ * lime=move/exercise, amber=warmth. */
+[data-theme="neon"] {
+  --bg-0: #0f1118;
+  --bg-1: #181b27;
+  --bg-2: #1d2030;
+  --bg-3: #23263a;
+  --bg: var(--bg-0);
+  --surface: var(--bg-1);
+  --surface-2: var(--bg-2);
+  --line: rgba(155, 155, 176, 0.12);
+  --line-2: rgba(155, 155, 176, 0.20);
+  --border: var(--line);
+  --text: #ececf5;
+  --text-soft: #cbd5e1;
+  --muted: #9b9bb0;
+  --muted-2: #6b6e85;
+  --accent: #28e6ff;
+  --accent-text: #04212a;
+  --good: #5dff3b;
+  --warn: #ffb52e;
+  --bad: #ff5d7a;
+  --violet: #ff3ad8;
+  color-scheme: dark;
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui, sans-serif;
 }
 
 html { background: var(--bg); }
@@ -267,6 +304,14 @@ main {
   padding: 1.25rem 1.5rem;
   flex: 1;
   position: relative;
+}
+
+/* Neon shell layout: no side rail in flow; NeonNav is fixed (bottom bar on
+ * mobile, left rail ≥768px). Offset the content for the desktop rail. The
+ * neon views carry their own bottom padding to clear the mobile bottom bar. */
+.app.neon .main-col { width: 100%; }
+@media (min-width: 768px) {
+  .app.neon .main-col { margin-left: 88px; }
 }
 
 /* Mobile hamburger */

@@ -1313,6 +1313,7 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           <label class="pick"><input type="radio" value="dark" v-model="themeChoice"/> Dark</label>
           <label class="pick"><input type="radio" value="light" v-model="themeChoice"/> Light</label>
           <label class="pick"><input type="radio" value="auto" v-model="themeChoice"/> Auto</label>
+          <label class="pick"><input type="radio" value="neon" v-model="themeChoice"/> ✦ Vitality Neon</label>
         </div>
 
         <div class="lbl">Units</div>

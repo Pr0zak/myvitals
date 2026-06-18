@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Adaptive launcher icon background. Dark navy so the red heart pops,
-         matches the dashboard favicon treatment. -->
-    <color name="ic_launcher_background">#0B1018</color>
+    <!-- Adaptive launcher icon background. Obsidian so the neon tri-ring
+         glows, matches the dashboard favicon + Vitality Neon shell. -->
+    <color name="ic_launcher_background">#0F1118</color>
 </resources>

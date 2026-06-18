@@ -1,42 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon foreground: a red heart with a white EKG/heartbeat trace.
-     The 108x108 viewport leaves an 18dp margin on every side; the visible
-     content lives inside the inner 72x72 safe zone. Matches the dashboard
-     AppLogo + favicon — red on dark. -->
+<!-- Adaptive icon foreground: the myvitals "vitality" tri-ring — sleep
+     (magenta) / move (lime) / recovery (cyan), the same trio the Today home
+     draws. The 108x108 viewport leaves an 18dp margin; the rings live inside
+     the 72x72 safe zone (outer r=36 → spans 18..90). Matches the dashboard
+     AppLogo + favicon. Strokes use trimPathEnd to open each ring. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Heart silhouette, red. -->
-    <path
-        android:fillColor="#EF4444"
-        android:pathData="M54,76
-                          C 54,76  30,60  30,46
-                          C 30,38  36,33  43,33
-                          C 49,33  52,36  54,40
-                          C 56,36  59,33  65,33
-                          C 72,33  78,38  78,46
-                          C 78,60  54,76  54,76 Z" />
-    <!-- Heartbeat trace, white, crossing the heart. -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M30,52
-                          L42,52
-                          L46,46
-                          L50,58
-                          L54,40
-                          L58,58
-                          L62,46
-                          L66,52
-                          L78,52
-                          L78,55
-                          L66,55
-                          L62,49
-                          L58,61
-                          L54,43
-                          L50,61
-                          L46,49
-                          L42,55
-                          L30,55 Z" />
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="-90">
+        <!-- Outer ring — sleep (magenta) -->
+        <path
+            android:strokeColor="#FF3AD8"
+            android:strokeWidth="8"
+            android:strokeLineCap="round"
+            android:trimPathStart="0"
+            android:trimPathEnd="0.76"
+            android:pathData="M54,18 A36,36 0 1 1 53.99,18" />
+        <!-- Middle ring — move (lime) -->
+        <path
+            android:strokeColor="#5DFF3B"
+            android:strokeWidth="8"
+            android:strokeLineCap="round"
+            android:trimPathStart="0"
+            android:trimPathEnd="0.70"
+            android:pathData="M54,29 A25,25 0 1 1 53.99,29" />
+        <!-- Inner ring — recovery (cyan) -->
+        <path
+            android:strokeColor="#28E6FF"
+            android:strokeWidth="8"
+            android:strokeLineCap="round"
+            android:trimPathStart="0"
+            android:trimPathEnd="0.82"
+            android:pathData="M54,40 A14,14 0 1 1 53.99,40" />
+    </group>
 </vector>

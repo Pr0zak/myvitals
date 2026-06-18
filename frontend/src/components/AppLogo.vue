@@ -1,14 +1,14 @@
 <script setup lang="ts">
 /**
- * The myvitals logo: a heart silhouette with an EKG/heartbeat trace
- * running through it. Same path data as the Android adaptive-icon
- * foreground (drawable/ic_launcher_foreground.xml) so the brand reads
- * the same on phone launcher and dashboard.
+ * The myvitals logo: three concentric "vitality" rings — sleep (magenta),
+ * move (lime), recovery (cyan) — the same trio the Today/rings home draws.
+ * Same mark as the Android adaptive icon (ic_launcher_foreground.xml) and
+ * the favicon, so the brand reads identically on phone launcher, browser
+ * tab, and dashboard.
  *
  * Two render modes:
- *  - default: white heart on transparent bg (drop into any colored chip)
- *  - "tile":  white heart on the brand sky→violet gradient with rounded
- *             corners — used as the SideNav brand badge.
+ *  - default: rings on transparent (drop into any chip)
+ *  - "tile":  rings on an obsidian rounded square — the SideNav brand badge
  */
 withDefaults(defineProps<{
   size?: number;
@@ -18,17 +18,15 @@ withDefaults(defineProps<{
 
 <template>
   <span class="logo-wrap" :class="{ tile }" :style="{ width: size + 'px', height: size + 'px' }">
-    <svg viewBox="22 22 64 64" :width="size" :height="size" aria-hidden="true">
-      <!-- Heart silhouette (red) -->
-      <path
-        d="M54,76 C 54,76 30,60 30,46 C 30,38 36,33 43,33 C 49,33 52,36 54,40 C 56,36 59,33 65,33 C 72,33 78,38 78,46 C 78,60 54,76 54,76 Z"
-        :fill="tile ? '#ffffff' : '#ef4444'"
-      />
-      <!-- EKG trace cutting across -->
-      <path
-        d="M30,52 L42,52 L46,46 L50,58 L54,40 L58,58 L62,46 L66,52 L78,52 L78,55 L66,55 L62,49 L58,61 L54,43 L50,61 L46,49 L42,55 L30,55 Z"
-        :fill="tile ? '#0b1018' : '#ffffff'"
-      />
+    <svg :width="size" :height="size" viewBox="0 0 108 108" aria-hidden="true">
+      <g fill="none" stroke-linecap="round" stroke-width="9" transform="rotate(-90 54 54)">
+        <circle cx="54" cy="54" r="38" stroke="#ff3ad8" stroke-dasharray="181 999"
+          style="filter: drop-shadow(0 0 2px rgba(255,58,216,.55))" />
+        <circle cx="54" cy="54" r="26.5" stroke="#5dff3b" stroke-dasharray="117 999"
+          style="filter: drop-shadow(0 0 2px rgba(93,255,59,.55))" />
+        <circle cx="54" cy="54" r="15" stroke="#28e6ff" stroke-dasharray="77 999"
+          style="filter: drop-shadow(0 0 2px rgba(40,230,255,.55))" />
+      </g>
     </svg>
   </span>
 </template>
@@ -39,11 +37,10 @@ withDefaults(defineProps<{
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: #ef4444;
 }
 .logo-wrap.tile {
-  background: linear-gradient(135deg, #ef4444, #b91c1c);
-  border-radius: 8px;
+  background: #0f1118;
+  border-radius: 9px;
 }
-.logo-wrap.tile svg { transform: scale(1.05); }
+.logo-wrap.tile svg { transform: scale(0.92); }
 </style>

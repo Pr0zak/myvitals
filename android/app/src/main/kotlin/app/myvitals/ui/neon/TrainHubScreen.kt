@@ -73,8 +73,6 @@ fun TrainHubScreen(
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var activities by remember { mutableStateOf<List<ActivityRow>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
-    // Visual-only segment toggle, mirroring the web `segment` ref.
-    var segment by remember { mutableStateOf(TrainSegment.STRENGTH) }
 
     LaunchedEffect(Unit) {
         if (!settings.isConfigured()) {
@@ -128,23 +126,6 @@ fun TrainHubScreen(
             WeekChip(weekCount) { onOpen("activities") }
         },
     ) {
-        // ── Strength / Cardio segment toggle (visual) ────────────────────
-        Row(
-            Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            SegmentPill(
-                label = "Strength",
-                selected = segment == TrainSegment.STRENGTH,
-                modifier = Modifier.weight(1f),
-            ) { segment = TrainSegment.STRENGTH }
-            SegmentPill(
-                label = "Cardio",
-                selected = segment == TrainSegment.CARDIO,
-                modifier = Modifier.weight(1f),
-            ) { segment = TrainSegment.CARDIO }
-        }
-
         // ── Today hero card ──────────────────────────────────────────────
         Caption("Today")
         Spacer(Modifier.height(11.dp))
@@ -202,8 +183,6 @@ fun TrainHubScreen(
     }
 }
 
-private enum class TrainSegment { STRENGTH, CARDIO }
-
 // ── Header week chip ──────────────────────────────────────────────────────
 @Composable
 private fun WeekChip(count: Int, onClick: () -> Unit) {
@@ -236,36 +215,6 @@ private fun Caption(text: String) {
         fontWeight = FontWeight.Bold,
         letterSpacing = 1.4.sp,
     )
-}
-
-// ── Segment toggle pill ───────────────────────────────────────────────────
-@Composable
-private fun SegmentPill(
-    label: String,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (selected) NeonMV.Lime else NeonMV.Card)
-            .then(
-                if (selected)
-                    Modifier.border(1.dp, NeonMV.Lime, RoundedCornerShape(16.dp))
-                else Modifier,
-            )
-            .clickable(onClick = onClick)
-            .padding(vertical = 11.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            color = if (selected) NeonMV.OnAccent else NeonMV.Muted,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-        )
-    }
 }
 
 // ── Today hero card ───────────────────────────────────────────────────────

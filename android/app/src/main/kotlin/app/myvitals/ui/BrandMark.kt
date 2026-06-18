@@ -18,27 +18,32 @@ import androidx.compose.ui.unit.dp
  * the dashboard AppLogo, and the favicon. Rendered with Canvas arcs so it
  * scales freely.
  *
- * The legacy `heart` / `trace` color params are kept for source-compat with
- * existing call sites but no longer affect rendering — the mark is always the
- * three brand-colored rings.
+ * The legacy `heart` / `trace` color params no longer pick the mark's colors
+ * (it is always the three brand rings), but the **alpha** of `heart` is still
+ * honoured so existing call sites that fade the mark — e.g. the 360dp Settings
+ * watermark passes `heart = …copy(alpha = 0.05f)` — stay faint instead of
+ * blasting full-colour rings over the content.
  */
 @Composable
 fun BrandMark(
     dimension: Dp = 28.dp,
-    @Suppress("UNUSED_PARAMETER") heart: Color = Color(0xFFFF3AD8),
+    heart: Color = Color(0xFFFF3AD8),
     @Suppress("UNUSED_PARAMETER") trace: Color = Color(0xFF28E6FF),
 ) {
+    val tint = heart.alpha
     Canvas(modifier = Modifier.size(dimension)) {
         val s = this.size.minDimension
         val w = s * 0.085f
         val stroke = Stroke(width = w, cap = StrokeCap.Round)
 
-        // diameter fraction, sweep fraction (of 360°), color — outer→inner
+        // diameter fraction, sweep fraction (of 360°), color — outer→inner.
+        // `tint` carries the caller's requested opacity (1f for the normal mark,
+        // ~0.05f for the faint Settings watermark).
         data class Ring(val diam: Float, val sweep: Float, val color: Color)
         val rings = listOf(
-            Ring(0.78f, 0.76f, Color(0xFFFF3AD8)), // sleep
-            Ring(0.54f, 0.70f, Color(0xFF5DFF3B)), // move
-            Ring(0.30f, 0.82f, Color(0xFF28E6FF)), // recovery
+            Ring(0.78f, 0.76f, Color(0xFFFF3AD8).copy(alpha = tint)), // sleep
+            Ring(0.54f, 0.70f, Color(0xFF5DFF3B).copy(alpha = tint)), // move
+            Ring(0.30f, 0.82f, Color(0xFF28E6FF).copy(alpha = tint)), // recovery
         )
         for (r in rings) {
             val d = s * r.diam

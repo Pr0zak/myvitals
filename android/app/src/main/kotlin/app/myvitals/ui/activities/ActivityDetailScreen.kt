@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -40,6 +41,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,7 +53,11 @@ import app.myvitals.sync.ActivityRow
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.Trail
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonBackgroundBrush
+import app.myvitals.ui.neon.NeonCardShape
 import app.myvitals.ui.neon.NeonMV
+import app.myvitals.ui.neon.NeonNumber
+import app.myvitals.ui.neon.NeonNumberFamily
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottom
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStart
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
@@ -165,7 +172,11 @@ fun ActivityDetailScreen(
 
     LaunchedEffect(source, sourceId) { load() }
 
-    Column(Modifier.fillMaxSize().background(bg)) {
+    // Under neon the root is the obsidian radial gradient (matching the shell
+    // home screens); classic keeps the flat fill byte-identical.
+    val rootBg = if (neon) Modifier.fillMaxSize().background(NeonBackgroundBrush)
+                 else Modifier.fillMaxSize().background(bg)
+    Column(rootBg) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -218,12 +229,30 @@ fun ActivityDetailScreen(
                     item { TrailLinkCard(a, trails, neon, onPick = { showPicker = true }) }
                     if (!a.notes.isNullOrBlank()) {
                         item {
-                            Card(colors = CardDefaults.cardColors(containerColor = card)) {
-                                Column(Modifier.padding(12.dp)) {
-                                    Text("Notes", color = muted,
-                                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.5.sp)
+                            if (neon) {
+                                Column(
+                                    Modifier.fillMaxWidth()
+                                        .clip(NeonCardShape)
+                                        .background(NeonMV.Card)
+                                        .border(1.dp, NeonMV.Periwinkle.copy(alpha = 0.16f),
+                                            NeonCardShape)
+                                        .padding(16.dp),
+                                ) {
+                                    Text("NOTES", color = NeonMV.Muted,
+                                        fontFamily = NeonNumberFamily,
+                                        fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.2.sp)
+                                    Spacer(Modifier.height(7.dp))
                                     Text(a.notes, color = ink, fontSize = 14.sp)
+                                }
+                            } else {
+                                Card(colors = CardDefaults.cardColors(containerColor = card)) {
+                                    Column(Modifier.padding(12.dp)) {
+                                        Text("Notes", color = muted,
+                                            fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                            letterSpacing = 1.5.sp)
+                                        Text(a.notes, color = ink, fontSize = 14.sp)
+                                    }
                                 }
                             }
                         }
@@ -462,9 +491,10 @@ private fun ActivityEditDialog(
 
 @Composable
 private fun StatsCard(a: ActivityRow, neon: Boolean) {
-    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
-    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
-    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    if (neon) { NeonStatsCard(a); return }
+    val card = MV.SurfaceContainer
+    val muted = MV.OnSurfaceVariant
+    val ink = MV.OnSurface
     Card(colors = CardDefaults.cardColors(containerColor = card)) {
         Column(Modifier.padding(14.dp)) {
             Text(prettyType(a.type), color = muted,
@@ -498,11 +528,117 @@ private fun Stat(label: String, value: String, neon: Boolean) {
     }
 }
 
+/**
+ * Neon stats surface — a header tile (activity type + start time) above a flowed
+ * grid of rounded accent-bordered stat tiles. Values render as Space Grotesk
+ * [NeonNumber]; labels are uppercase Space Grotesk muted. Only the non-null
+ * stats produce a tile, so the grid is dense with no empty slots. Crafted to
+ * match BodyScreen's MetricCard idiom.
+ */
+@Composable
+private fun NeonStatsCard(a: ActivityRow) {
+    // Build the present stats in display order, each carrying its accent.
+    val tiles = buildList {
+        a.distanceM?.let {
+            add(NeonStatSpec("DISTANCE", "%.2f".format(it / 1609.34), "mi", NeonMV.Lime))
+        }
+        add(NeonStatSpec("DURATION", "${a.durationS / 60}", "min", NeonMV.Cyan))
+        a.elevationGainM?.let {
+            add(NeonStatSpec("ELEVATION", "%.0f".format(it * 3.28084), "ft", NeonMV.Amber))
+        }
+        a.avgHr?.let {
+            add(NeonStatSpec("AVG HR", "%.0f".format(it), "bpm", NeonMV.Cyan))
+        }
+        a.maxHr?.let {
+            add(NeonStatSpec("MAX HR", "%.0f".format(it), "bpm", NeonMV.Bad))
+        }
+        a.kcal?.let {
+            add(NeonStatSpec("KCAL", "%.0f".format(it), null, NeonMV.Amber))
+        }
+    }
+    Column {
+        // Header tile: activity type (cyan accent) + human start time.
+        Column(
+            Modifier.fillMaxWidth()
+                .clip(NeonCardShape)
+                .background(NeonMV.Card)
+                .border(1.dp, NeonMV.Cyan.copy(alpha = 0.16f), NeonCardShape)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+        ) {
+            Text(
+                prettyType(a.type).uppercase(),
+                color = NeonMV.Cyan,
+                fontFamily = NeonNumberFamily,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.4.sp,
+            )
+            Spacer(Modifier.height(5.dp))
+            Text(formatStartAt(a.startAt), color = NeonMV.Ink, fontSize = 14.sp)
+        }
+        Spacer(Modifier.height(12.dp))
+        // Stat tiles flowed two-per-row so each gets equal width.
+        tiles.chunked(2).forEach { pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                pair.forEach { spec ->
+                    NeonStatTile(spec, Modifier.weight(1f))
+                }
+                // Pad an odd trailing row so the lone tile keeps half width.
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+private data class NeonStatSpec(
+    val label: String,
+    val value: String,
+    val unit: String?,
+    val accent: Color,
+)
+
+@Composable
+private fun NeonStatTile(spec: NeonStatSpec, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(NeonCardShape)
+            .background(NeonMV.Card)
+            .border(1.dp, spec.accent.copy(alpha = 0.16f), NeonCardShape)
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+    ) {
+        Text(
+            spec.label,
+            color = NeonMV.Muted,
+            fontFamily = NeonNumberFamily,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            NeonNumber(spec.value, color = NeonMV.Ink, size = 25)
+            if (spec.unit != null) {
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    spec.unit,
+                    color = NeonMV.Muted,
+                    fontFamily = NeonNumberFamily,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 3.dp),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun TrailLinkCard(a: ActivityRow, trails: List<Trail>, neon: Boolean, onPick: () -> Unit) {
-    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
-    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
-    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    if (neon) { NeonTrailLinkCard(a, trails, onPick); return }
+    val card = MV.SurfaceContainer
+    val muted = MV.OnSurfaceVariant
+    val ink = MV.OnSurface
     val linked = a.trailId?.let { id -> trails.firstOrNull { it.id == id } }
     Card(
         colors = CardDefaults.cardColors(containerColor = card),
@@ -510,7 +646,7 @@ private fun TrailLinkCard(a: ActivityRow, trails: List<Trail>, neon: Boolean, on
     ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.Link, contentDescription = null,
-                tint = if (neon) NeonMV.Cyan else MV.OnSurfaceVariant,
+                tint = MV.OnSurfaceVariant,
                 modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
@@ -528,6 +664,47 @@ private fun TrailLinkCard(a: ActivityRow, trails: List<Trail>, neon: Boolean, on
                     Text("Tap to link a trail", color = ink, fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold)
                 }
+            }
+        }
+    }
+}
+
+/** Neon trail-link tile — rounded, cyan accent border, uppercase label. */
+@Composable
+private fun NeonTrailLinkCard(a: ActivityRow, trails: List<Trail>, onPick: () -> Unit) {
+    val linked = a.trailId?.let { id -> trails.firstOrNull { it.id == id } }
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(NeonCardShape)
+            .background(NeonMV.Card)
+            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.16f), NeonCardShape)
+            .clickable { onPick() }
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Link, contentDescription = null,
+            tint = NeonMV.Cyan, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            if (linked != null) {
+                Text("LINKED TO", color = NeonMV.Muted,
+                    fontFamily = NeonNumberFamily, fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                Spacer(Modifier.height(3.dp))
+                Text(linked.name, color = NeonMV.Ink, fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold)
+                val visits = linked.visitsTotal
+                if (visits > 0) {
+                    Text("${visits} all-time visit${if (visits == 1) "" else "s"}",
+                        color = NeonMV.Muted, fontSize = 11.sp)
+                }
+            } else {
+                Text("NOT LINKED", color = NeonMV.Muted,
+                    fontFamily = NeonNumberFamily, fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                Spacer(Modifier.height(3.dp))
+                Text("Tap to link a trail", color = NeonMV.Ink, fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold)
             }
         }
     }

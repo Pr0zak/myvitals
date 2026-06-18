@@ -327,8 +327,12 @@ fun TrailsScreen(settings: SettingsRepository) {
         }
     }
 
+    val neonBrush = app.myvitals.ui.neon.NeonBackgroundBrush
     Column(
-        modifier = Modifier.fillMaxSize().background(bg).padding(horizontal = 16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .let { if (neon) it.background(neonBrush) else it.background(bg) }
+            .padding(horizontal = 16.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp),
@@ -336,20 +340,43 @@ fun TrailsScreen(settings: SettingsRepository) {
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column {
-                Text(
-                    "TRAILS",
-                    color = muted,
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp,
-                )
-                Text(
-                    if (trails.isEmpty()) "—"
-                    else listOfNotNull(
-                        "${grouped.open.size} open",
-                        if (grouped.delayed.isNotEmpty()) "${grouped.delayed.size} delayed" else null,
-                        "${grouped.closed.size} closed",
-                    ).joinToString(" · "),
-                    color = ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
-                )
+                if (neon) {
+                    // Crafted neon header — big Jakarta title + Space Grotesk
+                    // status line, mirroring NeonTrailsScreen's RAINOUTLINE read.
+                    Text(
+                        "Trails",
+                        color = NeonMV.Ink,
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = (-0.5).sp,
+                    )
+                    Text(
+                        if (trails.isEmpty()) "RAINOUTLINE"
+                        else (listOfNotNull(
+                            "${grouped.open.size} open",
+                            if (grouped.delayed.isNotEmpty()) "${grouped.delayed.size} delayed" else null,
+                            "${grouped.closed.size} closed",
+                        ).joinToString(" · ") + " · RAINOUTLINE"),
+                        color = NeonMV.Muted,
+                        fontFamily = app.myvitals.ui.neon.NeonNumberFamily,
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp,
+                    )
+                } else {
+                    Text(
+                        "TRAILS",
+                        color = muted,
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp,
+                    )
+                    Text(
+                        if (trails.isEmpty()) "—"
+                        else listOfNotNull(
+                            "${grouped.open.size} open",
+                            if (grouped.delayed.isNotEmpty()) "${grouped.delayed.size} delayed" else null,
+                            "${grouped.closed.size} closed",
+                        ).joinToString(" · "),
+                        color = ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 val mostRecentFetch = remember(trails) {
                     trails.mapNotNull { it.fetchedAt }.maxOrNull()
                 }
@@ -731,11 +758,21 @@ fun TrailsScreen(settings: SettingsRepository) {
 
 @Composable
 private fun GroupHeader(text: String, neon: Boolean = false) {
-    Text(
-        text, color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant,
-        fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
-        modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
-    )
+    if (neon) {
+        Text(
+            text.uppercase(),
+            color = NeonMV.Muted,
+            fontFamily = app.myvitals.ui.neon.NeonNumberFamily,
+            fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp,
+            modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
+        )
+    } else {
+        Text(
+            text, color = MV.OnSurfaceVariant,
+            fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
+            modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -764,6 +801,10 @@ private fun TrailRow(
         colors = CardDefaults.cardColors(
             containerColor = if (neon) NeonMV.Card else MV.SurfaceContainer,
         ),
+        shape = if (neon) app.myvitals.ui.neon.NeonCardShape else CardDefaults.shape,
+        border = if (neon)
+            androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.16f))
+            else null,
         modifier = Modifier.fillMaxWidth().combinedClickable(
             onClick = { if (hasLocation) onTap() },
             onLongClick = onLongPress,
@@ -774,7 +815,24 @@ private fun TrailRow(
                 modifier = Modifier.padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(color))
+                if (neon) {
+                    // Glowing status dot — soft colored halo + solid core,
+                    // matching NeonTrailsScreen's board dots.
+                    Box(
+                        modifier = Modifier.size(16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier.size(16.dp).clip(CircleShape)
+                                .background(color.copy(alpha = 0.22f)),
+                        )
+                        Box(
+                            modifier = Modifier.size(10.dp).clip(CircleShape).background(color),
+                        )
+                    }
+                } else {
+                    Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(color))
+                }
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(t.name, color = ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -898,6 +956,10 @@ private fun RideLinkRow(ride: ActivityRow, nowMs: Long, neon: Boolean = false, o
         colors = CardDefaults.cardColors(
             containerColor = if (neon) NeonMV.Card else MV.SurfaceContainer,
         ),
+        shape = if (neon) app.myvitals.ui.neon.NeonCardShape else CardDefaults.shape,
+        border = if (neon)
+            androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.16f))
+            else null,
         modifier = Modifier.fillMaxWidth().clickable { onTap() },
     ) {
         Row(

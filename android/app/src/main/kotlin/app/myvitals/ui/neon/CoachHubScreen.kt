@@ -150,15 +150,12 @@ private fun SectionLabel(text: String) {
  */
 @Composable
 private fun OpenCoachCard(onClick: () -> Unit) {
+    // NOTE: no Modifier.shadow() — a colored elevation shadow on the obsidian
+    // background renders as a dark halo/square behind the card. The gradient
+    // fill + magenta border carry the "glow" instead.
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(
-                elevation = 24.dp,
-                shape = NeonCardShape,
-                ambientColor = NeonMV.Magenta,
-                spotColor = NeonMV.Magenta,
-            )
             .clip(NeonCardShape)
             .background(
                 Brush.linearGradient(

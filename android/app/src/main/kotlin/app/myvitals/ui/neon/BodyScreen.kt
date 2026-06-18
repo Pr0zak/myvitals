@@ -25,10 +25,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.myvitals.data.JsonCache
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.DailySummary
@@ -58,11 +61,23 @@ fun BodyScreen(
     contentPadding: PaddingValues,
     onOpen: (String) -> Unit,
 ) {
+    val context = LocalContext.current
     var sum by remember { mutableStateOf<DailySummary?>(null) }
     var profile by remember { mutableStateOf<ProfileResponse?>(null) }
     var loading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
+        // SWR: render the last-known summary instantly so cold/offline loads
+        // don't paint a grid of blank "—" tiles. The fresh fetch below
+        // overwrites once it lands. Keys mirror the other detail screens
+        // (grep "JsonCache.write" to audit).
+        runCatching {
+            JsonCache.read<DailySummary>(context, BODY_SUMMARY_KEY, DailySummary::class.java)
+                ?.let { sum = it.value; loading = false }
+            JsonCache.read<ProfileResponse>(context, BODY_PROFILE_KEY, ProfileResponse::class.java)
+                ?.let { profile = it.value }
+        }
+
         if (!settings.isConfigured()) {
             loading = false
             return@LaunchedEffect
@@ -76,8 +91,16 @@ fun BodyScreen(
                 val profileD = async(Dispatchers.IO) {
                     runCatching { api.profile() }.getOrNull()
                 }
-                sum = sumD.await()
-                profile = profileD.await()
+                // Only swap in a fresh value — keep the cached render on a
+                // failed/null fetch rather than blanking back to dashes.
+                sumD.await()?.let {
+                    sum = it
+                    JsonCache.write(context, BODY_SUMMARY_KEY, DailySummary::class.java, it)
+                }
+                profileD.await()?.let {
+                    profile = it
+                    JsonCache.write(context, BODY_PROFILE_KEY, ProfileResponse::class.java, it)
+                }
             }
         }.onFailure { Timber.w(it, "body load failed") }
         loading = false
@@ -100,6 +123,16 @@ fun BodyScreen(
             letterSpacing = 1.4.sp,
             modifier = Modifier.padding(bottom = 12.dp),
         )
+
+        // No data and not loading (cold/offline failure or a genuinely empty
+        // day) — render a single hint card rather than a grid of blank "—"
+        // tiles, which read as broken. SWR above means this only shows on a
+        // truly cold cache; once a day has synced, the cached summary fills in.
+        if (sum == null && !loading) {
+            EmptyHintCard()
+            Spacer(Modifier.height(24.dp))
+            return@NeonScreen
+        }
 
         // ---- Row 1: Heart rate · HRV ----
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -238,6 +271,49 @@ private fun RecoveryPill(recovery: Double?, onClick: () -> Unit) {
 }
 
 /**
+ * Centered "no data" hint shown when today's summary failed to load (cold
+ * launch / offline) or there's genuinely nothing for today yet. Replaces the
+ * grid of blank tiles so the screen never looks broken.
+ */
+@Composable
+private fun EmptyHintCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(NeonCardShape)
+            .background(NeonMV.CardHigh)
+            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.22f), NeonCardShape)
+            .padding(horizontal = 20.dp, vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .size(10.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(NeonMV.Cyan.copy(alpha = 0.55f)),
+        )
+        Spacer(Modifier.height(14.dp))
+        Text(
+            "Couldn't load today's data",
+            color = NeonMV.Ink,
+            fontFamily = NeonNumberFamily,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.2).sp,
+        )
+        Spacer(Modifier.height(7.dp))
+        Text(
+            "Pull down or check your connection — vitals will appear once today has synced.",
+            color = NeonMV.Muted,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            lineHeight = 17.sp,
+        )
+    }
+}
+
+/**
  * Single glanceable metric card — tiny label, big NeonNumber value + unit,
  * sub-context line. A subtle accent-coloured border supplies the neon glow
  * the web cards get from drop-shadow filters. `onClick = null` renders a
@@ -259,14 +335,22 @@ private fun MetricCard(
         modifier = modifier
             .height(112.dp)
             .clip(NeonCardShape)
-            .background(NeonMV.Card)
-            .border(1.dp, accent.copy(alpha = 0.16f), NeonCardShape)
+            // Slightly stronger surface than the flat Card fill: a faint
+            // accent-tinted top-to-bottom wash over the elevated card colour
+            // so the tile reads as a lit surface, not an empty rectangle.
+            .background(NeonMV.CardHigh)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(accent.copy(alpha = 0.10f), Color.Transparent),
+                ),
+            )
+            .border(1.dp, accent.copy(alpha = 0.26f), NeonCardShape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 14.dp, vertical = 13.dp),
     ) {
         Text(
             label.uppercase(),
-            color = NeonMV.Muted,
+            color = accent.copy(alpha = 0.85f),
             fontFamily = NeonNumberFamily,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
@@ -321,8 +405,13 @@ private fun BloodPressureCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(NeonCardShape)
-            .background(NeonMV.Card)
-            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.16f), NeonCardShape)
+            .background(NeonMV.CardHigh)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(NeonMV.Cyan.copy(alpha = 0.10f), Color.Transparent),
+                ),
+            )
+            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.26f), NeonCardShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -331,7 +420,7 @@ private fun BloodPressureCard(
         Column {
             Text(
                 "BLOOD PRESSURE",
-                color = NeonMV.Muted,
+                color = NeonMV.Cyan.copy(alpha = 0.85f),
                 fontFamily = NeonNumberFamily,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
@@ -366,6 +455,13 @@ private fun BloodPressureCard(
         }
     }
 }
+
+// ============================================================
+// SWR cache keys (grep "JsonCache.write" to audit)
+// ============================================================
+
+private const val BODY_SUMMARY_KEY = "neon_body_summary"
+private const val BODY_PROFILE_KEY = "neon_body_profile"
 
 // ============================================================
 // Formatters (mirror the web `fmt` helper)

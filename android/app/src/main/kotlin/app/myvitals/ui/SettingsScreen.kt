@@ -53,6 +53,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.detectTapGestures
 import app.myvitals.BuildConfig
 import app.myvitals.data.SettingsRepository
+import app.myvitals.ui.neon.NeonBackgroundBrush
+import app.myvitals.ui.neon.NeonMV
+import app.myvitals.ui.neon.NeonNumberFamily
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.ProfilePutBody
 import app.myvitals.sync.ProfileResponse
@@ -89,6 +92,12 @@ fun SettingsScreen(
     // Health Connect binder IPC in runBlocking and janked the UI on every
     // recomposition. produceState does it on a coroutine; LifecycleResumeEffect
     // re-checks when the user returns from the grant sheet so the label updates.
+    // Neon QA signal: when the obsidian 6-tab shell is active, this screen
+    // (otherwise classic) at minimum swaps its flat fill for the obsidian
+    // radial gradient so it doesn't glare against the rest of the shell.
+    // neon == false → every color/layout below stays byte-identical.
+    val neon = neonShellEnabled
+
     var permRefreshTick by remember { mutableIntStateOf(0) }
     app.myvitals.ui.common.LifecycleResumeEffect(staleAfterMs = 0L) { permRefreshTick++ }
     val permsGranted by produceState(
@@ -202,7 +211,10 @@ fun SettingsScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MV.Bg),
+            .then(
+                if (neon) Modifier.background(NeonBackgroundBrush)
+                else Modifier.background(MV.Bg)
+            ),
     ) {
         Box(
             modifier = Modifier
@@ -258,14 +270,14 @@ fun SettingsScreen(
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Normal,
                 letterSpacing = (-0.6).sp,
-                color = MV.OnSurface,
+                color = if (neon) NeonMV.Ink else MV.OnSurface,
                 modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 12.dp),
             )
         }
 
         // ── Appearance ──
         item {
-            Section(title = "Appearance") {
+            Section(title = "Appearance", neon = neon) {
                 Card {
                     Row(
                         modifier = Modifier
@@ -297,7 +309,7 @@ fun SettingsScreen(
 
         // ── Connection ──
         item {
-            Section(title = "Connection") {
+            Section(title = "Connection", neon = neon) {
                 Card {
                     SectionField(label = "Backend URL", value = url, mono = false) {
                         url = it; dirty = (url != settings.backendUrl || token != settings.bearerToken)
@@ -325,7 +337,7 @@ fun SettingsScreen(
 
         // ── Health Connect ──
         item {
-            Section(title = "Health Connect") {
+            Section(title = "Health Connect", neon = neon) {
                 Card {
                     val perms = permsGranted
                     StatusListItem(
@@ -355,7 +367,7 @@ fun SettingsScreen(
 
         // ── Sync ──
         item {
-            Section(title = "Sync") {
+            Section(title = "Sync", neon = neon) {
                 Card {
                     KvRow(
                         label = "Last sync",
@@ -492,7 +504,7 @@ fun SettingsScreen(
                     kotlinx.coroutines.delay(4000); stravaToast = null
                 }
             }
-            Section(title = "Strava") {
+            Section(title = "Strava", neon = neon) {
                 Card {
                     Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
                         val s = stravaStatus
@@ -567,7 +579,7 @@ fun SettingsScreen(
 
         // ── Workout reminders ──
         item {
-            Section(title = "Workout reminders") {
+            Section(title = "Workout reminders", neon = neon) {
                 Card {
                     Row(
                         modifier = Modifier
@@ -642,7 +654,7 @@ fun SettingsScreen(
 
         // ── Diagnostics ──
         item {
-            Section(title = "Diagnostics") {
+            Section(title = "Diagnostics", neon = neon) {
                 Card {
                     ListLinkRow(label = "View on-device logs", onClick = onOpenLogs)
                     Divider()
@@ -660,7 +672,7 @@ fun SettingsScreen(
 
         // ── Backend updates (UPDATE-2) ──
         item {
-            Section(title = "Backend updates") {
+            Section(title = "Backend updates", neon = neon) {
                 Card {
                     KvRow(
                         label = "Running",
@@ -766,7 +778,7 @@ fun SettingsScreen(
 
         // ── About ──
         item {
-            Section(title = "About") {
+            Section(title = "About", neon = neon) {
                 Card {
                     KvRow(label = "Version", value = "${BuildConfig.VERSION_NAME} · build ${BuildConfig.VERSION_CODE}")
                     Divider()
@@ -918,14 +930,21 @@ private fun fmtMb(bytes: Long): String {
 // ── Layout primitives ───────────────────────────────────────────
 
 @Composable
-private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
+private fun Section(
+    title: String,
+    neon: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 20.dp)) {
         Text(
             text = title.uppercase(),
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             letterSpacing = 2.4.sp,
-            color = MV.OnSurfaceVariant,
+            color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant,
+            // null = inherit theme family (classic stays byte-identical);
+            // neon swaps to Space Grotesk for the crafted eyebrow idiom.
+            fontFamily = if (neon) NeonNumberFamily else null,
             modifier = Modifier.padding(start = 8.dp, bottom = 10.dp),
         )
         content()

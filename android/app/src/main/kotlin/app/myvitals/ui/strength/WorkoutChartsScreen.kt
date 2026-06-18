@@ -205,25 +205,12 @@ private fun DailyVolumeCard(s: StrengthStats, neon: Boolean) {
                 val ys = pairs.map { it.second }
                 producer.runTransaction { lineSeries { series(x = xs, y = ys) } }
             }
-            // Under neon the volume line + area adopt the lime "move" accent;
-            // classic keeps Vico's theme-default line untouched.
-            val lineLayer = if (neon) {
-                rememberLineCartesianLayer(
-                    LineCartesianLayer.LineProvider.series(
-                        LineCartesianLayer.rememberLine(
-                            fill = LineCartesianLayer.LineFill.single(fill(NeonMV.Lime)),
-                            areaFill = LineCartesianLayer.AreaFill.single(
-                                fill(NeonMV.Lime.copy(alpha = 0.18f)),
-                            ),
-                        ),
-                    ),
-                )
-            } else {
-                rememberLineCartesianLayer()
-            }
+            // Default Vico line layer (stable across data shapes + devices).
+            // The neon feel comes from the obsidian card + lime muscle bars;
+            // the custom LineProvider/rememberLine path was a crash risk.
             CartesianChartHost(
                 chart = rememberCartesianChart(
-                    lineLayer,
+                    rememberLineCartesianLayer(),
                     startAxis = VerticalAxis.rememberStart(),
                     bottomAxis = HorizontalAxis.rememberBottom(),
                 ),
@@ -332,25 +319,10 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
                 val ys = pairs.map { it.second }
                 producer.runTransaction { lineSeries { series(x = xs, y = ys) } }
             }
-            // Under neon the progression line + area adopt the amber "weight"
-            // accent; classic keeps Vico's theme-default line untouched.
-            val lineLayer = if (neon) {
-                rememberLineCartesianLayer(
-                    LineCartesianLayer.LineProvider.series(
-                        LineCartesianLayer.rememberLine(
-                            fill = LineCartesianLayer.LineFill.single(fill(NeonMV.Amber)),
-                            areaFill = LineCartesianLayer.AreaFill.single(
-                                fill(NeonMV.Amber.copy(alpha = 0.18f)),
-                            ),
-                        ),
-                    ),
-                )
-            } else {
-                rememberLineCartesianLayer()
-            }
+            // Default Vico line layer (stable across data shapes + devices).
             CartesianChartHost(
                 chart = rememberCartesianChart(
-                    lineLayer,
+                    rememberLineCartesianLayer(),
                     startAxis = VerticalAxis.rememberStart(),
                     bottomAxis = HorizontalAxis.rememberBottom(),
                 ),

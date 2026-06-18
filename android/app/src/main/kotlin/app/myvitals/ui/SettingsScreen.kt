@@ -81,6 +81,8 @@ fun SettingsScreen(
     onBackfill: (days: Int) -> Unit,
     onOpenLogs: () -> Unit,
     onClearBuffer: () -> Unit,
+    neonShellEnabled: Boolean = false,
+    onToggleNeonShell: (Boolean) -> Unit = {},
 ) {
     // Resolve HC permission state OFF the main thread. This used to be a
     // `hasPermissions()` call straight in the composable body, which wrapped a
@@ -259,6 +261,38 @@ fun SettingsScreen(
                 color = MV.OnSurface,
                 modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 12.dp),
             )
+        }
+
+        // ── Appearance ──
+        item {
+            Section(title = "Appearance") {
+                Card {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("✦ Vitality Neon", fontSize = 15.sp, color = MV.OnSurface)
+                            Text(
+                                "Obsidian + neon 6-tab redesign (Today / Body / Train / " +
+                                    "Trails / Coach / You). Restarts into the new shell.",
+                                fontSize = 12.sp, color = MV.OnSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = neonShellEnabled,
+                            onCheckedChange = onToggleNeonShell,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MV.OnSurface,
+                                checkedTrackColor = MV.BrandRed,
+                            ),
+                        )
+                    }
+                }
+            }
         }
 
         // ── Connection ──

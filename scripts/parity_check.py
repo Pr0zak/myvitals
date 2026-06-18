@@ -25,6 +25,28 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Each pair: (web_path, phone_path, optional notes). Both relative to repo root.
 PAIRS: list[tuple[str, str, str]] = [
+    # ── Vitality Neon shell (opt-in 6-tab redesign) — web view ↔ phone screen ──
+    ("frontend/src/components/NeonNav.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/neon/NeonAppShell.kt",
+     "Neon 6-tab shell (Today/Body/Train/Trails/Coach/You)"),
+    ("frontend/src/views/Rings.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/neon/RingsScreen.kt",
+     "Neon Today / rings home"),
+    ("frontend/src/views/Body.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/neon/BodyScreen.kt",
+     "Neon Body / vitals grid"),
+    ("frontend/src/views/Train.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/neon/TrainHubScreen.kt",
+     "Neon Train hub (strength + activities)"),
+    ("frontend/src/views/TrailsHub.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/neon/NeonTrailsScreen.kt",
+     "Neon Trails status board"),
+    ("frontend/src/views/CoachHub.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/neon/CoachHubScreen.kt",
+     "Neon Coach hub"),
+    ("frontend/src/views/You.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/neon/YouScreen.kt",
+     "Neon You / personal hub"),
     ("frontend/src/views/Trails.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/trails/TrailsScreen.kt",
      "Trails list + status grouping"),

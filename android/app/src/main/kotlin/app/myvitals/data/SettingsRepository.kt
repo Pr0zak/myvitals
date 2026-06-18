@@ -55,6 +55,15 @@ class SettingsRepository(context: Context) {
         get() = plain.getBoolean(KEY_PERMS_LOST, false)
         set(value) = plain.edit().putBoolean(KEY_PERMS_LOST, value).apply()
 
+    /**
+     * Opt-in "Vitality Neon" shell — the 6-tab neon redesign that mirrors the
+     * web theme. Off by default: the classic 5-tab shell stays the released
+     * experience until the user flips this in Settings → Appearance.
+     */
+    var neonShellEnabled: Boolean
+        get() = plain.getBoolean(KEY_NEON_SHELL, false)
+        set(value) = plain.edit().putBoolean(KEY_NEON_SHELL, value).apply()
+
     fun lastSyncInstant(): Instant? =
         lastSyncEpochSeconds.takeIf { it > 0 }?.let(Instant::ofEpochSecond)
 
@@ -72,5 +81,6 @@ class SettingsRepository(context: Context) {
         private const val KEY_LAST_DEEP_SWEEP = "last_deep_sweep_epoch_s"
         private const val KEY_LAST_SUCCESS = "last_success_epoch_s"
         private const val KEY_PERMS_LOST = "perms_lost"
+        private const val KEY_NEON_SHELL = "neon_shell_enabled"
     }
 }

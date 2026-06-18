@@ -23,6 +23,11 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import app.myvitals.ui.neon.NeonAppShell
+import app.myvitals.ui.neon.NeonTheme
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
@@ -125,6 +130,77 @@ class MainActivity : ComponentActivity() {
         val activity: ComponentActivity = this
 
         setContent {
+            var neonEnabled by remember { mutableStateOf(settings.neonShellEnabled) }
+            val toggleNeon: (Boolean) -> Unit = { on ->
+                settings.neonShellEnabled = on
+                neonEnabled = on
+            }
+
+            // Settings actions shared by both shells (defined once so the neon
+            // shell's reused SettingsScreen behaves identically to the classic).
+            val onRequestPermissions: () -> Unit = {
+                Timber.d("Requesting HC permissions: %s", gateway.requiredPermissions)
+                permissionLauncher.launch(gateway.requiredPermissions)
+            }
+            val onSyncNow: () -> Unit = {
+                Timber.i("Manual sync triggered")
+                WorkManager.getInstance(applicationContext)
+                    .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
+            }
+            val onSyncLogs: () -> Unit = {
+                Timber.i("Manual log upload triggered")
+                WorkManager.getInstance(applicationContext)
+                    .enqueue(OneTimeWorkRequestBuilder<LogUploadWorker>().build())
+            }
+            val onBackfill: (Int) -> Unit = { days ->
+                val newCheckpoint = System.currentTimeMillis() / 1000 - days * 24L * 3600L
+                settings.lastSyncEpochSeconds = newCheckpoint
+                Timber.i("Backfill: reset checkpoint to T-%dd (epoch=%d), enqueueing sync", days, newCheckpoint)
+                WorkManager.getInstance(applicationContext)
+                    .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
+            }
+            val onOpenLogs: () -> Unit = { LogViewerActivity.start(activity) }
+            val onClearBuffer: () -> Unit = {
+                Timber.w("User cleared sync buffer")
+                CoroutineScope(Dispatchers.IO).launch {
+                    AppDatabase.get(applicationContext).buffered().clear()
+                }
+            }
+
+            // APK update notification deep-link — works under either shell
+            // (ApkDownloader.start needs no nav controller).
+            val apkUrl = intent?.getStringExtra("apk_update_url")
+            val apkName = intent?.getStringExtra("apk_update_name")
+            LaunchedEffect(apkUrl, apkName) {
+                if (!apkUrl.isNullOrEmpty() && !apkName.isNullOrEmpty()) {
+                    app.myvitals.update.ApkDownloader.start(activity, apkUrl, apkName)
+                    intent?.removeExtra("apk_update_url")
+                    intent?.removeExtra("apk_update_name")
+                    intent?.removeExtra("apk_update_tag")
+                }
+            }
+
+            if (neonEnabled) {
+                NeonTheme {
+                    NeonAppShell(
+                        settings = settings,
+                        gateway = gateway,
+                        intent = intent,
+                        isHealthConnectAvailable = gateway.isAvailable(),
+                        hasPermissions = { gateway.hasAllPermissionsAsync() },
+                        onRequestPermissions = onRequestPermissions,
+                        onSyncNow = onSyncNow,
+                        onSyncLogs = onSyncLogs,
+                        onBackfill = onBackfill,
+                        onOpenLogs = onOpenLogs,
+                        onClearBuffer = onClearBuffer,
+                        neonShellEnabled = neonEnabled,
+                        onToggleNeonShell = toggleNeon,
+                    )
+                }
+                return@setContent
+            }
+
             MyVitalsTheme {
                 val nav = rememberNavController()
                 // Read the `shortcut_route` extra on every onCreate /
@@ -144,22 +220,6 @@ class MainActivity : ComponentActivity() {
                         // Consume the extra so onResume doesn't re-fire on
                         // every Lifecycle event.
                         intent?.removeExtra("shortcut_route")
-                    }
-                }
-                // APK update notification deep-link: extras carry the
-                // download URL + asset name → kick off ApkDownloader
-                // so the user lands on Settings with inline progress
-                // already running (no full-screen activity).
-                val apkUrl = intent?.getStringExtra("apk_update_url")
-                val apkName = intent?.getStringExtra("apk_update_name")
-                LaunchedEffect(apkUrl, apkName) {
-                    if (!apkUrl.isNullOrEmpty() && !apkName.isNullOrEmpty()) {
-                        app.myvitals.update.ApkDownloader.start(
-                            activity, apkUrl, apkName,
-                        )
-                        intent?.removeExtra("apk_update_url")
-                        intent?.removeExtra("apk_update_name")
-                        intent?.removeExtra("apk_update_tag")
                     }
                 }
                 Scaffold(
@@ -331,34 +391,14 @@ class MainActivity : ComponentActivity() {
                                 settings = settings,
                                 isHealthConnectAvailable = gateway.isAvailable(),
                                 hasPermissions = { gateway.hasAllPermissionsAsync() },
-                                onRequestPermissions = {
-                                    Timber.d("Requesting HC permissions: %s", gateway.requiredPermissions)
-                                    permissionLauncher.launch(gateway.requiredPermissions)
-                                },
-                                onSyncNow = {
-                                    Timber.i("Manual sync triggered")
-                                    WorkManager.getInstance(applicationContext)
-                                        .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
-                                },
-                                onSyncLogs = {
-                                    Timber.i("Manual log upload triggered")
-                                    WorkManager.getInstance(applicationContext)
-                                        .enqueue(OneTimeWorkRequestBuilder<LogUploadWorker>().build())
-                                },
-                                onBackfill = { days ->
-                                    val newCheckpoint = System.currentTimeMillis() / 1000 - days * 24L * 3600L
-                                    settings.lastSyncEpochSeconds = newCheckpoint
-                                    Timber.i("Backfill: reset checkpoint to T-%dd (epoch=%d), enqueueing sync", days, newCheckpoint)
-                                    WorkManager.getInstance(applicationContext)
-                                        .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
-                                },
-                                onOpenLogs = { LogViewerActivity.start(activity) },
-                                onClearBuffer = {
-                                    Timber.w("User cleared sync buffer")
-                                    CoroutineScope(Dispatchers.IO).launch {
-                                        AppDatabase.get(applicationContext).buffered().clear()
-                                    }
-                                },
+                                onRequestPermissions = onRequestPermissions,
+                                onSyncNow = onSyncNow,
+                                onSyncLogs = onSyncLogs,
+                                onBackfill = onBackfill,
+                                onOpenLogs = onOpenLogs,
+                                onClearBuffer = onClearBuffer,
+                                neonShellEnabled = neonEnabled,
+                                onToggleNeonShell = toggleNeon,
                             )
                         }
                     }

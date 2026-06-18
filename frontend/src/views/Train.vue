@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Train — unified Workout + Cardio + Trails screen of the "Vitality Neon"
+ * Train — unified Workout + Cardio screen of the "Vitality Neon"
  * redesign (mockup: tab_train.html). Mirrors the Rings.vue pattern: scoped
  * neon tokens on the `.train-view` wrapper, onMounted fan-out fetch with
  * per-call `.catch` fallbacks, defensive null handling, and router.push
@@ -20,7 +20,7 @@ const loading = ref(true);
 const workout = ref<StrengthWorkoutDetail | null>(null);
 const activities = ref<Activity[]>([]);
 
-const segment = ref<"strength" | "cardio" | "trails">("strength");
+const segment = ref<"strength" | "cardio">("strength");
 
 const C = 2 * Math.PI * 42; // hero ring circumference
 
@@ -257,13 +257,6 @@ const recent = computed<FeedRow[]>(() =>
         @click="segment = 'cardio'"
       >
         Cardio
-      </button>
-      <button
-        class="sp"
-        :class="{ on: segment === 'trails' }"
-        @click="segment = 'trails'"
-      >
-        Trails
       </button>
     </div>
 

@@ -7,7 +7,7 @@
  */
 import { computed } from "vue";
 import { useRoute, RouterLink } from "vue-router";
-import { Target, Heart, Dumbbell, Sparkles, User } from "lucide-vue-next";
+import { Target, Heart, Dumbbell, Mountain, Sparkles, User } from "lucide-vue-next";
 
 const route = useRoute();
 
@@ -23,7 +23,9 @@ const tabs: Tab[] = [
     match: (p) => p === "/body" ||
       ["/heart-rate", "/hrv", "/sleep", "/steps", "/blood-pressure", "/weight", "/skin-temp", "/watch"].includes(p) },
   { to: "/train", label: "Train", color: "#5dff3b", icon: Dumbbell,
-    match: (p) => p.startsWith("/train") || p.startsWith("/workout") || p.startsWith("/activit") || p.startsWith("/trails") || p === "/calendar" },
+    match: (p) => p.startsWith("/train") || p.startsWith("/workout") || p.startsWith("/activit") || p === "/calendar" },
+  { to: "/trails-hub", label: "Trails", color: "#ffb52e", icon: Mountain,
+    match: (p) => p.startsWith("/trails") },
   { to: "/coach-hub", label: "Coach", color: "#ff3ad8", icon: Sparkles,
     match: (p) => p === "/coach-hub" || p === "/coach" || p === "/insights" || p.startsWith("/analytics") },
   { to: "/you", label: "You", color: "#28e6ff", icon: User,

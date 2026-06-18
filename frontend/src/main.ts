@@ -24,6 +24,7 @@ const router = createRouter({
     { path: "/rings", name: "rings", component: () => import("./views/Rings.vue") },
     { path: "/body", name: "body", component: () => import("./views/Body.vue") },
     { path: "/train", name: "train", component: () => import("./views/Train.vue") },
+    { path: "/trails-hub", name: "trails-hub", component: () => import("./views/TrailsHub.vue") },
     { path: "/coach-hub", name: "coach-hub", component: () => import("./views/CoachHub.vue") },
     { path: "/you", name: "you", component: () => import("./views/You.vue") },
     { path: "/trends", name: "trends", component: () => import("./views/Trends.vue") },

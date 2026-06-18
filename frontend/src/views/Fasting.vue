@@ -387,4 +387,107 @@ button { font-family: inherit; cursor: pointer; border-radius: 8px; padding: 0.6
 .duration { color: var(--text); font-variant-numeric: tabular-nums; }
 .when { margin-left: auto; }
 .done { color: #22c55e; }
+
+/* ============================================================
+   Vitality Neon overrides — scoped to html[data-theme="neon"]
+   so classic / light / dark themes are byte-for-byte unchanged.
+   Magenta primary (sober/streak family) for the ring + stage,
+   cyan for protocol/start, lime for "completed", amber caution.
+   ============================================================ */
+html[data-theme="neon"] .fasting {
+  --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-cyan: #28e6ff; --rn-amber: #ffb52e;
+  --rn-track: #272a3b; --rn-red: #ff5d7a;
+  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 54px 22px 32px;
+  max-width: none;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  color: var(--rn-ink); font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+html[data-theme="neon"] .fasting :is(.hdr) { max-width: 720px; margin: 0 auto 1rem; }
+html[data-theme="neon"] .fasting h1 {
+  font-size: 30px; font-weight: 800; letter-spacing: -0.5px; color: var(--rn-ink);
+}
+html[data-theme="neon"] .fasting .streak { color: var(--rn-ink); }
+html[data-theme="neon"] .fasting .streak-n {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  color: var(--rn-mag); text-shadow: 0 0 14px rgba(255, 58, 216, 0.55);
+}
+html[data-theme="neon"] .fasting .streak-l { color: var(--rn-mut); }
+
+html[data-theme="neon"] .fasting section {
+  max-width: 720px; margin-left: auto; margin-right: auto;
+  background: var(--rn-card); border: 1px solid #21243450; border-radius: 18px;
+}
+html[data-theme="neon"] .fasting section h3 { color: var(--rn-mut); }
+
+html[data-theme="neon"] .fasting .err {
+  color: var(--rn-red); background: rgba(255, 93, 122, 0.10);
+  border-left-color: var(--rn-red);
+  max-width: 720px; margin-left: auto; margin-right: auto;
+}
+html[data-theme="neon"] .fasting .hint { color: var(--rn-mut); }
+
+/* Progress ring — track dim, fill magenta with glow */
+html[data-theme="neon"] .fasting .ring .track { stroke: var(--rn-track); }
+html[data-theme="neon"] .fasting .ring .fill {
+  stroke: var(--rn-mag);
+  filter: drop-shadow(0 0 6px rgba(255, 58, 216, 0.6));
+}
+html[data-theme="neon"] .fasting .elapsed {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-ink);
+}
+html[data-theme="neon"] .fasting .stage {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  color: var(--rn-mag); text-shadow: 0 0 10px rgba(255, 58, 216, 0.5);
+}
+html[data-theme="neon"] .fasting .target { color: var(--rn-mut); }
+html[data-theme="neon"] .fasting .meta .muted { color: var(--rn-mut); }
+
+/* Protocol picker — cyan selection accent */
+html[data-theme="neon"] .fasting .proto {
+  background: #1f2233; color: var(--rn-ink); border-color: #2a2d40;
+}
+html[data-theme="neon"] .fasting .proto.on {
+  background: rgba(40, 230, 255, 0.12); border-color: var(--rn-cyan);
+  box-shadow: 0 0 0 1px rgba(40, 230, 255, 0.25), 0 0 14px rgba(40, 230, 255, 0.18);
+}
+html[data-theme="neon"] .fasting .proto-sub { color: var(--rn-mut); }
+
+/* Buttons */
+html[data-theme="neon"] .fasting .primary {
+  background: var(--rn-cyan); color: #0f1118;
+  box-shadow: 0 0 16px rgba(40, 230, 255, 0.35);
+}
+html[data-theme="neon"] .fasting .end {
+  background: transparent; color: var(--rn-red); border-color: var(--rn-red);
+}
+
+/* In-fast logging card */
+html[data-theme="neon"] .fasting .log-card {
+  background: #1f2233; border-color: #2a2d40;
+}
+html[data-theme="neon"] .fasting .log-card h4 { color: var(--rn-ink); }
+html[data-theme="neon"] .fasting .log-card .slider { color: var(--rn-mut); }
+html[data-theme="neon"] .fasting .log-card .slider .val {
+  color: var(--rn-ink); font-family: 'Space Grotesk', 'Geist Mono', monospace;
+}
+html[data-theme="neon"] .fasting .log-card .numfield { color: var(--rn-mut); }
+html[data-theme="neon"] .fasting .log-card .numfield input,
+html[data-theme="neon"] .fasting .log-card .numfield textarea {
+  background: #14172180; color: var(--rn-ink); border-color: #2a2d40;
+}
+html[data-theme="neon"] .fasting .log-card .ghost {
+  color: var(--rn-ink); border-color: #2a2d40;
+}
+html[data-theme="neon"] .fasting .log-msg { color: var(--rn-mut); }
+
+/* Stats / history */
+html[data-theme="neon"] .fasting .kpi .muted { color: var(--rn-mut); }
+html[data-theme="neon"] .fasting .duration {
+  color: var(--rn-ink); font-family: 'Space Grotesk', 'Geist Mono', monospace;
+}
+html[data-theme="neon"] .fasting .history li { border-bottom-color: #ffffff10; }
+html[data-theme="neon"] .fasting .done {
+  color: var(--rn-lime); filter: drop-shadow(0 0 4px rgba(93, 255, 59, 0.5));
+}
 </style>

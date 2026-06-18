@@ -9,7 +9,7 @@ import LoadState from "@/components/LoadState.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
-import { chartTheme } from "@/theme";
+import { chartTheme, isNeon } from "@/theme";
 import { weightVal, weightUnit, fmtWeight, isImperial } from "@/units";
 
 type Range = "30d" | "90d" | "1y" | "all";
@@ -143,7 +143,7 @@ function bmiBands(): unknown[] {
 }
 
 const mainOption = computed(() => {
-  void chartTheme.value; void weightUnit.value;
+  void chartTheme.value; void weightUnit.value; void isNeon.value;
   const t = chartTheme.value;
   // Year-over-year overlay: split series into per-year curves aligned by
   // day-of-year so seasonal patterns become obvious.
@@ -165,7 +165,9 @@ const mainOption = computed(() => {
       (byYear[String(y)] ??= []).push([ts, v]);
     }
     const yrs = Object.keys(byYear).sort();
-    const palette = ["#94a3b8", "#64748b", "#a78bfa", "#22c55e", "#eab308", "#f97316", "#ef4444", "#38bdf8", "#0ea5e9"];
+    const palette = isNeon.value
+      ? ["#9b9bb0", "#6f7bff", "#ff3ad8", "#5dff3b", "#ffb52e", "#ff5d7a", "#28e6ff", "#9b9bb0", "#6f7bff"]
+      : ["#94a3b8", "#64748b", "#a78bfa", "#22c55e", "#eab308", "#f97316", "#ef4444", "#38bdf8", "#0ea5e9"];
     const series = yrs.map((y, i) => ({
       name: y, type: "line", smooth: true, symbol: "none",
       data: byYear[y].sort((a, b) => a[0] - b[0]),
@@ -200,6 +202,12 @@ const mainOption = computed(() => {
     };
   }
 
+  // Neon: weight = amber, body fat = cyan, goal line = magenta.
+  // Classic: unchanged (sky accent / yellow annotation / violet recovery).
+  const weightColor = isNeon.value ? "#ffb52e" : t.palette.accent;
+  const fatColor = isNeon.value ? "#28e6ff" : t.palette.annotation;
+  const goalColor = isNeon.value ? "#ff3ad8" : t.palette.recovery;
+
   const raw = sorted.value.map((p) => ({ t: new Date(p.time).getTime(), v: weightVal(p.weight_kg) as number }));
   const pts = raw.map((p) => [p.t, p.v]);
   const ma = rolling7Avg(raw).map((p) => [p.t, p.v]);
@@ -211,29 +219,32 @@ const mainOption = computed(() => {
   if (pts.length) series.push({
     name: `Daily ${weightUnit.value}`, type: "line", data: pts,
     symbol: "circle", symbolSize: 3, connectNulls: false,
-    lineStyle: { width: 1, color: t.palette.accent, opacity: 0.4 },
-    itemStyle: { color: t.palette.accent }, yAxisIndex: 0,
+    lineStyle: { width: 1, color: weightColor, opacity: 0.4 },
+    itemStyle: { color: weightColor }, yAxisIndex: 0,
     markArea: { silent: true, data: bmiBands() },
   });
   if (ma.length) series.push({
     name: "7-day avg", type: "line", data: ma, smooth: true,
-    symbol: "none", lineStyle: { width: 2.5, color: t.palette.accent }, yAxisIndex: 0,
+    symbol: "none",
+    lineStyle: { width: 2.5, color: weightColor,
+      ...(isNeon.value ? { shadowColor: "rgba(255, 181, 46, 0.55)", shadowBlur: 8 } : {}) },
+    yAxisIndex: 0,
   });
   if (goalKg.value != null) {
     const gv = weightVal(goalKg.value);
     if (gv != null) series.push({
       name: "Goal", type: "line", data: [],
       yAxisIndex: 0, markLine: {
-        silent: true, symbol: "none", lineStyle: { color: t.palette.recovery, type: "dashed" as const, width: 1.5 },
-        data: [{ yAxis: gv, label: { formatter: `Goal ${gv.toFixed(1)} ${weightUnit.value}`, color: t.palette.recovery } }],
+        silent: true, symbol: "none", lineStyle: { color: goalColor, type: "dashed" as const, width: 1.5 },
+        data: [{ yAxis: gv, label: { formatter: `Goal ${gv.toFixed(1)} ${weightUnit.value}`, color: goalColor } }],
       },
     });
   }
   if (fatPts.length) series.push({
     name: "Body fat %", type: "line", data: fatPts, smooth: true,
     symbol: "circle", symbolSize: 4, connectNulls: true,
-    lineStyle: { width: 1.5, color: t.palette.annotation, type: "dashed" as const },
-    itemStyle: { color: t.palette.annotation }, yAxisIndex: 1,
+    lineStyle: { width: 1.5, color: fatColor, type: "dashed" as const },
+    itemStyle: { color: fatColor }, yAxisIndex: 1,
   });
 
   return {
@@ -252,8 +263,9 @@ const mainOption = computed(() => {
 
 // === Distribution histogram ===
 const histogramOption = computed(() => {
-  void chartTheme.value; void weightUnit.value;
+  void chartTheme.value; void weightUnit.value; void isNeon.value;
   const t = chartTheme.value;
+  const barColor = isNeon.value ? "#ffb52e" : t.palette.accent;
   if (sorted.value.length === 0) return null;
   const vals = sorted.value.map((p) => weightVal(p.weight_kg) as number);
   const min = Math.floor(Math.min(...vals));
@@ -272,7 +284,7 @@ const histogramOption = computed(() => {
     xAxis: { type: "category", data: cats, name: weightUnit.value, axisLabel: t.axisLabel },
     yAxis: { type: "value", name: "days", axisLabel: t.axisLabel, splitLine: t.splitLine },
     series: [{ type: "bar", data: cats.map((c) => bins[c]),
-               itemStyle: { color: t.palette.accent } }],
+               itemStyle: { color: barColor } }],
   };
 });
 
@@ -429,5 +441,52 @@ function deltaCls(kg: number | null, lowerIsBetter = true): string {
 .hist td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--surface-2); }
 .hist .m { color: var(--muted); font-size: 0.85rem; }
 .muted { color: var(--muted); font-size: 0.85rem; padding: 0.6rem; }
+
+/* ===== Vitality Neon — scoped, neon-theme-only overrides ===== */
+html[data-theme="neon"] .weight {
+  --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  --rn-amber: #ffb52e; --rn-lime: #5dff3b; --rn-red: #ff5d7a;
+  --rn-cyan: #28e6ff; --rn-track: #272a3b;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+
+/* Recomp + delta status text → neon good/bad */
+html[data-theme="neon"] .recomp.good,
+html[data-theme="neon"] .delta-good { color: var(--rn-lime); }
+html[data-theme="neon"] .recomp.bad,
+html[data-theme="neon"] .delta-bad { color: var(--rn-red); }
+
+/* KPI cards → neon surface + glanceable monospace numerics */
+html[data-theme="neon"] .kpi {
+  background: var(--rn-card);
+  border: 1px solid #21243450;
+  border-radius: 18px;
+}
+html[data-theme="neon"] .kpi-label {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  letter-spacing: 0.11em; color: var(--rn-mut);
+}
+html[data-theme="neon"] .kpi-val {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  letter-spacing: -0.5px; color: var(--rn-ink);
+}
+/* First KPI card = "Latest" weight — give the headline an amber glow */
+html[data-theme="neon"] .kpi:first-child .kpi-val {
+  color: var(--rn-amber);
+  text-shadow: 0 0 10px rgba(255, 181, 46, 0.45);
+}
+html[data-theme="neon"] .kpi-sub { color: var(--rn-mut); }
+html[data-theme="neon"] .kpi-sub strong { color: var(--rn-ink); }
+
+/* YoY toggle label */
+html[data-theme="neon"] .yoy-tog { color: var(--rn-mut); }
+
+/* History table chrome on neon */
+html[data-theme="neon"] .hist th { color: var(--rn-mut); border-bottom-color: #21243480; }
+html[data-theme="neon"] .hist td { border-bottom-color: #1d2030; }
+html[data-theme="neon"] .hist td strong { color: var(--rn-amber); }
+html[data-theme="neon"] .hist .m,
+html[data-theme="neon"] .muted { color: var(--rn-mut); }
 
 </style>

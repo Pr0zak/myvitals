@@ -21,7 +21,7 @@ import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import type {
   Activity, Annotation, HeartRateSeries, HrvSeries, TodaySummary,
 } from "@/api/types";
-import { chartTheme } from "@/theme";
+import { chartTheme, isNeon } from "@/theme";
 import {
   annotationMarkPoint, meanMarkLine, sleepMarkArea,
   soberResetMarkLine, timeAxisFormatter, workoutMarkArea,
@@ -172,6 +172,15 @@ watch(range, loadHistory);
 const dayMs = 24 * 3600 * 1000;
 const xWindow24 = computed(() => ({ min: Date.now() - dayMs, max: Date.now() }));
 
+// Under the Vitality Neon skin the HR line/zones move to the neon cyan
+// palette; every other theme keeps the chartTheme red/zone colors
+// byte-for-byte. Charts that read these already trip on chartTheme.value
+// in their computed bodies, so adding isNeon to the same `void` line makes
+// them re-render when the theme flips.
+const hrLineColor = computed(() => (isNeon.value ? "#28e6ff" : chartTheme.value.palette.hr));
+// HR zones z1..z5 under neon (else the original tailwind-ish stops).
+const NEON_ZONE_COLORS = ["#6f7bff", "#28e6ff", "#5dff3b", "#ffb52e", "#ff5d7a"];
+
 // ── Headline cards ──
 function avg(xs: number[]): number | null {
   if (!xs.length) return null;
@@ -200,8 +209,9 @@ const hrvDelta = computed(() => {
 
 // ── Live 24h trace ──
 const traceOption = computed(() => {
-  void chartTheme.value;
+  void chartTheme.value; void isNeon.value;
   const t = chartTheme.value;
+  const hrColor = hrLineColor.value;
   if (!hr24.value || hr24.value.points.length === 0) return null;
 
   // Stack the mean line + sober-reset verticals into a single markLine
@@ -235,8 +245,8 @@ const traceOption = computed(() => {
   const series: any[] = [
     {
       type: "line", name: "HR", showSymbol: false, smooth: true,
-      lineStyle: { color: t.palette.hr, width: 1.5 },
-      areaStyle: { color: `${t.palette.hr}22` },
+      lineStyle: { color: hrColor, width: 1.5 },
+      areaStyle: { color: `${hrColor}22` },
       data: hr24.value.points.map((p) => [p.time, p.value]),
       ...(markLineConfig
         ? { markLine: { ...markLineConfig, data: markLineData } } : {}),
@@ -285,7 +295,7 @@ const traceOption = computed(() => {
 
 // ── Daily resting HR over the selected range ──
 function dailyLineOption(rows: TodaySummary[], color: string) {
-  void chartTheme.value;
+  void chartTheme.value; void isNeon.value;
   const t = chartTheme.value;
   const data = rows
     .filter((r) => r.resting_hr != null)
@@ -311,13 +321,16 @@ function dailyLineOption(rows: TodaySummary[], color: string) {
   };
 }
 const restingOption = computed(() =>
-  dailyLineOption(dailyRows.value, chartTheme.value.palette.hr),
+  dailyLineOption(dailyRows.value, hrLineColor.value),
 );
 
 // ── Daily HRV ──
 const hrvOption = computed(() => {
-  void chartTheme.value;
+  void chartTheme.value; void isNeon.value;
   const t = chartTheme.value;
+  // HRV is a heart-family metric → neon cyan; every other theme keeps the
+  // chartTheme green byte-for-byte.
+  const hrvColor = isNeon.value ? "#28e6ff" : t.palette.hrv;
   const data = dailyRows.value
     .filter((r) => r.hrv_avg != null)
     .map((r) => [r.date, r.hrv_avg]);
@@ -330,9 +343,9 @@ const hrvOption = computed(() => {
     tooltip: { ...t.tooltip, trigger: "axis" },
     series: [{
       type: "line", name: "HRV (ms)", showSymbol: data.length < 90, smooth: true,
-      lineStyle: { color: t.palette.hrv, width: 1.8 },
-      itemStyle: { color: t.palette.hrv },
-      areaStyle: { color: `${t.palette.hrv}1f` }, data,
+      lineStyle: { color: hrvColor, width: 1.8 },
+      itemStyle: { color: hrvColor },
+      areaStyle: { color: `${hrvColor}1f` }, data,
     }],
   };
 });
@@ -346,8 +359,9 @@ const ZONE_DEFS = [
   { name: "Z5 · max",       min: 0.90, color: "#ef4444" },
 ];
 const zonesOption = computed(() => {
-  void chartTheme.value;
+  void chartTheme.value; void isNeon.value;
   const t = chartTheme.value;
+  const zoneColor = (i: number) => (isNeon.value ? NEON_ZONE_COLORS[i] : ZONE_DEFS[i].color);
   if (!hr24.value || hr24.value.points.length === 0) return null;
   const maxHr = profile.value?.max_hr_estimated ?? 187;
   const buckets = ZONE_DEFS.map(() => 0);
@@ -367,7 +381,7 @@ const zonesOption = computed(() => {
   if (total === 0) return null;
   const data = buckets.map((s, i) => ({
     value: +(s / 60).toFixed(0),
-    itemStyle: { color: ZONE_DEFS[i].color },
+    itemStyle: { color: zoneColor(i) },
   }));
   return {
     grid: { left: 90, right: 30, top: 12, bottom: 28 },
@@ -388,8 +402,9 @@ const zonesOption = computed(() => {
 
 // ── HR distribution histogram (5-bpm bins, from 24h trace) ──
 const histogramOption = computed(() => {
-  void chartTheme.value;
+  void chartTheme.value; void isNeon.value;
   const t = chartTheme.value;
+  const hrColor = hrLineColor.value;
   if (!hr24.value || hr24.value.points.length === 0) return null;
   const BIN = 5;
   const counts = new Map<number, number>();
@@ -416,7 +431,7 @@ const histogramOption = computed(() => {
     series: [{
       type: "bar",
       data: bins.map((b) => counts.get(b) ?? 0),
-      itemStyle: { color: t.palette.hr },
+      itemStyle: { color: hrColor },
       barWidth: "85%",
     }],
   };
@@ -425,8 +440,9 @@ const histogramOption = computed(() => {
 // ── Weekday-of-week pattern (avg resting HR by DOW from selected range) ──
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const weekdayOption = computed(() => {
-  void chartTheme.value;
+  void chartTheme.value; void isNeon.value;
   const t = chartTheme.value;
+  const hrColor = hrLineColor.value;
   const sums = Array(7).fill(0);
   const cnts = Array(7).fill(0);
   for (const r of dailyRows.value) {
@@ -445,7 +461,7 @@ const weekdayOption = computed(() => {
                formatter: (p: any) => `${p[0].name}: ${p[0].value ?? "—"} bpm` },
     series: [{
       type: "bar",
-      data: data.map((v) => ({ value: v, itemStyle: { color: t.palette.hr } })),
+      data: data.map((v) => ({ value: v, itemStyle: { color: hrColor } })),
       barWidth: "55%",
       label: { show: true, position: "top", color: t.axisLabel.color, fontSize: 10,
                formatter: (p: any) => p.value != null ? `${Math.round(p.value)}` : "" },
@@ -455,8 +471,9 @@ const weekdayOption = computed(() => {
 
 // ── Exercise (activity-type) HR correlation ──
 const activityHrOption = computed(() => {
-  void chartTheme.value;
+  void chartTheme.value; void isNeon.value;
   const t = chartTheme.value;
+  const hrColor = hrLineColor.value;
   const grouped = new Map<string, number[]>();
   for (const a of activities.value) {
     if (a.avg_hr == null) continue;
@@ -488,7 +505,7 @@ const activityHrOption = computed(() => {
         itemStyle: {
           color: types[i] === "strength" ? t.palette.workout
                 : types[i] === "rower" ? t.palette.violet
-                : t.palette.hr,
+                : hrColor,
         },
       })),
       barWidth: 14,
@@ -503,8 +520,9 @@ const activityHrOption = computed(() => {
 
 // ── Year-over-year overlay ──
 const yoyOption = computed(() => {
-  void chartTheme.value;
+  void chartTheme.value; void isNeon.value;
   const t = chartTheme.value;
+  const hrColor = hrLineColor.value;
   const cur = dailyRows.value
     .filter((r) => r.resting_hr != null)
     .map((r) => [new Date(r.date + "T00:00:00").getTime(), r.resting_hr]);
@@ -527,8 +545,8 @@ const yoyOption = computed(() => {
     series: [
       {
         type: "line", name: "This period", smooth: true, showSymbol: cur.length < 90,
-        lineStyle: { color: t.palette.hr, width: 1.8 },
-        itemStyle: { color: t.palette.hr },
+        lineStyle: { color: hrColor, width: 1.8 },
+        itemStyle: { color: hrColor },
         data: cur,
       },
       {
@@ -641,4 +659,21 @@ const minHrInWindow = computed(() => hr24.value?.min_bpm ?? null);
 .muted { color: var(--muted); }
 .err { color: #ef4444; }
 .hint { color: var(--muted); font-size: 0.78rem; margin-top: 0.4rem; }
+
+/* ── Vitality Neon skin (data-theme="neon" only) ──
+   Neon-scoped selectors leave every classic theme byte-for-byte. */
+html[data-theme="neon"] .hr {
+  min-height: 100vh;
+  margin: -1rem;
+  padding: 1.5rem 1rem 2rem;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+}
+/* Big bpm / ms readouts in the headline StatCards go Space Grotesk +
+   a faint cyan glow to match the Body.vue numeric idiom. */
+html[data-theme="neon"] .cards :deep(.stat-big) {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  letter-spacing: -0.5px;
+  color: #ececf5;
+  text-shadow: 0 0 14px rgba(40, 230, 255, 0.28);
+}
 </style>

@@ -15,7 +15,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import RangeTabs from "@/components/RangeTabs.vue";
 import { api } from "@/api/client";
 import type { HrvSeries, TodaySummary } from "@/api/types";
-import { chartTheme } from "@/theme";
+import { chartTheme, isNeon } from "@/theme";
 import { timeAxisFormatter } from "@/components/charts/chartHelpers";
 import PatternsLink from "@/components/PatternsLink.vue";
 
@@ -62,6 +62,7 @@ watch(range, loadHistory);
 const traceOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
+  const hrvColor = isNeon.value ? "#28e6ff" : t.palette.hrv;
   if (!live.value || live.value.points.length === 0) return null;
   return {
     grid: { left: 40, right: 12, top: 12, bottom: 28 },
@@ -70,7 +71,7 @@ const traceOption = computed(() => {
     tooltip: { trigger: "axis", ...t.tooltip },
     series: [{
       type: "scatter", name: "HRV (ms)", symbolSize: 6,
-      itemStyle: { color: t.palette.hrv, opacity: 0.85 },
+      itemStyle: { color: hrvColor, opacity: 0.85 },
       data: live.value.points.map((p) => [p.time, p.value]),
     }],
   };
@@ -80,6 +81,8 @@ const traceOption = computed(() => {
 const dailyOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
+  const hrvColor = isNeon.value ? "#28e6ff" : t.palette.hrv;
+  const meanColor = isNeon.value ? "#ff3ad8" : t.palette.violet;
   const data = dailyRows.value
     .filter((r) => r.hrv_avg != null)
     .map((r) => [r.date, r.hrv_avg]);
@@ -100,12 +103,12 @@ const dailyOption = computed(() => {
     series: [
       {
         type: "bar", name: "Nightly avg",
-        itemStyle: { color: `${t.palette.hrv}aa` },
+        itemStyle: { color: `${hrvColor}aa` },
         data,
       },
       {
         type: "line", name: "7d avg", smooth: true, showSymbol: false,
-        lineStyle: { color: t.palette.violet, width: 2 },
+        lineStyle: { color: meanColor, width: 2 },
         data: series7,
       },
     ],
@@ -117,6 +120,7 @@ const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const weekdayOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
+  const hrvColor = isNeon.value ? "#28e6ff" : t.palette.hrv;
   const buckets: Array<{ sum: number; count: number }> = Array.from({ length: 7 }, () => ({ sum: 0, count: 0 }));
   for (const r of dailyRows.value) {
     if (r.hrv_avg == null) continue;
@@ -138,7 +142,7 @@ const weekdayOption = computed(() => {
     },
     series: [{
       type: "bar", name: "HRV avg",
-      itemStyle: { color: t.palette.hrv },
+      itemStyle: { color: hrvColor },
       data,
     }],
   };
@@ -228,4 +232,28 @@ const stats = computed(() => {
 .stat .unit { font-size: 0.75rem; color: var(--on-surface-2); margin-left: 4px; }
 
 .chart { height: 220px; }
+
+/* ── Vitality Neon (neon-only, scoped) ────────────────────────────── */
+html[data-theme="neon"] .hrv-view {
+  --rn-cyan: #28e6ff; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  min-height: 100vh;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+}
+html[data-theme="neon"] .stat .lbl {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  letter-spacing: 0.10em; color: var(--rn-mut);
+}
+html[data-theme="neon"] .stat .val {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  color: var(--rn-ink);
+}
+html[data-theme="neon"] .stat .unit {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  color: var(--rn-mut);
+}
+/* Latest reading carries the primary cyan accent + subtle glow. */
+html[data-theme="neon"] .stat:first-child .val {
+  color: var(--rn-cyan);
+  text-shadow: 0 0 10px rgba(40, 230, 255, 0.45);
+}
 </style>

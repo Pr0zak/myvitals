@@ -16,7 +16,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import RangeTabs from "@/components/RangeTabs.vue";
 import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
-import { chartTheme } from "@/theme";
+import { chartTheme, isNeon } from "@/theme";
 import { timeAxisFormatter } from "@/components/charts/chartHelpers";
 import PatternsLink from "@/components/PatternsLink.vue";
 
@@ -62,6 +62,7 @@ watch(range, loadHistory);
 
 const traceOption = computed(() => {
   void chartTheme.value;
+  void isNeon.value;
   const t = chartTheme.value;
   if (live.value.length === 0) return null;
   return {
@@ -76,7 +77,7 @@ const traceOption = computed(() => {
     },
     series: [{
       type: "scatter", symbolSize: 6,
-      itemStyle: { color: t.palette.recovery, opacity: 0.85 },
+      itemStyle: { color: isNeon.value ? "#ffb52e" : t.palette.recovery, opacity: 0.85 },
       data: live.value.map((p) => [p.time, p.value]),
     }],
   };
@@ -84,6 +85,7 @@ const traceOption = computed(() => {
 
 const dailyOption = computed(() => {
   void chartTheme.value;
+  void isNeon.value;
   const t = chartTheme.value;
   const data = dailyRows.value
     .filter((r) => r.skin_temp_delta_avg != null)
@@ -100,6 +102,10 @@ const dailyOption = computed(() => {
     const avg = window.reduce((a, b) => a + b, 0) / window.length;
     return [r.date, +avg.toFixed(2)] as [string, number];
   });
+  const warmColor = isNeon.value ? "#ff5d7a" : "#ef4444";
+  const coolColor = isNeon.value ? "#28e6ff" : "#60a5fa";
+  const neutralColor = isNeon.value ? "#9b9bb0" : "#94a3b8";
+  const avgColor = isNeon.value ? "#ffb52e" : t.palette.violet;
   return {
     grid: { left: 48, right: 12, top: 24, bottom: 28 },
     xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter }, splitLine: t.splitLine },
@@ -115,21 +121,21 @@ const dailyOption = computed(() => {
         type: "bar", name: "Δ vs baseline",
         itemStyle: { color: (params: any) => {
           const v = params.value[1] as number;
-          if (v > 0.3) return "#ef4444";
-          if (v < -0.3) return "#60a5fa";
-          return "#94a3b8";
+          if (v > 0.3) return warmColor;
+          if (v < -0.3) return coolColor;
+          return neutralColor;
         } },
         data,
         markLine: {
           symbol: ["none", "none"], silent: true,
-          lineStyle: { color: "#ef4444", type: "dashed" as const, opacity: 0.6 },
-          label: { show: true, formatter: "anomaly threshold", color: "#ef4444", fontSize: 9 },
+          lineStyle: { color: warmColor, type: "dashed" as const, opacity: 0.6 },
+          label: { show: true, formatter: "anomaly threshold", color: warmColor, fontSize: 9 },
           data: [{ yAxis: 0.4 }],
         },
       },
       {
         type: "line", name: "3d avg", smooth: true, showSymbol: false,
-        lineStyle: { color: t.palette.violet, width: 2 },
+        lineStyle: { color: avgColor, width: 2 },
         data: series3,
       },
     ],
@@ -139,6 +145,7 @@ const dailyOption = computed(() => {
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const weekdayOption = computed(() => {
   void chartTheme.value;
+  void isNeon.value;
   const t = chartTheme.value;
   const buckets: Array<{ sum: number; count: number }> = Array.from({ length: 7 }, () => ({ sum: 0, count: 0 }));
   for (const r of dailyRows.value) {
@@ -156,7 +163,7 @@ const weekdayOption = computed(() => {
     tooltip: { trigger: "axis", ...t.tooltip },
     series: [{
       type: "bar", name: "Avg Δ",
-      itemStyle: { color: t.palette.recovery },
+      itemStyle: { color: isNeon.value ? "#ffb52e" : t.palette.recovery },
       data,
     }],
   };
@@ -258,4 +265,32 @@ const stats = computed(() => {
 .stat .unit { font-size: 0.75rem; color: var(--on-surface-2); margin-left: 4px; }
 
 .chart { height: 220px; }
+
+/* ── Vitality Neon (data-theme="neon") — scoped, neon-only overrides ── */
+html[data-theme="neon"] .skin-view {
+  min-height: 100vh;
+  margin: -1.25rem -1.5rem;
+  padding: 54px 22px 32px;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  color: #ececf5;
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+html[data-theme="neon"] .err { color: #ff5d7a; }
+html[data-theme="neon"] .dim { color: #9b9bb0; }
+html[data-theme="neon"] .stat .lbl { color: #9b9bb0; }
+html[data-theme="neon"] .stat .unit { color: #9b9bb0; }
+html[data-theme="neon"] .stat .val {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  letter-spacing: -0.5px;
+  color: #ececf5;
+}
+/* "Latest" is the headline readout — subtle amber (warmth) glow */
+html[data-theme="neon"] .stat:first-child .val {
+  color: #ffb52e;
+  text-shadow: 0 0 8px rgba(255, 181, 46, 0.45);
+}
+html[data-theme="neon"] .stat .val.warn {
+  color: #ff5d7a;
+  text-shadow: 0 0 8px rgba(255, 93, 122, 0.45);
+}
 </style>

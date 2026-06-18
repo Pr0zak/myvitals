@@ -12,7 +12,7 @@ import ActivityIcon from "@/components/ActivityIcon.vue";
 import PolylineThumbnail from "@/components/PolylineThumbnail.vue";
 import { api } from "@/api/client";
 import type { Activity, ActivityStats } from "@/api/types";
-import { chartTheme } from "@/theme";
+import { chartTheme, isNeon } from "@/theme";
 import { fmtDistance, fmtElevation, distanceVal, distanceUnit } from "@/units";
 import { fmtDateTime } from "@/format";
 
@@ -328,7 +328,9 @@ function isPR(a: Activity): PRBadge[] {
 // === Mini activity heatmap ===
 const heatmapOption = computed(() => {
   void chartTheme.value;
+  void isNeon.value;
   const t = chartTheme.value;
+  const neon = isNeon.value;
   // Compute the inclusive lower bound of the heatmap window. For
   // YTD we anchor to Jan 1 of the current year (rather than 365d ago)
   // so a single late-Dec activity from last year doesn't trigger a
@@ -375,8 +377,8 @@ const heatmapOption = computed(() => {
     cellSize: ["auto", 12] as [string, number],
     range: y,
     itemStyle: {
-      color: "#1a2332",
-      borderColor: "rgba(148, 163, 184, 0.12)",
+      color: neon ? "#181b27" : "#1a2332",
+      borderColor: neon ? "rgba(39, 42, 59, 0.9)" : "rgba(148, 163, 184, 0.12)",
       borderWidth: 1,
     },
     splitLine: { show: false },
@@ -405,7 +407,7 @@ const heatmapOption = computed(() => {
     visualMap: {
       min: 0, max: Math.max(...allValues),
       calculable: false, orient: "horizontal", show: false,
-      inRange: { color: ["#1e3a5f", "#7dd3fc", "#22c55e"] },
+      inRange: { color: neon ? ["#1a2030", "#28e6ff", "#5dff3b"] : ["#1e3a5f", "#7dd3fc", "#22c55e"] },
     },
     calendar: calendars,
     series,
@@ -470,6 +472,14 @@ function isRide(t: string): boolean { return t.includes("ride") || t.includes("b
 
 function intensityColor(s: number | null): string {
   if (s === null) return "var(--muted-2)";
+  if (isNeon.value) {
+    // Neon intensity ramp on-palette: lime → amber → red. The top two
+    // suffer tiers both read as "high" (red); amber is the single
+    // caution step per the Vitality Neon palette.
+    if (s < 30) return "#5dff3b";
+    if (s < 80) return "#ffb52e";
+    return "#ff5d7a";
+  }
   if (s < 30) return "#22c55e";
   if (s < 80) return "#eab308";
   if (s < 150) return "#f97316";
@@ -950,4 +960,87 @@ dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
 .row-stat { color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
+
+/* ============================================================
+   Vitality Neon — scoped overrides (html[data-theme="neon"] only).
+   Classic / light / dark themes are byte-for-byte unchanged.
+   ============================================================ */
+html[data-theme="neon"] .activities {
+  --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  --rn-cyan: #28e6ff; --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-amber: #ffb52e;
+  --rn-red: #ff5d7a; --rn-track: #272a3b;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+
+/* Big numeric readouts → Space Grotesk mono, neon ink */
+html[data-theme="neon"] .activities .stat .num,
+html[data-theme="neon"] .activities .ytd-num,
+html[data-theme="neon"] .activities .pr-val {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  letter-spacing: -0.5px; color: var(--rn-ink); font-weight: 700;
+}
+html[data-theme="neon"] .activities .stat .num .unit,
+html[data-theme="neon"] .activities .ytd-num .unit { color: var(--rn-mut); }
+
+/* Status / delta swatches → neon palette */
+html[data-theme="neon"] .activities .stat .up,
+html[data-theme="neon"] .activities .ytd-cmp .up { color: var(--rn-lime); }
+html[data-theme="neon"] .activities .stat .down,
+html[data-theme="neon"] .activities .ytd-cmp .down { color: var(--rn-red); }
+html[data-theme="neon"] .activities .stat .same,
+html[data-theme="neon"] .activities .ytd-cmp .same,
+html[data-theme="neon"] .activities .ytd-prev { color: var(--rn-mut); }
+
+/* Strength-list status pills → neon zone swatches */
+html[data-theme="neon"] .activities .strength-list .status.completed { color: var(--rn-lime); }
+html[data-theme="neon"] .activities .strength-list .status.in_progress { color: var(--rn-amber); }
+html[data-theme="neon"] .activities .strength-list .status.skipped { color: var(--rn-mut); }
+html[data-theme="neon"] .activities .strength-list .status.planned { color: var(--rn-cyan); }
+
+/* Surfaces → obsidian card with faint neon edge */
+html[data-theme="neon"] .activities .ytd-cell,
+html[data-theme="neon"] .activities .card,
+html[data-theme="neon"] .activities .row {
+  background: var(--rn-card); border-color: #21243450; border-radius: 14px;
+}
+html[data-theme="neon"] .activities .ytd-cell { border-radius: 14px; }
+
+/* PR cells — cyan accent value with subtle glow on the headline stat */
+html[data-theme="neon"] .activities .pr {
+  background: var(--rn-card); border-color: #21243450;
+}
+html[data-theme="neon"] .activities .pr:hover { border-color: rgba(40, 230, 255, 0.45); }
+html[data-theme="neon"] .activities .pr-val {
+  color: var(--rn-cyan);
+  text-shadow: 0 0 10px rgba(40, 230, 255, 0.45);
+}
+html[data-theme="neon"] .activities .pr-label,
+html[data-theme="neon"] .activities .pr-meta { color: var(--rn-mut); }
+
+/* Interactive accents → cyan */
+html[data-theme="neon"] .activities .card:hover,
+html[data-theme="neon"] .activities .row:hover { border-color: rgba(40, 230, 255, 0.45); }
+html[data-theme="neon"] .activities .type { color: var(--rn-cyan); }
+html[data-theme="neon"] .activities .map-link,
+html[data-theme="neon"] .activities .sync-btn { color: var(--rn-cyan); }
+html[data-theme="neon"] .activities .map-link:hover,
+html[data-theme="neon"] .activities .sync-btn:hover:not(:disabled) { border-color: var(--rn-cyan); }
+
+/* Filter chips + active states → cyan glow */
+html[data-theme="neon"] .activities .chip.active,
+html[data-theme="neon"] .activities .dir.active {
+  background: rgba(40, 230, 255, 0.14); color: var(--rn-cyan);
+  border-color: rgba(40, 230, 255, 0.45);
+}
+html[data-theme="neon"] .activities .badge {
+  background: rgba(40, 230, 255, 0.10); color: var(--rn-cyan);
+  border-color: rgba(40, 230, 255, 0.35);
+}
+
+/* Sync toast → cyan rail */
+html[data-theme="neon"] .activities .sync-toast {
+  background: var(--rn-card); border-color: #21243450;
+  border-left-color: var(--rn-cyan);
+}
 </style>

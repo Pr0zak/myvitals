@@ -9,7 +9,7 @@ import "leaflet/dist/leaflet.css";
 import Card from "@/components/Card.vue";
 import { api } from "@/api/client";
 import type { Activity, HeartRateSeries } from "@/api/types";
-import { chartTheme, effectiveTheme } from "@/theme";
+import { chartTheme, effectiveTheme, isNeon } from "@/theme";
 import { fmtDistance, fmtElevation, distanceVal, distanceUnit, isImperial } from "@/units";
 import { fmtDateTime } from "@/format";
 import { timeAxisFormatter } from "@/components/charts/chartHelpers";
@@ -35,9 +35,11 @@ const hiddenTrailIds = ref<Set<number>>(new Set());
 const trailLayerOpen = ref(false);  // legend collapsed by default
 const NEARBY_TRAIL_MILES = 25;       // ~40 km — generous so out-of-state activities still pull in something
 
-const TRAIL_STATUS_COLOR: Record<string, string> = {
-  open: "#22c55e", closed: "#ef4444", delayed: "#f59e0b", unknown: "#94a3b8",
-};
+const TRAIL_STATUS_COLOR = computed<Record<string, string>>(() =>
+  isNeon.value
+    ? { open: "#5dff3b", closed: "#ff5d7a", delayed: "#ffb52e", unknown: "#9b9bb0" }
+    : { open: "#22c55e", closed: "#ef4444", delayed: "#f59e0b", unknown: "#94a3b8" },
+);
 
 // Shared cursor (seconds since activity.start_at). Hover on any
 // time-aligned chart sets this; the map marker + the other chart's
@@ -100,7 +102,9 @@ function renderMap() {
     maxZoom: 19,
   }).addTo(map);
 
-  polylineLayer = L.polyline(coords, { color: "#38bdf8", weight: 3 }).addTo(map);
+  polylineLayer = L.polyline(coords, {
+    color: isNeon.value ? "#28e6ff" : "#38bdf8", weight: 3,
+  }).addTo(map);
   applyMapMode();
 
   // Start (green) + end (red) markers
@@ -128,7 +132,8 @@ function renderMap() {
       cumDist += haversine(coords[i - 1], coords[i]);
       while (cumDist / unitMeters >= nextMark && nextMark < totalUnits) {
         L.circleMarker(coords[i], {
-          radius: 4, color: "#ffffff", weight: 1, fillColor: "#0ea5e9", fillOpacity: 1,
+          radius: 4, color: "#ffffff", weight: 1,
+          fillColor: isNeon.value ? "#28e6ff" : "#0ea5e9", fillOpacity: 1,
         }).addTo(map).bindTooltip(`${nextMark} ${distanceUnit.value}`, { permanent: false, direction: "top" });
         nextMark += stepUnits;
       }
@@ -170,7 +175,11 @@ async function loadMaxHr() {
 }
 onMounted(loadMaxHr);
 
-const ZONE_COLORS = ["#38bdf8", "#22c55e", "#eab308", "#f97316", "#ef4444"];
+const ZONE_COLORS = computed<string[]>(() =>
+  isNeon.value
+    ? ["#6f7bff", "#28e6ff", "#5dff3b", "#ffb52e", "#ff5d7a"]
+    : ["#38bdf8", "#22c55e", "#eab308", "#f97316", "#ef4444"],
+);
 const ZONE_LABELS = ["Z1 Recovery", "Z2 Endurance", "Z3 Tempo", "Z4 Threshold", "Z5 VO2"];
 
 // Toggle map between solid-blue polyline and HR-colored segments.
@@ -209,7 +218,7 @@ function applyMapMode() {
     }
     const z = zoneFor(nearest.value) - 1;
     const seg = L.polyline([polylineCoords[i], polylineCoords[i + 1]], {
-      color: ZONE_COLORS[z], weight: 4, opacity: 0.9,
+      color: ZONE_COLORS.value[z], weight: 4, opacity: 0.9,
     }).addTo(map);
     heatmapSegments.push(seg);
   }
@@ -254,7 +263,7 @@ function applyTrailLayer() {
   trailMarkers.clear();
   for (const { t } of nearbyTrails.value) {
     if (hiddenTrailIds.value.has(t.id)) continue;
-    const color = TRAIL_STATUS_COLOR[t.status ?? "unknown"];
+    const color = TRAIL_STATUS_COLOR.value[t.status ?? "unknown"];
     const marker = L.circleMarker([t.latitude!, t.longitude!], {
       radius: 8, color, weight: 2, fillColor: color, fillOpacity: 0.75,
     }).addTo(map);
@@ -356,7 +365,9 @@ watch(cursorOffsetS, (offsetS) => {
       mapCursor.setLatLng([lat, lng]);
     } else {
       mapCursor = L.circleMarker([lat, lng], {
-        radius: 7, color: "#fbbf24", weight: 3, fillColor: "#fbbf24", fillOpacity: 0.9,
+        radius: 7,
+        color: isNeon.value ? "#ffb52e" : "#fbbf24", weight: 3,
+        fillColor: isNeon.value ? "#ffb52e" : "#fbbf24", fillOpacity: 0.9,
       }).addTo(map);
     }
   }
@@ -400,7 +411,7 @@ const hrZoneStreamOption = computed(() => {
     xAxis: { type: "category", data: xs, name: "min", axisLabel: t.axisLabel },
     yAxis: { type: "value", name: "samples", axisLabel: t.axisLabel, splitLine: t.splitLine },
     series: buckets.map((data, i) => ({
-      name: ZONE_LABELS[i], type: "line", stack: "z", areaStyle: { color: ZONE_COLORS[i], opacity: 0.7 },
+      name: ZONE_LABELS[i], type: "line", stack: "z", areaStyle: { color: ZONE_COLORS.value[i], opacity: 0.7 },
       symbol: "none", smooth: true, lineStyle: { width: 0 }, data,
     })),
   };
@@ -427,7 +438,7 @@ const hrZonePieOption = computed(() => {
       type: "pie", radius: ["45%", "75%"],
       label: { color: t.axisLabel.color, formatter: "{b}\n{d}%" },
       data: counts.map((v, i) => ({
-        value: v, name: ZONE_LABELS[i], itemStyle: { color: ZONE_COLORS[i] },
+        value: v, name: ZONE_LABELS[i], itemStyle: { color: ZONE_COLORS.value[i] },
       })),
     }],
   };
@@ -462,12 +473,15 @@ const hrChartOption = computed(() => {
 const zoneBreakdown = computed(() => {
   if (!activity.value || !hr.value) return null;
   const maxHr = activity.value.max_hr ?? 190;
+  const zc = isNeon.value
+    ? ["#6f7bff", "#28e6ff", "#5dff3b", "#ffb52e", "#ff5d7a"]
+    : ["#94a3b8", "#22c55e", "#38bdf8", "#eab308", "#ef4444"];
   const zones = [
-    { name: "Z1 (rest)", lo: 0, hi: 0.6 * maxHr, color: "#94a3b8" },
-    { name: "Z2 (fat burn)", lo: 0.6 * maxHr, hi: 0.7 * maxHr, color: "#22c55e" },
-    { name: "Z3 (aerobic)", lo: 0.7 * maxHr, hi: 0.8 * maxHr, color: "#38bdf8" },
-    { name: "Z4 (threshold)", lo: 0.8 * maxHr, hi: 0.9 * maxHr, color: "#eab308" },
-    { name: "Z5 (anaerobic)", lo: 0.9 * maxHr, hi: 999, color: "#ef4444" },
+    { name: "Z1 (rest)", lo: 0, hi: 0.6 * maxHr, color: zc[0] },
+    { name: "Z2 (fat burn)", lo: 0.6 * maxHr, hi: 0.7 * maxHr, color: zc[1] },
+    { name: "Z3 (aerobic)", lo: 0.7 * maxHr, hi: 0.8 * maxHr, color: zc[2] },
+    { name: "Z4 (threshold)", lo: 0.8 * maxHr, hi: 0.9 * maxHr, color: zc[3] },
+    { name: "Z5 (anaerobic)", lo: 0.9 * maxHr, hi: 999, color: zc[4] },
   ];
   const start = new Date(activity.value.start_at).getTime();
   const end = start + activity.value.duration_s * 1000;
@@ -698,7 +712,7 @@ async function submitEdit() {
               Trails ({{ nearbyTrails.length }})
             </button>
             <span v-if="mapMode === 'heatmap'" class="zone-legend">
-              <span v-for="(c, i) in ['#38bdf8','#22c55e','#eab308','#f97316','#ef4444']" :key="i"
+              <span v-for="(c, i) in ZONE_COLORS" :key="i"
                     class="zone-swatch" :style="`background:${c}`"
                     :title="`Z${i+1}`"/>
               <span class="zone-legend-text">Z1 → Z5</span>
@@ -712,7 +726,7 @@ async function submitEdit() {
                        :checked="!hiddenTrailIds.has(t.id)"
                        @change="toggleTrail(t.id)"/>
                 <span class="trail-status-dot"
-                      :style="`background:${ {open:'#22c55e',closed:'#ef4444',delayed:'#f59e0b',unknown:'#94a3b8'}[t.status ?? 'unknown'] }`"
+                      :style="`background:${ TRAIL_STATUS_COLOR[t.status ?? 'unknown'] }`"
                       :title="t.status ?? 'unknown'"/>
                 <button class="trail-name" @click="panToTrail(t.id)">{{ t.name }}</button>
                 <span class="trail-meta">
@@ -959,4 +973,58 @@ dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
 .primary { background: var(--accent); color: var(--accent-text); border: 0; border-radius: 6px; padding: 0.4rem 0.9rem; cursor: pointer; font-weight: 500; }
 .primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .saved { color: var(--good); font-size: 0.85rem; }
+
+/* ── Vitality Neon — scoped overrides, neon theme only ───────────────────
+   Classic/light/dark are untouched: every rule below is gated behind
+   html[data-theme="neon"]. The trailing class still gets the scope attr,
+   so these stay component-scoped AND neon-only. */
+html[data-theme="neon"] .detail {
+  --rn-cyan: #28e6ff; --rn-amber: #ffb52e; --rn-ink: #ececf5;
+  --rn-mut: #9b9bb0; --rn-track: #272a3b;
+  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 18px 22px 32px;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  color: var(--rn-ink);
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+html[data-theme="neon"] .detail .back { color: var(--rn-cyan); }
+html[data-theme="neon"] .detail .head h1 {
+  letter-spacing: -0.5px;
+  text-shadow: 0 0 18px rgba(40, 230, 255, 0.28);
+}
+html[data-theme="neon"] .detail .type { color: var(--rn-cyan); }
+
+/* Big numeric readouts → Space Grotesk mono numerics */
+html[data-theme="neon"] .detail dd,
+html[data-theme="neon"] .detail .zone-pct {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+}
+
+/* Map + chart shell — neon edge glow on the route card's accent */
+html[data-theme="neon"] .detail .map {
+  box-shadow: 0 0 0 1px rgba(40, 230, 255, 0.18),
+              0 8px 28px rgba(40, 230, 255, 0.10);
+}
+
+/* Active map/trail toggle pills glow cyan instead of violet */
+html[data-theme="neon"] .detail .map-toggle.on {
+  background: rgba(40, 230, 255, 0.16);
+  color: var(--rn-cyan);
+  border-color: rgba(40, 230, 255, 0.55);
+  box-shadow: 0 0 10px rgba(40, 230, 255, 0.32);
+}
+html[data-theme="neon"] .detail .trail-name { color: var(--rn-cyan); }
+html[data-theme="neon"] .detail .trail-link { color: var(--rn-cyan); }
+
+/* Zone bars get a soft inner glow track */
+html[data-theme="neon"] .detail .zone-fill {
+  filter: drop-shadow(0 0 4px currentColor);
+}
+
+/* Route start/end markers in neon palette */
+html[data-theme="neon"] .detail :deep(.start-marker > div) {
+  background: #5dff3b; box-shadow: 0 0 8px rgba(93, 255, 59, 0.7);
+}
+html[data-theme="neon"] .detail :deep(.end-marker > div) {
+  background: #ff5d7a; box-shadow: 0 0 8px rgba(255, 93, 122, 0.7);
+}
 </style>

@@ -9,10 +9,11 @@ import Skeleton from "@/components/Skeleton.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import type { SleepNight } from "@/api/types";
-import { chartTheme } from "@/theme";
+import { chartTheme, isNeon } from "@/theme";
 import { fmtTime, fmtDateTime } from "@/format";
 
-const STAGE_COLORS: Record<string, string> = {
+// Classic stage palette (byte-for-byte unchanged for non-neon themes).
+const STAGE_COLORS_CLASSIC: Record<string, string> = {
   awake: "#f97316",
   rem: "#a78bfa",
   light: "#60a5fa",
@@ -20,6 +21,18 @@ const STAGE_COLORS: Record<string, string> = {
   out_of_bed: "#94a3b8",
   unknown: "#64748b",
 };
+// Vitality Neon sleep-stage palette.
+const STAGE_COLORS_NEON: Record<string, string> = {
+  awake: "#ffb52e",
+  rem: "#28e6ff",
+  light: "#6f7bff",
+  deep: "#ff3ad8",
+  out_of_bed: "#9b9bb0",
+  unknown: "#9b9bb0",
+};
+const stageColors = computed<Record<string, string>>(() =>
+  isNeon.value ? STAGE_COLORS_NEON : STAGE_COLORS_CLASSIC,
+);
 
 // Order top-to-bottom in the hypnogram (REM is shallowest after awake)
 const STAGE_ORDER = ["awake", "rem", "light", "deep"];
@@ -93,7 +106,9 @@ const Y_LABELS = ["Deep", "Light", "REM", "Awake"];
 
 const hypnogramOption = computed(() => {
   void chartTheme.value;
+  void isNeon.value;
   const t = chartTheme.value;
+  const STAGE_COLORS = stageColors.value;
   if (lastNightRaw.value.length === 0) return null;
 
   // Group raw rows into the most recent contiguous session (gap > 2h splits).
@@ -160,7 +175,7 @@ const hypnogramOption = computed(() => {
       type: "line",
       step: "end" as const,
       showSymbol: false,
-      lineStyle: { color: t.palette.violet, width: 2 },
+      lineStyle: { color: isNeon.value ? "#ff3ad8" : t.palette.violet, width: 2 },
       data: linePts,
       markArea: { silent: true, data: areas },
     }],
@@ -170,7 +185,9 @@ const hypnogramOption = computed(() => {
 // === Last N nights stacked bar ===
 const stackedNightsOption = computed(() => {
   void chartTheme.value;
+  void isNeon.value;
   const t = chartTheme.value;
+  const STAGE_COLORS = stageColors.value;
   const dates = nights.value.map((n) => n.date);
   const allStages = Array.from(new Set(nights.value.flatMap((n) => n.stages.map((s) => s.stage))));
   const orderedStages = [...STAGE_ORDER, ...allStages.filter((s) => !STAGE_ORDER.includes(s))];
@@ -191,6 +208,7 @@ const stackedNightsOption = computed(() => {
   // target is configured.
   if (sleepTargetH.value != null && series.length > 0) {
     const targetMin = sleepTargetH.value * 60;
+    const targetColor = isNeon.value ? "#5dff3b" : t.palette.recovery;
     series[0] = {
       ...series[0],
       markLine: {
@@ -198,10 +216,10 @@ const stackedNightsOption = computed(() => {
         symbol: ["none", "none"],
         data: [{
           yAxis: targetMin,
-          lineStyle: { color: t.palette.recovery, type: "dashed" as const, width: 1.5, opacity: 0.7 },
+          lineStyle: { color: targetColor, type: "dashed" as const, width: 1.5, opacity: 0.7 },
           label: {
             formatter: `Target ${sleepTargetH.value!.toFixed(1)}h`,
-            color: t.palette.recovery,
+            color: targetColor,
             fontSize: 10,
             position: "insideEndTop",
           },
@@ -224,7 +242,10 @@ const stackedNightsOption = computed(() => {
 // === Bedtime / wake time consistency scatter ===
 const consistencyOption = computed(() => {
   void chartTheme.value;
+  void isNeon.value;
   const t = chartTheme.value;
+  const bedColor = isNeon.value ? "#ff3ad8" : t.palette.violet;
+  const wakeColor = isNeon.value ? "#28e6ff" : t.palette.steps;
   // Map each night to (date, fractional hour of bedtime) and (date, fractional hour of wake).
   // Bedtime can wrap past midnight; encode hours since 18:00 to keep them positive.
   const bedData: [string, number][] = [];
@@ -242,13 +263,13 @@ const consistencyOption = computed(() => {
     legend: { textStyle: t.axisLabel, top: 4 },
     xAxis: { type: "category", data: nights.value.map((n) => n.date), axisLabel: t.axisLabel },
     yAxis: [
-      { type: "value", name: "bedtime (h after 6pm)", axisLabel: t.axisLabel, splitLine: t.splitLine, nameTextStyle: { color: t.palette.violet, fontSize: 9 } },
-      { type: "value", name: "wake hour", axisLabel: t.axisLabel, splitLine: { show: false }, position: "right", nameTextStyle: { color: t.palette.steps, fontSize: 9 } },
+      { type: "value", name: "bedtime (h after 6pm)", axisLabel: t.axisLabel, splitLine: t.splitLine, nameTextStyle: { color: bedColor, fontSize: 9 } },
+      { type: "value", name: "wake hour", axisLabel: t.axisLabel, splitLine: { show: false }, position: "right", nameTextStyle: { color: wakeColor, fontSize: 9 } },
     ],
     tooltip: { trigger: "axis", ...t.tooltip },
     series: [
-      { name: "Bedtime", type: "scatter", yAxisIndex: 0, symbolSize: 8, data: bedData, itemStyle: { color: t.palette.violet } },
-      { name: "Wake", type: "scatter", yAxisIndex: 1, symbolSize: 8, data: wakeData, itemStyle: { color: t.palette.steps } },
+      { name: "Bedtime", type: "scatter", yAxisIndex: 0, symbolSize: 8, data: bedData, itemStyle: { color: bedColor } },
+      { name: "Wake", type: "scatter", yAxisIndex: 1, symbolSize: 8, data: wakeData, itemStyle: { color: wakeColor } },
     ],
   };
 });
@@ -315,7 +336,7 @@ function fmtNightDate(n: SleepNight): string {
         <div class="chart hypno"><VChart v-if="hypnogramOption" :option="hypnogramOption" autoresize/></div>
         <div class="legend">
           <span v-for="s in lastNight.stages" :key="s.stage" class="lg-item">
-            <span class="dot" :style="{ background: STAGE_COLORS[s.stage] ?? '#64748b' }"></span>
+            <span class="dot" :style="{ background: stageColors[s.stage] ?? '#64748b' }"></span>
             {{ s.stage }} {{ Math.round(s.duration_s / 60) }} min
           </span>
         </div>
@@ -459,4 +480,42 @@ function fmtNightDate(n: SleepNight): string {
 }
 .last-banner strong { color: var(--text); }
 .last-banner .rel { color: var(--muted-2); font-size: 0.85rem; margin-left: auto; }
+
+/* ===== Vitality Neon — scoped overrides (neon theme only) ===== */
+html[data-theme="neon"] .sleep {
+  --rn-mag: #ff3ad8; --rn-cyan: #28e6ff; --rn-lime: #5dff3b;
+  --rn-amber: #ffb52e; --rn-track: #272a3b; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 1.25rem 1.5rem 2rem;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  color: var(--rn-ink);
+}
+
+/* Big numeric readouts → Space Grotesk monospace */
+html[data-theme="neon"] .sleep .rn-stat-val,
+html[data-theme="neon"] .sleep .rn-total,
+html[data-theme="neon"] .sleep .rn-window {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+}
+html[data-theme="neon"] .sleep .rn-stat-val { color: var(--rn-ink); }
+html[data-theme="neon"] .sleep .rn-stat-label { color: var(--rn-mut); }
+
+/* Recent-night duration bar → neon sleep magenta gradient + glow */
+html[data-theme="neon"] .sleep .rn-bar {
+  background: linear-gradient(90deg, rgba(255, 58, 216, 0.28), rgba(255, 58, 216, 0.85));
+  box-shadow: 0 0 6px rgba(255, 58, 216, 0.45);
+}
+
+/* Last-sleep banner dot → magenta glow */
+html[data-theme="neon"] .sleep .last-banner .dot {
+  background: var(--rn-mag) !important;
+  box-shadow: 0 0 7px rgba(255, 58, 216, 0.7);
+}
+
+/* Toggle accent → cyan */
+html[data-theme="neon"] .sleep .rn-toggle { color: var(--rn-cyan); }
+
+/* Per-night row chrome reads slightly brighter against the obsidian bg */
+html[data-theme="neon"] .sleep .recent-nights li {
+  border-color: #2a2e42;
+}
 </style>

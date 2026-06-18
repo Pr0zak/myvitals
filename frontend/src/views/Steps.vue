@@ -15,7 +15,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import RangeTabs from "@/components/RangeTabs.vue";
 import { api } from "@/api/client";
 import type { StepsSeries, TodaySummary } from "@/api/types";
-import { chartTheme } from "@/theme";
+import { chartTheme, isNeon } from "@/theme";
 import { timeAxisFormatter } from "@/components/charts/chartHelpers";
 import PatternsLink from "@/components/PatternsLink.vue";
 
@@ -65,6 +65,16 @@ async function loadHistory() {
 onMounted(() => { loadLive(); loadHistory(); });
 watch(range, loadHistory);
 
+// Steps bar/line color: neon lime under the Vitality Neon theme, else the
+// theme palette's sky blue byte-for-byte. Reading isNeon.value here also makes
+// every chart option recompute (and re-render) when the theme flips.
+const stepsColor = computed(() => (isNeon.value ? "#5dff3b" : chartTheme.value.palette.steps));
+// 7d-avg overlay: neon uses the palette's secondary stroke (#6f7bff) so it
+// reads as a distinct steps-derived line — NOT magenta, which is reserved for
+// sleep/sober. Classic keeps the violet token byte-for-byte.
+const stepsAvgColor = computed(() => (isNeon.value ? "#6f7bff" : chartTheme.value.palette.violet));
+const goalLineColor = computed(() => (isNeon.value ? "#28e6ff" : chartTheme.value.palette.recovery));
+
 // ── Hourly bar chart (today only) ──
 // Buckets the live per-minute series into hour-of-day bins (local TZ)
 // scoped to TODAY so the chart shows when steps actually accumulated
@@ -100,7 +110,7 @@ const hourlyOption = computed(() => {
     },
     series: [{
       type: "bar", name: "Steps",
-      itemStyle: { color: t.palette.steps },
+      itemStyle: { color: stepsColor.value },
       data: buckets.map((v) => Math.round(v)),
     }],
   };
@@ -118,8 +128,8 @@ const traceOption = computed(() => {
     tooltip: { trigger: "axis", ...t.tooltip },
     series: [{
       type: "line", smooth: true, showSymbol: false,
-      lineStyle: { color: t.palette.steps, width: 2 },
-      areaStyle: { color: `${t.palette.steps}22` },
+      lineStyle: { color: stepsColor.value, width: 2 },
+      areaStyle: { color: `${stepsColor.value}22` },
       data: live.value.points.map((p) => [p.time, p.value]),
     }],
   };
@@ -150,18 +160,18 @@ const dailyOption = computed(() => {
     series: [
       {
         type: "bar", name: "Steps",
-        itemStyle: { color: t.palette.steps },
+        itemStyle: { color: stepsColor.value },
         data,
         markLine: stepsGoal.value > 0 ? {
           symbol: ["none", "none"], silent: true,
-          lineStyle: { color: t.palette.recovery, type: "dashed" as const, opacity: 0.7 },
+          lineStyle: { color: goalLineColor.value, type: "dashed" as const, opacity: 0.7 },
           label: { show: true, formatter: `goal ${stepsGoal.value.toLocaleString()}`, color: t.axisLabel.color, fontSize: 9 },
           data: [{ yAxis: stepsGoal.value }],
         } : undefined,
       },
       {
         type: "line", name: "7d avg", smooth: true, showSymbol: false,
-        lineStyle: { color: t.palette.violet, width: 2 },
+        lineStyle: { color: stepsAvgColor.value, width: 2 },
         data: series7,
       },
     ],
@@ -195,7 +205,7 @@ const weekdayOption = computed(() => {
     },
     series: [{
       type: "bar", name: "Avg steps",
-      itemStyle: { color: t.palette.steps },
+      itemStyle: { color: stepsColor.value },
       data,
     }],
   };
@@ -290,4 +300,32 @@ const stats = computed(() => {
 .stat .val { font-size: 1.25rem; font-weight: 600; color: var(--on-surface); }
 
 .chart { height: 220px; }
+
+/* ── Vitality Neon — scoped to data-theme="neon" only; classic themes unchanged ── */
+html[data-theme="neon"] .steps-view {
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  min-height: 100vh;
+  margin: -1rem -1.25rem 0;
+  padding: 1.25rem 1.25rem 2rem;
+  max-width: none;
+}
+html[data-theme="neon"] .steps-view > * {
+  max-width: 1080px;
+  margin-left: auto;
+  margin-right: auto;
+}
+html[data-theme="neon"] .stat .lbl {
+  letter-spacing: 0.11em;
+  color: #9b9bb0;
+}
+html[data-theme="neon"] .stat .val {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: #ececf5;
+}
+html[data-theme="neon"] .stat:first-child .val {
+  color: #5dff3b;
+  text-shadow: 0 0 12px rgba(93, 255, 59, 0.45);
+}
 </style>

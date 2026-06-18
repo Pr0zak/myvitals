@@ -14,7 +14,7 @@ import { RouterLink } from "vue-router";
 import VChart from "@/echarts";
 import WatchStatus from "@/components/today/WatchStatus.vue";
 import { api } from "@/api/client";
-import { chartTheme } from "@/theme";
+import { chartTheme, isNeon } from "@/theme";
 
 type DeviceStatusSeries = Awaited<ReturnType<typeof api.deviceStatusSeries>>;
 
@@ -82,8 +82,8 @@ const batteryOption = computed(() => {
     },
     series: [{
       type: "line", smooth: true, symbol: "none",
-      lineStyle: { width: 2, color: t.palette.recovery },
-      areaStyle: { color: "rgba(167, 139, 250, 0.16)" },
+      lineStyle: { width: 2, color: isNeon.value ? "#ff3ad8" : t.palette.recovery },
+      areaStyle: { color: isNeon.value ? "rgba(255, 58, 216, 0.18)" : "rgba(167, 139, 250, 0.16)" },
       data,
     }],
   };
@@ -121,8 +121,8 @@ const onBodyOption = computed(() => {
     },
     series: [{
       type: "line", step: "end", symbol: "none",
-      lineStyle: { width: 2, color: t.palette.steps },
-      areaStyle: { color: "rgba(56, 189, 248, 0.18)" },
+      lineStyle: { width: 2, color: isNeon.value ? "#28e6ff" : t.palette.steps },
+      areaStyle: { color: isNeon.value ? "rgba(40, 230, 255, 0.18)" : "rgba(56, 189, 248, 0.18)" },
       connectNulls: false,
       data,
     }],
@@ -139,8 +139,21 @@ const ACTIVITY_PALETTE: Record<string, string> = {
   unknown:  "#334155",
 };
 
+// Vitality Neon variant — walking/running lime, on_bike cyan,
+// in_vehicle magenta, tilting amber, still/unknown muted.
+const ACTIVITY_PALETTE_NEON: Record<string, string> = {
+  still:    "#9b9bb0",
+  walking:  "#5dff3b",
+  running:  "#5dff3b",
+  on_bike:  "#28e6ff",
+  in_vehicle: "#ff3ad8",
+  tilting:  "#ffb52e",
+  unknown:  "#272a3b",
+};
+
 const activityOption = computed(() => {
   const t = chartTheme.value;
+  const palette = isNeon.value ? ACTIVITY_PALETTE_NEON : ACTIVITY_PALETTE;
   const points = series.value?.points ?? [];
   // Build distinct rows per activity_state so each lights up as bars at its row.
   const seen = new Set<string>();
@@ -190,7 +203,7 @@ const activityOption = computed(() => {
             width: Math.max(1, endCoord[0] - startCoord[0]),
             height: 16,
           },
-          style: { fill: ACTIVITY_PALETTE[state] ?? ACTIVITY_PALETTE.unknown },
+          style: { fill: palette[state] ?? palette.unknown },
         };
       },
       encode: { x: [1, 2], y: 0 },
@@ -329,5 +342,66 @@ h1 { margin: 0 0 0.5rem; }
 @media (max-width: 720px) {
   .grid { grid-template-columns: 1fr; }
   .summary-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Vitality Neon (neon theme only) ───────────────────────────────── */
+html[data-theme="neon"] .watch-view {
+  --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-cyan: #28e6ff; --rn-amber: #ffb52e;
+  --rn-track: #272a3b;
+  min-height: 100vh;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  color: var(--rn-ink);
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+html[data-theme="neon"] .watch-view h1 {
+  font-weight: 800; letter-spacing: -0.5px;
+}
+html[data-theme="neon"] .watch-view .muted {
+  color: var(--rn-mut);
+}
+html[data-theme="neon"] .watch-view .err {
+  color: #ff5d7a;
+}
+
+html[data-theme="neon"] .watch-view .charts-head .card-title,
+html[data-theme="neon"] .watch-view .chart-card .card-title {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  font-weight: 700; letter-spacing: 0.11em;
+  color: var(--rn-mut);
+}
+
+html[data-theme="neon"] .watch-view .seg-toggle {
+  border-color: rgba(40, 230, 255, 0.32);
+  background: rgba(40, 230, 255, 0.06);
+}
+html[data-theme="neon"] .watch-view .seg-toggle button {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  font-weight: 700; letter-spacing: 0.06em;
+  color: var(--rn-mut);
+}
+html[data-theme="neon"] .watch-view .seg-toggle button.active {
+  background: rgba(40, 230, 255, 0.16);
+  color: var(--rn-cyan);
+  text-shadow: 0 0 8px rgba(40, 230, 255, 0.6);
+}
+
+html[data-theme="neon"] .watch-view .card {
+  background: var(--rn-card);
+  border: 1px solid #21243450;
+  border-radius: 18px;
+  box-shadow: inset 0 1px 0 #ffffff08;
+}
+
+html[data-theme="neon"] .watch-view .summary-val {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  font-weight: 700;
+  color: var(--rn-ink);
+  text-shadow: 0 0 10px rgba(40, 230, 255, 0.35);
+}
+
+html[data-theme="neon"] .watch-view .cfg-hint a {
+  color: var(--rn-cyan);
+  text-shadow: 0 0 8px rgba(40, 230, 255, 0.5);
 }
 </style>

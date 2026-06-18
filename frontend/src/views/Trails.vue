@@ -9,7 +9,7 @@ import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "@/leaflet-icons";   // side-effect: fixes default marker URLs under Vite
-import { effectiveTheme } from "@/theme";
+import { effectiveTheme, isNeon } from "@/theme";
 import { Star, RefreshCw, Navigation, Pencil, Map as MapIcon, Bike } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { queryToken } from "@/config";
@@ -165,7 +165,7 @@ function initEditMap(t: Trail) {
     : KC_CENTER;
   editMap = L.map(editMapEl.value, { zoomControl: true })
     .setView(start, t.latitude != null ? 14 : 9);
-  const tiles = effectiveTheme.value === "dark"
+  const tiles = (effectiveTheme.value === "dark" || isNeon.value)
     ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
     : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
   L.tileLayer(tiles, {
@@ -861,4 +861,135 @@ header h1 { margin: 0; }
 .comment { color: var(--text-soft); font-size: 0.82rem; margin: 0; }
 .meta { color: var(--muted-2); font-size: 0.74rem; margin: 0;
   font-family: 'Geist Mono', ui-monospace, monospace; }
+
+/* ============================================================
+   Vitality Neon skin — scoped to html[data-theme="neon"] only.
+   Classic / dark / light themes are untouched. Matches the
+   TrailsHub.vue board: obsidian radial bg, glowing status dots,
+   18px cards, Space Grotesk numerics, brighter status-flip flash.
+   ============================================================ */
+html[data-theme="neon"] .trails {
+  --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-cyan: #28e6ff; --rn-amber: #ffb52e;
+  --rn-bad: #ff5d7a; --rn-track: #272a3b;
+  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 54px 22px 104px;
+  max-width: none;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  color: var(--rn-ink); font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+html[data-theme="neon"] .trails > header { max-width: 880px; margin: 0 auto 1rem; }
+html[data-theme="neon"] .trails > header h1 {
+  font-size: 32px; font-weight: 800; letter-spacing: -0.5px; color: var(--rn-ink);
+}
+html[data-theme="neon"] .trails > .hint,
+html[data-theme="neon"] .trails > .err,
+html[data-theme="neon"] .trails > .skeleton-trails,
+html[data-theme="neon"] .trails > .group {
+  max-width: 880px; margin-left: auto; margin-right: auto;
+}
+
+html[data-theme="neon"] .trails .refresh {
+  background: var(--rn-card); border: 1px solid var(--rn-track);
+  border-radius: 999px; color: var(--rn-cyan);
+}
+html[data-theme="neon"] .trails .refresh:hover {
+  color: var(--rn-ink); border-color: var(--rn-cyan);
+  box-shadow: 0 0 10px rgba(40, 230, 255, 0.35);
+}
+html[data-theme="neon"] .trails .dnis-link { color: var(--rn-cyan); }
+
+html[data-theme="neon"] .trails .hint { color: var(--rn-mut); }
+html[data-theme="neon"] .trails .err { color: var(--rn-bad); }
+
+html[data-theme="neon"] .trails .group h2 {
+  color: var(--rn-mut);
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  font-weight: 700; letter-spacing: 0.10em;
+}
+
+html[data-theme="neon"] .trails .card {
+  background: var(--rn-card); border: 1px solid #21243450;
+  border-radius: 18px;
+}
+html[data-theme="neon"] .trails .card.status-open    { border-left: 3px solid var(--rn-lime); }
+html[data-theme="neon"] .trails .card.status-closed  { border-left: 3px solid var(--rn-bad); opacity: 0.82; }
+html[data-theme="neon"] .trails .card.status-delayed { border-left: 3px solid var(--rn-amber); }
+html[data-theme="neon"] .trails .card.has_loc:hover {
+  border-color: var(--rn-cyan);
+  box-shadow: 0 0 14px rgba(40, 230, 255, 0.18);
+}
+html[data-theme="neon"] .trails .card header strong { color: var(--rn-ink); }
+
+/* Glowing status dots — the primary accent element, à la TrailsHub. */
+html[data-theme="neon"] .trails .card .dot { box-shadow: 0 0 8px currentColor; }
+html[data-theme="neon"] .trails .card.status-open .dot {
+  background: var(--rn-lime); box-shadow: 0 0 9px var(--rn-lime);
+}
+html[data-theme="neon"] .trails .card.status-closed .dot {
+  background: var(--rn-bad); box-shadow: 0 0 9px var(--rn-bad);
+}
+html[data-theme="neon"] .trails .card.status-delayed .dot {
+  background: var(--rn-amber); box-shadow: 0 0 9px var(--rn-amber);
+}
+
+html[data-theme="neon"] .trails .star { color: var(--rn-mut); }
+html[data-theme="neon"] .trails .star:hover {
+  color: var(--rn-cyan); background: #ffffff10;
+}
+html[data-theme="neon"] .trails .star.on {
+  color: var(--rn-amber); filter: drop-shadow(0 0 4px rgba(255, 181, 46, 0.55));
+}
+html[data-theme="neon"] .trails .edit-pin:hover,
+html[data-theme="neon"] .trails .map-toggle:hover,
+html[data-theme="neon"] .trails .map-toggle.on { color: var(--rn-cyan); }
+
+html[data-theme="neon"] .trails .comment { color: #c4c4d4; }
+html[data-theme="neon"] .trails .meta {
+  color: var(--rn-mut); font-family: 'Space Grotesk', 'Geist Mono', monospace;
+}
+html[data-theme="neon"] .trails .loc { color: var(--rn-mut); }
+html[data-theme="neon"] .trails .loc.nopin { color: var(--rn-amber); }
+html[data-theme="neon"] .trails .last-visit { color: var(--rn-mut); }
+html[data-theme="neon"] .trails .nav-ic { color: var(--rn-cyan); }
+html[data-theme="neon"] .trails .status-tag { color: var(--rn-mut); }
+
+/* Visit-age heat scale, neon-mapped (fresh→lime … stale→muted). */
+html[data-theme="neon"] .trails .visits.age-fresh  { color: var(--rn-lime); }
+html[data-theme="neon"] .trails .visits.age-recent { color: var(--rn-lime); }
+html[data-theme="neon"] .trails .visits.age-medium { color: var(--rn-amber); }
+html[data-theme="neon"] .trails .visits.age-old    { color: var(--rn-amber); }
+html[data-theme="neon"] .trails .visits.age-stale  { color: var(--rn-mut); }
+
+/* Brighter status-flip flash under neon — punchier neon glow pulse. */
+@keyframes status-flip-open-neon {
+  0%   { background: rgba(93, 255, 59, 0.0);  box-shadow: none; }
+  18%  { background: rgba(93, 255, 59, 0.32); box-shadow: 0 0 22px rgba(93, 255, 59, 0.45); }
+  100% { background: rgba(93, 255, 59, 0.0);  box-shadow: none; }
+}
+@keyframes status-flip-closed-neon {
+  0%   { background: rgba(255, 93, 122, 0.0);  box-shadow: none; }
+  18%  { background: rgba(255, 93, 122, 0.32); box-shadow: 0 0 22px rgba(255, 93, 122, 0.45); }
+  100% { background: rgba(255, 93, 122, 0.0);  box-shadow: none; }
+}
+@keyframes status-flip-delayed-neon {
+  0%   { background: rgba(255, 181, 46, 0.0);  box-shadow: none; }
+  18%  { background: rgba(255, 181, 46, 0.32); box-shadow: 0 0 22px rgba(255, 181, 46, 0.45); }
+  100% { background: rgba(255, 181, 46, 0.0);  box-shadow: none; }
+}
+html[data-theme="neon"] .trails .card.status-open.flip    { animation: status-flip-open-neon 2.5s ease-out; }
+html[data-theme="neon"] .trails .card.status-closed.flip  { animation: status-flip-closed-neon 2.5s ease-out; }
+html[data-theme="neon"] .trails .card.status-delayed.flip { animation: status-flip-delayed-neon 2.5s ease-out; }
+
+/* Modals / drawers pick up the neon surface tokens. */
+html[data-theme="neon"] .trails .full-map-wrap,
+html[data-theme="neon"] .trails .edit-drawer {
+  background: var(--rn-bg); border-color: var(--rn-track);
+}
+html[data-theme="neon"] .trails .full-map-head { background: var(--rn-card); border-color: var(--rn-track); }
+html[data-theme="neon"] .trails .full-map-head strong,
+html[data-theme="neon"] .trails .edit-drawer header h2 { color: var(--rn-ink); }
+html[data-theme="neon"] .trails .actions .primary {
+  background: var(--rn-cyan); color: #0f1118;
+  box-shadow: 0 0 14px rgba(40, 230, 255, 0.35);
+}
 </style>

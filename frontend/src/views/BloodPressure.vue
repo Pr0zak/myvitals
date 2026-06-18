@@ -8,7 +8,7 @@ import EmptyState from "@/components/EmptyState.vue";
 import LoadState from "@/components/LoadState.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
-import { chartTheme } from "@/theme";
+import { chartTheme, isNeon } from "@/theme";
 import { fmtDateTime } from "@/format";
 
 type Range = "30d" | "90d" | "1y" | "all";
@@ -108,9 +108,18 @@ const recent = computed(() => {
 // Main chart — sys + dia over time + threshold reference lines.
 const trendOption = computed(() => {
   void chartTheme.value;
+  void isNeon.value;
   const t = chartTheme.value;
+  const neon = isNeon.value;
   const sys = sorted.value.map((p) => [p.time, p.systolic]);
   const dia = sorted.value.map((p) => [p.time, p.diastolic]);
+  // Threshold reference-line colors. Neon: elev→amber, stage1→amber, stage2→red.
+  const cElev = neon ? "#ffb52e" : "#eab308";
+  const cStage1 = neon ? "#ffb52e" : "#f97316";
+  const cStage2 = neon ? "#ff5d7a" : "#ef4444";
+  // Series colors. Neon: systolic→cyan, diastolic→magenta.
+  const cSys = neon ? "#28e6ff" : t.palette.hr;
+  const cDia = neon ? "#ff3ad8" : t.palette.recovery;
   return {
     grid: { left: 50, right: 50, top: 36, bottom: 28 },
     legend: { textStyle: t.axisLabel, top: 4 },
@@ -120,19 +129,19 @@ const trendOption = computed(() => {
     series: [
       { name: "Systolic", type: "line", data: sys, smooth: true, connectNulls: true,
         symbol: "circle", symbolSize: 5,
-        lineStyle: { width: 2, color: t.palette.hr }, itemStyle: { color: t.palette.hr },
+        lineStyle: { width: 2, color: cSys }, itemStyle: { color: cSys },
         markLine: {
           silent: true, symbol: "none", lineStyle: { type: "dashed" as const },
           data: [
-            { yAxis: 120, lineStyle: { color: "#eab308" }, label: { formatter: "elev", color: "#eab308" } },
-            { yAxis: 130, lineStyle: { color: "#f97316" }, label: { formatter: "stage 1", color: "#f97316" } },
-            { yAxis: 140, lineStyle: { color: "#ef4444" }, label: { formatter: "stage 2", color: "#ef4444" } },
+            { yAxis: 120, lineStyle: { color: cElev }, label: { formatter: "elev", color: cElev } },
+            { yAxis: 130, lineStyle: { color: cStage1 }, label: { formatter: "stage 1", color: cStage1 } },
+            { yAxis: 140, lineStyle: { color: cStage2 }, label: { formatter: "stage 2", color: cStage2 } },
           ],
         },
       },
       { name: "Diastolic", type: "line", data: dia, smooth: true, connectNulls: true,
         symbol: "circle", symbolSize: 5,
-        lineStyle: { width: 2, color: t.palette.recovery }, itemStyle: { color: t.palette.recovery },
+        lineStyle: { width: 2, color: cDia }, itemStyle: { color: cDia },
       },
     ],
     dataZoom: [{ type: "inside" }],
@@ -142,7 +151,9 @@ const trendOption = computed(() => {
 // Pulse line (when present)
 const pulseOption = computed(() => {
   void chartTheme.value;
+  void isNeon.value;
   const t = chartTheme.value;
+  const cPulse = isNeon.value ? "#28e6ff" : t.palette.hr;
   const pts = sorted.value
     .filter((p) => p.pulse_bpm != null)
     .map((p) => [p.time, p.pulse_bpm]);
@@ -155,7 +166,7 @@ const pulseOption = computed(() => {
     series: [{
       name: "Pulse @ reading", type: "line", data: pts, smooth: true,
       symbol: "circle", symbolSize: 4, connectNulls: true,
-      lineStyle: { width: 1.5, color: t.palette.hr }, itemStyle: { color: t.palette.hr },
+      lineStyle: { width: 1.5, color: cPulse }, itemStyle: { color: cPulse },
     }],
   };
 });
@@ -331,4 +342,64 @@ function categoryLabel(s: number, d: number): string {
 .muted { color: var(--muted); font-size: 0.85rem; padding: 0.6rem; }
 
 .err { color: var(--bad); padding: 0.4rem 0.6rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin-top: 0.4rem; }
+
+/* ── Vitality Neon ─────────────────────────────────────────────────────
+   Scoped to html[data-theme="neon"]; classic/light/dark untouched. */
+html[data-theme="neon"] .bp {
+  --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  --rn-cyan: #28e6ff; --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-amber: #ffb52e;
+  --rn-red: #ff5d7a; --rn-track: #272a3b;
+  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 22px 22px 32px;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  color: var(--rn-ink); font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+
+/* KPI cards → neon surface, with a Space Grotesk monospace numeric readout */
+html[data-theme="neon"] .bp .kpi {
+  background: var(--rn-card); border: 1px solid #21243450; border-radius: 18px;
+  box-shadow: inset 0 1px 0 #ffffff08;
+}
+html[data-theme="neon"] .bp .kpi-label {
+  color: var(--rn-mut); font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  letter-spacing: 0.11em;
+}
+html[data-theme="neon"] .bp .kpi-val {
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-ink);
+}
+html[data-theme="neon"] .bp .kpi-val .unit,
+html[data-theme="neon"] .bp .kpi-sub { color: var(--rn-mut); }
+
+/* Glow on the headline "Latest" reading (color comes from the bp-* badge class) */
+html[data-theme="neon"] .bp .kpi-val.bp-normal   { text-shadow: 0 0 14px rgba(93, 255, 59, 0.45); }
+html[data-theme="neon"] .bp .kpi-val.bp-elevated,
+html[data-theme="neon"] .bp .kpi-val.bp-stage1   { text-shadow: 0 0 14px rgba(255, 181, 46, 0.45); }
+html[data-theme="neon"] .bp .kpi-val.bp-stage2,
+html[data-theme="neon"] .bp .kpi-val.bp-crisis   { text-shadow: 0 0 14px rgba(255, 93, 122, 0.5); }
+
+/* Category badges: normal→lime, elevated/stage1→amber, stage2/crisis→red */
+html[data-theme="neon"] .bp .bp-normal   { background: rgba(93, 255, 59, 0.16);  color: var(--rn-lime); }
+html[data-theme="neon"] .bp .bp-elevated { background: rgba(255, 181, 46, 0.16); color: var(--rn-amber); }
+html[data-theme="neon"] .bp .bp-stage1   { background: rgba(255, 181, 46, 0.16); color: var(--rn-amber); }
+html[data-theme="neon"] .bp .bp-stage2   { background: rgba(255, 93, 122, 0.16); color: var(--rn-red); }
+html[data-theme="neon"] .bp .bp-crisis   { background: rgba(255, 93, 122, 0.24); color: var(--rn-red); font-weight: 700; }
+html[data-theme="neon"] .bp .cat { font-family: 'Space Grotesk', 'Geist Mono', monospace; }
+
+/* The bp-* classes also tint the inline "Latest" value + history-table BP cells;
+   the kpi-val rule above keeps that legible against the dark surface. */
+
+/* Manual-entry form on the neon surface */
+html[data-theme="neon"] .bp .bp-form input {
+  background: #11131c; color: var(--rn-ink); border: 1px solid #2a2e42; border-radius: 9px;
+}
+html[data-theme="neon"] .bp .bp-form input::placeholder { color: var(--rn-mut); }
+html[data-theme="neon"] .bp .bp-form .primary {
+  background: var(--rn-cyan); color: #0a0d16; border: 1px solid var(--rn-cyan); border-radius: 9px;
+  font-weight: 700; box-shadow: 0 0 14px rgba(40, 230, 255, 0.35);
+}
+
+/* History table chrome */
+html[data-theme="neon"] .bp .hist th { color: var(--rn-mut); border-bottom-color: #2a2e42; }
+html[data-theme="neon"] .bp .hist td { border-bottom-color: #21243450; }
+html[data-theme="neon"] .bp .hist .m,
+html[data-theme="neon"] .bp .muted { color: var(--rn-mut); }
 </style>

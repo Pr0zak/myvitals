@@ -6,7 +6,7 @@ import Card from "@/components/Card.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import { api } from "@/api/client";
 import { fmtDateTime } from "@/format";
-import { chartTheme } from "@/theme";
+import { chartTheme, isNeon } from "@/theme";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 
 interface Streak {
@@ -159,8 +159,11 @@ async function removeStreak(s: Streak) {
 // ── Charts ────────────────────────────────────────────────────
 const histogramOption = computed(() => {
   void chartTheme.value;
+  void isNeon.value;
   const t = chartTheme.value;
   if (!history.value.length) return null;
+  // sober/streak == magenta under neon; theme accent otherwise (unchanged).
+  const barColor = isNeon.value ? "#ff3ad8" : t.palette.accent;
   // Bucket streak durations: 0-1, 1-3, 3-7, 7-14, 14-30, 30-60, 60-90, 90+
   const buckets = [
     { label: "<1d", lo: 0, hi: 1 },
@@ -190,15 +193,18 @@ const histogramOption = computed(() => {
     series: [{
       type: "bar",
       data: counts,
-      itemStyle: { color: t.palette.accent, borderRadius: [4, 4, 0, 0] },
+      itemStyle: { color: barColor, borderRadius: [4, 4, 0, 0] },
     }],
   };
 });
 
 const timelineOption = computed(() => {
   void chartTheme.value;
+  void isNeon.value;
   const t = chartTheme.value;
   if (!history.value.length) return null;
+  // sober/streak == magenta under neon; green otherwise (byte-for-byte).
+  const scatterColor = isNeon.value ? "#ff3ad8" : "#22c55e";
   // Sort ascending by start_at, plot duration of each streak as a step line over time.
   const sorted = [...history.value].sort((a, b) => a.start_at.localeCompare(b.start_at));
   const points = sorted.map((s) => [s.start_at, +s.days.toFixed(2)]);
@@ -211,7 +217,7 @@ const timelineOption = computed(() => {
       type: "scatter",
       data: points,
       symbolSize: (val: [string, number]) => Math.min(20, 4 + Math.sqrt(val[1])),
-      itemStyle: { color: "#22c55e", opacity: 0.7 },
+      itemStyle: { color: scatterColor, opacity: 0.7 },
     }],
   };
 });
@@ -521,5 +527,58 @@ h1 { margin: 0 0 0.4rem; }
   background: transparent; color: var(--muted); border: 1px solid var(--border);
   border-radius: 6px; padding: 0.45rem 0.85rem;
   display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Vitality Neon — scoped to html[data-theme="neon"] only, so the
+   classic/light/dark themes stay byte-for-byte unchanged. Sober/
+   streak == magenta (#ff3ad8). Big numerics use Space Grotesk.
+   ────────────────────────────────────────────────────────────── */
+html[data-theme="neon"] .sober {
+  --rn-mag: #ff3ad8; --rn-track: #272a3b; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
+  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 54px 22px 32px;
+  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+}
+html[data-theme="neon"] .sober h1 {
+  letter-spacing: -0.5px; font-weight: 800;
+}
+
+/* Big live counter — magenta family + glow */
+html[data-theme="neon"] .sober .counter-num {
+  font-family: 'Space Grotesk', 'Geist Mono', ui-monospace, monospace;
+  color: #ff3ad8;
+}
+html[data-theme="neon"] .sober .counter-num .d { color: #ff3ad8; }
+html[data-theme="neon"] .sober .counter-num .h { color: #ff7ae6; }
+html[data-theme="neon"] .sober .counter-num .m { color: #ffaef0; }
+html[data-theme="neon"] .sober .counter-num .s { color: var(--rn-mut); }
+html[data-theme="neon"] .sober .counter-num .lbl {
+  color: var(--rn-mut); font-family: 'Plus Jakarta Sans', system-ui;
+}
+
+/* Milestone ring — magenta stroke with neon glow, dim track */
+html[data-theme="neon"] .sober .ring-bg {
+  stroke: var(--rn-track);
+}
+html[data-theme="neon"] .sober .ring-fg {
+  stroke: #ff3ad8;
+  filter: drop-shadow(0 0 5px rgba(255, 58, 216, 0.6));
+}
+
+/* Stat tiles — Space Grotesk numerics */
+html[data-theme="neon"] .sober .stat-num {
+  font-family: 'Space Grotesk', 'Geist Mono', ui-monospace, monospace;
+}
+
+/* History rows — magenta active accents */
+html[data-theme="neon"] .sober .srow.active {
+  background: rgba(255, 58, 216, 0.06);
+}
+html[data-theme="neon"] .sober .srow-when {
+  font-family: 'Space Grotesk', 'Geist Mono', ui-monospace, monospace;
+}
+html[data-theme="neon"] .sober .active-pill {
+  background: rgba(255, 58, 216, 0.16); color: #ff3ad8;
 }
 </style>

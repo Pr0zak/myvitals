@@ -53,6 +53,9 @@ const router = createRouter({
     { path: "/workout/strength/day/:date", name: "workout-strength-day", component: () => import("./views/workout/StrengthDayView.vue") },
     { path: "/logs", name: "logs", component: () => import("./views/Logs.vue") },
     { path: "/settings", name: "settings", component: () => import("./views/Settings.vue") },
+    // Catch-all: unknown paths (incl. a stale bundle that predates a new route)
+    // redirect home instead of rendering a blank page.
+    { path: "/:pathMatch(.*)*", redirect: "/" },
   ],
 });
 

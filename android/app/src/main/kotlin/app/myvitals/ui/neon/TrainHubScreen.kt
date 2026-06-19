@@ -3,6 +3,7 @@ package app.myvitals.ui.neon
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,12 +15,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
+import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.History
@@ -45,6 +48,7 @@ import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.ActivityRow
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.StrengthWorkoutDetail
+import app.myvitals.ui.MV
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -70,9 +74,15 @@ fun TrainHubScreen(
     contentPadding: PaddingValues,
     onOpen: (String) -> Unit,
 ) {
+    val neon = settings.neonShellEnabled
+
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var activities by remember { mutableStateOf<List<ActivityRow>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    // Selected activity filter — `null` = All. Client-side substring match on
+    // ActivityRow.type against the already-loaded list (the screen now loads a
+    // wide range). Mirrors the web Activities filter chips for parity.
+    var filter by remember { mutableStateOf<ActivityFilter?>(null) }
 
     LaunchedEffect(Unit) {
         if (!settings.isConfigured()) {
@@ -89,7 +99,9 @@ fun TrainHubScreen(
                     }.getOrNull()
                 }
                 val actsD = async(Dispatchers.IO) {
-                    runCatching { api.activities(limit = 8) }.getOrDefault(emptyList())
+                    // Load a wide range so the filter chips have something to
+                    // bite on — filtering is client-side over this list.
+                    runCatching { api.activities(limit = 100) }.getOrDefault(emptyList())
                 }
                 workout = workoutD.await()
                 activities = actsD.await()
@@ -113,10 +125,24 @@ fun TrainHubScreen(
         ?.let { (doneExercises.toFloat() / it).coerceIn(0f, 1f) } ?: 0f
     val ringLabel = if (totalExercises == null) "—" else "$doneExercises/$totalExercises"
 
-    // This-week pill: activities started within the trailing 7 days.
+    // This-week pill: activities started within the trailing 7 days. Counts
+    // the full (unfiltered) list — the pill is a global stat, not filtered.
     val weekCount = remember(activities) {
         val cutoff = LocalDate.now().minusDays(7).toString()
         activities.count { it.startAt >= cutoff }
+    }
+
+    // Which filter chips actually have matches in the loaded list — never show
+    // a chip that would yield an empty feed. "All" is always present.
+    val availableFilters = remember(activities) {
+        ActivityFilter.entries.filter { f -> activities.any { f.matches(it.type) } }
+    }
+    // The visible feed: filtered (client-side) then capped to a sane count so
+    // the page stays a "recent" hub, not an unbounded scroll.
+    val shown = remember(activities, filter) {
+        val f = filter
+        val base = if (f == null) activities else activities.filter { f.matches(it.type) }
+        base.take(25)
     }
 
     NeonScreen(
@@ -144,8 +170,28 @@ fun TrainHubScreen(
 
         // ── Recent activities feed ───────────────────────────────────────
         Spacer(Modifier.height(20.dp))
-        Caption("Recent")
+        CaptionRow("Recent") {
+            // Cheap "See all" affordance — only worth showing once there's a
+            // feed to open into. Routes to the same full activity list as the
+            // footer "All activities" link.
+            if (activities.isNotEmpty()) {
+                SeeAll { onOpen("activities") }
+            }
+        }
         Spacer(Modifier.height(11.dp))
+
+        // ── Filter bar — theme-aware chip row (web parity) ───────────────
+        // Only render once there's a feed to filter and at least one non-All
+        // category present. Selected chip: neon → Cyan, classic → BrandRed.
+        if (availableFilters.size > 1) {
+            FilterBar(
+                available = availableFilters,
+                selected = filter,
+                neon = neon,
+                onSelect = { filter = it },
+            )
+            Spacer(Modifier.height(11.dp))
+        }
 
         if (activities.isEmpty()) {
             ActivityPill(
@@ -156,8 +202,18 @@ fun TrainHubScreen(
                 value = null,
                 onClick = { onOpen("activities") },
             )
+        } else if (shown.isEmpty()) {
+            // Filtered to empty — keep the chips visible above and explain why.
+            ActivityPill(
+                icon = Icons.AutoMirrored.Outlined.FormatListBulleted,
+                tone = NeonMV.Muted,
+                title = "No ${filter?.label ?: "matching"} activities",
+                sub = "Tap to open the full feed",
+                value = null,
+                onClick = { onOpen("activities") },
+            )
         } else {
-            activities.forEach { a ->
+            shown.forEach { a ->
                 val cls = classify(a.type)
                 ActivityPill(
                     icon = cls.icon,
@@ -171,8 +227,14 @@ fun TrainHubScreen(
             }
         }
 
-        // ── Footer links: history + charts + catalog ─────────────────────
+        // ── Footer links: all activities + history + charts + catalog ────
+        // "All activities" is the FIRST link — the full activity feed used to
+        // be reachable only via the disguised "This week · N" header chip,
+        // which read as a stat, not a button. An explicit list LinkRow makes
+        // the whole feed discoverable (web-dashboard parity).
         Spacer(Modifier.height(6.dp))
+        LinkRow("All activities", Icons.AutoMirrored.Outlined.FormatListBulleted) { onOpen("activities") }
+        Spacer(Modifier.height(11.dp))
         LinkRow("Workout history", Icons.Outlined.History) { onOpen("workout/history") }
         Spacer(Modifier.height(11.dp))
         LinkRow("Workout charts", Icons.Outlined.BarChart) { onOpen("workout/charts") }
@@ -215,6 +277,129 @@ private fun Caption(text: String) {
         fontWeight = FontWeight.Bold,
         letterSpacing = 1.4.sp,
     )
+}
+
+/**
+ * Caption eyebrow with an optional trailing action (e.g. a "See all" link)
+ * pushed to the right edge. Used for the "Recent" header so the full activity
+ * feed has a clear inline affordance, not just the footer link.
+ */
+@Composable
+private fun CaptionRow(text: String, trailing: @Composable () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Caption(text)
+        trailing()
+    }
+}
+
+/** Small cyan "See all" text + chevron affordance. */
+@Composable
+private fun SeeAll(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(
+            "See all",
+            color = NeonMV.Cyan,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.6.sp,
+        )
+        Icon(
+            Icons.AutoMirrored.Outlined.ArrowForwardIos,
+            contentDescription = null,
+            tint = NeonMV.Cyan,
+            modifier = Modifier.size(9.dp),
+        )
+    }
+}
+
+// ── Activity filter categories (web Activities parity) ────────────────────
+// Each chip matches ActivityRow.type by case-insensitive substring. Keep the
+// keyword sets aligned with the web ActivityIcon classifier + the planner's
+// manual_cardio / elliptical generic-cardio bucket.
+private enum class ActivityFilter(val label: String, val keywords: List<String>) {
+    Ride("Ride", listOf("ride", "cycl", "bike", "vr")),
+    Run("Run", listOf("run")),
+    Walk("Walk", listOf("walk")),
+    Hike("Hike", listOf("hike")),
+    Row("Row", listOf("row")),
+    Ski("Ski", listOf("ski")),
+    Cardio("Cardio", listOf("manual_cardio", "elliptical", "cardio")),
+    ;
+
+    fun matches(type: String?): Boolean {
+        val t = (type ?: "").lowercase()
+        return keywords.any { t.contains(it) }
+    }
+}
+
+// ── Theme-aware filter chip row ───────────────────────────────────────────
+@Composable
+private fun FilterBar(
+    available: List<ActivityFilter>,
+    selected: ActivityFilter?,
+    neon: Boolean,
+    onSelect: (ActivityFilter?) -> Unit,
+) {
+    // Selected-chip accent: neon shell → Cyan, classic shell → brand red. The
+    // chip bar is a NEW control so it's fine in both shells; only the accent
+    // colour flips so it reads native to whichever theme is active.
+    val accent = if (neon) NeonMV.Cyan else MV.BrandRed
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FilterChip(label = "All", active = selected == null, accent = accent) { onSelect(null) }
+        available.forEach { f ->
+            FilterChip(label = f.label, active = selected == f, accent = accent) {
+                // Tapping the active chip again clears back to All.
+                onSelect(if (selected == f) null else f)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilterChip(
+    label: String,
+    active: Boolean,
+    accent: Color,
+    onClick: () -> Unit,
+) {
+    val bg = if (active) accent.copy(alpha = 0.16f) else NeonMV.Card
+    val border = if (active) accent.copy(alpha = 0.5f) else NeonMV.Line
+    val ink = if (active) accent else NeonMV.Muted
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(bg)
+            .border(1.dp, border, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            color = ink,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.3.sp,
+            maxLines = 1,
+        )
+    }
 }
 
 // ── Today hero card ───────────────────────────────────────────────────────

@@ -538,11 +538,18 @@ private fun Stat(label: String, value: String, neon: Boolean) {
 @Composable
 private fun NeonStatsCard(a: ActivityRow) {
     // Build the present stats in display order, each carrying its accent.
+    // Every non-null field earns a tile; only the dense set renders so the
+    // grid never carries an empty slot. Pace is computed (not a raw field)
+    // and gated to foot sports with a real distance.
     val tiles = buildList {
         a.distanceM?.let {
             add(NeonStatSpec("DISTANCE", "%.2f".format(it / 1609.34), "mi", NeonMV.Lime))
         }
         add(NeonStatSpec("DURATION", "${a.durationS / 60}", "min", NeonMV.Cyan))
+        // Pace (min/mi) for Run / Walk / Hike with a positive distance —
+        // a foot-sport-only readout the web dashboard surfaces. duration
+        // (min) ÷ distance (mi) → "m:ss /mi".
+        computePaceMinPerMi(a)?.let { add(it) }
         a.elevationGainM?.let {
             add(NeonStatSpec("ELEVATION", "%.0f".format(it * 3.28084), "ft", NeonMV.Amber))
         }
@@ -551,6 +558,9 @@ private fun NeonStatsCard(a: ActivityRow) {
         }
         a.maxHr?.let {
             add(NeonStatSpec("MAX HR", "%.0f".format(it), "bpm", NeonMV.Bad))
+        }
+        a.avgPowerW?.let {
+            add(NeonStatSpec("AVG POWER", "%.0f".format(it), "W", NeonMV.Magenta))
         }
         a.kcal?.let {
             add(NeonStatSpec("KCAL", "%.0f".format(it), null, NeonMV.Amber))
@@ -597,6 +607,25 @@ private data class NeonStatSpec(
     val unit: String?,
     val accent: Color,
 )
+
+/**
+ * Pace tile for foot sports (Run / Walk / Hike, case-insensitive substring)
+ * with a positive distance. Returns null otherwise so the caller never adds
+ * an empty tile. Value is "m:ss" minutes-per-mile; the unit carries "/mi".
+ */
+private fun computePaceMinPerMi(a: ActivityRow): NeonStatSpec? {
+    val dist = a.distanceM ?: return null
+    if (dist <= 0.0 || a.durationS <= 0) return null
+    val t = a.type.lowercase()
+    val isFootSport = t.contains("run") || t.contains("walk") || t.contains("hike")
+    if (!isFootSport) return null
+    val miles = dist / 1609.34
+    if (miles <= 0.0) return null
+    val totalSecPerMile = a.durationS / miles
+    val min = (totalSecPerMile / 60).toInt()
+    val sec = (totalSecPerMile % 60).toInt()
+    return NeonStatSpec("PACE", "%d:%02d".format(min, sec), "/mi", NeonMV.Cyan)
+}
 
 @Composable
 private fun NeonStatTile(spec: NeonStatSpec, modifier: Modifier = Modifier) {

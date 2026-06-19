@@ -1,6 +1,7 @@
 package app.myvitals.ui.activities
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,11 +13,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -59,6 +63,7 @@ import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.ActivityRow
 import app.myvitals.sync.BackendClient
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonMV
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -80,6 +85,42 @@ sealed class FeedEntry {
     }
 }
 
+// ── Feed filters (client-side, on the already-loaded wide range) ──────
+
+/** Date-range chips. Filters feed items by sortKey against a cutoff. */
+private enum class RangeFilter(val label: String) {
+    D7("7d"), D30("30d"), D90("90d"), YTD("YTD");
+
+    /** Inclusive lower-bound epoch millis for the range; YTD = Jan 1 this year. */
+    fun cutoffMs(nowMs: Long): Long = when (this) {
+        D7 -> nowMs - 7L * 86_400_000L
+        D30 -> nowMs - 30L * 86_400_000L
+        D90 -> nowMs - 90L * 86_400_000L
+        YTD -> java.time.LocalDate.of(java.time.LocalDate.now().year, 1, 1)
+            .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+    }
+}
+
+/** Type chips. "Strength" keeps the interleaved strength-workout items;
+ *  the rest match ActivityRow.type via case-insensitive substring. */
+private enum class TypeFilter(val label: String, val match: String?) {
+    ALL("All", null),
+    RIDE("Ride", "Ride"),
+    RUN("Run", "Run"),
+    WALK("Walk", "Walk"),
+    HIKE("Hike", "Hike"),
+    STRENGTH("Strength", null);
+}
+
+/** Parse an ISO sortKey to epoch millis; unparseable rows sort as "now"
+ *  (kept visible) so a malformed timestamp never silently hides an item. */
+private fun sortKeyMs(iso: String, nowMs: Long): Long = runCatching {
+    java.time.OffsetDateTime.parse(iso).toInstant().toEpochMilli()
+}.recoverCatching {
+    java.time.LocalDate.parse(iso.take(10))
+        .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+}.getOrDefault(nowMs)
+
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ActivitiesScreen(
@@ -88,6 +129,10 @@ fun ActivitiesScreen(
     onOpenStrengthDay: (dateIso: String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    val neon = settings.neonShellEnabled
+    // Client-side feed filters — default 90d / All.
+    var rangeFilter by remember { mutableStateOf(RangeFilter.D90) }
+    var typeFilter by remember { mutableStateOf(TypeFilter.ALL) }
     var rows by remember { mutableStateOf<List<ActivityRow>>(emptyList()) }
     var workouts by remember {
         mutableStateOf<List<app.myvitals.sync.StrengthWorkoutSummary>>(emptyList())
@@ -176,6 +221,26 @@ fun ActivitiesScreen(
             .sortedByDescending { it.sortKey }
     }
 
+    // Only surface the Hike chip when there's actually a hike in range —
+    // keeps the type row tight for users who never hike.
+    val hasHike = remember(rows) {
+        rows.any { it.type.contains("Hike", ignoreCase = true) }
+    }
+
+    // Apply the two filters client-side over the already-loaded wide range.
+    val filteredFeed = remember(feed, rangeFilter, typeFilter, nowMs) {
+        val cutoff = rangeFilter.cutoffMs(nowMs)
+        feed.filter { entry ->
+            if (sortKeyMs(entry.sortKey, nowMs) < cutoff) return@filter false
+            when (typeFilter) {
+                TypeFilter.ALL -> true
+                TypeFilter.STRENGTH -> entry is FeedEntry.Strength
+                else -> entry is FeedEntry.Activity &&
+                    entry.a.type.contains(typeFilter.match!!, ignoreCase = true)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) { load() }
     LaunchedEffect(Unit) {
         while (true) { delay(60_000); nowMs = System.currentTimeMillis() }
@@ -200,7 +265,7 @@ fun ActivitiesScreen(
                 }
                 Text(
                     if (feed.isEmpty() && !loading) "—"
-                    else "${feed.size} recent",
+                    else "${filteredFeed.size} shown",
                     color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
                 )
             }
@@ -254,6 +319,20 @@ fun ActivitiesScreen(
             )
         }
 
+        // Filter bar — two rows of compact chips (date range + type). Sits
+        // above the list (and the YTD/heatmap cards, which stay unfiltered).
+        // Hidden on a cold empty/loading state to avoid filtering nothing.
+        if (feed.isNotEmpty()) {
+            FilterBar(
+                neon = neon,
+                range = rangeFilter,
+                onRange = { rangeFilter = it },
+                type = typeFilter,
+                onType = { typeFilter = it },
+                hasHike = hasHike,
+            )
+        }
+
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
             isRefreshing = loading,
             onRefresh = { scope.launch { loading = true; load() } },
@@ -281,8 +360,21 @@ fun ActivitiesScreen(
                     ActivityCalendarStrip(rows, workouts)
                     Spacer(Modifier.height(8.dp))
                 }
+                if (filteredFeed.isEmpty()) {
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                "No activities match these filters.",
+                                Modifier.padding(14.dp), color = MV.OnSurfaceVariant,
+                            )
+                        }
+                    }
+                }
                 items(
-                    feed,
+                    filteredFeed,
                     key = { entry ->
                         when (entry) {
                             is FeedEntry.Activity -> "act-${entry.a.source}-${entry.a.sourceId}"
@@ -302,6 +394,100 @@ fun ActivitiesScreen(
             }
         }
         }  // end PullToRefreshBox
+    }
+}
+
+// ── Filter bar ──────────────────────────────────────────────────
+
+@Composable
+private fun FilterBar(
+    neon: Boolean,
+    range: RangeFilter,
+    onRange: (RangeFilter) -> Unit,
+    type: TypeFilter,
+    onType: (TypeFilter) -> Unit,
+    hasHike: Boolean,
+) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        // Row 1 — date range. Fixed 4 chips fit without scrolling, but the
+        // horizontalScroll keeps it safe on narrow displays / large fonts.
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            for (r in RangeFilter.entries) {
+                FilterChip(
+                    label = r.label,
+                    selected = r == range,
+                    neon = neon,
+                    onClick = { onRange(r) },
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        // Row 2 — type. Hike chip only when a hike is present in the data.
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            for (t in TypeFilter.entries) {
+                if (t == TypeFilter.HIKE && !hasHike) continue
+                FilterChip(
+                    label = t.label,
+                    selected = t == type,
+                    neon = neon,
+                    onClick = { onType(t) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Compact pill chip, theme-aware. Selected fill uses the accent
+ * (NeonMV.Cyan in the neon shell, MV.BrandRed in classic); unselected is a
+ * faint outlined surface. Mirrors the BodyScreen neon-pill treatment.
+ */
+@Composable
+private fun FilterChip(
+    label: String,
+    selected: Boolean,
+    neon: Boolean,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(50)
+    val bg = when {
+        selected && neon -> NeonMV.Cyan
+        selected -> MV.BrandRed
+        neon -> NeonMV.Card
+        else -> MV.SurfaceContainer
+    }
+    val borderColor = when {
+        selected -> Color.Transparent
+        neon -> NeonMV.Line
+        else -> MV.OnSurfaceDim.copy(alpha = 0.35f)
+    }
+    val textColor = when {
+        selected && neon -> NeonMV.OnAccent
+        selected -> Color.White
+        neon -> NeonMV.Muted
+        else -> MV.OnSurfaceVariant
+    }
+    Box(
+        Modifier
+            .clip(shape)
+            .background(bg, shape)
+            .border(1.dp, borderColor, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = textColor,
+            fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+        )
     }
 }
 

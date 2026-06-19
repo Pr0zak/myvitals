@@ -192,7 +192,13 @@ private fun DailyVolumeCard(s: StrengthStats, neon: Boolean) {
                 Text("Not enough sessions yet.", color = muted, fontSize = 12.sp)
                 return@Card
             }
-            val producer = remember(s) { CartesianChartModelProducer() }
+            // The producer MUST be a single stable instance for the lifetime of
+            // this CartesianChartHost — Vico throws IllegalStateException if a new
+            // producer is handed to an existing host. Create it ONCE (no key) and
+            // push every data change through runTransaction below; keying the
+            // remember on `s` recreated it when SWR swapped cached→fresh stats,
+            // which is what crashed the screen.
+            val producer = remember { CartesianChartModelProducer() }
             LaunchedEffect(s) {
                 val pairs = s.daily.mapIndexedNotNull { _, d ->
                     runCatching {
@@ -306,7 +312,9 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
                 Text("Need at least 2 sessions for this exercise.",
                     color = muted, fontSize = 12.sp); return@Card
             }
-            val producer = remember(selected, s) { CartesianChartModelProducer() }
+            // Single stable producer (see DailyVolumeCard) — data updates flow
+            // through runTransaction keyed on (selected, s), never a new producer.
+            val producer = remember { CartesianChartModelProducer() }
             LaunchedEffect(selected, s) {
                 val pairs = pts.mapNotNull { p ->
                     runCatching {

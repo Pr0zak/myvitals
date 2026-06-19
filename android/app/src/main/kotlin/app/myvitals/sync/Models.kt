@@ -316,6 +316,22 @@ data class StrengthWorkoutsResponse(
     val workouts: List<StrengthWorkoutSummary>,
 )
 
+/** One projected workout day from GET /workout/strength/upcoming. */
+@JsonClass(generateAdapter = true)
+data class UpcomingDay(
+    val date: String,
+    @Json(name = "is_today") val isToday: Boolean = false,
+    @Json(name = "split_focus") val splitFocus: String,
+    @Json(name = "preview_exercises") val previewExercises: List<String> = emptyList(),
+    @Json(name = "exercise_count") val exerciseCount: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class UpcomingResponse(
+    val count: Int = 0,
+    val upcoming: List<UpcomingDay> = emptyList(),
+)
+
 @JsonClass(generateAdapter = true)
 data class RegenerateRequest(val force: Boolean = false)
 

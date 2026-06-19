@@ -85,6 +85,12 @@ interface BackendApi {
     @GET("workout/strength/today")
     suspend fun strengthToday(): Response<StrengthWorkoutDetail>
 
+    @GET("workout/strength/upcoming")
+    suspend fun upcomingWorkouts(
+        @Query("days") days: Int = 9,
+        @Query("per_day_count") perDayCount: Int = 4,
+    ): UpcomingResponse
+
     @GET("workout/strength/by-date/{date}")
     suspend fun strengthWorkoutByDate(
         @Path("date") date: String,

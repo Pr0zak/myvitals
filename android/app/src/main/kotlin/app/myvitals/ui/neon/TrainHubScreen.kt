@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Pool
@@ -42,12 +43,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.ActivityRow
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.StrengthWorkoutDetail
+import app.myvitals.sync.UpcomingDay
 import app.myvitals.ui.MV
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -78,6 +81,7 @@ fun TrainHubScreen(
 
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var activities by remember { mutableStateOf<List<ActivityRow>>(emptyList()) }
+    var upcoming by remember { mutableStateOf<List<UpcomingDay>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     // Selected activity filter — `null` = All. Client-side substring match on
     // ActivityRow.type against the already-loaded list (the screen now loads a
@@ -103,8 +107,13 @@ fun TrainHubScreen(
                     // bite on — filtering is client-side over this list.
                     runCatching { api.activities(limit = 100) }.getOrDefault(emptyList())
                 }
+                // Read-only schedule forecast → "Next session" card.
+                val upcomingD = async(Dispatchers.IO) {
+                    runCatching { api.upcomingWorkouts().upcoming }.getOrDefault(emptyList())
+                }
                 workout = workoutD.await()
                 activities = actsD.await()
+                upcoming = upcomingD.await()
             }
         }.onFailure { Timber.w(it, "train hub load failed") }
         loading = false
@@ -152,9 +161,10 @@ fun TrainHubScreen(
             WeekChip(weekCount) { onOpen("activities") }
         },
     ) {
-        // ── Today hero card ──────────────────────────────────────────────
+        // ── Today hero card (with the next sessions as a week-timeline strip) ──
         Caption("Today")
         Spacer(Modifier.height(11.dp))
+        val nextSessions = remember(upcoming) { upcoming.filter { !it.isToday }.take(3) }
         TodayHero(
             ringPct = ringPct,
             ringLabel = ringLabel,
@@ -165,6 +175,7 @@ fun TrainHubScreen(
             exerciseCount = totalExercises,
             ctaLabel = if (isRest) "View" else "Continue",
             loading = loading && workout == null,
+            upcoming = nextSessions,
             onClick = { onOpen("workout/today") },
         )
 
@@ -402,6 +413,18 @@ private fun FilterChip(
     }
 }
 
+/** "SAT" / "TMRW" / "9D" — compact day label for the timeline strip. */
+private fun shortDay(iso: String): String = try {
+    val d = java.time.LocalDate.parse(iso)
+    val days = java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.now(), d)
+    when {
+        days == 1L -> "TMRW"
+        days in 0..6 -> d.dayOfWeek.getDisplayName(
+            java.time.format.TextStyle.SHORT, java.util.Locale.getDefault()).uppercase()
+        else -> "${days}D"
+    }
+} catch (e: Exception) { "SOON" }
+
 // ── Today hero card ───────────────────────────────────────────────────────
 @Composable
 private fun TodayHero(
@@ -412,9 +435,10 @@ private fun TodayHero(
     exerciseCount: Int?,
     ctaLabel: String,
     loading: Boolean,
+    upcoming: List<UpcomingDay>,
     onClick: () -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
@@ -422,57 +446,101 @@ private fun TodayHero(
             .border(1.dp, NeonMV.Lime.copy(alpha = 0.18f), RoundedCornerShape(24.dp))
             .clickable(onClick = onClick)
             .padding(18.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        ProgressRing(pct = ringPct, label = ringLabel, color = NeonMV.Lime)
-        Column(Modifier.weight(1f)) {
-            Text(
-                tag.uppercase(),
-                color = NeonMV.Lime,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.4.sp,
-                maxLines = 1,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                title,
-                color = NeonMV.Ink,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = (-0.3).sp,
-                maxLines = 1,
-            )
-            Spacer(Modifier.height(5.dp))
-            Text(
-                when {
-                    loading -> "Loading plan…"
-                    exerciseCount == null -> "No plan today"
-                    exerciseCount == 0 -> "Rest"
-                    exerciseCount == 1 -> "1 exercise"
-                    else -> "$exerciseCount exercises"
-                },
-                color = NeonMV.Muted,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(12.dp))
-            // CTA pill — neon lime fill with glow border, mirroring web `.cont`.
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(NeonMV.Lime)
-                    .border(1.dp, NeonMV.Lime.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
-                    .padding(horizontal = 16.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+        // ── Today ──
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            ProgressRing(pct = ringPct, label = ringLabel, color = NeonMV.Lime)
+            Column(Modifier.weight(1f)) {
                 Text(
-                    ctaLabel,
-                    color = NeonMV.OnAccent,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.ExtraBold,
+                    tag.uppercase(),
+                    color = NeonMV.Lime,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.4.sp,
+                    maxLines = 1,
                 )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    title,
+                    color = NeonMV.Ink,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.3).sp,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    when {
+                        loading -> "Loading plan…"
+                        exerciseCount == null -> "No plan today"
+                        exerciseCount == 0 -> "Rest"
+                        exerciseCount == 1 -> "1 exercise"
+                        else -> "$exerciseCount exercises"
+                    },
+                    color = NeonMV.Muted,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(12.dp))
+                // CTA pill — neon lime fill with glow border, mirroring web `.cont`.
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(NeonMV.Lime)
+                        .border(1.dp, NeonMV.Lime.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 16.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        ctaLabel,
+                        color = NeonMV.OnAccent,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                }
+            }
+        }
+
+        // ── Week-timeline strip: the next sessions, inside the same bubble ──
+        if (upcoming.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                upcoming.forEach { s ->
+                    val lead = s === upcoming.first()
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(NeonMV.Card)
+                            .border(
+                                1.dp,
+                                if (lead) NeonMV.Lime.copy(alpha = 0.30f) else NeonMV.Track,
+                                RoundedCornerShape(14.dp),
+                            )
+                            .padding(horizontal = 11.dp, vertical = 10.dp),
+                    ) {
+                        Text(
+                            shortDay(s.date),
+                            color = if (lead) NeonMV.Lime else NeonMV.Periwinkle,
+                            fontFamily = NeonNumberFamily,
+                            fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp, maxLines = 1,
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            titleCase(s.splitFocus),
+                            color = NeonMV.Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                        if (s.exerciseCount > 0) {
+                            Spacer(Modifier.height(2.dp))
+                            Text("${s.exerciseCount} ex", color = NeonMV.Muted, fontSize = 11.sp)
+                        }
+                    }
+                }
             }
         }
     }

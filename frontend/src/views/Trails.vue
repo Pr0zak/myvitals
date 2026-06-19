@@ -10,7 +10,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "@/leaflet-icons";   // side-effect: fixes default marker URLs under Vite
 import { effectiveTheme, isNeon } from "@/theme";
-import { Star, RefreshCw, Navigation, Pencil, Map as MapIcon, Bike } from "lucide-vue-next";
+import { Star, RefreshCw, Navigation, Pencil, Map as MapIcon, MapPin, Route, Bike } from "lucide-vue-next";
 import { api } from "@/api/client";
 import { queryToken } from "@/config";
 import Card from "@/components/Card.vue";
@@ -439,7 +439,7 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
         </button>
         <button class="refresh" :disabled="fetchingOsm" @click="fetchAllOsm"
                 title="Pull official trail route geometry from OpenStreetMap (free, no key)">
-          🗺 {{ fetchingOsm ? "Fetching OSM…" : "OSM routes" }}
+          <Route :size="14" /> {{ fetchingOsm ? "Fetching OSM…" : "OSM routes" }}
         </button>
       </div>
     </header>
@@ -670,8 +670,8 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
         </p>
         <div ref="editMapEl" class="edit-map" />
         <div class="quick-actions">
-          <button class="ghost" @click="useMyLocation">📍 Use my location</button>
-          <button class="ghost" @click="openInMaps">🗺 Open in Google Maps</button>
+          <button class="ghost" @click="useMyLocation"><MapPin :size="13" /> Use my location</button>
+          <button class="ghost" @click="openInMaps"><MapIcon :size="13" /> Open in Google Maps</button>
         </div>
         <div class="form-grid">
           <label>Latitude<input type="number" step="0.0001" v-model="editLat" placeholder="e.g. 38.9881" /></label>
@@ -889,13 +889,17 @@ html[data-theme="neon"] .trails > .group {
 }
 
 html[data-theme="neon"] .trails .refresh {
-  background: var(--rn-card); border: 1px solid var(--rn-track);
+  background: rgba(40, 230, 255, 0.10);
+  border: 1px solid rgba(40, 230, 255, 0.32);
   border-radius: 999px; color: var(--rn-cyan);
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
 }
 html[data-theme="neon"] .trails .refresh:hover {
   color: var(--rn-ink); border-color: var(--rn-cyan);
   box-shadow: 0 0 10px rgba(40, 230, 255, 0.35);
 }
+html[data-theme="neon"] .trails .refresh:active { transform: scale(0.96); }
 html[data-theme="neon"] .trails .dnis-link { color: var(--rn-cyan); }
 
 html[data-theme="neon"] .trails .hint { color: var(--rn-mut); }
@@ -910,7 +914,9 @@ html[data-theme="neon"] .trails .group h2 {
 html[data-theme="neon"] .trails .card {
   background: var(--rn-card); border: 1px solid #21243450;
   border-radius: 18px;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
+html[data-theme="neon"] .trails .card:active { transform: scale(0.985); }
 html[data-theme="neon"] .trails .card.status-open    { border-left: 3px solid var(--rn-lime); }
 html[data-theme="neon"] .trails .card.status-closed  { border-left: 3px solid var(--rn-bad); opacity: 0.82; }
 html[data-theme="neon"] .trails .card.status-delayed { border-left: 3px solid var(--rn-amber); }

@@ -137,10 +137,29 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
         .limit(1)
     )).scalar_one_or_none()
 
+    # Weight / body-fat are slow-changing "latest" stats (the Body card is
+    # literally labelled "latest"). daily_summary only carries them on days
+    # with a weigh-in, and the recovery-row fallback above reaches at most one
+    # prior day — so a weigh-in from a week ago reads as "—". Fall back to the
+    # most recent BodyMetric overall so the latest known weight always shows.
+    # (BP is deliberately NOT carried this way: a week-old reading shown as
+    # "today's" would be misleading; weight barely moves day-to-day.)
+    latest_body = (await db.execute(
+        select(models.BodyMetric.weight_kg, models.BodyMetric.body_fat_pct)
+        .where(models.BodyMetric.weight_kg.is_not(None))
+        .order_by(models.BodyMetric.time.desc())
+        .limit(1)
+    )).first()
+
     def pick(field: str):
         v = getattr(saved, field, None) if saved else None
         if v is None and fallback is not None:
-            return getattr(fallback, field, None)
+            v = getattr(fallback, field, None)
+        if v is None and latest_body is not None:
+            if field == "weight_kg":
+                return latest_body[0]
+            if field == "body_fat_pct":
+                return latest_body[1]
         return v
 
     if saved or fallback:

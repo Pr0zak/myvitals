@@ -24,7 +24,7 @@ const tabs: Tab[] = [
       ["/heart-rate", "/hrv", "/sleep", "/steps", "/blood-pressure", "/weight", "/skin-temp", "/watch"].includes(p) },
   { to: "/train", label: "Train", color: "#5dff3b", icon: Dumbbell,
     match: (p) => p.startsWith("/train") || p.startsWith("/workout") || p.startsWith("/activit") || p === "/calendar" },
-  { to: "/trails-hub", label: "Trails", color: "#ffb52e", icon: Mountain,
+  { to: "/trails", label: "Trails", color: "#ffb52e", icon: Mountain,
     match: (p) => p.startsWith("/trails") },
   { to: "/coach-hub", label: "Coach", color: "#ff3ad8", icon: Sparkles,
     match: (p) => p === "/coach-hub" || p === "/coach" || p === "/insights" || p.startsWith("/analytics") },

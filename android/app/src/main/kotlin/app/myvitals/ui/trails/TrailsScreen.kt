@@ -5,8 +5,14 @@ import android.net.Uri
 import android.annotation.SuppressLint
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.viewinterop.AndroidView
@@ -64,6 +70,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -339,7 +347,7 @@ fun TrailsScreen(settings: SettingsRepository) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 if (neon) {
                     // Crafted neon header — big Jakarta title + Space Grotesk
                     // status line, mirroring NeonTrailsScreen's RAINOUTLINE read.
@@ -387,56 +395,96 @@ fun TrailsScreen(settings: SettingsRepository) {
                     )
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Aggregate-map overlay — every pinned trail with status colour.
-                IconButton(onClick = { showOverviewMap = true }) {
-                    Icon(
-                        Icons.Outlined.Map,
-                        contentDescription = "Trail status map",
-                        tint = muted,
-                    )
-                }
-                // RainoutLine status board shortcut — same as web header.
-                if (dnisUrl != null) {
-                    val ctxLink = androidx.compose.ui.platform.LocalContext.current
-                    IconButton(
-                        onClick = {
-                            val intent = android.content.Intent(
-                                android.content.Intent.ACTION_VIEW,
-                                android.net.Uri.parse(dnisUrl),
-                            )
-                            ctxLink.startActivity(intent)
-                        },
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Outlined.OpenInNew,
-                            contentDescription = "Open RainoutLine status board",
-                            tint = muted,
-                        )
-                    }
-                }
-                IconButton(onClick = { scope.launch { refreshNow() } }, enabled = !refreshing) {
-                    Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = ink)
-                }
+            Spacer(Modifier.width(12.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(if (neon) 8.dp else 0.dp),
+            ) {
                 var menuOpen by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = "More",
-                            tint = ink)
+                val ctxLink = LocalContext.current
+                if (neon) {
+                    // Redesigned neon header: cyan circular action buttons in the
+                    // Vitality Neon button language (clip → accent fill → accent
+                    // border → tinted icon, à la the old board's RefreshButton).
+                    // Map + Refresh stay visible; RainoutLine + the heavier link /
+                    // OSM actions live in the overflow menu so the cluster stays a
+                    // clean three-button row.
+                    NeonHeaderButton(Icons.Outlined.Map, "Trail status map") {
+                        showOverviewMap = true
                     }
-                    DropdownMenu(
-                        expanded = menuOpen, onDismissRequest = { menuOpen = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(if (linking) "Linking rides…" else "Link rides to trails") },
-                            enabled = !linking,
-                            onClick = { menuOpen = false; scope.launch { linkActivities() } },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(if (fetchingOsm) "Fetching OSM…" else "Fetch OSM routes") },
-                            enabled = !fetchingOsm,
-                            onClick = { menuOpen = false; scope.launch { fetchOsmRoutes() } },
-                        )
+                    NeonHeaderButton(
+                        Icons.Outlined.Refresh, "Refresh trail status",
+                        spinning = refreshing, enabled = !refreshing,
+                    ) { scope.launch { refreshNow() } }
+                    Box {
+                        NeonHeaderButton(Icons.Outlined.MoreVert, "More") { menuOpen = true }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                            modifier = Modifier.background(NeonMV.Card),
+                        ) {
+                            if (dnisUrl != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Open RainoutLine board", color = ink) },
+                                    onClick = {
+                                        menuOpen = false
+                                        ctxLink.startActivity(
+                                            Intent(Intent.ACTION_VIEW, Uri.parse(dnisUrl)),
+                                        )
+                                    },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text(if (linking) "Linking rides…" else "Link rides to trails", color = ink) },
+                                enabled = !linking,
+                                onClick = { menuOpen = false; scope.launch { linkActivities() } },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (fetchingOsm) "Fetching OSM…" else "Fetch OSM routes", color = ink) },
+                                enabled = !fetchingOsm,
+                                onClick = { menuOpen = false; scope.launch { fetchOsmRoutes() } },
+                            )
+                        }
+                    }
+                } else {
+                    // Classic Material header (neon toggle off).
+                    IconButton(onClick = { showOverviewMap = true }) {
+                        Icon(Icons.Outlined.Map, contentDescription = "Trail status map", tint = muted)
+                    }
+                    if (dnisUrl != null) {
+                        IconButton(
+                            onClick = {
+                                ctxLink.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dnisUrl)))
+                            },
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.OpenInNew,
+                                contentDescription = "Open RainoutLine status board",
+                                tint = muted,
+                            )
+                        }
+                    }
+                    IconButton(onClick = { scope.launch { refreshNow() } }, enabled = !refreshing) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = ink)
+                    }
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Outlined.MoreVert, contentDescription = "More", tint = ink)
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen, onDismissRequest = { menuOpen = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(if (linking) "Linking rides…" else "Link rides to trails") },
+                                enabled = !linking,
+                                onClick = { menuOpen = false; scope.launch { linkActivities() } },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (fetchingOsm) "Fetching OSM…" else "Fetch OSM routes") },
+                                enabled = !fetchingOsm,
+                                onClick = { menuOpen = false; scope.launch { fetchOsmRoutes() } },
+                            )
+                        }
                     }
                 }
             }
@@ -444,6 +492,10 @@ fun TrailsScreen(settings: SettingsRepository) {
         if (actionResult != null) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = card),
+                shape = if (neon) app.myvitals.ui.neon.NeonCardShape else CardDefaults.shape,
+                border = if (neon)
+                    androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.30f))
+                    else null,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
             ) {
                 Row(
@@ -470,6 +522,10 @@ fun TrailsScreen(settings: SettingsRepository) {
             error != null -> Text(error!!, color = bad)
             trails.isEmpty() -> Card(
                 colors = CardDefaults.cardColors(containerColor = card),
+                shape = if (neon) app.myvitals.ui.neon.NeonCardShape else CardDefaults.shape,
+                border = if (neon)
+                    androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.22f))
+                    else null,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
@@ -753,6 +809,52 @@ fun TrailsScreen(settings: SettingsRepository) {
                 }
             }
         }
+    }
+}
+
+/**
+ * Circular neon header action button — the Vitality Neon button language:
+ * a 42dp accent-tinted circle (fill α0.14 / border α0.45) with an accent-
+ * tinted icon. `spinning` rotates the icon (used by Refresh while a poll is
+ * in flight), mirroring the old neon board's RefreshButton.
+ */
+@Composable
+private fun NeonHeaderButton(
+    icon: ImageVector,
+    contentDescription: String,
+    accent: Color = NeonMV.Cyan,
+    spinning: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val rotation = if (spinning) {
+        val transition = rememberInfiniteTransition(label = "trails-hdr-spin")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 800, easing = LinearEasing),
+            ),
+            label = "trails-hdr-rot",
+        ).value
+    } else 0f
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(accent.copy(alpha = if (enabled) 0.14f else 0.06f))
+            .border(1.dp, accent.copy(alpha = if (enabled) 0.45f else 0.20f), CircleShape)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = accent.copy(alpha = if (enabled) 1f else 0.5f),
+            modifier = Modifier
+                .size(21.dp)
+                .graphicsLayer { rotationZ = rotation },
+        )
     }
 }
 

@@ -75,7 +75,7 @@ private val NEON_TABS = listOf(
             it == "activities" || it?.startsWith("activity/") == true
     },
     NeonTab(NeonRoutes.TRAILS, "Trails", NeonMV.Amber, Icons.Outlined.Terrain) {
-        it == NeonRoutes.TRAILS || it == "trails"
+        it == NeonRoutes.TRAILS
     },
     NeonTab(NeonRoutes.COACH, "Coach", NeonMV.Magenta, Icons.Outlined.AutoAwesome) {
         it == NeonRoutes.COACH || it == "coach"
@@ -137,7 +137,14 @@ fun NeonAppShell(
                 composable(NeonRoutes.TODAY) { RingsScreen(settings, pad, open) }
                 composable(NeonRoutes.BODY) { BodyScreen(settings, pad, open) }
                 composable(NeonRoutes.TRAIN) { TrainHubScreen(settings, pad, open) }
-                composable(NeonRoutes.TRAILS) { NeonTrailsScreen(settings, pad, open) }
+                // The Trails tab IS the full Trails screen — map button,
+                // recency sort within status groups, and per-trail inline map
+                // drill-down. (Replaced the old NeonTrailsScreen status board,
+                // which had no map button, sorted by status not recency, and
+                // pushed a SECOND full trails list on tap.)
+                composable(NeonRoutes.TRAILS) {
+                    app.myvitals.ui.trails.TrailsScreen(settings = settings)
+                }
                 composable(NeonRoutes.COACH) { CoachHubScreen(settings, pad, open) }
                 composable(NeonRoutes.YOU) { YouScreen(settings, pad, open) }
 
@@ -222,9 +229,6 @@ fun NeonAppShell(
                         sourceId = entry.arguments?.getString("sourceId") ?: "",
                         onBack = { nav.popBackStack() },
                     )
-                }
-                composable("trails") {
-                    app.myvitals.ui.trails.TrailsScreen(settings = settings)
                 }
                 composable("settings") {
                     app.myvitals.ui.SettingsScreen(

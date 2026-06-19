@@ -1143,25 +1143,59 @@ async def upcoming_workouts(
 
     out: list[dict[str, Any]] = []
     cursor_split = last_split
-    for offset in range(days + 1):
+
+    # Today already has a persisted plan (the app generates one daily). The
+    # forecast MUST agree with it rather than simulate a fresh strength session
+    # for today. Today is frequently a yoga / cardio / rest day; simulating a
+    # phantom strength session here (a) disagreed with the real plan and (b)
+    # consumed a rotation step — so the strip showed the rotation one slot
+    # behind ("legs" the day after a just-completed legs session). Emit today's
+    # real plan, advance the cursor only when today is itself a rotation-
+    # strength day, then simulate strictly the FUTURE days. (Read-only: never
+    # generate a missing plan here — fall back to simulating today instead.)
+    start_offset = 0
+    today_plan = (await db.execute(
+        select(models.StrengthWorkout)
+        .where(models.StrengthWorkout.date == today)
+        .order_by(models.StrengthWorkout.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if today_plan is not None:
+        today_count = (await db.execute(
+            select(func.count(models.StrengthWorkoutExercise.id))
+            .where(models.StrengthWorkoutExercise.workout_id == today_plan.id)
+        )).scalar() or 0
+        out.append({
+            "date": today.isoformat(),
+            "is_today": True,
+            "split_focus": today_plan.split_focus,
+            "preview_exercises": [],
+            "exercise_count": int(today_count),
+        })
+        if today_plan.split_focus in strength_algo._ROTATION_FOCUSES:  # noqa: SLF001
+            # Today is a real rotation session — future days rotate off it, and
+            # it counts as the most recent training day for the spacing rule.
+            cursor_split = today_plan.split_focus
+            last_done = today
+        start_offset = 1
+
+    for offset in range(start_offset, days + 1):
         d = today + _td(days=offset)
         # Mon-first index
         mon_first = (d.weekday())  # Python's weekday(): Mon=0..Sun=6 ✓
         if mon_first not in workout_dows:
             continue
-        # Skip if the previous calendar day already had a completed workout.
+        # Spacing: if this scheduled day lands the day after the last training
+        # day, push it back one day when possible so the user doesn't hit two
+        # strength sessions back-to-back. The shifted day is the SINGLE session
+        # for this slot — the rotation advances exactly once for it just below,
+        # so we must NOT advance the cursor here as well (that double-advance
+        # was the rotation-misalignment bug).
         if last_done is not None and (d - last_done).days == 1:
-            # Push this scheduled session back one day if possible.
             shifted = d + _td(days=1)
-            shifted_mon = shifted.weekday()
-            if shifted_mon not in workout_dows:
-                # advance the rotation cursor as if we'd done it on `d`
-                cursor_split = strength_algo.select_split(dpw, pref, cursor_split)
-                # treat `d` as rest, inject `shifted` as the workout instead
+            if shifted.weekday() not in workout_dows:
                 d = shifted
-            else:
-                # next day is already a workout day — leave both alone
-                pass
+            # else: next day is already a workout day — leave both alone.
 
         focus = strength_algo.select_split(dpw, pref, cursor_split)
         cursor_split = focus

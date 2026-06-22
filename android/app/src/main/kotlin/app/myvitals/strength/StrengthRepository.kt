@@ -66,9 +66,13 @@ class StrengthRepository(
         }
     }
 
-    suspend fun regenerate(force: Boolean): StrengthWorkoutDetail =
+    suspend fun regenerate(
+        force: Boolean, forceFullWeight: Boolean = false,
+    ): StrengthWorkoutDetail =
         withContext(Dispatchers.IO) {
-            val plan = api().regenerateStrengthToday(RegenerateRequest(force))
+            val plan = api().regenerateStrengthToday(
+                RegenerateRequest(force, forceFullWeight),
+            )
             planCache.savePlan(plan)
             plan
         }

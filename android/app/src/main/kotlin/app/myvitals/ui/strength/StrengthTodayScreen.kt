@@ -884,6 +884,58 @@ fun StrengthTodayScreen(
                     }
                 }
             }
+            // Recovery deload banner — today's weights were auto-eased for
+            // low recovery. Cyan. Transparent + one-tap override to full
+            // weight, only while still actionable (planned / in_progress).
+            if (plan.deloadFactor < 1.0 &&
+                (plan.status == "planned" || plan.status == "in_progress")
+            ) {
+                item {
+                    val dlCyan = if (neon) NeonMV.Cyan else Color(0xFF38BDF8)
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = dlCyan.copy(alpha = 0.08f),
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("🪶", fontSize = 16.sp,
+                                modifier = Modifier.padding(end = 8.dp))
+                            val pct = Math.round((1.0 - plan.deloadFactor) * 100).toInt()
+                            Column(Modifier.weight(1f)) {
+                                Text("Load eased ~${pct}% for recovery",
+                                    color = pal.ink, fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    (plan.deloadReason ?: "low recovery")
+                                        .replaceFirstChar { it.uppercase() } +
+                                        " — feeling strong?",
+                                    color = pal.muted, fontSize = 12.sp,
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        try {
+                                            workout = repo.regenerate(
+                                                force = true, forceFullWeight = true,
+                                            )
+                                            reload()
+                                        } catch (e: Exception) {
+                                            error = e.message?.take(160)
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = dlCyan),
+                                modifier = Modifier.padding(start = 8.dp),
+                            ) { Text("Full weight") }
+                        }
+                    }
+                }
+            }
             // WP-14 paused banner. Set logging is gated until resume.
             if (plan.status == "paused") {
                 item {

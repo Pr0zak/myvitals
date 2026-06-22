@@ -245,5 +245,9 @@ export interface StrengthWorkoutDetail {
     stage: string;
     modulation: string;       // "normal" | "volume_-20%" | "volume_-30%_cardio_priority"
   } | null;
+  // Automatic recovery deload applied to this plan's weights (1.0 = none).
+  // < 1.0 → show "load eased for recovery — Use full weight" banner.
+  deload_factor?: number;
+  deload_reason?: string | null;  // e.g. "low recovery 52"
   exercises: StrengthWorkoutExercise[];
 }

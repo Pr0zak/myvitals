@@ -658,8 +658,12 @@ export const api = {
     return data;
   },
 
-  async regenerateStrengthToday(force = false): Promise<import("./types").StrengthWorkoutDetail> {
-    const { data } = await http.post("/workout/strength/today/regenerate", { force });
+  async regenerateStrengthToday(
+    force = false, forceFullWeight = false,
+  ): Promise<import("./types").StrengthWorkoutDetail> {
+    const { data } = await http.post("/workout/strength/today/regenerate", {
+      force, force_full_weight: forceFullWeight,
+    });
     return data;
   },
 

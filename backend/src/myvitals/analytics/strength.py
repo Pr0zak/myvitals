@@ -258,6 +258,12 @@ class GeneratedPlan:
     # they can render an amber "fasted training" banner. None when
     # no fast is in progress at plan-generation time.
     fasting_context: dict[str, Any] | None = None
+    # The automatic recovery/readiness-driven deload multiplier that was
+    # applied to target weights (1.0 = none). Surfaced on WorkoutOut so the
+    # UI can show a "load eased for recovery — use full weight" banner and
+    # let the user override via regenerate(force_full_weight=True). Excludes
+    # the user-chosen difficulty knob (that's not something to "confirm").
+    deload_factor: float = 1.0
 
 
 # ------------------------------------------------------------------
@@ -373,6 +379,41 @@ def round_weight(
     return best
 
 
+def deload_round(
+    target_lb: float | None,
+    deload: float,
+    pairs_lb: list[float],
+    wrist_weights_lb: list[float],
+) -> float | None:
+    """Round a deloaded target to a loadable weight, but DON'T let coarse
+    equipment turn a light/moderate deload into a disproportionate cut.
+
+    With only 5-lb dumbbell pairs and no micro-loaders, an 8% recovery deload
+    on a 15 lb lift (→13.8) rounds DOWN to the next pair (10 lb = −33%), and a
+    10 lb lift (→9.2) drops to 5 (−50%). That made a gentle, intended easing
+    feel like a brutal one. Here, when the forced cut is far larger than
+    intended (>2× the intended reduction) AND the deload was only light/
+    moderate (≥0.85), we hold the full-weight rounding instead — a gentle
+    deload should never knock off a whole pair. Severe deloads (<0.85, i.e.
+    multiple low recovery signals) still take the pair drop, and fine-grained
+    setups (micro-loaders) are unaffected because the deloaded weight lands
+    close to intended so the guard never trips.
+    """
+    if target_lb is None:
+        return None
+    full = round_weight(target_lb, pairs_lb, wrist_weights_lb)
+    if deload >= 1.0 or full is None:
+        return full
+    deloaded = round_weight(target_lb * deload, pairs_lb, wrist_weights_lb)
+    if deloaded is None or deloaded >= full:
+        return full
+    intended_cut = target_lb * (1.0 - deload)
+    actual_cut = full - deloaded
+    if actual_cut > 2.0 * intended_cut and deload >= 0.85:
+        return full  # coarse rounding over-corrected — hold full weight
+    return deloaded
+
+
 # ------------------------------------------------------------------
 # Pure: starting weight + rating-driven progression
 # ------------------------------------------------------------------
@@ -466,7 +507,7 @@ def double_progression(
     progress_from_rating directly is unaffected.
     """
     def _round(w: float) -> float | None:
-        return round_weight(w * deload, pairs_lb, wrist_weights_lb)
+        return deload_round(w, deload, pairs_lb, wrist_weights_lb)
 
     base_reps_lo = min(base_reps_lo, base_reps_hi)
     held = _round(last_weight_lb)
@@ -1643,6 +1684,7 @@ async def generate_plan(
     override_split: str | None = None,
     duration_minutes: int | None = None,
     difficulty: str | None = None,
+    force_full_weight: bool = False,
 ) -> GeneratedPlan:
     """Build (but don't persist) a strength plan for the given date.
 
@@ -1915,18 +1957,25 @@ async def generate_plan(
 
     superset_map = pair_supersets(chosen, chosen_slots)
 
-    # Compute target weights for each exercise, applying history + deload
-    deload = recovery.deload_factor() if recovery else 1.0
+    # Compute target weights for each exercise, applying history + deload.
+    # `recovery_deload` is the automatic recovery/readiness factor we surface
+    # to the user (WorkoutOut.deload_factor) and that force_full_weight
+    # overrides. Difficulty is a separate, user-chosen knob layered on top for
+    # the weight math only (not something to "confirm").
+    recovery_deload = (
+        recovery.deload_factor() if (recovery and not force_full_weight) else 1.0
+    )
+    deload = recovery_deload
     # Ad-hoc difficulty knob: easy -10% on top of deload, hard +5%.
     if difficulty == "easy":
         deload *= 0.90
     elif difficulty == "hard":
         deload *= 1.05
-    if deload < 1.0:
+    if recovery_deload < 1.0:
         notes.append(
-            f"Targets reduced by {round((1 - deload) * 100)}% based on today's "
-            f"recovery / sleep / readiness. Toggle this off in Settings if you "
-            f"prefer the algorithm to ignore those signals."
+            f"Targets eased ~{round((1 - recovery_deload) * 100)}% for today's "
+            f"recovery / readiness. Tap “Use full weight” to override, "
+            f"or turn recovery-aware off in Settings."
         )
     if difficulty and difficulty != "normal":
         notes.append(f"Ad-hoc session — difficulty: {difficulty}.")
@@ -1998,15 +2047,15 @@ async def generate_plan(
         elif avg_rating is not None and avg_weight is not None:
             # Non-dumbbell-but-rated (e.g. timed holds carrying a load) —
             # keep the weight-only policy; reps/seconds handled elsewhere.
-            target = round_weight(
+            target = deload_round(
                 progress_from_rating(
                     avg_weight, avg_rating, ex["is_compound"], goal=goal,
-                ) * deload, pairs_lb, wrist,
+                ), deload, pairs_lb, wrist,
             )
         else:
             target = starting_weight_lb(ex["movement_pattern"], level)
             if target is not None:
-                target = round_weight(target * deload, pairs_lb, wrist)
+                target = deload_round(target, deload, pairs_lb, wrist)
 
         # Bodyweight-only exercise (or no DBs owned): leave weight null,
         # progress by reps.
@@ -2205,6 +2254,7 @@ async def generate_plan(
         recovery=recovery,
         notes=notes,
         fasting_context=fasting_ctx,
+        deload_factor=recovery_deload,
     )
 
 
@@ -2245,6 +2295,7 @@ async def persist_plan(
         recovery_score_used=plan.recovery.recovery_score if plan.recovery else None,
         readiness_score_used=plan.recovery.readiness_score if plan.recovery else None,
         sleep_h_used=plan.recovery.sleep_h if plan.recovery else None,
+        deload_factor=plan.deload_factor,
         notes="\n".join(plan.notes) if plan.notes else None,
     )
     db.add(workout)

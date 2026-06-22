@@ -9,8 +9,44 @@ import pytest
 
 from myvitals.analytics.strength import (
     round_weight, valid_dumbbell_loads, progress_from_rating,
-    double_progression,
+    double_progression, deload_round,
 )
+
+
+# Fixed 5-lb pairs, no micro-loaders — the equipment that amplified an 8%
+# recovery deload into a 33–50% cut before the deload_round guard (v0.7.307).
+COARSE_PAIRS = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0]
+
+
+class TestDeloadRound:
+    def test_light_deload_holds_full_on_coarse_pairs(self):
+        # 8% deload on 15 → 13.8, which would round DOWN to 10 (−33%). Guard
+        # holds 15 instead: a gentle deload must not drop a whole pair.
+        assert deload_round(15.0, 0.92, COARSE_PAIRS, []) == 15.0
+        # 10 → 9.2 would drop to 5 (−50%); hold 10.
+        assert deload_round(10.0, 0.92, COARSE_PAIRS, []) == 10.0
+
+    def test_moderate_deload_still_holds_on_coarse_pairs(self):
+        # 15% deload on 15 → 12.75 → would drop to 10; still disproportionate
+        # for the rack granularity at this light load, so hold.
+        assert deload_round(15.0, 0.85, COARSE_PAIRS, []) == 15.0
+
+    def test_severe_deload_takes_the_pair_drop(self):
+        # A real heavy deload (<0.85, e.g. multiple low signals) is meant to
+        # back off hard — let it drop the pair.
+        assert deload_round(15.0, 0.76, COARSE_PAIRS, []) == 10.0
+
+    def test_no_deload_is_plain_rounding(self):
+        assert deload_round(15.0, 1.0, COARSE_PAIRS, []) == 15.0
+
+    def test_microloaders_apply_deload_proportionally(self):
+        # With fine granularity the deloaded weight lands close to intended,
+        # so the guard never trips — the gentle cut actually happens.
+        out = deload_round(15.0, 0.92, COARSE_PAIRS, [1.25, 2.5])
+        assert out is not None and 13.0 <= out < 15.0
+
+    def test_none_target_returns_none(self):
+        assert deload_round(None, 0.92, COARSE_PAIRS, []) is None
 
 
 class TestValidDumbbellLoads:

@@ -591,6 +591,13 @@ class WorkoutOut(BaseModel):
     # active fast. Shape: {active, current_hours, stage, modulation}.
     # Clients render an amber banner when modulation != "normal".
     fasting_context: dict[str, Any] | None = None
+    # Automatic recovery/readiness deload multiplier applied to this plan's
+    # weights (1.0 = none). When < 1.0, clients surface a "load eased for
+    # recovery — Use full weight" banner; the action regenerates with
+    # force_full_weight=true. `deload_reason` is a short human string
+    # ("recovery 52", "readiness 28").
+    deload_factor: float = 1.0
+    deload_reason: str | None = None
     exercises: list[WorkoutExerciseOut] = []
 
 
@@ -707,6 +714,18 @@ async def _hydrate_workout(
     sets_by_wex: dict[int, list[models.StrengthSet]] = {}
     for s in sets_rows:
         sets_by_wex.setdefault(s.workout_exercise_id, []).append(s)
+    # Surface the automatic recovery deload + a short reason so the client can
+    # show a "load eased for recovery — Use full weight" banner. Legacy rows
+    # (deload_factor NULL) are treated as 1.0 (no banner).
+    df = w.deload_factor if w.deload_factor is not None else 1.0
+    deload_reason: str | None = None
+    if df < 1.0:
+        bits: list[str] = []
+        if w.recovery_score_used is not None and w.recovery_score_used < 60:
+            bits.append(f"recovery {round(w.recovery_score_used)}")
+        if w.readiness_score_used is not None and w.readiness_score_used < 30:
+            bits.append(f"readiness {round(w.readiness_score_used)}")
+        deload_reason = ("low " + " / ".join(bits)) if bits else "low recovery"
     return WorkoutOut(
         id=w.id,
         date=w.date,
@@ -729,6 +748,8 @@ async def _hydrate_workout(
         # the fast looks *right now*; the UI can fade the banner once
         # the user has broken the fast.
         fasting_context=await strength_algo._active_fasting_context(db),
+        deload_factor=df,
+        deload_reason=deload_reason,
         exercises=[
             _wex_to_out(wex, sets_by_wex.get(wex.id, [])) for wex in wex_rows
         ],
@@ -1654,6 +1675,7 @@ async def get_workout_by_date(
 
 class RegenerateBody(BaseModel):
     force: bool = False  # bypass rest-day recommendation
+    force_full_weight: bool = False  # ignore the recovery deload (use full load)
 
 
 @router.post("/today/regenerate", response_model=WorkoutOut)
@@ -1687,7 +1709,7 @@ async def regenerate_today(
     profile = await db.get(models.UserProfile, 1)
     plan = await strength_algo.generate_plan(
         db, today, equipment, profile, regen_count=regen_count,
-        force_no_rest=body.force,
+        force_no_rest=body.force, force_full_weight=body.force_full_weight,
     )
 
     if plan.rest_day_recommended and not body.force:

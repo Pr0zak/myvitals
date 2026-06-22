@@ -237,6 +237,10 @@ data class StrengthWorkoutDetail(
     @Json(name = "recovery_score_used") val recoveryScoreUsed: Double? = null,
     @Json(name = "readiness_score_used") val readinessScoreUsed: Double? = null,
     @Json(name = "sleep_h_used") val sleepHUsed: Double? = null,
+    // Automatic recovery deload applied to this plan's weights (1.0 = none).
+    // < 1.0 → StrengthTodayScreen shows a "load eased — Use full weight" banner.
+    @Json(name = "deload_factor") val deloadFactor: Double = 1.0,
+    @Json(name = "deload_reason") val deloadReason: String? = null,
     @Json(name = "started_at") val startedAt: String? = null,
     @Json(name = "completed_at") val completedAt: String? = null,
     @Json(name = "paused_at") val pausedAt: String? = null,
@@ -333,7 +337,10 @@ data class UpcomingResponse(
 )
 
 @JsonClass(generateAdapter = true)
-data class RegenerateRequest(val force: Boolean = false)
+data class RegenerateRequest(
+    val force: Boolean = false,
+    @Json(name = "force_full_weight") val forceFullWeight: Boolean = false,
+)
 
 @JsonClass(generateAdapter = true)
 data class SwapTodayTypeRequest(

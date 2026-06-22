@@ -451,6 +451,10 @@ class StrengthWorkout(Base):
     recovery_score_used: Mapped[float | None] = mapped_column(Float, nullable=True)
     readiness_score_used: Mapped[float | None] = mapped_column(Float, nullable=True)
     sleep_h_used: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Automatic recovery/readiness deload multiplier applied to target weights
+    # (1.0 = none). Surfaced on WorkoutOut for the "load eased — use full
+    # weight" banner. Null on legacy rows (treated as 1.0). v0.7.307.
+    deload_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

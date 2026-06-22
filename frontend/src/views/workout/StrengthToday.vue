@@ -370,11 +370,11 @@ function youtubeUrl(slug: string): string {
 // hash, so re-clicks that don't change underlying data are free.
 const deloadRefreshKey = ref(0);
 
-async function regenerate(force = false) {
+async function regenerate(force = false, forceFullWeight = false) {
   busy.value = "regen";
   error.value = "";
   try {
-    workout.value = await api.regenerateStrengthToday(force);
+    workout.value = await api.regenerateStrengthToday(force, forceFullWeight);
     api.aiStrengthDeloadCheck().catch(() => { /* banner stays stale on failure */ });
     deloadRefreshKey.value++;
   } catch (e) {
@@ -877,6 +877,22 @@ useVisibilityRefresh(loadAll);
           volume trimmed ~30%, rest +30s. A Z2 cardio block alongside is a strong option.
         </template>
       </span>
+    </div>
+
+    <!-- Recovery deload banner — today's weights were auto-eased for low
+         recovery. Transparent + one-tap override to full weight. -->
+    <div v-if="workout && (workout.deload_factor ?? 1) < 1
+               && (workout.status === 'planned' || workout.status === 'in_progress')"
+         class="deload-banner">
+      <span class="deload-icon">🪶</span>
+      <span class="deload-text">
+        Today's load is <strong>eased ~{{ Math.round((1 - (workout.deload_factor ?? 1)) * 100) }}%</strong>
+        for {{ workout.deload_reason || 'low recovery' }}. Feeling strong?
+      </span>
+      <button class="primary small" :disabled="busy === 'regen'"
+              @click="regenerate(true, true)">
+        Use full weight
+      </button>
     </div>
 
     <!-- WP-14 paused banner. Logging is gated until the user resumes. -->
@@ -1809,6 +1825,26 @@ button.ghost:hover { color: var(--text); border-color: var(--accent, #ef4444); }
 }
 .fast-icon { color: #f59e0b; font-size: 1.05rem; }
 .fast-text { flex: 1; font-size: 0.83rem; line-height: 1.35; }
+
+.deload-banner {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.55rem 0.8rem; margin: 0 0 0.7rem;
+  background: rgba(56, 189, 248, 0.07);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-left: 3px solid #38bdf8;
+  border-radius: 8px; color: var(--text);
+}
+.deload-icon { font-size: 1.05rem; }
+.deload-text { flex: 1; font-size: 0.83rem; line-height: 1.35; }
+html[data-theme="neon"] .deload-banner {
+  background: rgba(40,230,255,0.08);
+  border-color: rgba(40,230,255,0.38);
+  border-left: 3px solid var(--rn-cyan);
+  border-radius: 8px;
+  color: var(--rn-ink);
+  box-shadow: 0 0 14px rgba(40,230,255,0.10);
+}
+html[data-theme="neon"] .deload-text strong { color: var(--rn-cyan); }
 
 /* Workout-complete confirmation dialog */
 .cd-backdrop {

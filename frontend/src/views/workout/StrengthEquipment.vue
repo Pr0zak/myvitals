@@ -15,7 +15,7 @@ import type { StrengthEquipment } from "@/api/types";
 const ALL_DB_PAIRS_LB = [5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 27.5, 30, 32.5,
                          35, 37.5, 40, 42.5, 45, 47.5, 50, 55, 60, 65, 70, 75, 80,
                          85, 90, 95, 100];
-const ALL_WRIST_LB = [0.5, 0.75, 1, 1.5, 2, 2.5, 3, 4, 5];
+const ALL_WRIST_LB = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5];
 
 const equip = ref<StrengthEquipment | null>(null);
 const unit = ref<"lb" | "kg">("lb");
@@ -116,6 +116,7 @@ function addWristCustom() {
   const v = Number(wristInput.value);
   if (!isFinite(v) || v <= 0) return;
   const rounded = Math.round(v * 4) / 4;  // 0.25 lb resolution
+  if (rounded <= 0) { wristInput.value = ""; return; }  // sub-0.125 rounds to 0 — ignore
   if (!equip.value.wrist_weights_lb.includes(rounded)) {
     equip.value.wrist_weights_lb.push(rounded);
     equip.value.wrist_weights_lb.sort((a, b) => a - b);

@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +23,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -35,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
@@ -188,14 +192,27 @@ fun StrengthEquipmentScreen(
                 // limits until we add Compose number-pickers in a follow-up.
 
                 EqSection("Wrist weights (lb)", muted)
-                val wristPresets = listOf(1.0, 1.5, 2.0, 2.5, 3.0, 5.0)
+                Text(
+                    "Sub-5 lb micro-loaders you strap on to bridge the gap " +
+                        "between pairs (e.g. 1.25 lb). The planner uses exactly " +
+                        "what you select here — nothing else.",
+                    color = muted, fontSize = 11.sp,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+                val wristAccent = if (neon) NeonMV.Lime else MV.BrandRed
+                val wristPresets = listOf(
+                    0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0,
+                )
+                // Render presets PLUS any custom values already selected (e.g.
+                // added via the web equipment screen) so they're visible and
+                // removable here too — not silently hidden on the phone.
+                val wristItems = (wristPresets + eq.wristWeightsLb).distinct().sorted()
                 ChipGrid(
-                    items = wristPresets,
+                    items = wristItems,
                     selected = eq.wristWeightsLb.toSet(),
                     label = { fmtLb(it) },
                     neon = neon,
-                    // micro-loader rows use the Lime accent under neon
-                    accentColor = if (neon) NeonMV.Lime else MV.BrandRed,
+                    accentColor = wristAccent,
                     onToggle = { lb ->
                         mutate {
                             val cur = it.wristWeightsLb.toMutableList()
@@ -205,6 +222,41 @@ fun StrengthEquipmentScreen(
                         }
                     },
                 )
+                // Custom micro-loader entry (parity with web) — any value not in
+                // the presets, snapped to 0.25 lb resolution.
+                var wristInput by remember { mutableStateOf("") }
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = wristInput,
+                        onValueChange = { wristInput = it },
+                        label = { Text("custom lb") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            val v = wristInput.toDoubleOrNull()
+                            if (v != null) {
+                                val rounded = Math.round(v * 4.0) / 4.0  // 0.25 lb
+                                if (rounded > 0.0) {
+                                    mutate {
+                                        val cur = it.wristWeightsLb.toMutableList()
+                                        if (rounded !in cur) { cur.add(rounded); cur.sort() }
+                                        it.copy(wristWeightsLb = cur)
+                                    }
+                                }
+                            }
+                            wristInput = ""
+                        },
+                        enabled = wristInput.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = wristAccent, contentColor = onAccent,
+                        ),
+                    ) { Text("Add") }
+                }
 
                 EqSection("Bench", muted)
                 SwitchRow("Flat", eq.bench.flat, neon) { on ->

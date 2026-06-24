@@ -753,9 +753,13 @@ data class DailySummary(
     @Json(name = "body_fat_pct") val bodyFatPct: Double? = null,
     @Json(name = "bp_systolic_avg") val bpSystolicAvg: Double? = null,
     @Json(name = "bp_diastolic_avg") val bpDiastolicAvg: Double? = null,
+    @Json(name = "skin_temp_delta_avg") val skinTempDeltaAvg: Double? = null,
     @Json(name = "readiness_score") val readinessScore: Double? = null,
     @Json(name = "sleep_debt_h") val sleepDebtH: Double? = null,
     @Json(name = "fasting_hours") val fastingHours: Double? = null,
+    // Newest HeartRate sample time from /summary/today — drives the
+    // "synced Xm ago" freshness line on the neon Today screen.
+    @Json(name = "last_sync") val lastSync: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

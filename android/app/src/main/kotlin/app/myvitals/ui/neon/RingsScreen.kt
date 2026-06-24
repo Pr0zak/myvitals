@@ -120,7 +120,7 @@ fun RingsScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 4.dp, bottom = 24.dp),
+                .padding(top = 4.dp, bottom = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             GoalRing(
@@ -153,6 +153,21 @@ fun RingsScreen(
                 onClick = { onOpen("vitals/HR") },
                 modifier = Modifier.weight(1f),
             )
+        }
+
+        // ---- Last-sync freshness — is my data up to date? ----
+        // last_sync rides /summary/today (newest HR sample); no extra fetch.
+        val syncAge = summary?.lastSync?.let { syncAgeMinutes(it) }
+        if (syncAge != null) {
+            Text(
+                "Synced ${fmtSyncAge(syncAge)}",
+                color = if (syncAge > 360) NeonMV.Amber else NeonMV.Muted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(bottom = 18.dp),
+            )
+        } else {
+            Spacer(Modifier.height(18.dp))
         }
 
         // ---- Streaks & goals ----
@@ -233,9 +248,16 @@ fun RingsScreen(
             }
         }
 
-        // ---- "Almost there" CTA ----
-        if (stepsToGoal != null && stepsToGoal > 0) {
+        // ---- Move-ring nudge — headline scales with how close you are, so it
+        // no longer says "Almost there!" at 0 steps. Hidden on a cold fetch
+        // (steps == null) and once the goal is hit (stepsToGoal == 0). ----
+        if (steps != null && stepsToGoal != null && stepsToGoal > 0) {
             AlmostThereCta(
+                headline = when {
+                    movePct >= 75f -> "Almost there!"
+                    movePct >= 40f -> "Keep it up"
+                    else -> "Let's get moving"
+                },
                 stepsToGoal = stepsToGoal,
                 onClick = { onOpen("vitals/STEPS") },
             )
@@ -377,7 +399,7 @@ private fun PillRow(
 }
 
 @Composable
-private fun AlmostThereCta(stepsToGoal: Int, onClick: () -> Unit) {
+private fun AlmostThereCta(headline: String, stepsToGoal: Int, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -395,7 +417,7 @@ private fun AlmostThereCta(stepsToGoal: Int, onClick: () -> Unit) {
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                "Almost there!",
+                headline,
                 color = NeonMV.Ink,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.ExtraBold,
@@ -419,4 +441,19 @@ private fun AlmostThereCta(stepsToGoal: Int, onClick: () -> Unit) {
             Text("→", color = NeonMV.OnAccent, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         }
     }
+}
+
+/** Minutes since an ISO timestamp (handles both +00:00 offset and Z forms). */
+private fun syncAgeMinutes(iso: String): Long? = runCatching {
+    val ms = runCatching { java.time.OffsetDateTime.parse(iso).toInstant().toEpochMilli() }
+        .getOrElse { java.time.Instant.parse(iso).toEpochMilli() }
+    (System.currentTimeMillis() - ms) / 60_000L
+}.getOrNull()
+
+/** "just now" / "Nm ago" / "Nh ago" / "Nd ago" — same shape as the Trails header. */
+private fun fmtSyncAge(min: Long): String = when {
+    min < 1 -> "just now"
+    min < 60 -> "${min}m ago"
+    min < 60 * 24 -> "${min / 60}h ago"
+    else -> "${min / (60 * 24)}d ago"
 }

@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Adjust
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Person
@@ -41,9 +40,9 @@ import app.myvitals.health.HealthConnectGateway
  * ALONGSIDE the classic 5-tab Scaffold; MainActivity branches on the Settings
  * "Vitality Neon" toggle. The classic shell is left untouched.
  *
- * Top tabs (Today / Body / Train / Trails / Coach / You) drill into the SAME
+ * Top tabs (Today / Body / Train / Trails / You) drill into the SAME
  * existing detail screens the classic shell uses, so there's no second copy of
- * any detail screen — only a new front door + six consolidated home screens.
+ * any detail screen — only a new front door + consolidated home screens.
  */
 
 /** Neon top-level routes. */
@@ -52,7 +51,6 @@ object NeonRoutes {
     const val BODY = "neon/body"
     const val TRAIN = "neon/train"
     const val TRAILS = "neon/trails"
-    const val COACH = "neon/coach"
     const val YOU = "neon/you"
 }
 
@@ -76,9 +74,6 @@ private val NEON_TABS = listOf(
     },
     NeonTab(NeonRoutes.TRAILS, "Trails", NeonMV.Amber, Icons.Outlined.Terrain) {
         it == NeonRoutes.TRAILS
-    },
-    NeonTab(NeonRoutes.COACH, "Coach", NeonMV.Magenta, Icons.Outlined.AutoAwesome) {
-        it == NeonRoutes.COACH || it == "coach"
     },
     NeonTab(NeonRoutes.YOU, "You", NeonMV.Cyan, Icons.Outlined.Person) {
         it == NeonRoutes.YOU || it in setOf("settings", "sober", "fasting", "journal")
@@ -145,7 +140,6 @@ fun NeonAppShell(
                 composable(NeonRoutes.TRAILS) {
                     app.myvitals.ui.trails.TrailsScreen(settings = settings)
                 }
-                composable(NeonRoutes.COACH) { CoachHubScreen(settings, pad, open) }
                 composable(NeonRoutes.YOU) { YouScreen(settings, pad, open) }
 
                 // ---- Existing detail screens, reused as drill-downs ----

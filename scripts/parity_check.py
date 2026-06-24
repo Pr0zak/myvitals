@@ -38,9 +38,10 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/views/Train.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/neon/TrainHubScreen.kt",
      "Neon Train hub (strength + activities)"),
-    ("frontend/src/views/CoachHub.vue",
-     "android/app/src/main/kotlin/app/myvitals/ui/neon/CoachHubScreen.kt",
-     "Neon Coach hub"),
+    # Coach is intentionally web-only in the neon shell — the phone neon Coach
+    # tab + hub were removed in v0.7.309 (CoachHubScreen.kt deleted) per user
+    # request; the classic phone shell + shared CoachScreen still exist. So
+    # there is deliberately no phone↔web pair for the neon Coach hub.
     ("frontend/src/views/You.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/neon/YouScreen.kt",
      "Neon You / personal hub"),

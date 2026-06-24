@@ -137,19 +137,34 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
         .limit(1)
     )).scalar_one_or_none()
 
-    # Weight / body-fat are slow-changing "latest" stats (the Body card is
-    # literally labelled "latest"). daily_summary only carries them on days
-    # with a weigh-in, and the recovery-row fallback above reaches at most one
-    # prior day — so a weigh-in from a week ago reads as "—". Fall back to the
-    # most recent BodyMetric overall so the latest known weight always shows.
-    # (BP is deliberately NOT carried this way: a week-old reading shown as
-    # "today's" would be misleading; weight barely moves day-to-day.)
+    # Weight / body-fat / blood-pressure are sporadic "latest" stats — recorded
+    # only on days with a weigh-in / cuff reading. daily_summary carries them
+    # only on those days and the recovery-row fallback reaches at most one prior
+    # day, so a reading from last week reads as "—". Fall back to the most recent
+    # reading overall so the latest known value always shows. The Body cards
+    # present these as the last reading (same treatment as weight), not
+    # necessarily today's. Skin-temp delta gets the same carry-forward below
+    # (today's night often has no computed delta).
     latest_body = (await db.execute(
         select(models.BodyMetric.weight_kg, models.BodyMetric.body_fat_pct)
         .where(models.BodyMetric.weight_kg.is_not(None))
         .order_by(models.BodyMetric.time.desc())
         .limit(1)
     )).first()
+    latest_bp = (await db.execute(
+        select(models.BloodPressure.systolic, models.BloodPressure.diastolic)
+        .order_by(models.BloodPressure.time.desc())
+        .limit(1)
+    )).first()
+    # Skin-temp delta is computed per night but not every night (needs a
+    # baseline + an overnight reading), so today's row is often null even
+    # though a recent night has one. Carry forward the latest non-null delta.
+    latest_skin = (await db.execute(
+        select(models.DailySummary.skin_temp_delta_avg)
+        .where(models.DailySummary.skin_temp_delta_avg.is_not(None))
+        .order_by(models.DailySummary.date.desc())
+        .limit(1)
+    )).scalar()
 
     def pick(field: str):
         v = getattr(saved, field, None) if saved else None
@@ -160,6 +175,13 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
                 return latest_body[0]
             if field == "body_fat_pct":
                 return latest_body[1]
+        if v is None and latest_bp is not None:
+            if field == "bp_systolic_avg":
+                return latest_bp[0]
+            if field == "bp_diastolic_avg":
+                return latest_bp[1]
+        if v is None and field == "skin_temp_delta_avg" and latest_skin is not None:
+            return latest_skin
         return v
 
     if saved or fallback:

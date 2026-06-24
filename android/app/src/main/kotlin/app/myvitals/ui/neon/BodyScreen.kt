@@ -217,14 +217,15 @@ fun BodyScreen(
                 loading = loading,
                 onClick = { onOpen("vitals/WEIGHT") },
             )
-            // Skin temp delta has no phone detail screen — render as a
-            // non-clickable stat. The Kotlin DailySummary doesn't carry
-            // skin_temp_delta_avg, so this always reads "—" (the watch
-            // skin-temp upstream bug also zeros it out).
+            // Skin temp overnight delta vs baseline (signed). Same field the
+            // web Body card shows; surfaced via DailySummary.skinTempDeltaAvg.
+            // Non-clickable (no phone detail screen). Reads "—" when there's
+            // genuinely no reading (e.g. the PW3/PW4 skin-temp firmware bug).
+            val skinDelta = sum?.skinTempDeltaAvg
             MetricCard(
                 modifier = Modifier.weight(1f),
                 label = "Skin temp",
-                value = "—",
+                value = skinDelta?.let { (if (it >= 0) "+" else "") + "%.1f".format(it) } ?: "—",
                 unit = "°C",
                 accent = NeonMV.Muted,
                 sub = "vs baseline",

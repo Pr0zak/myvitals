@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForwardIos
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.LocalFireDepartment
@@ -163,12 +162,6 @@ fun YouScreen(
             icon = Icons.Outlined.EditNote, tint = NeonMV.Magenta,
             title = "Journal", subtitle = "Notes & reflections",
             onClick = { onOpen("journal") },
-        )
-        Spacer(Modifier.height(8.dp))
-        LinkPill(
-            icon = Icons.Outlined.AutoAwesome, tint = NeonMV.Cyan,
-            title = "Coach", subtitle = "AI insights & guidance",
-            onClick = { onOpen("coach") },
         )
         Spacer(Modifier.height(8.dp))
         LinkPill(

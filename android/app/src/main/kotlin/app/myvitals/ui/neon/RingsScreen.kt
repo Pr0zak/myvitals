@@ -104,7 +104,6 @@ fun RingsScreen(
     val stepGoal = profile?.stepsGoal() ?: 10_000
     val movePct: Float = if (steps != null && stepGoal > 0)
         min(100f, (steps.toFloat() / stepGoal.toFloat()) * 100f) else 0f
-    val stepsToGoal: Int? = if (steps != null) max(0, stepGoal - steps) else null
 
     NeonScreen(title = "Today", contentPadding = contentPadding) {
         if (loading && summary == null) {
@@ -248,21 +247,6 @@ fun RingsScreen(
             }
         }
 
-        // ---- Move-ring nudge — headline scales with how close you are, so it
-        // no longer says "Almost there!" at 0 steps. Hidden on a cold fetch
-        // (steps == null) and once the goal is hit (stepsToGoal == 0). ----
-        if (steps != null && stepsToGoal != null && stepsToGoal > 0) {
-            AlmostThereCta(
-                headline = when {
-                    movePct >= 75f -> "Almost there!"
-                    movePct >= 40f -> "Keep it up"
-                    else -> "Let's get moving"
-                },
-                stepsToGoal = stepsToGoal,
-                onClick = { onOpen("vitals/STEPS") },
-            )
-        }
-
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -395,51 +379,6 @@ private fun PillRow(
             modifier = Modifier.weight(1f),
         )
         Row(verticalAlignment = Alignment.Bottom) { value() }
-    }
-}
-
-@Composable
-private fun AlmostThereCta(headline: String, stepsToGoal: Int, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 18.dp)
-            .clip(NeonPillShape)
-            .background(
-                Brush.horizontalGradient(
-                    listOf(NeonMV.Lime.copy(alpha = 0.22f), NeonMV.Lime.copy(alpha = 0.05f)),
-                ),
-            )
-            .border(1.dp, NeonMV.Lime.copy(alpha = 0.30f), NeonPillShape)
-            .clickable(onClick = onClick)
-            .padding(20.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                headline,
-                color = NeonMV.Ink,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "${"%,d".format(stepsToGoal)} steps to close your Move ring",
-                color = NeonMV.Lime,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-            )
-        }
-        Spacer(Modifier.width(14.dp))
-        Box(
-            modifier = Modifier
-                .size(52.dp)
-                .clip(CircleShape)
-                .background(NeonMV.Lime),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("→", color = NeonMV.OnAccent, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        }
     }
 }
 

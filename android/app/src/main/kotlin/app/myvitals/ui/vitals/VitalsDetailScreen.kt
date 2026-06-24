@@ -91,15 +91,18 @@ fun VitalsDetailScreen(
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val producer = remember { CartesianChartModelProducer() }
+    // HRV (and other non-dedicated vitals) render on a synchronous dark Canvas
+    // line instead of Vico: Vico painted an un-themed white box and flashed
+    // blank while its model producer pushed async ("white / slow to load").
+    var seriesYs by remember { mutableStateOf<List<Double>>(emptyList()) }
     var stats by remember { mutableStateOf(Triple<Float?, Float?, Float?>(null, null, null)) }
     var haveSeries by remember { mutableStateOf(false) }
 
     val seriesType = remember { VitalsSeries::class.java as java.lang.reflect.Type }
 
-    suspend fun pushSeries(xs: List<Double>, ys: List<Double>) {
+    fun pushSeries(xs: List<Double>, ys: List<Double>) {
         if (xs.isNotEmpty() && ys.isNotEmpty()) {
-            producer.runTransaction { lineSeries { series(x = xs, y = ys) } }
+            seriesYs = ys
             val realY = ys.filter { it.isFinite() }
             stats = Triple(
                 realY.minOrNull()?.toFloat(),
@@ -108,7 +111,7 @@ fun VitalsDetailScreen(
             )
             haveSeries = true
         } else {
-            producer.runTransaction { lineSeries { series(x = listOf(0.0), y = listOf(0.0)) } }
+            seriesYs = emptyList()
             stats = Triple(null, null, null)
         }
     }
@@ -231,33 +234,58 @@ fun VitalsDetailScreen(
                         Text(error!!, Modifier.padding(20.dp), color = bad)
                     } else {
                         Column(Modifier.padding(8.dp)) {
-                            // Under neon the line + area adopt the domain accent;
-                            // classic keeps Vico's theme-default line untouched.
-                            val lineLayer = if (neon) {
-                                rememberLineCartesianLayer(
-                                    LineCartesianLayer.LineProvider.series(
-                                        LineCartesianLayer.rememberLine(
-                                            fill = LineCartesianLayer.LineFill.single(fill(accent)),
-                                            areaFill = LineCartesianLayer.AreaFill.single(
-                                                fill(accent.copy(alpha = 0.18f)),
-                                            ),
-                                        ),
-                                    ),
+                            // Synchronous, dark-themed Canvas line — replaces the
+                            // Vico chart that painted white + flashed blank while
+                            // its async model producer loaded. Dots are dropped
+                            // above ~1 month of points so dense ranges don't smear.
+                            val ys = seriesYs
+                            if (ys.size < 2) {
+                                Text(
+                                    "Not enough data in this window.",
+                                    color = muted, fontSize = 12.sp,
+                                    modifier = Modifier.padding(20.dp),
                                 )
                             } else {
-                                rememberLineCartesianLayer()
+                                val gridColor = if (neon) NeonMV.Line else MV.OnSurfaceDim
+                                androidx.compose.foundation.Canvas(
+                                    Modifier.fillMaxWidth().height(220.dp).padding(vertical = 8.dp),
+                                ) {
+                                    val real = ys.mapIndexed { i, v -> i to v }
+                                        .filter { it.second.isFinite() }
+                                    if (real.size < 2) return@Canvas
+                                    val minV = real.minOf { it.second }
+                                    val maxV = real.maxOf { it.second }
+                                    val span = (maxV - minV).coerceAtLeast(1e-6)
+                                    val padY = size.height * 0.08f
+                                    val plotH = size.height - 2 * padY
+                                    val stepX = size.width / (ys.size - 1).coerceAtLeast(1)
+                                    drawLine(
+                                        color = gridColor.copy(alpha = 0.25f),
+                                        start = androidx.compose.ui.geometry.Offset(0f, size.height - padY),
+                                        end = androidx.compose.ui.geometry.Offset(size.width, size.height - padY),
+                                        strokeWidth = 1.dp.toPx(),
+                                    )
+                                    val path = androidx.compose.ui.graphics.Path()
+                                    var started = false
+                                    val drawDots = ys.size <= 31
+                                    for ((idx, v) in real) {
+                                        val x = idx * stepX
+                                        val y = (padY + ((maxV - v) / span) * plotH).toFloat()
+                                        if (!started) { path.moveTo(x, y); started = true }
+                                        else path.lineTo(x, y)
+                                        if (drawDots) drawCircle(
+                                            accent, radius = 2.dp.toPx(),
+                                            center = androidx.compose.ui.geometry.Offset(x, y),
+                                        )
+                                    }
+                                    drawPath(
+                                        path, color = accent,
+                                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                            width = 2.dp.toPx(),
+                                        ),
+                                    )
+                                }
                             }
-                            CartesianChartHost(
-                                chart = rememberCartesianChart(
-                                    lineLayer,
-                                    startAxis = VerticalAxis.rememberStart(),
-                                    bottomAxis = HorizontalAxis.rememberBottom(),
-                                ),
-                                modelProducer = producer,
-                                scrollState = rememberVicoScrollState(),
-                                zoomState = rememberVicoZoomState(),
-                                modifier = Modifier.fillMaxWidth().height(240.dp),
-                            )
 
                             Spacer(Modifier.height(8.dp))
                             Row(

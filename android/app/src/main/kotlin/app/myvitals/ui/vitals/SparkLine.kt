@@ -1,7 +1,12 @@
 package app.myvitals.ui.vitals
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -9,6 +14,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.myvitals.ui.MV
 
 /**
  * Tiny line chart sized to fit the parent. Auto-scales to data range
@@ -53,5 +60,32 @@ fun SparkLine(
             path = path, color = color,
             style = Stroke(width = 1.5.dp.toPx()),
         )
+    }
+}
+
+/** ISO date ("YYYY-MM-DD…") → "M/d", or null if unparseable. */
+private fun shortMd(iso: String?): String? = iso?.take(10)?.let {
+    runCatching { "${it.substring(5, 7).toInt()}/${it.substring(8, 10).toInt()}" }.getOrNull()
+}
+
+/** Epoch millis → "YYYY-MM-DD" in the device zone (feed into [ChartDateRow]). */
+fun isoDate(ms: Long): String =
+    java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault())
+        .toLocalDate().toString()
+
+/**
+ * First→last date labels under a multi-day trend chart, so a 7/30/90-day
+ * window is anchored to real dates instead of an unlabelled run of points.
+ */
+@Composable
+fun ChartDateRow(startIso: String?, endIso: String?) {
+    val s = shortMd(startIso) ?: return
+    val e = shortMd(endIso) ?: return
+    Row(
+        Modifier.fillMaxWidth().padding(top = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(s, color = MV.OnSurfaceDim, fontSize = 9.sp)
+        Text(e, color = MV.OnSurfaceDim, fontSize = 9.sp)
     }
 }

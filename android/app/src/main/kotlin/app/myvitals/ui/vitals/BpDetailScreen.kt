@@ -217,7 +217,8 @@ private fun BpChart(pts: List<BpReading>) {
                             val py = padTop + ((maxY - getter(r)) /
                                 span.toFloat() * plotH)
                             if (i == 0) path.moveTo(x, py) else path.lineTo(x, py)
-                            drawCircle(color = color, radius = 3.dp.toPx(),
+                            // De-smear: skip per-point dots once the window is dense.
+                            if (pts.size <= 31) drawCircle(color = color, radius = 3.dp.toPx(),
                                 center = Offset(x, py))
                         }
                         drawPath(path = path, color = color, style = Stroke(width = 2.dp.toPx()))
@@ -235,6 +236,7 @@ private fun BpChart(pts: List<BpReading>) {
                         modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
                 }
             }
+            ChartDateRow(isoDate(pts.first().ms), isoDate(pts.last().ms))
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp)) {

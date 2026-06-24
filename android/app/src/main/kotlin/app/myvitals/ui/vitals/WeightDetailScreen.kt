@@ -235,7 +235,8 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
                         val x = padX + i * stepX
                         val py = padTop + ((maxV - w) / span * plotH).toFloat()
                         if (i == 0) path.moveTo(x, py) else path.lineTo(x, py)
-                        drawCircle(color = color, radius = 3.dp.toPx(),
+                        // De-smear: skip per-point dots once the window is dense.
+                        if (n <= 31) drawCircle(color = color, radius = 3.dp.toPx(),
                             center = Offset(x, py))
                     }
                     drawPath(path = path, color = color, style = Stroke(width = 2.dp.toPx()))
@@ -252,6 +253,10 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
                         modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
                 }
             }
+            ChartDateRow(
+                pts.firstOrNull()?.let { isoDate(it.ms) },
+                pts.lastOrNull()?.let { isoDate(it.ms) },
+            )
         }
     }
 }

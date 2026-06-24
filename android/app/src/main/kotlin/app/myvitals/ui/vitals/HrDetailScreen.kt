@@ -540,13 +540,15 @@ private fun RestingHrTrend(rows: List<DailySummary>, range: VitalRange) {
                         val py = padTop + ((maxY - v) / span) * plotH
                         if (!started) { path.moveTo(x, py); started = true }
                         else path.lineTo(x, py)
-                        drawCircle(color = Vital.HR.color, radius = 1.5.dp.toPx(),
-                            center = Offset(x, py))
+                        // De-smear: skip per-point dots once the window is dense.
+                        if (pts.size <= 31) drawCircle(color = Vital.HR.color,
+                            radius = 1.5.dp.toPx(), center = Offset(x, py))
                     }
                     drawPath(path = path, color = Vital.HR.color,
                         style = Stroke(width = 2.dp.toPx()))
                 }
             }
+            ChartDateRow(rows.firstOrNull()?.date, rows.lastOrNull()?.date)
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 Stat("Min", "${real.min().toInt()} bpm")

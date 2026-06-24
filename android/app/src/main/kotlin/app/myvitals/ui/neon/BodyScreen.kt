@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -64,6 +65,8 @@ fun BodyScreen(
     val context = LocalContext.current
     var sum by remember { mutableStateOf<DailySummary?>(null) }
     var profile by remember { mutableStateOf<ProfileResponse?>(null) }
+    // 14-day daily-summary window powering the inline sparklines on each card.
+    var trend by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
@@ -91,6 +94,13 @@ fun BodyScreen(
                 val profileD = async(Dispatchers.IO) {
                     runCatching { api.profile() }.getOrNull()
                 }
+                val trendD = async(Dispatchers.IO) {
+                    runCatching {
+                        api.summaryRange(
+                            since = java.time.LocalDate.now().minusDays(13).toString(),
+                        )
+                    }.getOrNull()
+                }
                 // Only swap in a fresh value — keep the cached render on a
                 // failed/null fetch rather than blanking back to dashes.
                 sumD.await()?.let {
@@ -101,6 +111,7 @@ fun BodyScreen(
                     profile = it
                     JsonCache.write(context, BODY_PROFILE_KEY, ProfileResponse::class.java, it)
                 }
+                trendD.await()?.let { trend = it }
             }
         }.onFailure { Timber.w(it, "body load failed") }
         loading = false
@@ -145,6 +156,7 @@ fun BodyScreen(
                 sub = "resting",
                 loading = loading,
                 onClick = { onOpen("vitals/HR") },
+                spark = trend.map { it.restingHr?.toFloat() },
             )
             MetricCard(
                 modifier = Modifier.weight(1f),
@@ -155,6 +167,7 @@ fun BodyScreen(
                 sub = "overnight avg",
                 loading = loading,
                 onClick = { onOpen("vitals/HRV") },
+                spark = trend.map { it.hrvAvg?.toFloat() },
             )
         }
 
@@ -176,6 +189,7 @@ fun BodyScreen(
                 subColor = if (score != null) NeonMV.Magenta else NeonMV.Muted,
                 loading = loading,
                 onClick = { onOpen("vitals/SLEEP") },
+                spark = trend.map { it.sleepDurationS?.toFloat() },
             )
             val steps = sum?.stepsTotal
             val stepsPct = steps?.let { Math.round(it.toFloat() / stepGoal * 100) }
@@ -189,6 +203,7 @@ fun BodyScreen(
                 subColor = if (stepsPct != null) NeonMV.Lime else NeonMV.Muted,
                 loading = loading,
                 onClick = { onOpen("vitals/STEPS") },
+                spark = trend.map { it.stepsTotal?.toFloat() },
             )
         }
 
@@ -216,6 +231,7 @@ fun BodyScreen(
                 sub = "latest",
                 loading = loading,
                 onClick = { onOpen("vitals/WEIGHT") },
+                spark = trend.map { it.weightKg?.toFloat()?.times(2.20462f) },
             )
             // Skin temp overnight delta vs baseline (signed). Same field the
             // web Body card shows; surfaced via DailySummary.skinTempDeltaAvg.
@@ -330,11 +346,12 @@ private fun MetricCard(
     loading: Boolean,
     onClick: (() -> Unit)?,
     subColor: Color = NeonMV.Muted,
+    spark: List<Float?>? = null,
     modifier: Modifier = Modifier,
 ) {
-    Column(
+    Box(
         modifier = modifier
-            .height(112.dp)
+            .height(124.dp)
             .clip(NeonCardShape)
             // Slightly stronger surface than the flat Card fill: a faint
             // accent-tinted top-to-bottom wash over the elevated card colour
@@ -346,43 +363,58 @@ private fun MetricCard(
                 ),
             )
             .border(1.dp, accent.copy(alpha = 0.26f), NeonCardShape)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 14.dp, vertical = 13.dp),
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
     ) {
-        Text(
-            label.uppercase(),
-            color = accent.copy(alpha = 0.85f),
-            fontFamily = NeonNumberFamily,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.2.sp,
-        )
-        Spacer(Modifier.weight(1f))
-        Row(verticalAlignment = Alignment.Bottom) {
-            NeonNumber(
-                if (loading && value == "—") "…" else value,
-                color = NeonMV.Ink,
-                size = 25,
+        // Bolder variant: the 14-day trend rides the lower half of the card as
+        // a faint accent backdrop behind the value, not a thin line under it.
+        if (spark != null && spark.count { it != null } >= 2) {
+            app.myvitals.ui.vitals.SparkLine(
+                values = spark,
+                color = accent.copy(alpha = 0.30f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+                    .align(Alignment.BottomCenter),
             )
-            if (unit != null) {
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    unit,
-                    color = NeonMV.Muted,
-                    fontFamily = NeonNumberFamily,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 3.dp),
-                )
-            }
         }
-        Spacer(Modifier.height(7.dp))
-        Text(
-            sub,
-            color = subColor,
-            fontSize = 11.5.sp,
-            fontWeight = FontWeight.Medium,
-        )
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 13.dp),
+        ) {
+            Text(
+                label.uppercase(),
+                color = accent.copy(alpha = 0.85f),
+                fontFamily = NeonNumberFamily,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.2.sp,
+            )
+            Spacer(Modifier.weight(1f))
+            Row(verticalAlignment = Alignment.Bottom) {
+                NeonNumber(
+                    if (loading && value == "—") "…" else value,
+                    color = NeonMV.Ink,
+                    size = 25,
+                )
+                if (unit != null) {
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        unit,
+                        color = NeonMV.Muted,
+                        fontFamily = NeonNumberFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 3.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                sub,
+                color = subColor,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
     }
 }
 

@@ -82,6 +82,8 @@ fun TrainHubScreen(
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var activities by remember { mutableStateOf<List<ActivityRow>>(emptyList()) }
     var upcoming by remember { mutableStateOf<List<UpcomingDay>>(emptyList()) }
+    // 30-day strength stats — feeds the weekly dashboard + PR/streak cards.
+    var stats by remember { mutableStateOf<app.myvitals.sync.StrengthStats?>(null) }
     var loading by remember { mutableStateOf(true) }
     // Selected activity filter — `null` = All. Client-side substring match on
     // ActivityRow.type against the already-loaded list (the screen now loads a
@@ -111,9 +113,13 @@ fun TrainHubScreen(
                 val upcomingD = async(Dispatchers.IO) {
                     runCatching { api.upcomingWorkouts().upcoming }.getOrDefault(emptyList())
                 }
+                val statsD = async(Dispatchers.IO) {
+                    runCatching { api.strengthStats(days = 30) }.getOrNull()
+                }
                 workout = workoutD.await()
                 activities = actsD.await()
                 upcoming = upcomingD.await()
+                stats = statsD.await()
             }
         }.onFailure { Timber.w(it, "train hub load failed") }
         loading = false
@@ -178,6 +184,12 @@ fun TrainHubScreen(
             upcoming = nextSessions,
             onClick = { onOpen("workout/today") },
         )
+
+        // ── Weekly training dashboard + PR/streak (PROTOTYPE) ─────────────
+        stats?.let { s ->
+            Spacer(Modifier.height(16.dp))
+            WeeklyDashboardCard(s) { onOpen("workout/charts") }
+        }
 
         // ── Recent activities feed ───────────────────────────────────────
         Spacer(Modifier.height(20.dp))
@@ -538,6 +550,104 @@ private fun TodayHero(
                         if (s.exerciseCount > 0) {
                             Spacer(Modifier.height(2.dp))
                             Text("${s.exerciseCount} ex", color = NeonMV.Muted, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Weekly training dashboard (PROTOTYPE) ──────────────────────────────────
+private fun muscleColorNeon(m: String): Color = when (m.lowercase()) {
+    "chest" -> NeonMV.Bad
+    "back", "lats" -> NeonMV.Cyan
+    "shoulders" -> NeonMV.Amber
+    "biceps" -> NeonMV.Magenta
+    "triceps" -> NeonMV.Periwinkle
+    "quadriceps", "quads", "hamstrings", "calves", "glutes" -> NeonMV.Lime
+    "abdominals", "abs", "core" -> NeonMV.Amber
+    else -> NeonMV.Muted
+}
+
+@Composable
+private fun WeeklyDashboardCard(s: app.myvitals.sync.StrengthStats, onClick: () -> Unit) {
+    val today = java.time.LocalDate.now()
+    fun agoDays(d: String): Long? = runCatching {
+        java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.parse(d), today)
+    }.getOrNull()
+    val thisWeek = s.daily.filter { (agoDays(it.date) ?: 99) in 0..6 }
+    val prevWeek = s.daily.filter { (agoDays(it.date) ?: 99) in 7..13 }
+    val weekTonnage = thisWeek.sumOf { it.volumeLb }
+    val prevTonnage = prevWeek.sumOf { it.volumeLb }
+    val weekSessions = thisWeek.count { it.volumeLb > 0 || it.sets > 0 }
+    val deltaPct = if (prevTonnage > 0)
+        ((weekTonnage - prevTonnage) / prevTonnage * 100).toInt() else null
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(NeonMV.CardHigh)
+            .border(1.dp, NeonMV.Lime.copy(alpha = 0.18f), RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+    ) {
+        Text(
+            "THIS WEEK", color = NeonMV.Lime.copy(alpha = 0.85f),
+            fontFamily = NeonNumberFamily, fontSize = 10.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+            Column {
+                Text("VOLUME", color = NeonMV.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    NeonNumber("%,.0f".format(weekTonnage), color = NeonMV.Ink, size = 22)
+                    Spacer(Modifier.width(3.dp))
+                    Text("lb", color = NeonMV.Muted, fontSize = 11.sp,
+                        modifier = Modifier.padding(bottom = 2.dp))
+                }
+                if (deltaPct != null) {
+                    val up = deltaPct >= 0
+                    Text(
+                        "${if (up) "▲" else "▼"} ${kotlin.math.abs(deltaPct)}% vs last wk",
+                        color = if (up) NeonMV.Lime else NeonMV.Amber,
+                        fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+            Column {
+                Text("SESSIONS", color = NeonMV.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                NeonNumber("$weekSessions", color = NeonMV.Lime, size = 22)
+            }
+        }
+        if (s.perMuscle.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "VOLUME BY MUSCLE · 30d", color = NeonMV.Muted,
+                fontFamily = NeonNumberFamily, fontSize = 9.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+            )
+            Spacer(Modifier.height(7.dp))
+            val maxV = s.perMuscle.maxOf { it.volumeLb }.coerceAtLeast(1.0)
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                for (m in s.perMuscle.sortedByDescending { it.volumeLb }.take(5)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            titleCase(m.muscle), color = NeonMV.Ink, fontSize = 11.sp,
+                            maxLines = 1, modifier = Modifier.width(86.dp),
+                        )
+                        Box(
+                            Modifier.weight(1f).height(7.dp)
+                                .clip(RoundedCornerShape(4.dp)).background(NeonMV.Track),
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth((m.volumeLb / maxV).toFloat().coerceIn(0.02f, 1f))
+                                    .height(7.dp)
+                                    .background(muscleColorNeon(m.muscle)),
+                            )
                         }
                     }
                 }

@@ -1190,7 +1190,7 @@
   {
     "id": "Hollow_Body_Hold",
     "name": "Hollow Body Hold",
-    "primary_muscle": "core",
+    "primary_muscle": "abdominals",
     "secondary_muscles": [
       "hip_flexors"
     ],
@@ -1198,7 +1198,7 @@
       "bodyweight"
     ],
     "is_compound": false,
-    "movement_pattern": "core_stability",
+    "movement_pattern": "isolation_core",
     "level": "intermediate",
     "mechanic": "isolation",
     "instructions": [
@@ -1215,7 +1215,7 @@
   {
     "id": "Plank_Pull_Through",
     "name": "Dumbbell Plank Pull-Through",
-    "primary_muscle": "core",
+    "primary_muscle": "abdominals",
     "secondary_muscles": [
       "back",
       "shoulders"
@@ -1224,7 +1224,7 @@
       "dumbbell"
     ],
     "is_compound": false,
-    "movement_pattern": "core_stability",
+    "movement_pattern": "isolation_core",
     "level": "intermediate",
     "mechanic": "isolation",
     "instructions": [
@@ -1902,5 +1902,126 @@
     "youtube_query": "Rolling Like a Ball pilates form",
     "is_bilateral": false,
     "is_timed": false
+  },
+  {
+    "id": "Bicycle_Crunch",
+    "name": "Bicycle Crunch",
+    "primary_muscle": "abdominals",
+    "secondary_muscles": [
+      "lower_back"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "isolation_core",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Lie on your back, hands lightly behind your head, knees bent and lifted.",
+      "Bring one elbow toward the opposite knee while extending the other leg straight.",
+      "Rotate through your trunk — the twist comes from the obliques, not yanking your neck.",
+      "Alternate sides in a smooth pedaling motion, controlling each rep."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Bicycle crunch form"
+  },
+  {
+    "id": "Dumbbell_Russian_Twist",
+    "name": "Dumbbell Russian Twist",
+    "primary_muscle": "abdominals",
+    "secondary_muscles": [
+      "lower_back"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": false,
+    "movement_pattern": "isolation_core",
+    "level": "intermediate",
+    "mechanic": "isolation",
+    "instructions": [
+      "Sit on the floor, knees bent, heels down or lifted for more challenge, holding one dumbbell at your chest.",
+      "Lean back to about 45 degrees and brace your core.",
+      "Rotate the dumbbell from hip to hip, twisting through your trunk and following with your gaze.",
+      "Keep the movement controlled — rotation, not just swinging the arms."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Dumbbell Russian twist form"
+  },
+  {
+    "id": "Dumbbell_Woodchopper",
+    "name": "Dumbbell Woodchopper",
+    "primary_muscle": "abdominals",
+    "secondary_muscles": [
+      "shoulders",
+      "lower_back"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": false,
+    "movement_pattern": "isolation_core",
+    "level": "intermediate",
+    "mechanic": "isolation",
+    "instructions": [
+      "Stand holding one dumbbell with both hands, feet shoulder-width.",
+      "Start high over one shoulder, then chop diagonally down and across to the opposite hip, pivoting the back foot.",
+      "Drive the rotation from your core, keeping arms fairly straight.",
+      "Control the way back up and finish all reps before switching sides."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Dumbbell woodchopper form"
+  },
+  {
+    "id": "Plank_Shoulder_Taps",
+    "name": "Plank Shoulder Taps",
+    "primary_muscle": "abdominals",
+    "secondary_muscles": [
+      "shoulders"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "is_compound": false,
+    "movement_pattern": "isolation_core",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Set up in a high plank, hands under shoulders, feet wider than hips for stability.",
+      "Brace hard and tap one hand to the opposite shoulder without letting your hips rock.",
+      "Return the hand and tap with the other — resisting rotation is the whole point.",
+      "Keep your hips level and core tight throughout."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Plank shoulder taps form"
+  },
+  {
+    "id": "Standing_Dumbbell_Twist",
+    "name": "Standing Dumbbell Twist",
+    "primary_muscle": "abdominals",
+    "secondary_muscles": [
+      "lower_back"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "is_compound": false,
+    "movement_pattern": "isolation_core",
+    "level": "beginner",
+    "mechanic": "isolation",
+    "instructions": [
+      "Stand tall holding one dumbbell at chest height with both hands, elbows bent.",
+      "Keep hips facing forward and rotate your trunk to one side under control.",
+      "Return to center and rotate to the other side — move from the waist, not the arms.",
+      "Use a light weight and keep the tempo smooth."
+    ],
+    "image_front": null,
+    "image_side": null,
+    "youtube_query": "Standing dumbbell twist form"
   }
 ]

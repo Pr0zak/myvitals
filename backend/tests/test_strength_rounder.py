@@ -377,6 +377,46 @@ class TestPrescribeSlotAgeAndBodyweight:
         assert any(i.startswith("Fresh_") for i in ids)
         assert "Heavily_Used" not in ids
 
+    def test_soft_level_surfaces_offlevel_core_variety(self):
+        """#WP-18: a BEGINNER must still see deep core variety, including
+        intermediate moves like Russian Twist.
+
+        Pre-fix, level was a hard gate: the core slot ranked all 33
+        beginner-tagged ab exercises ahead of intermediate ones, and the
+        top-3 pick window plus a deterministic tie-break meant Russian
+        Twist (intermediate, ~#36 of 40) was effectively unreachable
+        forever. The seeded jitter + soft-level tie-break should make the
+        core slot rotate through the deep catalog and surface intermediate
+        variants for a beginner.
+        """
+        from myvitals.analytics.strength import (
+            select_exercises_for_split, filter_catalog_for_equipment, CATALOG,
+        )
+        import random
+
+        equip = {
+            "bench": {"flat": True, "incline": True, "decline": True},
+            "dumbbells": {"type": "fixed_pairs"}, "bodyweight": True,
+            "pull_up_bar": False, "barbell": False, "squat_rack": False,
+        }
+        cat = filter_catalog_for_equipment(CATALOG, equip)
+
+        core_ids: set[str] = set()
+        for seed in range(80):
+            rng = random.Random(f"wp18-{seed}")
+            chosen, _, _ = select_exercises_for_split(cat, "legs", "beginner", rng)
+            for e in chosen:
+                if e["movement_pattern"] == "isolation_core":
+                    core_ids.add(e["id"])
+
+        # Deep variety: a beginner should reach well beyond a handful of
+        # crunches over 80 plans.
+        assert len(core_ids) >= 15, f"only {len(core_ids)} distinct core moves"
+        # The flagship intermediate rotation move must be reachable.
+        assert "Russian_Twist" in core_ids
+        # The newly-added rotation/anti-rotation moves are reachable too.
+        assert {"Bicycle_Crunch", "Dumbbell_Russian_Twist"} & core_ids
+
     def test_weighted_exercise_ignores_bodyweight(self):
         # A weighted exercise should keep its baseline reps regardless of user BW.
         from myvitals.analytics.strength import prescribe_slot

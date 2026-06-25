@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from itertools import chain, combinations
@@ -583,6 +584,29 @@ _LOW_BAR_REQUIRED_EXERCISES: frozenset[str] = frozenset({
     "Inverted_Row",
 })
 
+# WP-18 — qualifier words stripped when deriving an exercise's "movement
+# family" (the core noun). Lets us tell that "Straight-Arm Dumbbell Pullover"
+# and "Bent-Arm Dumbbell Pullover" are the SAME movement so the finisher
+# doesn't add a second pullover when the pull slot already substituted one.
+_FAMILY_QUALIFIERS: frozenset[str] = frozenset({
+    "dumbbell", "barbell", "cable", "machine", "band", "bands",
+    "incline", "decline", "flat", "seated", "standing", "lying", "kneeling",
+    "alternate", "alternating", "single", "one", "two", "arm", "leg", "legs",
+    "bent", "straight", "close", "wide", "neutral", "reverse", "overhead",
+    "grip", "with", "a", "an", "the", "of", "on", "over", "to", "in", "out",
+    "up", "down", "palms", "front", "rear", "side", "high", "low", "body",
+    "weighted", "db", "and", "for", "head",
+})
+
+
+def _name_family(name: str) -> str:
+    """Coarse movement family from an exercise name — the last non-qualifier
+    word (e.g. 'pullover', 'twist', 'crunch'). Used to block near-duplicate
+    variants from landing in the same day."""
+    words = re.split(r"[\s_/+-]+", name.lower())
+    core = [w for w in words if w and w not in _FAMILY_QUALIFIERS]
+    return core[-1] if core else name.lower()
+
 
 def filter_catalog_for_equipment(
     catalog: list[dict[str, Any]], equipment: dict[str, Any]
@@ -670,7 +694,13 @@ def _exercises_for_pattern(
         compound_score = 0 if (is_compound_slot and e["is_compound"]) else 1
         lvl = LEVEL_INDEX.get(e["level"], 1)
         target_lvl = LEVEL_INDEX.get(level, 1)
-        level_score = abs(lvl - target_lvl)
+        # WP-18 — SOFT level. Treat adjacent levels (±1) as equally eligible
+        # so a beginner still rotates through intermediate variants (e.g.
+        # Russian Twist, intermediate, was hard-gated to ~#36 of 40 ab moves
+        # and never made the pick window). Only a 2-level gap is deprioritised.
+        # Without this the level term dominates isolation slots (where
+        # compound_score is constant) and crushes variety.
+        level_score = 0 if abs(lvl - target_lvl) <= 1 else 1
         return (compound_score, level_score, e["id"])
 
     return sorted(matches, key=rank_key)
@@ -776,7 +806,22 @@ def select_exercises_for_split(
             if favs:
                 candidates = favs
             else:
-                def _sort_key(e: dict[str, Any]) -> tuple[int, int, int]:
+                # WP-18 — seeded jitter + soft level. Previously equally-fresh
+                # candidates (all freq 0 on a new plan) resolved to the same
+                # deterministic order, so the top-3 window served the same
+                # alphabetically/level-first moves forever and never reached
+                # the deep catalog (Russian Twist was ~#36 of 40 ab moves and
+                # invisible). `jitter` randomises ties so any fresh candidate
+                # can surface; `lvl_bucket` keeps a 2-level mismatch (e.g. an
+                # advanced compound for a beginner) deprioritised while
+                # treating adjacent levels as equal — so a beginner still sees
+                # intermediate isolation variety. Frequency still dominates
+                # (rotation pressure intact), so a heavily-used lift stays out
+                # of the window while fresher options exist.
+                jitter = {c["id"]: rng.random() for c in candidates}
+                target_lvl = LEVEL_INDEX.get(level, 1)
+
+                def _sort_key(e: dict[str, Any]) -> tuple:
                     eid = e["id"]
                     if prefs.get(eid) == "avoid":
                         avoid_bucket = 2
@@ -788,7 +833,10 @@ def select_exercises_for_split(
                     # frequency. Negate so higher gap = lower sort value
                     # = front of list.
                     bal = -_balance_score(e)
-                    return (avoid_bucket, bal, freq.get(eid, 0))
+                    lvl = LEVEL_INDEX.get(e["level"], 1)
+                    lvl_bucket = 0 if abs(lvl - target_lvl) <= 1 else 1
+                    return (avoid_bucket, bal, freq.get(eid, 0),
+                            lvl_bucket, jitter[eid])
                 candidates = sorted(candidates, key=_sort_key)
 
         if not candidates:
@@ -800,8 +848,10 @@ def select_exercises_for_split(
                     "would unlock pull-ups, chin-ups, and lat width work."
                 )
             continue
-        # Among the top 3 candidates, pick one (lets seeded RNG vary across
-        # regen calls without dropping into low-quality picks).
+        # Pick from the top 3 candidates (lets seeded RNG vary across regen
+        # calls). The window stays narrow so rotation pressure holds — the
+        # jitter in _sort_key, not a wider window, is what delivers variety,
+        # so a heavily-used lift can't sneak back in while fresh ones exist.
         top = candidates[: min(3, len(candidates))]
         pick = rng.choice(top)
         chosen.append(pick)
@@ -2151,22 +2201,36 @@ async def generate_plan(
 
         finishers_added: list[str] = []
         already_chosen_ids = {e["id"] for e in chosen}
+        # WP-18 — track movement families already in the plan so a finisher
+        # can't add a near-duplicate (the classic bug: pull slot substitutes
+        # Straight-Arm Pullover, then the lats finisher adds Bent-Arm Pullover
+        # — two pullovers in one day). Family-block only the finisher; the
+        # regular slots' twin-isolation design (e.g. two biceps slots) stays.
+        chosen_families = {_name_family(e.get("name", e["id"])) for e in chosen}
         finisher_seed_rng = random.Random(seed + "::finishers")
         for muscle in fill_order:
             if len(finishers_added) >= max_accessory:
                 break
             pattern = FINISHER_PATTERNS[muscle]
             candidates = _exercises_for_pattern(catalog, pattern, level, [muscle])
-            candidates = [c for c in candidates if c["id"] not in already_chosen_ids]
+            candidates = [
+                c for c in candidates
+                if c["id"] not in already_chosen_ids
+                and _name_family(c["name"]) not in chosen_families
+            ]
             if not candidates:
                 continue
-            # Use rotation pressure (low frequency wins) for variety.
+            # Rotation pressure (low 4-week frequency wins) + WP-18 seeded
+            # jitter so equally-fresh finishers don't always resolve to the
+            # same alphabetical pick — same fix as the main slots.
+            fin_jitter = {c["id"]: finisher_seed_rng.random() for c in candidates}
             candidates = sorted(
                 candidates,
-                key=lambda e: recent_frequency.get(e["id"], 0),
+                key=lambda e: (recent_frequency.get(e["id"], 0), fin_jitter[e["id"]]),
             )
             pick = finisher_seed_rng.choice(candidates[:min(3, len(candidates))])
             already_chosen_ids.add(pick["id"])
+            chosen_families.add(_name_family(pick["name"]))
             # Reps: 12-15 light pump range for isolation finishers.
             # 2 sets keeps the time cost low (~3-5 min per finisher).
             plan_exs.append(ExerciseInPlan(

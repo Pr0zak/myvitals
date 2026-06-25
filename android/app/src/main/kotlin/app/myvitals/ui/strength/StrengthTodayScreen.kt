@@ -2,9 +2,12 @@ package app.myvitals.ui.strength
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -689,6 +692,31 @@ fun StrengthTodayScreen(
         }
 
         val plan = workout!!
+
+        // Session progress bar — sets done / total for this workout. Lives in
+        // the fixed header so it stays pinned while the exercise list scrolls.
+        if (totalSets > 0 && plan.exercises.isNotEmpty()) {
+            val frac = (completedSets.toFloat() / totalSets).coerceIn(0f, 1f)
+            val barColor = if (allSetsDone) pal.good else pal.accent
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.weight(1f).height(8.dp)
+                        .clip(RoundedCornerShape(50)).background(pal.cardLow),
+                ) {
+                    Box(
+                        Modifier.fillMaxWidth(frac).height(8.dp)
+                            .clip(RoundedCornerShape(50)).background(barColor),
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "$completedSets/$totalSets",
+                    color = if (allSetsDone) pal.good else pal.muted,
+                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+        }
 
         // Sticky-ish rest timer
         if (restRemainingS.value > 0 || restTotal > 0L) {
@@ -2336,6 +2364,7 @@ private fun RestTimerBar(
     // (lime/green) when done. Classic keeps brand-red running / green done.
     val runningColor = pal.rest
     val doneColor = pal.good
+    val ringColor = if (done) doneColor else runningColor
     Card(
         colors = CardDefaults.cardColors(
             containerColor = if (done) doneColor.copy(alpha = 0.18f) else runningColor.copy(alpha = 0.18f)
@@ -2343,20 +2372,51 @@ private fun RestTimerBar(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             val mm = remainingS / 60
             val ss = (remainingS % 60).toString().padStart(2, '0')
-            Text(
-                "$mm:$ss",
-                color = if (done) doneColor else runningColor,
-                fontSize = 28.sp, fontWeight = FontWeight.Bold,
-            )
-            Text("/ ${totalS / 60}:${(totalS % 60).toString().padStart(2, '0')}",
-                color = pal.muted)
-            Spacer(Modifier.weight(1f))
+            // Depleting countdown ring with the mm:ss readout in the centre.
+            val frac = if (totalS > 0) (remainingS.toFloat() / totalS).coerceIn(0f, 1f) else 0f
+            Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.size(56.dp)) {
+                    val sw = 5.dp.toPx()
+                    val inset = sw / 2
+                    val arcSize = androidx.compose.ui.geometry.Size(size.width - sw, size.height - sw)
+                    val topLeft = androidx.compose.ui.geometry.Offset(inset, inset)
+                    drawArc(
+                        color = ringColor.copy(alpha = 0.18f),
+                        startAngle = 0f, sweepAngle = 360f, useCenter = false,
+                        topLeft = topLeft, size = arcSize,
+                        style = Stroke(width = sw, cap = StrokeCap.Round),
+                    )
+                    drawArc(
+                        color = ringColor,
+                        startAngle = -90f, sweepAngle = -360f * frac, useCenter = false,
+                        topLeft = topLeft, size = arcSize,
+                        style = Stroke(width = sw, cap = StrokeCap.Round),
+                    )
+                }
+                Text(
+                    if (done) "rest\nover" else "$mm:$ss",
+                    color = ringColor, fontSize = if (done) 12.sp else 16.sp,
+                    fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                    lineHeight = 14.sp,
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (done) "Rest complete" else "Resting",
+                    color = if (done) doneColor else runningColor,
+                    fontWeight = FontWeight.Bold, fontSize = 15.sp,
+                )
+                Text(
+                    "of ${totalS / 60}:${(totalS % 60).toString().padStart(2, '0')}",
+                    color = pal.muted, fontSize = 12.sp,
+                )
+            }
             TextButton(onClick = onAdd30) {
                 Icon(Icons.Filled.Add, contentDescription = null, tint = pal.ink)
                 Text(" 30s", color = pal.ink)
@@ -2565,6 +2625,9 @@ private fun ExerciseCard(
                             ?: wex.targetWeightLb?.toString().orEmpty(),
                         reps = (priorLogged?.actualReps
                             ?: wex.targetRepsLow).toString(),
+                        // Pre-select Good so the common case is one ✓ tap;
+                        // Hard / Easy / Fail are a single tap away.
+                        rating = 4,
                     ) }
                     SetEntryRow(
                         n = n, input = input,
@@ -2592,9 +2655,15 @@ private fun ExerciseCard(
                             inputs.remove(key)
                         },
                         sideLabel = bilateralSideLabel(n, wex.targetSets, info),
+                        targetWeightLb = wex.targetWeightLb,
+                        targetReps = repsRange(wex.targetRepsLow, wex.targetRepsHigh),
                     )
                 } else {
-                    PendingSetRow(n, bilateralSideLabel(n, wex.targetSets, info))
+                    PendingSetRow(
+                        n, bilateralSideLabel(n, wex.targetSets, info),
+                        targetWeightLb = wex.targetWeightLb,
+                        targetReps = repsRange(wex.targetRepsLow, wex.targetRepsHigh),
+                    )
                 }
             }
         }
@@ -2813,7 +2882,10 @@ private fun LoggedSetRow(n: Int, weightLb: Double?, reps: Int, rating: Int,
 }
 
 @Composable
-private fun PendingSetRow(n: Int, sideLabel: String? = null) {
+private fun PendingSetRow(
+    n: Int, sideLabel: String? = null,
+    targetWeightLb: Double? = null, targetReps: String? = null,
+) {
     val pal = LocalStrengthPalette.current
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -2825,9 +2897,24 @@ private fun PendingSetRow(n: Int, sideLabel: String? = null) {
             fontWeight = if (sideLabel != null) FontWeight.SemiBold else FontWeight.Normal,
             modifier = Modifier.width(20.dp),
         )
-        Text("waiting", color = pal.dim, fontSize = 13.sp)
+        // Pending rows show what the planner prescribes (carried from last
+        // session's performance) instead of a bare "waiting".
+        val tgt = buildString {
+            targetWeightLb?.let { append(fmtTargetLb(it)) }
+            targetReps?.let { if (isNotEmpty()) append(" × "); append(it) }
+        }
+        Text(
+            if (tgt.isNotBlank()) tgt else "—",
+            color = pal.muted, fontSize = 14.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Text("waiting", color = pal.dim, fontSize = 12.sp)
     }
 }
+
+/** "6" when low==high, else "6–8" — the prescribed rep window. */
+private fun repsRange(low: Int, high: Int): String =
+    if (low == high) "$low" else "$low–$high"
 
 @Composable
 private fun SetEntryRow(
@@ -2836,17 +2923,43 @@ private fun SetEntryRow(
     onRating: (Int) -> Unit, canLog: Boolean,
     onLog: () -> Unit, onFailed: () -> Unit,
     sideLabel: String? = null,
+    targetWeightLb: Double? = null, targetReps: String? = null,
 ) {
     val pal = LocalStrengthPalette.current
     val sideColor = if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA)
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+    val onAccent = if (pal.neon) NeonMV.OnAccent else MV.OnSurface
+    // Active set is visually flagged: accent border + faint accent wash + a
+    // "NOW" chip, so the one live input is findable in a multi-exercise list.
+    Column(
+        Modifier.fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(pal.accent.copy(alpha = 0.06f))
+            .border(1.dp, pal.accent.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            .padding(10.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 if (sideLabel != null) "$sideLabel side" else "Set $n",
                 color = if (sideLabel != null) sideColor else pal.ink,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.width(72.dp),
+                fontWeight = FontWeight.Bold, fontSize = 14.sp,
             )
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier.clip(RoundedCornerShape(6.dp)).background(pal.accent)
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            ) { Text("NOW", color = onAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
+            Spacer(Modifier.weight(1f))
+            val tgt = buildString {
+                targetWeightLb?.let { append(fmtTargetLb(it)) }
+                targetReps?.let { if (isNotEmpty()) append(" × "); append(it) }
+            }
+            if (tgt.isNotBlank()) {
+                Text("target $tgt", color = pal.dim, fontSize = 11.sp)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = input.weight, onValueChange = onWeight,
                 label = { Text("lb", fontSize = 11.sp) },
@@ -2864,20 +2977,19 @@ private fun SetEntryRow(
             )
         }
         Row(
-            Modifier.fillMaxWidth().padding(top = 6.dp),
+            Modifier.fillMaxWidth().padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // WP-16 — three non-failed buttons (Failed is the dedicated
-            // action below). Values map to backend thresholds: Hard=2 hold,
-            // Good=4 +rep, Easy=5 +weight.
-            for ((value, label) in listOf(2 to "Hard", 4 to "Good", 5 to "Easy")) {
+            // Good is pre-selected (see SetInput default) so the common case is
+            // a single ✓ tap; Hard/Easy/Failed adjust. Failed = rating 1.
+            for ((value, label) in listOf(1 to "Fail", 2 to "Hard", 4 to "Good", 5 to "Easy")) {
                 val on = input.rating == value
                 val color = ratingColor(value, pal)
                 Box(
                     Modifier
                         .weight(1f)
-                        .height(48.dp)
+                        .height(42.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (on) color else pal.cardLow)
                         .border(1.dp,
@@ -2887,37 +2999,28 @@ private fun SetEntryRow(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(label,
-                        color = if (on) (if (pal.neon) NeonMV.OnAccent else MV.OnSurface) else color,
-                        fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        color = if (on) onAccent else color,
+                        fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
         }
-        Text(
-            "Hard = stays · Good = +1 rep · Easy = +weight next time. " +
-                "Tap Failed if you missed reps.",
-            color = pal.dim, fontSize = 10.sp, textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        )
-        Row(
-            Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Button(
-                onClick = onLog, enabled = canLog,
-                modifier = Modifier.weight(2f),
-                colors = if (pal.neon) ButtonDefaults.buttonColors(
-                    containerColor = pal.accent, contentColor = NeonMV.OnAccent,
-                ) else ButtonDefaults.buttonColors(
-                    containerColor = MV.BrandRed, contentColor = MV.OnSurface,
-                ),
-            ) { Text("Log set $n") }
-            OutlinedButton(
-                onClick = onFailed,
-                modifier = Modifier.weight(1f),
-            ) { Text("Failed") }
-        }
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = { if (input.rating == 1) onFailed() else onLog() },
+            enabled = canLog,
+            modifier = Modifier.fillMaxWidth().height(46.dp),
+            colors = if (pal.neon) ButtonDefaults.buttonColors(
+                containerColor = pal.accent, contentColor = onAccent,
+            ) else ButtonDefaults.buttonColors(
+                containerColor = MV.BrandRed, contentColor = MV.OnSurface,
+            ),
+        ) { Text("✓  Log set $n", fontWeight = FontWeight.Bold) }
     }
 }
+
+/** Target weight for the per-set ghost — whole numbers drop the decimal. */
+private fun fmtTargetLb(w: Double): String =
+    (if (w == w.toLong().toDouble()) "${w.toLong()}" else "%.1f".format(w)) + "lb"
 
 @Composable
 private fun ReviewBlock(

@@ -47,6 +47,8 @@ import app.myvitals.sync.StrengthExerciseInfo
 import app.myvitals.sync.StrengthWorkoutDetail
 import app.myvitals.sync.StrengthWorkoutSummary
 import app.myvitals.ui.MV
+import androidx.compose.foundation.BorderStroke
+import app.myvitals.ui.neon.NeonCardShape
 import app.myvitals.ui.neon.NeonMV
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -186,9 +188,11 @@ private fun MuscleVolumeCard(settings: SettingsRepository, neon: Boolean) {
 
     Card(
         colors = CardDefaults.cardColors(containerColor = card),
+        shape = if (neon) NeonCardShape else CardDefaults.shape,
+        border = if (neon) BorderStroke(1.dp, NeonMV.Line) else null,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(14.dp)) {
             Text(
                 "Weekly muscle volume",
                 color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
@@ -270,9 +274,11 @@ private fun WorkoutCalendar(rows: List<StrengthWorkoutSummary>, neon: Boolean) {
         colors = androidx.compose.material3.CardDefaults.cardColors(
             containerColor = card,
         ),
+        shape = if (neon) NeonCardShape else androidx.compose.material3.CardDefaults.shape,
+        border = if (neon) BorderStroke(1.dp, NeonMV.Line) else null,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "WORKOUT CALENDAR",
@@ -379,7 +385,7 @@ private fun HistoryRow(r: StrengthWorkoutSummary, neon: Boolean, onClick: () -> 
     val container = if (neon) {
         when (r.status) {
             "in_progress" -> NeonMV.CardHigh
-            "skipped" -> NeonMV.Bg
+            "skipped" -> NeonMV.Card
             else -> NeonMV.Card
         }
     } else {
@@ -403,6 +409,8 @@ private fun HistoryRow(r: StrengthWorkoutSummary, neon: Boolean, onClick: () -> 
         colors = CardDefaults.cardColors(
             containerColor = container,
         ),
+        shape = if (neon) NeonCardShape else CardDefaults.shape,
+        border = if (neon) BorderStroke(1.dp, statusColor.copy(alpha = 0.30f)) else null,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -441,9 +449,11 @@ private fun DetailList(plan: StrengthWorkoutDetail, catalog: Map<String, Strengt
         items(plan.exercises, key = { it.id }) { wex ->
             Card(
                 colors = CardDefaults.cardColors(containerColor = card),
+                shape = if (neon) NeonCardShape else CardDefaults.shape,
+                border = if (neon) BorderStroke(1.dp, NeonMV.Line) else null,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(Modifier.padding(12.dp)) {
+                Column(Modifier.padding(14.dp)) {
                     Text(
                         "${wex.orderIndex + 1}. " +
                                 (catalog[wex.exerciseId]?.name ?: wex.exerciseId.replace('_', ' ')),

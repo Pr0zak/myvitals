@@ -1923,8 +1923,8 @@
       "Rotate through your trunk — the twist comes from the obliques, not yanking your neck.",
       "Alternate sides in a smooth pedaling motion, controlling each rep."
     ],
-    "image_front": null,
-    "image_side": null,
+    "image_front": "/exercises/img/Bicycle_Crunch/0.jpg",
+    "image_side": "/exercises/img/Bicycle_Crunch/1.jpg",
     "youtube_query": "Bicycle crunch form"
   },
   {
@@ -1947,8 +1947,8 @@
       "Rotate the dumbbell from hip to hip, twisting through your trunk and following with your gaze.",
       "Keep the movement controlled — rotation, not just swinging the arms."
     ],
-    "image_front": null,
-    "image_side": null,
+    "image_front": "/exercises/img/Dumbbell_Russian_Twist/0.jpg",
+    "image_side": "/exercises/img/Dumbbell_Russian_Twist/1.jpg",
     "youtube_query": "Dumbbell Russian twist form"
   },
   {
@@ -1972,8 +1972,8 @@
       "Drive the rotation from your core, keeping arms fairly straight.",
       "Control the way back up and finish all reps before switching sides."
     ],
-    "image_front": null,
-    "image_side": null,
+    "image_front": "/exercises/img/Dumbbell_Woodchopper/0.jpg",
+    "image_side": "/exercises/img/Dumbbell_Woodchopper/1.jpg",
     "youtube_query": "Dumbbell woodchopper form"
   },
   {
@@ -1996,8 +1996,8 @@
       "Return the hand and tap with the other — resisting rotation is the whole point.",
       "Keep your hips level and core tight throughout."
     ],
-    "image_front": null,
-    "image_side": null,
+    "image_front": "/exercises/img/Plank_Shoulder_Taps/0.jpg",
+    "image_side": "/exercises/img/Plank_Shoulder_Taps/1.jpg",
     "youtube_query": "Plank shoulder taps form"
   },
   {
@@ -2020,8 +2020,8 @@
       "Return to center and rotate to the other side — move from the waist, not the arms.",
       "Use a light weight and keep the tempo smooth."
     ],
-    "image_front": null,
-    "image_side": null,
+    "image_front": "/exercises/img/Standing_Dumbbell_Twist/0.jpg",
+    "image_side": "/exercises/img/Standing_Dumbbell_Twist/1.jpg",
     "youtube_query": "Standing dumbbell twist form"
   }
 ]

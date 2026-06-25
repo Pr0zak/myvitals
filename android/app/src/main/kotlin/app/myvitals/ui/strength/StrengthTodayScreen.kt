@@ -817,6 +817,13 @@ fun StrengthTodayScreen(
 
             groupedIncomplete + complete
         }
+        // The single set that's genuinely "NOW": the next set of the first
+        // not-yet-finished exercise in render order. Every exercise still shows
+        // its own entry form (you can log out of order), but only this one gets
+        // the NOW chip + strong highlight so the screen has one clear focus.
+        val currentExerciseId = orderedExercises.firstOrNull { ex ->
+            ex.sets.count { it.actualReps != null || it.skipped } < ex.targetSets
+        }?.id
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
             isRefreshing = loading,
             onRefresh = { scope.launch { reload() } },
@@ -1042,6 +1049,7 @@ fun StrengthTodayScreen(
                     info = catalog[wex.exerciseId],
                     inputs = setInputs,
                     canSwap = canSwap,
+                    isCurrentExercise = wex.id == currentExerciseId,
                     onLogSet = onLogSet@{ setNum, weight, reps, rating ->
                         // WP-14: resume before logging — a paused session
                         // shouldn't accept new sets.
@@ -2441,6 +2449,7 @@ private fun ExerciseCard(
     info: StrengthExerciseInfo?,
     inputs: androidx.compose.runtime.snapshots.SnapshotStateMap<String, SetInput>,
     canSwap: Boolean,
+    isCurrentExercise: Boolean = true,
     onLogSet: (setNum: Int, weight: Double?, reps: Int?, rating: Int?) -> Unit,
     onYouTube: (slug: String, name: String) -> Unit,
     onSwap: () -> Unit,
@@ -2657,6 +2666,7 @@ private fun ExerciseCard(
                         sideLabel = bilateralSideLabel(n, wex.targetSets, info),
                         targetWeightLb = wex.targetWeightLb,
                         targetReps = repsRange(wex.targetRepsLow, wex.targetRepsHigh),
+                        isCurrent = isCurrentExercise,
                     )
                 } else {
                     PendingSetRow(
@@ -2924,18 +2934,25 @@ private fun SetEntryRow(
     onLog: () -> Unit, onFailed: () -> Unit,
     sideLabel: String? = null,
     targetWeightLb: Double? = null, targetReps: String? = null,
+    isCurrent: Boolean = true,
 ) {
     val pal = LocalStrengthPalette.current
     val sideColor = if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA)
     val onAccent = if (pal.neon) NeonMV.OnAccent else MV.OnSurface
-    // Active set is visually flagged: accent border + faint accent wash + a
-    // "NOW" chip, so the one live input is findable in a multi-exercise list.
+    // Only the genuinely-current set (first unfinished exercise) gets the
+    // accent border + faint wash + "NOW" chip. Other exercises still show
+    // their entry form — they're loggable out of order — but with a muted
+    // border and no chip, so the screen has exactly one "NOW".
+    val borderColor = if (isCurrent) pal.accent.copy(alpha = 0.45f)
+        else pal.muted.copy(alpha = 0.22f)
+    val washColor = if (isCurrent) pal.accent.copy(alpha = 0.06f)
+        else androidx.compose.ui.graphics.Color.Transparent
     Column(
         Modifier.fillMaxWidth()
             .padding(vertical = 6.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(pal.accent.copy(alpha = 0.06f))
-            .border(1.dp, pal.accent.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            .background(washColor)
+            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
             .padding(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2945,10 +2962,12 @@ private fun SetEntryRow(
                 fontWeight = FontWeight.Bold, fontSize = 14.sp,
             )
             Spacer(Modifier.width(8.dp))
-            Box(
-                Modifier.clip(RoundedCornerShape(6.dp)).background(pal.accent)
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            ) { Text("NOW", color = onAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
+            if (isCurrent) {
+                Box(
+                    Modifier.clip(RoundedCornerShape(6.dp)).background(pal.accent)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) { Text("NOW", color = onAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
+            }
             Spacer(Modifier.weight(1f))
             val tgt = buildString {
                 targetWeightLb?.let { append(fmtTargetLb(it)) }

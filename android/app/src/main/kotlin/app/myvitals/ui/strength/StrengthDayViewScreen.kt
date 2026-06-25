@@ -1,5 +1,6 @@
 package app.myvitals.ui.strength
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +41,7 @@ import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.StrengthWorkoutDetail
 import app.myvitals.ui.MV
+import app.myvitals.ui.neon.NeonCardShape
 import app.myvitals.ui.neon.NeonMV
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -123,6 +125,8 @@ fun StrengthDayViewScreen(
                 modifier = Modifier.padding(16.dp))
             notFound -> Card(
                 colors = CardDefaults.cardColors(containerColor = card),
+                shape = if (neon) NeonCardShape else CardDefaults.shape,
+                border = if (neon) BorderStroke(1.dp, NeonMV.Line) else null,
                 modifier = Modifier.padding(16.dp).fillMaxWidth(),
             ) {
                 Text("No workout recorded for this day.",
@@ -151,7 +155,21 @@ private fun DayHeader(w: StrengthWorkoutDetail, neon: Boolean) {
     val ink = if (neon) NeonMV.Ink else MV.OnSurface
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     val isPreview = w.id < 0 || w.status == "preview"
-    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+    // Status-tinted border, matching StrengthHistoryScreen's HistoryRow so the
+    // two screens' cards read as one family (completed=Lime, in_progress=Cyan,
+    // skipped=Amber, else=Muted).
+    val statusColor = if (neon) when (w.status) {
+        "completed" -> NeonMV.Lime
+        "in_progress" -> NeonMV.Cyan
+        "skipped" -> NeonMV.Amber
+        else -> NeonMV.Muted
+    } else MV.OnSurfaceVariant
+    Card(
+        colors = CardDefaults.cardColors(containerColor = card),
+        shape = if (neon) NeonCardShape else CardDefaults.shape,
+        border = if (neon) BorderStroke(1.dp, statusColor.copy(alpha = 0.30f)) else null,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Column(Modifier.padding(14.dp)) {
             Text(w.splitFocus.replaceFirstChar { it.titlecase() }
                 + (if (isPreview) " · Preview" else ""),
@@ -190,8 +208,13 @@ private fun DayExerciseCard(wex: app.myvitals.sync.StrengthWorkoutExerciseRow, n
     val ink = if (neon) NeonMV.Ink else MV.OnSurface
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     val setInk = if (neon) NeonMV.Muted else MV.OnSurfaceDim
-    Card(colors = CardDefaults.cardColors(containerColor = card)) {
-        Column(Modifier.padding(12.dp)) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = card),
+        shape = if (neon) NeonCardShape else CardDefaults.shape,
+        border = if (neon) BorderStroke(1.dp, NeonMV.Line) else null,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(14.dp)) {
             Text(wex.exerciseId.replace('_', ' '),
                 color = ink, fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold)

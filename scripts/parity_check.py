@@ -35,10 +35,12 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/views/RingsRefined.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/neon/RefinedRingsScreen.kt",
      "Neon Refined (A1) home — concentric tri-ring hero + vitals tiles"),
-    # NOTE: the refined (A1) TAB variants BodyRefined.vue / TrainRefined.vue are
-    # web-only for now — the phone refined skin currently ships only the home
-    # (RefinedRingsScreen). Phone RefinedBody/RefinedTrain are a tracked
-    # follow-up; Body.vue/Train.vue below will parity-warn until they land.
+    ("frontend/src/views/BodyRefined.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/neon/RefinedBodyScreen.kt",
+     "Neon Refined (A1) Body tab — vitals cards + weight sparkline"),
+    ("frontend/src/views/TrainRefined.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/neon/RefinedTrainScreen.kt",
+     "Neon Refined (A1) Train tab — workout hero + recent activities feed"),
     ("frontend/src/views/Body.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/neon/BodyScreen.kt",
      "Neon Body / vitals grid"),

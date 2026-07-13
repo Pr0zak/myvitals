@@ -135,8 +135,14 @@ fun NeonAppShell(
                     if (refinedHomeEnabled) RefinedRingsScreen(settings, pad, open)
                     else RingsScreen(settings, pad, open)
                 }
-                composable(NeonRoutes.BODY) { BodyScreen(settings, pad, open) }
-                composable(NeonRoutes.TRAIN) { TrainHubScreen(settings, pad, open) }
+                composable(NeonRoutes.BODY) {
+                    if (refinedHomeEnabled) RefinedBodyScreen(settings, pad, open)
+                    else BodyScreen(settings, pad, open)
+                }
+                composable(NeonRoutes.TRAIN) {
+                    if (refinedHomeEnabled) RefinedTrainScreen(settings, pad, open)
+                    else TrainHubScreen(settings, pad, open)
+                }
                 // The Trails tab IS the full Trails screen — map button,
                 // recency sort within status groups, and per-trail inline map
                 // drill-down. (Replaced the old NeonTrailsScreen status board,

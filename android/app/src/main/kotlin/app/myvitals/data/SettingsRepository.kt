@@ -64,6 +64,16 @@ class SettingsRepository(context: Context) {
         get() = plain.getBoolean(KEY_NEON_SHELL, false)
         set(value) = plain.edit().putBoolean(KEY_NEON_SHELL, value).apply()
 
+    /**
+     * Opt-in "Neon Refined" home — the A1 concentric tri-ring home screen that
+     * mirrors web `RingsRefined.vue`. Only takes effect while the Vitality Neon
+     * shell is active; off by default so the classic neon Today (RingsScreen)
+     * stays the default front door.
+     */
+    var refinedHomeEnabled: Boolean
+        get() = plain.getBoolean(KEY_REFINED_HOME, false)
+        set(value) = plain.edit().putBoolean(KEY_REFINED_HOME, value).apply()
+
     fun lastSyncInstant(): Instant? =
         lastSyncEpochSeconds.takeIf { it > 0 }?.let(Instant::ofEpochSecond)
 
@@ -82,5 +92,6 @@ class SettingsRepository(context: Context) {
         private const val KEY_LAST_SUCCESS = "last_success_epoch_s"
         private const val KEY_PERMS_LOST = "perms_lost"
         private const val KEY_NEON_SHELL = "neon_shell_enabled"
+        private const val KEY_REFINED_HOME = "refined_home_enabled"
     }
 }

@@ -12,6 +12,8 @@
 import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
+import { isRefined } from "@/theme";
+import TrainRefined from "./TrainRefined.vue";
 import type { Activity, StrengthWorkoutDetail } from "@/api/types";
 
 const router = useRouter();
@@ -34,7 +36,11 @@ async function load(): Promise<void> {
   activities.value = Array.isArray(acts) ? acts : [];
   loading.value = false;
 }
-onMounted(load);
+onMounted(() => {
+  // The refined skin renders <TrainRefined/> (its own data load); skip the
+  // classic fetch when it's active.
+  if (!isRefined.value) load();
+});
 
 function go(path: string): void {
   router.push(path);
@@ -234,7 +240,8 @@ const recent = computed<FeedRow[]>(() =>
 </script>
 
 <template>
-  <div class="train-view">
+  <TrainRefined v-if="isRefined" />
+  <div v-else class="train-view">
     <header class="head">
       <h1>Train</h1>
       <button class="weekchip" @click="go('/activities')">

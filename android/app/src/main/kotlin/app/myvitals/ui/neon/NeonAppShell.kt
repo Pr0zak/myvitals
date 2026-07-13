@@ -95,6 +95,8 @@ fun NeonAppShell(
     onClearBuffer: () -> Unit,
     neonShellEnabled: Boolean,
     onToggleNeonShell: (Boolean) -> Unit,
+    refinedHomeEnabled: Boolean,
+    onToggleRefinedHome: (Boolean) -> Unit,
 ) {
     val nav = rememberNavController()
 
@@ -129,7 +131,10 @@ fun NeonAppShell(
                 modifier = Modifier.fillMaxSize().weight(1f),
             ) {
                 // ---- Neon top-level home screens ----
-                composable(NeonRoutes.TODAY) { RingsScreen(settings, pad, open) }
+                composable(NeonRoutes.TODAY) {
+                    if (refinedHomeEnabled) RefinedRingsScreen(settings, pad, open)
+                    else RingsScreen(settings, pad, open)
+                }
                 composable(NeonRoutes.BODY) { BodyScreen(settings, pad, open) }
                 composable(NeonRoutes.TRAIN) { TrainHubScreen(settings, pad, open) }
                 // The Trails tab IS the full Trails screen — map button,
@@ -237,6 +242,8 @@ fun NeonAppShell(
                         onClearBuffer = onClearBuffer,
                         neonShellEnabled = neonShellEnabled,
                         onToggleNeonShell = onToggleNeonShell,
+                        refinedHomeEnabled = refinedHomeEnabled,
+                        onToggleRefinedHome = onToggleRefinedHome,
                     )
                 }
             }

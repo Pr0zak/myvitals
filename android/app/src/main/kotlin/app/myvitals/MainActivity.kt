@@ -136,6 +136,12 @@ class MainActivity : ComponentActivity() {
                 neonEnabled = on
             }
 
+            var refinedEnabled by remember { mutableStateOf(settings.refinedHomeEnabled) }
+            val toggleRefined: (Boolean) -> Unit = { on ->
+                settings.refinedHomeEnabled = on
+                refinedEnabled = on
+            }
+
             // Settings actions shared by both shells (defined once so the neon
             // shell's reused SettingsScreen behaves identically to the classic).
             val onRequestPermissions: () -> Unit = {
@@ -196,6 +202,8 @@ class MainActivity : ComponentActivity() {
                         onClearBuffer = onClearBuffer,
                         neonShellEnabled = neonEnabled,
                         onToggleNeonShell = toggleNeon,
+                        refinedHomeEnabled = refinedEnabled,
+                        onToggleRefinedHome = toggleRefined,
                     )
                 }
                 return@setContent
@@ -399,6 +407,8 @@ class MainActivity : ComponentActivity() {
                                 onClearBuffer = onClearBuffer,
                                 neonShellEnabled = neonEnabled,
                                 onToggleNeonShell = toggleNeon,
+                                refinedHomeEnabled = refinedEnabled,
+                                onToggleRefinedHome = toggleRefined,
                             )
                         }
                     }

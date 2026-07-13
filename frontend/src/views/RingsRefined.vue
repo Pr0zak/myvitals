@@ -15,7 +15,7 @@
 import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
-import type { StrengthWorkoutDetail } from "@/api/types";
+import type { StrengthWorkoutDetail, SleepNight } from "@/api/types";
 
 const router = useRouter();
 const loading = ref(true);
@@ -38,14 +38,27 @@ const fastActive = ref(false);
 const fastStage = ref<string | null>(null);
 const workout = ref<StrengthWorkoutDetail | null>(null);
 
+// deltas + sparkline
+const hrvDelta = ref<number | null>(null);
+const rhrDelta = ref<number | null>(null);
+const weightDelta7Kg = ref<number | null>(null);
+const lastSleep = ref<SleepNight | null>(null);
+const weightPts = ref<number[]>([]);
+
 async function load() {
   loading.value = true;
-  const [sum, prof, sober, fast, wk] = await Promise.all([
+  const now = new Date();
+  const yesterday = new Date(now.getTime() - 24 * 3600 * 1000);
+  const since30 = new Date(now.getTime() - 30 * 24 * 3600 * 1000);
+  const [sum, prof, sober, fast, wk, prior, sleepN, wt] = await Promise.all([
     api.todaySummary().catch(() => null),
     api.getProfile().catch(() => null),
     api.soberStats().catch(() => null),
     api.fastingCurrent().catch(() => null),
     api.strengthToday().catch(() => null),
+    api.summaryRange(yesterday).catch(() => null),
+    api.lastSleep().catch(() => null),
+    api.weight({ since: since30 }).catch(() => null),
   ]);
   if (sum) {
     sleepScore.value = sum.sleep_score;
@@ -69,6 +82,36 @@ async function load() {
     if (fast.target_hours) fastTarget.value = fast.target_hours;
   }
   workout.value = wk;
+
+  // deltas: today vs most-recent prior-day summary row
+  if (prior && prior.length) {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const priorRows = prior
+      .filter((r) => r.date < todayStr)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const p = priorRows.length ? priorRows[priorRows.length - 1] : null;
+    if (p) {
+      if (hrv.value != null && p.hrv_avg != null) hrvDelta.value = hrv.value - p.hrv_avg;
+      if (rhr.value != null && p.resting_hr != null) rhrDelta.value = rhr.value - p.resting_hr;
+    }
+  }
+
+  lastSleep.value = sleepN;
+
+  // weight sparkline + 7-day delta from the 30-day series
+  if (wt) {
+    const rows = wt.points
+      .filter((pt): pt is typeof pt & { weight_kg: number } => pt.weight_kg != null)
+      .sort((a, b) => a.time.localeCompare(b.time));
+    weightPts.value = rows.map((r) => r.weight_kg);
+    if (rows.length) {
+      const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+      const past = rows.filter((r) => r.time <= cutoff);
+      const base = past.length ? past[past.length - 1] : rows[0];
+      weightDelta7Kg.value = rows[rows.length - 1].weight_kg - base.weight_kg;
+    }
+  }
+
   loading.value = false;
 }
 onMounted(load);
@@ -149,6 +192,87 @@ const workoutSub = computed(() => {
   return parts.join(" · ");
 });
 const workoutDone = computed(() => workout.value?.status === "completed");
+
+// ---- deltas ----
+/** class by good-direction: goodUp=true → up is lime; goodUp=false → down is lime */
+function deltaClass(v: number | null, goodUp: boolean): string {
+  if (v == null || v === 0) return "flat";
+  const up = v > 0;
+  return up === goodUp ? "up-good" : "down-bad";
+}
+function deltaArrow(v: number | null): string {
+  if (v == null || v === 0) return "";
+  return v > 0 ? "▲" : "▼";
+}
+function deltaLabel(v: number | null, d = 0): string {
+  if (v == null) return "";
+  const a = Math.abs(v);
+  return a.toFixed(d);
+}
+const hrvDeltaClass = computed(() => deltaClass(hrvDelta.value, true));
+const rhrDeltaClass = computed(() => deltaClass(rhrDelta.value, false));
+// weight delta shown neutral (no universal good direction) → cyan-muted
+const weightDelta7Lb = computed(() =>
+  weightDelta7Kg.value == null ? null : weightDelta7Kg.value * 2.2046226,
+);
+
+// ---- sleep stages ----
+type Seg = { key: string; label: string; color: string; s: number; pct: number };
+const STAGE_MAP: Record<string, { label: string; color: string }> = {
+  deep: { label: "Deep", color: "#ff3ad8" },
+  light: { label: "Light", color: "#6f7bff" },
+  rem: { label: "REM", color: "#28e6ff" },
+  awake: { label: "Awake", color: "#ffb52e" },
+};
+const sleepSegs = computed<Seg[]>(() => {
+  const sn = lastSleep.value;
+  if (!sn || !sn.stages || !sn.stages.length) return [];
+  // sum by normalised stage key
+  const sums: Record<string, number> = {};
+  for (const b of sn.stages) {
+    const k = (b.stage || "").toLowerCase();
+    const key = k in STAGE_MAP ? k : k.includes("rem") ? "rem" : k.includes("deep") ? "deep"
+      : k.includes("light") ? "light" : k.includes("wake") || k.includes("awake") ? "awake" : "";
+    if (!key) continue;
+    sums[key] = (sums[key] ?? 0) + (b.duration_s || 0);
+  }
+  const total = Object.values(sums).reduce((a, b) => a + b, 0);
+  if (total <= 0) return [];
+  const order = ["deep", "rem", "light", "awake"];
+  return order
+    .filter((k) => sums[k] > 0)
+    .map((k) => ({
+      key: k,
+      label: STAGE_MAP[k].label,
+      color: STAGE_MAP[k].color,
+      s: sums[k],
+      pct: (sums[k] / total) * 100,
+    }));
+});
+const hasSleepSegs = computed(() => sleepSegs.value.length > 0);
+function segHm(s: number): string {
+  const m = Math.round(s / 60);
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+}
+
+// ---- weight sparkline (cyan inline SVG polyline) ----
+const SPARK_W = 96;
+const SPARK_H = 26;
+const weightSparkPoints = computed<string>(() => {
+  const pts = weightPts.value;
+  if (pts.length < 2) return "";
+  const min = Math.min(...pts);
+  const max = Math.max(...pts);
+  const span = max - min || 1;
+  const stepX = SPARK_W / (pts.length - 1);
+  return pts
+    .map((v, i) => {
+      const x = i * stepX;
+      const y = SPARK_H - 2 - ((v - min) / span) * (SPARK_H - 4);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+});
 </script>
 
 <template>
@@ -233,10 +357,16 @@ const workoutDone = computed(() => workout.value?.status === "completed");
       <button class="tile" @click="go('/hrv')">
         <div class="tk">HRV</div>
         <div class="tv num">{{ fmt(hrv) }}<u>ms</u></div>
+        <div v-if="hrvDelta != null" class="tdelta num" :class="hrvDeltaClass">
+          {{ deltaArrow(hrvDelta) }} {{ deltaLabel(hrvDelta) }}
+        </div>
       </button>
       <button class="tile" @click="go('/heart-rate')">
         <div class="tk">RESTING HR</div>
         <div class="tv num">{{ fmt(rhr) }}<u>bpm</u></div>
+        <div v-if="rhrDelta != null" class="tdelta num" :class="rhrDeltaClass">
+          {{ deltaArrow(rhrDelta) }} {{ deltaLabel(rhrDelta) }}
+        </div>
       </button>
       <button class="tile" @click="go('/skin-temp')">
         <div class="tk">SKIN TEMP</div>
@@ -283,8 +413,23 @@ const workoutDone = computed(() => workout.value?.status === "completed");
         <span class="ctitle">Last night</span>
         <span class="num cval">{{ sleepHm }}</span>
       </div>
-      <div class="bar big"><i :style="{ width: sleepPctTo8 + '%', background: 'var(--violet)' }"></i></div>
-      <div class="csub"><span>Sleep score {{ fmt(sleepScore) }}</span><span class="muted">goal 8h</span></div>
+      <template v-if="hasSleepSegs">
+        <div class="stagebar">
+          <i v-for="s in sleepSegs" :key="s.key"
+            :style="{ width: s.pct + '%', background: s.color }"></i>
+        </div>
+        <div class="stagelegend">
+          <span v-for="s in sleepSegs" :key="s.key" class="sleg">
+            <span class="sdot" :style="{ background: s.color }"></span>
+            <span class="slk">{{ s.label }}</span>
+            <span class="slv num">{{ segHm(s.s) }}</span>
+          </span>
+        </div>
+      </template>
+      <template v-else>
+        <div class="bar big"><i :style="{ width: sleepPctTo8 + '%', background: 'var(--violet)' }"></i></div>
+        <div class="csub"><span>Sleep score {{ fmt(sleepScore) }}</span><span class="muted">goal 8h</span></div>
+      </template>
     </button>
 
     <!-- weight -->
@@ -293,9 +438,16 @@ const workoutDone = computed(() => workout.value?.status === "completed");
         <span class="ctitle">Weight</span>
         <span class="num cval">{{ fmt(weightLb, 1) }}<u v-if="weightLb != null">lb</u></span>
       </div>
+      <svg v-if="weightSparkPoints" class="wspark" :viewBox="`0 0 ${SPARK_W} ${SPARK_H}`" preserveAspectRatio="none">
+        <polyline :points="weightSparkPoints" fill="none" stroke="var(--accent)"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
       <div class="csub">
         <span class="muted">Body fat {{ fmt(bodyFat, 1) }}<template v-if="bodyFat != null">%</template></span>
-        <span class="chev">›</span>
+        <span v-if="weightDelta7Lb != null" class="num wdelta">
+          {{ deltaArrow(weightDelta7Lb) }} {{ deltaLabel(weightDelta7Lb, 1) }}lb · 7d
+        </span>
+        <span v-else class="chev">›</span>
       </div>
     </button>
   </div>
@@ -405,4 +557,24 @@ const workoutDone = computed(() => workout.value?.status === "completed");
 .csub { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; font-size: 12px; }
 .csub .muted, .muted { color: var(--muted-c); }
 .chev { color: var(--dim); font-size: 18px; }
+
+/* vitals tile deltas */
+.tdelta { font-size: 10px; font-weight: 600; margin-top: 3px; letter-spacing: 0.01em; white-space: nowrap; }
+.tdelta.up-good { color: var(--good); }
+.tdelta.down-bad { color: var(--bad); }
+.tdelta.flat { color: var(--muted-c); }
+
+/* sleep stage bar */
+.stagebar { display: flex; width: 100%; height: 9px; border-radius: 6px; overflow: hidden;
+  margin-top: 11px; background: rgba(255, 255, 255, 0.06); }
+.stagebar i { display: block; height: 100%; }
+.stagelegend { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 10px; }
+.sleg { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted-c); }
+.sleg .sdot { width: 7px; height: 7px; border-radius: 2px; flex: 0 0 auto; }
+.sleg .slk { font-weight: 600; }
+.sleg .slv { color: var(--ink); font-weight: 600; margin-left: 1px; }
+
+/* weight sparkline + delta */
+.wspark { display: block; width: 100%; height: 26px; margin-top: 10px; }
+.wdelta { font-size: 11px; font-weight: 600; color: var(--accent); white-space: nowrap; }
 </style>

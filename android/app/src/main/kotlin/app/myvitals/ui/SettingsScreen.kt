@@ -86,6 +86,8 @@ fun SettingsScreen(
     onClearBuffer: () -> Unit,
     neonShellEnabled: Boolean = false,
     onToggleNeonShell: (Boolean) -> Unit = {},
+    refinedHomeEnabled: Boolean = false,
+    onToggleRefinedHome: (Boolean) -> Unit = {},
 ) {
     // Resolve HC permission state OFF the main thread. This used to be a
     // `hasPermissions()` call straight in the composable body, which wrapped a
@@ -302,6 +304,37 @@ fun SettingsScreen(
                                 checkedTrackColor = MV.BrandRed,
                             ),
                         )
+                    }
+                }
+                // Neon Refined home — the A1 concentric tri-ring redesign.
+                // Only meaningful while the Vitality Neon shell is active.
+                if (neonShellEnabled) {
+                    Spacer(Modifier.height(10.dp))
+                    Card {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("✦ Neon Refined home", fontSize = 15.sp, color = MV.OnSurface)
+                                Text(
+                                    "Concentric tri-ring Today screen (Recovery / Move / " +
+                                        "Sleep) with vitals tiles + streak cards.",
+                                    fontSize = 12.sp, color = MV.OnSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = refinedHomeEnabled,
+                                onCheckedChange = onToggleRefinedHome,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MV.OnSurface,
+                                    checkedTrackColor = MV.BrandRed,
+                                ),
+                            )
+                        }
                     }
                 }
             }

@@ -1,6 +1,6 @@
 import { computed, ref, watch, watchEffect } from "vue";
 
-export type ThemeChoice = "dark" | "light" | "auto" | "neon";
+export type ThemeChoice = "dark" | "light" | "auto" | "neon" | "refined";
 export type EffectiveTheme = "dark" | "light" | "neon";
 
 const KEY = "myvitals.theme";
@@ -19,16 +19,27 @@ export const themeChoice = ref<ThemeChoice>(
  * swaps the navigation shell (see App.vue / NeonNav). */
 export const effectiveTheme = computed<EffectiveTheme>(() => {
   if (themeChoice.value === "auto") return systemPrefersDark() ? "dark" : "light";
+  // "refined" (Neon Refined) reuses the neon shell + neon-scoped CSS so nothing
+  // else has to be restyled; the only difference lives in refined-only view
+  // branches (gated by `isRefined`) + the `data-variant="refined"` hook below.
+  if (themeChoice.value === "refined") return "neon";
   return themeChoice.value;
 });
 
-/** True when the redesigned neon shell + palette is active. */
+/** True when the redesigned neon shell + palette is active (neon OR refined). */
 export const isNeon = computed(() => effectiveTheme.value === "neon");
+
+/** True only for the "Neon Refined" (A1) skin — the refined home + refined-only
+ * view branches key off this while everything else rides the neon shell. */
+export const isRefined = computed(() => themeChoice.value === "refined");
 
 watch(themeChoice, (v) => localStorage.setItem(KEY, v));
 
 watchEffect(() => {
-  document.documentElement.setAttribute("data-theme", effectiveTheme.value);
+  const el = document.documentElement;
+  el.setAttribute("data-theme", effectiveTheme.value);
+  if (themeChoice.value === "refined") el.setAttribute("data-variant", "refined");
+  else el.removeAttribute("data-variant");
 });
 
 // Re-evaluate when system preference changes (only matters in "auto" mode).

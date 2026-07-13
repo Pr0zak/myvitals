@@ -11,6 +11,8 @@
 import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
+import { isRefined } from "@/theme";
+import RingsRefined from "./RingsRefined.vue";
 
 const router = useRouter();
 const loading = ref(true);
@@ -63,7 +65,11 @@ async function load() {
   }
   loading.value = false;
 }
-onMounted(load);
+onMounted(() => {
+  // The refined skin renders <RingsRefined/> (its own data load); skip the
+  // classic rings fetch when it's active.
+  if (!isRefined.value) load();
+});
 
 function go(path: string) {
   router.push(path);
@@ -74,7 +80,8 @@ function fmt(n: number | null, d = 0): string {
 </script>
 
 <template>
-  <div class="rings-view">
+  <RingsRefined v-if="isRefined" />
+  <div v-else class="rings-view">
     <header class="head">
       <h1>Today</h1>
       <span class="date">{{ today }}</span>

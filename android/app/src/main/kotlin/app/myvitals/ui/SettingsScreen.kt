@@ -3,6 +3,7 @@ package app.myvitals.ui
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
@@ -280,62 +282,34 @@ fun SettingsScreen(
         // ── Appearance ──
         item {
             Section(title = "Appearance", neon = neon) {
-                Card {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("✦ Vitality Neon", fontSize = 15.sp, color = MV.OnSurface)
-                            Text(
-                                "Obsidian + neon 6-tab redesign (Today / Body / Train / " +
-                                    "Trails / Coach / You). Restarts into the new shell.",
-                                fontSize = 12.sp, color = MV.OnSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = neonShellEnabled,
-                            onCheckedChange = onToggleNeonShell,
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = MV.OnSurface,
-                                checkedTrackColor = MV.BrandRed,
-                            ),
-                        )
-                    }
+                // Single top-level theme picker (mirrors the web radio group):
+                // three mutually-exclusive modes, each setting both flags.
+                val mode = when {
+                    neonShellEnabled && refinedHomeEnabled -> "refined"
+                    neonShellEnabled -> "neon"
+                    else -> "classic"
                 }
-                // Neon Refined home — the A1 concentric tri-ring redesign.
-                // Only meaningful while the Vitality Neon shell is active.
-                if (neonShellEnabled) {
-                    Spacer(Modifier.height(10.dp))
-                    Card {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("✦ Neon Refined home", fontSize = 15.sp, color = MV.OnSurface)
-                                Text(
-                                    "Concentric tri-ring Today screen (Recovery / Move / " +
-                                        "Sleep) with vitals tiles + streak cards.",
-                                    fontSize = 12.sp, color = MV.OnSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = refinedHomeEnabled,
-                                onCheckedChange = onToggleRefinedHome,
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = MV.OnSurface,
-                                    checkedTrackColor = MV.BrandRed,
-                                ),
-                            )
-                        }
-                    }
+                Card {
+                    ThemeOptionRow(
+                        selected = mode == "classic",
+                        label = "Classic",
+                        subtitle = "System light/dark, classic side-nav",
+                        onClick = { onToggleRefinedHome(false); onToggleNeonShell(false) },
+                    )
+                    HorizontalDivider(color = MV.OutlineVariant)
+                    ThemeOptionRow(
+                        selected = mode == "neon",
+                        label = "✦ Vitality Neon",
+                        subtitle = "Obsidian neon 6-tab shell",
+                        onClick = { onToggleRefinedHome(false); onToggleNeonShell(true) },
+                    )
+                    HorizontalDivider(color = MV.OutlineVariant)
+                    ThemeOptionRow(
+                        selected = mode == "refined",
+                        label = "✦ Neon Refined",
+                        subtitle = "Neon + A1 concentric-ring Home / Body / Train",
+                        onClick = { onToggleNeonShell(true); onToggleRefinedHome(true) },
+                    )
                 }
             }
         }
@@ -994,6 +968,43 @@ private fun Card(content: @Composable ColumnScope.() -> Unit) {
             .border(1.dp, MV.OutlineVariant, RoundedCornerShape(20.dp)),
         content = content,
     )
+}
+
+@Composable
+private fun ThemeOptionRow(
+    selected: Boolean,
+    label: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(18.dp)
+                .border(1.dp, MV.Outline, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(MV.BrandRed),
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, fontSize = 15.sp, color = MV.OnSurface)
+            Text(subtitle, fontSize = 12.sp, color = MV.OnSurfaceVariant)
+        }
+    }
 }
 
 @Composable

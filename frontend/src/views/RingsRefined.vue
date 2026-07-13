@@ -303,16 +303,16 @@ const weightSparkPoints = computed<string>(() => {
       <div class="hero-row">
         <button class="rings" @click="go('/heart-rate')" aria-label="Recovery detail">
           <svg viewBox="0 0 120 120">
-            <circle cx="60" cy="60" r="52" fill="none" stroke="var(--track)" stroke-width="9" />
-            <circle cx="60" cy="60" r="41" fill="none" stroke="var(--track)" stroke-width="9" />
-            <circle cx="60" cy="60" r="30" fill="none" stroke="var(--track)" stroke-width="9" />
-            <circle cx="60" cy="60" r="52" fill="none" stroke="var(--accent)" stroke-width="9"
+            <circle cx="60" cy="60" r="52" fill="none" stroke="var(--track)" stroke-width="7" />
+            <circle cx="60" cy="60" r="41" fill="none" stroke="var(--track)" stroke-width="7" />
+            <circle cx="60" cy="60" r="30" fill="none" stroke="var(--track)" stroke-width="7" />
+            <circle cx="60" cy="60" r="52" fill="none" stroke="var(--accent)" stroke-width="7"
               stroke-linecap="round" :stroke-dasharray="dash(recoveryScore ?? 0, 52)"
               transform="rotate(-90 60 60)" />
-            <circle cx="60" cy="60" r="41" fill="none" stroke="var(--good)" stroke-width="9"
+            <circle cx="60" cy="60" r="41" fill="none" stroke="var(--good)" stroke-width="7"
               stroke-linecap="round" :stroke-dasharray="dash(movePct, 41)"
               transform="rotate(-90 60 60)" />
-            <circle cx="60" cy="60" r="30" fill="none" stroke="var(--violet)" stroke-width="9"
+            <circle cx="60" cy="60" r="30" fill="none" stroke="var(--violet)" stroke-width="7"
               stroke-linecap="round" :stroke-dasharray="dash(sleepScore ?? 0, 30)"
               transform="rotate(-90 60 60)" />
           </svg>
@@ -500,9 +500,11 @@ const weightSparkPoints = computed<string>(() => {
 .hero-row { display: flex; align-items: center; gap: 16px; }
 .rings { position: relative; width: 148px; height: 148px; flex: 0 0 auto; background: none; border: 0; padding: 0; }
 .rings svg { width: 100%; height: 100%; display: block; }
-.rings-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.rings-center .big { font-size: 42px; font-weight: 600; line-height: 0.9; letter-spacing: -0.03em; }
-.rings-center .lbl { font-size: 9px; font-weight: 700; letter-spacing: 0.16em; color: var(--muted-c); margin-top: 5px; }
+/* dead-center the number on the true ring center; float the label below it
+ * (absolute) so it never shifts the number off-centre. */
+.rings-center { position: absolute; inset: 0; display: grid; place-items: center; }
+.rings-center .big { font-size: 40px; font-weight: 700; line-height: 1; letter-spacing: -0.03em; color: var(--ink); }
+.rings-center .lbl { position: absolute; left: 0; right: 0; top: calc(50% + 21px); text-align: center; font-size: 9px; font-weight: 700; letter-spacing: 0.16em; color: var(--muted-c); }
 
 .legend { display: flex; flex-direction: column; gap: 12px; flex: 1; min-width: 0; }
 .leg { display: flex; align-items: flex-start; gap: 9px; background: none; border: 0; padding: 0; text-align: left; }

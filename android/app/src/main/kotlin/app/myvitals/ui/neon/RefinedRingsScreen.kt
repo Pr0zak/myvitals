@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -141,21 +142,21 @@ fun RefinedRingsScreen(
                     sleepPct = (sleepScore ?: 0.0).toFloat(),
                     modifier = Modifier.size(148.dp),
                 )
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    NeonNumber(
-                        recoveryScore?.let { "${it.roundToInt()}" } ?: "—",
-                        color = NeonMV.Ink,
-                        size = 40,
-                    )
-                    Text(
-                        "RECOVERY",
-                        color = NeonMV.Muted,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.6.sp,
-                        modifier = Modifier.padding(top = 3.dp),
-                    )
-                }
+                NeonNumber(
+                    recoveryScore?.let { "${it.roundToInt()}" } ?: "—",
+                    color = NeonMV.Ink,
+                    size = 36,
+                )
+                Text(
+                    "RECOVERY",
+                    color = NeonMV.Muted,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.4.sp,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .offset(y = 24.dp),
+                )
             }
 
             Column(
@@ -462,8 +463,8 @@ private fun TriRing(
     modifier: Modifier = Modifier,
 ) {
     Canvas(modifier = modifier) {
-        val stroke = size.minDimension * 0.075f
-        val gap = stroke * 1.35f
+        val stroke = size.minDimension * 0.058f
+        val gap = stroke * 0.55f
         // Outer radius ratio, stepping inward by (stroke + gap) each ring.
         val outer = size.minDimension / 2f - stroke / 2f - size.minDimension * 0.02f
         val radii = listOf(outer, outer - (stroke + gap), outer - 2f * (stroke + gap))

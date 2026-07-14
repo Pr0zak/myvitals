@@ -75,6 +75,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.layout.fillMaxHeight
+import app.myvitals.ui.neon.NeonNumberFamily
 import app.myvitals.data.SettingsRepository
 import app.myvitals.strength.StrengthRepository
 import androidx.compose.material.icons.outlined.Block
@@ -2609,6 +2613,7 @@ private fun ExerciseCard(
                 } else if (timed && n == nextSet) {
                     TimedSetRow(
                         n = n, holdSeconds = wex.targetRepsLow,
+                        exerciseName = name,
                         sideLabel = bilateralSideLabel(n, wex.targetSets, info),
                         onComplete = { elapsed, rating ->
                             // Logs actual seconds held + the user's
@@ -2718,6 +2723,7 @@ private fun TimedSetRow(
     n: Int,
     holdSeconds: Int,
     onComplete: (elapsedSeconds: Int, rating: Int) -> Unit,
+    exerciseName: String = "",
     sideLabel: String? = null,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -2745,6 +2751,145 @@ private fun TimedSetRow(
         }
     }
     val remaining = if (running) ((endsAt - nowMs).coerceAtLeast(0L) / 1000L).toInt() else null
+
+    // ── Full-screen hold overlay ─────────────────────────────────────
+    // While a hold is running, float a room-readable countdown above the
+    // whole screen. The endsAt/nowMs tick above still drives it (and still
+    // fires Notifier.postHoldDone at zero — dismissal happens because the
+    // tick sets endsAt=0L, flipping `running` false and closing the Dialog).
+    if (running && remaining != null) {
+        // Fraction remaining, 1f → 0f, for the ring behind the number.
+        val total = (holdSeconds.coerceAtLeast(1)) * 1000L
+        val fraction = ((endsAt - nowMs).coerceAtLeast(0L).toFloat() / total.toFloat())
+            .coerceIn(0f, 1f)
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+            ),
+        ) {
+            Box(
+                Modifier.fillMaxSize().background(pal.bg),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    Modifier.fillMaxSize().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    // Exercise name — modest, top.
+                    Spacer(Modifier.height(24.dp))
+                    val heading = buildString {
+                        if (!exerciseName.isBlank()) append(exerciseName)
+                        if (sideLabel != null) {
+                            if (isNotEmpty()) append(" · ")
+                            append(if (sideLabel == "R") "Right" else if (sideLabel == "L") "Left" else sideLabel)
+                        }
+                    }.ifBlank { "Hold" }
+                    Text(
+                        heading,
+                        color = pal.muted, fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                    )
+
+                    // Giant countdown + progress ring, vertically centered.
+                    Box(
+                        Modifier.weight(1f).fillMaxWidth(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Canvas(Modifier.size(320.dp)) {
+                            val stroke = 14.dp.toPx()
+                            val inset = stroke / 2f
+                            // Track.
+                            drawArc(
+                                color = holdViolet.copy(alpha = 0.16f),
+                                startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                                topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
+                                size = androidx.compose.ui.geometry.Size(
+                                    size.width - stroke, size.height - stroke),
+                                style = Stroke(width = stroke, cap = StrokeCap.Round),
+                            )
+                            // Remaining progress.
+                            drawArc(
+                                color = holdViolet,
+                                startAngle = -90f, sweepAngle = 360f * fraction,
+                                useCenter = false,
+                                topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
+                                size = androidx.compose.ui.geometry.Size(
+                                    size.width - stroke, size.height - stroke),
+                                style = Stroke(width = stroke, cap = StrokeCap.Round),
+                            )
+                        }
+                        Text(
+                            if (remaining >= 60)
+                                "${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}"
+                            else "$remaining",
+                            color = pal.ink,
+                            fontSize = 140.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = NeonNumberFamily,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+
+                    Text(
+                        "of ${holdSeconds}s hold",
+                        color = pal.muted, fontSize = 16.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(28.dp))
+
+                    // Bottom controls: big Fail (rating=1) + Done (capture elapsed).
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val elapsed = ((System.currentTimeMillis() - startedAt) / 1000L)
+                                    .coerceAtLeast(1L).toInt()
+                                endsAt = 0L
+                                onComplete(elapsed, 1)
+                            },
+                            modifier = Modifier.weight(1f).height(64.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = pal.bad,
+                            ),
+                        ) {
+                            Text("Fail", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = {
+                                // "Done" — end the hold early, capture elapsed,
+                                // then fall through to the rating prompt.
+                                val elapsed = ((System.currentTimeMillis() - startedAt) / 1000L)
+                                    .coerceAtLeast(1L).toInt()
+                                pendingElapsed = elapsed
+                                endsAt = 0L
+                            },
+                            modifier = Modifier.weight(1f).height(64.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = holdViolet,
+                                contentColor = if (pal.neon) NeonMV.OnAccent else Color.White,
+                            ),
+                        ) {
+                            Text("Done", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    TextButton(
+                        onClick = { endsAt = 0L },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Cancel", color = pal.muted, fontSize = 14.sp)
+                    }
+                }
+            }
+        }
+    }
 
     // Three-state row: rating prompt, running countdown, or idle Start button.
     if (pendingElapsed != null) {

@@ -313,7 +313,10 @@ function startTimer(wex: StrengthWorkoutExercise, n: number) {
           const setN = Number(setStr);
           const targetWex = workout.value?.exercises.find((x) => x.id === wexId);
           if (targetWex) {
-            // Fire haptic if the browser supports it.
+            // Audible + haptic at zero. The rest timer already chimes on
+            // completion; timed holds didn't until now — a hold running
+            // full-screen across the room needs the beep to signal "release".
+            chime();
             try { navigator.vibrate?.(200); } catch { /* no-op */ }
             // Auto-log: full hold completed, no weight, rating=4 (smooth).
             const e = entry(wexId, setN, targetWex.target_reps_low, null);
@@ -349,6 +352,64 @@ function timerRemaining(wexId: number, n: number): number | null {
 function fmtCountdown(s: number): string {
   if (s >= 60) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   return `${s}s`;
+}
+// Full-screen hold format — always mm:ss at 60s+, bare seconds under 60,
+// so the giant number reads cleanly across the room.
+function fmtHold(s: number): string {
+  if (s >= 60) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  return String(s);
+}
+
+// The one timed hold currently counting down (non-finished). Drives the
+// full-screen overlay. Realistically only one runs at a time — the UI
+// only exposes a single Start per row and a hold blocks the screen.
+const activeTimer = computed<{
+  wex: StrengthWorkoutExercise;
+  setNum: number;
+  remaining: number;
+  totalS: number;
+  fraction: number;   // 0 → 1 elapsed, for the progress ring
+} | null>(() => {
+  if (!workout.value) return null;
+  for (const [key, st] of Object.entries(timers.value)) {
+    if (st.finished) continue;
+    const [wexIdStr, setStr] = key.split("-");
+    const wexId = Number(wexIdStr);
+    const setNum = Number(setStr);
+    const wex = workout.value.exercises.find((x) => x.id === wexId);
+    if (!wex) continue;
+    // tickNow keeps this reactive each second.
+    const remaining = Math.max(0, Math.ceil((st.endsAt - tickNow.value) / 1000));
+    const fraction = st.totalS > 0
+      ? Math.min(1, Math.max(0, 1 - remaining / st.totalS))
+      : 0;
+    return { wex, setNum, remaining, totalS: st.totalS, fraction };
+  }
+  return null;
+});
+
+// Overlay "Done" — finish the hold now, logging the elapsed seconds like
+// the auto-finish (rating 4), then close. Uses whatever time has already
+// elapsed rather than the full target.
+async function finishTimedNow(wex: StrengthWorkoutExercise, setNum: number) {
+  const st = timers.value[timerKey(wex.id, setNum)];
+  const total = st?.totalS ?? wex.target_reps_low;
+  const remaining = timerRemaining(wex.id, setNum) ?? 0;
+  const elapsed = Math.max(1, total - remaining);
+  chime();
+  const e = entry(wex.id, setNum, wex.target_reps_low, null);
+  e.weight = "";
+  e.reps = String(elapsed);
+  e.rating = 4;
+  stopTimer(wex.id, setNum);
+  await logSet(wex, setNum).catch((err) => { error.value = String(err); });
+}
+
+// Overlay "Fail" — route through the existing fail path (confirm + rating 1),
+// then stop the timer + close the overlay.
+async function failTimedNow(wex: StrengthWorkoutExercise, setNum: number) {
+  const proceeded = await logFailed(wex, setNum);
+  if (proceeded) stopTimer(wex.id, setNum);
 }
 function imageUrl(slug: string, side: 0 | 1 = 0): string | null {
   const cat = ex(slug);
@@ -570,15 +631,18 @@ const currentExercise = computed(() => {
   return workout.value.exercises.find((ex) => !isExerciseDone(ex)) ?? null;
 });
 
-async function logFailed(wex: StrengthWorkoutExercise, setNum: number) {
+async function logFailed(wex: StrengthWorkoutExercise, setNum: number): Promise<boolean> {
   // Shortcut: mark the set as failed (rating=1) using whatever weight is
   // already in the input. Reps default to whatever was entered (or the
   // target if unset) — what matters is the rating, which drives the
-  // -7.5% deload on next session.
+  // -7.5% deload on next session. Returns false if the user cancels the
+  // confirm so callers (e.g. the timed-hold overlay) can keep the timer
+  // running instead of closing on a no-op.
   const e = entry(wex.id, setNum, wex.target_reps_low, wex.target_weight_lb);
-  if (!confirm("Mark set " + setNum + " as failed? Next session's weight will drop ~7.5%.")) return;
+  if (!confirm("Mark set " + setNum + " as failed? Next session's weight will drop ~7.5%.")) return false;
   e.rating = 1;
   await logSet(wex, setNum);
+  return true;
 }
 
 async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = false) {
@@ -1355,6 +1419,33 @@ useVisibilityRefresh(loadAll);
       </div>
     </template>
 
+    <!-- Full-screen HOLD countdown. Renders whenever a timed hold is
+         running so the number is legible across the room. Solid theme
+         background (CSS vars) covers everything beneath it. -->
+    <div v-if="activeTimer" class="hold-overlay" role="dialog" aria-live="polite">
+      <div class="hold-name">{{ exName(activeTimer.wex.exercise_id) }}</div>
+      <div class="hold-center">
+        <svg class="hold-ring" viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="hold-ring-track" cx="50" cy="50" r="46" />
+          <circle class="hold-ring-fill" cx="50" cy="50" r="46"
+                  :stroke-dasharray="289.0265"
+                  :stroke-dashoffset="289.0265 * (1 - activeTimer.fraction)" />
+        </svg>
+        <div class="hold-count mono">{{ fmtHold(activeTimer.remaining) }}</div>
+        <div class="hold-of mono">of {{ fmtHold(activeTimer.totalS) }}</div>
+      </div>
+      <div class="hold-actions">
+        <button class="hold-btn fail"
+                @click="failTimedNow(activeTimer.wex, activeTimer.setNum)">
+          Fail
+        </button>
+        <button class="hold-btn done"
+                @click="finishTimedNow(activeTimer.wex, activeTimer.setNum)">
+          Done
+        </button>
+      </div>
+    </div>
+
     <!-- Workout-complete confirmation. Pops on the false → true
          transition of allSetsDone; user can finish now or keep
          going (e.g. bonus sets). -->
@@ -1724,6 +1815,81 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
 .countdown { font-size: 1.2rem; font-weight: 600; color: #a78bfa;
              font-feature-settings: "tnum"; }
 .dim.small { font-size: 0.78rem; color: var(--muted); }
+
+/* ── Full-screen HOLD countdown ────────────────────────────────
+   Solid theme background so it reads across the room. The NUMBER
+   dominates; the ring is a thin secondary accent. */
+.hold-overlay {
+  position: fixed; inset: 0; z-index: 9000;
+  background: var(--bg-0);
+  color: var(--text);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: space-between;
+  padding: max(1.2rem, env(safe-area-inset-top)) 1.2rem
+           max(1.2rem, env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+}
+.hold-name {
+  font-size: clamp(1.1rem, 4.5vw, 2rem);
+  font-weight: 600; text-align: center; line-height: 1.1;
+  color: var(--text); margin-top: 0.4rem;
+  max-width: 90vw;
+}
+.hold-center {
+  position: relative; flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  width: 100%; min-height: 0;
+}
+.hold-ring {
+  position: absolute;
+  width: min(88vw, 78vh); height: min(88vw, 78vh);
+  transform: rotate(-90deg);
+  pointer-events: none; opacity: 0.85;
+}
+.hold-ring-track {
+  fill: none; stroke: var(--line); stroke-width: 1.5;
+}
+.hold-ring-fill {
+  fill: none; stroke: var(--brand, #ef4444); stroke-width: 2.5;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.4s linear;
+}
+.hold-count {
+  position: relative; z-index: 1;
+  font-size: clamp(96px, 42vw, 340px);
+  font-weight: 700; line-height: 0.9;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  color: var(--text);
+}
+.hold-of {
+  position: relative; z-index: 1; margin-top: 0.4rem;
+  font-size: clamp(0.9rem, 3.5vw, 1.4rem);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.hold-actions {
+  display: flex; gap: 0.8rem; width: 100%;
+  max-width: 520px;
+}
+.hold-btn {
+  flex: 1; padding: 1.1rem 0.6rem; border-radius: 14px;
+  font-size: 1.25rem; font-weight: 700; cursor: pointer;
+  border: 1px solid var(--line); background: var(--bg-1);
+  color: var(--text);
+  min-height: 64px;
+}
+.hold-btn.fail {
+  color: #ef4444; border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.08);
+}
+.hold-btn.done {
+  color: #fff; background: var(--brand, #ef4444);
+  border-color: var(--brand, #ef4444);
+}
+.hold-btn:active { transform: scale(0.98); }
 
 .week-strip {
   display: flex; gap: 0.4rem; margin: 0.4rem 0 0.8rem;
@@ -2110,6 +2276,32 @@ html[data-theme="neon"] .countdown {
   color: var(--rn-peri); font-family: 'Space Grotesk', monospace;
 }
 html[data-theme="neon"] .dim.small { color: var(--rn-mut); }
+
+/* Full-screen hold — neon: periwinkle ring + glowing count on ink bg */
+html[data-theme="neon"] .hold-overlay { background: #0f1118; color: var(--rn-ink); }
+html[data-theme="neon"] .hold-name { color: var(--rn-ink); }
+html[data-theme="neon"] .hold-count {
+  color: var(--rn-ink); font-family: 'Space Grotesk', monospace;
+  text-shadow: 0 0 22px rgba(111,123,255,0.55);
+}
+html[data-theme="neon"] .hold-of { color: var(--rn-mut); }
+html[data-theme="neon"] .hold-ring-track { stroke: var(--rn-track); }
+html[data-theme="neon"] .hold-ring-fill {
+  stroke: var(--rn-peri);
+  filter: drop-shadow(0 0 6px rgba(111,123,255,0.55));
+}
+html[data-theme="neon"] .hold-btn {
+  background: var(--rn-card); border-color: var(--rn-track); color: #fff;
+}
+html[data-theme="neon"] .hold-btn.fail {
+  color: var(--rn-red); border-color: rgba(255,93,122,0.5);
+  background: rgba(255,93,122,0.12);
+}
+html[data-theme="neon"] .hold-btn.done {
+  color: #0f1118; background: var(--rn-peri);
+  border-color: var(--rn-peri);
+  box-shadow: 0 0 16px rgba(111,123,255,0.35);
+}
 
 /* Cardio prescription card */
 html[data-theme="neon"] .cardio-card {

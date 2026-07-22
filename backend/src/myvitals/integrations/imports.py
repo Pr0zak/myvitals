@@ -83,11 +83,19 @@ def _emit(stream: str, batch: list[dict[str, Any]]) -> Iterator[tuple[str, list[
 
 def parse_fitbit_zip(
     zf: zipfile.ZipFile, weight_unit: str = "kg",
+    activities_only: bool = False,
+    since: datetime | None = None, until: datetime | None = None,
+    type_substrings: list[str] | None = None,
 ) -> Iterator[tuple[str, list[dict[str, Any]]]]:
     """Walk a Fitbit export ZIP, yielding (stream_name, [samples]) batches.
 
     weight_unit ("kg" | "lb") is what the user said their Fitbit profile is
     set to. We can't tell from the export alone.
+
+    activities_only skips the vitals streams (HR/steps/sleep/…) and imports
+    only exercise records — used to backfill missing activities without
+    re-processing the (huge) vitals that are already ingested. since/until
+    bound the exercise import window.
     """
     files_seen: dict[str, int] = {}
 
@@ -95,33 +103,35 @@ def parse_fitbit_zip(
         low = name.lower()
 
         # Heart rate intraday: heart_rate-YYYY-MM-DD.json
-        if "heart_rate-" in low and low.endswith(".json"):
+        if not activities_only and "heart_rate-" in low and low.endswith(".json"):
             files_seen["heartrate"] = files_seen.get("heartrate", 0) + 1
             yield from _parse_fitbit_hr(zf, name)
 
-        elif re.search(r"(^|/)steps-\d{4}-\d{2}-\d{2}\.json$", low):
+        elif not activities_only and re.search(r"(^|/)steps-\d{4}-\d{2}-\d{2}\.json$", low):
             files_seen["steps"] = files_seen.get("steps", 0) + 1
             yield from _parse_fitbit_steps(zf, name)
 
-        elif re.search(r"(^|/)sleep-\d{4}-\d{2}-\d{2}\.json$", low):
+        elif not activities_only and re.search(r"(^|/)sleep-\d{4}-\d{2}-\d{2}\.json$", low):
             files_seen["sleep_stages"] = files_seen.get("sleep_stages", 0) + 1
             yield from _parse_fitbit_sleep(zf, name)
 
-        elif "heart rate variability details" in low and low.endswith(".csv"):
+        elif not activities_only and "heart rate variability details" in low and low.endswith(".csv"):
             files_seen["hrv"] = files_seen.get("hrv", 0) + 1
             yield from _parse_fitbit_hrv(zf, name)
 
-        elif re.search(r"(^|/)weight-\d{4}-\d{2}", low) and low.endswith(".json"):
+        elif not activities_only and re.search(r"(^|/)weight-\d{4}-\d{2}", low) and low.endswith(".json"):
             files_seen["body_metrics"] = files_seen.get("body_metrics", 0) + 1
             yield from _parse_fitbit_weight(zf, name, weight_unit)
 
-        elif "wrist temperature" in low and low.endswith(".csv"):
+        elif not activities_only and "wrist temperature" in low and low.endswith(".csv"):
             files_seen["skin_temp"] = files_seen.get("skin_temp", 0) + 1
             yield from _parse_fitbit_wrist_temp(zf, name)
 
         elif re.search(r"(^|/)exercise(-\d+)?\.json$", low):
             files_seen["activities"] = files_seen.get("activities", 0) + 1
-            yield from _parse_fitbit_exercise(zf, name)
+            yield from _parse_fitbit_exercise(
+                zf, name, since=since, until=until, type_substrings=type_substrings,
+            )
 
     log.info("fitbit zip walk done: files_seen=%s", files_seen)
 
@@ -299,19 +309,49 @@ def _parse_fitbit_wrist_temp(zf, name) -> Iterator[tuple[str, list[dict[str, Any
     yield from _emit("skin_temp", batch)
 
 
-def _parse_fitbit_exercise(zf, name) -> Iterator[tuple[str, list[dict[str, Any]]]]:
+def _parse_fitbit_exercise(
+    zf, name, since: datetime | None = None, until: datetime | None = None,
+    type_substrings: list[str] | None = None,
+) -> Iterator[tuple[str, list[dict[str, Any]]]]:
     data = _safe_load_json(zf, name)
     if not data:
         return
     batch: list[dict[str, Any]] = []
     for ex in data:
-        start = _parse_iso_ts(ex.get("startTime"))
+        # Optional type filter — substring match on activity name / type id,
+        # e.g. ["bik", "cycl"] to backfill only rides.
+        if type_substrings:
+            hay = f"{ex.get('activityName') or ''} {ex.get('activityTypeId') or ''}".lower()
+            if not any(t in hay for t in type_substrings):
+                continue
+        # Fitbit exercise startTime is "MM/DD/YY HH:MM:SS" (local clock), NOT
+        # ISO. The old code used _parse_iso_ts, which only groks ISO, so it
+        # returned None for every record and no exercises ever imported.
+        # Parse the Fitbit format first, ISO second (newer/Google Health
+        # exports may switch formats).
+        start = _parse_fitbit_ts(ex.get("startTime")) or _parse_iso_ts(ex.get("startTime"))
         if not start:
+            continue
+        # Optional import window — used to backfill only a missing gap
+        # without duplicating activities already present from other sources.
+        if since is not None and start < since:
+            continue
+        if until is not None and start >= until:
             continue
         dur_ms = ex.get("duration") or 0
         dur_s = int(dur_ms / 1000) if dur_ms else 0
-        dist_km = ex.get("distance")
-        dist_m = float(dist_km) * 1000 if isinstance(dist_km, (int, float)) else None
+        # Honor distanceUnit: imperial Fitbit profiles export miles + feet,
+        # not km + metres. Assuming km silently under-counts distance ~1.6x.
+        unit = str(ex.get("distanceUnit") or "").lower()
+        imperial = unit.startswith("mile")
+        dist_val = ex.get("distance")
+        dist_m = (
+            float(dist_val) * (1609.344 if imperial else 1000.0)
+            if isinstance(dist_val, (int, float)) else None
+        )
+        elev = ex.get("elevationGain")
+        if isinstance(elev, (int, float)) and imperial:
+            elev = float(elev) * 0.3048  # feet -> metres for imperial exports
         log_id = ex.get("logId") or ex.get("logID")
         if log_id is None:
             continue
@@ -324,7 +364,7 @@ def _parse_fitbit_exercise(zf, name) -> Iterator[tuple[str, list[dict[str, Any]]
             "start_at": start,
             "duration_s": dur_s,
             "distance_m": dist_m,
-            "elevation_gain_m": ex.get("elevationGain"),
+            "elevation_gain_m": elev,
             "avg_hr": ex.get("averageHeartRate"),
             "max_hr": ex.get("maxHeartRate"),
             "kcal": ex.get("calories"),

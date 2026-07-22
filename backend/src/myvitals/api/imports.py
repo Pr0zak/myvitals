@@ -191,15 +191,32 @@ async def _run_import(
             pass
 
 
+def _parse_date_param(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    dt = datetime.fromisoformat(s)
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 @router.post("/fitbit")
 async def import_fitbit(
     file: UploadFile = File(...),
     weight_unit: str = Query("kg", pattern="^(kg|lb)$"),
+    activities_only: bool = Query(False, description="Import only exercise records, skip vitals"),
+    since: str | None = Query(None, description="ISO date; only import exercises on/after this"),
+    until: str | None = Query(None, description="ISO date; only import exercises strictly before this"),
+    types: str | None = Query(None, description="Comma-separated substrings; keep only matching activity types (e.g. bik,cycl)"),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
+    since_dt = _parse_date_param(since)
+    until_dt = _parse_date_param(until)
+    type_subs = [t.strip().lower() for t in types.split(",") if t.strip()] if types else None
     return await _run_import(
         "fitbit", file, db,
-        lambda zf: imp_int.parse_fitbit_zip(zf, weight_unit=weight_unit),
+        lambda zf: imp_int.parse_fitbit_zip(
+            zf, weight_unit=weight_unit, activities_only=activities_only,
+            since=since_dt, until=until_dt, type_substrings=type_subs,
+        ),
     ) | {"weight_unit": weight_unit, "source": "fitbit"}
 
 

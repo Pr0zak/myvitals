@@ -380,6 +380,37 @@ def _parse_fitbit_exercise(
     yield from _emit("activities", batch)
 
 
+def parse_fitbit_gps_tracks(zf: zipfile.ZipFile) -> list[tuple[int, float, float]]:
+    """Read every 'gps_location_*.csv' (timestamp,latitude,longitude,…) from a
+    Fitbit/Google Takeout and return a time-sorted [(utc_epoch, lat, lon), …].
+
+    The exercise JSON is summary-only; the actual GPS track lives in these
+    per-date CSVs. The API layer windows these points to each activity's
+    time range and encodes a polyline (see _process_fitbit_tracks_job)."""
+    pts: list[tuple[int, float, float]] = []
+    for name in zf.namelist():
+        low = name.lower()
+        if "gps_location" not in low or not low.endswith(".csv"):
+            continue
+        try:
+            text = zf.read(name).decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001
+            continue
+        for row in csv.reader(text.splitlines()):
+            if len(row) < 3 or row[0].strip().lower() == "timestamp":
+                continue
+            ts = _parse_iso_ts(row[0])
+            if ts is None:
+                continue
+            try:
+                pts.append((int(ts.timestamp()), float(row[1]), float(row[2])))
+            except (ValueError, TypeError):
+                continue
+    pts.sort()
+    log.info("fitbit gps tracks: %d points loaded", len(pts))
+    return pts
+
+
 # --- Garmin Connect data export ---------------------------------------
 
 def parse_garmin_zip(zf: zipfile.ZipFile) -> Iterator[tuple[str, list[dict[str, Any]]]]:

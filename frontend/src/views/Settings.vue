@@ -777,10 +777,11 @@ function jobAge(j: ImportJob): string {
   return `${h}h ${m}m`;
 }
 
-type ImportKind = "fitbit" | "garmin" | "garmin_tracks";
+type ImportKind = "fitbit" | "fitbit_tracks" | "garmin" | "garmin_tracks";
 
 async function uploadImport(kind: ImportKind, file: File) {
-  importBusy.value = kind === "garmin_tracks" ? "garmin" : kind;
+  importBusy.value = kind === "garmin_tracks" ? "garmin"
+                   : kind === "fitbit_tracks" ? "fitbit" : kind;
   importResult.value = "";
   importError.value = "";
   try {
@@ -790,6 +791,7 @@ async function uploadImport(kind: ImportKind, file: File) {
     const params: Record<string, string> = {};
     if (kind === "fitbit") params.weight_unit = fitbitWeightUnit.value;
     const path = kind === "garmin_tracks" ? "/import/garmin/tracks"
+               : kind === "fitbit_tracks" ? "/import/fitbit/tracks"
                : kind === "fitbit" ? "/import/fitbit"
                : "/import/garmin";
     const r = await axios.post(`${base}${path}`, fd, {
@@ -801,7 +803,7 @@ async function uploadImport(kind: ImportKind, file: File) {
       maxContentLength: 1024 * 1024 * 1024,
       maxBodyLength: 1024 * 1024 * 1024,
     });
-    if (kind === "garmin_tracks") {
+    if (kind === "garmin_tracks" || kind === "fitbit_tracks") {
       importResult.value = `Track parsing started — job ${r.data.job_id}. Watch progress in Recent jobs below.`;
     } else {
       const counts = r.data?.imported ?? {};
@@ -1582,6 +1584,13 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           <button class="ghost" :disabled="!!importBusy" @click="pickImportFile('fitbit')">
             {{ importBusy === 'fitbit' ? 'Uploading…' : 'Upload Fitbit / Google Health ZIP' }}
           </button>
+          <button class="ghost" :disabled="!!importBusy" @click="pickImportFile('fitbit_tracks')"
+                  style="margin-top: 0.4rem;">
+            Upload Fitbit ZIP (GPS maps)
+          </button>
+          <p class="muted" style="margin-top: 0.4rem; font-size: 0.75rem;">
+            The GPS upload reads the Takeout's <code>gps_location</code> CSVs and adds ride maps to your Fitbit activities. Background job, watch progress below.
+          </p>
         </div>
         <div class="import-card">
           <strong>Garmin Connect</strong>

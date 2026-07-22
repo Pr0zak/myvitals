@@ -416,6 +416,77 @@ async def import_garmin_tracks(
     }
 
 
+# --- Fitbit GPS tracks (background job) ------------------------------
+
+async def _process_fitbit_tracks_job(tmp_path: str, job_id: int) -> None:
+    """Attach GPS polylines to fitbit activities from a Takeout's
+    gps_location_*.csv track files. Fitbit + gps timestamps are both UTC, so
+    each activity's [start, start+duration] window selects its points; the
+    polyline is written only (never wiped) so it survives future imports."""
+    import bisect
+    import polyline as polyline_lib
+
+    counts: dict[str, int] = {"gps_points": 0, "activities_scanned": 0, "matched": 0}
+    try:
+        with zipfile.ZipFile(tmp_path) as zf:
+            pts = imp_int.parse_fitbit_gps_tracks(zf)
+        counts["gps_points"] = len(pts)
+        eps = [p[0] for p in pts]
+        async with SessionLocal() as db:
+            rows = (await db.execute(
+                select(models.Activity.source_id, models.Activity.start_at,
+                       models.Activity.duration_s)
+                .where(models.Activity.source == "fitbit")
+            )).all()
+            for sid, start_at, dur in rows:
+                counts["activities_scanned"] += 1
+                ep = int(start_at.timestamp())
+                dur = dur or 0
+                lo = bisect.bisect_left(eps, ep - 60)
+                hi = bisect.bisect_right(eps, ep + max(dur, 300) + 60)
+                seg = pts[lo:hi]
+                if len(seg) < 10:
+                    continue
+                poly = polyline_lib.encode(
+                    [(la, lon) for _, la, lon in seg], precision=5)
+                await db.execute(
+                    update(models.Activity)
+                    .where(models.Activity.source == "fitbit")
+                    .where(models.Activity.source_id == sid)
+                    .values(polyline=poly)
+                )
+                counts["matched"] += 1
+            await db.commit()
+        await _finish_job(job_id, "done", counts)
+    except Exception:
+        tb = traceback.format_exc()
+        log.exception("fitbit tracks job %d failed", job_id)
+        await _finish_job(job_id, "failed", counts, error=tb)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+@router.post("/fitbit/tracks", status_code=202)
+async def import_fitbit_tracks(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Attach GPS maps to fitbit activities from a Fitbit/Google Takeout's
+    gps_location_*.csv files (the exercise JSON is summary-only). Background
+    job — poll /import/jobs/<id>."""
+    tmp_path = await _save_upload_to_tmp(file)
+    size = os.path.getsize(tmp_path)
+    job_id = await _create_job(
+        kind="fitbit_gps_tracks", filename=file.filename, size_bytes=size,
+    )
+    asyncio.create_task(_process_fitbit_tracks_job(tmp_path, job_id))
+    return {
+        "job_id": job_id, "status": "queued",
+        "filename": file.filename, "size_bytes": size,
+        "message": f"Processing in background — poll /import/jobs/{job_id}",
+    }
+
+
 # --- Job status -------------------------------------------------------
 
 @router.get("/jobs")

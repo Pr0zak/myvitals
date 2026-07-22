@@ -236,7 +236,12 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
                     select(func.count())
                     .select_from(models.Alert)
                     .where(models.Alert.kind == "rhr_drift")
-                    .where(models.Alert.payload["date"].astext == target.isoformat())
+                    # payload is a generic JSON column (not PG JSONB), so
+                    # `.astext` isn't available — use the ->> operator, which
+                    # extracts JSON text on both json and jsonb. `.astext`
+                    # here silently failed the whole daily-summary recompute
+                    # on any day with an RHR drift.
+                    .where(models.Alert.payload.op("->>")("date") == target.isoformat())
                 )).scalar() or 0
                 if not already:
                     db.add(models.Alert(

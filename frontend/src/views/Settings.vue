@@ -74,6 +74,7 @@ interface StravaCookieStatus {
 const cookieStatus = ref<StravaCookieStatus | null>(null);
 const cookieRememberInput = ref("");
 const cookieSidInput = ref("");
+const cookieBlobInput = ref("");
 const cookieEmailInput = ref("");
 const cookiePasswordInput = ref("");
 const cookieAutoLoginEnabled = ref(true);
@@ -107,10 +108,11 @@ async function loadCookieStatus() {
 async function saveCookie() {
   const haveRemember = !!cookieRememberInput.value.trim();
   const haveSid = !!cookieSidInput.value.trim();
-  const haveCookie = haveRemember || haveSid;
+  const haveBlob = !!cookieBlobInput.value.trim();
+  const haveCookie = haveRemember || haveSid || haveBlob;
   const haveCreds = !!cookieEmailInput.value.trim() && !!cookiePasswordInput.value;
   if (!haveCookie && !haveCreds) {
-    cookieResult.value = "Provide either cookie or email + password.";
+    cookieResult.value = "Paste your Strava cookies (or a cookie/email+password).";
     return;
   }
   cookieSaving.value = true;
@@ -121,6 +123,7 @@ async function saveCookie() {
     };
     if (haveRemember) body.remember_token = cookieRememberInput.value.trim();
     if (haveSid) body.sid_cookie = cookieSidInput.value.trim();
+    if (haveBlob) body.cookie_blob = cookieBlobInput.value.trim();
     if (haveCreds) {
       body.email = cookieEmailInput.value.trim();
       body.password = cookiePasswordInput.value;
@@ -135,6 +138,7 @@ async function saveCookie() {
     cookieEditing.value = false;
     cookieRememberInput.value = "";
     cookieSidInput.value = "";
+    cookieBlobInput.value = "";
     cookiePasswordInput.value = "";
   } catch (e) {
     cookieResult.value = `Save failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -1799,24 +1803,44 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           </div>
 
           <details class="howto" :open="cookieHowtoOpen" @toggle="cookieHowtoOpen = ($event.target as HTMLDetailsElement).open">
-            <summary class="muted">Or paste a cookie manually</summary>
+            <summary class="muted">Paste a cookie (no password needed)</summary>
+
+            <p class="hint" style="margin-top: 0.6rem;">
+              <strong>Easiest — one paste, no DevTools hunting:</strong>
+            </p>
             <ol class="howto-steps">
-              <li>Sign in at <a href="https://www.strava.com/login" target="_blank" rel="noreferrer">strava.com/login</a> in Chrome / Firefox — any method (Google, emailed code, or password) works; the cookie is the same afterward.</li>
-              <li>Open DevTools (<kbd>F12</kbd> or <kbd>Cmd+Opt+I</kbd>).</li>
-              <li>Application tab → Storage → Cookies → <code>https://www.strava.com</code>.</li>
-              <li>Copy <code>strava_remember_token</code> if present (preferred — lasts months). Otherwise copy <code>_strava4_session</code> alone — works for accounts using one-time login codes, but Strava times out the session so you'll re-paste more often.</li>
-              <li>Paste whichever cookie(s) you have below and Save.</li>
+              <li>Install <a href="https://cookie-editor.com/" target="_blank" rel="noreferrer">Cookie-Editor</a> — a free, open-source extension for Chrome / Firefox / Edge / Safari.</li>
+              <li>Sign in at <a href="https://www.strava.com/login" target="_blank" rel="noreferrer">strava.com</a> — any method (Google, emailed code, or password) works; the cookies are the same afterward.</li>
+              <li>Click the Cookie-Editor icon in your toolbar → <strong>Export</strong> (bottom bar) → <strong>Export as JSON</strong>. It copies to your clipboard.</li>
+              <li>Paste it below and <strong>Save &amp; test</strong> — I find <code>strava_remember_token</code> / <code>_strava4_session</code> for you.</li>
             </ol>
             <div class="form">
               <label>
-                <span>strava_remember_token <em class="opt">(long-lived)</em></span>
-                <input v-model="cookieRememberInput" type="password" placeholder="long base64-ish string" autocomplete="off"/>
-              </label>
-              <label>
-                <span>_strava4_session <em class="opt">(short-lived fallback)</em></span>
-                <input v-model="cookieSidInput" type="password" placeholder="session cookie" autocomplete="off"/>
+                <span>Strava cookies <em class="opt">(Cookie-Editor export — JSON, header string, or Netscape all work)</em></span>
+                <textarea v-model="cookieBlobInput" rows="3"
+                          placeholder='[{"name":"strava_remember_token","value":"…"}, {"name":"_strava4_session","value":"…"}]'
+                          autocomplete="off" spellcheck="false"></textarea>
               </label>
             </div>
+
+            <details class="howto-manual" style="margin-top: 0.8rem;">
+              <summary class="muted">Or grab the value by hand in DevTools</summary>
+              <ol class="howto-steps">
+                <li>Signed in at strava.com, open DevTools (<kbd>F12</kbd> or <kbd>Cmd+Opt+I</kbd>).</li>
+                <li>Application tab → Storage → Cookies → <code>https://www.strava.com</code>.</li>
+                <li>Copy <code>strava_remember_token</code> if present (lasts months). Otherwise copy <code>_strava4_session</code> alone — works for one-time-code accounts, but Strava times out the session so you'll re-paste more often.</li>
+              </ol>
+              <div class="form">
+                <label>
+                  <span>strava_remember_token <em class="opt">(long-lived)</em></span>
+                  <input v-model="cookieRememberInput" type="password" placeholder="long base64-ish string" autocomplete="off"/>
+                </label>
+                <label>
+                  <span>_strava4_session <em class="opt">(short-lived fallback)</em></span>
+                  <input v-model="cookieSidInput" type="password" placeholder="session cookie" autocomplete="off"/>
+                </label>
+              </div>
+            </details>
           </details>
 
           <div class="actions">

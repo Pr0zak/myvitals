@@ -492,6 +492,11 @@ class StravaCookieIn(BaseModel):
     # optional so the user can paste just creds and have us auto-login.
     remember_token: str | None = None
     sid_cookie: str | None = None
+    # A whole cookie-export blob (Cookie-Editor / EditThisCookie JSON,
+    # Netscape cookies.txt, or a header string). Parsed server-side into
+    # remember_token / sid_cookie so the user pastes one thing instead of
+    # hunting each value in DevTools.
+    cookie_blob: str | None = None
     email: str | None = None
     password: str | None = None
     auto_login_enabled: bool = True
@@ -552,6 +557,15 @@ async def set_cookie(
     """
     now = datetime.now(timezone.utc)
     row = await strava_web.get_cookie_creds(db)
+    # Lenient paste: pull tokens out of a full cookie-export blob so the
+    # user doesn't have to match each value to a field. Explicit fields
+    # still win if both are somehow provided.
+    if body.cookie_blob:
+        b_remember, b_sid = strava_web.parse_cookie_blob(body.cookie_blob)
+        if not body.remember_token and b_remember:
+            body.remember_token = b_remember
+        if not body.sid_cookie and b_sid:
+            body.sid_cookie = b_sid
     have_creds = bool(body.email and body.password)
     # SCS-8: either cookie alone is enough — OTC accounts only get
     # _strava4_session, never a long-lived remember_token.

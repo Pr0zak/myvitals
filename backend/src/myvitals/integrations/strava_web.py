@@ -25,6 +25,7 @@ manifests as a 401 on the next call; the user re-pastes from devtools.
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -207,6 +208,67 @@ class CookieCheckResult:
     athlete_id: int | None = None
     athlete_name: str | None = None
     error: str | None = None
+
+
+def parse_cookie_blob(blob: str | None) -> tuple[str | None, str | None]:
+    """Extract (strava_remember_token, _strava4_session) from a pasted
+    cookie export in any common format, so the user can paste ONE blob
+    from a cookie-export extension (Cookie-Editor / EditThisCookie) instead
+    of hunting each value in DevTools and matching it to the right field.
+
+    Handles:
+      - JSON array/object (Cookie-Editor, EditThisCookie): [{"name":…,"value":…}]
+      - Netscape cookies.txt: tab-separated, name in col 6, value col 7
+      - Header/`document.cookie` string: "name=value; name2=value2"
+
+    Returns (None, None) for anything it can't recognise; the caller keeps
+    whatever it does find. HttpOnly values are fine — the extension reads
+    them via the browser cookie API, unlike a document.cookie bookmarklet."""
+    if not blob or not blob.strip():
+        return None, None
+    text = blob.strip()
+    remember: str | None = None
+    sid: str | None = None
+
+    def _take(name: str, val: str | None) -> None:
+        nonlocal remember, sid
+        if not val:
+            return
+        if name == "strava_remember_token":
+            remember = val
+        elif name == "_strava4_session":
+            sid = val
+
+    # 1) JSON export.
+    if text[:1] in "[{":
+        try:
+            data = json.loads(text)
+            items = data if isinstance(data, list) else (
+                data.get("cookies", []) if isinstance(data, dict) else [])
+            for c in items:
+                if isinstance(c, dict):
+                    _take(str(c.get("name") or c.get("Name") or ""),
+                          c.get("value") or c.get("Value"))
+            if remember or sid:
+                return remember, sid
+        except (ValueError, TypeError):
+            pass  # fall through to the text formats
+
+    # 2) Netscape cookies.txt (has tabs).
+    if "\t" in text:
+        for line in text.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 7 and not line.startswith("#"):
+                _take(parts[5].strip(), parts[6].strip())
+        if remember or sid:
+            return remember, sid
+
+    # 3) Header / document.cookie string.
+    for pair in text.replace("\n", ";").split(";"):
+        if "=" in pair:
+            name, _, val = pair.strip().partition("=")
+            _take(name.strip(), val.strip())
+    return remember, sid
 
 
 async def check_cookie(

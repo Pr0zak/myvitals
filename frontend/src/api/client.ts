@@ -478,6 +478,7 @@ export const api = {
   async stravaCookieSet(body: {
     remember_token?: string;
     sid_cookie?: string | null;
+    cookie_blob?: string;
     email?: string;
     password?: string;
     auto_login_enabled?: boolean;

@@ -1698,42 +1698,13 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
            policy paywalls OAuth API access on 2026-06-30. Cookie
            mode keeps free-tier users working. -->
       <div class="block">
-        <h3 style="margin-top: 0;">Cookie-mode (recommended)</h3>
-        <p class="hint">
-          Strava's June 2026 API policy paywalls the OAuth path on
-          <strong>2026-06-30</strong> for free accounts. Cookie mode pulls
-          rides directly from <code>strava.com</code> using the same
-          login your browser uses — no subscription required, and the
-          chest-strap HR stream embedded in the FIT comes through
-          intact.
-        </p>
-
-        <!-- Session dead — surface the credential form directly (a dead
-             cookie still counts as "configured", so without this it would
-             hide behind a "✓ Connected" view + "Update credentials"). -->
-        <div v-if="cookieStatus && cookieStatus.needs_reconnect" class="reconnect-callout">
-          <strong>⚠ Strava session expired — reconnect below.</strong>
-          <span v-if="cookieStatus.last_error" class="muted" style="display:block;">
-            {{ cookieStatus.last_error }}
-          </span>
-          <span class="muted" style="display:block;">
-            <strong>Sign in with Google or an emailed code?</strong> Your
-            account has no Strava password, so use <em>“Paste a cookie
-            manually”</em> below (opened for you) — that's your path. Only
-            accounts with an email + password login can use hands-off
-            auto-login.
-          </span>
-        </div>
-
-        <template v-if="cookieStatus && cookieStatus.configured && !cookieEditing && !cookieStatus.needs_reconnect">
+        <!-- ═══ CONNECTED & HEALTHY — calm status, no form ═══ -->
+        <template v-if="cookieStatus?.configured && !cookieStatus.needs_reconnect && !cookieEditing">
           <p class="ok-text">
-            ✓ Connected as <strong>{{ cookieStatus.athlete_name ?? cookieStatus.athlete_id ?? "Strava (cookie session)" }}</strong><br/>
+            ✓ Connected as <strong>{{ cookieStatus.athlete_name ?? cookieStatus.athlete_id ?? "Strava" }}</strong><br/>
             <span class="muted">Last sync: {{ cookieStatus.last_sync_at ? fmt(cookieStatus.last_sync_at) : "never" }}</span>
             <span v-if="cookieStatus.auto_login_enabled" class="muted" style="display: block;">
-              Auto-login: ✓ enabled
-              <span v-if="cookieStatus.last_auto_login_at">
-                · last refresh {{ fmt(cookieStatus.last_auto_login_at) }}
-              </span>
+              Auto-login on<span v-if="cookieStatus.last_auto_login_at"> · last refresh {{ fmt(cookieStatus.last_auto_login_at) }}</span>
             </span>
             <span v-if="cookieStatus.last_error" class="err" style="display: block;">
               Last error: {{ cookieStatus.last_error }}
@@ -1747,7 +1718,7 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
                     :disabled="cookieRefreshing" @click="refreshCookieNow">
               {{ cookieRefreshing ? "Refreshing…" : "Refresh cookie" }}
             </button>
-            <button class="ghost" @click="cookieEditing = true">Update credentials</button>
+            <button class="ghost" @click="cookieEditing = true">Update cookies</button>
             <button class="ghost danger" @click="disconnectCookie">Disconnect</button>
           </div>
 
@@ -1771,18 +1742,70 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           </details>
         </template>
 
+        <!-- ═══ FRESH / RECONNECT / EDITING — the cookie paste box IS the lead ═══ -->
         <template v-else>
-          <!-- Auto-login (recommended). Encryption key is auto-
-               generated on first save and stored in the DB row, so no
-               .env shell session is needed. -->
-          <div class="auto-login-block">
+          <div v-if="cookieStatus?.needs_reconnect" class="reconnect-callout">
+            <strong>⚠ Strava session expired</strong>
+            <span class="muted" style="display:block;">Paste fresh cookies below to reconnect.</span>
+            <span v-if="cookieStatus.last_error" class="muted" style="display:block;">{{ cookieStatus.last_error }}</span>
+          </div>
+
+          <!-- PRIMARY ACTION — un-nested, the first visible element -->
+          <div class="form">
+            <label>
+              <span>Strava cookies</span>
+              <textarea v-model="cookieBlobInput" rows="3"
+                        placeholder='[{"name":"strava_remember_token","value":"…"}, {"name":"_strava4_session","value":"…"}]'
+                        autocomplete="off" spellcheck="false"></textarea>
+            </label>
             <p class="hint">
-              <strong>Auto-login</strong>
-              <em class="opt">— only if you sign in to Strava with an email + password.</em>
-              Google or “email me a code” sign-ins have no password — skip
-              this and use “Paste a cookie manually” below. Password is
-              stored encrypted in your local DB; backend re-runs the login
-              automatically whenever the cookie expires.
+              Export with the <a href="https://cookie-editor.com/" target="_blank" rel="noreferrer">Cookie-Editor</a>
+              extension and paste here — JSON, header string, or Netscape all work. No password needed.
+            </p>
+          </div>
+          <div class="actions">
+            <button class="primary" :disabled="cookieSaving" @click="saveCookie">
+              {{ cookieSaving ? "Validating…" : "Save & test" }}
+            </button>
+            <button v-if="cookieEditing" class="ghost" @click="cookieEditing = false">Cancel</button>
+          </div>
+
+          <!-- SECONDARY — all collapsed, clearly labeled -->
+          <details class="howto" :open="cookieHowtoOpen" @toggle="cookieHowtoOpen = ($event.target as HTMLDetailsElement).open">
+            <summary class="muted">How to get your cookies</summary>
+            <ol class="howto-steps">
+              <li>Install <a href="https://cookie-editor.com/" target="_blank" rel="noreferrer">Cookie-Editor</a> (Chrome / Firefox / Edge / Safari).</li>
+              <li>Sign in at <a href="https://www.strava.com/login" target="_blank" rel="noreferrer">strava.com</a> — any method (Google, emailed code, or password) works.</li>
+              <li>Click the Cookie-Editor icon → <strong>Export</strong> → <strong>Export as JSON</strong> (copies to your clipboard).</li>
+              <li>Paste it above and <strong>Save &amp; test</strong>.</li>
+            </ol>
+          </details>
+
+          <details>
+            <summary class="muted">Paste cookie values by hand (DevTools)</summary>
+            <ol class="howto-steps">
+              <li>At strava.com open DevTools (<kbd>F12</kbd> or <kbd>Cmd+Opt+I</kbd>) → Application → Cookies → <code>https://www.strava.com</code>.</li>
+              <li>Copy <code>strava_remember_token</code> (long-lived), or <code>_strava4_session</code> as a fallback.</li>
+            </ol>
+            <div class="form">
+              <label>
+                <span>strava_remember_token <em class="opt">(long-lived)</em></span>
+                <input v-model="cookieRememberInput" type="password" placeholder="long base64-ish string" autocomplete="off"/>
+              </label>
+              <label>
+                <span>_strava4_session <em class="opt">(short-lived fallback)</em></span>
+                <input v-model="cookieSidInput" type="password" placeholder="session cookie" autocomplete="off"/>
+              </label>
+            </div>
+            <p class="hint">Then hit <strong>Save &amp; test</strong> above.</p>
+          </details>
+
+          <details>
+            <summary class="muted">Email + password auto-login (password accounts only)</summary>
+            <p class="hint" style="margin-top: 0.6rem;">
+              Only if you sign in to Strava with an email + password (not Google
+              / emailed code). Stored encrypted in your local DB; the backend
+              re-runs the login when the cookie expires.
             </p>
             <div class="form">
               <label>
@@ -1800,55 +1823,17 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
                 <span>Auto-refresh cookie when it expires</span>
               </label>
             </div>
-          </div>
-
-          <details class="howto" :open="cookieHowtoOpen" @toggle="cookieHowtoOpen = ($event.target as HTMLDetailsElement).open">
-            <summary class="muted">Paste a cookie (no password needed)</summary>
-
-            <p class="hint" style="margin-top: 0.6rem;">
-              <strong>Easiest — one paste, no DevTools hunting:</strong>
-            </p>
-            <ol class="howto-steps">
-              <li>Install <a href="https://cookie-editor.com/" target="_blank" rel="noreferrer">Cookie-Editor</a> — a free, open-source extension for Chrome / Firefox / Edge / Safari.</li>
-              <li>Sign in at <a href="https://www.strava.com/login" target="_blank" rel="noreferrer">strava.com</a> — any method (Google, emailed code, or password) works; the cookies are the same afterward.</li>
-              <li>Click the Cookie-Editor icon in your toolbar → <strong>Export</strong> (bottom bar) → <strong>Export as JSON</strong>. It copies to your clipboard.</li>
-              <li>Paste it below and <strong>Save &amp; test</strong> — I find <code>strava_remember_token</code> / <code>_strava4_session</code> for you.</li>
-            </ol>
-            <div class="form">
-              <label>
-                <span>Strava cookies <em class="opt">(Cookie-Editor export — JSON, header string, or Netscape all work)</em></span>
-                <textarea v-model="cookieBlobInput" rows="3"
-                          placeholder='[{"name":"strava_remember_token","value":"…"}, {"name":"_strava4_session","value":"…"}]'
-                          autocomplete="off" spellcheck="false"></textarea>
-              </label>
-            </div>
-
-            <details class="howto-manual" style="margin-top: 0.8rem;">
-              <summary class="muted">Or grab the value by hand in DevTools</summary>
-              <ol class="howto-steps">
-                <li>Signed in at strava.com, open DevTools (<kbd>F12</kbd> or <kbd>Cmd+Opt+I</kbd>).</li>
-                <li>Application tab → Storage → Cookies → <code>https://www.strava.com</code>.</li>
-                <li>Copy <code>strava_remember_token</code> if present (lasts months). Otherwise copy <code>_strava4_session</code> alone — works for one-time-code accounts, but Strava times out the session so you'll re-paste more often.</li>
-              </ol>
-              <div class="form">
-                <label>
-                  <span>strava_remember_token <em class="opt">(long-lived)</em></span>
-                  <input v-model="cookieRememberInput" type="password" placeholder="long base64-ish string" autocomplete="off"/>
-                </label>
-                <label>
-                  <span>_strava4_session <em class="opt">(short-lived fallback)</em></span>
-                  <input v-model="cookieSidInput" type="password" placeholder="session cookie" autocomplete="off"/>
-                </label>
-              </div>
-            </details>
           </details>
 
-          <div class="actions">
-            <button class="primary" :disabled="cookieSaving" @click="saveCookie">
-              {{ cookieSaving ? "Validating…" : "Save & test" }}
-            </button>
-            <button v-if="cookieEditing" class="ghost" @click="cookieEditing = false">Cancel</button>
-          </div>
+          <details>
+            <summary class="muted">Why cookie mode?</summary>
+            <p class="hint" style="margin-top: 0.6rem;">
+              Strava paywalled its free OAuth API on <strong>2026-06-30</strong>.
+              Cookie mode pulls rides straight from <code>strava.com</code> using
+              your normal browser login — no subscription, and the chest-strap HR
+              in each FIT comes through intact.
+            </p>
+          </details>
         </template>
 
         <div v-if="cookieResult" class="hint" style="margin-top: 0.6rem;">{{ cookieResult }}</div>
@@ -1858,7 +1843,7 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
            reachable for users on a paid Strava sub who prefer it. -->
       <div class="block">
         <details :open="showLegacyOAuth" @toggle="showLegacyOAuth = ($event.target as HTMLDetailsElement).open">
-          <summary class="muted">Legacy: Strava OAuth (requires paid subscription after 2026-06-30)</summary>
+          <summary class="muted">Legacy: Strava OAuth (needs a paid Strava sub)</summary>
           <template v-if="strava && stravaConfig">
             <p v-if="!stravaConfig.configured" class="hint">
               Create an app at
@@ -1930,7 +1915,6 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
         </details>
       </div>
 
-      <div v-if="!strava && !cookieStatus && !stravaError" class="hint">Loading…</div>
     </section>
 
     <!-- ── Fasting preferences ── -->

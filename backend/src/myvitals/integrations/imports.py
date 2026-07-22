@@ -355,12 +355,16 @@ def _parse_fitbit_exercise(
         log_id = ex.get("logId") or ex.get("logID")
         if log_id is None:
             continue
-        act_type = (ex.get("activityName") or ex.get("activityTypeId") or "unknown")
+        act_type = str(ex.get("activityName") or ex.get("activityTypeId") or "unknown")
+        name = ex.get("activityName")
         batch.append({
             "source": "fitbit",
             "source_id": str(log_id),
-            "type": str(act_type).lower().replace(" ", "_"),
-            "name": ex.get("activityName"),
+            # activities.type is varchar(64); long MyFitnessPal names (e.g.
+            # "Running (jogging), 5.2 mph …") overflow it, aborting the whole
+            # import. Cap to the column width (full text stays in `name`).
+            "type": act_type.lower().replace(" ", "_")[:64],
+            "name": name[:255] if isinstance(name, str) else name,
             "start_at": start,
             "duration_s": dur_s,
             "distance_m": dist_m,

@@ -110,9 +110,13 @@ async def _upsert_activities_chunk(db: AsyncSession, rows: list[dict[str, Any]])
     if not rows:
         return
     stmt = insert(models.Activity).values(rows)
+    # Never let an activity re-import clobber columns owned by other flows:
+    # notes/tags are user edits, and `polyline` is attached separately by the
+    # FIT/GPS track job — including it here wipes every restored map on the
+    # next activity import (this is what erased the Garmin tracks before).
     update_cols = {
         c.name: c for c in stmt.excluded
-        if c.name not in ("source", "source_id", "notes", "tags")
+        if c.name not in ("source", "source_id", "notes", "tags", "polyline")
     }
     stmt = stmt.on_conflict_do_update(index_elements=["source", "source_id"], set_=update_cols)
     await db.execute(stmt)

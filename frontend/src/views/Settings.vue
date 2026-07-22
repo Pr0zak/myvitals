@@ -65,6 +65,7 @@ interface StravaCookieStatus {
   athlete_name: string | null;
   last_sync_at: string | null;
   last_error: string | null;
+  needs_reconnect: boolean;
   auto_login_available: boolean;
   auto_login_enabled: boolean;
   email: string | null;
@@ -89,6 +90,12 @@ const showLegacyOAuth = ref(false);
 async function loadCookieStatus() {
   try {
     cookieStatus.value = await api.stravaCookieStatus();
+    // On a dead session, prefill the known email so the user only has
+    // to type their password to reconnect.
+    if (cookieStatus.value?.needs_reconnect && cookieStatus.value.email
+        && !cookieEmailInput.value) {
+      cookieEmailInput.value = cookieStatus.value.email;
+    }
   } catch (e) {
     cookieResult.value = `Status check failed: ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -1694,7 +1701,21 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           intact.
         </p>
 
-        <template v-if="cookieStatus && cookieStatus.configured && !cookieEditing">
+        <!-- Session dead — surface the credential form directly (a dead
+             cookie still counts as "configured", so without this it would
+             hide behind a "✓ Connected" view + "Update credentials"). -->
+        <div v-if="cookieStatus && cookieStatus.needs_reconnect" class="reconnect-callout">
+          <strong>⚠ Strava session expired — reconnect below.</strong>
+          <span v-if="cookieStatus.last_error" class="muted" style="display:block;">
+            {{ cookieStatus.last_error }}
+          </span>
+          <span class="muted" style="display:block;">
+            Enter your Strava email + password to enable auto-login (it
+            self-refreshes on future expiries), or paste a fresh cookie.
+          </span>
+        </div>
+
+        <template v-if="cookieStatus && cookieStatus.configured && !cookieEditing && !cookieStatus.needs_reconnect">
           <p class="ok-text">
             ✓ Connected as <strong>{{ cookieStatus.athlete_name ?? cookieStatus.athlete_id ?? "Strava (cookie session)" }}</strong><br/>
             <span class="muted">Last sync: {{ cookieStatus.last_sync_at ? fmt(cookieStatus.last_sync_at) : "never" }}</span>
@@ -1746,10 +1767,10 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
                .env shell session is needed. -->
           <div class="auto-login-block">
             <p class="hint">
-              <strong>Auto-login (recommended).</strong> Email + password
-              are stored encrypted in your local DB; backend re-runs the
-              login automatically whenever the cookie expires. Encryption
-              key is auto-generated on save.
+              <strong>{{ cookieStatus?.needs_reconnect ? "Reconnect with auto-login (recommended)." : "Auto-login (recommended)." }}</strong>
+              Email + password are stored encrypted in your local DB;
+              backend re-runs the login automatically whenever the cookie
+              expires. Encryption key is auto-generated on save.
             </p>
             <div class="form">
               <label>
@@ -2138,6 +2159,12 @@ select { background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-
 select:disabled { opacity: 0.5; }
 .err { color: #ef4444; padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; margin-top: 0.6rem; }
 .err small { color: #94a3b8; font-family: monospace; }
+.reconnect-callout {
+  padding: 0.6rem 0.8rem; margin-bottom: 0.8rem;
+  background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444;
+  border-radius: 4px; font-size: 0.9rem;
+}
+.reconnect-callout strong { color: #ef4444; }
 .muted { color: #94a3b8; font-size: 0.85rem; }
 code { background: var(--surface); padding: 0.1rem 0.3rem; border-radius: 3px; font-family: ui-monospace, monospace; font-size: 0.85rem; color: var(--accent); }
 

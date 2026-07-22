@@ -192,6 +192,15 @@ async def auto_login(email: str, password: str) -> LoginResult:
 
 # ─── Cookie validation ──────────────────────────────────────────────
 
+class CookieExpired(Exception):
+    """Raised when the Strava cookie session is confirmed dead (401 /
+    login-redirect) and could NOT be self-healed via auto-login. The
+    sync runner catches this and persists it as a user-facing
+    `last_error` instead of silently reporting a clean 0-activity run —
+    which is what let a dead cookie masquerade as 'up to date' for
+    weeks (the ride never came in, but the UI stayed green)."""
+
+
 @dataclass
 class CookieCheckResult:
     ok: bool

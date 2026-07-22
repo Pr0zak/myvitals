@@ -465,6 +465,7 @@ export const api = {
     athlete_name: string | null;
     last_sync_at: string | null;
     last_error: string | null;
+    needs_reconnect: boolean;
     auto_login_available: boolean;
     auto_login_enabled: boolean;
     email: string | null;

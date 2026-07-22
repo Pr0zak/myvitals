@@ -52,6 +52,22 @@ const error = ref<string | null>(null);
 // which we surface as the toast.
 const syncing = ref(false);
 const syncToast = ref<string>("");
+
+// Cookie-session health — drives the "reconnect Strava" banner. A dead
+// cookie used to sync silently (0 rides, no error), so a stale ride
+// count looked identical to "no new rides". needs_reconnect surfaces it.
+const cookieNeedsReconnect = ref(false);
+const cookieError = ref<string | null>(null);
+async function loadCookieStatus() {
+  try {
+    const s = await api.stravaCookieStatus();
+    cookieNeedsReconnect.value = !!s.needs_reconnect;
+    cookieError.value = s.last_error;
+  } catch {
+    // Non-fatal — the banner just stays hidden if the status call fails.
+  }
+}
+
 async function syncStravaNow() {
   syncing.value = true;
   syncToast.value = "";
@@ -65,6 +81,9 @@ async function syncStravaNow() {
         : `Synced ${r.upserted} new ${r.upserted === 1 ? "ride" : "rides"}.`;
       if (r.upserted > 0) await load();
     }
+    // Refresh the banner either way — a successful sync clears it,
+    // a failed one (dead cookie) raises it.
+    await loadCookieStatus();
   } catch (e) {
     syncToast.value = `Sync failed: ${e instanceof Error ? e.message : String(e)}`;
   } finally {
@@ -185,7 +204,7 @@ async function load() {
   }
 }
 
-onMounted(() => { load(); loadYtd(); });
+onMounted(() => { load(); loadYtd(); loadCookieStatus(); });
 watch(range, load);
 
 // Pull activities from Jan 1 of last year so we have both the current
@@ -514,6 +533,17 @@ const monthLabel = (key: string) =>
     </PageHeader>
     <div v-if="syncToast" class="sync-toast">{{ syncToast }}</div>
 
+    <!-- Reconnect banner — the cookie session is dead, so no new rides
+         are coming in until the user re-establishes it in Settings. -->
+    <div v-if="cookieNeedsReconnect" class="reconnect-banner">
+      <span class="rb-icon">⚠</span>
+      <div class="rb-body">
+        <strong>Strava sync is disconnected</strong> — no new activities are being pulled in.
+        <span v-if="cookieError" class="rb-detail">{{ cookieError }}</span>
+      </div>
+      <RouterLink to="/settings" class="rb-action">Reconnect →</RouterLink>
+    </div>
+
     <!-- Stats banner -->
     <Card v-if="stats && !loading" :title="`Stats — ${stats.period_label}`">
       <div class="stat-row">
@@ -837,6 +867,23 @@ const monthLabel = (key: string) =>
   border-left: 3px solid var(--accent); padding: 0.5rem 0.8rem;
   border-radius: 4px; margin-bottom: 0.8rem; font-size: 0.9rem;
 }
+
+/* Reconnect banner — dead Strava cookie session. */
+.reconnect-banner {
+  display: flex; align-items: center; gap: 0.7rem;
+  background: color-mix(in srgb, var(--bad) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--border));
+  border-left: 3px solid var(--bad);
+  padding: 0.6rem 0.9rem; border-radius: 4px; margin-bottom: 0.8rem;
+  font-size: 0.9rem;
+}
+.reconnect-banner .rb-icon { color: var(--bad); font-size: 1.1rem; line-height: 1; }
+.reconnect-banner .rb-body { flex: 1; }
+.reconnect-banner .rb-detail { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 0.15rem; }
+.reconnect-banner .rb-action {
+  color: var(--bad); font-weight: 600; text-decoration: none; white-space: nowrap;
+}
+.reconnect-banner .rb-action:hover { text-decoration: underline; }
 
 /* Stats banner */
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; }

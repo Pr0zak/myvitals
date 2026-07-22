@@ -473,6 +473,12 @@ class StravaCookieStatus(BaseModel):
     athlete_name: str | None = None
     last_sync_at: datetime | None = None
     last_error: str | None = None
+    # True when the last sync attempt failed and needs the user to act
+    # (dead cookie / broken auto-login). Drives the "reconnect Strava"
+    # banner on the web + phone Activities screens. last_error is
+    # cleared on every successful run, so a non-null value reliably
+    # means "sync is broken, go fix it in Settings".
+    needs_reconnect: bool = False
     # SCS-6: surfaced so the UI knows whether to show the email +
     # password form. False when STRAVA_CREDS_KEY isn't set in .env.
     auto_login_available: bool = False
@@ -520,6 +526,7 @@ async def get_cookie_status(
         athlete_name=row.athlete_name_cached,
         last_sync_at=row.last_sync_at,
         last_error=row.last_error,
+        needs_reconnect=bool(row.last_error),
         auto_login_available=strava_web.auto_login_available(),
         auto_login_enabled=row.auto_login_enabled,
         email=row.email,
@@ -748,10 +755,29 @@ async def _run_cookie_sync(
             return await strava_web.list_recent_activities(
                 row.remember_token, row.sid_cookie, since=since,
             )
-        return stubs
+        # Cookie is dead and auto-login can't recover it (disabled, or the
+        # stored password / 2FA no longer works). Surface it loudly instead
+        # of returning [] — a silent 0-activity run is exactly what hid a
+        # 6-week Strava outage (the ride never landed, but the UI stayed
+        # green). _refresh_cookie_via_auto_login may have set a specific
+        # reason on row.last_error; fall back to a plain reconnect prompt.
+        if row.auto_login_enabled:
+            raise strava_web.CookieExpired(
+                row.last_error
+                or "Strava auto-login failed — re-save your Strava password "
+                   "in Settings → Strava."
+            )
+        raise strava_web.CookieExpired(
+            "Strava session expired — reconnect in Settings → Strava "
+            "(paste a fresh cookie, or enable auto-login)."
+        )
 
     try:
         stubs = await _list_with_auto_relogin()
+    except strava_web.CookieExpired as e:
+        row.last_error = str(e)[:400]
+        await db.commit()
+        return StravaCookieSyncOut(upserted=0, error=row.last_error)
     except Exception as e:  # noqa: BLE001
         row.last_error = f"list error: {e}"[:400]
         await db.commit()

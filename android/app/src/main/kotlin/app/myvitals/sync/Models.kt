@@ -959,4 +959,8 @@ data class StravaCookieStatusResponse(
     @Json(name = "athlete_name") val athleteName: String? = null,
     @Json(name = "last_sync_at") val lastSyncAt: String? = null,
     @Json(name = "last_error") val lastError: String? = null,
+    // True when the last sync failed and needs the user to reconnect
+    // Strava in Settings (dead cookie / broken auto-login). Drives the
+    // reconnect banner on the Activities screen.
+    @Json(name = "needs_reconnect") val needsReconnect: Boolean = false,
 )

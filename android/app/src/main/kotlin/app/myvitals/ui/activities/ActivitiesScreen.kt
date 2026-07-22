@@ -38,6 +38,7 @@ import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Rowing
 import androidx.compose.material.icons.outlined.SelfImprovement
 import androidx.compose.material.icons.outlined.SportsEsports
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -147,7 +148,23 @@ fun ActivitiesScreen(
     LaunchedEffect(syncToast) {
         if (syncToast != null) { delay(4000); syncToast = null }
     }
+    // Cookie-session health — drives the reconnect banner. A dead cookie
+    // syncs silently (0 rides, no error), so a stale ride count looks
+    // identical to "no new rides". needsReconnect surfaces the outage.
+    var stravaNeedsReconnect by remember { mutableStateOf(false) }
+    var stravaCookieError by remember { mutableStateOf<String?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    suspend fun refreshCookieStatus() {
+        if (!settings.isConfigured()) return
+        runCatching {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            withContext(Dispatchers.IO) { api.stravaCookieStatus() }
+        }.getOrNull()?.let {
+            stravaNeedsReconnect = it.needsReconnect
+            stravaCookieError = it.lastError
+        }
+    }
 
     suspend fun load() {
         if (!settings.isConfigured()) {
@@ -242,6 +259,7 @@ fun ActivitiesScreen(
     }
 
     LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) { refreshCookieStatus() }
     LaunchedEffect(Unit) {
         while (true) { delay(60_000); nowMs = System.currentTimeMillis() }
     }
@@ -287,6 +305,9 @@ fun ActivitiesScreen(
                                     else -> "Strava: synced ${r.upserted}"
                                 }
                                 if (r.upserted > 0) { loading = true; load() }
+                                // A successful sync clears the banner; a dead
+                                // cookie raises it. Re-read either way.
+                                refreshCookieStatus()
                             } catch (e: Exception) {
                                 syncToast = "Strava sync failed: ${e.message?.take(60)}"
                             } finally { stravaSyncing = false }
@@ -317,6 +338,34 @@ fun ActivitiesScreen(
                 color = MV.OnSurfaceVariant, fontSize = 12.sp,
                 modifier = Modifier.padding(bottom = 6.dp),
             )
+        }
+
+        // Reconnect banner — cookie session is dead, no new rides coming
+        // in until the user re-establishes it in Settings → Strava.
+        if (stravaNeedsReconnect) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MV.Red.copy(alpha = 0.12f)),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            ) {
+                Row(
+                    Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.Warning, contentDescription = null,
+                        tint = MV.Red, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Strava sync is disconnected",
+                            color = MV.OnSurface, fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold)
+                        Text(
+                            stravaCookieError
+                                ?: "Reconnect Strava in Settings to resume pulling activities.",
+                            color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    }
+                }
+            }
         }
 
         // Filter bar — two rows of compact chips (date range + type). Sits

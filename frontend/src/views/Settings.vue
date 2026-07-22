@@ -90,11 +90,14 @@ const showLegacyOAuth = ref(false);
 async function loadCookieStatus() {
   try {
     cookieStatus.value = await api.stravaCookieStatus();
-    // On a dead session, prefill the known email so the user only has
-    // to type their password to reconnect.
-    if (cookieStatus.value?.needs_reconnect && cookieStatus.value.email
-        && !cookieEmailInput.value) {
-      cookieEmailInput.value = cookieStatus.value.email;
+    if (cookieStatus.value?.needs_reconnect) {
+      // Prefill the known email so a password user only types the password.
+      if (cookieStatus.value.email && !cookieEmailInput.value) {
+        cookieEmailInput.value = cookieStatus.value.email;
+      }
+      // Auto-open the cookie-paste section — it's the reconnect path for
+      // Google / email-code accounts that have no Strava password.
+      cookieHowtoOpen.value = true;
     }
   } catch (e) {
     cookieResult.value = `Status check failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -1710,8 +1713,11 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
             {{ cookieStatus.last_error }}
           </span>
           <span class="muted" style="display:block;">
-            Enter your Strava email + password to enable auto-login (it
-            self-refreshes on future expiries), or paste a fresh cookie.
+            <strong>Sign in with Google or an emailed code?</strong> Your
+            account has no Strava password, so use <em>“Paste a cookie
+            manually”</em> below (opened for you) — that's your path. Only
+            accounts with an email + password login can use hands-off
+            auto-login.
           </span>
         </div>
 
@@ -1767,10 +1773,12 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
                .env shell session is needed. -->
           <div class="auto-login-block">
             <p class="hint">
-              <strong>{{ cookieStatus?.needs_reconnect ? "Reconnect with auto-login (recommended)." : "Auto-login (recommended)." }}</strong>
-              Email + password are stored encrypted in your local DB;
-              backend re-runs the login automatically whenever the cookie
-              expires. Encryption key is auto-generated on save.
+              <strong>Auto-login</strong>
+              <em class="opt">— only if you sign in to Strava with an email + password.</em>
+              Google or “email me a code” sign-ins have no password — skip
+              this and use “Paste a cookie manually” below. Password is
+              stored encrypted in your local DB; backend re-runs the login
+              automatically whenever the cookie expires.
             </p>
             <div class="form">
               <label>
@@ -1793,7 +1801,7 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           <details class="howto" :open="cookieHowtoOpen" @toggle="cookieHowtoOpen = ($event.target as HTMLDetailsElement).open">
             <summary class="muted">Or paste a cookie manually</summary>
             <ol class="howto-steps">
-              <li>Sign in at <a href="https://www.strava.com/login" target="_blank" rel="noreferrer">strava.com/login</a> in Chrome / Firefox.</li>
+              <li>Sign in at <a href="https://www.strava.com/login" target="_blank" rel="noreferrer">strava.com/login</a> in Chrome / Firefox — any method (Google, emailed code, or password) works; the cookie is the same afterward.</li>
               <li>Open DevTools (<kbd>F12</kbd> or <kbd>Cmd+Opt+I</kbd>).</li>
               <li>Application tab → Storage → Cookies → <code>https://www.strava.com</code>.</li>
               <li>Copy <code>strava_remember_token</code> if present (preferred — lasts months). Otherwise copy <code>_strava4_session</code> alone — works for accounts using one-time login codes, but Strava times out the session so you'll re-paste more often.</li>

@@ -384,14 +384,14 @@ async def today_snapshot(
     results = await asyncio.gather(
         safe("today", lambda s: today(db=s)),
         safe("summary7d", lambda s: summary_range(since=seven_ago, until=None, db=s)),
-        safe("hr24", lambda s: _hr_get(since=day_ago, until=None, db=s)),
+        safe("hr24", lambda s: _hr_get(since=day_ago, until=None, bucket_seconds=None, db=s)),
         safe("hrv24", lambda s: _hrv_get(since=day_ago, until=None, db=s)),
         safe("steps24", lambda s: _steps_get(since=day_ago, until=None, db=s)),
         safe("sleep_last", lambda s: _sleep_last(db=s)),
         safe("weight30", lambda s: _weight_get(since=thirty_ago, until=None, db=s)),
         safe("bp30", lambda s: _bp_get(since=thirty_ago, until=None, db=s)),
         safe("annotations1d", lambda s: _journal_list(
-            since=day_ago, type=None, limit=50, db=s,
+            since=day_ago, until=None, type=None, limit=50, db=s,
         )),
         safe("profile", lambda s: _profile_get(db=s)),
         safe("sober", lambda s: _sober_current(addiction="alcohol", db=s)),

@@ -90,6 +90,15 @@ async def get_heartrate(
     pre-bucketed series cuts the network payload + JSON parse time
     roughly 5-10x with no visible chart fidelity loss."""
     start, end = _resolve_range(since, until, timedelta(hours=24))
+    # Auto-downsample long ranges. There are ~22M HR rows (~3M in a 90-day
+    # window); streaming raw samples for a multi-day range builds millions of
+    # objects and never finishes rendering. When the caller didn't request an
+    # explicit bucket, aggregate to ~2000 points once the window exceeds ~33h
+    # (below that, ~1-day raw is small and fine). Chart fidelity is unaffected.
+    if bucket_seconds is None:
+        span_s = (end - start).total_seconds()
+        if span_s > 2000 * 60:
+            bucket_seconds = max(60, int(span_s / 2000))
     if bucket_seconds:
         from sqlalchemy import text
         rows = (await db.execute(

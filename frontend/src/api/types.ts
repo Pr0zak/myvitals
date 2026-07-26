@@ -205,6 +205,7 @@ export interface StrengthSet {
   rest_seconds_taken: number | null;
   logged_at: string | null;
   skipped: boolean;
+  set_type?: string;
 }
 
 export interface StrengthWorkoutExercise {

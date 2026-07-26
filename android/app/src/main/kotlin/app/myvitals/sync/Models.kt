@@ -375,6 +375,7 @@ data class LogSetRequest(
     @Json(name = "rest_seconds_taken") val restSecondsTaken: Int? = null,
     val skipped: Boolean = false,
     @Json(name = "logged_at") val loggedAt: String? = null,
+    @Json(name = "set_type") val setType: String = "working",
 )
 
 @JsonClass(generateAdapter = true)

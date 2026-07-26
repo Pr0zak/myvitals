@@ -1310,6 +1310,7 @@ async def weekly_muscle_volume(
         .where(models.StrengthWorkout.split_focus.notin_(["yoga", "cardio"]))
         .where(models.StrengthSet.actual_reps.is_not(None))
         .where(models.StrengthSet.skipped.is_(False))
+        .where(models.StrengthSet.set_type != "warmup")  # SETTYPE-1
         .group_by(models.StrengthWorkoutExercise.exercise_id)
     )).all()
 
@@ -1378,6 +1379,7 @@ async def recent_frequency_by_exercise(
         .where(models.StrengthWorkout.status.in_(("completed", "in_progress")))
         .where(models.StrengthSet.actual_reps.is_not(None))
         .where(models.StrengthSet.skipped.is_(False))
+        .where(models.StrengthSet.set_type != "warmup")  # SETTYPE-1
         .group_by(models.StrengthWorkoutExercise.exercise_id)
     )).all()
     return {ex_id: int(n) for ex_id, n in rows if n}

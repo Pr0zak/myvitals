@@ -406,6 +406,7 @@ async def get_exercise_stats(
         .where(models.StrengthWorkoutExercise.exercise_id == exercise_id)
         .where(models.StrengthSet.skipped.is_(False))
         .where(models.StrengthSet.actual_reps.is_not(None))
+        .where(models.StrengthSet.set_type != "warmup")  # SETTYPE-1
     )
     rows = sets_q.all()
     if not rows:
@@ -504,6 +505,7 @@ class SetIn(BaseModel):
     rest_seconds_taken: int | None = None
     skipped: bool = False
     logged_at: datetime | None = None
+    set_type: str = "working"  # working | warmup | drop | failure (SETTYPE-1)
 
 
 class SetOut(BaseModel):
@@ -518,6 +520,7 @@ class SetOut(BaseModel):
     rest_seconds_taken: int | None
     logged_at: datetime | None
     skipped: bool
+    set_type: str = "working"
 
 
 class WorkoutExerciseIn(BaseModel):
@@ -646,6 +649,7 @@ def _set_to_out(s: models.StrengthSet) -> SetOut:
         rest_seconds_taken=s.rest_seconds_taken,
         logged_at=s.logged_at,
         skipped=s.skipped,
+        set_type=s.set_type or "working",
     )
 
 
@@ -1060,6 +1064,8 @@ async def log_set(
     after a flaky network."""
     if body.rating is not None and not (1 <= body.rating <= 5):
         raise HTTPException(status_code=400, detail="rating must be 1..5")
+    if body.set_type not in ("working", "warmup", "drop", "failure"):
+        raise HTTPException(status_code=400, detail="invalid set_type")
     wex = await db.get(models.StrengthWorkoutExercise, body.workout_exercise_id)
     if wex is None:
         raise HTTPException(status_code=404, detail="workout_exercise not found")
@@ -1084,6 +1090,7 @@ async def log_set(
             rest_seconds_taken=body.rest_seconds_taken,
             logged_at=logged_at,
             skipped=body.skipped,
+            set_type=body.set_type,
         )
         db.add(s)
     else:
@@ -1096,6 +1103,7 @@ async def log_set(
         s.rest_seconds_taken = body.rest_seconds_taken
         s.logged_at = logged_at
         s.skipped = body.skipped
+        s.set_type = body.set_type
 
     # Auto-advance the parent workout to in_progress on the first logged set
     workout = await db.get(models.StrengthWorkout, wex.workout_id)

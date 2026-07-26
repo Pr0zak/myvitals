@@ -41,6 +41,7 @@ interface SetEntry {
   weight: string;   // string so empty input doesn't show "0"
   reps: string;
   rating: number | null;
+  setType: string;  // working | warmup | drop | failure (SETTYPE-1)
 }
 const setEntries = ref<Record<string, SetEntry>>({});
 
@@ -234,6 +235,7 @@ async function loadAll() {
             weight: s.actual_weight_lb?.toString() ?? "",
             reps: s.actual_reps?.toString() ?? "",
             rating: s.rating,
+            setType: s.set_type ?? "working",
           };
         }
       }
@@ -565,13 +567,14 @@ function entry(wexId: number, setNum: number, target: number, targetWeight: numb
       weight: targetWeight?.toString() ?? "",
       reps: target.toString(),
       rating: null,
+      setType: "working",
     };
   }
   return setEntries.value[key];
 }
 function setRating(wexId: number, setNum: number, r: number) {
   const key = entryKey(wexId, setNum);
-  if (!setEntries.value[key]) setEntries.value[key] = { weight: "", reps: "", rating: null };
+  if (!setEntries.value[key]) setEntries.value[key] = { weight: "", reps: "", rating: null, setType: "working" };
   setEntries.value[key].rating = r;
 }
 
@@ -659,6 +662,7 @@ async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = fa
       actual_reps: skipped ? null : (parseInt(e.reps, 10) || null),
       rating: skipped ? null : e.rating,
       skipped,
+      set_type: e.setType,
     });
     if (!skipped) {
       // Pick rest duration: within-round (35s) when this is a superset
@@ -1259,6 +1263,15 @@ useVisibilityRefresh(loadAll);
                   </td>
                   <td>
                     <div v-if="!isSetLogged(wex, n)" class="row-actions">
+                      <select class="set-type-sel"
+                              v-model="entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).setType"
+                              :disabled="busy === `set-${wex.id}-${n}`"
+                              title="Set type — warm-ups are excluded from volume + PRs">
+                        <option value="working">Work</option>
+                        <option value="warmup">Warm-up</option>
+                        <option value="drop">Drop</option>
+                        <option value="failure">Failure</option>
+                      </select>
                       <button class="primary small"
                               :disabled="busy === `set-${wex.id}-${n}` || entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).rating === null"
                               @click="logSet(wex, n)">
@@ -1635,6 +1648,11 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
   font-family: 'Geist Mono', ui-monospace, monospace; }
 .rating:hover:not(:disabled) { transform: translateY(-1px); }
 .rating:disabled { opacity: 0.5; cursor: not-allowed; }
+.set-type-sel {
+  font-size: 0.72rem; padding: 0.15rem 0.25rem; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  max-width: 5.5rem;
+}
 
 /* Color the number always; fill background when selected. */
 .rating[data-r="1"] { border-color: rgba(239,68,68,0.45); }

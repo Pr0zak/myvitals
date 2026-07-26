@@ -504,6 +504,12 @@ class StrengthSet(Base):
     rest_seconds_taken: Mapped[int | None] = mapped_column(Integer, nullable=True)
     logged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     skipped: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Set classification (SETTYPE-1): 'working' (default) counts toward
+    # volume/PRs; 'warmup' is logged but excluded from working-set counts
+    # and PR detection; 'drop'/'failure' are working intensity techniques
+    # that still count. v0.7.328.
+    set_type: Mapped[str] = mapped_column(
+        String(16), default="working", server_default="working")
 
 
 class Trail(Base):

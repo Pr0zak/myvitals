@@ -1054,7 +1054,7 @@ fun StrengthTodayScreen(
                     inputs = setInputs,
                     canSwap = canSwap,
                     isCurrentExercise = wex.id == currentExerciseId,
-                    onLogSet = onLogSet@{ setNum, weight, reps, rating ->
+                    onLogSet = onLogSet@{ setNum, weight, reps, rating, setType ->
                         // WP-14: resume before logging — a paused session
                         // shouldn't accept new sets.
                         if (workout?.status == "paused") {
@@ -1070,6 +1070,7 @@ fun StrengthTodayScreen(
                                 actualWeightLb = weight,
                                 actualReps = reps,
                                 rating = rating,
+                                setType = setType,
                             ))
                             if (ok) {
                                 // Within-round rest (35s) if this is a superset and
@@ -2445,6 +2446,7 @@ private data class SetInput(
     var weight: String = "",
     var reps: String = "",
     var rating: Int? = null,
+    var setType: String = "working",  // working | warmup | drop | failure (SETTYPE-1)
 )
 
 @Composable
@@ -2454,7 +2456,7 @@ private fun ExerciseCard(
     inputs: androidx.compose.runtime.snapshots.SnapshotStateMap<String, SetInput>,
     canSwap: Boolean,
     isCurrentExercise: Boolean = true,
-    onLogSet: (setNum: Int, weight: Double?, reps: Int?, rating: Int?) -> Unit,
+    onLogSet: (setNum: Int, weight: Double?, reps: Int?, rating: Int?, setType: String) -> Unit,
     onYouTube: (slug: String, name: String) -> Unit,
     onSwap: () -> Unit,
     onSetPref: (String) -> Unit = {},
@@ -2620,7 +2622,7 @@ private fun ExerciseCard(
                             // rating (5 / 4 / 1). The next session's
                             // generator reads this history and adjusts
                             // the target via adjust_mobility_target().
-                            onLogSet(n, null, elapsed, rating)
+                            onLogSet(n, null, elapsed, rating, "working")
                             inputs.remove(key)
                         },
                     )
@@ -2648,6 +2650,7 @@ private fun ExerciseCard(
                         onWeight = { inputs[key] = input.copy(weight = it) },
                         onReps = { inputs[key] = input.copy(reps = it) },
                         onRating = { inputs[key] = input.copy(rating = it) },
+                        onSetType = { inputs[key] = input.copy(setType = it) },
                         canLog = input.rating != null && input.reps.isNotBlank(),
                         onLog = {
                             onLogSet(
@@ -2655,6 +2658,7 @@ private fun ExerciseCard(
                                 input.weight.toDoubleOrNull(),
                                 input.reps.toIntOrNull(),
                                 input.rating,
+                                input.setType,
                             )
                             inputs.remove(key)
                         },
@@ -2665,6 +2669,7 @@ private fun ExerciseCard(
                                 input.weight.toDoubleOrNull(),
                                 input.reps.toIntOrNull(),
                                 1,
+                                input.setType,
                             )
                             inputs.remove(key)
                         },
@@ -3076,6 +3081,7 @@ private fun SetEntryRow(
     n: Int, input: SetInput,
     onWeight: (String) -> Unit, onReps: (String) -> Unit,
     onRating: (Int) -> Unit, canLog: Boolean,
+    onSetType: (String) -> Unit = {},
     onLog: () -> Unit, onFailed: () -> Unit,
     sideLabel: String? = null,
     targetWeightLb: Double? = null, targetReps: String? = null,
@@ -3139,6 +3145,20 @@ private fun SetEntryRow(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
             )
+        }
+        // Set-type chips (SETTYPE-1): warm-ups are excluded from volume + PRs.
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            for ((stype, slabel) in listOf(
+                "working" to "Work", "warmup" to "Warm", "drop" to "Drop", "failure" to "Fail")) {
+                androidx.compose.material3.FilterChip(
+                    selected = (input.setType.ifBlank { "working" }) == stype,
+                    onClick = { onSetType(stype) },
+                    label = { Text(slabel, fontSize = 10.sp) },
+                )
+            }
         }
         Row(
             Modifier.fillMaxWidth().padding(top = 8.dp),

@@ -847,6 +847,7 @@ export const api = {
     rest_seconds_taken?: number | null;
     skipped?: boolean;
     logged_at?: string;
+    set_type?: string;
   }): Promise<unknown> {
     const { data } = await http.post("/workout/strength/sets", body);
     return data;

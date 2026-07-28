@@ -283,6 +283,7 @@ data class StrengthMuscleVolume(
 data class StrengthProgressionPoint(
     val date: String,
     @Json(name = "top_weight_lb") val topWeightLb: Double,
+    val e1rm: Double? = null,  // e1RM-1: Epley estimated 1-rep-max for the day
 )
 
 @JsonClass(generateAdapter = true)
@@ -404,6 +405,8 @@ data class StrengthExerciseStats(
     @Json(name = "total_volume_lb") val totalVolumeLb: Double,
     @Json(name = "last_weight_lb") val lastWeightLb: Double? = null,
     @Json(name = "max_weight_lb") val maxWeightLb: Double? = null,
+    @Json(name = "best_e1rm") val bestE1rm: Double? = null,   // e1RM-1
+    @Json(name = "last_e1rm") val lastE1rm: Double? = null,
     @Json(name = "last_performed_date") val lastPerformedDate: String? = null,
     @Json(name = "avg_rating") val avgRating: Double? = null,
 )

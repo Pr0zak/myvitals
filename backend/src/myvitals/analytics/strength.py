@@ -336,6 +336,25 @@ def valid_dumbbell_loads(
     return sorted(out)
 
 
+def estimate_1rm(weight_lb: float | None, reps: int | None) -> float | None:
+    """Epley estimated 1-rep-max: weight * (1 + reps/30). Reps are capped at
+    12 (Epley over-estimates for very high reps); a single rep returns the
+    weight itself. Returns None for missing/non-positive input. Rounded to
+    1dp. Epley is a public formula — implemented from scratch (e1RM-1)."""
+    if weight_lb is None or reps is None:
+        return None
+    try:
+        w = float(weight_lb)
+        r = int(reps)
+    except (TypeError, ValueError):
+        return None
+    if w <= 0 or r <= 0:
+        return None
+    if r == 1:
+        return round(w, 1)
+    return round(w * (1.0 + min(r, 12) / 30.0), 1)
+
+
 def round_weight(
     target_lb: float | None,
     pairs_lb: list[float],

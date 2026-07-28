@@ -510,6 +510,10 @@ onMounted(load);
               <span class="stat-label">Max weight</span>
               <span class="stat-val mono">{{ detailStats.max_weight_lb ?? "—" }}<span class="unit-s" v-if="detailStats.max_weight_lb"> lb</span></span>
             </div>
+            <div class="stat" v-if="detailStats.best_e1rm != null">
+              <span class="stat-label">Best e1RM</span>
+              <span class="stat-val mono">{{ detailStats.best_e1rm }}<span class="unit-s"> lb</span></span>
+            </div>
             <div class="stat">
               <span class="stat-label">Total reps</span>
               <span class="stat-val mono">{{ detailStats.total_reps.toLocaleString() }}</span>

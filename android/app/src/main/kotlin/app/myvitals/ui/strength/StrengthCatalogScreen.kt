@@ -692,6 +692,7 @@ fun StrengthCatalogScreen(
                         statRow("Last seen", s.lastPerformedDate ?: "—")
                         statRow("Last weight", s.lastWeightLb?.let { "$it lb" } ?: "—")
                         statRow("Max weight", s.maxWeightLb?.let { "$it lb" } ?: "—")
+                        if (s.bestE1rm != null) statRow("Best e1RM", "${s.bestE1rm} lb")  // e1RM-1
                         statRow("Total reps", "${s.totalReps}")
                         statRow("Volume",
                             "${s.totalVolumeLb.toInt().toString()} lb")

@@ -689,6 +689,8 @@ export const api = {
     total_volume_lb: number;
     last_weight_lb: number | null;
     max_weight_lb: number | null;
+    best_e1rm: number | null;
+    last_e1rm: number | null;
     last_performed_date: string | null;
     avg_rating: number | null;
   }> {

@@ -312,13 +312,27 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
                 Text("Need at least 2 sessions for this exercise.",
                     color = muted, fontSize = 12.sp); return@Card
             }
+            // e1RM-1: toggle the single line between top weight and estimated
+            // 1RM. One series at a time keeps the Vico producer simple (no
+            // multi-series styling — see the v0.7.302/306 Vico notes).
+            var metric by remember { mutableStateOf("e1rm") }
+            Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
+                for ((mv, ml) in listOf("e1rm" to "e1RM", "weight" to "Top weight")) {
+                    androidx.compose.material3.FilterChip(
+                        selected = metric == mv,
+                        onClick = { metric = mv },
+                        label = { Text(ml, fontSize = 10.sp) },
+                    )
+                }
+            }
             // Single stable producer (see DailyVolumeCard) — data updates flow
-            // through runTransaction keyed on (selected, s), never a new producer.
+            // through runTransaction keyed on (selected, s, metric), never a new producer.
             val producer = remember { CartesianChartModelProducer() }
-            LaunchedEffect(selected, s) {
+            LaunchedEffect(selected, s, metric) {
                 val pairs = pts.mapNotNull { p ->
                     runCatching {
-                        LocalDate.parse(p.date).toEpochDay().toDouble() to p.topWeightLb
+                        val y = if (metric == "e1rm") (p.e1rm ?: p.topWeightLb) else p.topWeightLb
+                        LocalDate.parse(p.date).toEpochDay().toDouble() to y
                     }.getOrNull()
                 }
                 if (pairs.size < 2) return@LaunchedEffect

@@ -415,6 +415,7 @@ async def get_exercise_stats(
             "times_performed": 0,
             "total_sets": 0, "total_reps": 0, "total_volume_lb": 0.0,
             "last_weight_lb": None, "max_weight_lb": None,
+            "best_e1rm": None, "last_e1rm": None,
             "last_performed_date": None,
             "avg_rating": None,
         }
@@ -440,6 +441,14 @@ async def get_exercise_stats(
     ratings = [r.rating for r in rows if r.rating is not None]
     avg_rating = (sum(ratings) / len(ratings)) if ratings else None
 
+    # e1RM-1: best + most-recent estimated 1-rep-max (warmups already excluded).
+    all_e1 = [e for e in (strength_algo.estimate_1rm(r.actual_weight_lb, r.actual_reps)
+                          for r in rows) if e is not None]
+    best_e1rm = max(all_e1) if all_e1 else None
+    last_e1 = [e for e in (strength_algo.estimate_1rm(r.actual_weight_lb, r.actual_reps)
+                           for r in rows if r.id == last_workout_id) if e is not None]
+    last_e1rm = max(last_e1) if last_e1 else None
+
     return {
         "exercise_id": exercise_id,
         "times_performed": len(workout_ids),
@@ -448,6 +457,8 @@ async def get_exercise_stats(
         "total_volume_lb": round(total_volume, 1),
         "last_weight_lb": last_weight,
         "max_weight_lb": max_weight,
+        "best_e1rm": best_e1rm,
+        "last_e1rm": last_e1rm,
         "last_performed_date": last_date.isoformat() if last_date else None,
         "avg_rating": round(avg_rating, 2) if avg_rating is not None else None,
     }
@@ -1409,6 +1420,7 @@ async def strength_stats(
             models.StrengthSet.actual_reps,
             models.StrengthSet.rating,
             models.StrengthSet.skipped,
+            models.StrengthSet.set_type,
         )
         .join(models.StrengthWorkoutExercise,
               models.StrengthSet.workout_exercise_id ==
@@ -1429,8 +1441,8 @@ async def strength_stats(
     progression: dict[str, list[dict[str, Any]]] = {}
     workout_dates: set[str] = set()
 
-    for d, ex_id, _setn, w_lb, reps, rating, skipped in rows:
-        if skipped or w_lb is None or reps is None:
+    for d, ex_id, _setn, w_lb, reps, rating, skipped, set_type in rows:
+        if skipped or w_lb is None or reps is None or set_type == "warmup":
             continue
         date_iso = d.isoformat()
         workout_dates.add(date_iso)
@@ -1445,13 +1457,19 @@ async def strength_stats(
         muscle = meta.get("primary_muscle") or "other"
         per_muscle[muscle] = per_muscle.get(muscle, 0.0) + vol
 
-        # Track top weight per (exercise, date) for weight-progression series
+        # Track top weight + top e1RM per (exercise, date) for the
+        # progression series (e1RM-1). e1RM is the canonical strength signal;
+        # a light warmup can't beat a working set's e1RM anyway.
+        e1 = strength_algo.estimate_1rm(w_lb, reps) or 0.0
         prog = progression.setdefault(ex_id, [])
         existing = next((p for p in prog if p["date"] == date_iso), None)
         if existing is None:
-            prog.append({"date": date_iso, "top_weight_lb": float(w_lb)})
-        elif float(w_lb) > existing["top_weight_lb"]:
-            existing["top_weight_lb"] = float(w_lb)
+            prog.append({"date": date_iso, "top_weight_lb": float(w_lb), "e1rm": e1})
+        else:
+            if float(w_lb) > existing["top_weight_lb"]:
+                existing["top_weight_lb"] = float(w_lb)
+            if e1 > existing.get("e1rm", 0.0):
+                existing["e1rm"] = e1
 
     # Sort daily series by date for the line chart.
     daily = sorted(

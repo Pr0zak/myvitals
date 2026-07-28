@@ -18,7 +18,7 @@ interface Stats {
   total_volume_lb: number; rpe_avg: number | null;
   daily: Array<{ date: string; volume_lb: number; sets: number }>;
   per_muscle: Array<{ muscle: string; volume_lb: number }>;
-  progression: Record<string, Array<{ date: string; top_weight_lb: number }>>;
+  progression: Record<string, Array<{ date: string; top_weight_lb: number; e1rm?: number }>>;
   progression_names: Record<string, string>;
 }
 const stats = ref<Stats | null>(null);
@@ -128,10 +128,12 @@ const progressionOption = computed(() => {
   const pts = s.progression[selectedExercise.value] ?? [];
   if (pts.length < 2) return null;
   const prog = isNeon.value ? "#ff5d7a" : "#ef4444";
+  const e1c = isNeon.value ? "#22d3ee" : "#0ea5e9";
   return {
-    grid: { left: 56, right: 16, top: 24, bottom: 32 },
+    grid: { left: 56, right: 16, top: 34, bottom: 32 },
+    legend: { data: ["Top weight", "e1RM"], top: 2, textStyle: t.axisLabel },
     tooltip: { trigger: "axis", ...t.tooltip,
-               valueFormatter: (v: number) => `${v} lb` },
+               valueFormatter: (v: number | null) => (v == null ? "—" : `${v} lb`) },
     xAxis: {
       type: "category", data: pts.map((p) => p.date),
       axisLabel: { ...t.axisLabel, formatter: (v: string) => v.slice(5) },
@@ -143,6 +145,13 @@ const progressionOption = computed(() => {
       data: pts.map((p) => p.top_weight_lb),
       lineStyle: { color: prog, width: 2 },
       itemStyle: { color: prog },
+    }, {
+      // e1RM-1: estimated 1-rep-max trend (Epley) — the canonical strength signal.
+      name: "e1RM", type: "line",
+      smooth: false, symbol: "circle", symbolSize: 5,
+      data: pts.map((p) => p.e1rm ?? null),
+      lineStyle: { color: e1c, width: 2, type: "dashed" },
+      itemStyle: { color: e1c },
     }],
   };
 });

@@ -1263,15 +1263,6 @@ useVisibilityRefresh(loadAll);
                   </td>
                   <td>
                     <div v-if="!isSetLogged(wex, n)" class="row-actions">
-                      <select class="set-type-sel"
-                              v-model="entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).setType"
-                              :disabled="busy === `set-${wex.id}-${n}`"
-                              title="Set type — warm-ups are excluded from volume + PRs">
-                        <option value="working">Work</option>
-                        <option value="warmup">Warm-up</option>
-                        <option value="drop">Drop</option>
-                        <option value="failure">Failure</option>
-                      </select>
                       <button class="primary small"
                               :disabled="busy === `set-${wex.id}-${n}` || entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).rating === null"
                               @click="logSet(wex, n)">
@@ -1648,11 +1639,6 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
   font-family: 'Geist Mono', ui-monospace, monospace; }
 .rating:hover:not(:disabled) { transform: translateY(-1px); }
 .rating:disabled { opacity: 0.5; cursor: not-allowed; }
-.set-type-sel {
-  font-size: 0.72rem; padding: 0.15rem 0.25rem; border-radius: 4px;
-  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
-  max-width: 5.5rem;
-}
 
 /* Color the number always; fill background when selected. */
 .rating[data-r="1"] { border-color: rgba(239,68,68,0.45); }

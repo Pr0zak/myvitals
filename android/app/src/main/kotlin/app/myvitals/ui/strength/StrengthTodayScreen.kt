@@ -3146,20 +3146,6 @@ private fun SetEntryRow(
                 singleLine = true,
             )
         }
-        // Set-type chips (SETTYPE-1): warm-ups are excluded from volume + PRs.
-        Row(
-            Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            for ((stype, slabel) in listOf(
-                "working" to "Work", "warmup" to "Warm", "drop" to "Drop", "failure" to "Fail")) {
-                androidx.compose.material3.FilterChip(
-                    selected = (input.setType.ifBlank { "working" }) == stype,
-                    onClick = { onSetType(stype) },
-                    label = { Text(slabel, fontSize = 10.sp) },
-                )
-            }
-        }
         Row(
             Modifier.fillMaxWidth().padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),

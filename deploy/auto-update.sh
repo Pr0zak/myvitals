@@ -37,6 +37,35 @@ if [ -f "$TRIGGER_FILE" ]; then
     rm -f "$TRIGGER_FILE" 2>/dev/null || true
 fi
 
+# Disk-pressure safeguard (PRUNE-2). Runs on EVERY tick — before the
+# no-op early-exit below — so the CT self-heals within one cron interval
+# regardless of whether the weekly Sun-04:00 docker-prune fired. That
+# weekly job is wall-clock cron with no anacron catch-up, so it silently
+# misses whenever the CT is migrating/down at that instant; meanwhile a
+# burst of same-day releases each leaves a <7-day dangling image that the
+# post-update `until=168h` prune won't touch. Left unchecked the 36 GB
+# rootfs creeps to 99% and the next image pull dies with "no space left
+# on device", stranding the backend on its old image (seen 2026-07-28).
+#
+# When the rootfs crosses the high-water mark, aggressively reclaim all
+# unused images + BuildKit cache. Running containers keep their images;
+# the TimescaleDB named volume is untouched (no --volumes). Under real
+# pressure, free space wins over the 7-day rollback window — the in-run
+# health-check rollback still protects the deploy actually in flight.
+DISK_HIGH_PCT=${MYVITALS_DISK_HIGH_PCT:-85}
+reclaim_if_low_disk() {
+    local used after
+    used=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')
+    [ -z "$used" ] && return 0
+    [ "$used" -lt "$DISK_HIGH_PCT" ] && return 0
+    echo "$LOG_TAG disk at ${used}% (>=${DISK_HIGH_PCT}%) — reclaiming docker space"
+    docker image prune -af >/dev/null 2>&1 || true
+    docker builder prune -af >/dev/null 2>&1 || true
+    after=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')
+    echo "$LOG_TAG   reclaim done — disk ${used}% -> ${after:-?}%"
+}
+reclaim_if_low_disk
+
 # NOTE: the CT's /opt/myvitals is not a git checkout under the current
 # bootstrap (deploy uses tar+rsync). So we don't `git pull` here — only
 # image pulls, which cover the 99% case. If docker-compose.yml or the
@@ -57,9 +86,18 @@ digest_local() {
     # Image ID of the local copy of whatever the compose file points
     # at — i.e. what we'd recreate the service against if we
     # restarted right now. Captures the pull result without applying it.
+    #
+    # NOTE: compose v2's `config --images <svc>` prints the service AND
+    # its depends_on images (backend pulls in timescaledb; frontend pulls
+    # in backend), so a bare `head -1` grabs the *dependency's* image and
+    # the digest never matches the running container — a false "update
+    # detected" + needless recreate on every tick. auto-update only ever
+    # manages the ghcr myvitals-<svc> images, so filter to this service's
+    # own line. (Was head -1; broke when compose was upgraded.)
     local svc="$1"
     local image
-    image=$(docker compose config --images "$svc" 2>/dev/null | head -1)
+    image=$(docker compose config --images "$svc" 2>/dev/null \
+        | grep "myvitals-${svc}" | head -1)
     [ -z "$image" ] && return
     docker image inspect --format '{{.Id}}' "$image" 2>/dev/null || true
 }

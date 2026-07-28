@@ -625,6 +625,24 @@ fun StrengthCatalogScreen(
             containerColor = card,
         ) {
             Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                // ANIM-1: crossfade demo hero (photos only; icons stay static
+                // elsewhere). Catalog detail had no image before.
+                val demoBase = remember(settings) { settings.backendUrl.trimEnd('/') }
+                val demoIsPhoto = ex.imageFront?.lowercase()?.let {
+                    it.endsWith(".jpg") || it.endsWith(".jpeg")
+                } ?: false
+                if (ex.imageFront != null && demoBase.isNotEmpty() && demoIsPhoto) {
+                    ExerciseDemo(
+                        frontUrl = demoBase + ex.imageFront,
+                        backUrl = ex.imageSide?.let { demoBase + it },
+                        contentDescription = ex.name,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(12.dp)),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
                 Text(ex.name, color = ink, fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold)
                 Text(

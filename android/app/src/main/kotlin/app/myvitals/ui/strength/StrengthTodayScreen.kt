@@ -3632,14 +3632,22 @@ private fun ExerciseInfoDialog(
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
+                        info.imageFront != null && backendBaseUrl.isNotEmpty() && isPhoto -> {
+                            // ANIM-1: crossfade the start/end frames for photos.
+                            ExerciseDemo(
+                                frontUrl = backendBaseUrl + info.imageFront,
+                                backUrl = info.imageSide?.let { backendBaseUrl + it },
+                                contentDescription = name,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                         info.imageFront != null && backendBaseUrl.isNotEmpty() -> {
+                            // Icon (.png) — single tinted frame.
                             AsyncImage(
                                 model = backendBaseUrl + info.imageFront,
                                 contentDescription = name,
-                                modifier = if (isPhoto) Modifier.fillMaxWidth()
-                                           else Modifier.size(160.dp),
-                                colorFilter = if (isPhoto) null
-                                              else ColorFilter.tint(iconViolet),
+                                modifier = Modifier.size(160.dp),
+                                colorFilter = ColorFilter.tint(iconViolet),
                             )
                         }
                         isMobilityYoga -> {

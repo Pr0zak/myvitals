@@ -18,6 +18,7 @@ import YogaPoseIcon from "@/components/YogaPoseIcon.vue";
 import { api } from "@/api/client";
 import { apiBase, queryToken } from "@/config";
 import Card from "@/components/Card.vue";
+import ExerciseDemo from "@/components/ExerciseDemo.vue";
 import { muscleIcon, muscleLabel } from "@/utils/muscleIcon";
 import type { StrengthEquipment, StrengthExercise } from "@/api/types";
 
@@ -257,6 +258,13 @@ function image(ex: StrengthExercise): string | null {
   return `${base}${ex.image_front}`;
 }
 
+// ANIM-1: the second frame (end position) for the crossfade demo.
+function imageSide(ex: StrengthExercise): string | null {
+  if (!ex.image_side) return null;
+  const base = (apiBase.value || "/api").replace(/\/$/, "");
+  return `${base}${ex.image_side}`;
+}
+
 function placeholderIcon(ex: StrengthExercise) {
   if (ex.movement_pattern === "mobility") return User;
   if (ex.equipment.includes("dumbbell")) return Dumbbell;
@@ -446,8 +454,8 @@ onMounted(load);
       <div class="detail-panel" @click.stop>
         <button class="detail-close" @click="closeDetail" aria-label="Close">×</button>
         <div class="detail-head">
-          <img v-if="image(detailEx) && /\.jpe?g($|\?)/i.test(image(detailEx)!)"
-               :src="image(detailEx) ?? ''" :alt="detailEx.name"/>
+          <ExerciseDemo v-if="image(detailEx) && /\.jpe?g($|\?)/i.test(image(detailEx)!)"
+               :front="image(detailEx)" :side="imageSide(detailEx)" :alt="detailEx.name"/>
           <div v-else-if="image(detailEx)" class="thumb-mask big"
                :style="`-webkit-mask-image: url('${image(detailEx)}'); mask-image: url('${image(detailEx)}')`"
                :title="detailEx.name"/>
@@ -738,6 +746,11 @@ header h1 { margin: 0; }
 .detail-head img, .detail-head .ph.big {
   width: 96px; height: 96px; border-radius: 8px;
   background: #111; object-fit: cover; flex: 0 0 auto;
+}
+/* ANIM-1: the crossfade demo replaces the single detail img — size its
+   wrapper to the same 96px square (its inner frames fill it). */
+.detail-head .exercise-demo {
+  width: 96px; flex: 0 0 auto; border-radius: 8px; overflow: hidden; background: #111;
 }
 .detail-head .ph.big {
   background: var(--bg-1); border: 1px dashed var(--line);

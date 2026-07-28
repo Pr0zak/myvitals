@@ -13,6 +13,7 @@ import { apiBase, queryToken } from "@/config";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import Card from "@/components/Card.vue";
 import CoachCard from "@/components/CoachCard.vue";
+import ExerciseDemo from "@/components/ExerciseDemo.vue";
 import type { StrengthExercise, StrengthWorkoutDetail, StrengthWorkoutExercise } from "@/api/types";
 
 const router = useRouter();
@@ -1235,9 +1236,10 @@ useVisibilityRefresh(loadAll);
             <!-- Real demo photo wins over the violet-tinted icon.
                  Photos are .jpg from the base catalog; icons are .png
                  (from the Noun Project mask treatment). -->
-            <img
+            <ExerciseDemo
               v-if="imageUrl(wex.exercise_id, 0) && /\.jpe?g($|\?)/i.test(imageUrl(wex.exercise_id, 0)!)"
-              :src="imageUrl(wex.exercise_id, 0) || ''"
+              :front="imageUrl(wex.exercise_id, 0)"
+              :side="imageUrl(wex.exercise_id, 1)"
               :alt="exName(wex.exercise_id)"
             />
             <div

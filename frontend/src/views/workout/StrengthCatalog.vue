@@ -473,6 +473,11 @@ onMounted(load);
               · {{ detailEx.equipment.join(' + ') }}
               · {{ detailEx.level }}
             </div>
+            <!-- CAT-1: mechanic + force badges -->
+            <div v-if="detailEx.mechanic || detailEx.force" class="detail-badges">
+              <span v-if="detailEx.mechanic" class="ex-badge">{{ detailEx.mechanic }}</span>
+              <span v-if="detailEx.force" class="ex-badge">{{ detailEx.force }}</span>
+            </div>
             <div class="detail-muscles">
               <span v-if="muscleIcon(detailEx.primary_muscle)"
                     class="muscle-mask big"
@@ -762,6 +767,12 @@ header h1 { margin: 0; }
 .detail-tags {
   font-family: 'Geist Mono', ui-monospace, monospace;
   font-size: 0.78rem; color: var(--muted);
+}
+.detail-badges { display: flex; gap: 0.35rem; margin-top: 0.35rem; }
+.ex-badge {
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 0.1rem 0.45rem; border-radius: 999px;
+  background: var(--bg-1); border: 1px solid var(--line); color: var(--muted);
 }
 .detail-muscles { font-size: 0.85rem; margin-top: 0.3rem; }
 .detail-muscles strong { color: var(--text); text-transform: capitalize; }

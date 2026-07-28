@@ -181,6 +181,7 @@ export interface StrengthExercise {
   movement_pattern: string;
   level: string;
   mechanic: string;
+  force?: string | null;  // CAT-1: push / pull / static (free-exercise-db)
   instructions: string[];
   image_front: string | null;
   image_side: string | null;

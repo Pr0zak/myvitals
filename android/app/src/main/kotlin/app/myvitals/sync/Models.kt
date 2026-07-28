@@ -170,6 +170,7 @@ data class StrengthExerciseInfo(
     @Json(name = "movement_pattern") val movementPattern: String,
     val level: String = "intermediate",
     val mechanic: String? = null,
+    val force: String? = null,  // CAT-1: push / pull / static
     val instructions: List<String> = emptyList(),
     @Json(name = "image_front") val imageFront: String? = null,
     @Json(name = "image_side") val imageSide: String? = null,

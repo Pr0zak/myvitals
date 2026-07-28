@@ -650,6 +650,8 @@ fun StrengthCatalogScreen(
                     color = muted, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 2.dp),
                 )
+                // CAT-1: mechanic + force badges.
+                ExerciseBadges(ex.mechanic, ex.force, muted)
                 Text(ex.primaryMuscle, color = ink, fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(top = 6.dp))

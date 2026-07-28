@@ -20,7 +20,8 @@
     ],
     "image_front": "/exercises/img/3_4_Sit-Up/0.jpg",
     "image_side": "/exercises/img/3_4_Sit-Up/1.jpg",
-    "youtube_query": "3/4 Sit-Up form"
+    "youtube_query": "3/4 Sit-Up form",
+    "force": "pull"
   },
   {
     "id": "Air_Bike",
@@ -44,7 +45,8 @@
     ],
     "image_front": "/exercises/img/Air_Bike/0.jpg",
     "image_side": "/exercises/img/Air_Bike/1.jpg",
-    "youtube_query": "Air Bike form"
+    "youtube_query": "Air Bike form",
+    "force": "pull"
   },
   {
     "id": "Alternate_Hammer_Curl",
@@ -70,7 +72,8 @@
     ],
     "image_front": "/exercises/img/Alternate_Hammer_Curl/0.jpg",
     "image_side": "/exercises/img/Alternate_Hammer_Curl/1.jpg",
-    "youtube_query": "Alternate Hammer Curl form"
+    "youtube_query": "Alternate Hammer Curl form",
+    "force": "pull"
   },
   {
     "id": "Alternate_Heel_Touchers",
@@ -93,7 +96,8 @@
     ],
     "image_front": "/exercises/img/Alternate_Heel_Touchers/0.jpg",
     "image_side": "/exercises/img/Alternate_Heel_Touchers/1.jpg",
-    "youtube_query": "Alternate Heel Touchers form"
+    "youtube_query": "Alternate Heel Touchers form",
+    "force": "pull"
   },
   {
     "id": "Alternate_Incline_Dumbbell_Curl",
@@ -119,7 +123,8 @@
     ],
     "image_front": "/exercises/img/Alternate_Incline_Dumbbell_Curl/0.jpg",
     "image_side": "/exercises/img/Alternate_Incline_Dumbbell_Curl/1.jpg",
-    "youtube_query": "Alternate Incline Dumbbell Curl form"
+    "youtube_query": "Alternate Incline Dumbbell Curl form",
+    "force": "pull"
   },
   {
     "id": "Alternating_Deltoid_Raise",
@@ -142,7 +147,8 @@
     ],
     "image_front": "/exercises/img/Alternating_Deltoid_Raise/0.jpg",
     "image_side": "/exercises/img/Alternating_Deltoid_Raise/1.jpg",
-    "youtube_query": "Alternating Deltoid Raise form"
+    "youtube_query": "Alternating Deltoid Raise form",
+    "force": "push"
   },
   {
     "id": "Arnold_Dumbbell_Press",
@@ -167,7 +173,8 @@
     ],
     "image_front": "/exercises/img/Arnold_Dumbbell_Press/0.jpg",
     "image_side": "/exercises/img/Arnold_Dumbbell_Press/1.jpg",
-    "youtube_query": "Arnold Dumbbell Press form"
+    "youtube_query": "Arnold Dumbbell Press form",
+    "force": "push"
   },
   {
     "id": "Around_The_Worlds",
@@ -190,7 +197,8 @@
     ],
     "image_front": "/exercises/img/Around_The_Worlds/0.jpg",
     "image_side": "/exercises/img/Around_The_Worlds/1.jpg",
-    "youtube_query": "Around The Worlds form"
+    "youtube_query": "Around The Worlds form",
+    "force": "push"
   },
   {
     "id": "Bench_Dips",
@@ -216,7 +224,8 @@
     ],
     "image_front": "/exercises/img/Bench_Dips/0.jpg",
     "image_side": "/exercises/img/Bench_Dips/1.jpg",
-    "youtube_query": "Bench Dips form"
+    "youtube_query": "Bench Dips form",
+    "force": "push"
   },
   {
     "id": "Bent-Arm_Dumbbell_Pullover",
@@ -244,7 +253,8 @@
     ],
     "image_front": "/exercises/img/Bent-Arm_Dumbbell_Pullover/0.jpg",
     "image_side": "/exercises/img/Bent-Arm_Dumbbell_Pullover/1.jpg",
-    "youtube_query": "Bent-Arm Dumbbell Pullover form"
+    "youtube_query": "Bent-Arm Dumbbell Pullover form",
+    "force": "push"
   },
   {
     "id": "Bent-Knee_Hip_Raise",
@@ -267,7 +277,8 @@
     ],
     "image_front": "/exercises/img/Bent-Knee_Hip_Raise/0.jpg",
     "image_side": "/exercises/img/Bent-Knee_Hip_Raise/1.jpg",
-    "youtube_query": "Bent-Knee Hip Raise form"
+    "youtube_query": "Bent-Knee Hip Raise form",
+    "force": "pull"
   },
   {
     "id": "Bent_Over_Dumbbell_Rear_Delt_Raise_With_Head_On_Bench",
@@ -291,7 +302,8 @@
     ],
     "image_front": "/exercises/img/Bent_Over_Dumbbell_Rear_Delt_Raise_With_Head_On_Bench/0.jpg",
     "image_side": "/exercises/img/Bent_Over_Dumbbell_Rear_Delt_Raise_With_Head_On_Bench/1.jpg",
-    "youtube_query": "Bent Over Dumbbell Rear Delt Raise With Head On Bench form"
+    "youtube_query": "Bent Over Dumbbell Rear Delt Raise With Head On Bench form",
+    "force": "pull"
   },
   {
     "id": "Bent_Over_Two-Dumbbell_Row",
@@ -317,7 +329,8 @@
     ],
     "image_front": "/exercises/img/Bent_Over_Two-Dumbbell_Row/0.jpg",
     "image_side": "/exercises/img/Bent_Over_Two-Dumbbell_Row/1.jpg",
-    "youtube_query": "Bent Over Two-Dumbbell Row form"
+    "youtube_query": "Bent Over Two-Dumbbell Row form",
+    "force": "pull"
   },
   {
     "id": "Bent_Over_Two-Dumbbell_Row_With_Palms_In",
@@ -342,7 +355,8 @@
     ],
     "image_front": "/exercises/img/Bent_Over_Two-Dumbbell_Row_With_Palms_In/0.jpg",
     "image_side": "/exercises/img/Bent_Over_Two-Dumbbell_Row_With_Palms_In/1.jpg",
-    "youtube_query": "Bent Over Two-Dumbbell Row With Palms In form"
+    "youtube_query": "Bent Over Two-Dumbbell Row With Palms In form",
+    "force": "pull"
   },
   {
     "id": "Body-Up",
@@ -367,7 +381,8 @@
     ],
     "image_front": "/exercises/img/Body-Up/0.jpg",
     "image_side": "/exercises/img/Body-Up/1.jpg",
-    "youtube_query": "Body-Up form"
+    "youtube_query": "Body-Up form",
+    "force": "push"
   },
   {
     "id": "Body_Tricep_Press",
@@ -390,7 +405,8 @@
     ],
     "image_front": "/exercises/img/Body_Tricep_Press/0.jpg",
     "image_side": "/exercises/img/Body_Tricep_Press/1.jpg",
-    "youtube_query": "Body Tricep Press form"
+    "youtube_query": "Body Tricep Press form",
+    "force": "push"
   },
   {
     "id": "Bodyweight_Squat",
@@ -414,7 +430,8 @@
     ],
     "image_front": "/exercises/img/Bodyweight_Squat/0.jpg",
     "image_side": "/exercises/img/Bodyweight_Squat/1.jpg",
-    "youtube_query": "Bodyweight Squat form"
+    "youtube_query": "Bodyweight Squat form",
+    "force": "push"
   },
   {
     "id": "Bodyweight_Walking_Lunge",
@@ -440,7 +457,8 @@
     ],
     "image_front": "/exercises/img/Bodyweight_Walking_Lunge/0.jpg",
     "image_side": "/exercises/img/Bodyweight_Walking_Lunge/1.jpg",
-    "youtube_query": "Bodyweight Walking Lunge form"
+    "youtube_query": "Bodyweight Walking Lunge form",
+    "force": "push"
   },
   {
     "id": "Bottoms_Up",
@@ -461,7 +479,8 @@
     ],
     "image_front": "/exercises/img/Bottoms_Up/0.jpg",
     "image_side": "/exercises/img/Bottoms_Up/1.jpg",
-    "youtube_query": "Bottoms Up form"
+    "youtube_query": "Bottoms Up form",
+    "force": "pull"
   },
   {
     "id": "Butt-Ups",
@@ -484,7 +503,8 @@
     ],
     "image_front": "/exercises/img/Butt-Ups/0.jpg",
     "image_side": "/exercises/img/Butt-Ups/1.jpg",
-    "youtube_query": "Butt-Ups form"
+    "youtube_query": "Butt-Ups form",
+    "force": "pull"
   },
   {
     "id": "Butt_Lift_Bridge",
@@ -507,7 +527,8 @@
     ],
     "image_front": "/exercises/img/Butt_Lift_Bridge/0.jpg",
     "image_side": "/exercises/img/Butt_Lift_Bridge/1.jpg",
-    "youtube_query": "Butt Lift (Bridge) form"
+    "youtube_query": "Butt Lift (Bridge) form",
+    "force": "push"
   },
   {
     "id": "Calf_Raise_On_A_Dumbbell",
@@ -530,7 +551,8 @@
     ],
     "image_front": "/exercises/img/Calf_Raise_On_A_Dumbbell/0.jpg",
     "image_side": "/exercises/img/Calf_Raise_On_A_Dumbbell/1.jpg",
-    "youtube_query": "Calf Raise On A Dumbbell form"
+    "youtube_query": "Calf Raise On A Dumbbell form",
+    "force": "push"
   },
   {
     "id": "Chin-Up",
@@ -557,7 +579,8 @@
     ],
     "image_front": "/exercises/img/Chin-Up/0.jpg",
     "image_side": "/exercises/img/Chin-Up/1.jpg",
-    "youtube_query": "Chin-Up form"
+    "youtube_query": "Chin-Up form",
+    "force": "pull"
   },
   {
     "id": "Clock_Push-Up",
@@ -584,7 +607,8 @@
     ],
     "image_front": "/exercises/img/Clock_Push-Up/0.jpg",
     "image_side": "/exercises/img/Clock_Push-Up/1.jpg",
-    "youtube_query": "Clock Push-Up form"
+    "youtube_query": "Clock Push-Up form",
+    "force": "push"
   },
   {
     "id": "Close-Grip_Dumbbell_Press",
@@ -610,7 +634,8 @@
     ],
     "image_front": "/exercises/img/Close-Grip_Dumbbell_Press/0.jpg",
     "image_side": "/exercises/img/Close-Grip_Dumbbell_Press/1.jpg",
-    "youtube_query": "Close-Grip Dumbbell Press form"
+    "youtube_query": "Close-Grip Dumbbell Press form",
+    "force": "push"
   },
   {
     "id": "Close-Grip_Push-Up_off_of_a_Dumbbell",
@@ -636,7 +661,8 @@
     ],
     "image_front": "/exercises/img/Close-Grip_Push-Up_off_of_a_Dumbbell/0.jpg",
     "image_side": "/exercises/img/Close-Grip_Push-Up_off_of_a_Dumbbell/1.jpg",
-    "youtube_query": "Close-Grip Push-Up off of a Dumbbell form"
+    "youtube_query": "Close-Grip Push-Up off of a Dumbbell form",
+    "force": "push"
   },
   {
     "id": "Cocoons",
@@ -657,7 +683,8 @@
     ],
     "image_front": "/exercises/img/Cocoons/0.jpg",
     "image_side": "/exercises/img/Cocoons/1.jpg",
-    "youtube_query": "Cocoons form"
+    "youtube_query": "Cocoons form",
+    "force": "pull"
   },
   {
     "id": "Concentration_Curls",
@@ -682,7 +709,8 @@
     ],
     "image_front": "/exercises/img/Concentration_Curls/0.jpg",
     "image_side": "/exercises/img/Concentration_Curls/1.jpg",
-    "youtube_query": "Concentration Curls form"
+    "youtube_query": "Concentration Curls form",
+    "force": "pull"
   },
   {
     "id": "Cross-Body_Crunch",
@@ -705,7 +733,8 @@
     ],
     "image_front": "/exercises/img/Cross-Body_Crunch/0.jpg",
     "image_side": "/exercises/img/Cross-Body_Crunch/1.jpg",
-    "youtube_query": "Cross-Body Crunch form"
+    "youtube_query": "Cross-Body Crunch form",
+    "force": "pull"
   },
   {
     "id": "Cross_Body_Hammer_Curl",
@@ -729,7 +758,8 @@
     ],
     "image_front": "/exercises/img/Cross_Body_Hammer_Curl/0.jpg",
     "image_side": "/exercises/img/Cross_Body_Hammer_Curl/1.jpg",
-    "youtube_query": "Cross Body Hammer Curl form"
+    "youtube_query": "Cross Body Hammer Curl form",
+    "force": "pull"
   },
   {
     "id": "Crunch_-_Hands_Overhead",
@@ -752,7 +782,8 @@
     ],
     "image_front": "/exercises/img/Crunch_-_Hands_Overhead/0.jpg",
     "image_side": "/exercises/img/Crunch_-_Hands_Overhead/1.jpg",
-    "youtube_query": "Crunch - Hands Overhead form"
+    "youtube_query": "Crunch - Hands Overhead form",
+    "force": "pull"
   },
   {
     "id": "Crunch_-_Legs_On_Exercise_Ball",
@@ -777,7 +808,8 @@
     ],
     "image_front": "/exercises/img/Crunch_-_Legs_On_Exercise_Ball/0.jpg",
     "image_side": "/exercises/img/Crunch_-_Legs_On_Exercise_Ball/1.jpg",
-    "youtube_query": "Crunch - Legs On Exercise Ball form"
+    "youtube_query": "Crunch - Legs On Exercise Ball form",
+    "force": "pull"
   },
   {
     "id": "Crunches",
@@ -801,7 +833,8 @@
     ],
     "image_front": "/exercises/img/Crunches/0.jpg",
     "image_side": "/exercises/img/Crunches/1.jpg",
-    "youtube_query": "Crunches form"
+    "youtube_query": "Crunches form",
+    "force": "pull"
   },
   {
     "id": "Cuban_Press",
@@ -826,7 +859,8 @@
     ],
     "image_front": "/exercises/img/Cuban_Press/0.jpg",
     "image_side": "/exercises/img/Cuban_Press/1.jpg",
-    "youtube_query": "Cuban Press form"
+    "youtube_query": "Cuban Press form",
+    "force": "push"
   },
   {
     "id": "Dead_Bug",
@@ -851,7 +885,8 @@
     ],
     "image_front": "/exercises/img/Dead_Bug/0.jpg",
     "image_side": "/exercises/img/Dead_Bug/1.jpg",
-    "youtube_query": "Dead Bug form"
+    "youtube_query": "Dead Bug form",
+    "force": "pull"
   },
   {
     "id": "Decline_Crunch",
@@ -875,7 +910,8 @@
     ],
     "image_front": "/exercises/img/Decline_Crunch/0.jpg",
     "image_side": "/exercises/img/Decline_Crunch/1.jpg",
-    "youtube_query": "Decline Crunch form"
+    "youtube_query": "Decline Crunch form",
+    "force": "pull"
   },
   {
     "id": "Decline_Dumbbell_Bench_Press",
@@ -903,7 +939,8 @@
     ],
     "image_front": "/exercises/img/Decline_Dumbbell_Bench_Press/0.jpg",
     "image_side": "/exercises/img/Decline_Dumbbell_Bench_Press/1.jpg",
-    "youtube_query": "Decline Dumbbell Bench Press form"
+    "youtube_query": "Decline Dumbbell Bench Press form",
+    "force": "push"
   },
   {
     "id": "Decline_Dumbbell_Flyes",
@@ -927,7 +964,8 @@
     ],
     "image_front": "/exercises/img/Decline_Dumbbell_Flyes/0.jpg",
     "image_side": "/exercises/img/Decline_Dumbbell_Flyes/1.jpg",
-    "youtube_query": "Decline Dumbbell Flyes form"
+    "youtube_query": "Decline Dumbbell Flyes form",
+    "force": "push"
   },
   {
     "id": "Decline_Dumbbell_Triceps_Extension",
@@ -951,7 +989,8 @@
     ],
     "image_front": "/exercises/img/Decline_Dumbbell_Triceps_Extension/0.jpg",
     "image_side": "/exercises/img/Decline_Dumbbell_Triceps_Extension/1.jpg",
-    "youtube_query": "Decline Dumbbell Triceps Extension form"
+    "youtube_query": "Decline Dumbbell Triceps Extension form",
+    "force": "push"
   },
   {
     "id": "Decline_Oblique_Crunch",
@@ -975,7 +1014,8 @@
     ],
     "image_front": "/exercises/img/Decline_Oblique_Crunch/0.jpg",
     "image_side": "/exercises/img/Decline_Oblique_Crunch/1.jpg",
-    "youtube_query": "Decline Oblique Crunch form"
+    "youtube_query": "Decline Oblique Crunch form",
+    "force": "pull"
   },
   {
     "id": "Decline_Push-Up",
@@ -1000,7 +1040,8 @@
     ],
     "image_front": "/exercises/img/Decline_Push-Up/0.jpg",
     "image_side": "/exercises/img/Decline_Push-Up/1.jpg",
-    "youtube_query": "Decline Push-Up form"
+    "youtube_query": "Decline Push-Up form",
+    "force": "push"
   },
   {
     "id": "Decline_Reverse_Crunch",
@@ -1023,7 +1064,8 @@
     ],
     "image_front": "/exercises/img/Decline_Reverse_Crunch/0.jpg",
     "image_side": "/exercises/img/Decline_Reverse_Crunch/1.jpg",
-    "youtube_query": "Decline Reverse Crunch form"
+    "youtube_query": "Decline Reverse Crunch form",
+    "force": "pull"
   },
   {
     "id": "Dips_-_Triceps_Version",
@@ -1048,7 +1090,8 @@
     ],
     "image_front": "/exercises/img/Dips_-_Triceps_Version/0.jpg",
     "image_side": "/exercises/img/Dips_-_Triceps_Version/1.jpg",
-    "youtube_query": "Dips - Triceps Version form"
+    "youtube_query": "Dips - Triceps Version form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Alternate_Bicep_Curl",
@@ -1073,7 +1116,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Alternate_Bicep_Curl/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Alternate_Bicep_Curl/1.jpg",
-    "youtube_query": "Dumbbell Alternate Bicep Curl form"
+    "youtube_query": "Dumbbell Alternate Bicep Curl form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_Bench_Press",
@@ -1100,7 +1144,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Bench_Press/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Bench_Press/1.jpg",
-    "youtube_query": "Dumbbell Bench Press form"
+    "youtube_query": "Dumbbell Bench Press form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Bench_Press_with_Neutral_Grip",
@@ -1126,7 +1171,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Bench_Press_with_Neutral_Grip/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Bench_Press_with_Neutral_Grip/1.jpg",
-    "youtube_query": "Dumbbell Bench Press with Neutral Grip form"
+    "youtube_query": "Dumbbell Bench Press with Neutral Grip form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Bicep_Curl",
@@ -1150,7 +1196,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Bicep_Curl/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Bicep_Curl/1.jpg",
-    "youtube_query": "Dumbbell Bicep Curl form"
+    "youtube_query": "Dumbbell Bicep Curl form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_Clean",
@@ -1181,7 +1228,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Clean/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Clean/1.jpg",
-    "youtube_query": "Dumbbell Clean form"
+    "youtube_query": "Dumbbell Clean form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_Flyes",
@@ -1204,7 +1252,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Flyes/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Flyes/1.jpg",
-    "youtube_query": "Dumbbell Flyes form"
+    "youtube_query": "Dumbbell Flyes form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Incline_Row",
@@ -1232,7 +1281,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Incline_Row/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Incline_Row/1.jpg",
-    "youtube_query": "Dumbbell Incline Row form"
+    "youtube_query": "Dumbbell Incline Row form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_Incline_Shoulder_Raise",
@@ -1258,7 +1308,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Incline_Shoulder_Raise/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Incline_Shoulder_Raise/1.jpg",
-    "youtube_query": "Dumbbell Incline Shoulder Raise form"
+    "youtube_query": "Dumbbell Incline Shoulder Raise form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Lunges",
@@ -1284,7 +1335,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Lunges/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Lunges/1.jpg",
-    "youtube_query": "Dumbbell Lunges form"
+    "youtube_query": "Dumbbell Lunges form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Lying_One-Arm_Rear_Lateral_Raise",
@@ -1309,7 +1361,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Lying_One-Arm_Rear_Lateral_Raise/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Lying_One-Arm_Rear_Lateral_Raise/1.jpg",
-    "youtube_query": "Dumbbell Lying One-Arm Rear Lateral Raise form"
+    "youtube_query": "Dumbbell Lying One-Arm Rear Lateral Raise form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_Lying_Pronation",
@@ -1333,7 +1386,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Lying_Pronation/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Lying_Pronation/1.jpg",
-    "youtube_query": "Dumbbell Lying Pronation form"
+    "youtube_query": "Dumbbell Lying Pronation form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_Lying_Rear_Lateral_Raise",
@@ -1356,7 +1410,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Lying_Rear_Lateral_Raise/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Lying_Rear_Lateral_Raise/1.jpg",
-    "youtube_query": "Dumbbell Lying Rear Lateral Raise form"
+    "youtube_query": "Dumbbell Lying Rear Lateral Raise form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_Lying_Supination",
@@ -1380,7 +1435,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Lying_Supination/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Lying_Supination/1.jpg",
-    "youtube_query": "Dumbbell Lying Supination form"
+    "youtube_query": "Dumbbell Lying Supination form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_One-Arm_Shoulder_Press",
@@ -1406,7 +1462,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_One-Arm_Shoulder_Press/0.jpg",
     "image_side": "/exercises/img/Dumbbell_One-Arm_Shoulder_Press/1.jpg",
-    "youtube_query": "Dumbbell One-Arm Shoulder Press form"
+    "youtube_query": "Dumbbell One-Arm Shoulder Press form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_One-Arm_Triceps_Extension",
@@ -1430,7 +1487,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_One-Arm_Triceps_Extension/0.jpg",
     "image_side": "/exercises/img/Dumbbell_One-Arm_Triceps_Extension/1.jpg",
-    "youtube_query": "Dumbbell One-Arm Triceps Extension form"
+    "youtube_query": "Dumbbell One-Arm Triceps Extension form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_One-Arm_Upright_Row",
@@ -1456,7 +1514,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_One-Arm_Upright_Row/0.jpg",
     "image_side": "/exercises/img/Dumbbell_One-Arm_Upright_Row/1.jpg",
-    "youtube_query": "Dumbbell One-Arm Upright Row form"
+    "youtube_query": "Dumbbell One-Arm Upright Row form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_Prone_Incline_Curl",
@@ -1481,7 +1540,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Prone_Incline_Curl/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Prone_Incline_Curl/1.jpg",
-    "youtube_query": "Dumbbell Prone Incline Curl form"
+    "youtube_query": "Dumbbell Prone Incline Curl form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_Raise",
@@ -1505,7 +1565,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Raise/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Raise/1.jpg",
-    "youtube_query": "Dumbbell Raise form"
+    "youtube_query": "Dumbbell Raise form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_Rear_Lunge",
@@ -1531,7 +1592,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Rear_Lunge/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Rear_Lunge/1.jpg",
-    "youtube_query": "Dumbbell Rear Lunge form"
+    "youtube_query": "Dumbbell Rear Lunge form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Scaption",
@@ -1554,7 +1616,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Scaption/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Scaption/1.jpg",
-    "youtube_query": "Dumbbell Scaption form"
+    "youtube_query": "Dumbbell Scaption form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Seated_One-Leg_Calf_Raise",
@@ -1578,7 +1641,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Seated_One-Leg_Calf_Raise/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Seated_One-Leg_Calf_Raise/1.jpg",
-    "youtube_query": "Dumbbell Seated One-Leg Calf Raise form"
+    "youtube_query": "Dumbbell Seated One-Leg Calf Raise form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Shoulder_Press",
@@ -1604,7 +1668,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Shoulder_Press/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Shoulder_Press/1.jpg",
-    "youtube_query": "Dumbbell Shoulder Press form"
+    "youtube_query": "Dumbbell Shoulder Press form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Shrug",
@@ -1626,7 +1691,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Shrug/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Shrug/1.jpg",
-    "youtube_query": "Dumbbell Shrug form"
+    "youtube_query": "Dumbbell Shrug form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_Side_Bend",
@@ -1648,7 +1714,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Side_Bend/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Side_Bend/1.jpg",
-    "youtube_query": "Dumbbell Side Bend form"
+    "youtube_query": "Dumbbell Side Bend form",
+    "force": "pull"
   },
   {
     "id": "Dumbbell_Squat",
@@ -1676,7 +1743,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Squat/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Squat/1.jpg",
-    "youtube_query": "Dumbbell Squat form"
+    "youtube_query": "Dumbbell Squat form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Squat_To_A_Bench",
@@ -1705,7 +1773,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Squat_To_A_Bench/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Squat_To_A_Bench/1.jpg",
-    "youtube_query": "Dumbbell Squat To A Bench form"
+    "youtube_query": "Dumbbell Squat To A Bench form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Step_Ups",
@@ -1731,7 +1800,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Step_Ups/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Step_Ups/1.jpg",
-    "youtube_query": "Dumbbell Step Ups form"
+    "youtube_query": "Dumbbell Step Ups form",
+    "force": "push"
   },
   {
     "id": "Dumbbell_Tricep_Extension_-Pronated_Grip",
@@ -1753,7 +1823,8 @@
     ],
     "image_front": "/exercises/img/Dumbbell_Tricep_Extension_-Pronated_Grip/0.jpg",
     "image_side": "/exercises/img/Dumbbell_Tricep_Extension_-Pronated_Grip/1.jpg",
-    "youtube_query": "Dumbbell Tricep Extension -Pronated Grip form"
+    "youtube_query": "Dumbbell Tricep Extension -Pronated Grip form",
+    "force": "push"
   },
   {
     "id": "Elbow_to_Knee",
@@ -1774,7 +1845,8 @@
     ],
     "image_front": "/exercises/img/Elbow_to_Knee/0.jpg",
     "image_side": "/exercises/img/Elbow_to_Knee/1.jpg",
-    "youtube_query": "Elbow to Knee form"
+    "youtube_query": "Elbow to Knee form",
+    "force": "pull"
   },
   {
     "id": "External_Rotation",
@@ -1798,7 +1870,8 @@
     ],
     "image_front": "/exercises/img/External_Rotation/0.jpg",
     "image_side": "/exercises/img/External_Rotation/1.jpg",
-    "youtube_query": "External Rotation form"
+    "youtube_query": "External Rotation form",
+    "force": "pull"
   },
   {
     "id": "Flat_Bench_Leg_Pull-In",
@@ -1822,7 +1895,8 @@
     ],
     "image_front": "/exercises/img/Flat_Bench_Leg_Pull-In/0.jpg",
     "image_side": "/exercises/img/Flat_Bench_Leg_Pull-In/1.jpg",
-    "youtube_query": "Flat Bench Leg Pull-In form"
+    "youtube_query": "Flat Bench Leg Pull-In form",
+    "force": "pull"
   },
   {
     "id": "Flat_Bench_Lying_Leg_Raise",
@@ -1845,7 +1919,8 @@
     ],
     "image_front": "/exercises/img/Flat_Bench_Lying_Leg_Raise/0.jpg",
     "image_side": "/exercises/img/Flat_Bench_Lying_Leg_Raise/1.jpg",
-    "youtube_query": "Flat Bench Lying Leg Raise form"
+    "youtube_query": "Flat Bench Lying Leg Raise form",
+    "force": "pull"
   },
   {
     "id": "Flexor_Incline_Dumbbell_Curls",
@@ -1870,7 +1945,8 @@
     ],
     "image_front": "/exercises/img/Flexor_Incline_Dumbbell_Curls/0.jpg",
     "image_side": "/exercises/img/Flexor_Incline_Dumbbell_Curls/1.jpg",
-    "youtube_query": "Flexor Incline Dumbbell Curls form"
+    "youtube_query": "Flexor Incline Dumbbell Curls form",
+    "force": "pull"
   },
   {
     "id": "Floor_Glute-Ham_Raise",
@@ -1895,7 +1971,8 @@
     ],
     "image_front": "/exercises/img/Floor_Glute-Ham_Raise/0.jpg",
     "image_side": "/exercises/img/Floor_Glute-Ham_Raise/1.jpg",
-    "youtube_query": "Floor Glute-Ham Raise form"
+    "youtube_query": "Floor Glute-Ham Raise form",
+    "force": "pull"
   },
   {
     "id": "Flutter_Kicks",
@@ -1920,7 +1997,8 @@
     ],
     "image_front": "/exercises/img/Flutter_Kicks/0.jpg",
     "image_side": "/exercises/img/Flutter_Kicks/1.jpg",
-    "youtube_query": "Flutter Kicks form"
+    "youtube_query": "Flutter Kicks form",
+    "force": "pull"
   },
   {
     "id": "Freehand_Jump_Squat",
@@ -1948,7 +2026,8 @@
     ],
     "image_front": "/exercises/img/Freehand_Jump_Squat/0.jpg",
     "image_side": "/exercises/img/Freehand_Jump_Squat/1.jpg",
-    "youtube_query": "Freehand Jump Squat form"
+    "youtube_query": "Freehand Jump Squat form",
+    "force": "push"
   },
   {
     "id": "Frog_Sit-Ups",
@@ -1973,7 +2052,8 @@
     ],
     "image_front": "/exercises/img/Frog_Sit-Ups/0.jpg",
     "image_side": "/exercises/img/Frog_Sit-Ups/1.jpg",
-    "youtube_query": "Frog Sit-Ups form"
+    "youtube_query": "Frog Sit-Ups form",
+    "force": "pull"
   },
   {
     "id": "Front_Dumbbell_Raise",
@@ -1995,7 +2075,8 @@
     ],
     "image_front": "/exercises/img/Front_Dumbbell_Raise/0.jpg",
     "image_side": "/exercises/img/Front_Dumbbell_Raise/1.jpg",
-    "youtube_query": "Front Dumbbell Raise form"
+    "youtube_query": "Front Dumbbell Raise form",
+    "force": "push"
   },
   {
     "id": "Front_Incline_Dumbbell_Raise",
@@ -2019,7 +2100,8 @@
     ],
     "image_front": "/exercises/img/Front_Incline_Dumbbell_Raise/0.jpg",
     "image_side": "/exercises/img/Front_Incline_Dumbbell_Raise/1.jpg",
-    "youtube_query": "Front Incline Dumbbell Raise form"
+    "youtube_query": "Front Incline Dumbbell Raise form",
+    "force": "push"
   },
   {
     "id": "Front_Two-Dumbbell_Raise",
@@ -2041,7 +2123,8 @@
     ],
     "image_front": "/exercises/img/Front_Two-Dumbbell_Raise/0.jpg",
     "image_side": "/exercises/img/Front_Two-Dumbbell_Raise/1.jpg",
-    "youtube_query": "Front Two-Dumbbell Raise form"
+    "youtube_query": "Front Two-Dumbbell Raise form",
+    "force": "push"
   },
   {
     "id": "Glute_Kickback",
@@ -2065,7 +2148,8 @@
     ],
     "image_front": "/exercises/img/Glute_Kickback/0.jpg",
     "image_side": "/exercises/img/Glute_Kickback/1.jpg",
-    "youtube_query": "Glute Kickback form"
+    "youtube_query": "Glute Kickback form",
+    "force": "push"
   },
   {
     "id": "Gorilla_Chin_Crunch",
@@ -2091,7 +2175,8 @@
     ],
     "image_front": "/exercises/img/Gorilla_Chin_Crunch/0.jpg",
     "image_side": "/exercises/img/Gorilla_Chin_Crunch/1.jpg",
-    "youtube_query": "Gorilla Chin/Crunch form"
+    "youtube_query": "Gorilla Chin/Crunch form",
+    "force": "pull"
   },
   {
     "id": "Hammer_Curls",
@@ -2114,7 +2199,8 @@
     ],
     "image_front": "/exercises/img/Hammer_Curls/0.jpg",
     "image_side": "/exercises/img/Hammer_Curls/1.jpg",
-    "youtube_query": "Hammer Curls form"
+    "youtube_query": "Hammer Curls form",
+    "force": "pull"
   },
   {
     "id": "Hammer_Grip_Incline_DB_Bench_Press",
@@ -2143,7 +2229,8 @@
     ],
     "image_front": "/exercises/img/Hammer_Grip_Incline_DB_Bench_Press/0.jpg",
     "image_side": "/exercises/img/Hammer_Grip_Incline_DB_Bench_Press/1.jpg",
-    "youtube_query": "Hammer Grip Incline DB Bench Press form"
+    "youtube_query": "Hammer Grip Incline DB Bench Press form",
+    "force": "push"
   },
   {
     "id": "Handstand_Push-Ups",
@@ -2168,7 +2255,8 @@
     ],
     "image_front": "/exercises/img/Handstand_Push-Ups/0.jpg",
     "image_side": "/exercises/img/Handstand_Push-Ups/1.jpg",
-    "youtube_query": "Handstand Push-Ups form"
+    "youtube_query": "Handstand Push-Ups form",
+    "force": "push"
   },
   {
     "id": "Hanging_Leg_Raise",
@@ -2190,7 +2278,8 @@
     ],
     "image_front": "/exercises/img/Hanging_Leg_Raise/0.jpg",
     "image_side": "/exercises/img/Hanging_Leg_Raise/1.jpg",
-    "youtube_query": "Hanging Leg Raise form"
+    "youtube_query": "Hanging Leg Raise form",
+    "force": "pull"
   },
   {
     "id": "Hanging_Pike",
@@ -2213,7 +2302,8 @@
     ],
     "image_front": "/exercises/img/Hanging_Pike/0.jpg",
     "image_side": "/exercises/img/Hanging_Pike/1.jpg",
-    "youtube_query": "Hanging Pike form"
+    "youtube_query": "Hanging Pike form",
+    "force": "pull"
   },
   {
     "id": "Hyperextensions_With_No_Hyperextension_Bench",
@@ -2240,7 +2330,8 @@
     ],
     "image_front": "/exercises/img/Hyperextensions_With_No_Hyperextension_Bench/0.jpg",
     "image_side": "/exercises/img/Hyperextensions_With_No_Hyperextension_Bench/1.jpg",
-    "youtube_query": "Hyperextensions With No Hyperextension Bench form"
+    "youtube_query": "Hyperextensions With No Hyperextension Bench form",
+    "force": "pull"
   },
   {
     "id": "Incline_Dumbbell_Bench_With_Palms_Facing_In",
@@ -2269,7 +2360,8 @@
     ],
     "image_front": "/exercises/img/Incline_Dumbbell_Bench_With_Palms_Facing_In/0.jpg",
     "image_side": "/exercises/img/Incline_Dumbbell_Bench_With_Palms_Facing_In/1.jpg",
-    "youtube_query": "Incline Dumbbell Bench With Palms Facing In form"
+    "youtube_query": "Incline Dumbbell Bench With Palms Facing In form",
+    "force": "push"
   },
   {
     "id": "Incline_Dumbbell_Curl",
@@ -2292,7 +2384,8 @@
     ],
     "image_front": "/exercises/img/Incline_Dumbbell_Curl/0.jpg",
     "image_side": "/exercises/img/Incline_Dumbbell_Curl/1.jpg",
-    "youtube_query": "Incline Dumbbell Curl form"
+    "youtube_query": "Incline Dumbbell Curl form",
+    "force": "pull"
   },
   {
     "id": "Incline_Dumbbell_Flyes",
@@ -2319,7 +2412,8 @@
     ],
     "image_front": "/exercises/img/Incline_Dumbbell_Flyes/0.jpg",
     "image_side": "/exercises/img/Incline_Dumbbell_Flyes/1.jpg",
-    "youtube_query": "Incline Dumbbell Flyes form"
+    "youtube_query": "Incline Dumbbell Flyes form",
+    "force": "push"
   },
   {
     "id": "Incline_Dumbbell_Flyes_-_With_A_Twist",
@@ -2346,7 +2440,8 @@
     ],
     "image_front": "/exercises/img/Incline_Dumbbell_Flyes_-_With_A_Twist/0.jpg",
     "image_side": "/exercises/img/Incline_Dumbbell_Flyes_-_With_A_Twist/1.jpg",
-    "youtube_query": "Incline Dumbbell Flyes - With A Twist form"
+    "youtube_query": "Incline Dumbbell Flyes - With A Twist form",
+    "force": "push"
   },
   {
     "id": "Incline_Dumbbell_Press",
@@ -2375,7 +2470,8 @@
     ],
     "image_front": "/exercises/img/Incline_Dumbbell_Press/0.jpg",
     "image_side": "/exercises/img/Incline_Dumbbell_Press/1.jpg",
-    "youtube_query": "Incline Dumbbell Press form"
+    "youtube_query": "Incline Dumbbell Press form",
+    "force": "push"
   },
   {
     "id": "Incline_Hammer_Curls",
@@ -2397,7 +2493,8 @@
     ],
     "image_front": "/exercises/img/Incline_Hammer_Curls/0.jpg",
     "image_side": "/exercises/img/Incline_Hammer_Curls/1.jpg",
-    "youtube_query": "Incline Hammer Curls form"
+    "youtube_query": "Incline Hammer Curls form",
+    "force": "pull"
   },
   {
     "id": "Incline_Inner_Biceps_Curl",
@@ -2446,7 +2543,8 @@
     ],
     "image_front": "/exercises/img/Incline_Push-Up/0.jpg",
     "image_side": "/exercises/img/Incline_Push-Up/1.jpg",
-    "youtube_query": "Incline Push-Up form"
+    "youtube_query": "Incline Push-Up form",
+    "force": "push"
   },
   {
     "id": "Incline_Push-Up_Close-Grip",
@@ -2473,7 +2571,8 @@
     ],
     "image_front": "/exercises/img/Incline_Push-Up_Close-Grip/0.jpg",
     "image_side": "/exercises/img/Incline_Push-Up_Close-Grip/1.jpg",
-    "youtube_query": "Incline Push-Up Close-Grip form"
+    "youtube_query": "Incline Push-Up Close-Grip form",
+    "force": "push"
   },
   {
     "id": "Incline_Push-Up_Medium",
@@ -2501,7 +2600,8 @@
     ],
     "image_front": "/exercises/img/Incline_Push-Up_Medium/0.jpg",
     "image_side": "/exercises/img/Incline_Push-Up_Medium/1.jpg",
-    "youtube_query": "Incline Push-Up Medium form"
+    "youtube_query": "Incline Push-Up Medium form",
+    "force": "push"
   },
   {
     "id": "Incline_Push-Up_Reverse_Grip",
@@ -2529,7 +2629,8 @@
     ],
     "image_front": "/exercises/img/Incline_Push-Up_Reverse_Grip/0.jpg",
     "image_side": "/exercises/img/Incline_Push-Up_Reverse_Grip/1.jpg",
-    "youtube_query": "Incline Push-Up Reverse Grip form"
+    "youtube_query": "Incline Push-Up Reverse Grip form",
+    "force": "push"
   },
   {
     "id": "Incline_Push-Up_Wide",
@@ -2557,7 +2658,8 @@
     ],
     "image_front": "/exercises/img/Incline_Push-Up_Wide/0.jpg",
     "image_side": "/exercises/img/Incline_Push-Up_Wide/1.jpg",
-    "youtube_query": "Incline Push-Up Wide form"
+    "youtube_query": "Incline Push-Up Wide form",
+    "force": "push"
   },
   {
     "id": "Inverted_Row",
@@ -2582,7 +2684,8 @@
     ],
     "image_front": "/exercises/img/Inverted_Row/0.jpg",
     "image_side": "/exercises/img/Inverted_Row/1.jpg",
-    "youtube_query": "Inverted Row form"
+    "youtube_query": "Inverted Row form",
+    "force": "pull"
   },
   {
     "id": "Iron_Cross",
@@ -2606,7 +2709,8 @@
     "instructions": [],
     "image_front": "/exercises/img/Iron_Cross/0.jpg",
     "image_side": "/exercises/img/Iron_Cross/1.jpg",
-    "youtube_query": "Iron Cross form"
+    "youtube_query": "Iron Cross form",
+    "force": "push"
   },
   {
     "id": "Isometric_Neck_Exercise_-_Front_And_Back",
@@ -2630,7 +2734,8 @@
     ],
     "image_front": "/exercises/img/Isometric_Neck_Exercise_-_Front_And_Back/0.jpg",
     "image_side": "/exercises/img/Isometric_Neck_Exercise_-_Front_And_Back/1.jpg",
-    "youtube_query": "Isometric Neck Exercise - Front And Back form"
+    "youtube_query": "Isometric Neck Exercise - Front And Back form",
+    "force": "static"
   },
   {
     "id": "Isometric_Neck_Exercise_-_Sides",
@@ -2654,7 +2759,8 @@
     ],
     "image_front": "/exercises/img/Isometric_Neck_Exercise_-_Sides/0.jpg",
     "image_side": "/exercises/img/Isometric_Neck_Exercise_-_Sides/1.jpg",
-    "youtube_query": "Isometric Neck Exercise - Sides form"
+    "youtube_query": "Isometric Neck Exercise - Sides form",
+    "force": "static"
   },
   {
     "id": "Isometric_Wipers",
@@ -2680,7 +2786,8 @@
     ],
     "image_front": "/exercises/img/Isometric_Wipers/0.jpg",
     "image_side": "/exercises/img/Isometric_Wipers/1.jpg",
-    "youtube_query": "Isometric Wipers form"
+    "youtube_query": "Isometric Wipers form",
+    "force": "push"
   },
   {
     "id": "Jackknife_Sit-Up",
@@ -2702,7 +2809,8 @@
     ],
     "image_front": "/exercises/img/Jackknife_Sit-Up/0.jpg",
     "image_side": "/exercises/img/Jackknife_Sit-Up/1.jpg",
-    "youtube_query": "Jackknife Sit-Up form"
+    "youtube_query": "Jackknife Sit-Up form",
+    "force": "pull"
   },
   {
     "id": "Janda_Sit-Up",
@@ -2724,7 +2832,8 @@
     ],
     "image_front": "/exercises/img/Janda_Sit-Up/0.jpg",
     "image_side": "/exercises/img/Janda_Sit-Up/1.jpg",
-    "youtube_query": "Janda Sit-Up form"
+    "youtube_query": "Janda Sit-Up form",
+    "force": "pull"
   },
   {
     "id": "Leg_Lift",
@@ -2749,7 +2858,8 @@
     ],
     "image_front": "/exercises/img/Leg_Lift/0.jpg",
     "image_side": "/exercises/img/Leg_Lift/1.jpg",
-    "youtube_query": "Leg Lift form"
+    "youtube_query": "Leg Lift form",
+    "force": "push"
   },
   {
     "id": "Leg_Pull-In",
@@ -2771,7 +2881,8 @@
     ],
     "image_front": "/exercises/img/Leg_Pull-In/0.jpg",
     "image_side": "/exercises/img/Leg_Pull-In/1.jpg",
-    "youtube_query": "Leg Pull-In form"
+    "youtube_query": "Leg Pull-In form",
+    "force": "pull"
   },
   {
     "id": "Lying_Dumbbell_Tricep_Extension",
@@ -2796,7 +2907,8 @@
     ],
     "image_front": "/exercises/img/Lying_Dumbbell_Tricep_Extension/0.jpg",
     "image_side": "/exercises/img/Lying_Dumbbell_Tricep_Extension/1.jpg",
-    "youtube_query": "Lying Dumbbell Tricep Extension form"
+    "youtube_query": "Lying Dumbbell Tricep Extension form",
+    "force": "push"
   },
   {
     "id": "Lying_One-Arm_Lateral_Raise",
@@ -2819,7 +2931,8 @@
     ],
     "image_front": "/exercises/img/Lying_One-Arm_Lateral_Raise/0.jpg",
     "image_side": "/exercises/img/Lying_One-Arm_Lateral_Raise/1.jpg",
-    "youtube_query": "Lying One-Arm Lateral Raise form"
+    "youtube_query": "Lying One-Arm Lateral Raise form",
+    "force": "pull"
   },
   {
     "id": "Lying_Rear_Delt_Raise",
@@ -2842,7 +2955,8 @@
     ],
     "image_front": "/exercises/img/Lying_Rear_Delt_Raise/0.jpg",
     "image_side": "/exercises/img/Lying_Rear_Delt_Raise/1.jpg",
-    "youtube_query": "Lying Rear Delt Raise form"
+    "youtube_query": "Lying Rear Delt Raise form",
+    "force": "pull"
   },
   {
     "id": "Lying_Supine_Dumbbell_Curl",
@@ -2865,7 +2979,8 @@
     ],
     "image_front": "/exercises/img/Lying_Supine_Dumbbell_Curl/0.jpg",
     "image_side": "/exercises/img/Lying_Supine_Dumbbell_Curl/1.jpg",
-    "youtube_query": "Lying Supine Dumbbell Curl form"
+    "youtube_query": "Lying Supine Dumbbell Curl form",
+    "force": "pull"
   },
   {
     "id": "Middle_Back_Shrug",
@@ -2887,7 +3002,8 @@
     ],
     "image_front": "/exercises/img/Middle_Back_Shrug/0.jpg",
     "image_side": "/exercises/img/Middle_Back_Shrug/1.jpg",
-    "youtube_query": "Middle Back Shrug form"
+    "youtube_query": "Middle Back Shrug form",
+    "force": "pull"
   },
   {
     "id": "Natural_Glute_Ham_Raise",
@@ -2913,7 +3029,8 @@
     ],
     "image_front": "/exercises/img/Natural_Glute_Ham_Raise/0.jpg",
     "image_side": "/exercises/img/Natural_Glute_Ham_Raise/1.jpg",
-    "youtube_query": "Natural Glute Ham Raise form"
+    "youtube_query": "Natural Glute Ham Raise form",
+    "force": "pull"
   },
   {
     "id": "Oblique_Crunches",
@@ -2938,7 +3055,8 @@
     ],
     "image_front": "/exercises/img/Oblique_Crunches/0.jpg",
     "image_side": "/exercises/img/Oblique_Crunches/1.jpg",
-    "youtube_query": "Oblique Crunches form"
+    "youtube_query": "Oblique Crunches form",
+    "force": "pull"
   },
   {
     "id": "Oblique_Crunches_-_On_The_Floor",
@@ -2961,7 +3079,8 @@
     ],
     "image_front": "/exercises/img/Oblique_Crunches_-_On_The_Floor/0.jpg",
     "image_side": "/exercises/img/Oblique_Crunches_-_On_The_Floor/1.jpg",
-    "youtube_query": "Oblique Crunches - On The Floor form"
+    "youtube_query": "Oblique Crunches - On The Floor form",
+    "force": "pull"
   },
   {
     "id": "One-Arm_Dumbbell_Row",
@@ -2990,7 +3109,8 @@
     ],
     "image_front": "/exercises/img/One-Arm_Dumbbell_Row/0.jpg",
     "image_side": "/exercises/img/One-Arm_Dumbbell_Row/1.jpg",
-    "youtube_query": "One-Arm Dumbbell Row form"
+    "youtube_query": "One-Arm Dumbbell Row form",
+    "force": "pull"
   },
   {
     "id": "One-Arm_Flat_Bench_Dumbbell_Flye",
@@ -3015,7 +3135,8 @@
     ],
     "image_front": "/exercises/img/One-Arm_Flat_Bench_Dumbbell_Flye/0.jpg",
     "image_side": "/exercises/img/One-Arm_Flat_Bench_Dumbbell_Flye/1.jpg",
-    "youtube_query": "One-Arm Flat Bench Dumbbell Flye form"
+    "youtube_query": "One-Arm Flat Bench Dumbbell Flye form",
+    "force": "push"
   },
   {
     "id": "One-Arm_Incline_Lateral_Raise",
@@ -3040,7 +3161,8 @@
     ],
     "image_front": "/exercises/img/One-Arm_Incline_Lateral_Raise/0.jpg",
     "image_side": "/exercises/img/One-Arm_Incline_Lateral_Raise/1.jpg",
-    "youtube_query": "One-Arm Incline Lateral Raise form"
+    "youtube_query": "One-Arm Incline Lateral Raise form",
+    "force": "push"
   },
   {
     "id": "One-Arm_Side_Laterals",
@@ -3064,7 +3186,8 @@
     ],
     "image_front": "/exercises/img/One-Arm_Side_Laterals/0.jpg",
     "image_side": "/exercises/img/One-Arm_Side_Laterals/1.jpg",
-    "youtube_query": "One-Arm Side Laterals form"
+    "youtube_query": "One-Arm Side Laterals form",
+    "force": "push"
   },
   {
     "id": "One_Arm_Dumbbell_Bench_Press",
@@ -3093,7 +3216,8 @@
     ],
     "image_front": "/exercises/img/One_Arm_Dumbbell_Bench_Press/0.jpg",
     "image_side": "/exercises/img/One_Arm_Dumbbell_Bench_Press/1.jpg",
-    "youtube_query": "One Arm Dumbbell Bench Press form"
+    "youtube_query": "One Arm Dumbbell Bench Press form",
+    "force": "push"
   },
   {
     "id": "One_Arm_Dumbbell_Preacher_Curl",
@@ -3116,7 +3240,8 @@
     ],
     "image_front": "/exercises/img/One_Arm_Dumbbell_Preacher_Curl/0.jpg",
     "image_side": "/exercises/img/One_Arm_Dumbbell_Preacher_Curl/1.jpg",
-    "youtube_query": "One Arm Dumbbell Preacher Curl form"
+    "youtube_query": "One Arm Dumbbell Preacher Curl form",
+    "force": "pull"
   },
   {
     "id": "One_Arm_Pronated_Dumbbell_Triceps_Extension",
@@ -3140,7 +3265,8 @@
     ],
     "image_front": "/exercises/img/One_Arm_Pronated_Dumbbell_Triceps_Extension/0.jpg",
     "image_side": "/exercises/img/One_Arm_Pronated_Dumbbell_Triceps_Extension/1.jpg",
-    "youtube_query": "One Arm Pronated Dumbbell Triceps Extension form"
+    "youtube_query": "One Arm Pronated Dumbbell Triceps Extension form",
+    "force": "push"
   },
   {
     "id": "One_Arm_Supinated_Dumbbell_Triceps_Extension",
@@ -3165,7 +3291,8 @@
     ],
     "image_front": "/exercises/img/One_Arm_Supinated_Dumbbell_Triceps_Extension/0.jpg",
     "image_side": "/exercises/img/One_Arm_Supinated_Dumbbell_Triceps_Extension/1.jpg",
-    "youtube_query": "One Arm Supinated Dumbbell Triceps Extension form"
+    "youtube_query": "One Arm Supinated Dumbbell Triceps Extension form",
+    "force": "push"
   },
   {
     "id": "Palms-Down_Dumbbell_Wrist_Curl_Over_A_Bench",
@@ -3191,7 +3318,8 @@
     ],
     "image_front": "/exercises/img/Palms-Down_Dumbbell_Wrist_Curl_Over_A_Bench/0.jpg",
     "image_side": "/exercises/img/Palms-Down_Dumbbell_Wrist_Curl_Over_A_Bench/1.jpg",
-    "youtube_query": "Palms-Down Dumbbell Wrist Curl Over A Bench form"
+    "youtube_query": "Palms-Down Dumbbell Wrist Curl Over A Bench form",
+    "force": "pull"
   },
   {
     "id": "Palms-Up_Dumbbell_Wrist_Curl_Over_A_Bench",
@@ -3217,7 +3345,8 @@
     ],
     "image_front": "/exercises/img/Palms-Up_Dumbbell_Wrist_Curl_Over_A_Bench/0.jpg",
     "image_side": "/exercises/img/Palms-Up_Dumbbell_Wrist_Curl_Over_A_Bench/1.jpg",
-    "youtube_query": "Palms-Up Dumbbell Wrist Curl Over A Bench form"
+    "youtube_query": "Palms-Up Dumbbell Wrist Curl Over A Bench form",
+    "force": "pull"
   },
   {
     "id": "Plank",
@@ -3238,7 +3367,8 @@
     ],
     "image_front": "/exercises/img/Plank/0.jpg",
     "image_side": "/exercises/img/Plank/1.jpg",
-    "youtube_query": "Plank form"
+    "youtube_query": "Plank form",
+    "force": "static"
   },
   {
     "id": "Plie_Dumbbell_Squat",
@@ -3266,7 +3396,8 @@
     ],
     "image_front": "/exercises/img/Plie_Dumbbell_Squat/0.jpg",
     "image_side": "/exercises/img/Plie_Dumbbell_Squat/1.jpg",
-    "youtube_query": "Plie Dumbbell Squat form"
+    "youtube_query": "Plie Dumbbell Squat form",
+    "force": "push"
   },
   {
     "id": "Power_Partials",
@@ -3289,7 +3420,8 @@
     ],
     "image_front": "/exercises/img/Power_Partials/0.jpg",
     "image_side": "/exercises/img/Power_Partials/1.jpg",
-    "youtube_query": "Power Partials form"
+    "youtube_query": "Power Partials form",
+    "force": "push"
   },
   {
     "id": "Preacher_Hammer_Dumbbell_Curl",
@@ -3313,7 +3445,8 @@
     ],
     "image_front": "/exercises/img/Preacher_Hammer_Dumbbell_Curl/0.jpg",
     "image_side": "/exercises/img/Preacher_Hammer_Dumbbell_Curl/1.jpg",
-    "youtube_query": "Preacher Hammer Dumbbell Curl form"
+    "youtube_query": "Preacher Hammer Dumbbell Curl form",
+    "force": "pull"
   },
   {
     "id": "Prone_Manual_Hamstring",
@@ -3334,7 +3467,8 @@
     ],
     "image_front": "/exercises/img/Prone_Manual_Hamstring/0.jpg",
     "image_side": "/exercises/img/Prone_Manual_Hamstring/1.jpg",
-    "youtube_query": "Prone Manual Hamstring form"
+    "youtube_query": "Prone Manual Hamstring form",
+    "force": "static"
   },
   {
     "id": "Pullups",
@@ -3360,7 +3494,8 @@
     ],
     "image_front": "/exercises/img/Pullups/0.jpg",
     "image_side": "/exercises/img/Pullups/1.jpg",
-    "youtube_query": "Pullups form"
+    "youtube_query": "Pullups form",
+    "force": "pull"
   },
   {
     "id": "Push-Up_Wide",
@@ -3411,7 +3546,8 @@
     ],
     "image_front": "/exercises/img/Push-Ups_-_Close_Triceps_Position/0.jpg",
     "image_side": "/exercises/img/Push-Ups_-_Close_Triceps_Position/1.jpg",
-    "youtube_query": "Push-Ups - Close Triceps Position form"
+    "youtube_query": "Push-Ups - Close Triceps Position form",
+    "force": "push"
   },
   {
     "id": "Push-Ups_With_Feet_Elevated",
@@ -3437,7 +3573,8 @@
     ],
     "image_front": "/exercises/img/Push-Ups_With_Feet_Elevated/0.jpg",
     "image_side": "/exercises/img/Push-Ups_With_Feet_Elevated/1.jpg",
-    "youtube_query": "Push-Ups With Feet Elevated form"
+    "youtube_query": "Push-Ups With Feet Elevated form",
+    "force": "push"
   },
   {
     "id": "Push_Up_to_Side_Plank",
@@ -3464,7 +3601,8 @@
     ],
     "image_front": "/exercises/img/Push_Up_to_Side_Plank/0.jpg",
     "image_side": "/exercises/img/Push_Up_to_Side_Plank/1.jpg",
-    "youtube_query": "Push Up to Side Plank form"
+    "youtube_query": "Push Up to Side Plank form",
+    "force": "push"
   },
   {
     "id": "Pushups",
@@ -3489,7 +3627,8 @@
     ],
     "image_front": "/exercises/img/Pushups/0.jpg",
     "image_side": "/exercises/img/Pushups/1.jpg",
-    "youtube_query": "Pushups form"
+    "youtube_query": "Pushups form",
+    "force": "push"
   },
   {
     "id": "Pushups_Close_and_Wide_Hand_Positions",
@@ -3514,7 +3653,8 @@
     ],
     "image_front": "/exercises/img/Pushups_Close_and_Wide_Hand_Positions/0.jpg",
     "image_side": "/exercises/img/Pushups_Close_and_Wide_Hand_Positions/1.jpg",
-    "youtube_query": "Pushups (Close and Wide Hand Positions) form"
+    "youtube_query": "Pushups (Close and Wide Hand Positions) form",
+    "force": "push"
   },
   {
     "id": "Reverse_Crunch",
@@ -3537,7 +3677,8 @@
     ],
     "image_front": "/exercises/img/Reverse_Crunch/0.jpg",
     "image_side": "/exercises/img/Reverse_Crunch/1.jpg",
-    "youtube_query": "Reverse Crunch form"
+    "youtube_query": "Reverse Crunch form",
+    "force": "pull"
   },
   {
     "id": "Reverse_Flyes",
@@ -3561,7 +3702,8 @@
     ],
     "image_front": "/exercises/img/Reverse_Flyes/0.jpg",
     "image_side": "/exercises/img/Reverse_Flyes/1.jpg",
-    "youtube_query": "Reverse Flyes form"
+    "youtube_query": "Reverse Flyes form",
+    "force": "pull"
   },
   {
     "id": "Reverse_Flyes_With_External_Rotation",
@@ -3586,7 +3728,8 @@
     ],
     "image_front": "/exercises/img/Reverse_Flyes_With_External_Rotation/0.jpg",
     "image_side": "/exercises/img/Reverse_Flyes_With_External_Rotation/1.jpg",
-    "youtube_query": "Reverse Flyes With External Rotation form"
+    "youtube_query": "Reverse Flyes With External Rotation form",
+    "force": "pull"
   },
   {
     "id": "Russian_Twist",
@@ -3611,7 +3754,8 @@
     ],
     "image_front": "/exercises/img/Russian_Twist/0.jpg",
     "image_side": "/exercises/img/Russian_Twist/1.jpg",
-    "youtube_query": "Russian Twist form"
+    "youtube_query": "Russian Twist form",
+    "force": "pull"
   },
   {
     "id": "Scapular_Pull-Up",
@@ -3635,7 +3779,8 @@
     ],
     "image_front": "/exercises/img/Scapular_Pull-Up/0.jpg",
     "image_side": "/exercises/img/Scapular_Pull-Up/1.jpg",
-    "youtube_query": "Scapular Pull-Up form"
+    "youtube_query": "Scapular Pull-Up form",
+    "force": "pull"
   },
   {
     "id": "Seated_Bent-Over_One-Arm_Dumbbell_Triceps_Extension",
@@ -3660,7 +3805,8 @@
     ],
     "image_front": "/exercises/img/Seated_Bent-Over_One-Arm_Dumbbell_Triceps_Extension/0.jpg",
     "image_side": "/exercises/img/Seated_Bent-Over_One-Arm_Dumbbell_Triceps_Extension/1.jpg",
-    "youtube_query": "Seated Bent-Over One-Arm Dumbbell Triceps Extension form"
+    "youtube_query": "Seated Bent-Over One-Arm Dumbbell Triceps Extension form",
+    "force": "push"
   },
   {
     "id": "Seated_Bent-Over_Rear_Delt_Raise",
@@ -3684,7 +3830,8 @@
     ],
     "image_front": "/exercises/img/Seated_Bent-Over_Rear_Delt_Raise/0.jpg",
     "image_side": "/exercises/img/Seated_Bent-Over_Rear_Delt_Raise/1.jpg",
-    "youtube_query": "Seated Bent-Over Rear Delt Raise form"
+    "youtube_query": "Seated Bent-Over Rear Delt Raise form",
+    "force": "pull"
   },
   {
     "id": "Seated_Bent-Over_Two-Arm_Dumbbell_Triceps_Extension",
@@ -3708,7 +3855,8 @@
     ],
     "image_front": "/exercises/img/Seated_Bent-Over_Two-Arm_Dumbbell_Triceps_Extension/0.jpg",
     "image_side": "/exercises/img/Seated_Bent-Over_Two-Arm_Dumbbell_Triceps_Extension/1.jpg",
-    "youtube_query": "Seated Bent-Over Two-Arm Dumbbell Triceps Extension form"
+    "youtube_query": "Seated Bent-Over Two-Arm Dumbbell Triceps Extension form",
+    "force": "push"
   },
   {
     "id": "Seated_Dumbbell_Curl",
@@ -3731,7 +3879,8 @@
     ],
     "image_front": "/exercises/img/Seated_Dumbbell_Curl/0.jpg",
     "image_side": "/exercises/img/Seated_Dumbbell_Curl/1.jpg",
-    "youtube_query": "Seated Dumbbell Curl form"
+    "youtube_query": "Seated Dumbbell Curl form",
+    "force": "pull"
   },
   {
     "id": "Seated_Dumbbell_Inner_Biceps_Curl",
@@ -3755,7 +3904,8 @@
     ],
     "image_front": "/exercises/img/Seated_Dumbbell_Inner_Biceps_Curl/0.jpg",
     "image_side": "/exercises/img/Seated_Dumbbell_Inner_Biceps_Curl/1.jpg",
-    "youtube_query": "Seated Dumbbell Inner Biceps Curl form"
+    "youtube_query": "Seated Dumbbell Inner Biceps Curl form",
+    "force": "pull"
   },
   {
     "id": "Seated_Dumbbell_Palms-Down_Wrist_Curl",
@@ -3780,7 +3930,8 @@
     ],
     "image_front": "/exercises/img/Seated_Dumbbell_Palms-Down_Wrist_Curl/0.jpg",
     "image_side": "/exercises/img/Seated_Dumbbell_Palms-Down_Wrist_Curl/1.jpg",
-    "youtube_query": "Seated Dumbbell Palms-Down Wrist Curl form"
+    "youtube_query": "Seated Dumbbell Palms-Down Wrist Curl form",
+    "force": "pull"
   },
   {
     "id": "Seated_Dumbbell_Palms-Up_Wrist_Curl",
@@ -3805,7 +3956,8 @@
     ],
     "image_front": "/exercises/img/Seated_Dumbbell_Palms-Up_Wrist_Curl/0.jpg",
     "image_side": "/exercises/img/Seated_Dumbbell_Palms-Up_Wrist_Curl/1.jpg",
-    "youtube_query": "Seated Dumbbell Palms-Up Wrist Curl form"
+    "youtube_query": "Seated Dumbbell Palms-Up Wrist Curl form",
+    "force": "pull"
   },
   {
     "id": "Seated_Dumbbell_Press",
@@ -3831,7 +3983,8 @@
     ],
     "image_front": "/exercises/img/Seated_Dumbbell_Press/0.jpg",
     "image_side": "/exercises/img/Seated_Dumbbell_Press/1.jpg",
-    "youtube_query": "Seated Dumbbell Press form"
+    "youtube_query": "Seated Dumbbell Press form",
+    "force": "push"
   },
   {
     "id": "Seated_Flat_Bench_Leg_Pull-In",
@@ -3854,7 +4007,8 @@
     ],
     "image_front": "/exercises/img/Seated_Flat_Bench_Leg_Pull-In/0.jpg",
     "image_side": "/exercises/img/Seated_Flat_Bench_Leg_Pull-In/1.jpg",
-    "youtube_query": "Seated Flat Bench Leg Pull-In form"
+    "youtube_query": "Seated Flat Bench Leg Pull-In form",
+    "force": "pull"
   },
   {
     "id": "Seated_Leg_Tucks",
@@ -3876,7 +4030,8 @@
     ],
     "image_front": "/exercises/img/Seated_Leg_Tucks/0.jpg",
     "image_side": "/exercises/img/Seated_Leg_Tucks/1.jpg",
-    "youtube_query": "Seated Leg Tucks form"
+    "youtube_query": "Seated Leg Tucks form",
+    "force": "pull"
   },
   {
     "id": "Seated_One-Arm_Dumbbell_Palms-Down_Wrist_Curl",
@@ -3900,7 +4055,8 @@
     ],
     "image_front": "/exercises/img/Seated_One-Arm_Dumbbell_Palms-Down_Wrist_Curl/0.jpg",
     "image_side": "/exercises/img/Seated_One-Arm_Dumbbell_Palms-Down_Wrist_Curl/1.jpg",
-    "youtube_query": "Seated One-Arm Dumbbell Palms-Down Wrist Curl form"
+    "youtube_query": "Seated One-Arm Dumbbell Palms-Down Wrist Curl form",
+    "force": "pull"
   },
   {
     "id": "Seated_One-Arm_Dumbbell_Palms-Up_Wrist_Curl",
@@ -3924,7 +4080,8 @@
     ],
     "image_front": "/exercises/img/Seated_One-Arm_Dumbbell_Palms-Up_Wrist_Curl/0.jpg",
     "image_side": "/exercises/img/Seated_One-Arm_Dumbbell_Palms-Up_Wrist_Curl/1.jpg",
-    "youtube_query": "Seated One-Arm Dumbbell Palms-Up Wrist Curl form"
+    "youtube_query": "Seated One-Arm Dumbbell Palms-Up Wrist Curl form",
+    "force": "pull"
   },
   {
     "id": "Seated_Side_Lateral_Raise",
@@ -3946,7 +4103,8 @@
     ],
     "image_front": "/exercises/img/Seated_Side_Lateral_Raise/0.jpg",
     "image_side": "/exercises/img/Seated_Side_Lateral_Raise/1.jpg",
-    "youtube_query": "Seated Side Lateral Raise form"
+    "youtube_query": "Seated Side Lateral Raise form",
+    "force": "push"
   },
   {
     "id": "Seated_Triceps_Press",
@@ -3968,7 +4126,8 @@
     ],
     "image_front": "/exercises/img/Seated_Triceps_Press/0.jpg",
     "image_side": "/exercises/img/Seated_Triceps_Press/1.jpg",
-    "youtube_query": "Seated Triceps Press form"
+    "youtube_query": "Seated Triceps Press form",
+    "force": "push"
   },
   {
     "id": "See-Saw_Press_Alternating_Side_Press",
@@ -3994,7 +4153,8 @@
     ],
     "image_front": "/exercises/img/See-Saw_Press_Alternating_Side_Press/0.jpg",
     "image_side": "/exercises/img/See-Saw_Press_Alternating_Side_Press/1.jpg",
-    "youtube_query": "See-Saw Press (Alternating Side Press) form"
+    "youtube_query": "See-Saw Press (Alternating Side Press) form",
+    "force": "push"
   },
   {
     "id": "Side_Bridge",
@@ -4014,7 +4174,8 @@
     "instructions": [],
     "image_front": "/exercises/img/Side_Bridge/0.jpg",
     "image_side": "/exercises/img/Side_Bridge/1.jpg",
-    "youtube_query": "Side Bridge form"
+    "youtube_query": "Side Bridge form",
+    "force": "static"
   },
   {
     "id": "Side_Jackknife",
@@ -4031,7 +4192,8 @@
     "instructions": [],
     "image_front": "/exercises/img/Side_Jackknife/0.jpg",
     "image_side": "/exercises/img/Side_Jackknife/1.jpg",
-    "youtube_query": "Side Jackknife form"
+    "youtube_query": "Side Jackknife form",
+    "force": "pull"
   },
   {
     "id": "Side_Lateral_Raise",
@@ -4053,7 +4215,8 @@
     ],
     "image_front": "/exercises/img/Side_Lateral_Raise/0.jpg",
     "image_side": "/exercises/img/Side_Lateral_Raise/1.jpg",
-    "youtube_query": "Side Lateral Raise form"
+    "youtube_query": "Side Lateral Raise form",
+    "force": "push"
   },
   {
     "id": "Side_Laterals_to_Front_Raise",
@@ -4079,7 +4242,8 @@
     ],
     "image_front": "/exercises/img/Side_Laterals_to_Front_Raise/0.jpg",
     "image_side": "/exercises/img/Side_Laterals_to_Front_Raise/1.jpg",
-    "youtube_query": "Side Laterals to Front Raise form"
+    "youtube_query": "Side Laterals to Front Raise form",
+    "force": "push"
   },
   {
     "id": "Single-Arm_Push-Up",
@@ -4104,7 +4268,8 @@
     ],
     "image_front": "/exercises/img/Single-Arm_Push-Up/0.jpg",
     "image_side": "/exercises/img/Single-Arm_Push-Up/1.jpg",
-    "youtube_query": "Single-Arm Push-Up form"
+    "youtube_query": "Single-Arm Push-Up form",
+    "force": "push"
   },
   {
     "id": "Single_Dumbbell_Raise",
@@ -4152,7 +4317,8 @@
     ],
     "image_front": "/exercises/img/Single_Leg_Glute_Bridge/0.jpg",
     "image_side": "/exercises/img/Single_Leg_Glute_Bridge/1.jpg",
-    "youtube_query": "Single Leg Glute Bridge form"
+    "youtube_query": "Single Leg Glute Bridge form",
+    "force": "push"
   },
   {
     "id": "Sit-Up",
@@ -4175,7 +4341,8 @@
     ],
     "image_front": "/exercises/img/Sit-Up/0.jpg",
     "image_side": "/exercises/img/Sit-Up/1.jpg",
-    "youtube_query": "Sit-Up form"
+    "youtube_query": "Sit-Up form",
+    "force": "pull"
   },
   {
     "id": "Spell_Caster",
@@ -4200,7 +4367,8 @@
     ],
     "image_front": "/exercises/img/Spell_Caster/0.jpg",
     "image_side": "/exercises/img/Spell_Caster/1.jpg",
-    "youtube_query": "Spell Caster form"
+    "youtube_query": "Spell Caster form",
+    "force": "pull"
   },
   {
     "id": "Spider_Crawl",
@@ -4225,7 +4393,8 @@
     ],
     "image_front": "/exercises/img/Spider_Crawl/0.jpg",
     "image_side": "/exercises/img/Spider_Crawl/1.jpg",
-    "youtube_query": "Spider Crawl form"
+    "youtube_query": "Spider Crawl form",
+    "force": "pull"
   },
   {
     "id": "Split_Squat_with_Dumbbells",
@@ -4250,7 +4419,8 @@
     ],
     "image_front": "/exercises/img/Split_Squat_with_Dumbbells/0.jpg",
     "image_side": "/exercises/img/Split_Squat_with_Dumbbells/1.jpg",
-    "youtube_query": "Split Squat with Dumbbells form"
+    "youtube_query": "Split Squat with Dumbbells form",
+    "force": "push"
   },
   {
     "id": "Standing_Alternating_Dumbbell_Press",
@@ -4274,7 +4444,8 @@
     ],
     "image_front": "/exercises/img/Standing_Alternating_Dumbbell_Press/0.jpg",
     "image_side": "/exercises/img/Standing_Alternating_Dumbbell_Press/1.jpg",
-    "youtube_query": "Standing Alternating Dumbbell Press form"
+    "youtube_query": "Standing Alternating Dumbbell Press form",
+    "force": "push"
   },
   {
     "id": "Standing_Bent-Over_One-Arm_Dumbbell_Triceps_Extension",
@@ -4300,7 +4471,8 @@
     ],
     "image_front": "/exercises/img/Standing_Bent-Over_One-Arm_Dumbbell_Triceps_Extension/0.jpg",
     "image_side": "/exercises/img/Standing_Bent-Over_One-Arm_Dumbbell_Triceps_Extension/1.jpg",
-    "youtube_query": "Standing Bent-Over One-Arm Dumbbell Triceps Extension form"
+    "youtube_query": "Standing Bent-Over One-Arm Dumbbell Triceps Extension form",
+    "force": "push"
   },
   {
     "id": "Standing_Bent-Over_Two-Arm_Dumbbell_Triceps_Extension",
@@ -4322,7 +4494,8 @@
     ],
     "image_front": "/exercises/img/Standing_Bent-Over_Two-Arm_Dumbbell_Triceps_Extension/0.jpg",
     "image_side": "/exercises/img/Standing_Bent-Over_Two-Arm_Dumbbell_Triceps_Extension/1.jpg",
-    "youtube_query": "Standing Bent-Over Two-Arm Dumbbell Triceps Extension form"
+    "youtube_query": "Standing Bent-Over Two-Arm Dumbbell Triceps Extension form",
+    "force": "push"
   },
   {
     "id": "Standing_Concentration_Curl",
@@ -4346,7 +4519,8 @@
     ],
     "image_front": "/exercises/img/Standing_Concentration_Curl/0.jpg",
     "image_side": "/exercises/img/Standing_Concentration_Curl/1.jpg",
-    "youtube_query": "Standing Concentration Curl form"
+    "youtube_query": "Standing Concentration Curl form",
+    "force": "pull"
   },
   {
     "id": "Standing_Dumbbell_Calf_Raise",
@@ -4368,7 +4542,8 @@
     ],
     "image_front": "/exercises/img/Standing_Dumbbell_Calf_Raise/0.jpg",
     "image_side": "/exercises/img/Standing_Dumbbell_Calf_Raise/1.jpg",
-    "youtube_query": "Standing Dumbbell Calf Raise form"
+    "youtube_query": "Standing Dumbbell Calf Raise form",
+    "force": "push"
   },
   {
     "id": "Standing_Dumbbell_Press",
@@ -4391,7 +4566,8 @@
     ],
     "image_front": "/exercises/img/Standing_Dumbbell_Press/0.jpg",
     "image_side": "/exercises/img/Standing_Dumbbell_Press/1.jpg",
-    "youtube_query": "Standing Dumbbell Press form"
+    "youtube_query": "Standing Dumbbell Press form",
+    "force": "push"
   },
   {
     "id": "Standing_Dumbbell_Reverse_Curl",
@@ -4415,7 +4591,8 @@
     ],
     "image_front": "/exercises/img/Standing_Dumbbell_Reverse_Curl/0.jpg",
     "image_side": "/exercises/img/Standing_Dumbbell_Reverse_Curl/1.jpg",
-    "youtube_query": "Standing Dumbbell Reverse Curl form"
+    "youtube_query": "Standing Dumbbell Reverse Curl form",
+    "force": "pull"
   },
   {
     "id": "Standing_Dumbbell_Straight-Arm_Front_Delt_Raise_Above_Head",
@@ -4438,7 +4615,8 @@
     ],
     "image_front": "/exercises/img/Standing_Dumbbell_Straight-Arm_Front_Delt_Raise_Above_Head/0.jpg",
     "image_side": "/exercises/img/Standing_Dumbbell_Straight-Arm_Front_Delt_Raise_Above_Head/1.jpg",
-    "youtube_query": "Standing Dumbbell Straight-Arm Front Delt Raise Above Head form"
+    "youtube_query": "Standing Dumbbell Straight-Arm Front Delt Raise Above Head form",
+    "force": "push"
   },
   {
     "id": "Standing_Dumbbell_Triceps_Extension",
@@ -4461,7 +4639,8 @@
     ],
     "image_front": "/exercises/img/Standing_Dumbbell_Triceps_Extension/0.jpg",
     "image_side": "/exercises/img/Standing_Dumbbell_Triceps_Extension/1.jpg",
-    "youtube_query": "Standing Dumbbell Triceps Extension form"
+    "youtube_query": "Standing Dumbbell Triceps Extension form",
+    "force": "push"
   },
   {
     "id": "Standing_Dumbbell_Upright_Row",
@@ -4486,7 +4665,8 @@
     ],
     "image_front": "/exercises/img/Standing_Dumbbell_Upright_Row/0.jpg",
     "image_side": "/exercises/img/Standing_Dumbbell_Upright_Row/1.jpg",
-    "youtube_query": "Standing Dumbbell Upright Row form"
+    "youtube_query": "Standing Dumbbell Upright Row form",
+    "force": "pull"
   },
   {
     "id": "Standing_Inner-Biceps_Curl",
@@ -4511,7 +4691,8 @@
     ],
     "image_front": "/exercises/img/Standing_Inner-Biceps_Curl/0.jpg",
     "image_side": "/exercises/img/Standing_Inner-Biceps_Curl/1.jpg",
-    "youtube_query": "Standing Inner-Biceps Curl form"
+    "youtube_query": "Standing Inner-Biceps Curl form",
+    "force": "pull"
   },
   {
     "id": "Standing_One-Arm_Dumbbell_Curl_Over_Incline_Bench",
@@ -4536,7 +4717,8 @@
     ],
     "image_front": "/exercises/img/Standing_One-Arm_Dumbbell_Curl_Over_Incline_Bench/0.jpg",
     "image_side": "/exercises/img/Standing_One-Arm_Dumbbell_Curl_Over_Incline_Bench/1.jpg",
-    "youtube_query": "Standing One-Arm Dumbbell Curl Over Incline Bench form"
+    "youtube_query": "Standing One-Arm Dumbbell Curl Over Incline Bench form",
+    "force": "pull"
   },
   {
     "id": "Standing_One-Arm_Dumbbell_Triceps_Extension",
@@ -4563,7 +4745,8 @@
     ],
     "image_front": "/exercises/img/Standing_One-Arm_Dumbbell_Triceps_Extension/0.jpg",
     "image_side": "/exercises/img/Standing_One-Arm_Dumbbell_Triceps_Extension/1.jpg",
-    "youtube_query": "Standing One-Arm Dumbbell Triceps Extension form"
+    "youtube_query": "Standing One-Arm Dumbbell Triceps Extension form",
+    "force": "push"
   },
   {
     "id": "Standing_Palm-In_One-Arm_Dumbbell_Press",
@@ -4590,7 +4773,8 @@
     ],
     "image_front": "/exercises/img/Standing_Palm-In_One-Arm_Dumbbell_Press/0.jpg",
     "image_side": "/exercises/img/Standing_Palm-In_One-Arm_Dumbbell_Press/1.jpg",
-    "youtube_query": "Standing Palm-In One-Arm Dumbbell Press form"
+    "youtube_query": "Standing Palm-In One-Arm Dumbbell Press form",
+    "force": "push"
   },
   {
     "id": "Standing_Palms-In_Dumbbell_Press",
@@ -4614,7 +4798,8 @@
     ],
     "image_front": "/exercises/img/Standing_Palms-In_Dumbbell_Press/0.jpg",
     "image_side": "/exercises/img/Standing_Palms-In_Dumbbell_Press/1.jpg",
-    "youtube_query": "Standing Palms-In Dumbbell Press form"
+    "youtube_query": "Standing Palms-In Dumbbell Press form",
+    "force": "push"
   },
   {
     "id": "Standing_Towel_Triceps_Extension",
@@ -4636,7 +4821,8 @@
     ],
     "image_front": "/exercises/img/Standing_Towel_Triceps_Extension/0.jpg",
     "image_side": "/exercises/img/Standing_Towel_Triceps_Extension/1.jpg",
-    "youtube_query": "Standing Towel Triceps Extension form"
+    "youtube_query": "Standing Towel Triceps Extension form",
+    "force": "push"
   },
   {
     "id": "Step-up_with_Knee_Raise",
@@ -4660,7 +4846,8 @@
     ],
     "image_front": "/exercises/img/Step-up_with_Knee_Raise/0.jpg",
     "image_side": "/exercises/img/Step-up_with_Knee_Raise/1.jpg",
-    "youtube_query": "Step-up with Knee Raise form"
+    "youtube_query": "Step-up with Knee Raise form",
+    "force": "push"
   },
   {
     "id": "Stiff-Legged_Dumbbell_Deadlift",
@@ -4686,7 +4873,8 @@
     ],
     "image_front": "/exercises/img/Stiff-Legged_Dumbbell_Deadlift/0.jpg",
     "image_side": "/exercises/img/Stiff-Legged_Dumbbell_Deadlift/1.jpg",
-    "youtube_query": "Stiff-Legged Dumbbell Deadlift form"
+    "youtube_query": "Stiff-Legged Dumbbell Deadlift form",
+    "force": "pull"
   },
   {
     "id": "Straight-Arm_Dumbbell_Pullover",
@@ -4714,7 +4902,8 @@
     ],
     "image_front": "/exercises/img/Straight-Arm_Dumbbell_Pullover/0.jpg",
     "image_side": "/exercises/img/Straight-Arm_Dumbbell_Pullover/1.jpg",
-    "youtube_query": "Straight-Arm Dumbbell Pullover form"
+    "youtube_query": "Straight-Arm Dumbbell Pullover form",
+    "force": "pull"
   },
   {
     "id": "Tate_Press",
@@ -4740,7 +4929,8 @@
     ],
     "image_front": "/exercises/img/Tate_Press/0.jpg",
     "image_side": "/exercises/img/Tate_Press/1.jpg",
-    "youtube_query": "Tate Press form"
+    "youtube_query": "Tate Press form",
+    "force": "push"
   },
   {
     "id": "Tricep_Dumbbell_Kickback",
@@ -4762,7 +4952,8 @@
     ],
     "image_front": "/exercises/img/Tricep_Dumbbell_Kickback/0.jpg",
     "image_side": "/exercises/img/Tricep_Dumbbell_Kickback/1.jpg",
-    "youtube_query": "Tricep Dumbbell Kickback form"
+    "youtube_query": "Tricep Dumbbell Kickback form",
+    "force": "push"
   },
   {
     "id": "Tuck_Crunch",
@@ -4786,7 +4977,8 @@
     ],
     "image_front": "/exercises/img/Tuck_Crunch/0.jpg",
     "image_side": "/exercises/img/Tuck_Crunch/1.jpg",
-    "youtube_query": "Tuck Crunch form"
+    "youtube_query": "Tuck Crunch form",
+    "force": "pull"
   },
   {
     "id": "Two-Arm_Dumbbell_Preacher_Curl",
@@ -4808,7 +5000,8 @@
     ],
     "image_front": "/exercises/img/Two-Arm_Dumbbell_Preacher_Curl/0.jpg",
     "image_side": "/exercises/img/Two-Arm_Dumbbell_Preacher_Curl/1.jpg",
-    "youtube_query": "Two-Arm Dumbbell Preacher Curl form"
+    "youtube_query": "Two-Arm Dumbbell Preacher Curl form",
+    "force": "pull"
   },
   {
     "id": "V-Bar_Pullup",
@@ -4835,7 +5028,8 @@
     ],
     "image_front": "/exercises/img/V-Bar_Pullup/0.jpg",
     "image_side": "/exercises/img/V-Bar_Pullup/1.jpg",
-    "youtube_query": "V-Bar Pullup form"
+    "youtube_query": "V-Bar Pullup form",
+    "force": "pull"
   },
   {
     "id": "Wide-Grip_Rear_Pull-Up",
@@ -4862,7 +5056,8 @@
     ],
     "image_front": "/exercises/img/Wide-Grip_Rear_Pull-Up/0.jpg",
     "image_side": "/exercises/img/Wide-Grip_Rear_Pull-Up/1.jpg",
-    "youtube_query": "Wide-Grip Rear Pull-Up form"
+    "youtube_query": "Wide-Grip Rear Pull-Up form",
+    "force": "pull"
   },
   {
     "id": "Wind_Sprints",
@@ -4884,7 +5079,8 @@
     ],
     "image_front": "/exercises/img/Wind_Sprints/0.jpg",
     "image_side": "/exercises/img/Wind_Sprints/1.jpg",
-    "youtube_query": "Wind Sprints form"
+    "youtube_query": "Wind Sprints form",
+    "force": "pull"
   },
   {
     "id": "Zottman_Curl",
@@ -4912,7 +5108,8 @@
     ],
     "image_front": "/exercises/img/Zottman_Curl/0.jpg",
     "image_side": "/exercises/img/Zottman_Curl/1.jpg",
-    "youtube_query": "Zottman Curl form"
+    "youtube_query": "Zottman Curl form",
+    "force": "pull"
   },
   {
     "id": "Zottman_Preacher_Curl",
@@ -4938,6 +5135,7 @@
     ],
     "image_front": "/exercises/img/Zottman_Preacher_Curl/0.jpg",
     "image_side": "/exercises/img/Zottman_Preacher_Curl/1.jpg",
-    "youtube_query": "Zottman Preacher Curl form"
+    "youtube_query": "Zottman Preacher Curl form",
+    "force": "pull"
   }
 ]

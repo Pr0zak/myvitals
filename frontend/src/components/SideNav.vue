@@ -17,7 +17,7 @@ import { RouterLink, useRoute } from "vue-router";
 import {
   Activity, BarChart3, Battery, Bed, Brain, Calendar, ChevronDown,
   ChevronRight, Download, Droplets, Dumbbell, Edit3, FileUp, Footprints, Github, GitCompare,
-  Heart, Home, Hourglass, Key, List, Map, Menu, Monitor, Mountain, RotateCcw, Scale, Search,
+  Heart, Home, Hourglass, Key, List, Map, Menu, Monitor, Mountain, RotateCcw, Ruler, Scale, Search,
   Settings, Ship, Sparkles, Target, Terminal, Thermometer, TrendingUp, User, Watch as WatchIcon,
   Wrench, type LucideIcon,
 } from "lucide-vue-next";
@@ -227,6 +227,7 @@ const groups = computed<Group[]>(() => {
         { to: "/steps",          icon: Footprints,  label: "Steps",          sub: stepsStr,  subColor: "#22c55e" },
         { to: "/blood-pressure", icon: Droplets,    label: "Blood pressure", sub: bpStr,     subColor: "#fb923c" },
         { to: "/weight",         icon: Scale,       label: "Weight",         sub: weightStr, subColor: "#38bdf8" },
+        { to: "/measurements",   icon: Ruler,       label: "Measurements",   subColor: "#38bdf8" },
         { to: "/skin-temp",      icon: Thermometer, label: "Skin Δ",         sub: tempStr,   subColor: "#94a3b8" },
         { to: "/watch",          icon: WatchIcon,   label: "Watch",          sub: watchSub.value, subColor: "#38bdf8" },
       ],

@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import require_any
@@ -499,6 +499,91 @@ async def post_blood_pressure(
     await db.merge(row)
     await db.commit()
     return {"status": "ok", "time": ts.isoformat()}
+
+
+# BODY-1: body circumference measurements (cm), manual entry only.
+_CIRC_SITES = ("waist_cm", "chest_cm", "arms_cm", "hips_cm",
+               "thighs_cm", "neck_cm", "calves_cm")
+
+
+@router.get("/circumference")
+async def get_circumference(
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    """Body circumference measurements over time (waist/chest/arms/hips/
+    thighs/neck/calves, cm). Manual entry — no watch source."""
+    start, end = _resolve_range(since, until, timedelta(days=365))
+    result = await db.execute(
+        select(models.BodyCircumference)
+        .where(models.BodyCircumference.time >= start)
+        .where(models.BodyCircumference.time <= end)
+        .order_by(models.BodyCircumference.time)
+    )
+    rows = result.scalars().all()
+    points = [
+        {"time": r.time.isoformat(),
+         **{s: getattr(r, s) for s in _CIRC_SITES}}
+        for r in rows
+    ]
+    # Latest non-null value per site (ascending, so last non-null wins).
+    latest_per_site: dict = {}
+    for r in rows:
+        for s in _CIRC_SITES:
+            v = getattr(r, s)
+            if v is not None:
+                latest_per_site[s] = v
+    return {
+        "points": points,
+        "latest": points[-1] if points else None,
+        "latest_per_site": latest_per_site,
+    }
+
+
+class CircumferenceIn(BaseModel):
+    waist_cm: float | None = None
+    chest_cm: float | None = None
+    arms_cm: float | None = None
+    hips_cm: float | None = None
+    thighs_cm: float | None = None
+    neck_cm: float | None = None
+    calves_cm: float | None = None
+    time: datetime | None = None
+
+
+@router.post("/circumference")
+async def post_circumference(
+    body: CircumferenceIn,
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    """Log a measurement session (any subset of sites). Merges by time so
+    re-saving the same timestamp updates rather than duplicates. Only positive
+    values are stored — a stray 0/negative is dropped, and an all-empty body is
+    rejected (no junk rows)."""
+    provided = {s: getattr(body, s) for s in _CIRC_SITES}
+    clean = {k: v for k, v in provided.items() if v is not None and v > 0}
+    if not clean:
+        raise HTTPException(422, "Provide at least one positive measurement (cm).")
+    ts = body.time or datetime.now(timezone.utc)
+    row = models.BodyCircumference(time=ts, source="manual", **clean)
+    await db.merge(row)
+    await db.commit()
+    return {"status": "ok", "time": ts.isoformat()}
+
+
+@router.delete("/circumference")
+async def delete_circumference(
+    time: datetime = Query(...),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    """Delete a mis-entered measurement session by its exact timestamp."""
+    await db.execute(
+        sa_delete(models.BodyCircumference)
+        .where(models.BodyCircumference.time == time)
+    )
+    await db.commit()
+    return {"status": "ok"}
 
 
 @router.get("/skin-temp")

@@ -34,6 +34,7 @@ const router = createRouter({
     { path: "/hrv", name: "hrv", component: () => import("./views/Hrv.vue") },
     { path: "/skin-temp", name: "skin-temp", component: () => import("./views/SkinTemp.vue") },
     { path: "/blood-pressure", name: "blood-pressure", component: () => import("./views/BloodPressure.vue") },
+    { path: "/measurements", name: "measurements", component: () => import("./views/Measurements.vue") },
     { path: "/journal", name: "journal", component: () => import("./views/Journal.vue") },
     { path: "/sober", name: "sober", component: () => import("./views/Sober.vue") },
     { path: "/fasting", name: "fasting", component: () => import("./views/Fasting.vue") },

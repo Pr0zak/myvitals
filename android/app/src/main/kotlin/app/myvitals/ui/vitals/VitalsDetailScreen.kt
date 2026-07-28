@@ -79,6 +79,9 @@ fun VitalsDetailScreen(
         Vital.STEPS -> { StepsDetailScreen(settings, onBack); return }
         Vital.HR -> { HrDetailScreen(settings, onBack); return }
         Vital.WEIGHT -> { WeightDetailScreen(settings, onBack); return }
+        Vital.MEASUREMENTS -> {
+            app.myvitals.ui.vitals.MeasurementsScreen(settings, onBack); return
+        }
         Vital.BP -> { BpDetailScreen(settings, onBack); return }
         else -> {}
     }
@@ -343,7 +346,7 @@ private fun fmtForVital(v: Float, vital: Vital): String = when (vital) {
     Vital.SOBER -> "${v.toInt()}d"
     Vital.FASTING -> "%.1f h".format(v)
     Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS, Vital.COACH,
-    Vital.JOURNAL -> "${v.toInt()}"
+    Vital.JOURNAL, Vital.MEASUREMENTS -> "${v.toInt()}"
 }
 
 private suspend fun fetchSeries(
@@ -359,6 +362,9 @@ private suspend fun fetchSeries(
         else selectedDay.plusDays(1).atStartOfDay(zone).toInstant().toString()
     }
     when (vital) {
+        // Routed to its own MeasurementsScreen (early return in the dispatch);
+        // this generic series path is never reached for it.
+        Vital.MEASUREMENTS -> return Pair(emptyList(), emptyList())
         Vital.HR -> {
             if (isDayRange) {
                 val s = api.heartRateSeries(since = dayStartIso, until = dayEndIso)

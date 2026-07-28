@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.MonitorWeight
 import androidx.compose.material.icons.outlined.Note
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.ArrowDropDown
@@ -100,6 +101,7 @@ enum class Vital(val label: String, val icon: ImageVector, val color: Color) {
     SLEEP("Sleep", Icons.Outlined.Bedtime, Color(0xFF60A5FA)),
     STEPS("Steps", Icons.AutoMirrored.Outlined.DirectionsRun, Color(0xFF22C55E)),
     WEIGHT("Weight", Icons.Outlined.MonitorWeight, Color(0xFFF59E0B)),
+    MEASUREMENTS("Measurements", Icons.Outlined.Timeline, Color(0xFF38BDF8)),
     BP("Blood pressure", Icons.Outlined.FavoriteBorder, Color(0xFFEC4899)),
     SOBER("Sober", Icons.Outlined.Timer, Color(0xFF84CC16)),
     FASTING("Fasting", Icons.Outlined.HourglassEmpty, Color(0xFF38BDF8)),
@@ -321,7 +323,7 @@ fun VitalsScreen(
         listOf(
             Vital.HR, Vital.SLEEP, Vital.STEPS, Vital.HRV,
             Vital.WORKOUT, Vital.ACTIVITY, Vital.TRAILS,
-            Vital.WEIGHT, Vital.BP, Vital.SOBER, Vital.FASTING,
+            Vital.WEIGHT, Vital.MEASUREMENTS, Vital.BP, Vital.SOBER, Vital.FASTING,
             Vital.COACH, Vital.JOURNAL,
         )
     }
@@ -478,6 +480,7 @@ fun VitalsScreen(
                         weight, profile?.weightGoalKg, nowMs,
                         onClick = { onOpenVitalDetail(v) },
                     )
+                    Vital.MEASUREMENTS -> MeasurementsBadge(onClick = { onOpenVitalDetail(v) })
                     Vital.BP -> BpBadge(bp, nowMs, onClick = { onOpenVitalDetail(v) })
                 }
             }
@@ -895,6 +898,17 @@ private fun CoachBadge(onClick: () -> Unit) {
             fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(6.dp))
         Text("Workout + cardio", color = MV.OnSurfaceDim, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun MeasurementsBadge(onClick: () -> Unit) {
+    val v = Vital.MEASUREMENTS
+    BadgeFrame(v, null, onClick, isAction = true) {
+        Icon(Icons.Outlined.Timeline, contentDescription = null,
+            tint = v.color, modifier = Modifier.size(26.dp))
+        Spacer(Modifier.height(6.dp))
+        Text("Tape measure", color = MV.OnSurfaceDim, fontSize = 10.sp)
     }
 }
 

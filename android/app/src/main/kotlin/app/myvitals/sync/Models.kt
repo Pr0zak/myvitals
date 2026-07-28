@@ -289,6 +289,37 @@ data class StrengthDailyVolume(
     val sets: Int,
 )
 
+// BODY-1: body circumference measurements (cm), manual entry.
+@JsonClass(generateAdapter = true)
+data class CircumferencePoint(
+    val time: String,
+    @Json(name = "waist_cm") val waistCm: Double? = null,
+    @Json(name = "chest_cm") val chestCm: Double? = null,
+    @Json(name = "arms_cm") val armsCm: Double? = null,
+    @Json(name = "hips_cm") val hipsCm: Double? = null,
+    @Json(name = "thighs_cm") val thighsCm: Double? = null,
+    @Json(name = "neck_cm") val neckCm: Double? = null,
+    @Json(name = "calves_cm") val calvesCm: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class CircumferenceResponse(
+    val points: List<CircumferencePoint> = emptyList(),
+    @Json(name = "latest_per_site") val latestPerSite: Map<String, Double> = emptyMap(),
+)
+
+@JsonClass(generateAdapter = true)
+data class CircumferenceIn(
+    @Json(name = "waist_cm") val waistCm: Double? = null,
+    @Json(name = "chest_cm") val chestCm: Double? = null,
+    @Json(name = "arms_cm") val armsCm: Double? = null,
+    @Json(name = "hips_cm") val hipsCm: Double? = null,
+    @Json(name = "thighs_cm") val thighsCm: Double? = null,
+    @Json(name = "neck_cm") val neckCm: Double? = null,
+    @Json(name = "calves_cm") val calvesCm: Double? = null,
+    val time: String? = null,
+)
+
 // VOLT-1: weekly mesocycle volume trend.
 @JsonClass(generateAdapter = true)
 data class StrengthWeeklyPoint(

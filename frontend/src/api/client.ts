@@ -126,6 +126,26 @@ export const api = {
     return data;
   },
 
+  // BODY-1: body circumference measurements (cm), manual entry.
+  async circumference(p: RangeParams = {}): Promise<{
+    points: { time: string; waist_cm: number | null; chest_cm: number | null; arms_cm: number | null; hips_cm: number | null; thighs_cm: number | null; neck_cm: number | null; calves_cm: number | null }[];
+    latest: Record<string, string | number | null> | null;
+    latest_per_site: Record<string, number>;
+  }> {
+    const { data } = await http.get("/query/circumference", { params: rangeToQuery(p) });
+    return data;
+  },
+
+  async logCircumference(body: { waist_cm?: number | null; chest_cm?: number | null; arms_cm?: number | null; hips_cm?: number | null; thighs_cm?: number | null; neck_cm?: number | null; calves_cm?: number | null; time?: string }): Promise<{ status: string; time: string }> {
+    const { data } = await http.post("/query/circumference", body);
+    return data;
+  },
+
+  async deleteCircumference(time: string): Promise<{ status: string }> {
+    const { data } = await http.delete("/query/circumference", { params: { time } });
+    return data;
+  },
+
   async sleepRaw(since?: Date | string, until?: Date | string): Promise<{ time: string; stage: string; duration_s: number }[]> {
     const params: Record<string, string> = {};
     if (since) params.since = since instanceof Date ? since.toISOString() : since;

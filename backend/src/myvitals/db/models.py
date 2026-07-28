@@ -69,6 +69,22 @@ class BodyMetric(Base):
     source: Mapped[str] = mapped_column(String(32), default="manual")
 
 
+class BodyCircumference(Base):
+    """BODY-1: tape-measure circumference sites (cm), manual entry only (no
+    Health Connect source). One row per measurement session, keyed on time;
+    any subset of sites may be filled. Plain table (low cardinality)."""
+    __tablename__ = "body_circumference"
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    waist_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    chest_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    arms_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hips_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    thighs_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    neck_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    calves_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="manual")
+
+
 class Steps(Base):
     __tablename__ = "vitals_steps"
     # Source is part of the PK so multiple HC writers (watch + phone

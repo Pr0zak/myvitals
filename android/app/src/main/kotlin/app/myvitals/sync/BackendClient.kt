@@ -255,6 +255,14 @@ interface BackendApi {
         @retrofit2.http.Query("since") since: String? = null,
     ): okhttp3.ResponseBody
 
+    @GET("query/circumference")
+    suspend fun circumference(
+        @retrofit2.http.Query("since") since: String? = null,
+    ): CircumferenceResponse
+
+    @POST("query/circumference")
+    suspend fun logCircumference(@Body body: CircumferenceIn): Map<String, String>
+
     @GET("summary/range")
     suspend fun summaryRange(
         @retrofit2.http.Query("since") since: String,

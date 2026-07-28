@@ -33,6 +33,7 @@ from ..db import models
 from ..db.session import SessionLocal, get_session
 from ..integrations import fit_tracks
 from ..integrations import imports as imp_int
+from ..integrations import strength_import as strimp
 from .ingest import _bulk_upsert
 
 log = logging.getLogger(__name__)
@@ -485,6 +486,122 @@ async def import_fitbit_tracks(file: UploadFile = File(...)) -> dict[str, Any]:
         "filename": file.filename, "size_bytes": size,
         "message": f"Processing in background — poll /import/jobs/{job_id}",
     }
+
+
+# --- Strength-log import (Strong / Hevy / FitNotes CSV) — IMPORT-1 ----
+
+@router.post("/strength")
+async def import_strength_log(
+    file: UploadFile = File(...),
+    source: str | None = Query(default=None),
+    strong_unit: str = Query(default="kg"),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Import a Strong / Hevy / FitNotes CSV export as historical strength
+    workouts. Web-only (require_query). Synchronous — these exports are small
+    single CSVs. Idempotent: re-importing the same export skips sessions
+    already present, matched by a deterministic per-session seed.
+
+    `source` may be given explicitly ("strong"/"hevy"/"fitnotes") or is sniffed
+    from the header. `strong_unit` (kg|lb) resolves Strong's unitless weight
+    column; Hevy is always kg and FitNotes is self-describing per row."""
+    raw = await file.read()
+    if len(raw) > 25 * 1024 * 1024:  # strength CSVs are small; guard the RAM buffer
+        raise HTTPException(413, "File too large (max 25 MB for a strength CSV).")
+    text = raw.decode("utf-8", errors="replace").lstrip("﻿")
+    if not text.strip():
+        raise HTTPException(422, "Empty file.")
+    _, header = strimp._sniff(text)
+    src = ((source or "").strip().lower() or strimp.detect_source(header) or "")
+    if src not in ("strong", "hevy", "fitnotes"):
+        raise HTTPException(
+            422, "Unrecognized export. Supported: Strong, Hevy, or FitNotes CSV. "
+                 "(Apple Health exports carry no per-set data — export from "
+                 "Strong or Hevy instead.)")
+    unit = "kg" if strong_unit.lower().startswith("kg") else "lb"
+    try:
+        rows = strimp.parse_rows(text, src, strong_unit=unit)
+        sessions = strimp.group_sessions(rows, src)
+    except (csv.Error, ValueError) as e:
+        raise HTTPException(422, f"Could not parse the CSV: {e}") from e
+    if not sessions:
+        raise HTTPException(422, "No logged sets found in the file.")
+
+    job_id = await _create_job(f"strength_{src}", file.filename, len(raw))
+    counts = {"workouts": 0, "sets": 0, "skipped_duplicates": 0,
+              "unmatched_exercises": 0}
+    unmatched: set[str] = set()
+    try:
+        for sess in sessions:
+            dup = (await db.execute(
+                select(models.StrengthWorkout.id)
+                .where(models.StrengthWorkout.seed == sess["seed"])
+            )).first()
+            if dup:
+                counts["skipped_duplicates"] += 1
+                continue
+            when = sess["when"]
+            w = models.StrengthWorkout(
+                date=sess["date"],
+                # Date generated_at to the session itself (not now) so an
+                # imported historical workout never wins /today's "newest
+                # generated_at" selection and shadows the real generated plan.
+                generated_at=(when or datetime.now(timezone.utc)),
+                split_focus="imported",
+                status="completed",
+                seed=sess["seed"],
+                started_at=when,
+                completed_at=when,
+                notes=(sess["workout"] if sess["workout"] != "Imported" else None),
+            )
+            db.add(w)
+            await db.flush()
+            for oi, ex in enumerate(sess["exercises"]):
+                working = [s for s in ex["sets"]
+                           if s["set_type"] != "warmup" and s["reps"]]
+                rep_pool = [s["reps"] for s in (working or ex["sets"]) if s["reps"]]
+                w_pool = [s["weight_lb"] for s in ex["sets"] if s["weight_lb"]]
+                if not ex["matched"]:
+                    unmatched.add(ex["exercise"])
+                wex = models.StrengthWorkoutExercise(
+                    workout_id=w.id,
+                    exercise_id=ex["exercise_id"],
+                    order_index=oi,
+                    superset_id=(str(ex["superset"])[:16] if ex.get("superset")
+                                 else None),
+                    target_sets=len(working) or len(ex["sets"]),
+                    target_reps_low=min(rep_pool) if rep_pool else 0,
+                    target_reps_high=max(rep_pool) if rep_pool else 0,
+                    target_weight_lb=max(w_pool) if w_pool else None,
+                    notes=(None if ex["matched"]
+                           else f"imported: {ex['exercise']}"[:500]),
+                )
+                db.add(wex)
+                await db.flush()
+                for s in ex["sets"]:
+                    db.add(models.StrengthSet(
+                        workout_exercise_id=wex.id,
+                        set_number=s["set_number"],
+                        target_weight_lb=s["weight_lb"],
+                        target_reps=s["reps"] or 0,
+                        actual_weight_lb=s["weight_lb"],
+                        actual_reps=s["reps"],
+                        rating=s.get("rating"),
+                        set_type=s["set_type"],
+                        logged_at=s.get("when"),
+                    ))
+                    counts["sets"] += 1
+            counts["workouts"] += 1
+        await db.commit()
+        counts["unmatched_exercises"] = len(unmatched)
+        await _finish_job(job_id, "done", counts)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        await db.rollback()
+        await _finish_job(job_id, "error", counts, error=str(e)[:500])
+        raise HTTPException(500, f"Import failed: {e}") from e
+    return {"source": src, **counts, "unmatched_names": sorted(unmatched)[:50]}
 
 
 # --- Job status -------------------------------------------------------

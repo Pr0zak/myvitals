@@ -579,6 +579,58 @@ function pickSoberFile() {
   inp.click();
 }
 
+// IMPORT-1: strength-log CSV (Strong / Hevy / FitNotes)
+const strengthImportBusy = ref(false);
+const strengthImportResult = ref<string>("");
+const strengthImportError = ref<string>("");
+const strengthSource = ref<string>("auto"); // auto | strong | hevy | fitnotes
+const strongUnit = ref<string>("kg"); // Strong's weight column has no unit
+async function uploadStrength(file: File) {
+  strengthImportBusy.value = true;
+  strengthImportResult.value = "";
+  strengthImportError.value = "";
+  try {
+    const base = (apiBase.value || "/api").replace(/\/$/, "");
+    const fd = new FormData();
+    fd.append("file", file);
+    const params: Record<string, string> = { strong_unit: strongUnit.value };
+    if (strengthSource.value !== "auto") params.source = strengthSource.value;
+    const r = await axios.post(`${base}/import/strength`, fd, {
+      params,
+      headers: {
+        Authorization: `Bearer ${queryToken.value}`,
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    const d = r.data;
+    let msg = `Imported ${d.workouts} workout${d.workouts === 1 ? "" : "s"} · ${d.sets} sets from ${d.source}.`;
+    if (d.skipped_duplicates) msg += ` ${d.skipped_duplicates} duplicate session(s) skipped.`;
+    if (d.unmatched_exercises) {
+      msg += ` ${d.unmatched_exercises} exercise(s) weren't in the catalog (kept by name).`;
+    }
+    strengthImportResult.value = msg;
+  } catch (e: unknown) {
+    if (e && typeof e === "object" && "response" in e) {
+      const r = (e as { response?: { status?: number; data?: { detail?: string } } }).response;
+      strengthImportError.value = r?.data?.detail ?? `HTTP ${r?.status ?? "?"}`;
+    } else {
+      strengthImportError.value = e instanceof Error ? e.message : String(e);
+    }
+  } finally {
+    strengthImportBusy.value = false;
+  }
+}
+function pickStrengthFile() {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".csv,text/csv";
+  inp.onchange = () => {
+    const f = inp.files?.[0];
+    if (f) uploadStrength(f);
+  };
+  inp.click();
+}
+
 // Profile
 type Profile = Awaited<ReturnType<typeof api.getProfile>>;
 const profile = ref<Profile | null>(null);
@@ -1622,6 +1674,41 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           <p v-if="soberImportResult" class="ok" style="margin-top: 0.4rem;">{{ soberImportResult }}</p>
           <p v-if="soberImportError" class="err" style="margin-top: 0.4rem;"><small>{{ soberImportError }}</small></p>
         </div>
+
+        <div class="import-card">
+          <strong>Strength log</strong>
+          <p class="muted">
+            Import lifting history from <em>Strong</em>, <em>Hevy</em>, or
+            <em>FitNotes</em> (their CSV export). Sets, reps, weight, warmups and
+            RPE come across; re-importing the same file skips duplicates.
+            Exercises not in the catalog are kept by name.
+          </p>
+          <div class="strength-import-opts">
+            <label>Format
+              <select v-model="strengthSource">
+                <option value="auto">Auto-detect</option>
+                <option value="strong">Strong</option>
+                <option value="hevy">Hevy</option>
+                <option value="fitnotes">FitNotes</option>
+              </select>
+            </label>
+            <label v-if="strengthSource === 'strong' || strengthSource === 'auto'">Strong weight unit
+              <select v-model="strongUnit">
+                <option value="kg">kg</option>
+                <option value="lb">lb</option>
+              </select>
+            </label>
+          </div>
+          <button class="ghost" :disabled="strengthImportBusy" @click="pickStrengthFile">
+            {{ strengthImportBusy ? 'Importing…' : 'Upload strength CSV' }}
+          </button>
+          <p class="muted" style="margin-top: 0.4rem; font-size: 0.78rem;">
+            iPhone / Apple Health: strength workouts export without set data —
+            export directly from Strong or Hevy instead.
+          </p>
+          <p v-if="strengthImportResult" class="ok" style="margin-top: 0.4rem;">{{ strengthImportResult }}</p>
+          <p v-if="strengthImportError" class="err" style="margin-top: 0.4rem;"><small>{{ strengthImportError }}</small></p>
+        </div>
       </div>
       <div v-if="importResult" class="ok">{{ importResult }}</div>
       <div v-if="importError" class="err"><small>{{ importError }}</small></div>
@@ -2211,6 +2298,11 @@ h3.sub { font-size: 0.75rem; color: var(--muted-2); text-transform: uppercase; l
 }
 .import-card strong { display: block; margin-bottom: 0.3rem; color: var(--text); }
 .import-card p { font-size: 0.85rem; margin: 0 0 0.6rem; }
+.strength-import-opts { display: flex; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.strength-import-opts label { display: flex; flex-direction: column; gap: 0.2rem;
+  font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.strength-import-opts select { font-size: 0.85rem; padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
 .unit-row { display: flex; gap: 0.6rem; align-items: center; font-size: 0.8rem; margin-bottom: 0.5rem; }
 .unit-row label { display: inline-flex; align-items: center; gap: 0.2rem; cursor: pointer; }
 .token-row { display: flex; gap: 0.4rem; }

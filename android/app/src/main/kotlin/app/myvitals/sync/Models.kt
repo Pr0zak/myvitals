@@ -203,6 +203,9 @@ data class StrengthSetRow(
     @Json(name = "rest_seconds_taken") val restSecondsTaken: Int? = null,
     @Json(name = "logged_at") val loggedAt: String? = null,
     val skipped: Boolean = false,
+    // PR-1: set on the log_set response when this set just beat a record.
+    @Json(name = "is_weight_pr") val isWeightPr: Boolean = false,
+    @Json(name = "is_e1rm_pr") val isE1rmPr: Boolean = false,
 )
 
 @JsonClass(generateAdapter = true)
@@ -284,6 +287,22 @@ data class StrengthProgressionPoint(
     val date: String,
     @Json(name = "top_weight_lb") val topWeightLb: Double,
     val e1rm: Double? = null,  // e1RM-1: Epley estimated 1-rep-max for the day
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthRecord(
+    @Json(name = "exercise_id") val exerciseId: String,
+    val name: String,
+    @Json(name = "best_weight_lb") val bestWeightLb: Double,
+    @Json(name = "best_weight_date") val bestWeightDate: String? = null,
+    @Json(name = "best_e1rm") val bestE1rm: Double,
+    @Json(name = "best_e1rm_date") val bestE1rmDate: String? = null,
+    @Json(name = "last_performed_date") val lastPerformedDate: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthRecordsResponse(
+    val records: List<StrengthRecord> = emptyList(),
 )
 
 @JsonClass(generateAdapter = true)

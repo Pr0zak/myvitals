@@ -9,6 +9,7 @@ import app.myvitals.sync.LogSetRequest
 import app.myvitals.sync.RegenerateRequest
 import app.myvitals.sync.StrengthExerciseInfo
 import app.myvitals.sync.StrengthRecoveryResponse
+import app.myvitals.sync.StrengthSetRow
 import app.myvitals.sync.StrengthWorkoutDetail
 import app.myvitals.sync.StrengthWorkoutSummary
 import app.myvitals.sync.WorkoutPatchRequest
@@ -271,7 +272,13 @@ class StrengthRepository(
      * to `buffered_strength_sets` (best-effort flush by SyncWorker).
      * Returns true if it landed on the backend, false if buffered.
      */
-    suspend fun logSet(req: LogSetRequest): Boolean = withContext(Dispatchers.IO) {
+    /**
+     * Logs a set. Returns the server [StrengthSetRow] on a successful online
+     * post (carrying PR-1's is_weight_pr / is_e1rm_pr flags), or null when the
+     * write was buffered offline/on-error. Null == "queued, no PR info yet" —
+     * the same "not immediately confirmed" signal the old Boolean `false` gave.
+     */
+    suspend fun logSet(req: LogSetRequest): StrengthSetRow? = withContext(Dispatchers.IO) {
         suspend fun buffer() {
             AppDatabase.get(context).bufferedStrengthSets().insert(
                 BufferedStrengthSet(
@@ -283,15 +290,14 @@ class StrengthRepository(
         // Offline → buffer instantly; mid-workout set logging must never
         // block on a timeout (gym wifi is the whole point of buffering).
         if (!app.myvitals.sync.NetworkStatus.isOnline(context)) {
-            buffer(); return@withContext false
+            buffer(); return@withContext null
         }
         try {
             api().logStrengthSet(req)
-            true
         } catch (e: Exception) {
             Timber.w(e, "logSet network error — buffering")
             buffer()
-            false
+            null
         }
     }
 

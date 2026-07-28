@@ -42,6 +42,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
+import app.myvitals.sync.StrengthRecord
+import app.myvitals.sync.StrengthRecordsResponse
 import app.myvitals.sync.StrengthStats
 import app.myvitals.ui.MV
 import app.myvitals.ui.neon.NeonMV
@@ -78,6 +80,7 @@ fun WorkoutChartsScreen(
     val bad = if (neon) NeonMV.Bad else MV.Red
     var days by remember { mutableStateOf(90) }
     var stats by remember { mutableStateOf<StrengthStats?>(null) }
+    var records by remember { mutableStateOf<List<StrengthRecord>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -107,6 +110,24 @@ fun WorkoutChartsScreen(
             Timber.w(e, "strength stats load failed")
             if (stats == null) error = e.message?.take(160)
         } finally { loading = false }
+    }
+
+    // PR-1: all-time records — SWR (cache then fetch), range-independent.
+    LaunchedEffect(Unit) {
+        if (!settings.isConfigured()) return@LaunchedEffect
+        app.myvitals.data.JsonCache.read<StrengthRecordsResponse>(
+            context, "strength_records", StrengthRecordsResponse::class.java,
+        )?.let { records = it.value.records }
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val fresh = withContext(Dispatchers.IO) { api.strengthRecords() }
+            records = fresh.records
+            app.myvitals.data.JsonCache.write(
+                context, "strength_records", StrengthRecordsResponse::class.java, fresh,
+            )
+        } catch (e: Exception) {
+            Timber.w(e, "strength records load failed")
+        }
     }
 
     Column(Modifier.fillMaxSize().background(bg)) {
@@ -154,6 +175,7 @@ fun WorkoutChartsScreen(
                     item { DailyVolumeCard(s, neon) }
                     item { MuscleGroupCard(s, neon) }
                     item { ProgressionCard(s, neon) }
+                    if (records.isNotEmpty()) item { RecordsCard(records, neon) }
                 }
             }
         }
@@ -353,6 +375,61 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
                 zoomState = rememberVicoZoomState(),
                 modifier = Modifier.fillMaxWidth().height(200.dp),
             )
+        }
+    }
+}
+
+private val REC_DATE_FMT = java.time.format.DateTimeFormatter.ofPattern("MMM d, yy")
+
+private fun fmtRecDate(iso: String?): String {
+    if (iso.isNullOrBlank()) return ""
+    return runCatching {
+        java.time.LocalDate.parse(iso.take(10)).format(REC_DATE_FMT)
+    }.getOrDefault("")
+}
+
+@Composable
+private fun RecordsCard(records: List<StrengthRecord>, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("PERSONAL RECORDS", color = muted,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(8.dp))
+            for (r in records) {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(r.name, color = ink, fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold)
+                        fmtRecDate(r.lastPerformedDate).takeIf { it.isNotEmpty() }?.let {
+                            Text("last $it", color = muted, fontSize = 10.sp)
+                        }
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            buildString {
+                                append("%.1f lb".format(r.bestWeightLb))
+                                fmtRecDate(r.bestWeightDate).takeIf { it.isNotEmpty() }
+                                    ?.let { append(" · $it") }
+                            },
+                            color = ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            buildString {
+                                append("e1RM %.0f".format(r.bestE1rm))
+                                fmtRecDate(r.bestE1rmDate).takeIf { it.isNotEmpty() }
+                                    ?.let { append(" · $it") }
+                            },
+                            color = muted, fontSize = 11.sp,
+                        )
+                    }
+                }
+            }
         }
     }
 }

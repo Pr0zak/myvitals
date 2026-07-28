@@ -1062,7 +1062,7 @@ fun StrengthTodayScreen(
                             return@onLogSet
                         }
                         scope.launch {
-                            val ok = repo.logSet(LogSetRequest(
+                            val logged = repo.logSet(LogSetRequest(
                                 workoutExerciseId = wex.id,
                                 setNumber = setNum,
                                 targetWeightLb = wex.targetWeightLb,
@@ -1072,7 +1072,15 @@ fun StrengthTodayScreen(
                                 rating = rating,
                                 setType = setType,
                             ))
-                            if (ok) {
+                            // PR-1: transient toast the moment a record falls.
+                            if (logged != null && (logged.isWeightPr || logged.isE1rmPr)) {
+                                val what = if (logged.isWeightPr) "weight" else "e1RM"
+                                android.widget.Toast.makeText(
+                                    context, "🏆 New $what PR!",
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                            if (logged != null) {
                                 // Within-round rest (35s) if this is a superset and
                                 // the partner hasn't completed this set yet; full
                                 // target_rest_s otherwise.

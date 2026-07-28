@@ -23,6 +23,11 @@ interface Stats {
 }
 const stats = ref<Stats | null>(null);
 
+// PR-1: all-time per-exercise records — independent of the range picker,
+// fetched once on mount.
+type StrengthRecord = Awaited<ReturnType<typeof api.strengthRecords>>["records"][number];
+const records = ref<StrengthRecord[]>([]);
+
 async function load() {
   loading.value = true; error.value = null;
   try {
@@ -31,8 +36,19 @@ async function load() {
     error.value = e instanceof Error ? e.message : String(e);
   } finally { loading.value = false; }
 }
-onMounted(load);
+async function loadRecords() {
+  try {
+    records.value = (await api.strengthRecords()).records;
+  } catch { /* records are non-critical; leave empty on failure */ }
+}
+onMounted(() => { load(); loadRecords(); });
 watch(days, load);
+
+function fmtRecDate(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
+}
 
 // Selected exercise for the progression chart
 const selectedExercise = ref<string>("");
@@ -213,6 +229,28 @@ const progressionOption = computed(() => {
           Need at least 2 sessions of this exercise to chart progression.
         </p>
       </Card>
+
+      <Card v-if="records.length" title="Personal records">
+        <table class="records">
+          <thead>
+            <tr><th>Exercise</th><th>Best set</th><th>Best e1RM</th><th>Last</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in records" :key="r.exercise_id">
+              <td class="rec-name">{{ r.name }}</td>
+              <td class="rec-num">
+                {{ r.best_weight_lb }} lb
+                <span class="rec-date">{{ fmtRecDate(r.best_weight_date) }}</span>
+              </td>
+              <td class="rec-num">
+                {{ r.best_e1rm }} lb
+                <span class="rec-date">{{ fmtRecDate(r.best_e1rm_date) }}</span>
+              </td>
+              <td class="rec-date">{{ fmtRecDate(r.last_performed_date) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </Card>
     </template>
   </section>
 </template>
@@ -239,6 +277,16 @@ header h1 { margin: 0; font-size: 1.25rem; }
        font-family: 'Geist Mono', ui-monospace, monospace; }
 .chart { width: 100%; height: 320px; }
 .chart > * { width: 100%; height: 100%; }
+.records { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.records th { text-align: left; font-size: 0.68rem; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--muted); font-weight: 700;
+  padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); }
+.records td { padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line); }
+.records tr:last-child td { border-bottom: none; }
+.rec-name { font-weight: 600; }
+.rec-num { font-family: 'Geist Mono', ui-monospace, monospace; }
+.rec-date { color: var(--muted); font-size: 0.72rem; }
+.rec-num .rec-date { margin-left: 0.35rem; }
 .picker { margin-bottom: 0.6rem; }
 .picker select { background: var(--bg-2); color: var(--text);
                  border: 1px solid var(--line);
@@ -277,4 +325,9 @@ html[data-theme="neon"] .charts .picker select {
   background: #ffffff08; color: var(--rn-ink);
   border: 1px solid #ffffff14; border-radius: 10px;
 }
+html[data-theme="neon"] .charts .records th,
+html[data-theme="neon"] .charts .records .rec-date { color: var(--rn-mut); }
+html[data-theme="neon"] .charts .records th,
+html[data-theme="neon"] .charts .records td { border-color: #ffffff14; }
+html[data-theme="neon"] .charts .rec-num { color: var(--rn-ink); }
 </style>

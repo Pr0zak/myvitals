@@ -165,6 +165,9 @@ interface BackendApi {
         @retrofit2.http.Query("days") days: Int = 90,
     ): StrengthStats
 
+    @GET("workout/strength/records")
+    suspend fun strengthRecords(): StrengthRecordsResponse
+
     @GET("workout/strength/equipment")
     suspend fun strengthEquipment(): EquipmentResponse
 

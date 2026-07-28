@@ -850,8 +850,23 @@ export const api = {
     skipped?: boolean;
     logged_at?: string;
     set_type?: string;
-  }): Promise<unknown> {
+  }): Promise<{ id: number; is_weight_pr: boolean; is_e1rm_pr: boolean }> {
     const { data } = await http.post("/workout/strength/sets", body);
+    return data;
+  },
+
+  async strengthRecords(): Promise<{
+    records: {
+      exercise_id: string;
+      name: string;
+      best_weight_lb: number;
+      best_weight_date: string | null;
+      best_e1rm: number;
+      best_e1rm_date: string | null;
+      last_performed_date: string | null;
+    }[];
+  }> {
+    const { data } = await http.get("/workout/strength/records");
     return data;
   },
 

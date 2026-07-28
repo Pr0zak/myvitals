@@ -35,6 +35,9 @@ const catalogById = ref<Record<string, StrengthExercise>>({});
 const loading = ref(true);
 const error = ref<string>("");
 const busy = ref<string>(""); // e.g. "regen", "complete", "skip-3"
+// PR-1: transient "🏆 PR" flash keyed "<wexId>-<setNum>" → label, cleared
+// after a few seconds. Only appears the moment a record is actually beaten.
+const prFlash = ref<Record<string, string>>({});
 
 // Set-logging state, keyed by `${wexId}-${setNum}`
 interface SetEntry {
@@ -653,7 +656,7 @@ async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = fa
   const e = entry(wex.id, setNum, wex.target_reps_low, wex.target_weight_lb);
   busy.value = `set-${wex.id}-${setNum}`;
   try {
-    await api.logStrengthSet({
+    const res = await api.logStrengthSet({
       workout_exercise_id: wex.id,
       set_number: setNum,
       target_weight_lb: wex.target_weight_lb,
@@ -682,6 +685,18 @@ async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = fa
       startRest(rest);
     }
     await loadAll();
+    // Flash the 🏆 badge only after loadAll() flips the row to logged (its
+    // v-else branch), so the 5s window starts when the badge is actually
+    // visible — not before, which on slow gym wifi could expire unseen.
+    if (!skipped && (res.is_weight_pr || res.is_e1rm_pr)) {
+      const key = `${wex.id}-${setNum}`;
+      prFlash.value = { ...prFlash.value, [key]: res.is_weight_pr ? "PR" : "e1RM PR" };
+      window.setTimeout(() => {
+        const next = { ...prFlash.value };
+        delete next[key];
+        prFlash.value = next;
+      }, 5000);
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -1275,7 +1290,12 @@ useVisibilityRefresh(loadAll);
                         Failed
                       </button>
                     </div>
-                    <span v-else class="ok">✓</span>
+                    <span v-else class="ok">
+                      ✓
+                      <span v-if="prFlash[`${wex.id}-${n}`]" class="pr-badge">
+                        🏆 {{ prFlash[`${wex.id}-${n}`] }}
+                      </span>
+                    </span>
                   </td>
                 </tr>
 
@@ -1692,6 +1712,22 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
 .big-btn { font-size: 1rem; padding: 0.7rem 1.4rem; }
 .big-btn small { color: rgba(255,255,255,0.7); margin-left: 0.4rem; font-weight: 400; }
 .ok { color: #22c55e; font-weight: 600; }
+.pr-badge {
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #78350f;
+  background: linear-gradient(180deg, #fde68a, #fbbf24);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  animation: pr-pop 0.3s ease-out;
+}
+@keyframes pr-pop {
+  from { transform: scale(0.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
 
 .ai-review { margin-top: 0.5rem; }
 .review-card {

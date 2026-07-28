@@ -532,6 +532,10 @@ class SetOut(BaseModel):
     logged_at: datetime | None
     skipped: bool
     set_type: str = "working"
+    # PR-1: set on the log_set response when this set just beat the
+    # exercise's prior best. Drives the transient "PR" badge on the client.
+    is_weight_pr: bool = False
+    is_e1rm_pr: bool = False
 
 
 class WorkoutExerciseIn(BaseModel):
@@ -662,6 +666,38 @@ def _set_to_out(s: models.StrengthSet) -> SetOut:
         skipped=s.skipped,
         set_type=s.set_type or "working",
     )
+
+
+async def _detect_pr(
+    db: AsyncSession, exercise_id: str, s: "models.StrengthSet",
+) -> tuple[bool, bool]:
+    """PR-1: which records this set just set for the exercise, vs all PRIOR
+    working sets (excluding this one). Returns (weight_pr, e1rm_pr). No prior
+    history -> (False, False): the first-ever set isn't a "record"."""
+    if (s.actual_weight_lb is None or s.actual_reps is None or s.skipped
+            or (s.set_type or "working") == "warmup"):
+        return (False, False)
+    rows = (await db.execute(
+        select(models.StrengthSet.actual_weight_lb, models.StrengthSet.actual_reps)
+        .join(models.StrengthWorkoutExercise,
+              models.StrengthSet.workout_exercise_id == models.StrengthWorkoutExercise.id)
+        .where(models.StrengthWorkoutExercise.exercise_id == exercise_id)
+        .where(models.StrengthSet.id != s.id)
+        .where(models.StrengthSet.skipped.is_(False))
+        .where(models.StrengthSet.actual_reps.is_not(None))
+        .where(models.StrengthSet.set_type != "warmup")
+    )).all()
+    if not rows:
+        return (False, False)
+    prior_w = [r.actual_weight_lb for r in rows if r.actual_weight_lb is not None]
+    prior_max_w = max(prior_w) if prior_w else None
+    prior_max_e1 = max(
+        (strength_algo.estimate_1rm(r.actual_weight_lb, r.actual_reps) or 0.0
+         for r in rows), default=0.0)
+    this_e1 = strength_algo.estimate_1rm(s.actual_weight_lb, s.actual_reps) or 0.0
+    weight_pr = prior_max_w is not None and s.actual_weight_lb > prior_max_w
+    e1rm_pr = this_e1 > prior_max_e1
+    return (weight_pr, e1rm_pr)
 
 
 def _wex_to_out(
@@ -1125,7 +1161,10 @@ async def log_set(
 
     await db.commit()
     await db.refresh(s)
-    return _set_to_out(s)
+    out = _set_to_out(s)
+    if not s.skipped:
+        out.is_weight_pr, out.is_e1rm_pr = await _detect_pr(db, wex.exercise_id, s)
+    return out
 
 
 class SwapBody(BaseModel):
@@ -1508,6 +1547,55 @@ async def strength_stats(
         "progression": progression_out,
         "progression_names": progression_names,
     }
+
+
+@router.get("/records")
+async def strength_records(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    """PR-1: per-exercise personal bests — heaviest working set + best e1RM,
+    each with the date it was set, plus last-performed. Powers the Records
+    card. Working sets only (warmups/skipped excluded)."""
+    rows = (await db.execute(
+        select(
+            models.StrengthWorkout.date,
+            models.StrengthWorkoutExercise.exercise_id,
+            models.StrengthSet.actual_weight_lb,
+            models.StrengthSet.actual_reps,
+        )
+        .join(models.StrengthWorkoutExercise,
+              models.StrengthSet.workout_exercise_id == models.StrengthWorkoutExercise.id)
+        .join(models.StrengthWorkout,
+              models.StrengthWorkoutExercise.workout_id == models.StrengthWorkout.id)
+        .where(models.StrengthSet.skipped.is_(False))
+        .where(models.StrengthSet.actual_reps.is_not(None))
+        .where(models.StrengthSet.actual_weight_lb.is_not(None))
+        .where(models.StrengthSet.set_type != "warmup")
+        # ASC + strict-> below means the FIRST date a max was hit wins ties,
+        # so the reported PR date is deterministic and reads as "first achieved".
+        .order_by(models.StrengthWorkout.date.asc())
+    )).all()
+    recs: dict[str, dict[str, Any]] = {}
+    for d, ex_id, w, reps in rows:
+        e1 = strength_algo.estimate_1rm(w, reps) or 0.0
+        r = recs.setdefault(ex_id, {
+            "best_weight_lb": 0.0, "best_weight_date": None,
+            "best_e1rm": 0.0, "best_e1rm_date": None, "last_date": None})
+        if float(w) > r["best_weight_lb"]:
+            r["best_weight_lb"] = float(w); r["best_weight_date"] = d
+        if e1 > r["best_e1rm"]:
+            r["best_e1rm"] = e1; r["best_e1rm_date"] = d
+        if r["last_date"] is None or d > r["last_date"]:
+            r["last_date"] = d
+    out = [{
+        "exercise_id": ex_id,
+        "name": strength_algo.CATALOG_BY_ID.get(ex_id, {}).get("name", ex_id),
+        "best_weight_lb": round(r["best_weight_lb"], 1),
+        "best_weight_date": r["best_weight_date"].isoformat() if r["best_weight_date"] else None,
+        "best_e1rm": round(r["best_e1rm"], 1),
+        "best_e1rm_date": r["best_e1rm_date"].isoformat() if r["best_e1rm_date"] else None,
+        "last_performed_date": r["last_date"].isoformat() if r["last_date"] else None,
+    } for ex_id, r in recs.items()]
+    out.sort(key=lambda x: x["best_e1rm"], reverse=True)
+    return {"records": out}
 
 
 @router.get("/explain/{workout_id}")

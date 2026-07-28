@@ -235,6 +235,9 @@ data class StrengthWorkoutExerciseRow(
     // LOAD-1: "30 lb DB + 2.5 lb wrist" when the weight needs micro-loaders;
     // null for bodyweight / plain-dumbbell weights.
     @Json(name = "load_hint") val loadHint: String? = null,
+    // PROG-1: "Greyskull LP · AMRAP last · +5" scheme badge on program lifts;
+    // null for normal generator-driven exercises.
+    @Json(name = "program_scheme") val programScheme: String? = null,
     // LOG-1: previous session's working sets, for a faint "last: 30×8 · 30×8" line.
     @Json(name = "last_sets") val lastSets: List<LastSet> = emptyList(),
     val sets: List<StrengthSetRow> = emptyList(),
@@ -581,6 +584,33 @@ data class TrainingPreferences(
     @Json(name = "yoga_on_rest_days") val yogaOnRestDays: Boolean = true,
     @Json(name = "cardio_days_per_week") val cardioDaysPerWeek: Int = 2,
     val goal: String = "hypertrophy",                     // strength | hypertrophy | general
+    val program: ProgramConfig = ProgramConfig(),         // PROG-1 — opt-in program mode
+)
+
+// PROG-1 — program mode. One core lift under a fixed progression scheme.
+// amrap_last_set defaults false (Moshi-default landmine avoidance — the
+// catalog/greyskull path opts in explicitly).
+@JsonClass(generateAdapter = true)
+data class ProgramLiftState(
+    @Json(name = "exercise_id") val exerciseId: String,
+    val scheme: String = "linear",                        // greyskull | linear | double
+    @Json(name = "current_weight_lb") val currentWeightLb: Double? = null,
+    @Json(name = "increment_lb") val incrementLb: Double = 5.0,
+    val sets: Int = 3,
+    @Json(name = "reps_low") val repsLow: Int = 5,
+    @Json(name = "reps_high") val repsHigh: Int = 5,
+    @Json(name = "amrap_last_set") val amrapLastSet: Boolean = false,
+    @Json(name = "rest_s") val restS: Int = 180,
+    @Json(name = "consecutive_fails") val consecutiveFails: Int = 0,
+    @Json(name = "fails_before_deload") val failsBeforeDeload: Int = 3,
+    @Json(name = "deload_pct") val deloadPct: Double = 0.10,
+    @Json(name = "last_advanced_on") val lastAdvancedOn: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class ProgramConfig(
+    val enabled: Boolean = false,
+    val lifts: List<ProgramLiftState> = emptyList(),
 )
 
 @JsonClass(generateAdapter = true)

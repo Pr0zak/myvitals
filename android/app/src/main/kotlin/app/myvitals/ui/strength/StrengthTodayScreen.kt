@@ -2531,6 +2531,14 @@ private fun ExerciseCard(
                         "${wex.targetSets}×$rep$w  ·  ${wex.targetRestS}s rest",
                         color = pal.muted, fontSize = 12.sp,
                     )
+                    // PROG-1: program-mode scheme badge on program lifts
+                    wex.programScheme?.let {
+                        Text(
+                            "📈 $it",
+                            color = pal.accent, fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                     // LOAD-1: how to load it (only when micro-loaders needed)
                     wex.loadHint?.let {
                         Text(

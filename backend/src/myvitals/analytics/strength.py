@@ -626,6 +626,169 @@ def double_progression(
 
 
 # ------------------------------------------------------------------
+# Pure: PROG-1 program mode (named linear-progression schemes)
+# ------------------------------------------------------------------
+
+# Sensible per-scheme defaults used when seeding a new program lift.
+# The config UI only asks for {scheme, exercise, starting weight}; the
+# rest come from here. Kept in sync with ProgramLiftState defaults.
+#   greyskull — 5×5 with the last set AMRAP; a single miss deloads 10%.
+#   linear    — straight 3×5 (StrongLifts-ish); 3 misses → 10% deload.
+#   double    — 3×8-12; add reps to the top of the range, then +weight.
+PROGRAM_SCHEME_DEFAULTS: dict[str, dict] = {
+    "greyskull": {
+        "sets": 3, "reps_low": 5, "reps_high": 5, "amrap_last_set": True,
+        "increment_lb": 5.0, "fails_before_deload": 1, "deload_pct": 0.10,
+        "rest_s": 180,
+    },
+    "linear": {
+        "sets": 3, "reps_low": 5, "reps_high": 5, "amrap_last_set": False,
+        "increment_lb": 5.0, "fails_before_deload": 3, "deload_pct": 0.10,
+        "rest_s": 180,
+    },
+    "double": {
+        "sets": 3, "reps_low": 8, "reps_high": 12, "amrap_last_set": False,
+        "increment_lb": 5.0, "fails_before_deload": 3, "deload_pct": 0.10,
+        "rest_s": 150,
+    },
+}
+
+
+def prescribe_program_lift(
+    state: dict,
+    pairs_lb: list[float],
+    wrist_weights_lb: list[float],
+) -> dict:
+    """Today's prescription for a program-mode lift — a fixed scheme,
+    NOT the recovery/rating oracle. Deterministic from the stored
+    working weight; snapped to a loadable combo via round_weight so the
+    number is always achievable on the user's rack.
+
+    Returns a dict the generate_plan Hook B consumes directly:
+      {sets, reps_lo, reps_hi, weight_lb, rest_s, amrap_last, note}
+    weight_lb is None for a bodyweight program lift (rep-only scheme).
+    """
+    scheme = state.get("scheme", "linear")
+    sets = int(state.get("sets", 3))
+    lo = int(state.get("reps_low", 5))
+    hi = max(int(state.get("reps_high", lo)), lo)
+    rest = int(state.get("rest_s", 180))
+    inc = float(state.get("increment_lb", 5.0))
+    cw = state.get("current_weight_lb")
+    weight = (
+        round_weight(float(cw), pairs_lb, wrist_weights_lb)
+        if cw is not None else None
+    )
+    amrap = bool(state.get("amrap_last_set")) and scheme == "greyskull"
+
+    if scheme == "greyskull":
+        note = (
+            f"Greyskull LP · last set AMRAP (aim {lo}+) · "
+            f"+{_fmt_lb(inc)} lb when it clears, double at {lo * 2}+"
+        )
+    elif scheme == "double":
+        note = (
+            f"Double progression · {lo}-{hi} reps · "
+            f"+{_fmt_lb(inc)} lb once you hit {hi} on every set"
+        )
+    else:
+        note = f"Linear progression · {sets}×{lo} · +{_fmt_lb(inc)} lb next session"
+
+    return {
+        "sets": sets,
+        "reps_lo": lo,
+        "reps_hi": hi,
+        "weight_lb": weight,
+        "rest_s": rest,
+        "amrap_last": amrap,
+        "note": note,
+    }
+
+
+def advance_program_lift(
+    state: dict,
+    min_working_reps: int | None,
+    amrap_reps: int | None = None,
+    on_date: str | None = None,
+) -> dict:
+    """Advance a program lift's stored state after a completed session.
+
+    Pure state machine — returns a NEW state dict, never mutates the
+    input. The caller (patch_workout completion hook) passes:
+      - min_working_reps: the MINIMUM reps completed across the fixed
+        working sets (None = nothing logged → no advance).
+      - amrap_reps: the Greyskull AMRAP set's reps (ignored otherwise).
+      - on_date: ISO date to stamp last_advanced_on (double-advance guard).
+
+    Schemes:
+      linear    — all sets hit reps_low → +increment; else fail streak,
+                  deload deload_pct after fails_before_deload misses.
+      greyskull — AMRAP ≥ reps_low → +increment (double at 2×reps_low);
+                  a miss deloads immediately (fails_before_deload=1).
+      double    — min reps ≥ reps_high → +increment (reset to reps_low);
+                  reps_low ≤ min < reps_high → hold (rep progress, not a
+                  fail); below reps_low → fail streak → deload.
+    Bodyweight lifts (current_weight_lb is None) never move weight; they
+    just stamp the date so the generator's rep progression carries them.
+    """
+    out = dict(state)
+    if on_date is not None:
+        out["last_advanced_on"] = on_date
+    if min_working_reps is None:
+        return out  # nothing logged this session — hold everything
+
+    scheme = state.get("scheme", "linear")
+    w = state.get("current_weight_lb")
+    if w is None:
+        return out  # bodyweight lift — no weight to progress
+
+    w = float(w)
+    inc = float(state.get("increment_lb", 5.0))
+    lo = int(state.get("reps_low", 5))
+    hi = max(int(state.get("reps_high", lo)), lo)
+    fails = int(state.get("consecutive_fails", 0))
+    fbd = int(state.get("fails_before_deload", 3))
+    dpct = float(state.get("deload_pct", 0.10))
+
+    if scheme == "greyskull":
+        top = amrap_reps if amrap_reps is not None else min_working_reps
+        if top >= lo:
+            jump = inc * (2 if top >= lo * 2 else 1)
+            out["current_weight_lb"] = round(w + jump, 1)
+            out["consecutive_fails"] = 0
+        else:
+            out["current_weight_lb"] = round(w * (1.0 - dpct), 1)
+            out["consecutive_fails"] = 0
+        return out
+
+    if scheme == "double":
+        if min_working_reps >= hi:
+            out["current_weight_lb"] = round(w + inc, 1)
+            out["consecutive_fails"] = 0
+        elif min_working_reps >= lo:
+            out["consecutive_fails"] = 0  # rep progress in-range — hold weight
+        else:
+            fails += 1
+            if fails >= fbd:
+                out["current_weight_lb"] = round(w * (1.0 - dpct), 1)
+                fails = 0
+            out["consecutive_fails"] = fails
+        return out
+
+    # linear (default)
+    if min_working_reps >= lo:
+        out["current_weight_lb"] = round(w + inc, 1)
+        out["consecutive_fails"] = 0
+    else:
+        fails += 1
+        if fails >= fbd:
+            out["current_weight_lb"] = round(w * (1.0 - dpct), 1)
+            fails = 0
+        out["consecutive_fails"] = fails
+    return out
+
+
+# ------------------------------------------------------------------
 # Pure: equipment filter for the catalog
 # ------------------------------------------------------------------
 
@@ -1842,6 +2005,18 @@ async def generate_plan(
         max(3, min(9, int(_epw))) if _epw not in (None, 0) else None
     )
 
+    # PROG-1 — opt-in program mode. When enabled, the chosen core lifts
+    # follow a fixed linear-progression scheme (see prescribe_program_lift)
+    # instead of the recovery/rating oracle. `program_lifts` is empty when
+    # disabled, so every hook below is a no-op and the default generator
+    # runs byte-for-byte unchanged.
+    _program = (training.get("program") or {}) if isinstance(training, dict) else {}
+    program_lifts: dict[str, dict] = {}
+    if _program.get("enabled"):
+        for _pl in _program.get("lifts") or []:
+            if isinstance(_pl, dict) and _pl.get("exercise_id"):
+                program_lifts[_pl["exercise_id"]] = _pl
+
     # Age + bodyweight context for prescribe_slot — drives age-scaled
     # rest / volume and bodyweight-scaled rep targets on BW exercises.
     user_age: int | None = None
@@ -2064,6 +2239,39 @@ async def generate_plan(
         muscle_volume=current_volume,
     )
     notes.extend(sel_notes)
+
+    # PROG-1 Hook A — pin program lifts into today's plan. For each
+    # enabled program lift that is equipment-available AND shares a
+    # movement pattern with a slot the generator already picked,
+    # substitute it into that slot (same index → same role + superset
+    # shape, which pair_supersets recomputes just below). A program lift
+    # whose pattern isn't trained today simply doesn't appear; it
+    # surfaces on its natural day. Off by default → this block is skipped.
+    if program_lifts:
+        avail_ids = {e["id"] for e in catalog}
+        already = {c["id"] for c in chosen}
+        for prog_id, pstate in program_lifts.items():
+            pex = CATALOG_BY_ID.get(prog_id)
+            if pex is None or prog_id not in avail_ids or prog_id in already:
+                continue  # unknown, equipment-filtered, or already chosen
+            pat = pex.get("movement_pattern")
+            for idx, c in enumerate(chosen):
+                if c.get("movement_pattern") == pat and c["id"] not in program_lifts:
+                    chosen[idx] = pex
+                    already.add(prog_id)
+                    break
+
+        # Front the pinned program lifts (stable order) so the WP-17
+        # trim below can't silently drop one, and so the user's core
+        # program lifts lead the session. chosen_slots is permuted in
+        # lockstep to stay aligned. Only runs when program mode is on.
+        prog_idx = [i for i, c in enumerate(chosen) if c["id"] in program_lifts]
+        if prog_idx and len(prog_idx) < len(chosen):
+            prog_set = set(prog_idx)
+            order = prog_idx + [i for i in range(len(chosen)) if i not in prog_set]
+            chosen = [chosen[i] for i in order]
+            chosen_slots = [chosen_slots[i] for i in order]
+
     if freq_advisory_note:
         notes.append(freq_advisory_note)
     if carryover_note:
@@ -2125,6 +2333,28 @@ async def generate_plan(
     dp_plateau_names: list[str] = []
 
     for i, ex in enumerate(chosen):
+        # PROG-1 Hook B — program lift: fixed scheme, bypass the
+        # recovery/rating/history oracle AND the recovery deload (weight
+        # is scheme-owned and advances only on completion). FAST-18
+        # fasted volume modulation and slot-role logic below are skipped
+        # too — the program dictates sets/reps/rest deterministically.
+        pstate = program_lifts.get(ex["id"])
+        if pstate is not None:
+            pp = prescribe_program_lift(pstate, pairs_lb, wrist)
+            plan_exs.append(ExerciseInPlan(
+                exercise_id=ex["id"],
+                order_index=i,
+                superset_id=superset_map.get(ex["id"]),
+                target_sets=pp["sets"],
+                target_reps_low=pp["reps_lo"],
+                target_reps_high=pp["reps_hi"],
+                target_weight_lb=pp["weight_lb"],
+                target_rest_s=(
+                    DEFAULT_REST_S_SUPERSET_AFTER
+                    if ex["id"] in superset_map else pp["rest_s"]
+                ),
+            ))
+            continue
         if i == 0:
             slot_role = "main_compound"
         elif i <= 2 and not ex["movement_pattern"].startswith("isolation"):

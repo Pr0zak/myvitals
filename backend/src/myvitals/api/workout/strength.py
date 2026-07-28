@@ -84,6 +84,46 @@ class BenchSpec(BaseModel):
     decline: bool = False
 
 
+class ProgramLiftState(BaseModel):
+    """One lift under PROG-1 program mode. Stores the live progression
+    state (current working weight + fail streak) so each session
+    advances deterministically. Pure JSON in user_equipment.payload —
+    no migration."""
+
+    exercise_id: str
+    scheme: Literal["greyskull", "linear", "double"] = "linear"
+    # Live working weight in lb (None = bodyweight lift; progresses by
+    # reps only, no weight jumps). round_weight snaps it to a loadable
+    # combo at prescribe time.
+    current_weight_lb: float | None = None
+    # Weight added on a successful session. Greyskull doubles it when
+    # the AMRAP set clears 2× the rep floor.
+    increment_lb: float = 5.0
+    sets: int = 3
+    reps_low: int = 5
+    reps_high: int = 5
+    # Greyskull: last set is AMRAP (as-many-reps-as-possible ≥ reps_low).
+    amrap_last_set: bool = False
+    rest_s: int = 180
+    # Progression bookkeeping — mutated by advance_program_lift on
+    # workout completion.
+    consecutive_fails: int = 0
+    fails_before_deload: int = 3
+    deload_pct: float = 0.10
+    # ISO date (YYYY-MM-DD) of the last completion that advanced this
+    # lift — guards double-advance on offline replay / re-PATCH.
+    last_advanced_on: str | None = None
+
+
+class ProgramConfig(BaseModel):
+    """Program-mode container hung off TrainingPreferences. Default
+    disabled with no lifts → generate_plan sees an empty program and
+    the default generator runs unchanged."""
+
+    enabled: bool = False
+    lifts: list[ProgramLiftState] = Field(default_factory=list)
+
+
 class TrainingPreferences(BaseModel):
     """Settings the workout generator reads when picking today's plan.
 
@@ -125,6 +165,11 @@ class TrainingPreferences(BaseModel):
     #   hypertrophy   — 6-12 reps, 60-90 s rest, balanced jumps
     #   general       — 8-15 reps, 30-60 s rest, smaller jumps
     goal: Literal["strength", "hypertrophy", "general"] = "hypertrophy"
+    # PROG-1 — opt-in linear-progression "program mode". When enabled,
+    # the chosen core lifts bypass the Fitbod-style recovery/rating
+    # generator and follow a fixed session-to-session scheme instead.
+    # Default off → the existing generator is byte-for-byte untouched.
+    program: ProgramConfig = Field(default_factory=lambda: ProgramConfig())
 
 
 class EquipmentPayload(BaseModel):
@@ -240,7 +285,7 @@ async def put_equipment(
     watched_fields = (
         "level", "days_per_week", "split_preference", "workout_minutes",
         "cardio_days_per_week", "include_mobility", "yoga_on_rest_days",
-        "goal", "exercises_per_workout",
+        "goal", "exercises_per_workout", "program",
     )
     training_changed = any(
         prior_training.get(f) != new_training.get(f) for f in watched_fields
@@ -580,6 +625,12 @@ class WorkoutExerciseOut(BaseModel):
     # Null for bodyweight lifts and for plain-dumbbell weights (the number
     # already says it). Computed server-side from current equipment.
     load_hint: str | None = None
+    # PROG-1: compact program-mode badge (e.g. "Greyskull LP · AMRAP last ·
+    # +5") when this exercise is a program lift. Derived at serialization
+    # time from the equipment program config — no DB column / migration.
+    # Null for normal generator-driven exercises. The daily indicator on
+    # both StrengthToday surfaces.
+    program_scheme: str | None = None
     # LOG-1: the working sets from the LAST time this exercise was done (most
     # recent prior session), for a faint "last: 30×8 · 30×8" ghost line in the
     # logger. Empty when there's no prior real set. Excludes warmups/skipped
@@ -719,13 +770,27 @@ async def _detect_pr(
     return (weight_pr, e1rm_pr)
 
 
+def _program_badge(state: dict) -> str:
+    """Compact PROG-1 daily indicator for a program lift's exercise card."""
+    scheme = state.get("scheme", "linear")
+    inc = f"{float(state.get('increment_lb', 5.0)):g}"
+    if scheme == "greyskull":
+        return f"Greyskull LP · AMRAP last · +{inc}"
+    if scheme == "double":
+        lo, hi = state.get("reps_low", 8), state.get("reps_high", 12)
+        return f"Double {lo}-{hi} · +{inc} at top"
+    return f"Linear · +{inc}/session"
+
+
 def _wex_to_out(
     wex: models.StrengthWorkoutExercise,
     sets: list[models.StrengthSet],
     pairs_lb: list[float] | None = None,
     wrist_lb: list[float] | None = None,
     last_sets: list[LastSetOut] | None = None,
+    program_by_id: dict[str, dict] | None = None,
 ) -> WorkoutExerciseOut:
+    prog = (program_by_id or {}).get(wex.exercise_id)
     return WorkoutExerciseOut(
         id=wex.id,
         workout_id=wex.workout_id,
@@ -742,6 +807,7 @@ def _wex_to_out(
         load_hint=strength_algo.describe_load(
             wex.target_weight_lb, pairs_lb or [], wrist_lb or [],
         ),
+        program_scheme=_program_badge(prog) if prog else None,
         last_sets=last_sets or [],
         sets=[_set_to_out(s) for s in sorted(sets, key=lambda x: x.set_number)],
     )
@@ -796,6 +862,14 @@ async def _hydrate_workout(
     equip = await _equipment_payload(db)
     pairs_lb = (equip.get("dumbbells") or {}).get("pairs_lb") or []
     wrist_lb = equip.get("wrist_weights_lb") or []
+    # PROG-1: program-lift map for the per-exercise scheme badge (empty
+    # when program mode is off → no badge on any exercise).
+    _prog = ((equip.get("training") or {}).get("program") or {})
+    program_by_id: dict[str, dict] = {}
+    if _prog.get("enabled"):
+        for _pl in _prog.get("lifts") or []:
+            if isinstance(_pl, dict) and _pl.get("exercise_id"):
+                program_by_id[_pl["exercise_id"]] = _pl
     # LOG-1: previous-session working sets per exercise, for the ghost line.
     # One batched query for all of today's exercises; set-level filters only
     # (skipped/actual_reps/set_type) and NO workout-status gate — auto-skip
@@ -891,7 +965,7 @@ async def _hydrate_workout(
         deload_reason=deload_reason,
         exercises=[
             _wex_to_out(wex, sets_by_wex.get(wex.id, []), pairs_lb, wrist_lb,
-                        last_by_ex.get(wex.exercise_id))
+                        last_by_ex.get(wex.exercise_id), program_by_id)
             for wex in wex_rows
         ],
     )
@@ -1048,6 +1122,74 @@ async def create_workout(
     return await _hydrate_workout(db, w)
 
 
+async def _advance_program_on_complete(
+    db: AsyncSession, w: models.StrengthWorkout
+) -> None:
+    """PROG-1 — advance program-lift working weights when a workout is
+    marked complete.
+
+    For each program lift in this workout, reads the logged working sets,
+    runs the pure scheme state machine (advance_program_lift), and writes
+    the mutated state back into user_equipment.payload so the NEXT session
+    prescribes the new weight. Idempotent per workout date via
+    last_advanced_on (offline replay / re-PATCH can't double-advance).
+    No-op when program mode is off. Runs inside patch_workout's txn."""
+    eq = await db.get(models.UserEquipment, 1)
+    if eq is None or not eq.payload:
+        return
+    payload = dict(eq.payload)
+    training = dict(payload.get("training") or {})
+    program = dict(training.get("program") or {})
+    if not program.get("enabled"):
+        return
+    lifts = [dict(l) for l in (program.get("lifts") or []) if isinstance(l, dict)]
+    by_id = {l["exercise_id"]: l for l in lifts if l.get("exercise_id")}
+    if not by_id:
+        return
+
+    wex_rows = (await db.execute(
+        select(
+            models.StrengthWorkoutExercise.id,
+            models.StrengthWorkoutExercise.exercise_id,
+        ).where(models.StrengthWorkoutExercise.workout_id == w.id)
+    )).all()
+    on_date = w.date.isoformat()
+    changed = False
+    for wex_id, ex_id in wex_rows:
+        st = by_id.get(ex_id)
+        if st is None or st.get("last_advanced_on") == on_date:
+            continue  # not a program lift, or already advanced for this date
+        # Prescribed sets only: exclude warmups AND drop sets (lighter
+        # supplementary work), but KEEP a to-failure AMRAP set — a
+        # Greyskull last set taken to failure is naturally tagged
+        # set_type="failure" and must count toward progression. Ordered
+        # by set_number so reps[-1] is the true last set (the AMRAP),
+        # regardless of the order the user logged them in.
+        reps = [
+            int(r) for r in (await db.execute(
+                select(models.StrengthSet.actual_reps)
+                .where(models.StrengthSet.workout_exercise_id == wex_id)
+                .where(models.StrengthSet.set_type.notin_(("warmup", "drop")))
+                .where(models.StrengthSet.actual_reps.is_not(None))
+                .order_by(models.StrengthSet.set_number)
+            )).scalars().all()
+            if r is not None
+        ]
+        min_working = min(reps) if reps else None
+        amrap = reps[-1] if reps else None  # Greyskull's last-set AMRAP
+        new_st = strength_algo.advance_program_lift(
+            st, min_working, amrap, on_date=on_date)
+        if new_st != st:
+            by_id[ex_id] = new_st
+            changed = True
+    if not changed:
+        return
+    program["lifts"] = [by_id.get(l.get("exercise_id"), l) for l in lifts]
+    training["program"] = program
+    payload["training"] = training
+    eq.payload = payload  # reassign → SQLAlchemy flags the JSON col dirty
+
+
 @router.patch("/workouts/{workout_id}", response_model=WorkoutOut)
 async def patch_workout(
     workout_id: int,
@@ -1064,6 +1206,9 @@ async def patch_workout(
     # free), but the paused_at / total_paused_s bookkeeping is derived
     # server-side from the transition rather than trusted from the client.
     new_status = data.get("status")
+    # PROG-1: capture the completion transition BEFORE setattr mutates
+    # w.status, so the program-state advance fires exactly once.
+    became_completed = new_status == "completed" and w.status != "completed"
     if new_status is not None and new_status != w.status:
         now = datetime.now(timezone.utc)
         if new_status == "paused":
@@ -1083,6 +1228,8 @@ async def patch_workout(
 
     for field, value in data.items():
         setattr(w, field, value)
+    if became_completed:
+        await _advance_program_on_complete(db, w)
     await db.commit()
     await db.refresh(w)
     return await _hydrate_workout(db, w)

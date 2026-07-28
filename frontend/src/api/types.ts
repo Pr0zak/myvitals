@@ -168,7 +168,30 @@ export interface StrengthEquipment {
     yoga_on_rest_days?: boolean;
     cardio_days_per_week?: number;
     goal?: "strength" | "hypertrophy" | "general";
+    program?: ProgramConfig;  // PROG-1 — opt-in linear-progression mode
   };
+}
+
+// PROG-1 — program mode. One core lift under a fixed progression scheme.
+export interface ProgramLiftState {
+  exercise_id: string;
+  scheme: "greyskull" | "linear" | "double";
+  current_weight_lb?: number | null;
+  increment_lb?: number;
+  sets?: number;
+  reps_low?: number;
+  reps_high?: number;
+  amrap_last_set?: boolean;
+  rest_s?: number;
+  consecutive_fails?: number;
+  fails_before_deload?: number;
+  deload_pct?: number;
+  last_advanced_on?: string | null;
+}
+
+export interface ProgramConfig {
+  enabled: boolean;
+  lifts: ProgramLiftState[];
 }
 
 export interface StrengthExercise {
@@ -223,6 +246,7 @@ export interface StrengthWorkoutExercise {
   is_timed?: boolean;     // backend flag — target_reps_* are hold seconds
   notes: string | null;
   load_hint?: string | null;  // LOAD-1: "30 lb DB + 2.5 lb wrist" when micro-loaders needed
+  program_scheme?: string | null;  // PROG-1: "Greyskull LP · AMRAP last · +5" badge on program lifts
   // LOG-1: previous session's working sets, for a faint "last: 30×8 · 30×8" ghost line.
   last_sets?: { set_number: number; weight_lb: number | null; reps: number | null }[];
   sets: StrengthSet[];

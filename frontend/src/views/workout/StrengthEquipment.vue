@@ -10,7 +10,7 @@ import { computed, onMounted, ref } from "vue";
 import { api } from "@/api/client";
 import { queryToken } from "@/config";
 import Card from "@/components/Card.vue";
-import type { StrengthEquipment } from "@/api/types";
+import type { StrengthEquipment, StrengthExercise, ProgramLiftState } from "@/api/types";
 
 const ALL_DB_PAIRS_LB = [5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 27.5, 30, 32.5,
                          35, 37.5, 40, 42.5, 45, 47.5, 50, 55, 60, 65, 70, 75, 80,
@@ -62,13 +62,86 @@ function ensureTraining(e: StrengthEquipment): NonNullable<StrengthEquipment["tr
   return e.training;
 }
 
+// PROG-1 — program mode config. Scheme defaults mirror the backend
+// PROGRAM_SCHEME_DEFAULTS so a lift added here matches what the server
+// would seed.
+const SCHEME_LABELS: Record<ProgramLiftState["scheme"], string> = {
+  greyskull: "Greyskull LP", linear: "Linear", double: "Double progression",
+};
+const SCHEME_DEFAULTS: Record<ProgramLiftState["scheme"], Partial<ProgramLiftState>> = {
+  greyskull: { sets: 3, reps_low: 5, reps_high: 5, amrap_last_set: true,
+               increment_lb: 5, fails_before_deload: 1, deload_pct: 0.10, rest_s: 180 },
+  linear:    { sets: 3, reps_low: 5, reps_high: 5, amrap_last_set: false,
+               increment_lb: 5, fails_before_deload: 3, deload_pct: 0.10, rest_s: 180 },
+  double:    { sets: 3, reps_low: 8, reps_high: 12, amrap_last_set: false,
+               increment_lb: 5, fails_before_deload: 3, deload_pct: 0.10, rest_s: 150 },
+};
+
+const catalog = ref<StrengthExercise[]>([]);
+const addLiftId = ref<string>("");
+
+function ensureProgram(e: StrengthEquipment): NonNullable<NonNullable<StrengthEquipment["training"]>["program"]> {
+  const t = ensureTraining(e);
+  if (!t.program) t.program = { enabled: false, lifts: [] };
+  return t.program;
+}
+
+// Candidate lifts for program mode: compound, weighted (dumbbell/barbell/
+// cable), non-timed. These are the movements that progress by fixed
+// increments — the core barbell/dumbbell lifts a program is built on.
+const programCandidates = computed<StrengthExercise[]>(() =>
+  catalog.value
+    .filter((x) =>
+      x.is_compound &&
+      !x.is_timed &&
+      (x.equipment.includes("dumbbell") || x.equipment.includes("barbell") ||
+       x.equipment.includes("cable")))
+    .sort((a, b) => a.name.localeCompare(b.name)),
+);
+
+// Candidates not already in the program (for the add dropdown).
+const availableToAdd = computed<StrengthExercise[]>(() => {
+  const inUse = new Set((equip.value?.training?.program?.lifts ?? []).map((l) => l.exercise_id));
+  return programCandidates.value.filter((x) => !inUse.has(x.id));
+});
+
+function exName(id: string): string {
+  return catalog.value.find((x) => x.id === id)?.name ?? id;
+}
+
+function addProgramLift() {
+  if (!equip.value || !addLiftId.value) return;
+  const prog = ensureProgram(equip.value);
+  const scheme: ProgramLiftState["scheme"] = "linear";
+  prog.lifts.push({
+    exercise_id: addLiftId.value,
+    scheme,
+    current_weight_lb: null,
+    ...SCHEME_DEFAULTS[scheme],
+  } as ProgramLiftState);
+  addLiftId.value = "";
+}
+
+function setScheme(lift: ProgramLiftState, scheme: ProgramLiftState["scheme"]) {
+  lift.scheme = scheme;
+  Object.assign(lift, SCHEME_DEFAULTS[scheme]);
+}
+
+function removeProgramLift(idx: number) {
+  equip.value?.training?.program?.lifts.splice(idx, 1);
+}
+
 async function load() {
   if (!queryToken.value) return;
   try {
-    const r = await api.strengthEquipment();
+    const [r, ex] = await Promise.all([
+      api.strengthEquipment(),
+      api.strengthExercises().catch(() => ({ count: 0, exercises: [] as StrengthExercise[] })),
+    ]);
     equip.value = r.payload;
     unit.value = r.unit;
     updatedAt.value = r.updated_at;
+    catalog.value = ex.exercises;
   } catch (e) {
     result.value = `Load failed: ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -358,6 +431,63 @@ onMounted(() => { equip.value = defaultEquip(); load(); });
         </label>
       </div>
 
+      <!-- PROG-1 — program mode -->
+      <h3 class="sub">Program mode</h3>
+      <p class="hint" style="margin: 0 0 0.5rem;">
+        Put chosen core lifts on a fixed linear-progression scheme. Weight
+        advances by set rules (e.g. +5 lb per session, AMRAP last set,
+        deload on failure) instead of the recovery-aware generator. Other
+        exercises are unaffected.
+      </p>
+      <div class="train-grid">
+        <label class="train-row toggle">
+          <input type="checkbox"
+                 :checked="ensureProgram(equip).enabled"
+                 @change="ensureProgram(equip).enabled = ($event.target as HTMLInputElement).checked"/>
+          <span class="toggle-text">
+            <strong>Enable program mode</strong>
+            <span class="hint">When on, the lifts below are pinned into your plan whenever their movement pattern is trained that day.</span>
+          </span>
+        </label>
+
+        <template v-if="ensureProgram(equip).enabled">
+          <div v-for="(lift, idx) in ensureProgram(equip).lifts" :key="lift.exercise_id" class="prog-lift">
+            <div class="prog-lift-head">
+              <strong>{{ exName(lift.exercise_id) }}</strong>
+              <button class="link-danger" @click="removeProgramLift(idx)">Remove</button>
+            </div>
+            <div class="seg">
+              <button v-for="s in (['greyskull','linear','double'] as const)" :key="s"
+                      :class="{ on: lift.scheme === s }"
+                      @click="setScheme(lift, s)">{{ SCHEME_LABELS[s] }}</button>
+            </div>
+            <label class="prog-weight">
+              <span>Working weight (lb)</span>
+              <input type="number" min="0" step="2.5" placeholder="auto"
+                     :value="lift.current_weight_lb ?? ''"
+                     @input="lift.current_weight_lb = ($event.target as HTMLInputElement).value === '' ? null : parseFloat(($event.target as HTMLInputElement).value)"/>
+            </label>
+            <span class="hint prog-detail">
+              {{ lift.scheme === 'greyskull'
+                  ? `${lift.sets}×${lift.reps_low}, last set AMRAP · +${lift.increment_lb} lb (double at ${(lift.reps_low ?? 5) * 2}+) · 1 miss → deload`
+                  : lift.scheme === 'double'
+                  ? `${lift.sets}×${lift.reps_low}-${lift.reps_high} · +${lift.increment_lb} lb once every set hits ${lift.reps_high}`
+                  : `${lift.sets}×${lift.reps_low} · +${lift.increment_lb} lb/session · ${lift.fails_before_deload} misses → deload` }}
+            </span>
+          </div>
+
+          <p v-if="!ensureProgram(equip).lifts.length" class="hint">No lifts yet — add your core barbell/dumbbell movements below.</p>
+
+          <div class="prog-add">
+            <select v-model="addLiftId">
+              <option value="">Add a lift…</option>
+              <option v-for="x in availableToAdd" :key="x.id" :value="x.id">{{ x.name }}</option>
+            </select>
+            <button class="ghost" :disabled="!addLiftId" @click="addProgramLift">Add</button>
+          </div>
+        </template>
+      </div>
+
       <div class="actions">
         <button class="primary" :disabled="saving" @click="save">
           {{ saving ? "Saving…" : "Save equipment" }}
@@ -440,6 +570,33 @@ h1 { margin: 0 0 0.6rem; }
 .seg button.on {
   background: var(--accent, #ef4444); color: #fff; font-weight: 600;
   border-color: var(--accent, #ef4444);
+}
+
+/* PROG-1 — program-mode lift cards */
+.prog-lift {
+  display: flex; flex-direction: column; gap: 0.45rem;
+  padding: 0.7rem 0.8rem; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--bg-2);
+}
+.prog-lift-head { display: flex; justify-content: space-between; align-items: center; }
+.prog-lift-head strong { font-size: 0.95rem; }
+.link-danger {
+  background: none; border: none; color: #ef4444; cursor: pointer;
+  font-size: 0.78rem; padding: 0.1rem 0.2rem;
+}
+.link-danger:hover { text-decoration: underline; }
+.prog-weight { display: flex; align-items: center; gap: 0.6rem; font-size: 0.82rem; }
+.prog-weight > span { min-width: 9rem; color: var(--muted); }
+.prog-weight input {
+  width: 6rem; padding: 0.3rem 0.5rem; border-radius: 5px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+}
+.prog-detail { font-family: 'Geist Mono', ui-monospace, monospace; }
+.prog-add { display: flex; gap: 0.5rem; align-items: center; }
+.prog-add select {
+  flex: 1; padding: 0.35rem 0.5rem; border-radius: 5px;
+  border: 1px solid var(--line); background: var(--bg-2); color: var(--text);
 }
 
 /* ===== Vitality Neon — scoped, neon-theme-only overrides ===== */

@@ -1207,6 +1207,11 @@ useVisibilityRefresh(loadAll);
           </span>
         </header>
 
+        <!-- PROG-1: program-mode scheme badge on program lifts -->
+        <p v-if="wex.program_scheme" class="program-badge">
+          📈 {{ wex.program_scheme }}
+        </p>
+
         <!-- LOAD-1: how to load it (only when micro-loaders are needed) -->
         <p v-if="wex.load_hint && !isExerciseDone(wex)" class="load-hint">
           🏋 {{ wex.load_hint }}
@@ -1644,6 +1649,13 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
   font-size: 0.76rem;
   color: var(--muted-2);
   font-family: 'Geist Mono', ui-monospace, monospace;
+}
+.program-badge {
+  margin: 0.15rem 0 0;
+  font-size: 0.74rem;
+  color: var(--accent, #ef4444);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 600;
 }
 .last-hint {
   margin: 0.1rem 0 0;

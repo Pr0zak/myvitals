@@ -168,6 +168,11 @@ interface BackendApi {
     @GET("workout/strength/records")
     suspend fun strengthRecords(): StrengthRecordsResponse
 
+    @GET("workout/strength/volume-trend")
+    suspend fun strengthVolumeTrend(
+        @retrofit2.http.Query("weeks") weeks: Int = 16,
+    ): StrengthVolumeTrend
+
     @GET("workout/strength/equipment")
     suspend fun strengthEquipment(): EquipmentResponse
 

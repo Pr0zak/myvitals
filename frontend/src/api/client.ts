@@ -1078,6 +1078,16 @@ export const api = {
     return data;
   },
 
+  async strengthVolumeTrend(weeks = 16): Promise<{
+    weeks: number;
+    since: string;
+    trend: { week_start: string; volume_lb: number; sets: number; workouts: number }[];
+  }> {
+    const { data } = await http.get("/workout/strength/volume-trend",
+      { params: { weeks } });
+    return data;
+  },
+
   async aiStrengthFocusCue(workoutId: number): Promise<{
     cue: { headline: string; tone: string; cue: string };
     generated_at: string;

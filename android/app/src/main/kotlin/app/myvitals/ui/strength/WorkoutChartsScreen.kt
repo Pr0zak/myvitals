@@ -52,11 +52,14 @@ import app.myvitals.sync.MuscleVolumeRow
 import app.myvitals.sync.StrengthRecord
 import app.myvitals.sync.StrengthRecordsResponse
 import app.myvitals.sync.StrengthStats
+import app.myvitals.sync.StrengthVolumeTrend
+import app.myvitals.sync.StrengthWeeklyPoint
 import app.myvitals.ui.MV
 import app.myvitals.ui.neon.NeonMV
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottom
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStart
+import com.patrykandpatrick.vico.compose.cartesian.layer.rememberColumnCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLine
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
@@ -66,6 +69,7 @@ import com.patrykandpatrick.vico.compose.common.fill
 import com.patrykandpatrick.vico.core.cartesian.axis.HorizontalAxis
 import com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
+import com.patrykandpatrick.vico.core.cartesian.data.columnSeries
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
 import kotlinx.coroutines.Dispatchers
@@ -89,6 +93,7 @@ fun WorkoutChartsScreen(
     var stats by remember { mutableStateOf<StrengthStats?>(null) }
     var records by remember { mutableStateOf<List<StrengthRecord>>(emptyList()) }
     var muscleVol by remember { mutableStateOf<Map<String, MuscleVolumeRow>>(emptyMap()) }
+    var volumeTrend by remember { mutableStateOf<List<StrengthWeeklyPoint>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -156,6 +161,24 @@ fun WorkoutChartsScreen(
         }
     }
 
+    // VOLT-1: 16-week mesocycle volume trend — SWR, fixed window.
+    LaunchedEffect(Unit) {
+        if (!settings.isConfigured()) return@LaunchedEffect
+        app.myvitals.data.JsonCache.read<StrengthVolumeTrend>(
+            context, "volume_trend_16w", StrengthVolumeTrend::class.java,
+        )?.let { volumeTrend = it.value.trend }
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val fresh = withContext(Dispatchers.IO) { api.strengthVolumeTrend(weeks = 16) }
+            volumeTrend = fresh.trend
+            app.myvitals.data.JsonCache.write(
+                context, "volume_trend_16w", StrengthVolumeTrend::class.java, fresh,
+            )
+        } catch (e: Exception) {
+            Timber.w(e, "volume trend load failed")
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(bg)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -200,6 +223,11 @@ fun WorkoutChartsScreen(
                     item { OverviewCard(s, neon) }
                     item { BodyMapCard(muscleVol, neon) }
                     item { DailyVolumeCard(s, neon) }
+                    // Only when >=2 weeks have real training (backend zero-fills
+                    // the full 16-week spine, so size is always 16).
+                    if (volumeTrend.count { it.volumeLb > 0 } >= 2) {
+                        item { WeeklyVolumeCard(volumeTrend, neon) }
+                    }
                     item { MuscleGroupCard(s, neon) }
                     item { ProgressionCard(s, neon) }
                     if (records.isNotEmpty()) item { RecordsCard(records, neon) }
@@ -266,6 +294,41 @@ private fun DailyVolumeCard(s: StrengthStats, neon: Boolean) {
             CartesianChartHost(
                 chart = rememberCartesianChart(
                     rememberLineCartesianLayer(),
+                    startAxis = VerticalAxis.rememberStart(),
+                    bottomAxis = HorizontalAxis.rememberBottom(),
+                ),
+                modelProducer = producer,
+                scrollState = rememberVicoScrollState(),
+                zoomState = rememberVicoZoomState(),
+                modifier = Modifier.fillMaxWidth().height(200.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeeklyVolumeCard(trend: List<StrengthWeeklyPoint>, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("WEEKLY VOLUME · 16-WEEK MESOCYCLE", color = muted,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(8.dp))
+            // Same stable-keyless-producer discipline as DailyVolumeCard — a
+            // single producer for the host's lifetime, data pushed via
+            // runTransaction. Column layer instead of line (bars read as a
+            // mesocycle load trend). x = week index, y = volume lb.
+            val producer = remember { CartesianChartModelProducer() }
+            LaunchedEffect(trend) {
+                if (trend.size < 2) return@LaunchedEffect
+                val xs = trend.indices.map { it.toDouble() }
+                val ys = trend.map { it.volumeLb }
+                producer.runTransaction { columnSeries { series(x = xs, y = ys) } }
+            }
+            CartesianChartHost(
+                chart = rememberCartesianChart(
+                    rememberColumnCartesianLayer(),
                     startAxis = VerticalAxis.rememberStart(),
                     bottomAxis = HorizontalAxis.rememberBottom(),
                 ),

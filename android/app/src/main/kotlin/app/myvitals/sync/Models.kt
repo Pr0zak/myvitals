@@ -288,6 +288,22 @@ data class StrengthDailyVolume(
     val sets: Int,
 )
 
+// VOLT-1: weekly mesocycle volume trend.
+@JsonClass(generateAdapter = true)
+data class StrengthWeeklyPoint(
+    @Json(name = "week_start") val weekStart: String,
+    @Json(name = "volume_lb") val volumeLb: Double,
+    val sets: Int = 0,
+    val workouts: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class StrengthVolumeTrend(
+    val weeks: Int = 16,
+    val since: String? = null,
+    val trend: List<StrengthWeeklyPoint> = emptyList(),
+)
+
 @JsonClass(generateAdapter = true)
 data class StrengthMuscleVolume(
     val muscle: String,

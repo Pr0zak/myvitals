@@ -1639,6 +1639,65 @@ async def strength_stats(
     }
 
 
+@router.get("/volume-trend")
+async def strength_volume_trend(
+    weeks: int = 16,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """VOLT-1: total working-set volume per ISO week (Monday-anchored) over the
+    last `weeks` weeks — the mesocycle load trend (accumulation / deload waves).
+    Fixed window, independent of the /stats range picker. Uses the SAME volume
+    formula as strength_stats.daily (weight*reps, skip warmup/skipped/NULL) so
+    the weekly bars reconcile with the daily series on the same screen. The
+    spine is zero-filled so rest weeks show as empty bars."""
+    from datetime import date as _date, timedelta as _td
+    weeks = max(1, min(52, int(weeks)))
+    today = _date.today()
+    this_monday = today - _td(days=today.weekday())
+    since = this_monday - _td(days=(weeks - 1) * 7)
+
+    rows = (await db.execute(
+        select(
+            models.StrengthWorkout.date,
+            models.StrengthWorkout.id,
+            models.StrengthSet.actual_weight_lb,
+            models.StrengthSet.actual_reps,
+            models.StrengthSet.skipped,
+            models.StrengthSet.set_type,
+        )
+        .join(models.StrengthWorkoutExercise,
+              models.StrengthSet.workout_exercise_id ==
+              models.StrengthWorkoutExercise.id)
+        .join(models.StrengthWorkout,
+              models.StrengthWorkoutExercise.workout_id ==
+              models.StrengthWorkout.id)
+        .where(models.StrengthWorkout.date >= since)
+    )).all()
+
+    vol: dict[_date, float] = {}
+    setc: dict[_date, int] = {}
+    wkos: dict[_date, set] = {}
+    for d, wid, w_lb, reps, skipped, set_type in rows:
+        if skipped or w_lb is None or reps is None or set_type == "warmup":
+            continue
+        wk = d - _td(days=d.weekday())
+        vol[wk] = vol.get(wk, 0.0) + float(w_lb) * float(reps)
+        setc[wk] = setc.get(wk, 0) + 1
+        wkos.setdefault(wk, set()).add(wid)
+
+    trend: list[dict[str, Any]] = []
+    wk = since
+    while wk <= this_monday:
+        trend.append({
+            "week_start": wk.isoformat(),
+            "volume_lb": round(vol.get(wk, 0.0), 1),
+            "sets": setc.get(wk, 0),
+            "workouts": len(wkos.get(wk, ())),
+        })
+        wk += _td(days=7)
+    return {"weeks": weeks, "since": since.isoformat(), "trend": trend}
+
+
 @router.get("/records")
 async def strength_records(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     """PR-1: per-exercise personal bests — heaviest working set + best e1RM,

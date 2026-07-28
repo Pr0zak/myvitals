@@ -51,7 +51,16 @@ async function loadMuscleVol() {
     muscleVol.value = (await api.strengthMuscleVolume(7)).muscles;
   } catch { /* map is non-critical; leave empty (all untrained) on failure */ }
 }
-onMounted(() => { load(); loadRecords(); loadMuscleVol(); });
+// VOLT-1: weekly volume over a fixed 16-week mesocycle window (independent of
+// the range picker), fetched once on mount.
+type VolumeTrend = Awaited<ReturnType<typeof api.strengthVolumeTrend>>["trend"];
+const volumeTrend = ref<VolumeTrend>([]);
+async function loadVolumeTrend() {
+  try {
+    volumeTrend.value = (await api.strengthVolumeTrend(16)).trend;
+  } catch { /* non-critical; leave empty on failure */ }
+}
+onMounted(() => { load(); loadRecords(); loadMuscleVol(); loadVolumeTrend(); });
 watch(days, load);
 
 function fmtRecDate(iso: string | null): string {
@@ -97,6 +106,41 @@ const dailyOption = computed(() => {
       lineStyle: { color: vol, width: 2 },
       itemStyle: { color: vol },
       areaStyle: { color: vol, opacity: 0.18 },
+    }],
+  };
+});
+
+// VOLT-1: weekly mesocycle volume bars (fixed 16-week window).
+const weeklyOption = computed(() => {
+  const t = chartTheme.value;
+  const tr = volumeTrend.value;
+  void isNeon.value;
+  // Backend zero-fills the full 16-week spine, so length is always 16 — only
+  // chart when at least 2 weeks actually have training (else empty/1-bar).
+  if (!tr || tr.filter((r) => r.volume_lb > 0).length < 2) return null;
+  const vol = VOLUME_COLOR.value;
+  return {
+    grid: { left: 56, right: 16, top: 24, bottom: 40 },
+    tooltip: {
+      trigger: "axis", ...t.tooltip,
+      formatter: (ps: { name: string; value: number }[]) => {
+        const p = ps[0];
+        const row = tr.find((r) => r.week_start === p.name);
+        return `Week of ${p.name}<br/>${Math.round(p.value).toLocaleString()} lb`
+          + (row ? ` · ${row.sets} sets · ${row.workouts} workouts` : "");
+      },
+    },
+    xAxis: {
+      type: "category",
+      data: tr.map((r) => r.week_start),
+      axisLabel: { ...t.axisLabel, formatter: (v: string) => v.slice(5) },
+    },
+    yAxis: { type: "value", name: "lb",
+             axisLabel: t.axisLabel, splitLine: t.splitLine },
+    series: [{
+      name: "Weekly volume", type: "bar",
+      data: tr.map((r) => r.volume_lb),
+      itemStyle: { color: vol, borderRadius: [3, 3, 0, 0] },
     }],
   };
 });
@@ -219,6 +263,10 @@ const progressionOption = computed(() => {
       <p v-else-if="stats.daily.length < 2" class="muted small">
         Need at least 2 sessions in this window for a daily-volume chart.
       </p>
+
+      <Card v-if="weeklyOption" title="Weekly volume · 16-week mesocycle">
+        <div class="chart"><VChart :option="weeklyOption" autoresize /></div>
+      </Card>
 
       <Card title="Muscle balance · 7-day">
         <BodyMap :muscles="muscleVol" />

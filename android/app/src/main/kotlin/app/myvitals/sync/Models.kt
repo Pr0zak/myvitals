@@ -209,6 +209,13 @@ data class StrengthSetRow(
 )
 
 @JsonClass(generateAdapter = true)
+data class LastSet(
+    @Json(name = "set_number") val setNumber: Int,
+    @Json(name = "weight_lb") val weightLb: Double? = null,
+    val reps: Int? = null,
+)
+
+@JsonClass(generateAdapter = true)
 data class StrengthWorkoutExerciseRow(
     val id: Long,
     @Json(name = "workout_id") val workoutId: Long,
@@ -227,6 +234,8 @@ data class StrengthWorkoutExerciseRow(
     // LOAD-1: "30 lb DB + 2.5 lb wrist" when the weight needs micro-loaders;
     // null for bodyweight / plain-dumbbell weights.
     @Json(name = "load_hint") val loadHint: String? = null,
+    // LOG-1: previous session's working sets, for a faint "last: 30×8 · 30×8" line.
+    @Json(name = "last_sets") val lastSets: List<LastSet> = emptyList(),
     val sets: List<StrengthSetRow> = emptyList(),
 )
 

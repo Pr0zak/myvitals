@@ -550,6 +550,13 @@ class WorkoutExerciseIn(BaseModel):
     notes: str | None = None
 
 
+class LastSetOut(BaseModel):
+    """LOG-1: one working set from the last time this exercise was done."""
+    set_number: int
+    weight_lb: float | None = None  # None for bodyweight lifts
+    reps: int | None = None
+
+
 class WorkoutExerciseOut(BaseModel):
     id: int
     workout_id: int
@@ -573,6 +580,13 @@ class WorkoutExerciseOut(BaseModel):
     # Null for bodyweight lifts and for plain-dumbbell weights (the number
     # already says it). Computed server-side from current equipment.
     load_hint: str | None = None
+    # LOG-1: the working sets from the LAST time this exercise was done (most
+    # recent prior session), for a faint "last: 30×8 · 30×8" ghost line in the
+    # logger. Empty when there's no prior real set. Excludes warmups/skipped
+    # and this workout; computed server-side. Set-level filters only (no
+    # workout-status gate — auto-skip flips forgotten-to-finish sessions to
+    # "skipped" even though their sets are real).
+    last_sets: list[LastSetOut] = []
     sets: list[SetOut] = []
 
 
@@ -710,6 +724,7 @@ def _wex_to_out(
     sets: list[models.StrengthSet],
     pairs_lb: list[float] | None = None,
     wrist_lb: list[float] | None = None,
+    last_sets: list[LastSetOut] | None = None,
 ) -> WorkoutExerciseOut:
     return WorkoutExerciseOut(
         id=wex.id,
@@ -727,6 +742,7 @@ def _wex_to_out(
         load_hint=strength_algo.describe_load(
             wex.target_weight_lb, pairs_lb or [], wrist_lb or [],
         ),
+        last_sets=last_sets or [],
         sets=[_set_to_out(s) for s in sorted(sets, key=lambda x: x.set_number)],
     )
 
@@ -780,6 +796,63 @@ async def _hydrate_workout(
     equip = await _equipment_payload(db)
     pairs_lb = (equip.get("dumbbells") or {}).get("pairs_lb") or []
     wrist_lb = equip.get("wrist_weights_lb") or []
+    # LOG-1: previous-session working sets per exercise, for the ghost line.
+    # One batched query for all of today's exercises; set-level filters only
+    # (skipped/actual_reps/set_type) and NO workout-status gate — auto-skip
+    # flips forgotten-to-finish sessions to "skipped" though their sets are
+    # real. date < w.date excludes today (and, for history views, this
+    # workout's own sets). Group by first-seen workout id per exercise so
+    # only the single most-recent prior session survives.
+    last_by_ex: dict[str, list[LastSetOut]] = {}
+    ex_ids = list({wx.exercise_id for wx in wex_rows})
+    if ex_ids:
+        # 180d floor bounds the scan (exercise_id is unindexed) — a "last time"
+        # older than that is stale enough to skip. The user trains multiple
+        # times a week, so any live exercise is well inside the window.
+        hist = (await db.execute(
+            select(
+                models.StrengthWorkoutExercise.exercise_id.label("ex_id"),
+                models.StrengthWorkoutExercise.id.label("we_id"),
+                models.StrengthSet.set_number,
+                models.StrengthSet.actual_weight_lb,
+                models.StrengthSet.actual_reps,
+            )
+            .join(models.StrengthWorkoutExercise,
+                  models.StrengthSet.workout_exercise_id
+                  == models.StrengthWorkoutExercise.id)
+            .join(models.StrengthWorkout,
+                  models.StrengthWorkout.id
+                  == models.StrengthWorkoutExercise.workout_id)
+            .where(models.StrengthWorkoutExercise.exercise_id.in_(ex_ids))
+            .where(models.StrengthWorkout.date < w.date)
+            .where(models.StrengthWorkout.date >= w.date - timedelta(days=180))
+            .where(models.StrengthSet.skipped.is_(False))
+            .where(models.StrengthSet.actual_reps.is_not(None))
+            .where(models.StrengthSet.set_type != "warmup")
+            .order_by(
+                models.StrengthWorkoutExercise.exercise_id.asc(),
+                models.StrengthWorkout.date.desc(),
+                models.StrengthWorkout.id.desc(),
+                models.StrengthWorkoutExercise.id.asc(),  # deterministic slot
+                models.StrengthSet.set_number.asc(),
+            )
+        )).all()
+        # Lock onto the FIRST workout_exercise slot seen per exercise (the most
+        # recent session's first slot). Locking on the slot, not just the
+        # workout, keeps the ghost to one clean set list even when the same
+        # exercise occupied two slots of that session (via swap-to-duplicate).
+        seen_wex: dict[str, int] = {}
+        for r in hist:
+            locked = seen_wex.get(r.ex_id)
+            if locked is None:
+                seen_wex[r.ex_id] = r.we_id
+            elif r.we_id != locked:
+                continue  # only the most-recent prior session's first slot
+            last_by_ex.setdefault(r.ex_id, []).append(LastSetOut(
+                set_number=r.set_number,
+                weight_lb=r.actual_weight_lb,
+                reps=r.actual_reps,
+            ))
     # Surface the automatic recovery deload + a short reason so the client can
     # show a "load eased for recovery — Use full weight" banner. Legacy rows
     # (deload_factor NULL) are treated as 1.0 (no banner).
@@ -817,7 +890,8 @@ async def _hydrate_workout(
         deload_factor=df,
         deload_reason=deload_reason,
         exercises=[
-            _wex_to_out(wex, sets_by_wex.get(wex.id, []), pairs_lb, wrist_lb)
+            _wex_to_out(wex, sets_by_wex.get(wex.id, []), pairs_lb, wrist_lb,
+                        last_by_ex.get(wex.exercise_id))
             for wex in wex_rows
         ],
     )

@@ -704,6 +704,20 @@ async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = fa
   }
 }
 
+// LOG-1: faint "last time" summary from the previous session's working sets.
+// Weight formatting mirrors the phone (whole → integer, else 1 decimal) so the
+// same set never renders differently across surfaces.
+function fmtGhostWeight(w: number): string {
+  return Number.isInteger(w) ? String(w) : w.toFixed(1);
+}
+function lastSetsSummary(wex: StrengthWorkoutExercise): string | null {
+  const ls = wex.last_sets;
+  if (!ls || !ls.length) return null;
+  return ls
+    .map((s) => (s.weight_lb != null ? `${fmtGhostWeight(s.weight_lb)}×${s.reps}` : `${s.reps}`))
+    .join(" · ");
+}
+
 // Lookup helpers for superset rendering
 function supersetPartnerName(superId: string | null, ownId: number): string | null {
   if (!superId || !workout.value) return null;
@@ -1197,6 +1211,12 @@ useVisibilityRefresh(loadAll);
           🏋 {{ wex.load_hint }}
         </p>
 
+        <!-- LOG-1: what you did last time (rep-based rows only) -->
+        <p v-if="lastSetsSummary(wex) && !isExerciseDone(wex) && !isTimedExercise(wex)"
+           class="last-hint">
+          ↩ last: {{ lastSetsSummary(wex) }}
+        </p>
+
         <!-- Completed state: collapse to chip summary instead of greyed-out inputs -->
         <div v-if="isExerciseDone(wex)" class="done-summary">
           <span v-for="s in [...wex.sets].sort((a, b) => a.set_number - b.set_number)"
@@ -1619,6 +1639,12 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 .prescription .rest { color: var(--muted-2); }
 .load-hint {
   margin: 0.15rem 0 0;
+  font-size: 0.76rem;
+  color: var(--muted-2);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+}
+.last-hint {
+  margin: 0.1rem 0 0;
   font-size: 0.76rem;
   color: var(--muted-2);
   font-family: 'Geist Mono', ui-monospace, monospace;
@@ -2213,7 +2239,8 @@ html[data-theme="neon"] .prescription {
   color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
 }
 html[data-theme="neon"] .prescription .rest { color: var(--rn-mut); }
-html[data-theme="neon"] .load-hint {
+html[data-theme="neon"] .load-hint,
+html[data-theme="neon"] .last-hint {
   color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
 }
 

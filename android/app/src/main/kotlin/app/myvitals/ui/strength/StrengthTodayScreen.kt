@@ -2538,6 +2538,20 @@ private fun ExerciseCard(
                             color = pal.muted, fontSize = 11.sp,
                         )
                     }
+                    // LOG-1: what you did last time (rep-based exercises only)
+                    if (!isTimedExercise(wex, info) && wex.lastSets.isNotEmpty()) {
+                        val summary = wex.lastSets.joinToString(" · ") { ls ->
+                            val wv = ls.weightLb?.let {
+                                if (it == it.toLong().toDouble()) "${it.toLong()}"
+                                else "%.1f".format(it)
+                            }
+                            if (wv != null) "$wv×${ls.reps}" else "${ls.reps}"
+                        }
+                        Text(
+                            "↩ last: $summary",
+                            color = pal.dim, fontSize = 11.sp,
+                        )
+                    }
                 }
                 if (info?.imageFront != null) {
                     val baseUrl = backendBaseUrl

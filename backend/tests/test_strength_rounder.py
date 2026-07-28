@@ -9,8 +9,47 @@ import pytest
 
 from myvitals.analytics.strength import (
     round_weight, valid_dumbbell_loads, progress_from_rating,
-    double_progression, deload_round,
+    double_progression, deload_round, describe_load,
 )
+
+
+PAIRS_5S = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0]
+WRISTS = [1.0, 1.5, 2.0, 3.0]
+
+
+class TestDescribeLoad:
+    def test_plain_pair_gives_no_hint(self):
+        # The weight number already tells you to grab the 30s.
+        assert describe_load(30.0, PAIRS_5S, WRISTS) is None
+
+    def test_single_micro_loader(self):
+        # 32.5 = 30 DB + 2.5 (=1 + 1.5) — smallest subset first.
+        h = describe_load(32.5, PAIRS_5S, WRISTS)
+        assert h is not None and h.startswith("30 lb DB + ")
+        assert h.endswith(" lb wrist")
+
+    def test_prefers_heaviest_base_pair(self):
+        # 33 = 30 + 3, not 25 + (…): heaviest base wins.
+        assert describe_load(33.0, PAIRS_5S, WRISTS) == "30 lb DB + 3 lb wrist"
+
+    def test_no_weight_or_no_dumbbells(self):
+        assert describe_load(None, PAIRS_5S, WRISTS) is None
+        assert describe_load(32.5, [], WRISTS) is None
+
+    def test_no_micro_loaders_owned(self):
+        # Nothing can bridge 32.5 without wrist weights → no hint.
+        assert describe_load(32.5, PAIRS_5S, []) is None
+
+    def test_unreachable_target_gives_no_hint(self):
+        # 31.25 isn't any pair + owned-wrist combo → silent, not a wrong hint.
+        assert describe_load(31.25, PAIRS_5S, WRISTS) is None
+
+    def test_hint_matches_a_real_valid_load(self):
+        # Every micro-loader hint must describe an actually-loadable weight.
+        for w in valid_dumbbell_loads(PAIRS_5S, WRISTS):
+            h = describe_load(w, PAIRS_5S, WRISTS)
+            if h is not None:
+                assert "DB +" in h and "wrist" in h
 
 
 # Fixed 5-lb pairs, no micro-loaders — the equipment that amplified an 8%

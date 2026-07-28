@@ -336,6 +336,59 @@ def valid_dumbbell_loads(
     return sorted(out)
 
 
+def _fmt_lb(x: float) -> str:
+    """Trim trailing .0 — 30.0 -> '30', 2.5 -> '2.5'."""
+    return f"{round(float(x), 2):g}"
+
+
+def _subset_for_sum(
+    items: list[float], target: float, tol: float = 0.05
+) -> list[float] | None:
+    """Smallest subset of `items` summing to `target` (within tol), or None.
+    Fewest items first, so the hint uses the least hardware. items are few
+    (wrist weights, ≤8) so brute force is fine."""
+    if abs(target) < tol:
+        return []
+    for r in range(1, len(items) + 1):
+        for combo in combinations(items, r):
+            if abs(sum(combo) - target) < tol:
+                return list(combo)
+    return None
+
+
+def describe_load(
+    weight_lb: float | None,
+    pairs_lb: list[float],
+    wrist_weights_lb: list[float],
+) -> str | None:
+    """LOAD-1: a one-line "how to load it" hint for a prescribed per-dumbbell
+    weight — the heaviest owned pair the target sits on, plus the micro-loaders
+    that make up the difference (e.g. "30 lb DB + 2.5 lb wrist").
+
+    Returns None when there's nothing worth saying: no weight, no dumbbells,
+    the target IS a plain owned pair (the number already tells you), or no
+    combo of owned gear reconstructs it. Deliberately silent unless micro-
+    loaders are actually involved, to keep it out of the default path."""
+    if weight_lb is None or not pairs_lb:
+        return None
+    w = round(float(weight_lb), 2)
+    # A plain dumbbell already answers "how to load it".
+    if any(abs(w - p) < 0.05 for p in pairs_lb):
+        return None
+    if not wrist_weights_lb:
+        return None
+    # Heaviest base pair that the wrist weights can top up to the target —
+    # fewest, lightest add-ons.
+    for p in sorted(pairs_lb, reverse=True):
+        if p > w + 0.05:
+            continue
+        combo = _subset_for_sum(wrist_weights_lb, round(w - p, 2))
+        if combo:
+            micros = " + ".join(_fmt_lb(x) for x in sorted(combo))
+            return f"{_fmt_lb(p)} lb DB + {micros} lb wrist"
+    return None
+
+
 def estimate_1rm(weight_lb: float | None, reps: int | None) -> float | None:
     """Epley estimated 1-rep-max: weight * (1 + reps/30). Reps are capped at
     12 (Epley over-estimates for very high reps); a single rep returns the

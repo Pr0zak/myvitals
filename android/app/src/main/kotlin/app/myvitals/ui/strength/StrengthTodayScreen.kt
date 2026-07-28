@@ -2531,6 +2531,13 @@ private fun ExerciseCard(
                         "${wex.targetSets}×$rep$w  ·  ${wex.targetRestS}s rest",
                         color = pal.muted, fontSize = 12.sp,
                     )
+                    // LOAD-1: how to load it (only when micro-loaders needed)
+                    wex.loadHint?.let {
+                        Text(
+                            "🏋 $it",
+                            color = pal.muted, fontSize = 11.sp,
+                        )
+                    }
                 }
                 if (info?.imageFront != null) {
                     val baseUrl = backendBaseUrl

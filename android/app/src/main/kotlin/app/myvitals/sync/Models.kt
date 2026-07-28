@@ -224,6 +224,9 @@ data class StrengthWorkoutExerciseRow(
     // logged actualReps should be interpreted as seconds too.
     @Json(name = "is_timed") val isTimed: Boolean = false,
     val notes: String? = null,
+    // LOAD-1: "30 lb DB + 2.5 lb wrist" when the weight needs micro-loaders;
+    // null for bodyweight / plain-dumbbell weights.
+    @Json(name = "load_hint") val loadHint: String? = null,
     val sets: List<StrengthSetRow> = emptyList(),
 )
 

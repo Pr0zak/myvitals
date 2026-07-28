@@ -568,6 +568,11 @@ class WorkoutExerciseOut(BaseModel):
     # "30-60 reps" for planks / isometric holds.
     is_timed: bool = False
     notes: str | None
+    # LOAD-1: one-line "how to load it" hint when the prescribed weight needs
+    # micro-loaders on top of a dumbbell (e.g. "30 lb DB + 2.5 lb wrist").
+    # Null for bodyweight lifts and for plain-dumbbell weights (the number
+    # already says it). Computed server-side from current equipment.
+    load_hint: str | None = None
     sets: list[SetOut] = []
 
 
@@ -701,7 +706,10 @@ async def _detect_pr(
 
 
 def _wex_to_out(
-    wex: models.StrengthWorkoutExercise, sets: list[models.StrengthSet]
+    wex: models.StrengthWorkoutExercise,
+    sets: list[models.StrengthSet],
+    pairs_lb: list[float] | None = None,
+    wrist_lb: list[float] | None = None,
 ) -> WorkoutExerciseOut:
     return WorkoutExerciseOut(
         id=wex.id,
@@ -716,6 +724,9 @@ def _wex_to_out(
         target_rest_s=wex.target_rest_s,
         is_timed=bool(_CATALOG_BY_ID.get(wex.exercise_id, {}).get("is_timed")),
         notes=wex.notes,
+        load_hint=strength_algo.describe_load(
+            wex.target_weight_lb, pairs_lb or [], wrist_lb or [],
+        ),
         sets=[_set_to_out(s) for s in sorted(sets, key=lambda x: x.set_number)],
     )
 
@@ -765,6 +776,10 @@ async def _hydrate_workout(
     sets_by_wex: dict[int, list[models.StrengthSet]] = {}
     for s in sets_rows:
         sets_by_wex.setdefault(s.workout_exercise_id, []).append(s)
+    # LOAD-1: current equipment for the "how to load it" hints (one load).
+    equip = await _equipment_payload(db)
+    pairs_lb = (equip.get("dumbbells") or {}).get("pairs_lb") or []
+    wrist_lb = equip.get("wrist_weights_lb") or []
     # Surface the automatic recovery deload + a short reason so the client can
     # show a "load eased for recovery — Use full weight" banner. Legacy rows
     # (deload_factor NULL) are treated as 1.0 (no banner).
@@ -802,7 +817,8 @@ async def _hydrate_workout(
         deload_factor=df,
         deload_reason=deload_reason,
         exercises=[
-            _wex_to_out(wex, sets_by_wex.get(wex.id, [])) for wex in wex_rows
+            _wex_to_out(wex, sets_by_wex.get(wex.id, []), pairs_lb, wrist_lb)
+            for wex in wex_rows
         ],
     )
 
@@ -1371,7 +1387,7 @@ async def swap_exercise(
         select(models.StrengthSet)
         .where(models.StrengthSet.workout_exercise_id == wex.id)
     )).scalars().all()
-    return _wex_to_out(wex, sets)
+    return _wex_to_out(wex, sets, pairs, wrist)
 
 
 @router.delete("/sets/{set_id}", status_code=204)

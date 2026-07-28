@@ -1192,6 +1192,11 @@ useVisibilityRefresh(loadAll);
           </span>
         </header>
 
+        <!-- LOAD-1: how to load it (only when micro-loaders are needed) -->
+        <p v-if="wex.load_hint && !isExerciseDone(wex)" class="load-hint">
+          🏋 {{ wex.load_hint }}
+        </p>
+
         <!-- Completed state: collapse to chip summary instead of greyed-out inputs -->
         <div v-if="isExerciseDone(wex)" class="done-summary">
           <span v-for="s in [...wex.sets].sort((a, b) => a.set_number - b.set_number)"
@@ -1612,6 +1617,12 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
   font-size: 0.82rem; color: var(--muted);
 }
 .prescription .rest { color: var(--muted-2); }
+.load-hint {
+  margin: 0.15rem 0 0;
+  font-size: 0.76rem;
+  color: var(--muted-2);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+}
 
 .ex-body { display: grid; grid-template-columns: 96px 1fr; gap: 0.9rem;
   margin-top: 0.6rem; align-items: start; }
@@ -2202,6 +2213,9 @@ html[data-theme="neon"] .prescription {
   color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
 }
 html[data-theme="neon"] .prescription .rest { color: var(--rn-mut); }
+html[data-theme="neon"] .load-hint {
+  color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
+}
 
 /* Media — neon-tinted exercise silhouette */
 html[data-theme="neon"] .media .ex-thumb {

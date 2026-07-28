@@ -221,6 +221,7 @@ export interface StrengthWorkoutExercise {
   target_rest_s: number;
   is_timed?: boolean;     // backend flag — target_reps_* are hold seconds
   notes: string | null;
+  load_hint?: string | null;  // LOAD-1: "30 lb DB + 2.5 lb wrist" when micro-loaders needed
   sets: StrengthSet[];
 }
 

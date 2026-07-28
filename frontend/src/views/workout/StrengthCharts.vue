@@ -6,6 +6,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
+import BodyMap from "@/components/BodyMap.vue";
 import { api } from "@/api/client";
 import { chartTheme, isNeon } from "@/theme";
 
@@ -41,7 +42,16 @@ async function loadRecords() {
     records.value = (await api.strengthRecords()).records;
   } catch { /* records are non-critical; leave empty on failure */ }
 }
-onMounted(() => { load(); loadRecords(); });
+// MMAP-1: 7-day muscle-volume status for the body map (fixed weekly window,
+// independent of the range picker — the map is a "this week's balance" audit).
+type MuscleVol = Awaited<ReturnType<typeof api.strengthMuscleVolume>>["muscles"];
+const muscleVol = ref<MuscleVol>({});
+async function loadMuscleVol() {
+  try {
+    muscleVol.value = (await api.strengthMuscleVolume(7)).muscles;
+  } catch { /* map is non-critical; leave empty (all untrained) on failure */ }
+}
+onMounted(() => { load(); loadRecords(); loadMuscleVol(); });
 watch(days, load);
 
 function fmtRecDate(iso: string | null): string {
@@ -209,6 +219,10 @@ const progressionOption = computed(() => {
       <p v-else-if="stats.daily.length < 2" class="muted small">
         Need at least 2 sessions in this window for a daily-volume chart.
       </p>
+
+      <Card title="Muscle balance · 7-day">
+        <BodyMap :muscles="muscleVol" />
+      </Card>
 
       <Card v-if="muscleOption" title="Volume by muscle">
         <div class="chart" style="height: 280px;"><VChart :option="muscleOption" autoresize /></div>

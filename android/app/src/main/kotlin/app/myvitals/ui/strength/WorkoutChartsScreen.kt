@@ -41,7 +41,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.vector.PathParser
 import app.myvitals.sync.BackendClient
+import app.myvitals.sync.MuscleVolumeResponse
+import app.myvitals.sync.MuscleVolumeRow
 import app.myvitals.sync.StrengthRecord
 import app.myvitals.sync.StrengthRecordsResponse
 import app.myvitals.sync.StrengthStats
@@ -81,6 +88,7 @@ fun WorkoutChartsScreen(
     var days by remember { mutableStateOf(90) }
     var stats by remember { mutableStateOf<StrengthStats?>(null) }
     var records by remember { mutableStateOf<List<StrengthRecord>>(emptyList()) }
+    var muscleVol by remember { mutableStateOf<Map<String, MuscleVolumeRow>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -130,6 +138,24 @@ fun WorkoutChartsScreen(
         }
     }
 
+    // MMAP-1: 7-day muscle-volume status for the body map — SWR, fixed window.
+    LaunchedEffect(Unit) {
+        if (!settings.isConfigured()) return@LaunchedEffect
+        app.myvitals.data.JsonCache.read<MuscleVolumeResponse>(
+            context, "muscle_volume_7d", MuscleVolumeResponse::class.java,
+        )?.let { muscleVol = it.value.muscles }
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val fresh = withContext(Dispatchers.IO) { api.strengthMuscleVolume(days = 7) }
+            muscleVol = fresh.muscles
+            app.myvitals.data.JsonCache.write(
+                context, "muscle_volume_7d", MuscleVolumeResponse::class.java, fresh,
+            )
+        } catch (e: Exception) {
+            Timber.w(e, "muscle volume load failed")
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(bg)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -172,6 +198,7 @@ fun WorkoutChartsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     item { OverviewCard(s, neon) }
+                    item { BodyMapCard(muscleVol, neon) }
                     item { DailyVolumeCard(s, neon) }
                     item { MuscleGroupCard(s, neon) }
                     item { ProgressionCard(s, neon) }
@@ -431,6 +458,77 @@ private fun RecordsCard(records: List<StrengthRecord>, neon: Boolean) {
                 }
             }
         }
+    }
+}
+
+// Pure (plain Color literals, no MaterialTheme/@Composable tokens) so it can be
+// called from the non-composable DrawScope lambda. Hexes match web BodyMap.vue
+// — untrained uses web's DARK-theme values (the phone is dark-only) so it
+// recedes into the silhouette on both surfaces.
+private fun muscleStatusColor(status: String?, neon: Boolean): Color = when (status) {
+    "under" -> if (neon) Color(0xFFFFB52E) else Color(0xFFFACC15)
+    "in_range" -> if (neon) Color(0xFF5DFF3B) else Color(0xFF22C55E)
+    "over" -> if (neon) Color(0xFFFF5D7A) else Color(0xFFEF4444)
+    else -> if (neon) Color(0xFF3A3F52) else Color(0xFF475569)  // untrained / absent
+}
+
+@Composable
+private fun BodyMapCard(muscles: Map<String, MuscleVolumeRow>, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val sil = muted.copy(alpha = 0.22f)
+    // Parse each SVG path once and resolve its status color HERE in the
+    // composable body (same path data as web BodyMap.vue). The draw lambda
+    // below stays pure geometry — resolving colors inside the DrawScope block
+    // trips the Compose compiler.
+    val silFront = remember { PathParser().parsePathString(BodyMapPaths.SILHOUETTE_FRONT).toPath() }
+    val silBack = remember { PathParser().parsePathString(BodyMapPaths.SILHOUETTE_BACK).toPath() }
+    val drawn = remember(muscles, neon) {
+        BodyMapPaths.REGIONS.map { (m, d) ->
+            PathParser().parsePathString(d).toPath() to muscleStatusColor(muscles[m]?.status, neon)
+        }
+    }
+    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("MUSCLE BALANCE · 7-DAY", color = muted,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(8.dp))
+            Canvas(
+                Modifier.fillMaxWidth()
+                    .aspectRatio(BodyMapPaths.VIEWBOX_W / BodyMapPaths.VIEWBOX_H)
+            ) {
+                scale(
+                    size.width / BodyMapPaths.VIEWBOX_W,
+                    size.height / BodyMapPaths.VIEWBOX_H,
+                    pivot = Offset.Zero,
+                ) {
+                    drawPath(silFront, sil)
+                    drawPath(silBack, sil)
+                    drawn.forEach { (p, c) -> drawPath(p, c) }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                LegendKey("Untrained", muscleStatusColor("untrained", neon), muted)
+                LegendKey("Under", muscleStatusColor("under", neon), muted)
+                LegendKey("In range", muscleStatusColor("in_range", neon), muted)
+                LegendKey("Over", muscleStatusColor("over", neon), muted)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LegendKey(label: String, color: Color, textColor: Color) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text("■", color = color, fontSize = 10.sp)
+        Text(label, color = textColor, fontSize = 10.sp)
     }
 }
 

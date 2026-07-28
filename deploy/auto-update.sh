@@ -2,8 +2,11 @@
 # auto-update.sh — pull-based self-update for the myvitals CT (UPDATE-1).
 #
 # Designed for cron. Silent on no-op (image digests unchanged). Loud only
-# when there's an actual update or a failure. Logs every run to
-# /var/log/myvitals-auto-update.log so you can grep history.
+# when there's an actual update or a failure. Logs to
+# /var/lib/myvitals/auto-update.log — the bind-mounted volume the backend
+# container reads for the Settings "last run" display (api/update.py). Do
+# NOT point the cron at /var/log/...: it isn't mounted, so the UI would
+# show a stale "last run" (this exact drift bit us 2026-07).
 #
 # Behaviour:
 #   1. git pull (so docker-compose.yml + migrations stay current)
@@ -16,17 +19,34 @@
 #        - on failure, automatic rollback to last-known-good
 #   5. Emit a one-line summary
 #
-# Suggested cron (every 15 min):
-#   */15 * * * * root /opt/myvitals/deploy/auto-update.sh >> /var/log/myvitals-auto-update.log 2>&1
-#
-# Manual install:
+# Install (use the canonical cron file — don't hand-write the redirect):
 #   sudo cp deploy/myvitals-auto-update.cron /etc/cron.d/myvitals-auto-update
+#   sudo chmod 644 /etc/cron.d/myvitals-auto-update
 #   sudo systemctl restart cron
 
 set -euo pipefail
 
 LOG_TAG="[$(date -Iseconds)]"
 cd "$(dirname "$0")/.." || exit 1
+
+# Heartbeat for the /update/status health check. That endpoint (api/update.py)
+# judges cron liveness from the mtime of this log (fresh < 20 min) and shows
+# its tail in the Settings UI. But this script is silent on no-op, and an
+# append redirect does NOT bump mtime when nothing is written — so a perfectly
+# healthy cron reads as "stale/unhealthy" between actual updates. Touch the log
+# on every run (all exit paths via trap) so mtime tracks "cron ran", while the
+# tail still shows only real events.
+#
+# THIS PATH MUST STAY IN SYNC in three places, or the UI reads the wrong file:
+#   - the cron redirect  (deploy/myvitals-auto-update.cron)
+#   - this heartbeat
+#   - the backend read   (api/update.py LOG_FILE)
+# All three: /var/lib/myvitals/auto-update.log — the bind-mounted volume the
+# backend container can see. (2026-07: the installed cron had drifted to
+# /var/log/myvitals-auto-update.log, which isn't mounted, so the UI showed a
+# stale "last run".)
+HEARTBEAT_LOG=/var/lib/myvitals/auto-update.log
+trap 'touch "$HEARTBEAT_LOG" 2>/dev/null || true' EXIT
 
 # UPDATE-1 trigger: backend's POST /api/update/apply writes
 # /var/lib/myvitals/update-requested. When present, log it and

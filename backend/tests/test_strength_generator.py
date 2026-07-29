@@ -6,8 +6,60 @@ import random
 
 from myvitals.analytics.strength import (
     CATALOG, filter_catalog_for_equipment, pair_supersets,
-    select_exercises_for_split, select_split,
+    select_exercises_for_split, select_split, _level_bucket,
 )
+
+
+class TestLevelSkillGate:
+    """Advanced moves are skill-gated: an intermediate user must not be
+    prescribed advanced calisthenics (one-arm push-ups etc.), while a
+    beginner still rotates through intermediate variety (WP-18)."""
+
+    def test_level_bucket_gates_advanced_from_non_advanced(self):
+        # In-band (0): easier-or-equal, and beginner reaching intermediate.
+        assert _level_bucket("beginner", "intermediate") == 0
+        assert _level_bucket("intermediate", "intermediate") == 0
+        assert _level_bucket("intermediate", "beginner") == 0  # can go down
+        # Advanced is only in-band for an advanced user.
+        assert _level_bucket("advanced", "intermediate") == 1  # the fix
+        assert _level_bucket("advanced", "beginner") == 1
+        assert _level_bucket("advanced", "advanced") == 0
+
+    def test_single_arm_pushup_rerated_advanced(self):
+        from myvitals.analytics.strength import CATALOG_BY_ID
+        assert CATALOG_BY_ID["Single-Arm_Push-Up"]["level"] == "advanced"
+
+    def test_intermediate_never_gets_advanced_pushups(self):
+        equip = {
+            "dumbbells": {"type": "fixed_pairs",
+                          "pairs_lb": [5, 10, 15, 20, 25, 30, 35, 40, 45]},
+            "bench": {"flat": True, "incline": True}, "bodyweight": True,
+            "pull_up_bar": False, "barbell": False, "squat_rack": False,
+        }
+        cat = filter_catalog_for_equipment(CATALOG, equip)
+        advanced_hits = 0
+        for seed in range(60):
+            rng = random.Random(f"push-{seed}")
+            chosen, _, _ = select_exercises_for_split(cat, "push", "intermediate", rng)
+            advanced_hits += sum(1 for e in chosen if e["level"] == "advanced")
+        assert advanced_hits == 0, (
+            f"advanced moves leaked to an intermediate plan {advanced_hits}x"
+        )
+
+    def test_advanced_user_still_gets_advanced_moves(self):
+        equip = {
+            "dumbbells": {"type": "fixed_pairs",
+                          "pairs_lb": [5, 10, 15, 20, 25, 30, 35, 40, 45]},
+            "bench": {"flat": True, "incline": True}, "bodyweight": True,
+            "pull_up_bar": False, "barbell": False, "squat_rack": False,
+        }
+        cat = filter_catalog_for_equipment(CATALOG, equip)
+        advanced_hits = 0
+        for seed in range(60):
+            rng = random.Random(f"push-{seed}")
+            chosen, _, _ = select_exercises_for_split(cat, "push", "advanced", rng)
+            advanced_hits += sum(1 for e in chosen if e["level"] == "advanced")
+        assert advanced_hits > 0, "advanced user should still reach advanced moves"
 
 
 class TestSelectSplit:

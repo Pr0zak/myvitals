@@ -67,6 +67,12 @@ _CATALOG_OVERRIDES: dict[str, dict[str, Any]] = {
         "primary_muscle": "lats",
         "secondary_muscles": ["chest", "shoulders", "triceps"],
     },
+    # free-exercise-db tags the one-arm push-up "intermediate", but a
+    # strict single-arm push-up is a genuine advanced calisthenics skill
+    # (its sibling Handstand/Archer push-ups are already "advanced").
+    # Re-rate so the skill-gated level logic keeps it away from non-
+    # advanced users instead of prescribing 4×8 of it to an intermediate.
+    "Single-Arm_Push-Up": {"level": "advanced"},
 }
 for _eid, _patch in _CATALOG_OVERRIDES.items():
     if _eid in CATALOG_BY_ID:
@@ -924,6 +930,28 @@ def filter_catalog_for_equipment(
 # Pure: exercise selection for a given split focus
 # ------------------------------------------------------------------
 
+def _level_bucket(ex_level: str, target_level: str) -> int:
+    """Level eligibility for slot ranking: 0 = in-band, 1 = deprioritised.
+
+    Adjacent levels are in-band so a beginner still rotates through
+    intermediate variety (WP-18). BUT advanced moves are skill-gated —
+    a genuine advanced movement (one-arm / archer push-up, handstand
+    push-up, pistol squat, etc.) is only in-band for an *advanced* user.
+    An intermediate must not be prescribed 4×8 one-arm push-ups just
+    because 'advanced' is one level up.
+
+    This only changes intermediate users: beginners are already 2 levels
+    from advanced (so it was deprioritised anyway), and advanced users
+    still match advanced moves. Beginner↔intermediate reach is untouched.
+    """
+    lvl = LEVEL_INDEX.get(ex_level, 1)
+    tgt = LEVEL_INDEX.get(target_level, 1)
+    advanced = LEVEL_INDEX["advanced"]
+    if lvl == advanced and tgt < advanced:
+        return 1
+    return 0 if abs(lvl - tgt) <= 1 else 1
+
+
 def _exercises_for_pattern(
     catalog: list[dict[str, Any]], pattern: str, level: str,
     muscles: list[str] | None = None,
@@ -948,15 +976,10 @@ def _exercises_for_pattern(
 
     def rank_key(e: dict[str, Any]) -> tuple:
         compound_score = 0 if (is_compound_slot and e["is_compound"]) else 1
-        lvl = LEVEL_INDEX.get(e["level"], 1)
-        target_lvl = LEVEL_INDEX.get(level, 1)
-        # WP-18 — SOFT level. Treat adjacent levels (±1) as equally eligible
-        # so a beginner still rotates through intermediate variants (e.g.
-        # Russian Twist, intermediate, was hard-gated to ~#36 of 40 ab moves
-        # and never made the pick window). Only a 2-level gap is deprioritised.
-        # Without this the level term dominates isolation slots (where
-        # compound_score is constant) and crushes variety.
-        level_score = 0 if abs(lvl - target_lvl) <= 1 else 1
+        # WP-18 — SOFT level (adjacent levels in-band so a beginner still
+        # rotates intermediate variants), but advanced moves are skill-
+        # gated to advanced users only — see _level_bucket.
+        level_score = _level_bucket(e["level"], level)
         return (compound_score, level_score, e["id"])
 
     return sorted(matches, key=rank_key)
@@ -1075,7 +1098,6 @@ def select_exercises_for_split(
                 # (rotation pressure intact), so a heavily-used lift stays out
                 # of the window while fresher options exist.
                 jitter = {c["id"]: rng.random() for c in candidates}
-                target_lvl = LEVEL_INDEX.get(level, 1)
 
                 def _sort_key(e: dict[str, Any]) -> tuple:
                     eid = e["id"]
@@ -1089,8 +1111,7 @@ def select_exercises_for_split(
                     # frequency. Negate so higher gap = lower sort value
                     # = front of list.
                     bal = -_balance_score(e)
-                    lvl = LEVEL_INDEX.get(e["level"], 1)
-                    lvl_bucket = 0 if abs(lvl - target_lvl) <= 1 else 1
+                    lvl_bucket = _level_bucket(e["level"], level)
                     return (avoid_bucket, bal, freq.get(eid, 0),
                             lvl_bucket, jitter[eid])
                 candidates = sorted(candidates, key=_sort_key)

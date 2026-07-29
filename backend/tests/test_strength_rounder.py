@@ -440,8 +440,15 @@ class TestPrescribeSlotAgeAndBodyweight:
         }
         cat = filter_catalog_for_equipment(CATALOG, equip)
 
+        # Sample a wide seed range. The exact seed at which any one move
+        # first surfaces depends on the full catalog composition (the RNG
+        # stream is shared across all slots in a plan), so a change to the
+        # available exercise pool shifts every move's first-appearance
+        # seed. A generous window keeps this asserting the real intent —
+        # intermediate core moves ARE reachable for a beginner — rather
+        # than pinning one move to an arbitrary sample size.
         core_ids: set[str] = set()
-        for seed in range(80):
+        for seed in range(200):
             rng = random.Random(f"wp18-{seed}")
             chosen, _, _ = select_exercises_for_split(cat, "legs", "beginner", rng)
             for e in chosen:
@@ -449,7 +456,7 @@ class TestPrescribeSlotAgeAndBodyweight:
                     core_ids.add(e["id"])
 
         # Deep variety: a beginner should reach well beyond a handful of
-        # crunches over 80 plans.
+        # crunches.
         assert len(core_ids) >= 15, f"only {len(core_ids)} distinct core moves"
         # The flagship intermediate rotation move must be reachable.
         assert "Russian_Twist" in core_ids

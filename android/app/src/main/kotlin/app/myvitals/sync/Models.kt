@@ -704,6 +704,9 @@ data class EquipmentPayload(
     @Json(name = "kettlebells_lb") val kettlebellsLb: List<Double> = emptyList(),
     @Json(name = "resistance_bands") val resistanceBands: Boolean = false,
     val bodyweight: Boolean = true,
+    // Spotter/partner available → unlocks partner-resistance exercises
+    // (towel triceps extension, manual hamstring). Off by default.
+    @Json(name = "training_partner") val trainingPartner: Boolean = false,
     @Json(name = "cardio_rower") val cardioRower: Boolean = false,
     @Json(name = "cardio_bike_indoor") val cardioBikeIndoor: Boolean = false,
     @Json(name = "cardio_mtb_outdoor") val cardioMtbOutdoor: Boolean = false,

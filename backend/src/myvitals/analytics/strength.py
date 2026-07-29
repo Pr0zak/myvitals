@@ -824,6 +824,19 @@ _LOW_BAR_REQUIRED_EXERCISES: frozenset[str] = frozenset({
     "Inverted_Row",
 })
 
+# Exercises that genuinely REQUIRE a second person to perform — a partner
+# applies the resistance or the movement is impossible solo. free-exercise-db
+# tags them equipment=['bodyweight'], so without this gate they'd be
+# prescribed to a solo home-gym user who literally can't do them. Dropped
+# by id when equipment.training_partner is false. Kept deliberately narrow:
+# exercises where a spotter is only *optional* (racking heavy DBs, holding
+# feet on sit-ups, or a "brace your feet instead" alternative) are doable
+# solo and stay in the catalog.
+_PARTNER_REQUIRED_EXERCISES: frozenset[str] = frozenset({
+    "Standing_Towel_Triceps_Extension",  # partner grips the towel to resist
+    "Prone_Manual_Hamstring",            # "you will need a partner" — manual resistance
+})
+
 # WP-18 — qualifier words stripped when deriving an exercise's "movement
 # family" (the core noun). Lets us tell that "Straight-Arm Dumbbell Pullover"
 # and "Bent-Arm Dumbbell Pullover" are the SAME movement so the finisher
@@ -871,6 +884,7 @@ def filter_catalog_for_equipment(
     )
     db_owned = equipment.get("dumbbells", {}).get("type", "none") != "none"
     bar_owned = bool(equipment.get("pull_up_bar"))
+    partner_owned = bool(equipment.get("training_partner"))
     # A waist-height bar can be rigged from any of these; a doorway
     # pull-up bar alone (bar_owned) is too high for inverted rows.
     low_bar_owned = bool(
@@ -883,6 +897,8 @@ def filter_catalog_for_equipment(
         if not bar_owned and ex["id"] in _BAR_REQUIRED_EXERCISES:
             return False
         if not low_bar_owned and ex["id"] in _LOW_BAR_REQUIRED_EXERCISES:
+            return False
+        if not partner_owned and ex["id"] in _PARTNER_REQUIRED_EXERCISES:
             return False
         for tag in ex["equipment"]:
             if tag == "bodyweight":

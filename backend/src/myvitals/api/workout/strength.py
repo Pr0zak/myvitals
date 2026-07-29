@@ -187,6 +187,11 @@ class EquipmentPayload(BaseModel):
     kettlebells_lb: list[float] = []
     resistance_bands: bool = False
     bodyweight: bool = True
+    # Whether a training partner / spotter is available. Default false —
+    # a solo home-gym user can't do partner-resistance moves (e.g. towel
+    # triceps extension, manual hamstring), so those are filtered out of
+    # generated plans unless this is on. See _PARTNER_REQUIRED_EXERCISES.
+    training_partner: bool = False
     # Cardio equipment hints. Used by build_cardio_plan() to suggest a
     # specific modality on cardio days (rower indoors, MTB outdoors).
     # The actual data syncs separately — Concept2 ERG → /activities for

@@ -274,6 +274,18 @@ fun StrengthEquipmentScreen(
                     mutate { it.copy(pullUpBar = on) }
                 }
 
+                EqSection("Assistance", muted)
+                SwitchRow("Training partner / spotter", eq.trainingPartner, neon) { on ->
+                    mutate { it.copy(trainingPartner = on) }
+                }
+                Text(
+                    "Off by default. When off, exercises that need a second " +
+                        "person to apply resistance (e.g. towel triceps extension, " +
+                        "manual hamstring) are left out of generated workouts.",
+                    color = muted, fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
+                )
+
                 EqSection("Cardio gear", muted)
                 SwitchRow("Rower (Concept2)", eq.cardioRower, neon) { on ->
                     mutate { it.copy(cardioRower = on) }

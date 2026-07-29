@@ -94,6 +94,29 @@ class TestFilterCatalog:
         assert "Pullups" in after_set, "Pullups missing when bar present"
         assert len(after_set) > len(before_set), "bar should strictly expand the catalog"
 
+    def test_partner_required_exercises_gated_on_training_partner(
+        self, user_equipment,
+    ):
+        """Exercises that need a second person (partner applies the
+        resistance) must be dropped for a solo user and unlocked only when
+        training_partner is on — mirrors the pull-up-bar gate."""
+        from myvitals.analytics.strength import _PARTNER_REQUIRED_EXERCISES
+        catalog_ids = {e["id"] for e in CATALOG}
+        partner_in_catalog = _PARTNER_REQUIRED_EXERCISES & catalog_ids
+        assert partner_in_catalog, "expected partner exercises in the catalog"
+
+        # Default (fixture has no training_partner key) → dropped.
+        solo = {e["id"] for e in filter_catalog_for_equipment(CATALOG, user_equipment)}
+        assert not (partner_in_catalog & solo), "partner move leaked to a solo user"
+
+        # Turning the toggle on unlocks exactly the partner set.
+        with_partner = {**user_equipment, "training_partner": True}
+        paired = {e["id"] for e in filter_catalog_for_equipment(CATALOG, with_partner)}
+        assert partner_in_catalog <= paired, "training_partner should unlock them"
+        assert (paired - solo) == partner_in_catalog, (
+            "training_partner should unlock ONLY the partner exercises"
+        )
+
     def test_inverted_row_needs_a_low_bar(self, user_equipment):
         """Inverted_Row is tagged equipment=['bodyweight'] but needs a
         waist-height bar (rack / Smith / rings) — it must NOT leak into a

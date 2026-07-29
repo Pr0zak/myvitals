@@ -152,6 +152,7 @@ export interface StrengthEquipment {
   kettlebells_lb: number[];
   resistance_bands: boolean;
   bodyweight: boolean;
+  training_partner?: boolean;  // spotter/partner available → unlocks partner-resistance moves
   cardio_rower?: boolean;
   cardio_bike_indoor?: boolean;
   cardio_mtb_outdoor?: boolean;

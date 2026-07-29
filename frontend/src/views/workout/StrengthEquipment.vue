@@ -32,7 +32,7 @@ function defaultEquip(): StrengthEquipment {
     wrist_weights_lb: [],
     bench: { flat: false, incline: false, decline: false },
     barbell: false, barbell_plates_lb: [],
-    squat_rack: false, pull_up_bar: false,
+    squat_rack: false, pull_up_bar: false, training_partner: false,
     cable_stack: false, cable_increment_lb: null,
     kettlebells_lb: [],
     resistance_bands: false,
@@ -224,6 +224,7 @@ const ownedSummary = computed(() => {
   if (e.cable_stack) parts.push("cable");
   if (e.kettlebells_lb.length) parts.push(`kb ${e.kettlebells_lb.join("/")} lb`);
   if (e.resistance_bands) parts.push("bands");
+  if (e.training_partner) parts.push("partner");
   return parts.join(" · ") || "(nothing yet)";
 });
 
@@ -322,7 +323,13 @@ onMounted(() => { equip.value = defaultEquip(); load(); });
         <label><input type="checkbox" v-model="equip.barbell"/> Barbell + plates</label>
         <label><input type="checkbox" v-model="equip.squat_rack"/> Squat rack</label>
         <label><input type="checkbox" v-model="equip.cable_stack"/> Cable stack / lat pulldown</label>
+        <label><input type="checkbox" v-model="equip.training_partner"/> Training partner / spotter</label>
       </div>
+      <p class="hint" style="margin: 0.1rem 0 0;">
+        Off by default. When off, exercises that need a second person to
+        apply resistance (e.g. towel triceps extension, manual hamstring)
+        are left out of generated workouts.
+      </p>
 
       <h3 class="sub">Cardio modalities</h3>
       <p class="hint">

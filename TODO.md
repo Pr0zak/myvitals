@@ -1,9 +1,10 @@
 # myvitals — Pending Work
 
-Snapshot by session-close on **2026-07-22** after shipping **v0.7.321**
-(previous snapshot v0.7.318, 2026-07-14). This session was entirely
-Strava-sync work — all of it shipped, so no new *active* tasks; two
-researched-but-deferred Strava options are recorded in Backlog.
+Snapshot by session-close on **2026-07-28** after shipping **v0.7.342**
+(previous snapshot v0.7.321, 2026-07-22). This session shipped the entire
+13-task **#ENHANCE** strength backlog (v0.7.322→342) — all deployed +
+verified. One low-severity follow-up (`PROG-STATE-1`) is deferred pending
+a product decision; see Active below.
 
 Numeric task IDs are session-scoped. Use **mnemonics** (e.g. `FITBIT-2`)
 as the durable identifier. At the start of a new session, ask Claude to
@@ -135,46 +136,37 @@ flags them phone-only); Coach tab intentionally phone-removed (v0.7.309).
 
 ---
 
-## #ENHANCE — strength/workout ideas from openGym + exercises-dataset (research 2026-07-25)
+## #ENHANCE — strength/workout backlog ✅ ALL SHIPPED (v0.7.322→342)
 
-Researched [openGym](https://github.com/DuarteSantos8/openGym) (self-hosted
-tracker, **AGPL v3**) + [exercises-dataset](https://github.com/hasaneyldrm/exercises-dataset)
-(1,324 exercises, **MIT metadata / "with-permission" media**) + fitness-UI
-patterns, deduped against a full codebase audit. Ranked by value ÷ effort.
+The full 13-task #ENHANCE backlog (researched 2026-07-25 from openGym +
+exercises-dataset) is **shipped, deployed to CT 104, and verified** on both
+surfaces. Durable design notes: memory `myvitals-strength-enhance-backlog`.
 
-**Three overriding licensing rules (public/Unlicense repo):**
-1. openGym is **AGPL** → reimplement algorithms/ideas from scratch (onerm,
-   import-csv, progression, muscle-map SVG); **never copy its code** or its
-   exercise GIFs.
-2. exercises-dataset **splits**: its MIT text/metadata is commit-safe (CAT-1),
-   but ALL Gym-Visual GIFs/thumbnails are "with permission" only — **never
-   committable**, would need a purchased license + git-ignored self-hosting.
-   This blocks an animated-GIF overlay → ANIM-1 uses bundled public-domain JPGs.
-3. MMAP-1's body SVG must be permissively-licensed (MIT body-highlighter /
-   vue-human-muscle-anatomy, or public-domain), not openGym's AGPL SVG.
+| Mnemonic | Task | Shipped |
+|---|---|---|
+| e1RM-1 | e1RM engine + per-exercise progress curve | ✅ |
+| PR-1 | Strength PR detection: set-log badge + Records card | ✅ |
+| LOAD-1 | "How to load it" micro-loader combo | ✅ |
+| LOG-1 | Previous-performance ghost prefill | ✅ |
+| MMAP-1 | Anatomical muscle-map shaded by volume | ✅ |
+| IMPORT-1 | Strong/Hevy/FitNotes/AppleHealth importers | ✅ |
+| ANIM-1 | Pseudo-animated demo (start/end JPG crossfade) | ✅ |
+| SETTYPE-1 | Set-type tags + volume exclusion | ✅ |
+| VOLT-1 | Weekly-volume-over-time (mesocycle) chart | ✅ |
+| CAT-1 | Metadata-only catalog merge (MIT dataset) | ✅ |
+| BODY-1 | Body circumference measurements + trends | ✅ v0.7.339 |
+| PROG-1 | Opt-in program mode (Greyskull/linear/double) | ✅ v0.7.340 |
+| PDF-1 | Print/PDF export of today's workout | ✅ v0.7.341 |
 
-| Mnemonic | Task | Val/Eff | Parity | Key code pointer |
-|---|---|---|---|---|
-| **e1RM-1** | e1RM engine + per-exercise progress curve (**keystone**) | high/M | both | `analytics/strength.py` helper by round_weight:339; new `/exercises/{id}/history` |
-| **PR-1** | Strength PR detection: live set-log badge + Records card | high/M | both | `api/workout/strength.py:1053` POST /sets → is_pr; reuse e1RM-1 |
-| **LOAD-1** | "How to load it" micro-loader combo under each weight | med/S | both | `round_weight` strength.py:308-380 (return components) |
-| **LOG-1** | Previous-performance ghost prefill in set logger | med/S | both | `get_exercise_stats` strength.py:427-449 (per-set last actuals) |
-| **MMAP-1** | Anatomical muscle-map shaded by volume | high/L | both | `weekly_muscle_volume` strength.py:1260-1345; /muscle-volume:1813 |
-| **IMPORT-1** | Strong/Hevy/FitNotes/AppleHealth strength importers | med/M | web | mirror `integrations/imports.py` + Settings upload |
-| **ANIM-1** | Pseudo-animated demo (start/end JPG crossfade) | med/S | both | `/exercises/img/<slug>/{0,1}.jpg`; StrengthToday.vue:417 |
-| **SETTYPE-1** | Set-type tags (warmup/working/drop) + volume exclusion | med/M | both | migration off 0042; filter weekly_muscle_volume:1278 |
-| **VOLT-1** | Weekly-volume-over-time (mesocycle) trend chart | med/M | both | bucket weekly_muscle_volume:1278 by ISO week |
-| **CAT-1** | Metadata-only catalog merge from MIT dataset (no media) | med/M | backend | catalog load strength.py:37-49; derive movement_pattern/is_compound/level |
-| **BODY-1** | Body circumference measurements + trends | med/M | both | `BodyMetric` db/models.py:61-66; Weight.vue |
-| **PROG-1** | Opt-in program mode: Greyskull LP / linear / double-prog | med/L | both | progress_from_rating strength.py:446; explain :1487 |
-| **PDF-1** | Print/PDF export of today's/this-week's workout | low/S | web | client-side print CSS in StrengthToday.vue |
+Licensing rules that shaped the work (still binding for follow-ons):
+openGym is **AGPL** → algorithms reimplemented from scratch, never copied;
+exercises-dataset GIFs are "with permission" only → **never committable**
+(ANIM-1 used bundled public-domain JPGs); MMAP-1's body SVG is permissive.
 
-**Sequencing:** e1RM-1 first (PR-1, relative-strength, richer AI payloads
-build on it). SETTYPE-1 should land before/with PR-1 + MMAP-1 (both consume
-working-set counts). Full what/why for each is in the session task tracker
-(TaskCreate #1-13, 2026-07-25) and workflow `wf_e5884c08-d8b`.
+Post-ship fixes (v0.7.342) from the full adversarial review, plus the one
+**deferred** item `PROG-STATE-1` (see Active above).
 
-**Deferred follow-ons** (below the cut, mostly depend on the above): muscle
+**Deferred follow-ons** (not part of the 13; still open backlog): muscle
 *recovery/freshness* body map (reuse MMAP-1 SVG + recovery_score); post-workout
 session-summary card (needs PR-1 + e1RM-1); relative-strength e1RM/bodyweight
 trend (needs e1RM-1 + BODY-1); consistency-streak / weekly-target ring;
@@ -189,7 +181,7 @@ i18n-UI (single-user self-host, irrelevant).
 
 ---
 
-## Resolved this session (v0.7.319 → v0.7.321, 2026-07-22)
+## Resolved — Strava sync session (v0.7.319 → v0.7.321, 2026-07-22)
 
 - **STRAVA-SILENT-401** — a dead cookie session was reporting a clean
   0-ride sync (`error:null`, green status) for ~6 weeks. Now raises

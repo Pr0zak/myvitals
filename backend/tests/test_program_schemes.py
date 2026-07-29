@@ -82,6 +82,18 @@ class TestLinearAdvance:
         assert s["current_weight_lb"] == 40.0
         assert s["consecutive_fails"] == 0
 
+    def test_empty_completion_does_not_burn_the_date_guard(self):
+        # An empty completion (no logged sets) must NOT stamp
+        # last_advanced_on — otherwise a later real completion for the same
+        # date is skipped and the lift stalls forever.
+        s = advance_program_lift(
+            _lift("linear", 40.0), min_working_reps=None, on_date="2026-07-28")
+        assert s.get("last_advanced_on") is None
+        # A subsequent real completion for the same date still advances.
+        s2 = advance_program_lift(s, min_working_reps=5, on_date="2026-07-28")
+        assert s2["current_weight_lb"] == 45.0
+        assert s2["last_advanced_on"] == "2026-07-28"
+
 
 class TestGreyskullAdvance:
     def test_amrap_clears_floor_adds_increment(self):

@@ -270,7 +270,13 @@ function printWorkout() {
   const w = workout.value;
   if (!w || !w.exercises.length) return;
   const title = `${w.split_focus.charAt(0).toUpperCase()}${w.split_focus.slice(1).replace("_", " ")} day`;
-  const dateStr = new Date(w.date).toLocaleDateString(undefined, {
+  // Parse w.date ("YYYY-MM-DD") as a LOCAL date. `new Date("YYYY-MM-DD")`
+  // parses as UTC midnight, so west-of-UTC users would print the previous
+  // calendar day (and disagree with the phone export, which uses the raw
+  // string). Split + construct with local components to match the day the
+  // rest of the UI shows.
+  const [dy, dm, dd] = w.date.split("-").map(Number);
+  const dateStr = new Date(dy, dm - 1, dd).toLocaleDateString(undefined, {
     weekday: "long", month: "long", day: "numeric", year: "numeric",
   });
   const rows = w.exercises.map((wex, i) => {
@@ -301,13 +307,22 @@ function printWorkout() {
     + `<tbody>${rows}</tbody></table>${notesBlock}`
     + `<p class="foot">myvitals · generated ${escapeHtml(new Date().toLocaleDateString())}</p>`
     + `</body></html>`;
-  const win = window.open("", "_blank", "width=800,height=900");
-  if (!win) return;  // popup blocked
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-  // Let the new document lay out before invoking the print dialog.
-  win.setTimeout(() => win.print(), 200);
+  // Render into a hidden iframe rather than a popup window — a new window
+  // can be silently blocked by the browser (leaving Print a no-op). An
+  // iframe has no popup blocker to defeat. srcdoc fires onload reliably.
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+  iframe.srcdoc = html;
+  iframe.onload = () => {
+    const cw = iframe.contentWindow;
+    if (!cw) { iframe.remove(); return; }
+    cw.focus();
+    cw.onafterprint = () => iframe.remove();
+    cw.print();
+    // Fallback cleanup if onafterprint never fires (some browsers).
+    window.setTimeout(() => { if (document.body.contains(iframe)) iframe.remove(); }, 60000);
+  };
+  document.body.appendChild(iframe);
 }
 
 // Time-based exercises (yoga / mobility) use a countdown timer instead

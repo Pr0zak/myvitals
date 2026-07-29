@@ -732,10 +732,15 @@ def advance_program_lift(
     just stamp the date so the generator's rep progression carries them.
     """
     out = dict(state)
+    if min_working_reps is None:
+        # Nothing logged this session — hold everything AND do NOT stamp
+        # last_advanced_on. Stamping here would burn the per-date
+        # idempotency guard: an empty completion (finished with no logged
+        # sets) would consume the date, and a later real completion for the
+        # same date would be skipped, stalling the lift forever.
+        return out
     if on_date is not None:
         out["last_advanced_on"] = on_date
-    if min_working_reps is None:
-        return out  # nothing logged this session — hold everything
 
     scheme = state.get("scheme", "linear")
     w = state.get("current_weight_lb")
@@ -2260,17 +2265,12 @@ async def generate_plan(
                     chosen[idx] = pex
                     already.add(prog_id)
                     break
-
-        # Front the pinned program lifts (stable order) so the WP-17
-        # trim below can't silently drop one, and so the user's core
-        # program lifts lead the session. chosen_slots is permuted in
-        # lockstep to stay aligned. Only runs when program mode is on.
-        prog_idx = [i for i, c in enumerate(chosen) if c["id"] in program_lifts]
-        if prog_idx and len(prog_idx) < len(chosen):
-            prog_set = set(prog_idx)
-            order = prog_idx + [i for i in range(len(chosen)) if i not in prog_set]
-            chosen = [chosen[i] for i in order]
-            chosen_slots = [chosen_slots[i] for i in order]
+        # NB: substitution is IN PLACE (same index) so chosen_slots stays
+        # aligned and the positional slot_role of the surrounding non-
+        # program exercises is preserved. Pinned lifts are protected from
+        # the WP-17 trim below by a program-aware trim, NOT by reordering
+        # (an earlier "front the pinned lifts" reorder demoted real
+        # compounds to isolation slot_roles — reverted).
 
     if freq_advisory_note:
         notes.append(freq_advisory_note)
@@ -2321,8 +2321,26 @@ async def generate_plan(
     elif target_exercises is not None:
         target_count = target_exercises
     if target_count is not None and len(chosen) > target_count:
-        chosen = chosen[:target_count]
-        chosen_slots = chosen_slots[:target_count]
+        if program_lifts:
+            # PROG-1: never trim away a pinned program lift, wherever it
+            # sits. Keep ALL program lifts + fill the remaining budget with
+            # non-program exercises in their ORIGINAL order (no reorder →
+            # positional slot_role stays correct for the survivors). When
+            # program lifts alone exceed target_count, keep them all.
+            keep_nonprog = target_count - sum(
+                1 for c in chosen if c["id"] in program_lifts)
+            new_chosen: list[dict[str, Any]] = []
+            new_slots: list = []
+            np_kept = 0
+            for c, s in zip(chosen, chosen_slots):
+                if c["id"] in program_lifts:
+                    new_chosen.append(c); new_slots.append(s)
+                elif np_kept < keep_nonprog:
+                    new_chosen.append(c); new_slots.append(s); np_kept += 1
+            chosen, chosen_slots = new_chosen, new_slots
+        else:
+            chosen = chosen[:target_count]
+            chosen_slots = chosen_slots[:target_count]
         notes.append(
             f"Trimmed to {target_count} exercises per your preference."
         )

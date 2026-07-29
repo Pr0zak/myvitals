@@ -14,6 +14,18 @@ each item against the code and re-instantiate via TaskCreate.
 
 ## Active — actionable now
 
+### PROG-STATE-1 — program progression state can be reverted by a stale equipment PUT
+Source: v0.7.342 adversarial review (see memory `myvitals-prog1-known-issue`).
+`_advance_program_on_complete` writes progression state (current_weight_lb,
+consecutive_fails, last_advanced_on) into `user_equipment.payload`, which the
+config UIs round-trip and `put_equipment` overwrites wholesale. A prefs save
+from a payload loaded before a workout completion silently reverts the
+advance. Low severity (narrow window, single user, SWR reload). Fix needs a
+**product decision**: make progression bookkeeping server-authoritative in
+`put_equipment` (running-lift weight then becomes non-editable from the config
+screen — reset = remove+re-add, or add a "reset weight" action), OR move the
+state to a separate server-owned store. Deferred pending that call.
+
 ### JOURNAL-401 — phone Journal quick-log returns HTTP 401 (bug)
 Source: neon-QA memory. The journal router gates on `require_query`
 (`api/annotations.py:13` + legacy `/log` shim `:20`), but the phone

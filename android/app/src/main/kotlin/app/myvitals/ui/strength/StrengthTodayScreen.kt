@@ -30,6 +30,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MenuBook
@@ -526,6 +527,28 @@ fun StrengthTodayScreen(
                             customSheetOpen = true
                         },
                     )
+                    // PDF-1: share / export today's workout as text (Android
+                    // share sheet → notes, print apps, messaging, etc.). The
+                    // phone analog of web's "Print / Save PDF".
+                    workout?.takeIf { it.exercises.isNotEmpty() }?.let { w ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("Share workout") },
+                            leadingIcon = { Icon(Icons.Filled.Share, null,
+                                modifier = Modifier.size(16.dp)) },
+                            onClick = {
+                                headerMenuOpen = false
+                                val text = buildWorkoutShareText(w, catalog)
+                                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_SUBJECT,
+                                        "${w.splitFocus.replaceFirstChar { it.uppercase() }.replace('_', ' ')} day — ${w.date}")
+                                    putExtra(android.content.Intent.EXTRA_TEXT, text)
+                                }
+                                context.startActivity(
+                                    android.content.Intent.createChooser(send, "Share workout"))
+                            },
+                        )
+                    }
                     if (workout?.status == "planned") {
                         // Dropdown copy of Regenerate — same action as the
                         // header IconButton, kept for users who reach for
@@ -3747,3 +3770,31 @@ private fun ExerciseInfoDialog(
     )
 }
 
+
+// PDF-1: compose a plain-text summary of a workout for the Android share
+// sheet. Mirrors the web print summary (exercise, sets×reps, weight, and
+// program/load notes) so both surfaces export the same content.
+private fun buildWorkoutShareText(
+    w: StrengthWorkoutDetail,
+    catalog: Map<String, StrengthExerciseInfo>,
+): String {
+    fun fmtW(x: Double): String =
+        if (x == x.toLong().toDouble()) "${x.toLong()}" else "$x"
+    val split = w.splitFocus.replaceFirstChar { it.uppercase() }.replace('_', ' ')
+    val sb = StringBuilder()
+    sb.append("$split day — ${w.date}\n\n")
+    w.exercises.forEachIndexed { i, wex ->
+        val name = catalog[wex.exerciseId]?.name ?: wex.exerciseId.replace('_', ' ')
+        val rep = if (wex.targetRepsLow == wex.targetRepsHigh) "${wex.targetRepsLow}"
+                  else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
+        val unit = if (wex.isTimed) "s" else ""
+        val wt = wex.targetWeightLb?.let { " @ ${fmtW(it)} lb" } ?: ""
+        sb.append("${i + 1}. $name — ${wex.targetSets}×$rep$unit$wt")
+        val extra = listOfNotNull(wex.programScheme, wex.loadHint).joinToString(" · ")
+        if (extra.isNotBlank()) sb.append("  ($extra)")
+        sb.append("\n")
+    }
+    if (!w.notes.isNullOrBlank()) sb.append("\n${w.notes}")
+    sb.append("\n\n— myvitals")
+    return sb.toString()
+}

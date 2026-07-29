@@ -256,6 +256,60 @@ function exName(slug: string): string {
   return ex(slug)?.name ?? slug.replace(/_/g, " ");
 }
 
+// PDF-1: print / save-as-PDF today's workout. Renders a self-contained
+// document into a fresh window and prints THAT — avoids polluting the
+// app's global CSS with an @media print rule (which would otherwise blank
+// out printing on every other route). The browser's print dialog handles
+// the actual PDF export ("Save as PDF").
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string
+  ));
+}
+function printWorkout() {
+  const w = workout.value;
+  if (!w || !w.exercises.length) return;
+  const title = `${w.split_focus.charAt(0).toUpperCase()}${w.split_focus.slice(1).replace("_", " ")} day`;
+  const dateStr = new Date(w.date).toLocaleDateString(undefined, {
+    weekday: "long", month: "long", day: "numeric", year: "numeric",
+  });
+  const rows = w.exercises.map((wex, i) => {
+    const rep = wex.target_reps_low === wex.target_reps_high
+      ? `${wex.target_reps_low}`
+      : `${wex.target_reps_low}-${wex.target_reps_high}`;
+    const unit = wex.is_timed ? "s" : "";
+    const wt = wex.target_weight_lb ? `${wex.target_weight_lb} lb` : "—";
+    const notes = [wex.program_scheme, wex.load_hint].filter(Boolean).join(" · ");
+    return `<tr><td>${i + 1}</td><td>${escapeHtml(exName(wex.exercise_id))}</td>`
+      + `<td>${wex.target_sets} × ${rep}${unit}</td><td>${wt}</td>`
+      + `<td>${escapeHtml(notes)}</td><td class="log"></td></tr>`;
+  }).join("");
+  const notesBlock = w.notes ? `<p class="notes">${escapeHtml(w.notes)}</p>` : "";
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)} — ${escapeHtml(dateStr)}</title>`
+    + `<style>`
+    + `*{box-sizing:border-box} body{font-family:system-ui,-apple-system,sans-serif;color:#000;margin:1.4cm}`
+    + `h1{font-size:20px;margin:0 0 2px} .date{font-size:12px;color:#333;margin:0 0 14px}`
+    + `table{width:100%;border-collapse:collapse;font-size:12px}`
+    + `th,td{border:1px solid #999;padding:5px 7px;text-align:left;vertical-align:top}`
+    + `th{background:#eee;font-weight:600} td.log,th.log{width:22%}`
+    + `.notes{font-size:11px;color:#333;font-style:italic;margin:14px 0 0}`
+    + `.foot{font-size:10px;color:#888;margin:18px 0 0}`
+    + `@page{margin:1.4cm}`
+    + `</style></head><body>`
+    + `<h1>${escapeHtml(title)}</h1><p class="date">${escapeHtml(dateStr)}</p>`
+    + `<table><thead><tr><th>#</th><th>Exercise</th><th>Sets × Reps</th><th>Weight</th><th>Notes</th><th class="log">Logged</th></tr></thead>`
+    + `<tbody>${rows}</tbody></table>${notesBlock}`
+    + `<p class="foot">myvitals · generated ${escapeHtml(new Date().toLocaleDateString())}</p>`
+    + `</body></html>`;
+  const win = window.open("", "_blank", "width=800,height=900");
+  if (!win) return;  // popup blocked
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  // Let the new document lay out before invoking the print dialog.
+  win.setTimeout(() => win.print(), 200);
+}
+
 // Time-based exercises (yoga / mobility) use a countdown timer instead
 // of weight/reps inputs. Mobility entries declare it via the catalog
 // `is_timed` flag (rep-based mobility like Thread-the-Needle / Cat-Cow
@@ -909,6 +963,10 @@ useVisibilityRefresh(loadAll);
         </span>
       </div>
       <div class="head-actions">
+        <button v-if="workout && workout.exercises.length"
+                class="ghost"
+                title="Print this workout or save it as a PDF"
+                @click="printWorkout">Print</button>
         <button v-if="workout && workout.status === 'planned'"
                 class="ghost"
                 :disabled="busy === 'regen'"

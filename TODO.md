@@ -1,6 +1,7 @@
 # myvitals — Pending Work
 
-Snapshot by session-close on **2026-07-28** after shipping **v0.7.342**
+Snapshot updated **2026-08-01** after shipping **v0.7.347**; prior
+snapshot by session-close on **2026-07-28** after **v0.7.342**
 (previous snapshot v0.7.321, 2026-07-22). This session shipped the entire
 13-task **#ENHANCE** strength backlog (v0.7.322→342) — all deployed +
 verified. One low-severity follow-up (`PROG-STATE-1`) is deferred pending
@@ -26,23 +27,6 @@ advance. Low severity (narrow window, single user, SWR reload). Fix needs a
 `put_equipment` (running-lift weight then becomes non-editable from the config
 screen — reset = remove+re-add, or add a "reset weight" action), OR move the
 state to a separate server-owned store. Deferred pending that call.
-
-### JOURNAL-401 — phone Journal quick-log returns HTTP 401 (bug)
-Source: neon-QA memory. The journal router gates on `require_query`
-(`api/annotations.py:13` + legacy `/log` shim `:20`), but the phone
-authenticates with the ingest bearer token — the recurring
-`require_any` vs `require_query` gotcha. Fix: switch both routers to
-`require_any`, update the import on `:8`. Backend-only. Verify with a
-phone quick-log against the deployed CT.
-
-### RECOVERY-STALE-CLEANUP — delete the dead `recovery_stale` flag
-Source: TODO.md. The banner was removed in v0.7.268 but the backend
-still computes/ships the flag and both clients declare it as inert
-deserialize-and-discard fields. Remove from
-`api/workout/strength.py` (WorkoutOut field :589, `_workout_recovery_stale`
-:672-695, call site :744), `frontend/src/api/types.ts:241` +
-`StrengthToday.vue:923-925`, and `android sync/Models.kt:235` +
-`StrengthTodayScreen.kt:884-888`. Pure dead-code removal. Quick win.
 
 ### WEB-WORKOUT-PARITY — port the phone v0.7.312 active-workout redesign to web
 Source: neon memory. Phone got the compact one-tap set-table + Canvas
@@ -178,6 +162,20 @@ rest/hold + missed-workout notifications, workout calendar-heatmap (both surface
 supersets, timed-hold countdown, double-progression plateau logic, per-set 1-5
 rating (RPE-ish). Not proposed: openGym plan-file *sharing*, passkey/multi-profile/
 i18n-UI (single-user self-host, irrelevant).
+
+---
+
+## Resolved — v0.7.347 (2026-08-01)
+
+- **JOURNAL-401** — the journal router (`api/annotations.py`) and its
+  legacy `/log` shim gated on `require_query`, so the phone's Journal
+  quick-log (ingest token only) 401'd while the dashboard worked. Both
+  routers now use `require_any`. Backend-only.
+- **RECOVERY-STALE-CLEANUP** — the `recovery_stale` flag, dead since the
+  banner was removed in v0.7.268, is gone from `WorkoutOut`,
+  `_workout_recovery_stale`, its `_hydrate_workout` call site,
+  `frontend/src/api/types.ts`, `StrengthToday.vue`, `sync/Models.kt`, and
+  `StrengthTodayScreen.kt`. Pure dead-code removal, no behaviour change.
 
 ---
 

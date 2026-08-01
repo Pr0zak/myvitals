@@ -674,12 +674,6 @@ class WorkoutOut(BaseModel):
     # is paused; `total_paused_s` is the running sum of paused intervals.
     paused_at: datetime | None = None
     total_paused_s: int = 0
-    # True when the plan was generated before today's sleep data was
-    # available AND fresh sleep has since landed. Surface a banner +
-    # "Regenerate to refresh" prompt on the UI; the plan is still
-    # usable but its deload factor / starting weights ignored the
-    # last night's recovery.
-    recovery_stale: bool = False
     # FAST-18 — populated when the plan was generated against an
     # active fast. Shape: {active, current_hours, stage, modulation}.
     # Clients render an amber banner when modulation != "normal".
@@ -818,32 +812,6 @@ def _wex_to_out(
     )
 
 
-async def _workout_recovery_stale(
-    db: AsyncSession, w: models.StrengthWorkout,
-) -> bool:
-    """True when the plan was generated before today's sleep data was
-    available AND fresh sleep is now ingested. Lets the UI surface a
-    "Regenerate to refresh" banner so the user doesn't unknowingly
-    train against stale recovery context.
-
-    Only meaningful for strength plans — cardio + yoga plans don't
-    consume recovery_score / sleep_duration in their prescription
-    (build_cardio_plan / build_yoga_plan are static), so flagging
-    them as "stale" produces a permanent false-positive banner.
-
-    Conservative — never flips to true once the plan recorded a
-    sleep_h_used value (further-up-stream rollups can change but the
-    plan's view of recovery is what it built against)."""
-    if w.split_focus in ("cardio", "yoga", "rest"):
-        return False
-    if w.sleep_h_used is not None:
-        return False
-    summary = await db.get(models.DailySummary, w.date)
-    if summary and summary.sleep_duration_s:
-        return True
-    return False
-
-
 async def _hydrate_workout(
     db: AsyncSession, w: models.StrengthWorkout
 ) -> WorkoutOut:
@@ -959,7 +927,6 @@ async def _hydrate_workout(
         notes=w.notes,
         paused_at=w.paused_at,
         total_paused_s=w.total_paused_s or 0,
-        recovery_stale=await _workout_recovery_stale(db, w),
         # FAST-18 — fasting context is read live on every request, not
         # persisted on the workout row. The plan was generated against
         # the fast that was active at the time, so this reflects how

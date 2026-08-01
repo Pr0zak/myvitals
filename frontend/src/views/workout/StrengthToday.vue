@@ -1027,9 +1027,6 @@ useVisibilityRefresh(loadAll);
 
     <p v-if="workout?.notes" class="hint subtle">{{ workout.notes }}</p>
 
-    <!-- recovery_stale banner removed in v0.7.268 — see phone screen
-         comment for the rationale. Backend keeps the flag in case we
-         want to bring it back; clients ignore it. -->
     <!-- FAST-18 — fasted-training banner. Appears when the workout
          was generated against an active fast that crossed the 18h
          volume-modulation threshold. -->

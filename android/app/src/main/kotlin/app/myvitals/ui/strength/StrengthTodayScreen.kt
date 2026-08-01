@@ -904,11 +904,6 @@ fun StrengthTodayScreen(
                     )
                 }
             }
-            // recovery_stale banner was removed in v0.7.268. The user
-            // found it noisy — pop a regenerate prompt every time the
-            // plan was made before HC sync was a daily annoyance with
-            // marginal value. Backend still populates the flag in case
-            // we want to resurrect it; clients just ignore it.
             // FAST-18 — fasted-training banner. Amber. Appears when an
             // active fast crossed the 18h volume-modulation threshold
             // at plan-generation time. Re-read live on every load so

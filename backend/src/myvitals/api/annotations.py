@@ -5,19 +5,23 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import require_query
+from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
 from ..schemas import AnnotationCreate, AnnotationOut, AnnotationUpdate
 
-router = APIRouter(dependencies=[Depends(require_query)])
+# `require_any`, not `require_query` — the phone's Journal quick-log
+# writes here and only ever holds the ingest token. Gating on the query
+# token made every phone quick-log 401 while the dashboard worked fine
+# (the recurring require_any/require_query trap; see CLAUDE.md).
+router = APIRouter(dependencies=[Depends(require_any)])
 
 
 # Backward-compatibility shims: /log/* → /journal/* via 308 redirects.
 # Cached frontend bundles or any out-of-tree client still hitting /log
 # get redirected to the renamed endpoint instead of a 404. Remove after
 # one release once we're sure nothing's still calling /log.
-_legacy = APIRouter(dependencies=[Depends(require_query)])
+_legacy = APIRouter(dependencies=[Depends(require_any)])
 
 
 @_legacy.api_route("/log", methods=["GET", "POST"], include_in_schema=False)

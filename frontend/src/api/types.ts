@@ -268,7 +268,6 @@ export interface StrengthWorkoutDetail {
   notes: string | null;
   paused_at?: string | null;    // ISO datetime while status === "paused"
   total_paused_s?: number;      // accumulated paused seconds (WP-14)
-  recovery_stale?: boolean;
   fasting_context?: {
     active: boolean;
     current_hours: number;

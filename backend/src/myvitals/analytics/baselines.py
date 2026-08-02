@@ -20,13 +20,32 @@ def _night_window(day: date) -> tuple[datetime, datetime]:
 
 
 async def nightly_rhr(db: AsyncSession, day: date) -> float | None:
-    """Mean HR during the sleep window for the night ending on `day`."""
+    """Resting HR for the night ending on `day` — the lowest sustained HR
+    during the sleep window, matching the Fitbit/Garmin convention.
+
+    Implemented as the minimum of 5-minute bucket means. Taking the mean of
+    the whole window (the pre-v0.7.348 behaviour) is NOT a resting HR: it
+    folds in wake periods, sleep-onset, and REM spikes, and read 20-40 bpm
+    high — e.g. 72 against a true overnight minimum of 53. That number feeds
+    readiness_score / recovery_score and anything doing Karvonen zone math,
+    so the bias was systematic, not cosmetic.
+
+    Bucketing rather than a bare MIN() is deliberate: a single-sample floor
+    tracks optical-sensor dropouts. Five minutes is long enough to require
+    the low HR to be *sustained* and short enough to catch the true trough.
+    """
     start, end = _night_window(day)
-    result = await db.execute(
-        select(func.avg(models.HeartRate.bpm))
+    bucket = func.to_timestamp(
+        func.floor(func.extract("epoch", models.HeartRate.time) / 300.0) * 300.0
+    ).label("bucket")
+    buckets = (
+        select(func.avg(models.HeartRate.bpm).label("bpm"))
         .where(models.HeartRate.time >= start)
         .where(models.HeartRate.time <= end)
+        .group_by(bucket)
+        .subquery()
     )
+    result = await db.execute(select(func.min(buckets.c.bpm)))
     val = result.scalar()
     return float(val) if val is not None else None
 

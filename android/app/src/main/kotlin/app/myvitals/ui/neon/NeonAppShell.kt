@@ -149,7 +149,10 @@ fun NeonAppShell(
                 // which had no map button, sorted by status not recency, and
                 // pushed a SECOND full trails list on tap.)
                 composable(NeonRoutes.TRAILS) {
-                    app.myvitals.ui.trails.TrailsScreen(settings = settings)
+                    app.myvitals.ui.trails.TrailsScreen(
+                        settings = settings,
+                        onOpenTrailVisits = { id -> nav.navigate("trails/$id/visits") },
+                    )
                 }
                 composable(NeonRoutes.YOU) { YouScreen(settings, pad, open) }
 
@@ -219,6 +222,29 @@ fun NeonAppShell(
                         settings = settings,
                         onOpenActivity = { source, sourceId -> nav.navigate("activity/$source/$sourceId") },
                         onOpenStrengthDay = { date -> nav.navigate("workout/day/$date") },
+                        onOpenMap = { nav.navigate("activities/map") },
+                    )
+                }
+                composable("activities/map") {
+                    app.myvitals.ui.activities.ActivityMapScreen(
+                        settings = settings,
+                        onBack = { nav.popBackStack() },
+                        onOpenActivity = { source, sourceId ->
+                            nav.navigate("activity/$source/$sourceId")
+                        },
+                    )
+                }
+                composable(
+                    "trails/{trailId}/visits",
+                    arguments = listOf(navArgument("trailId") { type = NavType.LongType }),
+                ) { entry ->
+                    app.myvitals.ui.trails.TrailVisitsScreen(
+                        settings = settings,
+                        trailId = entry.arguments?.getLong("trailId") ?: 0L,
+                        onBack = { nav.popBackStack() },
+                        onOpenActivity = { source, sourceId ->
+                            nav.navigate("activity/$source/$sourceId")
+                        },
                     )
                 }
                 composable(

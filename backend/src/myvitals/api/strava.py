@@ -10,6 +10,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import polyline as _polyline_lib
+
+from ..analytics import geo
 from ..auth import require_any, require_query
 from ..db import models
 from ..db.session import get_session
@@ -298,6 +301,124 @@ async def activities_stats(
             "elevation": pct(total_elev, pelev),
             "kcal": pct(total_kcal, pkcal),
         },
+    )
+
+
+class MapTrackOut(BaseModel):
+    source: str
+    source_id: str
+    type: str
+    name: str | None
+    start_at: datetime
+    duration_s: int
+    distance_m: float | None
+    trail_id: int | None = None
+    trail_name: str | None = None
+    # RDP-simplified, NOT the stored full-fidelity track. Fetch the
+    # activity detail endpoint when you need the real thing.
+    polyline: str
+
+
+class ActivityMapOut(BaseModel):
+    tracks: list[MapTrackOut]
+    # [south, west, north, east] over every returned track, for an
+    # initial fitBounds. Null when nothing matched.
+    bounds: list[float] | None = None
+    returned: int
+    # Point counts before/after simplification — surfaced so the payload
+    # cost stays visible rather than silently ballooning.
+    source_points: int
+    simplified_points: int
+
+
+@router.get("/activities/map", response_model=ActivityMapOut,
+            dependencies=[Depends(require_any)])
+async def activities_map(
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    type: str | None = Query(None),
+    trail_id: int | None = Query(None),
+    limit: int = Query(1000, ge=1, le=5000),
+    epsilon: float = Query(geo.DEFAULT_EPSILON_DEG, ge=0.0, le=0.01),
+    max_points: int = Query(geo.DEFAULT_MAX_POINTS, ge=2, le=5000),
+    db: AsyncSession = Depends(get_session),
+) -> ActivityMapOut:
+    """Every GPS-tracked activity as simplified polylines, for an
+    all-activities overview map.
+
+    The stored tracks total ~3.4 MB across ~560 activities, which is not
+    something to hand a phone in one response. Each is simplified before
+    it goes out (see `analytics/geo.py`); at the default epsilon that is
+    roughly a 10x reduction with no visible change at overview zoom.
+
+    `require_any` — the phone reads this, and it only carries the ingest
+    token.
+    """
+    stmt = (
+        select(models.Activity)
+        .where(models.Activity.polyline.isnot(None))
+        .where(models.Activity.polyline != "")
+        .order_by(models.Activity.start_at.desc())
+        .limit(limit)
+    )
+    if since:
+        stmt = stmt.where(models.Activity.start_at >= since)
+    if until:
+        stmt = stmt.where(models.Activity.start_at <= until)
+    if type:
+        stmt = stmt.where(models.Activity.type == type)
+    if trail_id is not None:
+        stmt = stmt.where(models.Activity.trail_id == trail_id)
+    rows = (await db.execute(stmt)).scalars().all()
+
+    trail_names: dict[int, str] = {}
+    trail_ids = {a.trail_id for a in rows if a.trail_id is not None}
+    if trail_ids:
+        trail_names = {
+            t.id: t.name
+            for t in (await db.execute(
+                select(models.Trail).where(models.Trail.id.in_(trail_ids))
+            )).scalars().all()
+        }
+
+    tracks: list[MapTrackOut] = []
+    south = west = north = east = None
+    src_pts = simp_pts = 0
+    for a in rows:
+        encoded, n_src, n_simp = geo.simplify_encoded(
+            a.polyline, epsilon=epsilon, max_points=max_points,
+        )
+        # A track that won't decode is skipped rather than sent empty —
+        # an empty polyline renders as an invisible zero-length line and
+        # would drag the fitBounds toward [0,0].
+        if not encoded:
+            continue
+        src_pts += n_src
+        simp_pts += n_simp
+        pts = _polyline_lib.decode(encoded)
+        b = geo.bounds_of(pts)
+        if b is not None:
+            south = b[0] if south is None else min(south, b[0])
+            west = b[1] if west is None else min(west, b[1])
+            north = b[2] if north is None else max(north, b[2])
+            east = b[3] if east is None else max(east, b[3])
+        tracks.append(MapTrackOut(
+            source=a.source, source_id=a.source_id, type=a.type, name=a.name,
+            start_at=a.start_at, duration_s=a.duration_s,
+            distance_m=a.distance_m, trail_id=a.trail_id,
+            trail_name=trail_names.get(a.trail_id) if a.trail_id else None,
+            polyline=encoded,
+        ))
+
+    bounds = None if south is None else [south, west, north, east]
+    log.info(
+        "activities/map: %d tracks, %d → %d points (%.1fx)",
+        len(tracks), src_pts, simp_pts,
+        (src_pts / simp_pts) if simp_pts else 0.0,
+    )
+    return ActivityMapOut(
+        tracks=tracks, bounds=bounds, returned=len(tracks),
+        source_points=src_pts, simplified_points=simp_pts,
     )
 
 

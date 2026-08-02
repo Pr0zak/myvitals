@@ -116,3 +116,77 @@ def bounds_of(points: list[tuple[float, float]]) -> list[float] | None:
     lats = [p[0] for p in points]
     lons = [p[1] for p in points]
     return [min(lats), min(lons), max(lats), max(lons)]
+
+
+# Roughly 110 km — wide enough to hold everyday riding around one metro,
+# tight enough to exclude a holiday two states over.
+HOME_RADIUS_DEG = 1.0
+# Cell size for the no-home fallback. 1° keeps a metro area in one or two
+# cells; finer than this and a single city fragments across cells.
+CLUSTER_CELL_DEG = 1.0
+
+
+def primary_bounds(
+    tracks: list[list[tuple[float, float]]],
+    home: tuple[float, float] | None = None,
+) -> list[float] | None:
+    """Bounds of the cluster the user actually trains in.
+
+    Fitting every track means one holiday ride two states away zooms the
+    map out to the whole continent and the home cluster becomes a dot.
+    This returns the bounds worth opening on; the full extent is still
+    available separately so a client can offer "fit all".
+
+    With a home location, that's every track centred within
+    `HOME_RADIUS_DEG` of it. Without one, the centroids are gridded and
+    the densest cell (plus its 8 neighbours, so a metro straddling a cell
+    edge isn't cut in half) wins.
+
+    Returns None when `tracks` is empty; falls back to the full extent
+    when the filter would produce nothing.
+    """
+    centroids: list[tuple[float, float]] = []
+    for pts in tracks:
+        if not pts:
+            centroids.append((0.0, 0.0))
+            continue
+        centroids.append((
+            sum(p[0] for p in pts) / len(pts),
+            sum(p[1] for p in pts) / len(pts),
+        ))
+    if not centroids:
+        return None
+
+    keep: list[int]
+    if home is not None:
+        keep = [
+            i for i, c in enumerate(centroids)
+            if abs(c[0] - home[0]) <= HOME_RADIUS_DEG
+            and abs(c[1] - home[1]) <= HOME_RADIUS_DEG
+        ]
+    else:
+        counts: dict[tuple[int, int], int] = {}
+        for c in centroids:
+            cell = (
+                int(c[0] // CLUSTER_CELL_DEG), int(c[1] // CLUSTER_CELL_DEG),
+            )
+            counts[cell] = counts.get(cell, 0) + 1
+        if not counts:
+            return None
+        # max() over (count, cell) would tie-break on cell coordinates,
+        # which is arbitrary but at least deterministic across requests.
+        best = max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+        neighbours = {
+            (best[0] + dy, best[1] + dx)
+            for dy in (-1, 0, 1) for dx in (-1, 0, 1)
+        }
+        keep = [
+            i for i, c in enumerate(centroids)
+            if (int(c[0] // CLUSTER_CELL_DEG), int(c[1] // CLUSTER_CELL_DEG))
+            in neighbours
+        ]
+
+    pts = [p for i in keep for p in tracks[i]] if keep else []
+    if not pts:
+        pts = [p for t in tracks for p in t]
+    return bounds_of(pts)

@@ -1,6 +1,7 @@
 import polyline
 
 from myvitals.analytics.geo import (
+    primary_bounds,
     DEFAULT_MAX_POINTS,
     bounds_of,
     rdp,
@@ -70,3 +71,46 @@ def test_simplify_encoded_tolerates_garbage():
 def test_bounds_of():
     assert bounds_of([]) is None
     assert bounds_of([(1.0, 2.0), (3.0, -4.0)]) == [1.0, -4.0, 3.0, 2.0]
+
+
+# ── primary_bounds ────────────────────────────────────────────────────
+
+# Three rides around one metro plus one holiday ride far away — the case
+# that made the real map open zoomed out to the whole continent.
+LOCAL = [
+    [(39.10, -94.60), (39.12, -94.58)],
+    [(39.05, -94.65), (39.07, -94.63)],
+    [(39.15, -94.55), (39.17, -94.52)],
+]
+FARAWAY = [[(34.05, -118.24), (34.07, -118.22)]]
+
+
+def test_primary_bounds_excludes_the_outlier_with_home():
+    b = primary_bounds(LOCAL + FARAWAY, home=(39.1, -94.6))
+    assert b is not None
+    # Never reaches Los Angeles.
+    assert b[1] > -95.0
+    assert b[3] < -94.0
+
+
+def test_primary_bounds_excludes_the_outlier_without_home():
+    # Densest-cell fallback must reach the same conclusion unaided.
+    b = primary_bounds(LOCAL + FARAWAY)
+    assert b is not None
+    assert b[1] > -95.0
+    assert b[3] < -94.0
+
+
+def test_primary_bounds_falls_back_to_full_extent_when_home_is_remote():
+    # Home nowhere near any track: better to show everything than nothing.
+    b = primary_bounds(LOCAL, home=(-33.87, 151.21))
+    assert b == bounds_of([p for t in LOCAL for p in t])
+
+
+def test_primary_bounds_empty():
+    assert primary_bounds([]) is None
+
+
+def test_primary_bounds_single_track():
+    b = primary_bounds([LOCAL[0]])
+    assert b == bounds_of(LOCAL[0])

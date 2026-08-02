@@ -128,8 +128,11 @@ export interface MapTrack {
 
 export interface ActivityMap {
   tracks: MapTrack[];
-  /** [south, west, north, east]; null when nothing matched. */
+  /** [south, west, north, east] over every track — the "fit all" extent. */
   bounds: [number, number, number, number] | null;
+  /** Bounds of the cluster the user actually trains in. Open on this;
+   *  fitting `bounds` lets one holiday ride shrink home to a dot. */
+  primary_bounds: [number, number, number, number] | null;
   returned: number;
   source_points: number;
   simplified_points: number;

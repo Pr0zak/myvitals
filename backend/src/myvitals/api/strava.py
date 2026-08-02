@@ -321,9 +321,14 @@ class MapTrackOut(BaseModel):
 
 class ActivityMapOut(BaseModel):
     tracks: list[MapTrackOut]
-    # [south, west, north, east] over every returned track, for an
-    # initial fitBounds. Null when nothing matched.
+    # [south, west, north, east] over every returned track — the "fit all"
+    # extent. Null when nothing matched.
     bounds: list[float] | None = None
+    # Bounds of the cluster the user actually trains in. Clients should
+    # OPEN on this; fitting `bounds` means one holiday ride two states
+    # away shrinks the home cluster to a dot. Computed server-side so web
+    # and phone open on the same view.
+    primary_bounds: list[float] | None = None
     returned: int
     # Point counts before/after simplification — surfaced so the payload
     # cost stays visible rather than silently ballooning.
@@ -389,6 +394,7 @@ async def activities_map(
     )
 
     tracks: list[MapTrackOut] = []
+    decoded_tracks: list[list[tuple[float, float]]] = []
     south = west = north = east = None
     src_pts = simp_pts = 0
     filled = 0
@@ -413,6 +419,7 @@ async def activities_map(
         if not encoded:
             continue
         pts = _polyline_lib.decode(encoded)
+        decoded_tracks.append(pts)
         src_pts += n_src
         simp_pts += len(pts)
         b = geo.bounds_of(pts)
@@ -436,8 +443,18 @@ async def activities_map(
         len(tracks), simp_pts, filled, src_pts,
     )
     bounds = None if south is None else [south, west, north, east]
+
+    prof = await db.get(models.UserProfile, 1)
+    home = (
+        (prof.home_latitude, prof.home_longitude)
+        if prof and prof.home_latitude is not None
+        and prof.home_longitude is not None
+        else None
+    )
     return ActivityMapOut(
-        tracks=tracks, bounds=bounds, returned=len(tracks),
+        tracks=tracks, bounds=bounds,
+        primary_bounds=geo.primary_bounds(decoded_tracks, home=home),
+        returned=len(tracks),
         source_points=src_pts, simplified_points=simp_pts,
     )
 

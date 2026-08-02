@@ -43,6 +43,15 @@ const lines: L.Polyline[] = [];
 // View mode: "lines" colors by activity type; "heatmap" stacks low-opacity
 // polylines in a single warm tone so overlapping routes glow brighter.
 const viewMode = ref<"lines" | "heatmap">("lines");
+// false = open on the home cluster the server identified, true = fit every
+// track. Without this one holiday ride zooms the map out to a continent.
+const fitAll = ref(false);
+const mapBounds = ref<[number, number, number, number] | null>(null);
+const primaryBounds = ref<[number, number, number, number] | null>(null);
+const canFitAll = computed(() =>
+  mapBounds.value != null && primaryBounds.value != null &&
+  JSON.stringify(mapBounds.value) !== JSON.stringify(primaryBounds.value),
+);
 
 // Trail layer state
 const trailMarkers = new Map<number, L.CircleMarker>();
@@ -80,6 +89,8 @@ async function load() {
     activities.value = mapResp.tracks.filter(
       (a) => new Date(a.start_at).getTime() <= untilMs,
     );
+    mapBounds.value = mapResp.bounds;
+    primaryBounds.value = mapResp.primary_bounds;
     trails.value = (tr as any).trails ?? [];
     if (prof) {
       homeLat.value = prof.home_latitude;
@@ -158,9 +169,17 @@ function renderMap() {
   //   - All-time + home set → center on home at zoom 12 (don't fit-to-all).
   //   - All-time + no home → centroid of all polylines.
   //   - Year navigation → always fit-to-bounds for the focused window.
-  if (timeRange.value === "all" && initialAllTimeRender) {
+  if (fitAll.value && mapBounds.value) {
+    const [s0, w0, n0, e0] = mapBounds.value;
+    map.fitBounds(L.latLngBounds([s0, w0], [n0, e0]), { padding: [30, 30] });
+  } else if (timeRange.value === "all" && initialAllTimeRender) {
     initialAllTimeRender = false;
-    if (homeLat.value != null && homeLng.value != null) {
+    // Prefer the server's cluster so the phone opens on the same view;
+    // fall back to home / centroid only when it isn't available.
+    if (primaryBounds.value) {
+      const [s0, w0, n0, e0] = primaryBounds.value;
+      map.fitBounds(L.latLngBounds([s0, w0], [n0, e0]), { padding: [30, 30] });
+    } else if (homeLat.value != null && homeLng.value != null) {
       map.setView([homeLat.value, homeLng.value], 12);
     } else if (allBounds.length > 0) {
       const c = L.latLngBounds(allBounds).getCenter();
@@ -268,6 +287,7 @@ watch(activities, () => setTimeout(renderMap, 50));
 watch(effectiveTheme, () => setTimeout(renderMap, 50));
 watch(yearOffset, load);
 watch(viewMode, () => setTimeout(renderMap, 50));
+watch(fitAll, () => setTimeout(renderMap, 50));
 watch(trails, () => applyTrailLayer());
 watch(hiddenTrailPins, () => applyTrailLayer(), { deep: true });
 
@@ -318,6 +338,9 @@ watch(timeRange, load);
       </div>
     </header>
     <div class="map-toolbar">
+      <button v-if="canFitAll" class="toggle" :class="{ on: fitAll }"
+              :title="fitAll ? 'Back to your home area' : 'Zoom out to every activity'"
+              @click="fitAll = !fitAll">{{ fitAll ? 'Home area' : 'Fit all' }}</button>
       <button class="toggle" :class="{ on: viewMode === 'lines' }"
               @click="viewMode = 'lines'">Lines (by type)</button>
       <button class="toggle" :class="{ on: viewMode === 'heatmap' }"

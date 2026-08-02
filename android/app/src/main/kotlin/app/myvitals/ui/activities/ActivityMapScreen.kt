@@ -22,7 +22,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.CenterFocusStrong
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.ZoomOutMap
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -112,6 +114,10 @@ fun ActivityMapScreen(
 
     var tracks by remember { mutableStateOf<List<MapTrack>>(emptyList()) }
     var bounds by remember { mutableStateOf<List<Double>?>(null) }
+    var primaryBounds by remember { mutableStateOf<List<Double>?>(null) }
+    // false = open on the home cluster, true = fit every track. Server
+    // decides what "home cluster" means so web and phone agree.
+    var fitAll by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -134,6 +140,7 @@ fun ActivityMapScreen(
             val resp = withContext(Dispatchers.IO) { api.activitiesMap() }
             tracks = resp.tracks
             bounds = resp.bounds
+            primaryBounds = resp.primaryBounds
             error = null
             JsonCache.write(context, CACHE_KEY, ActivityMapResponse::class.java, resp)
             Timber.i("activity map: ${resp.returned} tracks")
@@ -153,6 +160,7 @@ fun ActivityMapScreen(
         )?.value?.let {
             tracks = it.tracks
             bounds = it.bounds
+            primaryBounds = it.primaryBounds
             loading = false
         }
         fetch()
@@ -174,8 +182,9 @@ fun ActivityMapScreen(
 
     val leafletCss = remember { LeafletAssets.css(context) }
     val leafletJs = remember { LeafletAssets.js(context) }
-    val html = remember(shown, bounds, neon) {
-        buildMapHtml(shown, bounds, neon, leafletCss, leafletJs)
+    val fitTo = if (fitAll) bounds else (primaryBounds ?: bounds)
+    val html = remember(shown, fitTo, neon) {
+        buildMapHtml(shown, fitTo, neon, leafletCss, leafletJs)
     }
 
     Column(Modifier.fillMaxSize().background(bg)) {
@@ -190,9 +199,22 @@ fun ActivityMapScreen(
                 Text("Activity map", color = fg, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                 Text(
                     if (loading && tracks.isEmpty()) "Loading…"
-                    else "${shown.size} track${if (shown.size == 1) "" else "s"}",
+                    else "${shown.size} track${if (shown.size == 1) "" else "s"}" +
+                        if (fitAll) " · all" else "",
                     color = dim, fontSize = 12.sp,
                 )
+            }
+            // Only worth offering when the two extents actually differ —
+            // with no far-flung activities they're the same view.
+            if (primaryBounds != null && bounds != null && primaryBounds != bounds) {
+                IconButton(onClick = { fitAll = !fitAll }) {
+                    Icon(
+                        if (fitAll) Icons.Outlined.CenterFocusStrong
+                        else Icons.Outlined.ZoomOutMap,
+                        contentDescription = if (fitAll) "Back to home area" else "Fit all activities",
+                        tint = if (fitAll) (if (neon) NeonMV.Cyan else Color(0xFF3B82F6)) else fg,
+                    )
+                }
             }
             IconButton(
                 onClick = {

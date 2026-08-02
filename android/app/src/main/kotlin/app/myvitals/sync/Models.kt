@@ -793,8 +793,11 @@ data class MapTrack(
 @JsonClass(generateAdapter = true)
 data class ActivityMapResponse(
     val tracks: List<MapTrack> = emptyList(),
-    /** [south, west, north, east]; null when nothing matched. */
+    /** [south, west, north, east] over every track — the "fit all" extent. */
     val bounds: List<Double>? = null,
+    /** Bounds of the cluster the user actually trains in. Open on this;
+     *  fitting [bounds] lets one holiday ride shrink home to a dot. */
+    @Json(name = "primary_bounds") val primaryBounds: List<Double>? = null,
     val returned: Int = 0,
 )
 

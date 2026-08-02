@@ -111,6 +111,30 @@ export interface StravaAppConfigStatus {
   callback_url: string | null;
 }
 
+/** One GPS track from `/activities/map` — simplified, map-rendering only. */
+export interface MapTrack {
+  source: string;
+  source_id: string;
+  type: string;
+  name: string | null;
+  start_at: string;
+  duration_s: number;
+  distance_m: number | null;
+  trail_id: number | null;
+  trail_name: string | null;
+  /** RDP-simplified; use `activity()` when you need the full track. */
+  polyline: string;
+}
+
+export interface ActivityMap {
+  tracks: MapTrack[];
+  /** [south, west, north, east]; null when nothing matched. */
+  bounds: [number, number, number, number] | null;
+  returned: number;
+  source_points: number;
+  simplified_points: number;
+}
+
 export interface Activity {
   source: string;
   source_id: string;

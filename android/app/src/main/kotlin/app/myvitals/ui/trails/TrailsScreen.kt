@@ -31,8 +31,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Map
@@ -95,7 +97,10 @@ import java.time.Instant
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TrailsScreen(settings: SettingsRepository) {
+fun TrailsScreen(
+    settings: SettingsRepository,
+    onOpenTrailVisits: (trailId: Long) -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val neon = settings.neonShellEnabled
@@ -545,7 +550,8 @@ fun TrailsScreen(settings: SettingsRepository) {
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
-                            onLongPress = { openEdit(t) })
+                            onLongPress = { openEdit(t) },
+                            onOpenTrailVisits = onOpenTrailVisits)
                     }
                 }
                 if (grouped.delayed.isNotEmpty()) {
@@ -555,7 +561,8 @@ fun TrailsScreen(settings: SettingsRepository) {
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
-                            onLongPress = { openEdit(t) })
+                            onLongPress = { openEdit(t) },
+                            onOpenTrailVisits = onOpenTrailVisits)
                     }
                 }
                 if (grouped.closed.isNotEmpty()) {
@@ -565,7 +572,8 @@ fun TrailsScreen(settings: SettingsRepository) {
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
-                            onLongPress = { openEdit(t) })
+                            onLongPress = { openEdit(t) },
+                            onOpenTrailVisits = onOpenTrailVisits)
                     }
                 }
                 if (grouped.other.isNotEmpty()) {
@@ -575,7 +583,8 @@ fun TrailsScreen(settings: SettingsRepository) {
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
-                            onLongPress = { openEdit(t) })
+                            onLongPress = { openEdit(t) },
+                            onOpenTrailVisits = onOpenTrailVisits)
                     }
                 }
 
@@ -887,6 +896,7 @@ private fun TrailRow(
     onTap: () -> Unit,
     onSubscribeToggle: () -> Unit,
     onLongPress: () -> Unit,
+    onOpenTrailVisits: (trailId: Long) -> Unit = {},
 ) {
     val context = LocalContext.current
     val ink = if (neon) NeonMV.Ink else MV.OnSurface
@@ -958,21 +968,38 @@ private fun TrailRow(
                         if (t.visitsTotal > 0) {
                             val visitColor = visitAgeColor(t.lastVisitAt, nowMs, neon)
                             Text("  ·  ", color = dim, fontSize = 11.sp)
-                            Icon(
-                                Icons.AutoMirrored.Outlined.DirectionsBike,
-                                contentDescription = "Visits",
-                                tint = visitColor,
-                                modifier = Modifier.size(12.dp),
-                            )
-                            Text(
-                                " ${t.visitsTotal}",
-                                color = visitColor, fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                            )
-                            if (t.lastVisitAt != null) {
+                            // The whole visit cluster is the tap target for
+                            // the linked-activities list — the count alone is
+                            // too small to hit reliably.
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { onOpenTrailVisits(t.id) }
+                                    .padding(horizontal = 3.dp, vertical = 1.dp),
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.DirectionsBike,
+                                    contentDescription = "Show linked activities",
+                                    tint = visitColor,
+                                    modifier = Modifier.size(12.dp),
+                                )
                                 Text(
-                                    " · ${fmtAge(t.lastVisitAt, nowMs)}",
-                                    color = dim, fontSize = 10.sp,
+                                    " ${t.visitsTotal}",
+                                    color = visitColor, fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                if (t.lastVisitAt != null) {
+                                    Text(
+                                        " · ${fmtAge(t.lastVisitAt, nowMs)}",
+                                        color = dim, fontSize = 10.sp,
+                                    )
+                                }
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = visitColor,
+                                    modifier = Modifier.size(12.dp),
                                 )
                             }
                         }

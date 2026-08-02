@@ -5,7 +5,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import { api } from "@/api/client";
-import type { Activity } from "@/api/types";
+import type { MapTrack } from "@/api/types";
 import { effectiveTheme } from "@/theme";
 import { fmtDistance, distanceVal, distanceUnit } from "@/units";
 
@@ -17,7 +17,10 @@ const TYPE_COLOR: Record<string, string> = {
 };
 function colorFor(t: string) { return TYPE_COLOR[t.toLowerCase()] ?? "#94a3b8"; }
 
-const activities = ref<Activity[]>([]);
+// Tracks come from /activities/map — RDP-simplified server-side (~420 KB
+// vs the ~3.4 MB the full-fidelity polylines cost) and the same endpoint
+// the phone map uses, so the two surfaces can't disagree.
+const activities = ref<MapTrack[]>([]);
 const trails = ref<Awaited<ReturnType<typeof api.trails>>["trails"]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -69,12 +72,14 @@ async function load() {
       until.setFullYear(until.getFullYear() + yearOffset.value);
       untilMs = until.getTime();
     }
-    const [all, tr, prof] = await Promise.all([
-      api.activities({ since, limit: 2000 }),
+    const [mapResp, tr, prof] = await Promise.all([
+      api.activitiesMap({ since, limit: 2000 }),
       api.trails().catch(() => ({ trails: [] as any[] })),
       api.getProfile().catch(() => null),
     ]);
-    activities.value = all.filter((a) => new Date(a.start_at).getTime() <= untilMs);
+    activities.value = mapResp.tracks.filter(
+      (a) => new Date(a.start_at).getTime() <= untilMs,
+    );
     trails.value = (tr as any).trails ?? [];
     if (prof) {
       homeLat.value = prof.home_latitude;

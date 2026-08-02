@@ -350,6 +350,10 @@ class Activity(Base):
     kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
     suffer_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     polyline: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # RDP-simplified copy of `polyline`, for the all-activities map (0046).
+    # Derived + lazily backfilled — null means "not computed yet", never
+    # "no GPS". `polyline` stays the source of truth.
+    polyline_simple: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)), nullable=True)

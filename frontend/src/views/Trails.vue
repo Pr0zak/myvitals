@@ -492,13 +492,16 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
               <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
               <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
               <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
-              <span v-if="(t.visits_total ?? 0) > 0" class="visits"
+              <RouterLink v-if="(t.visits_total ?? 0) > 0" class="visits visits-link"
+                    :to="`/trails/${t.id}/visits`"
+                    title="Show the activities linked to this trail"
+                    @click.stop
                     :class="visitAgeClass(t.last_visit_at)">
                 · <Bike :size="11" class="bike-ic" /> {{ t.visits_total }} visit{{ t.visits_total === 1 ? '' : 's' }}
                 <span v-if="t.last_visit_at" class="last-visit">
                   · last {{ fmtAge(t.last_visit_at) }}
                 </span>
-              </span>
+              </RouterLink>
               <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
             </p>
             <TrailMap
@@ -587,13 +590,16 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
               <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
               <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
               <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
-              <span v-if="(t.visits_total ?? 0) > 0" class="visits"
+              <RouterLink v-if="(t.visits_total ?? 0) > 0" class="visits visits-link"
+                    :to="`/trails/${t.id}/visits`"
+                    title="Show the activities linked to this trail"
+                    @click.stop
                     :class="visitAgeClass(t.last_visit_at)">
                 · <Bike :size="11" class="bike-ic" /> {{ t.visits_total }} visit{{ t.visits_total === 1 ? '' : 's' }}
                 <span v-if="t.last_visit_at" class="last-visit">
                   · last {{ fmtAge(t.last_visit_at) }}
                 </span>
-              </span>
+              </RouterLink>
               <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
             </p>
             <TrailMap
@@ -756,6 +762,8 @@ header h1 { margin: 0; }
 .loc { color: var(--muted); }
 .loc.nopin { color: #f59e0b; }
 .visits { font-weight: 500; }
+.visits-link { text-decoration: none; cursor: pointer; }
+.visits-link:hover { text-decoration: underline; }
 .visits.age-fresh   { color: #22c55e; }   /* < 7 days */
 .visits.age-recent  { color: #84cc16; }   /* 7-30 days */
 .visits.age-medium  { color: #f59e0b; }   /* 30-90 days */

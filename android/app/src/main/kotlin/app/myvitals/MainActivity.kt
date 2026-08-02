@@ -80,9 +80,12 @@ private object Routes {
     const val WORKOUT_EQUIPMENT = "workout/equipment"
     const val WORKOUT_TRAINING_PREFS = "workout/training-prefs"
     const val ACTIVITIES = "activities"
+    const val ACTIVITY_MAP = "activities/map"
     const val ACTIVITY_DETAIL = "activity/{source}/{sourceId}"
     fun activityDetail(source: String, sourceId: String) = "activity/$source/$sourceId"
     const val TRAILS = "trails"
+    const val TRAIL_VISITS = "trails/{trailId}/visits"
+    fun trailVisits(trailId: Long) = "trails/$trailId/visits"
     const val SETTINGS = "settings"
 }
 
@@ -371,6 +374,16 @@ class MainActivity : ComponentActivity() {
                                 onOpenStrengthDay = { date ->
                                     nav.navigate(Routes.workoutDay(date))
                                 },
+                                onOpenMap = { nav.navigate(Routes.ACTIVITY_MAP) },
+                            )
+                        }
+                        composable(Routes.ACTIVITY_MAP) {
+                            app.myvitals.ui.activities.ActivityMapScreen(
+                                settings = settings,
+                                onBack = { nav.popBackStack() },
+                                onOpenActivity = { source, sourceId ->
+                                    nav.navigate(Routes.activityDetail(source, sourceId))
+                                },
                             )
                         }
                         composable(
@@ -392,7 +405,29 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable(Routes.TRAILS) {
-                            TrailsScreen(settings = settings)
+                            TrailsScreen(
+                                settings = settings,
+                                onOpenTrailVisits = { trailId ->
+                                    nav.navigate(Routes.trailVisits(trailId))
+                                },
+                            )
+                        }
+                        composable(
+                            Routes.TRAIL_VISITS,
+                            arguments = listOf(
+                                androidx.navigation.navArgument("trailId") {
+                                    type = androidx.navigation.NavType.LongType
+                                },
+                            ),
+                        ) { entry ->
+                            app.myvitals.ui.trails.TrailVisitsScreen(
+                                settings = settings,
+                                trailId = entry.arguments?.getLong("trailId") ?: 0L,
+                                onBack = { nav.popBackStack() },
+                                onOpenActivity = { source, sourceId ->
+                                    nav.navigate(Routes.activityDetail(source, sourceId))
+                                },
+                            )
                         }
                         composable(Routes.SETTINGS) {
                             SettingsScreen(

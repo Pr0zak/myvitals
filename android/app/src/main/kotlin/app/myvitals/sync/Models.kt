@@ -773,6 +773,54 @@ data class TrailOsmFetchAllResponse(
     @Json(name = "total_with_pins") val totalWithPins: Int = 0,
 )
 
+// ── All-activities map ────────────────────────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class MapTrack(
+    val source: String,
+    @Json(name = "source_id") val sourceId: String,
+    val type: String,
+    val name: String? = null,
+    @Json(name = "start_at") val startAt: String,
+    @Json(name = "duration_s") val durationS: Int = 0,
+    @Json(name = "distance_m") val distanceM: Double? = null,
+    @Json(name = "trail_id") val trailId: Long? = null,
+    @Json(name = "trail_name") val trailName: String? = null,
+    /** RDP-simplified — not the full-fidelity track. */
+    val polyline: String,
+)
+
+@JsonClass(generateAdapter = true)
+data class ActivityMapResponse(
+    val tracks: List<MapTrack> = emptyList(),
+    /** [south, west, north, east]; null when nothing matched. */
+    val bounds: List<Double>? = null,
+    val returned: Int = 0,
+)
+
+// ── Trail → linked activities ─────────────────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class TrailVisit(
+    val source: String,
+    @Json(name = "source_id") val sourceId: String,
+    val type: String,
+    val name: String? = null,
+    @Json(name = "start_at") val startAt: String,
+    @Json(name = "duration_s") val durationS: Int = 0,
+    @Json(name = "distance_m") val distanceM: Double? = null,
+    @Json(name = "avg_hr") val avgHr: Double? = null,
+    val kcal: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class TrailVisitsResponse(
+    @Json(name = "trail_id") val trailId: Long = 0,
+    val name: String? = null,
+    val count: Int = 0,
+    val visits: List<TrailVisit> = emptyList(),
+)
+
 @JsonClass(generateAdapter = true)
 data class TrailsResponse(
     val count: Int,

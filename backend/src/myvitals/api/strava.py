@@ -381,21 +381,40 @@ async def activities_map(
             )).scalars().all()
         }
 
+    # Use the cached simplification when the caller accepts the stored
+    # settings; custom epsilon / max_points always recompute and are never
+    # written back, so one exploratory request can't poison the cache.
+    use_cache = (
+        epsilon == geo.DEFAULT_EPSILON_DEG and max_points == geo.DEFAULT_MAX_POINTS
+    )
+
     tracks: list[MapTrackOut] = []
     south = west = north = east = None
     src_pts = simp_pts = 0
+    filled = 0
     for a in rows:
-        encoded, n_src, n_simp = geo.simplify_encoded(
-            a.polyline, epsilon=epsilon, max_points=max_points,
-        )
+        cached = a.polyline_simple if use_cache else None
+        if cached:
+            encoded, n_src = cached, 0
+        else:
+            encoded, n_src, _ = geo.simplify_encoded(
+                a.polyline, epsilon=epsilon, max_points=max_points,
+            )
+            if use_cache and encoded:
+                # Lazy backfill: pay the simplification cost once per
+                # activity, ever. A newly synced activity costs one
+                # track's worth on the next map load rather than a 15 s
+                # full rebuild.
+                a.polyline_simple = encoded
+                filled += 1
         # A track that won't decode is skipped rather than sent empty —
         # an empty polyline renders as an invisible zero-length line and
-        # would drag the fitBounds toward [0,0].
+        # would still drag fitBounds toward [0,0].
         if not encoded:
             continue
-        src_pts += n_src
-        simp_pts += n_simp
         pts = _polyline_lib.decode(encoded)
+        src_pts += n_src
+        simp_pts += len(pts)
         b = geo.bounds_of(pts)
         if b is not None:
             south = b[0] if south is None else min(south, b[0])
@@ -410,12 +429,13 @@ async def activities_map(
             polyline=encoded,
         ))
 
-    bounds = None if south is None else [south, west, north, east]
+    if filled:
+        await db.commit()
     log.info(
-        "activities/map: %d tracks, %d → %d points (%.1fx)",
-        len(tracks), src_pts, simp_pts,
-        (src_pts / simp_pts) if simp_pts else 0.0,
+        "activities/map: %d tracks, %d points (%d newly simplified from %d)",
+        len(tracks), simp_pts, filled, src_pts,
     )
+    bounds = None if south is None else [south, west, north, east]
     return ActivityMapOut(
         tracks=tracks, bounds=bounds, returned=len(tracks),
         source_points=src_pts, simplified_points=simp_pts,

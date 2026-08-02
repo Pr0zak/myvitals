@@ -580,6 +580,26 @@ export const api = {
     return data;
   },
 
+  /**
+   * GPS tracks for the all-activities map, RDP-simplified server-side.
+   * Prefer this over `activities()` for map rendering — the full-fidelity
+   * polylines are ~3.4 MB across the catalog, this is ~420 KB, and it is
+   * the same endpoint the phone map uses so the two can't disagree.
+   */
+  async activitiesMap(opts: {
+    since?: Date | string; until?: Date | string;
+    type?: string; trailId?: number; limit?: number;
+  } = {}): Promise<import("./types").ActivityMap> {
+    const params: Record<string, string | number> = {};
+    if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;
+    if (opts.until) params.until = opts.until instanceof Date ? opts.until.toISOString() : opts.until;
+    if (opts.type) params.type = opts.type;
+    if (opts.trailId != null) params.trail_id = opts.trailId;
+    if (opts.limit) params.limit = opts.limit;
+    const { data } = await http.get<import("./types").ActivityMap>("/activities/map", { params });
+    return data;
+  },
+
   async activity(source: string, sourceId: string): Promise<import("./types").Activity> {
     const { data } = await http.get<import("./types").Activity>(`/activities/${source}/${sourceId}`);
     return data;

@@ -316,6 +316,24 @@ interface BackendApi {
         @retrofit2.http.Query("since") since: String? = null,
     ): List<ActivityRow>
 
+    /** Every GPS-tracked activity as simplified polylines, for the map
+     *  screen. Server-side RDP keeps this ~400 KB instead of the 3.4 MB
+     *  the full-fidelity tracks would cost. */
+    @GET("activities/map")
+    suspend fun activitiesMap(
+        @retrofit2.http.Query("type") type: String? = null,
+        @retrofit2.http.Query("since") since: String? = null,
+        @retrofit2.http.Query("trail_id") trailId: Long? = null,
+        @retrofit2.http.Query("limit") limit: Int = 1000,
+    ): ActivityMapResponse
+
+    /** Activities linked to a trail, newest first. */
+    @GET("trails/{id}/visits")
+    suspend fun trailVisits(
+        @Path("id") id: Long,
+        @retrofit2.http.Query("days") days: Int = 3650,
+    ): TrailVisitsResponse
+
     @POST("activities/{source}/{sourceId}/link-trail")
     suspend fun linkActivityTrail(
         @Path("source") source: String,

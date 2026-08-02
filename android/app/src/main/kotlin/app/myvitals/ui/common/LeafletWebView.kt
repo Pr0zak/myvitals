@@ -22,8 +22,19 @@ import timber.log.Timber
  * the WebView should re-render. Pass the same value as the `html`
  * input unless you need a different cache key.
  */
+/**
+ * @param jsInterface optional `(object, name)` pair exposed to the page via
+ *   `addJavascriptInterface`, so map features can call back into Compose
+ *   (e.g. tapping a track to open its activity). Only methods annotated
+ *   `@JavascriptInterface` are reachable, and the HTML here is app-authored,
+ *   so there's no untrusted-content exposure.
+ */
 @Composable
-fun LeafletWebView(html: String, modifier: Modifier = Modifier) {
+fun LeafletWebView(
+    html: String,
+    modifier: Modifier = Modifier,
+    jsInterface: Pair<Any, String>? = null,
+) {
     AndroidView(
         factory = { wctx ->
             WebView(wctx).apply {
@@ -32,6 +43,7 @@ fun LeafletWebView(html: String, modifier: Modifier = Modifier) {
                 settings.loadsImagesAutomatically = true
                 settings.mixedContentMode =
                     android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                jsInterface?.let { (obj, name) -> addJavascriptInterface(obj, name) }
                 webViewClient = WebViewClient()
                 webChromeClient = object : android.webkit.WebChromeClient() {
                     override fun onConsoleMessage(

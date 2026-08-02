@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.outlined.DirectionsWalk
 import androidx.compose.material.icons.outlined.DownhillSkiing
 import androidx.compose.material.icons.outlined.Hiking
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Refresh
@@ -128,6 +129,7 @@ fun ActivitiesScreen(
     settings: SettingsRepository,
     onOpenActivity: (source: String, sourceId: String) -> Unit,
     onOpenStrengthDay: (dateIso: String) -> Unit = {},
+    onOpenMap: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val neon = settings.neonShellEnabled
@@ -288,6 +290,13 @@ fun ActivitiesScreen(
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onOpenMap) {
+                    Icon(
+                        Icons.Outlined.Map,
+                        contentDescription = "Activity map",
+                        tint = MV.OnSurface,
+                    )
+                }
                 IconButton(
                     onClick = {
                         scope.launch {

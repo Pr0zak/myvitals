@@ -133,7 +133,7 @@ class TrainingPreferences(BaseModel):
     level: Literal["beginner", "intermediate", "advanced"] = "intermediate"
     # 2-6 sessions per week — drives "auto" split selection
     days_per_week: int = 3
-    split_preference: Literal["auto", "full_body", "upper_lower", "ppl"] = "auto"
+    split_preference: Literal["auto", "adaptive", "full_body", "upper_lower", "ppl"] = "auto"
     # Deprecated (WP-17): the minutes knob was never wired into daily
     # generation. Kept so old stored payloads still validate; ignored.
     workout_minutes: int = 50

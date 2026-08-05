@@ -375,11 +375,19 @@ onMounted(() => { equip.value = defaultEquip(); load(); });
         <label class="train-row">
           <span>Split preference</span>
           <div class="seg">
-            <button v-for="s in (['auto','full_body','upper_lower','ppl'] as const)" :key="s"
+            <button v-for="s in (['auto','adaptive','full_body','upper_lower','ppl'] as const)" :key="s"
                     :class="{ on: ensureTraining(equip).split_preference === s }"
                     @click="ensureTraining(equip).split_preference = s">{{ s.replace('_',' ') }}</button>
           </div>
         </label>
+        <p v-if="ensureTraining(equip).split_preference === 'adaptive'"
+           class="hint" style="margin: -0.4rem 0 0.6rem;">
+          Picks each day's focus from what your muscles actually need —
+          weekly volume against MEV/MAV plus days rested — instead of
+          advancing a fixed rotation. Skipping a day no longer re-serves it
+          tomorrow. The week-ahead strip stays an estimate, since the real
+          choice is made on the day.
+        </p>
 
         <label class="train-row">
           <span>Goal</span>

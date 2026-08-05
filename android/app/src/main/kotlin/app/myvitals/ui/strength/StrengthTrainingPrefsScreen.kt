@@ -180,12 +180,25 @@ fun StrengthTrainingPrefsScreen(
 
                     Section("Split preference", neon)
                     Segmented(
-                        options = listOf("auto", "full_body", "upper_lower", "ppl"),
+                        options = listOf("auto", "adaptive", "full_body", "upper_lower", "ppl"),
                         selected = t.splitPreference,
                         labelMap = mapOf("full_body" to "full body", "upper_lower" to "upper-lower"),
                         onSelect = { update(t.copy(splitPreference = it)) },
                         neon = neon,
                     )
+                    if (t.splitPreference == "adaptive") {
+                        Text(
+                            "Picks each day's focus from what your muscles "
+                                + "actually need — weekly volume against MEV/MAV "
+                                + "plus days rested — instead of advancing a fixed "
+                                + "rotation. Skipping a day no longer re-serves it "
+                                + "tomorrow. The week-ahead strip stays an estimate, "
+                                + "since the real choice is made on the day.",
+                            color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                        )
+                    }
 
                     Section("Exercises per workout", neon)
                     Segmented(

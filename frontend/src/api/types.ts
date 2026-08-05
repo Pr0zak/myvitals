@@ -189,7 +189,7 @@ export interface StrengthEquipment {
   training?: {
     level: "beginner" | "intermediate" | "advanced";
     days_per_week: number;
-    split_preference: "auto" | "full_body" | "upper_lower" | "ppl";
+    split_preference: "auto" | "adaptive" | "full_body" | "upper_lower" | "ppl";
     workout_minutes: number;            // deprecated (WP-17); kept for compat
     exercises_per_workout?: number | null;  // WP-17 — null = auto
     include_mobility?: boolean;

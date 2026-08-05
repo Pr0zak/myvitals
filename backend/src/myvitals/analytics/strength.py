@@ -289,13 +289,19 @@ def select_split(
 ) -> str:
     """Pick today's split focus.
 
-    `preference` is one of {"auto", "full_body", "upper_lower", "ppl"}.
-    "auto" maps days_per_week to the simplest workable split:
+    `preference` is one of {"auto", "adaptive", "full_body", "upper_lower",
+    "ppl"}. "auto" maps days_per_week to the simplest workable split:
         2-3 days → full_body
         4 days   → upper_lower
         5-6 days → ppl
+
+    "adaptive" resolves to the same family here and then rotates. The real
+    adaptive pick is `select_split_adaptive`, which needs live volume data;
+    this path exists for callers that can only project (the week-ahead
+    strip, which can't know future volume). Under adaptive that forecast is
+    indicative — the actual day type is chosen on the day.
     """
-    if preference == "auto":
+    if preference in ("auto", "adaptive"):
         if days_per_week <= 3:
             preference = "full_body"
         elif days_per_week == 4:
@@ -308,6 +314,122 @@ def select_split(
         return rotation[0]
     idx = rotation.index(last_split)
     return rotation[(idx + 1) % len(rotation)]
+
+
+# ------------------------------------------------------------------
+# ADAPT-1: need-based split selection
+# ------------------------------------------------------------------
+#
+# The rotation above only advances on a COMPLETED session, so repeatedly
+# skipping one day type parks the schedule on it — the generator keeps
+# re-prescribing the session the user is actively avoiding, and the other
+# two thirds of the split never reach the calendar. Worse, it's blind to
+# volume: it will serve push day after push day while the push muscles sit
+# far above MAV.
+#
+# Adaptive mode scores each candidate focus by how much its muscles
+# actually need work (volume vs MEV/MAV) and how long they've been rested,
+# and picks the winner. A skip becomes information rather than a lock.
+
+# Relative influence of the two signals. Volume leads — it's the thing
+# rotation was blind to — but without a recency term the same
+# most-deficient focus would be picked several days running, since one
+# session doesn't move a 7-day volume total much.
+_ADAPT_VOLUME_WEIGHT = 1.0
+_ADAPT_RECENCY_WEIGHT = 0.6
+# Rest beyond this many days stops counting as extra need — past a week
+# the muscle is fully recovered and more rest isn't more reason.
+_ADAPT_RECENCY_CAP_DAYS = 7.0
+
+
+def muscles_for_focus(focus: str) -> set[str]:
+    """Muscles a focus's slot list actually targets.
+
+    Derived from SPLIT_SLOTS rather than a second hand-maintained table,
+    so editing a split's slots keeps the adaptive scorer honest. Slots
+    with `muscles: None` are pattern-driven (e.g. "squat") and contribute
+    nothing here; every push/pull/legs slot names its muscles.
+    """
+    out: set[str] = set()
+    for slot in SPLIT_SLOTS.get(focus) or []:
+        for m in slot.get("muscles") or []:
+            out.add(m)
+    return out
+
+
+def muscle_need(sets: float, mev: int, mav: int) -> float:
+    """How much a muscle wants work, on a continuous scale.
+
+    1.0 at MEV, falling linearly to 0.0 at MAV, negative above it, and
+    rising above 1.0 the further below MEV it sits. Continuous at both
+    landmarks, so no cliff makes the pick jitter between days.
+    """
+    if mev <= 0 or mav <= mev:
+        return 0.0
+    if sets < mev:
+        return 1.0 + (mev - sets) / mev
+    if sets <= mav:
+        return (mav - sets) / (mav - mev)
+    return -(sets - mav) / mav
+
+
+def score_focus(
+    focus: str,
+    volume: dict[str, dict[str, Any]],
+    days_since: dict[str, float],
+) -> float:
+    """Blended need score for one candidate focus. Higher wants it more."""
+    muscles = muscles_for_focus(focus)
+    if not muscles:
+        return 0.0
+    needs = []
+    rests = []
+    for m in muscles:
+        v = volume.get(m)
+        if v is not None:
+            needs.append(muscle_need(
+                float(v.get("sets", 0)), int(v["mev"]), int(v["mav"]),
+            ))
+        rests.append(min(
+            float(days_since.get(m, _ADAPT_RECENCY_CAP_DAYS)),
+            _ADAPT_RECENCY_CAP_DAYS,
+        ))
+    vol = sum(needs) / len(needs) if needs else 0.0
+    rec = (sum(rests) / len(rests)) / _ADAPT_RECENCY_CAP_DAYS if rests else 0.0
+    return _ADAPT_VOLUME_WEIGHT * vol + _ADAPT_RECENCY_WEIGHT * rec
+
+
+def select_split_adaptive(
+    days_per_week: int,
+    preference: str,
+    volume: dict[str, dict[str, Any]],
+    days_since: dict[str, float],
+    last_split: str | None = None,
+) -> tuple[str, dict[str, float]]:
+    """Pick the focus whose muscles most need work.
+
+    `preference` selects the candidate family the same way `select_split`
+    does ("adaptive" resolves like "auto"); adaptive only changes WHICH
+    member of that family is chosen, never the family itself. Returns
+    `(focus, scores)` so callers can explain the pick to the user.
+
+    Never repeats `last_split` when another candidate exists — one session
+    barely moves a 7-day volume total, so without this guard a deep
+    deficit could win several days in a row.
+    """
+    if preference in ("adaptive", "auto"):
+        if days_per_week <= 3:
+            preference = "full_body"
+        elif days_per_week == 4:
+            preference = "upper_lower"
+        else:
+            preference = "ppl"
+    candidates = ROTATION.get(preference) or ROTATION["full_body"]
+    scores = {f: score_focus(f, volume, days_since) for f in candidates}
+    eligible = [f for f in candidates if f != last_split] or list(candidates)
+    # Tie-break on rotation order so an exact tie stays deterministic.
+    best = max(eligible, key=lambda f: (scores[f], -candidates.index(f)))
+    return best, scores
 
 
 # ------------------------------------------------------------------
@@ -1446,6 +1568,68 @@ async def last_split_for_user(
     return row.split_focus if row else None
 
 
+async def days_since_muscle_trained(
+    db: AsyncSession, target_date: date, lookback_days: int = 28,
+) -> dict[str, float]:
+    """Days since each muscle last took a working set.
+
+    Credits primary and secondary movers alike — a muscle worked only as
+    a secondary is still fatigued, and for "is it rested?" the distinction
+    doesn't matter the way it does for volume counting.
+
+    Muscles with no qualifying set in the window report `lookback_days`,
+    which reads as "maximally rested" to the scorer. That's the intent:
+    something untrained for a month should be a strong pick.
+    """
+    since = target_date - timedelta(days=lookback_days)
+    rows = (await db.execute(
+        select(
+            models.StrengthWorkoutExercise.exercise_id,
+            func.max(models.StrengthWorkout.date),
+        )
+        .join(
+            models.StrengthSet,
+            models.StrengthSet.workout_exercise_id == models.StrengthWorkoutExercise.id,
+        )
+        .join(
+            models.StrengthWorkout,
+            models.StrengthWorkout.id == models.StrengthWorkoutExercise.workout_id,
+        )
+        .where(models.StrengthWorkout.date >= since)
+        .where(models.StrengthWorkout.date < target_date)
+        .where(models.StrengthWorkout.status.in_(("completed", "in_progress")))
+        .where(models.StrengthWorkout.split_focus.notin_(["yoga", "cardio"]))
+        .where(models.StrengthSet.actual_reps.is_not(None))
+        .where(models.StrengthSet.skipped.is_(False))
+        .where(models.StrengthSet.set_type != "warmup")
+        .group_by(models.StrengthWorkoutExercise.exercise_id)
+    )).all()
+
+    last_by_muscle: dict[str, date] = {}
+    for ex_id, last_date in rows:
+        info = CATALOG_BY_ID.get(ex_id)
+        if info is None or last_date is None:
+            continue
+        touched = [info.get("primary_muscle")] + list(
+            info.get("secondary_muscles") or []
+        )
+        for m in touched:
+            if not m:
+                continue
+            prev = last_by_muscle.get(m)
+            if prev is None or last_date > prev:
+                last_by_muscle[m] = last_date
+
+    out: dict[str, float] = {}
+    for muscle in MUSCLE_VOLUME_TARGETS:
+        last = last_by_muscle.get(muscle)
+        out[muscle] = (
+            float(lookback_days) if last is None
+            else float((target_date - last).days)
+        )
+    return out
+
+
 async def missed_strength_carryover(
     db: AsyncSession, target_date: date, lookback_days: int = 2,
 ) -> tuple[str, date] | None:
@@ -2215,7 +2399,40 @@ async def generate_plan(
                 )
 
     last_split = await last_split_for_user(db)
-    focus = override_split or select_split(days_per_week, split_pref, last_split)
+    # ADAPT-1 — need-based selection. Opt-in via split_preference="adaptive";
+    # every other value keeps the completion-advanced rotation untouched.
+    adaptive_note: str | None = None
+    if override_split:
+        focus = override_split
+    elif split_pref == "adaptive":
+        vol = await weekly_muscle_volume(db, days=7)
+        rested = await days_since_muscle_trained(db, target_date)
+        focus, _scores = select_split_adaptive(
+            days_per_week, split_pref, vol, rested, last_split,
+        )
+        # Name the muscles that drove the pick, so the choice is legible
+        # rather than the plan silently changing shape day to day.
+        drivers = sorted(
+            (
+                (m, vol.get(m, {}).get("sets", 0), rested.get(m, 0.0))
+                for m in muscles_for_focus(focus)
+                if vol.get(m, {}).get("status") in ("under", "untrained", "in_range")
+            ),
+            key=lambda t: (t[1], -t[2]),
+        )[:3]
+        if drivers:
+            adaptive_note = (
+                "Adaptive split picked "
+                + focus.replace("_", " ")
+                + " — most-needed: "
+                + ", ".join(
+                    f"{m.replace('_', ' ')} ({int(s)} sets, {int(d)}d rest)"
+                    for m, s, d in drivers
+                )
+                + "."
+            )
+    else:
+        focus = select_split(days_per_week, split_pref, last_split)
 
     # #WP-8 frequency advisory — compare declared days_per_week against
     # actual completed strength sessions in the trailing 14 days. If
@@ -2309,6 +2526,8 @@ async def generate_plan(
         # (an earlier "front the pinned lifts" reorder demoted real
         # compounds to isolation slot_roles — reverted).
 
+    if adaptive_note:
+        notes.append(adaptive_note)
     if freq_advisory_note:
         notes.append(freq_advisory_note)
     if carryover_note:

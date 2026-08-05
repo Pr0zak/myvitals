@@ -1152,9 +1152,19 @@ _NEAR_DUP_JACCARD = 0.6
 _NAME_STOPWORDS = frozenset({"the", "a", "with", "and", "on", "to", "in", "of"})
 
 
+def _stem(tok: str) -> str:
+    """Crude plural strip. The catalog mixes singular and plural freely —
+    "Hammer Curls" vs "Alternate Hammer Curl", "Tricep" vs "Triceps" — and
+    without this they tokenise as unrelated words, so twelve genuinely
+    near-identical pairs scored 0 overlap. Correctness as English doesn't
+    matter here, only that it's applied symmetrically to both names.
+    """
+    return tok[:-1] if len(tok) > 3 and tok.endswith("s") else tok
+
+
 def _name_tokens(name: str) -> frozenset[str]:
     return frozenset(
-        t for t in re.split(r"[^a-z0-9]+", (name or "").lower())
+        _stem(t) for t in re.split(r"[^a-z0-9]+", (name or "").lower())
         if t and t not in _NAME_STOPWORDS
     )
 

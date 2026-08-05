@@ -129,3 +129,30 @@ def test_guard_does_not_starve_any_slot():
 def test_selection_is_still_deterministic():
     assert [e["id"] for e in _generate("pull", 7)] == \
            [e["id"] for e in _generate("pull", 7)]
+
+
+# ── plural stemming ───────────────────────────────────────────────────
+#
+# The catalog mixes singular and plural freely. Without stemming these
+# tokenise as unrelated words and score 0 overlap.
+
+def test_singular_plural_variants_are_caught():
+    a = CATALOG_BY_ID["Hammer_Curls"]
+    b = CATALOG_BY_ID["Alternate_Hammer_Curl"]
+    assert is_near_duplicate(a, b)
+
+
+def test_tricep_triceps_spelling_variants_are_caught():
+    a = {"name": "Lying Dumbbell Tricep Extension", "primary_muscle": "triceps",
+         "movement_pattern": "isolation_arm"}
+    b = {"name": "Lying Dumbbell Triceps Extension", "primary_muscle": "triceps",
+         "movement_pattern": "isolation_arm"}
+    assert is_near_duplicate(a, b)
+
+
+def test_stemming_does_not_collapse_unrelated_moves():
+    a = {"name": "Hammer Curl", "primary_muscle": "biceps",
+         "movement_pattern": "isolation_arm"}
+    b = {"name": "Zottman Preacher Curl", "primary_muscle": "biceps",
+         "movement_pattern": "isolation_arm"}
+    assert not is_near_duplicate(a, b)

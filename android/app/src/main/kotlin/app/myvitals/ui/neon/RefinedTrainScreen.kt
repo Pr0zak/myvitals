@@ -132,8 +132,39 @@ fun RefinedTrainScreen(
         )
 
         // ── Recent activities ──
+        // The rows now drill into their own activity, so the full feed needs
+        // a real entry point rather than riding on a mis-wired row tap.
         Spacer(Modifier.height(18.dp))
-        Caption("Recent")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Caption("Recent")
+            if (recent.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onOpen("activities") }
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "See all",
+                        color = NeonMV.Cyan,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Icon(
+                        Icons.AutoMirrored.Outlined.ArrowForwardIos,
+                        contentDescription = "All activities",
+                        tint = NeonMV.Cyan,
+                        modifier = Modifier.size(10.dp),
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(11.dp))
         if (recent.isEmpty()) {
             FeedRow(
@@ -154,7 +185,13 @@ fun RefinedTrainScreen(
                     sub = feedSub(a, cls.strength),
                     value = feedValue(a),
                     valueTone = cls.tone,
-                    onClick = { onOpen("activities") },
+                    // Open the activity itself. This used to route to the
+                    // Activities LIST, so tapping a row you were already
+                    // looking at dumped you into a feed to find and tap it
+                    // again. TrainHubScreen (plain Vitality Neon) always did
+                    // this correctly; only the Refined variant was wired to
+                    // the list, because the rows doubled as its only way in.
+                    onClick = { onOpen("activity/${a.source}/${a.sourceId}") },
                 )
                 Spacer(Modifier.height(10.dp))
             }

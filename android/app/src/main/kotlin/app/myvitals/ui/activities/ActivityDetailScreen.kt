@@ -503,7 +503,7 @@ private fun StatsCard(a: ActivityRow, neon: Boolean) {
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 a.distanceM?.let { Stat("Distance", "%.2f mi".format(it / 1609.34), neon) }
-                Stat("Duration", "${a.durationS / 60}m", neon)
+                Stat("Duration", fmtDurationHm(a.durationS), neon)
                 a.elevationGainM?.let { Stat("Elev", "%.0f ft".format(it * 3.28084), neon) }
             }
             if (a.avgHr != null || a.kcal != null) {
@@ -545,7 +545,18 @@ private fun NeonStatsCard(a: ActivityRow) {
         a.distanceM?.let {
             add(NeonStatSpec("DISTANCE", "%.2f".format(it / 1609.34), "mi", NeonMV.Lime))
         }
-        add(NeonStatSpec("DURATION", "${a.durationS / 60}", "min", NeonMV.Cyan))
+        // Split so the big number stays a number: "1h 59" + "m" past the
+        // hour, "47" + "min" below it. Raw minutes ("119 min") made anything
+        // over an hour take mental arithmetic to read.
+        if (a.durationS >= 3600) {
+            add(NeonStatSpec(
+                "DURATION",
+                "${a.durationS / 3600}h ${(a.durationS % 3600) / 60}",
+                "m", NeonMV.Cyan,
+            ))
+        } else {
+            add(NeonStatSpec("DURATION", "${a.durationS / 60}", "min", NeonMV.Cyan))
+        }
         // Pace (min/mi) for Run / Walk / Hike with a positive distance —
         // a foot-sport-only readout the web dashboard surfaces. duration
         // (min) ÷ distance (mi) → "m:ss /mi".
@@ -599,6 +610,14 @@ private fun NeonStatsCard(a: ActivityRow) {
             Spacer(Modifier.height(12.dp))
         }
     }
+}
+
+/** "1h 59m" past the hour, "47m" below it. */
+internal fun fmtDurationHm(seconds: Int): String {
+    if (seconds <= 0) return "—"
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    return if (h > 0) "${h}h ${m}m" else "${m}m"
 }
 
 private data class NeonStatSpec(

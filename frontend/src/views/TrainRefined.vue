@@ -72,6 +72,9 @@ interface FeedRow {
   sub: string;
   strength: boolean;
   value: string;
+  /** Route to this row's own activity. Null when the source/id is missing,
+   *  in which case the row falls back to opening the full feed. */
+  href: string | null;
 }
 
 function classify(type: string | null | undefined): boolean {
@@ -123,6 +126,9 @@ const recent = computed<FeedRow[]>(() =>
       sub,
       strength,
       value: primary(a),
+      href: a.source && a.source_id
+        ? `/activity/${a.source}/${a.source_id}`
+        : null,
     };
   }),
 );
@@ -169,14 +175,19 @@ const recent = computed<FeedRow[]>(() =>
     </section>
 
     <!-- recent activities -->
-    <div class="cap out">Recent</div>
+    <div class="cap out cap-row">
+      <span>Recent</span>
+      <button v-if="recent.length > 0" class="see-all" @click="go('/activities')">
+        See all ›
+      </button>
+    </div>
     <section class="feed">
       <template v-if="recent.length > 0">
         <button
           v-for="row in recent"
           :key="row.key"
           class="row"
-          @click="go('/activities')"
+          @click="go(row.href ?? '/activities')"
         >
           <span class="ico" :class="row.strength ? 'good' : 'accent'">
             <svg v-if="row.strength" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -215,6 +226,16 @@ const recent = computed<FeedRow[]>(() =>
 </template>
 
 <style scoped>
+.cap-row {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.see-all {
+  background: none; border: 0; padding: 2px 4px; cursor: pointer;
+  color: var(--rn-cyan, #28e6ff);
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em;
+}
+.see-all:hover { text-decoration: underline; }
+
 .refined-train {
   --accent: var(--accent, #28e6ff);
   --good: var(--good, #5dff3b);

@@ -268,16 +268,24 @@ class TestDoubleProgression:
         assert w == 10.0
         assert (lo, hi) == (9, 10)
 
-    def test_top_of_range_but_rack_too_coarse_flags_plateau(self):
-        # At the top (10 reps), rating it easy, but +5% on 10 lb rounds back
-        # to 10 → weight-locked. Hold at top, surface the micro-loader nudge.
+    def test_top_of_range_takes_the_next_rack_weight_and_warns(self):
+        # PROG-2 (was: test_top_of_range_but_rack_too_coarse_flags_plateau).
+        # At the top (10 reps), rating it easy, +5% on 10 lb rounds back to
+        # 10. This used to HOLD at 10 with a "buy micro-loaders" nudge, which
+        # pinned the lift permanently for anyone who never bought them.
+        # It now takes the next weight the rack can actually deliver (15 lb,
+        # a coarse +50%), resets reps to the bottom of the range to absorb
+        # it, and warns rather than refuses.
         w, lo, hi, adv = double_progression(
             base_reps_lo=8, base_reps_hi=10, last_weight_lb=10.0,
             last_avg_rating=5.0, last_avg_reps=10.0, is_compound=False,
             goal="hypertrophy", **self.FIXED)
-        assert w == 10.0
-        assert (lo, hi) == (10, 10)
-        assert adv is not None and "micro" in adv.lower()
+        assert w == 15.0
+        assert (lo, hi) == (8, 10)
+        assert adv is not None and "+50%" in adv
+        assert "locked" not in adv.lower()
+        # The micro-loader suggestion survives as advice, not as a blocker.
+        assert "micro" in adv.lower()
 
     def test_top_of_range_with_loadable_jump_adds_weight_resets_reps(self):
         # 50 lb at the top: +5% = 52.5, and WITH micro-loaders the rack can

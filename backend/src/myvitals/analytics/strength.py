@@ -489,6 +489,27 @@ def valid_dumbbell_loads(
     return sorted(out)
 
 
+def next_loadable_above(
+    current: float | None,
+    pairs_lb: list[float],
+    wrist_weights_lb: list[float],
+    tol: float = 0.01,
+) -> float | None:
+    """Smallest loadable weight strictly heavier than `current`.
+
+    The escape hatch from the fixed-dumbbell dead zone. When a percentage
+    progression rounds back onto the weight already being used, this is
+    what the rack can actually deliver next — coarse, but real. Returns
+    None only when `current` is already the heaviest loadable weight.
+    """
+    if current is None:
+        return None
+    for w in valid_dumbbell_loads(pairs_lb, wrist_weights_lb):
+        if w > current + tol:
+            return w
+    return None
+
+
 def _fmt_lb(x: float) -> str:
     """Trim trailing .0 — 30.0 -> '30', 2.5 -> '2.5'."""
     return f"{round(float(x), 2):g}"
@@ -762,16 +783,38 @@ def double_progression(
         next_lo = max(base_reps_lo, min(int(last_avg_reps) + 1, base_reps_hi))
         return held, next_lo, base_reps_hi, None
 
-    # 4. At the top, rating it easy, but the rack can't add weight →
-    #    weight-locked plateau. Keep them at the top and flag it.
+    # 4. At the top, rating it easy, but the percentage jump rounded back
+    #    to the same load. Take the next weight the rack CAN deliver.
+    #
+    #    This used to hold the current weight and tell the user to buy
+    #    micro-loaders — which pins the lift forever if they never do.
+    #    A 25 lb pullover topping out at 12 reps has 30 lb sitting right
+    #    there; +20% is coarser than the +5% the policy wanted, but it is
+    #    real progression and reps reset to the bottom of the range to
+    #    absorb it. Warn about the size of the step, don't refuse it.
     if at_top and last_avg_rating >= EASY_THRESHOLD:
-        advisory = None
-        if jumped is not None and held is not None and jumped <= held:
-            advisory = (
-                "weight-locked: maxing the rep range but the dumbbell "
-                "step is too coarse to add load — add wrist/micro weights "
-                "in Equipment to keep progressing."
-            )
+        step = next_loadable_above(held, pairs_lb, wrist_weights_lb)
+        if step is not None and held:
+            pct = (step - held) / held
+            ideal = (jumped / held - 1.0) if (jumped and held) else 0.0
+            advisory = None
+            # Only worth a word when the forced step is materially bigger
+            # than the progression policy asked for.
+            if pct > max(ideal, 0.0) + 0.02:
+                advisory = (
+                    f"next dumbbell is a +{pct * 100:.0f}% jump "
+                    f"({held:g} → {step:g} lb) where ~+{max(ideal, 0.0) * 100:.0f}% "
+                    "was wanted — reps reset to the bottom of the range. "
+                    "Wrist/micro weights in Equipment would make this "
+                    "gradual, or log fewer reps and build back up."
+                )
+            return step, base_reps_lo, base_reps_hi, advisory
+        # Genuinely nothing heavier exists — the top of the rack.
+        advisory = (
+            "at the heaviest load you own and maxing the rep range — "
+            "add heavier dumbbells or wrist/micro weights in Equipment "
+            "to keep progressing."
+        )
         return held, base_reps_hi, base_reps_hi, advisory
 
     # 5. Hold zone (moderate rating, mid-range) → hold weight + base reps.
@@ -2722,7 +2765,10 @@ async def generate_plan(
     plan_exs: list[ExerciseInPlan] = []
     pairs_lb = (equipment.get("dumbbells") or {}).get("pairs_lb") or []
     wrist = equipment.get("wrist_weights_lb") or []
-    dp_plateau_names: list[str] = []
+    # (exercise name, advisory) — the advisory text now differs per
+    # case (coarse forced jump vs genuinely the top of the rack), so
+    # carry it through instead of collapsing to one generic sentence.
+    dp_advisories: list[tuple[str, str]] = []
 
     for i, ex in enumerate(chosen):
         # PROG-1 Hook B — program lift: fixed scheme, bypass the
@@ -2789,7 +2835,7 @@ async def generate_plan(
                 deload=deload,
             )
             if advisory:
-                dp_plateau_names.append(ex["name"])
+                dp_advisories.append((ex["name"], advisory))
         elif avg_rating is not None and avg_weight is not None:
             # Non-dumbbell-but-rated (e.g. timed holds carrying a load) —
             # keep the weight-only policy; reps/seconds handled elsewhere.
@@ -2821,13 +2867,8 @@ async def generate_plan(
             ),
         ))
 
-    if dp_plateau_names:
-        names = ", ".join(dp_plateau_names[:3])
-        notes.append(
-            f"Weight-locked on {names} — you're maxing the rep range but the "
-            f"dumbbell jump is too coarse to add load. Add wrist/micro weights "
-            f"in Equipment to keep progressing."
-        )
+    for _name, _adv in dp_advisories[:3]:
+        notes.append(f"{_name} — {_adv}")
 
     # WP-5F (v0.7.281) — adaptive MEV-filler finisher slots.
     # If the trailing 7-day audit shows a muscle is meaningfully under

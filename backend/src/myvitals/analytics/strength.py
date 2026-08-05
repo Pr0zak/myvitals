@@ -964,6 +964,10 @@ _BAR_REQUIRED_EXERCISES: frozenset[str] = frozenset({
     "Scapular_Pull-Up",
     "V-Bar_Pullup",
     "Wide-Grip_Rear_Pull-Up",
+    # BAR-2 — "Hang from a pull-up bar using a pronated grip", tagged
+    # equipment=['bodyweight'] upstream, so it was reaching a dumbbell-only
+    # gym as an isolation_core slot. Landed in a real generated plan.
+    "Wind_Sprints",
 })
 
 # Same catalog quirk, different gate: these need a *waist-height* bar to
@@ -975,6 +979,15 @@ _BAR_REQUIRED_EXERCISES: frozenset[str] = frozenset({
 # bar / rings — rather than pull_up_bar alone (a doorway bar is too high).
 _LOW_BAR_REQUIRED_EXERCISES: frozenset[str] = frozenset({
     "Inverted_Row",
+    # BAR-2 — "Position a bar in a rack at chest height." Needs a fixed bar,
+    # not just a body.
+    "Body_Tricep_Press",
+    # BAR-2 — parallel dip bars ("arms nearly locked above the bars"). The
+    # equipment schema has no dip-station flag, and this is the closest
+    # honest gate: a squat rack or a power-tower-style pull-up bar can be
+    # dipped on, a pair of dumbbells cannot. Bench dips are a separate
+    # catalog entry and stay available.
+    "Dips_-_Triceps_Version",
 })
 
 # Exercises that genuinely REQUIRE a second person to perform — a partner

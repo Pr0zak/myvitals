@@ -49,6 +49,31 @@ if _CATALOG_SUPPLEMENT_PATH.exists():
         CATALOG.extend(json.load(_f))
 CATALOG_BY_ID: dict[str, dict[str, Any]] = {e["id"]: e for e in CATALOG}
 
+# DEDUP-1 — entries that are the SAME movement as another catalog row, not
+# merely a variant. free-exercise-db and our supplement independently name a
+# few identical exercises, which let the generator put both in one session
+# ("Incline Dumbbell Row" + "Dumbbell Incline Row" on the same pull day) and
+# split progression history across two ids.
+#
+# Suppressed from *selection* only — the rows stay in CATALOG_BY_ID so
+# existing history keeps resolving names, images and PRs. Maps
+# superseded_id → the id that supersedes it.
+SUPERSEDED_EXERCISE_IDS: dict[str, str] = {
+    # Identical chest-supported incline row. Keep the supplement entry: 5
+    # coaching steps incl. the chest-pinned cue vs the upstream row's 4.
+    "Dumbbell_Incline_Row": "Incline_Dumbbell_Row",
+    # Both render as the display name "Decline Push-Up". The upstream row's
+    # instructions actually describe a flat wide push-up ("lie on the floor
+    # face down... hands about 36 inches apart"), not a decline; the
+    # supplement entry correctly elevates the feet on a bench.
+    "Decline_Push-Up": "Decline_Push_Up",
+}
+
+# The pool the generator picks from. CATALOG stays complete for history.
+CATALOG_SELECTABLE: list[dict[str, Any]] = [
+    e for e in CATALOG if e["id"] not in SUPERSEDED_EXERCISE_IDS
+]
+
 # #WP-5 (SCS-9 D) — catalog overrides for entries whose upstream tagging
 # disagrees with how the exercise is universally programmed. Free-
 # exercise-db tags Bent-Arm / Straight-Arm Dumbbell Pullover as
@@ -1004,7 +1029,12 @@ def filter_catalog_for_equipment(
     raise, etc.) are filtered by id when pull_up_bar=false — see the
     _BAR_REQUIRED_EXERCISES note above for why this is by-id instead
     of by-tag.
+
+    DEDUP-1 superseded ids are dropped here rather than at module load, so
+    every generation path picks them up (they all funnel through this
+    function) while CATALOG itself stays complete for history lookups.
     """
+    catalog = [e for e in catalog if e["id"] not in SUPERSEDED_EXERCISE_IDS]
     bench_owned = (
         equipment.get("bench", {}).get("flat")
         or equipment.get("bench", {}).get("incline")
@@ -1107,6 +1137,42 @@ def _exercises_for_pattern(
     return sorted(matches, key=rank_key)
 
 
+# DEDUP-1 — near-duplicate co-selection guard.
+#
+# Beyond the handful of outright duplicates above, the catalog carries many
+# legitimate close variants (palms-up vs palms-down wrist curl, one-arm vs
+# two-arm extension). Those are good *across* sessions — that's rotation —
+# but two of them in one workout reads as a bug and narrows the session.
+#
+# So they stay in the catalog and are instead deprioritised within a single
+# workout: same primary muscle AND same movement pattern AND name-token
+# Jaccard over the threshold. Name overlap alone is too blunt (every
+# dumbbell exercise shares "dumbbell"), hence all three conditions.
+_NEAR_DUP_JACCARD = 0.6
+_NAME_STOPWORDS = frozenset({"the", "a", "with", "and", "on", "to", "in", "of"})
+
+
+def _name_tokens(name: str) -> frozenset[str]:
+    return frozenset(
+        t for t in re.split(r"[^a-z0-9]+", (name or "").lower())
+        if t and t not in _NAME_STOPWORDS
+    )
+
+
+def is_near_duplicate(
+    a: dict[str, Any], b: dict[str, Any], threshold: float = _NEAR_DUP_JACCARD,
+) -> bool:
+    """True when two catalog entries are effectively the same movement."""
+    if a.get("primary_muscle") != b.get("primary_muscle"):
+        return False
+    if a.get("movement_pattern") != b.get("movement_pattern"):
+        return False
+    ta, tb = _name_tokens(a.get("name", "")), _name_tokens(b.get("name", ""))
+    if not ta or not tb:
+        return False
+    return len(ta & tb) / len(ta | tb) >= threshold
+
+
 def select_exercises_for_split(
     catalog: list[dict[str, Any]],
     focus: str,
@@ -1189,6 +1255,18 @@ def select_exercises_for_split(
         candidates = _exercises_for_pattern(catalog, pattern, level, muscles)
         # Drop any already chosen (avoid duplicates across passes).
         candidates = [c for c in candidates if c["id"] not in chosen_ids]
+        # DEDUP-1 — prefer candidates that aren't a near-duplicate of
+        # something already in this session. Deliberately a preference and
+        # not a filter: thin muscles leave almost no choice (lats has two
+        # entries for this user's equipment, and they're a near-dup pair),
+        # so starving the slot would be worse than a close variant.
+        if chosen:
+            distinct = [
+                c for c in candidates
+                if not any(is_near_duplicate(c, k) for k in chosen)
+            ]
+            if distinct:
+                candidates = distinct
         # If muscle filter was unsatisfiable, retry without it and note.
         if not candidates and muscles is not None:
             candidates = _exercises_for_pattern(catalog, pattern, level, None)

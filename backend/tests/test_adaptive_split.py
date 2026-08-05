@@ -148,3 +148,24 @@ def test_rotation_modes_are_untouched():
 
 def test_score_focus_unknown_focus_is_zero():
     assert score_focus("nonsense", _vol(), _rest()) == 0.0
+
+
+# ── carry-over interaction (ADAPT-2) ──────────────────────────────────
+#
+# The missed-session carry-over pins today's focus to whatever was
+# skipped. Under adaptive that re-serves the avoided session through a
+# second door, defeating the whole feature — so adaptive keeps only the
+# "make it a strength day" half and still chooses the focus by need.
+
+def test_adaptive_would_not_pick_the_skipped_focus_again():
+    # Mirrors the live state: pull skipped yesterday, but pull muscles are
+    # the most rested/deficient, so pull is legitimately still the answer.
+    # What must NOT happen is pull being pinned regardless of need.
+    volume = _vol(back=20, lats=20, biceps=16, quadriceps=0, calves=0, glutes=2)
+    rest = _rest(default=1.0, quadriceps=12, calves=12, glutes=12,
+                 hamstrings=12, abdominals=12)
+    focus, scores = select_split_adaptive(6, "adaptive", volume, rest, "pull")
+    assert focus == "legs", (
+        "pull was skipped yesterday and its muscles are now well-stocked; "
+        f"need must win over carry-over. scores={scores}"
+    )

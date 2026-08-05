@@ -2264,16 +2264,33 @@ async def generate_plan(
     # weekend yoga day. Acts like a soft override_split: bypasses the
     # day-type cardio/yoga dispatch but still respects override_split
     # set explicitly via /today/swap-type.
+    #
+    # ADAPT-1: under adaptive the carry-over must NOT pin the focus. Its
+    # rationale is "don't lose the rotation slot", and adaptive has no slot
+    # to lose — it re-decides from volume every day. Pinning here would
+    # re-serve the very session the user skipped, which is the exact
+    # behaviour adaptive exists to remove, just arriving through a second
+    # door. What we DO keep is the useful half: bypass the cardio/yoga
+    # day-type dispatch so a missed session still becomes a strength day.
     carryover_note: str | None = None
+    carry_bypass_day_type = False
     if not override_split:
         carry = await missed_strength_carryover(db, target_date)
         if carry is not None:
-            override_split = carry[0]
-            carryover_note = (
-                f"Carried over from {carry[1].isoformat()}'s missed "
-                f"{carry[0]} session — schedule slot would have been "
-                "rest/cardio/yoga today."
-            )
+            if split_pref == "adaptive":
+                carry_bypass_day_type = True
+                carryover_note = (
+                    f"You missed {carry[1].isoformat()}'s {carry[0]} session, "
+                    "so today is a strength day rather than rest/cardio/yoga "
+                    "— focus chosen by need, not by what was missed."
+                )
+            else:
+                override_split = carry[0]
+                carryover_note = (
+                    f"Carried over from {carry[1].isoformat()}'s missed "
+                    f"{carry[0]} session — schedule slot would have been "
+                    "rest/cardio/yoga today."
+                )
 
     # Day-type allocation by weekday — runs before recovery / rest
     # checks. If today's slot is cardio or yoga (auto), we short-circuit
@@ -2283,7 +2300,7 @@ async def generate_plan(
     # Regenerate tap on a cardio day silently flipped the plan to
     # strength — wrong. force_no_rest now scopes strictly to the
     # recovery-rest-day check below.
-    if not override_split:
+    if not override_split and not carry_bypass_day_type:
         day_type = schedule_day_type(target_date, days_per_week, cardio_per_week)
         if day_type == "cardio":
             return build_cardio_plan(

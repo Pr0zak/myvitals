@@ -102,3 +102,13 @@ def test_failure_still_cuts_weight():
     assert weight is not None and weight <= 25.0
     assert (lo, hi) == (10, 12)
     assert advisory is None
+
+
+def test_advisory_quotes_the_unrounded_policy_target():
+    """The 'wanted' figure must come from the raw percentage, not the
+    rounded one — the rounded jump is 0 by definition in this branch, so
+    the note used to read a nonsensical "~+0% was wanted"."""
+    _w, _lo, _hi, advisory = _dp()
+    assert advisory is not None
+    assert "+0%" not in advisory
+    assert "+5%" in advisory  # isolation / hypertrophy policy

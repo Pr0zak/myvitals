@@ -796,7 +796,16 @@ def double_progression(
         step = next_loadable_above(held, pairs_lb, wrist_weights_lb)
         if step is not None and held:
             pct = (step - held) / held
-            ideal = (jumped / held - 1.0) if (jumped and held) else 0.0
+            # Compare against the UNROUNDED policy target. Using `jumped`
+            # here read "~+0% was wanted", because in this branch it has by
+            # definition rounded back onto the current load.
+            raw_target = progress_from_rating(
+                last_weight_lb, last_avg_rating, is_compound, goal=goal,
+            )
+            ideal = (
+                (raw_target / last_weight_lb - 1.0)
+                if raw_target and last_weight_lb else 0.0
+            )
             advisory = None
             # Only worth a word when the forced step is materially bigger
             # than the progression policy asked for.

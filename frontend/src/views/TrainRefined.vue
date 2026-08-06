@@ -16,6 +16,7 @@
 import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
+import ActivityYearCalendar from "@/components/ActivityYearCalendar.vue";
 import type { Activity, StrengthWorkoutDetail } from "@/api/types";
 
 const router = useRouter();
@@ -23,17 +24,67 @@ const loading = ref(true);
 
 const workout = ref<StrengthWorkoutDetail | null>(null);
 const activities = ref<Activity[]>([]);
+const workouts = ref<Array<{ date: string; status?: string | null;
+  split_focus?: string | null; started_at?: string | null;
+  completed_at?: string | null }>>([]);
+
+/** Jan 1 of LAST year — the YTD pair compares against the same span a year
+ *  ago, so the fetch has to reach back that far. Widened from limit=6; the
+ *  recent rows are derived from the same list, so it stays one request. */
+function ytdSince(): string {
+  return new Date(Date.UTC(new Date().getFullYear() - 1, 0, 1)).toISOString();
+}
 
 async function load() {
   loading.value = true;
-  const [wk, acts] = await Promise.all([
+  const [wk, acts, wkts] = await Promise.all([
     api.strengthToday().catch(() => null),
-    api.activities({ limit: 6 }).catch(() => null),
+    api.activities({ limit: 2000, since: ytdSince() }).catch(() => null),
+    api.strengthWorkouts({ limit: 400 }).catch(() => ({ count: 0, workouts: [] })),
   ]);
   workout.value = wk;
   activities.value = Array.isArray(acts) ? acts : [];
+  workouts.value = ((wkts as any)?.workouts ?? [])
+    .filter((w: any) => !["regenerated", "planned", "skipped"].includes(w.status))
+    // Cardio days auto-completed by an Activity are already in the feed.
+    .filter((w: any) => !(w.split_focus === "cardio" && w.completed_by_activity_source));
   loading.value = false;
 }
+
+/** Same computation the Activities YTD card performs, including the
+ *  strength started_at/completed_at arm — two surfaces disagreeing about
+ *  "activities this year" is the bug class the architecture rule warns of. */
+const ytd = computed(() => {
+  const now = new Date();
+  const thisYear = now.getFullYear();
+  const lastYear = thisYear - 1;
+  const endLast = new Date(Date.UTC(lastYear, now.getMonth(), now.getDate()));
+  const a = { n: 0, dist: 0 };
+  const b = { n: 0, dist: 0 };
+  for (const r of activities.value) {
+    if (!r.start_at) continue;
+    const d = new Date(r.start_at);
+    const t = d.getFullYear() === thisYear && d <= now ? a
+      : d.getFullYear() === lastYear && d <= endLast ? b : null;
+    if (!t) continue;
+    t.n += 1;
+    t.dist += r.distance_m ?? 0;
+  }
+  for (const w of workouts.value) {
+    if (w.status !== "completed" || !w.date) continue;
+    const d = new Date(w.date + "T00:00:00Z");
+    const t = d.getUTCFullYear() === thisYear && d <= now ? a
+      : d.getUTCFullYear() === lastYear && d <= endLast ? b : null;
+    if (!t) continue;
+    t.n += 1;
+  }
+  const pct = (x: number, y: number) =>
+    y === 0 ? (x === 0 ? 0 : 100) : ((x - y) / y) * 100;
+  return {
+    n: a.n, miles: a.dist / 1609.344,
+    pctN: pct(a.n, b.n), pctDist: pct(a.dist, b.dist),
+  };
+});
 onMounted(load);
 
 function go(path: string) {
@@ -174,6 +225,30 @@ const recent = computed<FeedRow[]>(() =>
       </button>
     </section>
 
+    <!-- this year + activity calendar (mirrors the phone Refined Train) -->
+    <div class="cap out">This year</div>
+    <section class="ytd2">
+      <button class="ycell" @click="go('/activities')">
+        <span class="ylbl">Activities</span>
+        <span class="ynum num">{{ ytd.n }}</span>
+        <span class="ydelta" :class="ytd.pctN >= 0 ? 'up' : 'down'">
+          {{ ytd.pctN >= 0 ? '↑' : '↓' }} {{ Math.abs(ytd.pctN).toFixed(0) }}%
+        </span>
+      </button>
+      <button class="ycell" @click="go('/activities')">
+        <span class="ylbl">Distance</span>
+        <span class="ynum num">{{ ytd.miles.toFixed(0) }} <em>mi</em></span>
+        <span class="ydelta" :class="ytd.pctDist >= 0 ? 'up' : 'down'">
+          {{ ytd.pctDist >= 0 ? '↑' : '↓' }} {{ Math.abs(ytd.pctDist).toFixed(0) }}%
+        </span>
+      </button>
+    </section>
+
+    <div class="cap out">Activity calendar</div>
+    <section class="card calcard">
+      <ActivityYearCalendar :activities="activities" :workouts="workouts" compact />
+    </section>
+
     <!-- recent activities -->
     <div class="cap out cap-row">
       <span>Recent</span>
@@ -226,6 +301,21 @@ const recent = computed<FeedRow[]>(() =>
 </template>
 
 <style scoped>
+.ytd2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px; }
+.ycell {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 15px;
+  padding: 12px 14px; cursor: pointer; color: inherit;
+}
+.ycell:hover { border-color: var(--accent, #28e6ff); }
+.ylbl { font-size: .66rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.ynum { font-size: 1.35rem; font-weight: 700; }
+.ynum em { font-style: normal; font-size: .8rem; color: var(--muted); }
+.ydelta { font-size: .72rem; font-weight: 600; }
+.ydelta.up { color: #22c55e; }
+.ydelta.down { color: #ef4444; }
+.calcard { padding: 12px 14px; }
+
 .cap-row {
   display: flex; align-items: center; justify-content: space-between;
 }

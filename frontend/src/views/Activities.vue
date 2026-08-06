@@ -11,6 +11,7 @@ import LoadState from "@/components/LoadState.vue";
 import ActivityIcon from "@/components/ActivityIcon.vue";
 import PolylineThumbnail from "@/components/PolylineThumbnail.vue";
 import { api } from "@/api/client";
+import ActivityYearCalendar from "@/components/ActivityYearCalendar.vue";
 import type { Activity, ActivityStats } from "@/api/types";
 import { chartTheme, isNeon } from "@/theme";
 import { fmtDistance, fmtElevation, distanceVal, distanceUnit } from "@/units";
@@ -345,120 +346,25 @@ function isPR(a: Activity): PRBadge[] {
 }
 
 // === Mini activity heatmap ===
-const heatmapOption = computed(() => {
-  void chartTheme.value;
-  void isNeon.value;
-  const t = chartTheme.value;
-  const neon = isNeon.value;
-  // Compute the inclusive lower bound of the heatmap window. For
-  // YTD we anchor to Jan 1 of the current year (rather than 365d ago)
-  // so a single late-Dec activity from last year doesn't trigger a
-  // second calendar strip — that was the "still show 2 cals" report.
-  const rangeCfg = RANGES.find((r) => r.key === range.value);
-  let minDate: string | null = null;
-  if (rangeCfg) {
-    if (rangeCfg.key === "ytd") {
-      const y = new Date().getFullYear();
-      minDate = `${y}-01-01`;
-    } else if (rangeCfg.days != null && rangeCfg.days > 0) {
-      const d = new Date();
-      d.setDate(d.getDate() - rangeCfg.days);
-      minDate = d.toISOString().slice(0, 10);
-    }
+/** Inclusive lower bound for the calendar, derived from the range chips so
+ *  the selector still controls how many year strips render. Lifted out of
+ *  the old heatmapOption when the calendar became a shared component. */
+const calMinDate = computed<string | null>(() => {
+  const cfg = RANGES.find((r) => r.key === range.value);
+  if (!cfg) return null;
+  if (cfg.key === "ytd") return `${new Date().getFullYear()}-01-01`;
+  if (cfg.days != null && cfg.days > 0) {
+    const d = new Date();
+    d.setDate(d.getDate() - cfg.days);
+    return d.toISOString().slice(0, 10);
   }
-  // Bucket minutes-per-day, keyed by ISO date. Drop anything outside
-  // the active range so calendar strips only render years that the
-  // user actually selected.
-  const bucket: Record<string, number> = {};
-  for (const a of activities.value) {
-    const d = a.start_at.slice(0, 10);
-    if (minDate !== null && d < minDate) continue;
-    bucket[d] = (bucket[d] ?? 0) + a.duration_s / 60;
-  }
-  if (Object.keys(bucket).length === 0) return null;
-
-  // One calendar strip per distinct year present in the data, newest at
-  // top so the user sees this-year first when 1y / all is selected.
-  const years = Array.from(
-    new Set(Object.keys(bucket).map((d) => d.slice(0, 4)))
-  ).sort((a, b) => b.localeCompare(a));
-
-  // Tighter strip height — cells are 12 px so 7 rows = 84 px; plus the
-  // month labels above add ~14 px, leaving ~6 px breathing room at
-  // 104 px per year. Was 110 with 14-px cells which left a big empty
-  // band below when only one strip rendered.
-  const STRIP_H = 100;
-  const TOP_PAD = 14;
-  const calendars = years.map((y, i) => ({
-    top: TOP_PAD + i * STRIP_H,
-    left: 30,
-    right: 12,
-    cellSize: ["auto", 12] as [string, number],
-    range: y,
-    itemStyle: {
-      color: neon ? "#181b27" : "#1a2332",
-      borderColor: neon ? "rgba(39, 42, 59, 0.9)" : "rgba(148, 163, 184, 0.12)",
-      borderWidth: 1,
-    },
-    splitLine: { show: false },
-    yearLabel: { show: true, color: t.axisLabel.color, fontSize: 11,
-                 fontWeight: 600, margin: 14 },
-    monthLabel: { color: t.axisLabel.color, fontSize: 10 },
-    dayLabel: { color: t.axisLabel.color, fontSize: 9 },
-  }));
-
-  // One series per calendar strip — each filtered to its year.
-  const series = years.map((y, i) => ({
-    type: "heatmap" as const,
-    coordinateSystem: "calendar" as const,
-    calendarIndex: i,
-    data: Object.entries(bucket)
-      .filter(([d]) => d.startsWith(y))
-      .map(([d, v]) => [d, +v.toFixed(0)]),
-  }));
-
-  const allValues = Object.values(bucket).map((v) => +v.toFixed(0));
-  return {
-    tooltip: {
-      ...t.tooltip,
-      formatter: (p: any) => `${p.value[0]}: ${p.value[1]} min`,
-    },
-    visualMap: {
-      min: 0, max: Math.max(...allValues),
-      calculable: false, orient: "horizontal", show: false,
-      inRange: { color: neon ? ["#1a2030", "#28e6ff", "#5dff3b"] : ["#1e3a5f", "#7dd3fc", "#22c55e"] },
-    },
-    calendar: calendars,
-    series,
-  };
+  return null;
 });
+
 
 // Reserve enough chart height for one strip per year so all calendars
 // render without overflow. Matches STRIP_H + TOP_PAD above so the
 // container hugs the rendered strips.
-const heatmapHeight = computed(() => {
-  const years = new Set<string>();
-  // Mirror the heatmap's range filter — only count years that will
-  // actually render so the height stays correct for YTD vs all.
-  const rangeCfg = RANGES.find((r) => r.key === range.value);
-  let minDate: string | null = null;
-  if (rangeCfg) {
-    if (rangeCfg.key === "ytd") {
-      minDate = `${new Date().getFullYear()}-01-01`;
-    } else if (rangeCfg.days != null && rangeCfg.days > 0) {
-      const d = new Date();
-      d.setDate(d.getDate() - rangeCfg.days);
-      minDate = d.toISOString().slice(0, 10);
-    }
-  }
-  for (const a of activities.value) {
-    const d = a.start_at.slice(0, 10);
-    if (minDate !== null && d < minDate) continue;
-    years.add(d.slice(0, 4));
-  }
-  if (years.size === 0) return 110;
-  return 14 + years.size * 100 + 6;
-});
 
 // === Formatters ===
 function fmtDate(ts: string): string {
@@ -652,11 +558,15 @@ const monthLabel = (key: string) =>
       </div>
     </Card>
 
-    <!-- Activity heatmap -->
-    <Card v-if="heatmapOption" title="Activity calendar">
-      <div class="heat" :style="{ height: heatmapHeight + 'px' }">
-        <VChart :option="heatmapOption" autoresize/>
-      </div>
+    <!-- Activity calendar — coloured by activity type, shared with the
+         phone via utils/activityCategory. The old single-hue minutes ramp
+         couldn't tell a ride from a lift; minutes survive in the tooltip. -->
+    <Card title="Activity calendar">
+      <ActivityYearCalendar
+        :activities="filtered"
+        :workouts="strengthWorkouts"
+        :min-date="calMinDate"
+      />
     </Card>
 
     <!-- Personal records -->
@@ -916,8 +826,6 @@ const monthLabel = (key: string) =>
 .ytd-cmp .same { color: var(--muted-2); }
 
 /* Heatmap */
-.heat { width: 100%; }
-.heat > * { width: 100%; height: 100%; }
 
 /* PRs */
 .pr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.6rem; }

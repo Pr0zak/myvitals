@@ -69,6 +69,10 @@ fun RefinedTrainScreen(
 ) {
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var activities by remember { mutableStateOf<List<ActivityRow>>(emptyList()) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var yearWorkouts by remember {
+        mutableStateOf<List<app.myvitals.sync.StrengthWorkoutSummary>>(emptyList())
+    }
     var loading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
@@ -76,6 +80,18 @@ fun RefinedTrainScreen(
             loading = false
             return@LaunchedEffect
         }
+        // SWR: paint last-known year data before the (now much larger)
+        // fetch runs, so switching to Train never shows an empty calendar.
+        app.myvitals.data.JsonCache.read<List<ActivityRow>>(
+            ctx, CACHE_YEAR_ACTS,
+            app.myvitals.data.JsonCache.listType(ActivityRow::class.java),
+        )?.value?.let { if (it.isNotEmpty()) { activities = it; loading = false } }
+        app.myvitals.data.JsonCache.read<List<app.myvitals.sync.StrengthWorkoutSummary>>(
+            ctx, CACHE_YEAR_WKS,
+            app.myvitals.data.JsonCache.listType(
+                app.myvitals.sync.StrengthWorkoutSummary::class.java,
+            ),
+        )?.value?.let { if (it.isNotEmpty()) yearWorkouts = it }
         runCatching {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             coroutineScope {
@@ -85,11 +101,51 @@ fun RefinedTrainScreen(
                         if (r.isSuccessful) r.body() else null
                     }.getOrNull()
                 }
+                // Widened from limit=6: the YTD pair and the year calendar
+                // need the whole of this year and the same span of last year
+                // for the comparison. `recent` is derived from the same list,
+                // so this is one fetch, not two.
                 val actsD = async(Dispatchers.IO) {
-                    runCatching { api.activities(limit = 6) }.getOrDefault(emptyList())
+                    runCatching {
+                        api.activities(limit = 2000, since = ytdSince())
+                    }.getOrDefault(emptyList())
+                }
+                val wkD = async(Dispatchers.IO) {
+                    runCatching {
+                        api.strengthWorkouts().workouts
+                            .filter {
+                                it.status != "regenerated" && it.status != "planned" &&
+                                    it.status != "skipped"
+                            }
+                            // Cardio days auto-completed by an Activity are
+                            // already in the feed — counting both double-counts.
+                            .filter {
+                                !(it.splitFocus == "cardio" &&
+                                    it.completedByActivitySource != null)
+                            }
+                    }.getOrDefault(emptyList())
                 }
                 workout = workoutD.await()
-                activities = actsD.await()
+                val freshActs = actsD.await()
+                val freshWks = wkD.await()
+                if (freshActs.isNotEmpty()) {
+                    activities = freshActs
+                    app.myvitals.data.JsonCache.write(
+                        ctx, CACHE_YEAR_ACTS,
+                        app.myvitals.data.JsonCache.listType(ActivityRow::class.java),
+                        freshActs,
+                    )
+                }
+                if (freshWks.isNotEmpty()) {
+                    yearWorkouts = freshWks
+                    app.myvitals.data.JsonCache.write(
+                        ctx, CACHE_YEAR_WKS,
+                        app.myvitals.data.JsonCache.listType(
+                            app.myvitals.sync.StrengthWorkoutSummary::class.java,
+                        ),
+                        freshWks,
+                    )
+                }
             }
         }.onFailure { Timber.w(it, "refined train load failed") }
         loading = false
@@ -117,7 +173,17 @@ fun RefinedTrainScreen(
     }
 
     // ── Recent feed (bounded, client-side classify) ───────────────────────
-    val recent = remember(activities) { activities.take(6) }
+    val recent = remember(activities) {
+        activities.sortedByDescending { it.startAt }.take(6)
+    }
+    val ytd = remember(activities, yearWorkouts) {
+        app.myvitals.ui.common.computeYtdComparison(activities, yearWorkouts)
+    }
+    val calYear = remember { java.time.LocalDate.now().year }
+    val calIndex = remember(activities, yearWorkouts, calYear) {
+        app.myvitals.ui.common.buildActivityCalendarIndex(activities, yearWorkouts, calYear)
+    }
+    val totalCount = activities.size + yearWorkouts.size
 
     NeonScreen(title = "Train", contentPadding = contentPadding) {
         // ── Today's workout hero ──
@@ -130,6 +196,30 @@ fun RefinedTrainScreen(
             ctaLabel = ctaLabel,
             onClick = { onOpen("workout/today") },
         )
+
+        // ── This year ──
+        // Same numbers as the Activities screen: both call
+        // common.computeYtdComparison, so the two can't disagree.
+        Spacer(Modifier.height(18.dp))
+        Caption("This year")
+        Spacer(Modifier.height(11.dp))
+        app.myvitals.ui.common.YtdStatPair(
+            cmp = ytd, neon = true, onClick = { onOpen("activities") },
+        )
+
+        // ── Activity calendar ──
+        // Colour-coded per activity type (Strength / Yoga / Ride / Run /
+        // Walk / Row), sharing ui/common/ActivityCalendar.kt with the
+        // Activities screen so the palette can't drift between them.
+        if (calIndex.isNotEmpty()) {
+            Spacer(Modifier.height(18.dp))
+            Caption("Activity calendar")
+            Spacer(Modifier.height(11.dp))
+            app.myvitals.ui.common.ActivityCalendarCard(
+                rows = activities, workouts = yearWorkouts,
+                neon = true, year = calYear, title = null,
+            )
+        }
 
         // ── Recent activities ──
         // The rows now drill into their own activity, so the full feed needs
@@ -150,6 +240,9 @@ fun RefinedTrainScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
+                        // Deliberately no count: the destination applies its
+                        // own 90d default filter, so any number printed here
+                        // ("See all 291") is contradicted on arrival ("47 shown").
                         "See all",
                         color = NeonMV.Cyan,
                         fontSize = 12.sp,
@@ -200,6 +293,15 @@ fun RefinedTrainScreen(
         Spacer(Modifier.height(24.dp))
     }
 }
+
+/** Jan 1 of LAST year — the YTD card compares against the same span a year
+ *  ago, so the fetch has to reach back that far. */
+private const val CACHE_YEAR_ACTS = "refined_train_year_acts"
+private const val CACHE_YEAR_WKS = "refined_train_year_workouts"
+
+private fun ytdSince(): String =
+    java.time.LocalDate.of(java.time.LocalDate.now().year - 1, 1, 1)
+        .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toString()
 
 // ── Caption eyebrow (web `.cap`) ──────────────────────────────────────────
 @Composable
@@ -380,7 +482,7 @@ private fun classifyRefined(type: String?): FeedClass {
     val t = (type ?: "").lowercase()
     val isStrength = t.contains("strength") || t.contains("weight") || t.contains("workout")
     return when {
-        isStrength -> FeedClass(Icons.Outlined.FitnessCenter, NeonMV.Lime, true)
+        isStrength -> FeedClass(Icons.Outlined.FitnessCenter, NeonMV.Magenta, true)
         t.contains("trail") || t.contains("hike") -> FeedClass(Icons.Outlined.Terrain, NeonMV.Amber, false)
         t.contains("ride") || t.contains("bike") || t.contains("cycl") ->
             FeedClass(Icons.AutoMirrored.Outlined.DirectionsBike, NeonMV.Cyan, false)

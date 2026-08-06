@@ -400,7 +400,7 @@ fun ActivitiesScreen(
             loading && feed.isEmpty() -> Text("Loading…", color = MV.OnSurfaceVariant)
             error != null -> Text(error!!, color = MV.Red)
             feed.isEmpty() -> Card(
-                colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+                colors = CardDefaults.cardColors(containerColor = if (neon) NeonMV.Card else MV.SurfaceContainer),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
@@ -413,15 +413,22 @@ fun ActivitiesScreen(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 item {
-                    YtdYoyCard(rows, workouts)
+                    YtdYoyCard(rows, workouts, neon)
                     Spacer(Modifier.height(8.dp))
-                    ActivityCalendarStrip(rows, workouts)
+                    // Shared with the Refined Train screen — see
+                    // ui/common/ActivityCalendar.kt. Stays here because the
+                    // classic and Vitality Neon shells have no Train hub
+                    // that shows it.
+                    app.myvitals.ui.common.ActivityCalendarCard(
+                        rows = rows, workouts = workouts, neon = neon,
+                        title = "${java.time.LocalDate.now().year} ACTIVITY CALENDAR",
+                    )
                     Spacer(Modifier.height(8.dp))
                 }
                 if (filteredFeed.isEmpty()) {
                     item {
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+                            colors = CardDefaults.cardColors(containerColor = if (neon) NeonMV.Card else MV.SurfaceContainer),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
@@ -441,10 +448,10 @@ fun ActivitiesScreen(
                     },
                 ) { entry ->
                     when (entry) {
-                        is FeedEntry.Activity -> ActivityListRow(entry.a, nowMs) {
+                        is FeedEntry.Activity -> ActivityListRow(entry.a, nowMs, neon) {
                             onOpenActivity(entry.a.source, entry.a.sourceId)
                         }
-                        is FeedEntry.Strength -> StrengthListRow(entry.w, nowMs) {
+                        is FeedEntry.Strength -> StrengthListRow(entry.w, nowMs, neon) {
                             onOpenStrengthDay(entry.w.date)
                         }
                     }
@@ -514,19 +521,24 @@ private fun FilterChip(
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(50)
+    // Neon selected state is a TINT, not a solid fill. A saturated cyan
+    // slab was the loudest thing on the screen and read as a different
+    // design system from the Train tab; this matches the web rule
+    // `html[data-theme="neon"] .activities .chip.active`.
     val bg = when {
-        selected && neon -> NeonMV.Cyan
+        selected && neon -> NeonMV.Cyan.copy(alpha = 0.14f)
         selected -> MV.BrandRed
         neon -> NeonMV.Card
         else -> MV.SurfaceContainer
     }
     val borderColor = when {
+        selected && neon -> NeonMV.Cyan.copy(alpha = 0.45f)
         selected -> Color.Transparent
         neon -> NeonMV.Line
         else -> MV.OnSurfaceDim.copy(alpha = 0.35f)
     }
     val textColor = when {
-        selected && neon -> NeonMV.OnAccent
+        selected && neon -> NeonMV.Cyan
         selected -> Color.White
         neon -> NeonMV.Muted
         else -> MV.OnSurfaceVariant
@@ -553,17 +565,18 @@ private fun FilterChip(
 private fun StrengthListRow(
     w: app.myvitals.sync.StrengthWorkoutSummary,
     nowMs: Long,
+    neon: Boolean,
     onClick: () -> Unit,
 ) {
     val whenStr = remember(nowMs, w.startedAt, w.date) {
         fmtAge(w.startedAt ?: (w.date + "T00:00:00Z"), nowMs)
     }
     val statusColor = when (w.status) {
-        "completed" -> androidx.compose.ui.graphics.Color(0xFF22C55E)
-        "in_progress" -> androidx.compose.ui.graphics.Color(0xFFEAB308)
-        "skipped" -> MV.OnSurfaceDim
-        "planned" -> MV.BrandRed
-        else -> MV.OnSurfaceVariant
+        "completed" -> if (neon) NeonMV.Lime else androidx.compose.ui.graphics.Color(0xFF22C55E)
+        "in_progress" -> if (neon) NeonMV.Amber else androidx.compose.ui.graphics.Color(0xFFEAB308)
+        "skipped" -> if (neon) NeonMV.Muted else MV.OnSurfaceDim
+        "planned" -> if (neon) NeonMV.Cyan else MV.BrandRed
+        else -> if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     }
     val statusLabel = when (w.status) {
         "completed" -> "Complete"
@@ -574,7 +587,7 @@ private fun StrengthListRow(
     }
     androidx.compose.material3.Card(
         colors = androidx.compose.material3.CardDefaults.cardColors(
-            containerColor = MV.SurfaceContainer,
+            containerColor = if (neon) NeonMV.Card else MV.SurfaceContainer,
         ),
         modifier = Modifier.fillMaxWidth().clickable { onClick() },
     ) {
@@ -591,11 +604,11 @@ private fun StrengthListRow(
                 "cardio" -> androidx.compose.material.icons.Icons.AutoMirrored.Outlined.DirectionsBike
                 else -> androidx.compose.material.icons.Icons.Outlined.FitnessCenter
             }
-            val typeTint = when (w.splitFocus) {
-                "yoga" -> Color(0xFFA78BFA)
-                "cardio" -> Color(0xFF38BDF8)
-                else -> MV.BrandRed
-            }
+            // Shared palette — the same colour this workout gets on the
+            // activity calendar. Brand-red strength icons inside an obsidian
+            // shell were the single biggest "different app" tell.
+            val typeTint = app.myvitals.ui.common
+                .categoryForSplitFocus(w.splitFocus).color(neon)
             val typeDesc = when (w.splitFocus) {
                 "yoga" -> "Yoga"
                 "cardio" -> "Cardio"
@@ -603,7 +616,10 @@ private fun StrengthListRow(
             }
             Box(
                 Modifier.size(32.dp).clip(CircleShape)
-                    .background(MV.SurfaceContainerLow),
+                    .background(
+                        if (neon) typeTint.copy(alpha = 0.13f)
+                        else MV.SurfaceContainerLow,
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -619,12 +635,13 @@ private fun StrengthListRow(
                         "cardio" -> "Cardio day"
                         else -> "${w.splitFocus.replaceFirstChar { it.titlecase() }} day"
                     },
-                    color = MV.OnSurface, fontSize = 14.sp,
+                    color = if (neon) NeonMV.Ink else MV.OnSurface, fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold, maxLines = 1,
                 )
                 Text(
                     "$whenStr  ·  ${muscleGroupsForFocus(w.splitFocus)}",
-                    color = MV.OnSurfaceVariant, fontSize = 11.sp, maxLines = 1,
+                    color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant,
+                    fontSize = 11.sp, maxLines = 1,
                 )
             }
             Text(
@@ -649,14 +666,22 @@ private fun muscleGroupsForFocus(focus: String): String = when (focus.lowercase(
 }
 
 @Composable
-private fun ActivityListRow(a: ActivityRow, nowMs: Long, onClick: () -> Unit) {
+private fun ActivityListRow(
+    a: ActivityRow, nowMs: Long, neon: Boolean, onClick: () -> Unit,
+) {
     val icon = iconForType(a.type)
+    // Same category colour the calendar paints this activity with.
+    val cat = app.myvitals.ui.common.categoryForActivityType(a.type)
+    val tint = cat.color(neon)
     val title = a.name?.takeIf { it.isNotBlank() } ?: prettyType(a.type)
     val ageStr = remember(nowMs, a.startAt) { fmtAge(a.startAt, nowMs) }
     val miles = a.distanceM?.let { "%.1f mi".format(it / 1609.34) } ?: "—"
     val mins = a.durationS / 60
     Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        colors = CardDefaults.cardColors(
+            containerColor = if (neon) NeonMV.Card else MV.SurfaceContainer,
+        ),
+        shape = if (neon) RoundedCornerShape(15.dp) else CardDefaults.shape,
         modifier = Modifier.fillMaxWidth().clickable { onClick() },
     ) {
         Row(
@@ -664,18 +689,23 @@ private fun ActivityListRow(a: ActivityRow, nowMs: Long, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                Modifier.size(32.dp).clip(CircleShape).background(MV.SurfaceContainerLow),
+                Modifier.size(32.dp).clip(CircleShape).background(
+                    if (neon) tint.copy(alpha = 0.13f) else MV.SurfaceContainerLow,
+                ),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(icon, contentDescription = a.type,
-                    tint = MV.OnSurface, modifier = Modifier.size(18.dp))
+                    tint = if (neon) tint else MV.OnSurface,
+                    modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, color = MV.OnSurface, fontSize = 14.sp,
+                Text(title, color = if (neon) NeonMV.Ink else MV.OnSurface,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold, maxLines = 1)
                 Text("$ageStr  ·  $miles  ·  ${mins}m",
-                    color = MV.OnSurfaceVariant, fontSize = 11.sp)
+                    color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant,
+                    fontSize = 11.sp)
             }
             if (a.trailName != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -736,6 +766,7 @@ private data class YtdBucket(
 private fun YtdYoyCard(
     rows: List<ActivityRow>,
     workouts: List<app.myvitals.sync.StrengthWorkoutSummary>,
+    neon: Boolean,
 ) {
     val now = remember { java.time.LocalDate.now() }
     val thisYear = now.year
@@ -798,7 +829,7 @@ private fun YtdYoyCard(
     }
 
     Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
+        colors = CardDefaults.cardColors(containerColor = if (neon) NeonMV.Card else MV.SurfaceContainer),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -814,6 +845,7 @@ private fun YtdYoyCard(
                     label = "activities",
                     prev = "${lyr.n} last yr",
                     pct = pct(ytd.n, lyr.n),
+                    neon = neon,
                     modifier = Modifier.weight(1f),
                 )
                 YtdCell(
@@ -821,6 +853,7 @@ private fun YtdYoyCard(
                     label = "distance",
                     prev = "%.0f".format(lyr.distance / 1609.344) + "mi",
                     pct = pctD(ytd.distance, lyr.distance),
+                    neon = neon,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -831,6 +864,7 @@ private fun YtdYoyCard(
                     label = "moving time",
                     prev = "${lyr.duration / 3600}h last yr",
                     pct = pctL(ytd.duration, lyr.duration),
+                    neon = neon,
                     modifier = Modifier.weight(1f),
                 )
                 if (ytd.elevation > 0 || lyr.elevation > 0) {
@@ -839,6 +873,7 @@ private fun YtdYoyCard(
                         label = "climbed",
                         prev = "%.0f".format(lyr.elevation) + "m last yr",
                         pct = pctD(ytd.elevation, lyr.elevation),
+                        neon = neon,
                         modifier = Modifier.weight(1f),
                     )
                 } else {
@@ -852,15 +887,20 @@ private fun YtdYoyCard(
 @Composable
 private fun YtdCell(
     value: String, label: String, prev: String, pct: Double,
+    neon: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-            .background(Color(0x141A2332))
+            .background(if (neon) NeonMV.Bg else Color(0x141A2332))
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
-        Text(value, color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.Light)
+        if (neon) {
+            app.myvitals.ui.neon.NeonNumber(value, size = 18, color = NeonMV.Ink)
+        } else {
+            Text(value, color = MV.OnSurface, fontSize = 18.sp, fontWeight = FontWeight.Light)
+        }
         Text(
             label, color = MV.OnSurfaceVariant, fontSize = 10.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
@@ -874,127 +914,6 @@ private fun YtdCell(
                 "$arrow ${"%.0f".format(kotlin.math.abs(pct))}%",
                 color = if (pct >= 0) MV.Green else MV.Red,
                 fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
-            )
-        }
-    }
-}
-
-// ── Calendar strip ──────────────────────────────────────────────
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ActivityCalendarStrip(
-    rows: List<ActivityRow>,
-    workouts: List<app.myvitals.sync.StrengthWorkoutSummary>,
-) {
-    val year = java.time.LocalDate.now().year
-    // Bucket: ISO date → category. Activity types map to a color band.
-    val byDate = remember(rows, workouts) {
-        val m = mutableMapOf<String, String>()
-        for (r in rows) {
-            val d = runCatching {
-                java.time.OffsetDateTime.parse(r.startAt).toLocalDate()
-            }.getOrNull() ?: continue
-            if (d.year != year) continue
-            // Cycling-ish > running > walking > other; first match wins per day
-            val cat = when (r.type.lowercase()) {
-                "ride", "ebikeride", "mountain_biking", "cycling" -> "ride"
-                "run", "trailrun", "running" -> "run"
-                "hike", "walk", "walking" -> "walk"
-                "rower", "rowing", "row" -> "row"
-                else -> "other"
-            }
-            m.putIfAbsent(d.toString(), cat)
-        }
-        for (w in workouts) {
-            if (w.status != "completed") continue
-            val d = runCatching { java.time.LocalDate.parse(w.date) }.getOrNull() ?: continue
-            if (d.year != year) continue
-            val cat = if (w.splitFocus.lowercase() == "yoga") "yoga" else "strength"
-            // Activities take precedence visually if both happened that day
-            m.putIfAbsent(d.toString(), cat)
-        }
-        m.toMap()
-    }
-    if (byDate.isEmpty()) return
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                "${year} ACTIVITY CALENDAR",
-                color = MV.OnSurfaceVariant,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
-            )
-            Spacer(Modifier.height(8.dp))
-            CalendarYearStrip(year, byDate)
-            Spacer(Modifier.height(8.dp))
-            // Legend
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                LegendChip(Color(0xFFEF4444), "Strength")
-                LegendChip(Color(0xFFA78BFA), "Yoga")
-                LegendChip(Color(0xFF38BDF8), "Ride")
-                LegendChip(Color(0xFF22C55E), "Run")
-                LegendChip(Color(0xFFF59E0B), "Walk")
-            }
-        }
-    }
-}
-
-@Composable
-private fun LegendChip(color: Color, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        androidx.compose.foundation.layout.Box(
-            Modifier
-                .size(8.dp)
-                .background(color, androidx.compose.foundation.shape.CircleShape),
-        )
-        Spacer(Modifier.width(3.dp))
-        Text(label, color = MV.OnSurfaceVariant, fontSize = 9.sp)
-    }
-}
-
-@Composable
-private fun CalendarYearStrip(year: Int, byDate: Map<String, String>) {
-    val firstDay = remember(year) { java.time.LocalDate.of(year, 1, 1) }
-    val daysInYear = remember(year) { firstDay.lengthOfYear() }
-    val cellSize = 10.dp
-    val cellGap = 2.dp
-    Canvas(
-        modifier = Modifier
-            .height((cellSize.value * 7 + cellGap.value * 6).dp)
-            .fillMaxWidth(),
-    ) {
-        val cellPx = cellSize.toPx()
-        val gapPx = cellGap.toPx()
-        val totalCols = 53
-        val startDow = firstDay.dayOfWeek.value % 7  // ISO Mon=1..Sun=7 → Sun=0
-        for (i in 0 until daysInYear) {
-            val date = firstDay.plusDays(i.toLong())
-            val col = (i + startDow) / 7
-            val row = (i + startDow) % 7
-            if (col >= totalCols) break
-            val isoDate = date.toString()
-            val cat = byDate[isoDate]
-            val color = when (cat) {
-                "strength" -> Color(0xFFEF4444)
-                "yoga" -> Color(0xFFA78BFA)
-                "ride" -> Color(0xFF38BDF8)
-                "run" -> Color(0xFF22C55E)
-                "walk" -> Color(0xFFF59E0B)
-                "row" -> Color(0xFF06B6D4)
-                "other" -> Color(0xFF94A3B8)
-                else -> Color(0x141A2332)
-            }
-            val x = col * (cellPx + gapPx)
-            val y = row * (cellPx + gapPx)
-            drawRect(
-                color = color,
-                topLeft = androidx.compose.ui.geometry.Offset(x, y),
-                size = androidx.compose.ui.geometry.Size(cellPx, cellPx),
             )
         }
     }

@@ -509,9 +509,10 @@ private fun FilterBar(
 }
 
 /**
- * Compact pill chip, theme-aware. Selected fill uses the accent
- * (NeonMV.Cyan in the neon shell, MV.BrandRed in classic); unselected is a
- * faint outlined surface. Mirrors the BodyScreen neon-pill treatment.
+ * Compact pill chip, theme-aware. Neon selected state is a cyan TINT with
+ * a 45% border (matching the web `.chip.active` rule) — a solid cyan slab
+ * was the loudest element on the screen and read as a different design
+ * system from the Train tab. Classic keeps its solid MV.BrandRed fill.
  */
 @Composable
 private fun FilterChip(

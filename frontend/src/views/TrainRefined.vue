@@ -165,8 +165,17 @@ function primary(a: Activity): string {
   return "—";
 }
 
+const RECENT_LIMIT = 6;
+
+/** The fetch is deliberately wide (a trailing year, for the YTD pair and
+ *  the calendar) but this feed is a preview — cap and sort it explicitly
+ *  rather than inheriting whatever order and length the API returned.
+ *  Matches RefinedTrainScreen.kt's `sortedByDescending { startAt }.take(6)`. */
 const recent = computed<FeedRow[]>(() =>
-  activities.value.map((a, i): FeedRow => {
+  [...activities.value]
+    .sort((a, b) => (b.start_at ?? "").localeCompare(a.start_at ?? ""))
+    .slice(0, RECENT_LIMIT)
+    .map((a, i): FeedRow => {
     const strength = classify(a.type);
     const name = a.name?.trim() || (a.type ? titleCase(a.type) : "Activity");
     const day = relDay(a.start_at);
@@ -181,7 +190,7 @@ const recent = computed<FeedRow[]>(() =>
         ? `/activity/${a.source}/${a.source_id}`
         : null,
     };
-  }),
+    }),
 );
 </script>
 

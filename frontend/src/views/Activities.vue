@@ -43,6 +43,7 @@ const activities = ref<Activity[]>([]);
 const stats = ref<ActivityStats | null>(null);
 const strengthWorkouts = ref<Array<{
   id: number; date: string; split_focus: string; status: string;
+  started_at?: string | null; completed_at?: string | null;
 }>>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -141,6 +142,14 @@ async function load() {
       api.strengthWorkouts({ limit: 200 }).catch(() => ({ count: 0, workouts: [] })),
     ]);
     stats.value = st;
+
+    // Feed the year calendar. Without this the ref stayed empty and the
+    // calendar rendered no strength days at all — the synth rows below go
+    // into a different ref that only drives the list.
+    strengthWorkouts.value = sw.workouts
+      .filter((w) => w.status !== "regenerated" && w.status !== "planned"
+        && w.status !== "skipped")
+      .filter((w) => !(w.split_focus === "cardio" && w.completed_by_activity_source));
 
     // Synthesize Activity-shaped rows from strength workouts so they
     // sort, group, filter, and render alongside the rest of the feed.
@@ -255,6 +264,23 @@ const ytdStats = computed(() => {
     target.duration += a.duration_s ?? 0;
     target.elevation += a.elevation_gain_m ?? 0;
     target.kcal += a.kcal ?? 0;
+  }
+  // Strength arm. The phone's YTD card has always counted completed
+  // strength sessions (ui/common/ActivityYtd.kt), and the Train tile now
+  // does too — without this the same "Activities" figure read 108 on the
+  // phone and on /train but 78 here, and tapping the /train tile landed
+  // on a page that contradicted the number tapped.
+  for (const w of strengthWorkouts.value) {
+    if (w.status !== "completed" || !w.date) continue;
+    const d = new Date(w.date + "T00:00:00");
+    const target = d >= startOfThisYear && d <= now ? ytd
+      : d >= startOfLastYear && d <= endOfLastYear ? lyr : null;
+    if (!target) continue;
+    target.n += 1;
+    if (w.started_at && w.completed_at) {
+      target.duration += Math.max(0, Math.round(
+        (+new Date(w.completed_at) - +new Date(w.started_at)) / 1000));
+    }
   }
   function pct(now: number, prev: number): number {
     if (prev === 0) return now === 0 ? 0 : 100;

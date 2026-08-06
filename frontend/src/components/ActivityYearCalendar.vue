@@ -9,7 +9,7 @@
  * so nothing that ramp encoded is lost.
  */
 import { computed } from "vue";
-import VChart from "vue-echarts";
+import VChart from "@/echarts";
 import { chartTheme, isNeon } from "@/theme";
 import type { Activity } from "@/api/types";
 import {

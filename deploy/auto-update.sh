@@ -86,6 +86,54 @@ reclaim_if_low_disk() {
 }
 reclaim_if_low_disk
 
+# ── ORPHAN-1: recreate-orphan sweep ──────────────────────────────────
+# `docker compose up -d --force-recreate` swaps a service by RENAMING the
+# live container to "<old-id-prefix>_<name>" and creating a fresh one under
+# the real name. If the run dies between those two steps — OOM, disk
+# pressure, a compose timeout, the CT being migrated mid-deploy — the
+# rename survives and nothing owns the real name cleanly. Every later run
+# then aborts with:
+#
+#   Error response from daemon: Conflict. The container name
+#   "/<id>_myvitals-backend-1" is already in use by container "<id>"
+#
+# and the CT silently sticks on its old image until someone SSHes in
+# (2026-08-06).
+#
+# Runs on EVERY tick, BEFORE the no-op early-exit, so a stranded orphan is
+# cleared within one cron interval instead of waiting for the next release.
+#
+# SAFETY — learned the hard way: a *running* orphan is not garbage. It may
+# still be the container actually serving traffic. Force-removing one is
+# how a failed update becomes an outage (which is exactly what happened
+# when this was cleaned up by hand). So: remove only non-running orphans,
+# and merely warn about running ones.
+sweep_recreate_orphans() {
+    local removed=0 line cid cname cstate
+    while read -r cid cname cstate; do
+        [ -z "${cid:-}" ] && continue
+        case "$cstate" in
+            running|restarting|paused)
+                echo "$LOG_TAG WARNING: running recreate-orphan $cname ($cstate)"
+                echo "$LOG_TAG   left in place — it may still be serving."
+                echo "$LOG_TAG   inspect: docker ps -a --filter name=_myvitals-"
+                ;;
+            *)
+                if docker rm -f "$cid" >/dev/null 2>&1; then
+                    echo "$LOG_TAG removed stale recreate-orphan $cname ($cstate)"
+                    removed=$((removed + 1))
+                fi
+                ;;
+        esac
+    done < <(
+        docker ps -a --format '{{.ID}} {{.Names}} {{.State}}' 2>/dev/null \
+            | grep -E '^[0-9a-f]+ [0-9a-f]{6,}_myvitals-[a-z]+-1 ' || true
+    )
+    [ "$removed" -gt 0 ] && echo "$LOG_TAG swept $removed stale container(s)"
+    return 0
+}
+sweep_recreate_orphans
+
 # NOTE: the CT's /opt/myvitals is not a git checkout under the current
 # bootstrap (deploy uses tar+rsync). So we don't `git pull` here — only
 # image pulls, which cover the 99% case. If docker-compose.yml or the
@@ -148,7 +196,21 @@ frontend=$before_frontend
 EOF
 
 # Recreate.
-docker compose up -d --force-recreate backend frontend 2>&1 | tail -3
+#
+# `| tail -3` makes the pipeline's status tail's, so a compose failure here
+# does NOT trip `set -e`. That is deliberate (we want the health probe and
+# rollback below to run), but it means a failed swap reaches the probe with
+# a half-renamed container still holding the name. Capture the status so
+# the log says WHY rather than only that /health never answered.
+recreate_rc=0
+docker compose up -d --force-recreate backend frontend 2>&1 | tail -3 \
+    || recreate_rc=$?
+if [ "${PIPESTATUS[0]:-0}" -ne 0 ] || [ "$recreate_rc" -ne 0 ]; then
+    echo "$LOG_TAG WARNING: compose up returned non-zero — swap may be partial"
+    sweep_recreate_orphans
+    echo "$LOG_TAG retrying recreate once after sweep"
+    docker compose up -d --force-recreate backend frontend 2>&1 | tail -3 || true
+fi
 
 # Health probe — give the backend up to 60s to come up.
 healthy=0

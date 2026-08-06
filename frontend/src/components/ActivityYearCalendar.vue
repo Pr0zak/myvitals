@@ -99,7 +99,12 @@ const option = computed(() => {
     top: TOP_PAD + i * STRIP_H.value,
     left: 30, right: 10,
     cellSize: ["auto", props.compact ? 10 : 13] as [string, number],
-    range: y,
+    // Stop at today for the current year. `range: y` drew all 53 weeks, so
+    // ~40% of the strip was empty future weeks and the cells shrank to fit
+    // a year that hadn't happened yet.
+    range: y === String(new Date().getFullYear())
+      ? [`${y}-01-01`, new Date().toISOString().slice(0, 10)]
+      : y,
     itemStyle: {
       color: neon ? "#161a24" : "#1a2332",
       borderColor: neon ? "rgba(39,42,59,.9)" : "rgba(148,163,184,.12)",

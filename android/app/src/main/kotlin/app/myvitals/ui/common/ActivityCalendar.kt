@@ -44,11 +44,16 @@ import java.time.OffsetDateTime
  * Extracted from ActivitiesScreen so the Refined Train screen can show the
  * same strip without a second copy of the bucketing loop and the palette.
  *
- * Two long-standing bugs are fixed by the move:
+ * Three bugs are fixed by the move:
  *  - The old strip hard-coded `cellSize = 10.dp` across 53 columns — 634 dp
  *    of drawing inside a `fillMaxWidth()` Canvas, so on a ~360 dp phone
  *    roughly half the year was silently clipped off the right edge. Cell
  *    size is now derived from the measured width.
+ *  - It always drew all 53 columns, so ~40% of the strip was empty future
+ *    weeks. That both read as "the calendar stops in August" and squeezed
+ *    cells to 3.8 dp to fit a year that hadn't happened. The current year
+ *    now ends at today: 32 columns in August, cells twice the size, strip
+ *    fills the width.
  *  - The legend was a hard-coded list of five entries while the canvas
  *    could draw seven categories, so Row and Other rendered with no key.
  *    The legend is now derived from the data actually present.
@@ -144,9 +149,10 @@ fun ActivityCalendarCard(
 }
 
 /**
- * The 7×53 grid itself. Cell size is derived from the measured width so
- * the whole year fits; if the container is so narrow that cells would drop
- * below [minCell] the strip scrolls horizontally rather than clipping.
+ * The 7×N grid. N is the weeks actually elapsed (full 53 for a past year),
+ * and cell size is derived from the measured width so it fills the row. If
+ * the container is narrow enough that cells would fall below [minCell] the
+ * strip scrolls horizontally rather than clipping.
  */
 @Composable
 fun ActivityCalendarYearGrid(
@@ -158,9 +164,22 @@ fun ActivityCalendarYearGrid(
     minCell: Dp = 5.dp,
 ) {
     val firstDay = remember(year) { LocalDate.of(year, 1, 1) }
-    val daysInYear = remember(year) { firstDay.lengthOfYear() }
     val startDow = remember(year) { firstDay.dayOfWeek.value % 7 }  // Sun=0
-    val totalCols = 53
+    // Stop at today for the current year. Drawing all 53 columns meant ~40%
+    // of the strip was empty future weeks, which both looked like the
+    // calendar had stopped early AND squeezed the cells to 3.8 dp to fit a
+    // year that hadn't happened yet. Through-today is 32 columns in August,
+    // so cells double in size and the strip actually fills the width.
+    val lastDay = remember(year) {
+        val today = LocalDate.now()
+        if (year == today.year) today else firstDay.plusDays(firstDay.lengthOfYear() - 1L)
+    }
+    val dayCount = remember(firstDay, lastDay) {
+        (java.time.temporal.ChronoUnit.DAYS.between(firstDay, lastDay) + 1).toInt()
+    }
+    val totalCols = remember(dayCount, startDow) {
+        ((dayCount + startDow + 6) / 7).coerceIn(1, 53)
+    }
     val empty = activityCategoryEmpty(neon)
 
     BoxWithConstraints(modifier.fillMaxWidth()) {
@@ -179,7 +198,7 @@ fun ActivityCalendarYearGrid(
             ) {
                 val cellPx = cell.toPx()
                 val gapPx = cellGap.toPx()
-                for (i in 0 until daysInYear) {
+                for (i in 0 until dayCount) {
                     val date = firstDay.plusDays(i.toLong())
                     val col = (i + startDow) / 7
                     val row = (i + startDow) % 7

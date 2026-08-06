@@ -1,5 +1,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+// Registration side-effect. `@/echarts` runs use([...]) for the chart types
+// and components below; importing "echarts/core" alone leaves LineChart /
+// BarChart / GridComponent unregistered, and echarts.init() then throws
+// "Jl[o] is not a constructor". It only worked by accident on routes that
+// ALSO load a chart view (which imports the barrel) — so `/` , whose only
+// ECharts usage is these sparklines, threw on every visit.
+import "@/echarts";
 import * as echarts from "echarts/core";
 
 const props = withDefaults(defineProps<{

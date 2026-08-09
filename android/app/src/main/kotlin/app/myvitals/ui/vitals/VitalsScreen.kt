@@ -42,6 +42,8 @@ import androidx.compose.material.icons.outlined.Terrain
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.MonitorWeight
 import androidx.compose.material.icons.outlined.Note
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Thermostat
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Timeline
@@ -111,6 +113,13 @@ enum class Vital(val label: String, val icon: ImageVector, val color: Color) {
         Color(0xFF38BDF8)),
     TRAILS("Trails", Icons.Outlined.Terrain, Color(0xFF22C55E)),
     JOURNAL("Journal", Icons.Outlined.Note, Color(0xFF94A3B8)),
+    // BAR-3: RefinedRingsScreen emits vitals/SKIN_TEMP and vitals/RECOVERY.
+    // Without these members Vital.valueOf() threw and NeonAppShell's
+    // getOrDefault(Vital.HR) silently opened Heart rate instead — tapping
+    // "Skin temp" showed you your pulse. Both render through the generic
+    // series path off daily_summary.
+    SKIN_TEMP("Skin temp", Icons.Outlined.Thermostat, Color(0xFFF97316)),
+    RECOVERY("Recovery", Icons.Outlined.Bolt, Color(0xFF22D3EE)),
 }
 
 /** Lightweight wrapper for the live HR points + their freshness. */
@@ -448,6 +457,11 @@ fun VitalsScreen(
         ) {
             items(tiles, key = { it.name }) { v ->
                 when (v) {
+                    // SKIN_TEMP / RECOVERY are drill-down destinations only —
+                    // they're reachable from the neon home tiles but are not
+                    // members of `canonicalOrder`, so they never appear in this
+                    // grid. Branch defensively rather than crash if that changes.
+                    Vital.SKIN_TEMP, Vital.RECOVERY -> Unit
                     Vital.SOBER -> SoberBadge(sober, onClick = onOpenSober)
                     Vital.FASTING -> FastingBadge(fasting, nowMs, onClick = onOpenFasting)
                     Vital.COACH -> CoachBadge(onClick = onOpenCoach)

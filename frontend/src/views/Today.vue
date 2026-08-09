@@ -19,6 +19,7 @@ import type {
 import "@/styles/today-tokens.css";
 
 import PageHeader from "@/components/today/PageHeader.vue";
+import TrendBadges from "@/components/TrendBadges.vue";
 import Hero from "@/components/today/Hero.vue";
 import LiveVitals from "@/components/today/LiveVitals.vue";
 import WatchStatus from "@/components/today/WatchStatus.vue";
@@ -588,6 +589,11 @@ async function refreshAnnotations() {
                 @refresh="loadCore"/>
 
     <p v-if="error" class="err">{{ error }}</p>
+
+    <!-- Focus: pure-statistics trend badges from /ai/badges. The component
+         existed and worked but was imported by no view — the one signal that
+         answers "is anything notable today?" was computed and discarded. -->
+    <TrendBadges />
 
     <Hero
       v-if="summary"

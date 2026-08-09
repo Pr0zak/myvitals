@@ -331,6 +331,8 @@ private fun neonDomainColor(vital: Vital): Color = when (vital) {
     Vital.SLEEP -> NeonMV.Magenta
     Vital.STEPS -> NeonMV.Lime
     Vital.WEIGHT -> NeonMV.Amber
+    Vital.SKIN_TEMP -> NeonMV.Amber
+    Vital.RECOVERY -> NeonMV.Cyan
     Vital.SOBER -> NeonMV.Magenta
     Vital.FASTING -> NeonMV.Cyan
     else -> vital.color
@@ -339,6 +341,8 @@ private fun neonDomainColor(vital: Vital): Color = when (vital) {
 private fun fmtForVital(v: Float, vital: Vital): String = when (vital) {
     Vital.HR -> "%.0f bpm".format(v)
     Vital.HRV -> "%.0f ms".format(v)
+    Vital.SKIN_TEMP -> "%+.2f °C".format(v)
+    Vital.RECOVERY -> "%.0f".format(v)
     Vital.SLEEP -> "%.1f h".format(v)
     Vital.STEPS -> "%,.0f".format(v)
     Vital.WEIGHT -> "%.1f lb".format(v)
@@ -392,6 +396,12 @@ private suspend fun fetchSeries(
             return summaryXY(dailyRows(api, range)) {
                 it.sleepDurationS?.toDouble()?.div(3600.0)
             }
+        }
+        Vital.SKIN_TEMP -> {
+            return summaryXY(dailyRows(api, range)) { it.skinTempDeltaAvg }
+        }
+        Vital.RECOVERY -> {
+            return summaryXY(dailyRows(api, range)) { it.recoveryScore }
         }
         Vital.WEIGHT -> {
             return summaryXY(dailyRows(api, range)) { it.weightKg?.times(2.20462) }

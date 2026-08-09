@@ -162,8 +162,19 @@ fun NeonAppShell(
                     arguments = listOf(navArgument("key") { type = NavType.StringType }),
                 ) { entry ->
                     val key = entry.arguments?.getString("key") ?: "HR"
+                    // Fall back to HR only as a last resort, and SAY SO. This
+                    // used to swallow the failure, so a route naming a vital
+                    // the enum didn't have (SKIN_TEMP, RECOVERY) silently
+                    // opened Heart rate and looked like a UI bug rather than a
+                    // missing enum member.
                     val vital = runCatching { app.myvitals.ui.vitals.Vital.valueOf(key) }
-                        .getOrDefault(app.myvitals.ui.vitals.Vital.HR)
+                        .getOrElse {
+                            timber.log.Timber.w(
+                                "vitals route '%s' has no Vital member — " +
+                                    "falling back to HR", key,
+                            )
+                            app.myvitals.ui.vitals.Vital.HR
+                        }
                     app.myvitals.ui.vitals.VitalsDetailScreen(
                         settings = settings, vital = vital, onBack = { nav.popBackStack() },
                     )

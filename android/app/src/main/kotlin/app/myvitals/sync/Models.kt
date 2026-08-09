@@ -773,6 +773,20 @@ data class TrailOsmFetchAllResponse(
     @Json(name = "total_with_pins") val totalWithPins: Int = 0,
 )
 
+// ── Trend badges (/ai/badges — pure statistics, no LLM) ───────────
+
+@JsonClass(generateAdapter = true)
+data class TrendBadge(
+    val key: String,
+    val label: String,
+    val value: String,
+    val subtitle: String = "",
+    /** good | warn | bad | neutral */
+    val tone: String = "neutral",
+    /** up | down | flat | spike | streak */
+    val direction: String = "flat",
+)
+
 // ── All-activities map ────────────────────────────────────────────
 
 @JsonClass(generateAdapter = true)

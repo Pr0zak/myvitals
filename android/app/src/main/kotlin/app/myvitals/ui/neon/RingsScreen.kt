@@ -45,6 +45,7 @@ import app.myvitals.sync.SoberCurrentResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -68,10 +69,22 @@ fun RingsScreen(
     var profile by remember { mutableStateOf<ProfileResponse?>(null) }
     var sober by remember { mutableStateOf<SoberCurrentResponse?>(null) }
     var fasting by remember { mutableStateOf<FastingSession?>(null) }
+    var badges by remember { mutableStateOf<List<app.myvitals.sync.TrendBadge>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    // Previously this screen could not fail, refresh, or report staleness: a
+    // bare runCatching with .getOrNull() on every inner call meant a dead
+    // backend, an expired token and "no data yet" all rendered as "—".
+    var error by remember { mutableStateOf<String?>(null) }
+    var refreshing by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
-        runCatching {
+    suspend fun load() {
+        if (!settings.isConfigured()) {
+            error = "Backend not configured — open Settings."
+            loading = false
+            return
+        }
+        try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             coroutineScope {
                 val summaryD = async(Dispatchers.IO) {
@@ -83,20 +96,42 @@ fun RingsScreen(
                 val soberD = async(Dispatchers.IO) {
                     runCatching { api.soberCurrent() }.getOrNull()
                 }
+                val badgesD = async(Dispatchers.IO) {
+                    runCatching { api.aiBadges() }.getOrDefault(emptyList())
+                }
                 val fastingD = async(Dispatchers.IO) {
                     runCatching {
                         val r = api.fastingCurrent()
                         if (r.isSuccessful) r.body() else null
                     }.getOrNull()
                 }
-                summary = summaryD.await()
-                profile = profileD.await()
-                sober = soberD.await()
-                fasting = fastingD.await()
+                val s0 = summaryD.await()
+                val p0 = profileD.await()
+                // Both null with a configured backend means the requests
+                // failed — surface it instead of rendering empty rings.
+                if (s0 == null && p0 == null) {
+                    if (summary == null) error = "Couldn't reach the backend."
+                } else {
+                    error = null
+                    summary = s0
+                    profile = p0
+                    sober = soberD.await()
+                    fasting = fastingD.await()
+                    badges = badgesD.await()
+                }
             }
+        } catch (e: Exception) {
+            timber.log.Timber.w(e, "rings load failed")
+            if (summary == null) error = e.message?.take(140) ?: "Load failed"
+        } finally {
+            loading = false
         }
-        loading = false
     }
+
+    LaunchedEffect(Unit) { load() }
+    // Re-fetch on resume — a home screen that loads once shows yesterday's
+    // numbers after an overnight suspend.
+    app.myvitals.ui.common.LifecycleResumeEffect { scope.launch { load() } }
 
     val sleepScore = summary?.sleepScore
     val recoveryScore = summary?.recoveryScore
@@ -105,7 +140,20 @@ fun RingsScreen(
     val movePct: Float = if (steps != null && stepGoal > 0)
         min(100f, (steps.toFloat() / stepGoal.toFloat()) * 100f) else 0f
 
-    NeonScreen(title = "Today", contentPadding = contentPadding) {
+    NeonScreen(
+        title = "Today",
+        contentPadding = contentPadding,
+        refreshing = refreshing,
+        onRefresh = {
+            scope.launch { refreshing = true; try { load() } finally { refreshing = false } }
+        },
+    ) {
+        FocusStrip(badges)
+        error?.let {
+            NeonErrorBanner(it) {
+                scope.launch { refreshing = true; try { load() } finally { refreshing = false } }
+            }
+        }
         if (loading && summary == null) {
             Text(
                 "Loading…",

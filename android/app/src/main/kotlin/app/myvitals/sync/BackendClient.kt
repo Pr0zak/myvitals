@@ -319,6 +319,10 @@ interface BackendApi {
     /** Every GPS-tracked activity as simplified polylines, for the map
      *  screen. Server-side RDP keeps this ~400 KB instead of the 3.4 MB
      *  the full-fidelity tracks would cost. */
+    /** Pure-statistics trend badges for the Today header. No LLM, no cost. */
+    @GET("ai/badges")
+    suspend fun aiBadges(): List<TrendBadge>
+
     @GET("activities/map")
     suspend fun activitiesMap(
         @retrofit2.http.Query("type") type: String? = null,

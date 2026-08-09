@@ -42,19 +42,22 @@ val NeonPillShape = RoundedCornerShape(22.dp)
  * vertically-scrolling content column. `contentPadding` is supplied by the
  * shell so content clears the bottom nav bar.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun NeonScreen(
     title: String,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
     headerTrailing: @Composable (() -> Unit)? = null,
+    /** Supply both to make the screen pull-to-refreshable. Omitted by
+     *  callers that have nothing to re-fetch; the neon home screens had no
+     *  refresh at all, so a stale or failed load could only be cleared by
+     *  killing the app. */
+    refreshing: Boolean? = null,
+    onRefresh: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(NeonBackgroundBrush),
-    ) {
+    val body: @Composable () -> Unit = {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -64,6 +67,21 @@ fun NeonScreen(
         ) {
             NeonTitle(title, trailing = headerTrailing)
             content()
+        }
+    }
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(NeonBackgroundBrush),
+    ) {
+        if (refreshing != null && onRefresh != null) {
+            androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = onRefresh,
+                modifier = Modifier.fillMaxSize(),
+            ) { body() }
+        } else {
+            body()
         }
     }
 }

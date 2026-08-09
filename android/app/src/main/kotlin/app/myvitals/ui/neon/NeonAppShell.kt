@@ -73,10 +73,12 @@ private val NEON_TABS = listOf(
             it == "activities" || it?.startsWith("activity/") == true
     },
     NeonTab(NeonRoutes.TRAILS, "Trails", NeonMV.Amber, Icons.Outlined.Terrain) {
-        it == NeonRoutes.TRAILS
+        // Includes trails/{id}/visits, which previously lit nothing.
+        it == NeonRoutes.TRAILS || it?.startsWith("trails/") == true
     },
     NeonTab(NeonRoutes.YOU, "You", NeonMV.Cyan, Icons.Outlined.Person) {
-        it == NeonRoutes.YOU || it in setOf("settings", "sober", "fasting", "journal")
+        it == NeonRoutes.YOU ||
+            it in setOf("settings", "sober", "fasting", "journal", "coach")
     },
 )
 

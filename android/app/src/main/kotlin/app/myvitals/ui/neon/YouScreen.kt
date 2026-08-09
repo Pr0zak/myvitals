@@ -21,6 +21,7 @@ import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.LocalFireDepartment
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.Icon
@@ -174,6 +175,15 @@ fun YouScreen(
             icon = Icons.Outlined.HourglassEmpty, tint = NeonMV.Cyan,
             title = "Fasting", subtitle = "Protocol & stages",
             onClick = { onOpen("fasting") },
+        )
+        Spacer(Modifier.height(8.dp))
+        // Coach was reachable ONLY from the overflow menu inside
+        // StrengthTodayScreen — six AI cards behind Train → View workout → ⋮.
+        // This file's own KDoc already claimed the link existed; now it does.
+        LinkPill(
+            icon = Icons.Outlined.Psychology, tint = NeonMV.Periwinkle,
+            title = "Coach", subtitle = "AI reads on training, sleep & recovery",
+            onClick = { onOpen("coach") },
         )
         Spacer(Modifier.height(8.dp))
         LinkPill(

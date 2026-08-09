@@ -433,9 +433,22 @@ const recent = computed<FeedRow[]>(() =>
       <span class="chev">›</span>
     </button>
 
-    <!-- Catalog shortcut -->
+    <!-- Workout hub. Mirrors the phone's Train footer so the same
+         destinations are reachable from the same place on both surfaces. -->
+    <button class="catalog" @click="go('/workout/strength/history')">
+      <span>Workout history</span>
+      <span class="chev">›</span>
+    </button>
+    <button class="catalog" @click="go('/workout/strength/charts')">
+      <span>Workout charts</span>
+      <span class="chev">›</span>
+    </button>
     <button class="catalog" @click="go('/workout/strength/catalog')">
       <span>Exercise catalog</span>
+      <span class="chev">›</span>
+    </button>
+    <button class="catalog" @click="go('/workout/strength/equipment')">
+      <span>Equipment &amp; training preferences</span>
       <span class="chev">›</span>
     </button>
   </div>

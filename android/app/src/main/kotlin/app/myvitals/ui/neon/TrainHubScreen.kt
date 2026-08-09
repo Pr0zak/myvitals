@@ -27,6 +27,8 @@ import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Handyman
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Pool
 import androidx.compose.material.icons.outlined.Terrain
 import androidx.compose.material3.Icon
@@ -317,6 +319,17 @@ fun TrainHubScreen(
         LinkRow("Workout charts", Icons.Outlined.BarChart) { onOpen("workout/charts") }
         Spacer(Modifier.height(11.dp))
         LinkRow("Exercise catalog", Icons.Outlined.FitnessCenter) { onOpen("workout/catalog") }
+        Spacer(Modifier.height(11.dp))
+        // Promoted out of StrengthTodayScreen's ⋮, which was the only
+        // app-wide door to either. Apple's own argument against overflow is
+        // that it makes content "hard to reach AND hard to notice" — and
+        // these are navigation, not actions. The genuinely contextual items
+        // (Regenerate / Discard / Skip / Custom / Share) stay in the menu.
+        LinkRow("Training preferences", Icons.Outlined.Tune) {
+            onOpen("workout/training-prefs")
+        }
+        Spacer(Modifier.height(11.dp))
+        LinkRow("Equipment", Icons.Outlined.Handyman) { onOpen("workout/equipment") }
 
         Spacer(Modifier.height(24.dp))
     }

@@ -12,8 +12,6 @@
 import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
-import { isRefined } from "@/theme";
-import BodyRefined from "./BodyRefined.vue";
 import type { TodaySummary } from "@/api/types";
 
 const router = useRouter();
@@ -25,11 +23,7 @@ async function load(): Promise<void> {
   sum.value = await api.todaySummary().catch(() => null);
   loading.value = false;
 }
-onMounted(() => {
-  // The refined skin renders <BodyRefined/> (its own data load); skip the
-  // classic Body fetch when it's active.
-  if (!isRefined.value) load();
-});
+onMounted(load);
 
 function go(path: string): void {
   router.push(path);
@@ -98,8 +92,7 @@ function signed(n: number | null, d = 1): string {
 </script>
 
 <template>
-  <BodyRefined v-if="isRefined" />
-  <div v-else class="body-view">
+  <div class="body-view">
     <header class="head">
       <h1>Body</h1>
       <button class="recchip" @click="go('/heart-rate')" aria-label="Recovery detail">

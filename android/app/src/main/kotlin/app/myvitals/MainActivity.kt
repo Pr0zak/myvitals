@@ -132,17 +132,16 @@ class MainActivity : ComponentActivity() {
 
         val activity: ComponentActivity = this
 
+        // Anyone who had "Neon Refined" selected is migrated to Vitality Neon
+        // — the shell it was a variant of — rather than left pointing at a
+        // mode that no longer exists.
+        settings.clearRetiredRefinedHomeFlag()
+
         setContent {
             var neonEnabled by remember { mutableStateOf(settings.neonShellEnabled) }
             val toggleNeon: (Boolean) -> Unit = { on ->
                 settings.neonShellEnabled = on
                 neonEnabled = on
-            }
-
-            var refinedEnabled by remember { mutableStateOf(settings.refinedHomeEnabled) }
-            val toggleRefined: (Boolean) -> Unit = { on ->
-                settings.refinedHomeEnabled = on
-                refinedEnabled = on
             }
 
             // Settings actions shared by both shells (defined once so the neon
@@ -205,8 +204,6 @@ class MainActivity : ComponentActivity() {
                         onClearBuffer = onClearBuffer,
                         neonShellEnabled = neonEnabled,
                         onToggleNeonShell = toggleNeon,
-                        refinedHomeEnabled = refinedEnabled,
-                        onToggleRefinedHome = toggleRefined,
                     )
                 }
                 return@setContent
@@ -442,8 +439,6 @@ class MainActivity : ComponentActivity() {
                                 onClearBuffer = onClearBuffer,
                                 neonShellEnabled = neonEnabled,
                                 onToggleNeonShell = toggleNeon,
-                                refinedHomeEnabled = refinedEnabled,
-                                onToggleRefinedHome = toggleRefined,
                             )
                         }
                     }

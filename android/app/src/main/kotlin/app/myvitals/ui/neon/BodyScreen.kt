@@ -235,16 +235,47 @@ fun BodyScreen(
             )
             // Skin temp overnight delta vs baseline (signed). Same field the
             // web Body card shows; surfaced via DailySummary.skinTempDeltaAvg.
-            // Non-clickable (no phone detail screen). Reads "—" when there's
-            // genuinely no reading (e.g. the PW3/PW4 skin-temp firmware bug).
+            // Drillable as of v0.7.365 — Vital.SKIN_TEMP now exists and the
+            // generic series path charts it off daily_summary. Reads "—" when
+            // there's genuinely no reading (e.g. the PW3/PW4 firmware bug).
             val skinDelta = sum?.skinTempDeltaAvg
             MetricCard(
                 modifier = Modifier.weight(1f),
                 label = "Skin temp",
                 value = skinDelta?.let { (if (it >= 0) "+" else "") + "%.1f".format(it) } ?: "—",
                 unit = "°C",
-                accent = NeonMV.Muted,
+                accent = NeonMV.Amber,
                 sub = "vs baseline",
+                loading = loading,
+                onClick = { onOpen("vitals/SKIN_TEMP") },
+            )
+        }
+
+        // ---- Row 5: Recovery · Readiness ----
+        // Both were only ever surfaced on the retired Neon Refined home. They
+        // are the app's best-engineered numbers (readiness is a weighted
+        // z-score composite vs 28-day baselines) and were invisible on this
+        // shell entirely.
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            MetricCard(
+                modifier = Modifier.weight(1f),
+                label = "Recovery",
+                value = recovery?.let { "%.0f".format(it) } ?: "—",
+                unit = "",
+                accent = NeonMV.Cyan,
+                sub = "HRV vs baseline",
+                loading = loading,
+                onClick = { onOpen("vitals/RECOVERY") },
+            )
+            val readiness = sum?.readinessScore
+            MetricCard(
+                modifier = Modifier.weight(1f),
+                label = "Readiness",
+                value = readiness?.let { "%.0f".format(it) } ?: "—",
+                unit = "",
+                accent = NeonMV.Lime,
+                sub = "HRV · RHR · sleep",
                 loading = loading,
                 onClick = null,
             )

@@ -111,7 +111,12 @@ interface BackendApi {
     suspend fun strengthExercises(): StrengthExercisesResponse
 
     @GET("workout/strength/workouts")
-    suspend fun strengthWorkouts(): StrengthWorkoutsResponse
+    suspend fun strengthWorkouts(
+        /** Server default is 100 (~6 months at 4x/week), which leaves the
+         *  YTD comparison's last-year bucket empty and reports a bogus
+         *  "↑ 100%". The web twin asks for 400. */
+        @Query("limit") limit: Int = 400,
+    ): StrengthWorkoutsResponse
 
     @GET("workout/strength/workouts/{id}")
     suspend fun strengthWorkout(@Path("id") id: Long): StrengthWorkoutDetail

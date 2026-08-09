@@ -88,8 +88,6 @@ fun SettingsScreen(
     onClearBuffer: () -> Unit,
     neonShellEnabled: Boolean = false,
     onToggleNeonShell: (Boolean) -> Unit = {},
-    refinedHomeEnabled: Boolean = false,
-    onToggleRefinedHome: (Boolean) -> Unit = {},
 ) {
     // Resolve HC permission state OFF the main thread. This used to be a
     // `hasPermissions()` call straight in the composable body, which wrapped a
@@ -282,10 +280,11 @@ fun SettingsScreen(
         // ── Appearance ──
         item {
             Section(title = "Appearance", neon = neon) {
-                // Single top-level theme picker (mirrors the web radio group):
-                // three mutually-exclusive modes, each setting both flags.
+                // Two modes, not three. "Neon Refined" was removed in
+                // v0.7.366 — it was a separate information architecture
+                // rather than a skin, and on it Sleep, Steps and Measurements
+                // had no reachable entry point at all.
                 val mode = when {
-                    neonShellEnabled && refinedHomeEnabled -> "refined"
                     neonShellEnabled -> "neon"
                     else -> "classic"
                 }
@@ -294,21 +293,14 @@ fun SettingsScreen(
                         selected = mode == "classic",
                         label = "Classic",
                         subtitle = "System light/dark, classic side-nav",
-                        onClick = { onToggleRefinedHome(false); onToggleNeonShell(false) },
+                        onClick = { onToggleNeonShell(false) },
                     )
                     HorizontalDivider(color = MV.OutlineVariant)
                     ThemeOptionRow(
                         selected = mode == "neon",
                         label = "✦ Vitality Neon",
                         subtitle = "Obsidian neon 6-tab shell",
-                        onClick = { onToggleRefinedHome(false); onToggleNeonShell(true) },
-                    )
-                    HorizontalDivider(color = MV.OutlineVariant)
-                    ThemeOptionRow(
-                        selected = mode == "refined",
-                        label = "✦ Neon Refined",
-                        subtitle = "Neon + A1 concentric-ring Home / Body / Train",
-                        onClick = { onToggleNeonShell(true); onToggleRefinedHome(true) },
+                        onClick = { onToggleNeonShell(true) },
                     )
                 }
             }

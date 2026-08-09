@@ -19,9 +19,9 @@ export const themeChoice = ref<ThemeChoice>(
  * swaps the navigation shell (see App.vue / NeonNav). */
 export const effectiveTheme = computed<EffectiveTheme>(() => {
   if (themeChoice.value === "auto") return systemPrefersDark() ? "dark" : "light";
-  // "refined" (Neon Refined) reuses the neon shell + neon-scoped CSS so nothing
-  // else has to be restyled; the only difference lives in refined-only view
-  // branches (gated by `isRefined`) + the `data-variant="refined"` hook below.
+  // "refined" is RETIRED (v0.7.366) but may still be in localStorage — map it
+  // to neon, the shell it was a variant of, rather than falling through to a
+  // theme that no longer exists.
   if (themeChoice.value === "refined") return "neon";
   return themeChoice.value;
 });
@@ -29,9 +29,16 @@ export const effectiveTheme = computed<EffectiveTheme>(() => {
 /** True when the redesigned neon shell + palette is active (neon OR refined). */
 export const isNeon = computed(() => effectiveTheme.value === "neon");
 
-/** True only for the "Neon Refined" (A1) skin — the refined home + refined-only
- * view branches key off this while everything else rides the neon shell. */
-export const isRefined = computed(() => themeChoice.value === "refined");
+/** RETIRED in v0.7.366 — "Neon Refined" was a separate information
+ * architecture, not a skin. Kept as a constant `false` only so any stray
+ * reference compiles to the non-refined path instead of breaking the build. */
+export const isRefined = computed(() => false);
+
+// One-time migration. `themeChoice` can still hold the retired "refined"
+// value from localStorage, and the watch below only fires on CHANGE — so
+// without this the stored value stays "refined" forever: Settings shows no
+// radio selected and <html data-variant="refined"> is stamped on every load.
+if (themeChoice.value === "refined") themeChoice.value = "neon";
 
 watch(themeChoice, (v) => localStorage.setItem(KEY, v));
 

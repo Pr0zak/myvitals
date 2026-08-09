@@ -65,14 +65,20 @@ class SettingsRepository(context: Context) {
         set(value) = plain.edit().putBoolean(KEY_NEON_SHELL, value).apply()
 
     /**
-     * Opt-in "Neon Refined" home — the A1 concentric tri-ring home screen that
-     * mirrors web `RingsRefined.vue`. Only takes effect while the Vitality Neon
-     * shell is active; off by default so the classic neon Today (RingsScreen)
-     * stays the default front door.
+     * RETIRED in v0.7.366. "Neon Refined" was a third information
+     * architecture rather than a skin: on it Sleep, Steps and Measurements had
+     * no reachable entry point, weekly volume cost 4 taps instead of 1, and
+     * the blood-pressure card lost its "Optimal" band — so an *appearance*
+     * toggle changed a health verdict.
+     *
+     * The setter is kept only to clear the stored key, so anyone who had it
+     * enabled lands on Vitality Neon instead of a shell that no longer exists.
      */
-    var refinedHomeEnabled: Boolean
-        get() = plain.getBoolean(KEY_REFINED_HOME, false)
-        set(value) = plain.edit().putBoolean(KEY_REFINED_HOME, value).apply()
+    fun clearRetiredRefinedHomeFlag() {
+        if (plain.contains(KEY_REFINED_HOME)) {
+            plain.edit().remove(KEY_REFINED_HOME).apply()
+        }
+    }
 
     fun lastSyncInstant(): Instant? =
         lastSyncEpochSeconds.takeIf { it > 0 }?.let(Instant::ofEpochSecond)

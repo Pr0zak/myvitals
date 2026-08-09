@@ -95,8 +95,6 @@ fun NeonAppShell(
     onClearBuffer: () -> Unit,
     neonShellEnabled: Boolean,
     onToggleNeonShell: (Boolean) -> Unit,
-    refinedHomeEnabled: Boolean,
-    onToggleRefinedHome: (Boolean) -> Unit,
 ) {
     val nav = rememberNavController()
 
@@ -131,18 +129,13 @@ fun NeonAppShell(
                 modifier = Modifier.fillMaxSize().weight(1f),
             ) {
                 // ---- Neon top-level home screens ----
-                composable(NeonRoutes.TODAY) {
-                    if (refinedHomeEnabled) RefinedRingsScreen(settings, pad, open)
-                    else RingsScreen(settings, pad, open)
-                }
-                composable(NeonRoutes.BODY) {
-                    if (refinedHomeEnabled) RefinedBodyScreen(settings, pad, open)
-                    else BodyScreen(settings, pad, open)
-                }
-                composable(NeonRoutes.TRAIN) {
-                    if (refinedHomeEnabled) RefinedTrainScreen(settings, pad, open)
-                    else TrainHubScreen(settings, pad, open)
-                }
+                // One implementation per tab. The "Neon Refined" variants were
+                // a THIRD information architecture, not a skin: on them Sleep,
+                // Steps and Measurements were unreachable and weekly volume
+                // cost 4 taps instead of 1. Consolidated onto these.
+                composable(NeonRoutes.TODAY) { RingsScreen(settings, pad, open) }
+                composable(NeonRoutes.BODY) { BodyScreen(settings, pad, open) }
+                composable(NeonRoutes.TRAIN) { TrainHubScreen(settings, pad, open) }
                 // The Trails tab IS the full Trails screen — map button,
                 // recency sort within status groups, and per-trail inline map
                 // drill-down. (Replaced the old NeonTrailsScreen status board,
@@ -285,8 +278,6 @@ fun NeonAppShell(
                         onClearBuffer = onClearBuffer,
                         neonShellEnabled = neonShellEnabled,
                         onToggleNeonShell = onToggleNeonShell,
-                        refinedHomeEnabled = refinedHomeEnabled,
-                        onToggleRefinedHome = onToggleRefinedHome,
                     )
                 }
             }

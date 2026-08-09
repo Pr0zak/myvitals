@@ -12,8 +12,7 @@
 import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
-import { isRefined } from "@/theme";
-import TrainRefined from "./TrainRefined.vue";
+import ActivityYearCalendar from "@/components/ActivityYearCalendar.vue";
 import type { Activity, StrengthWorkoutDetail } from "@/api/types";
 
 const router = useRouter();
@@ -21,26 +20,63 @@ const loading = ref(true);
 
 const workout = ref<StrengthWorkoutDetail | null>(null);
 const activities = ref<Activity[]>([]);
+const workouts = ref<Array<{ date: string; status?: string | null;
+  split_focus?: string | null }>>([]);
 
 const segment = ref<"strength" | "cardio">("strength");
 
 const C = 2 * Math.PI * 42; // hero ring circumference
 
+/** Jan 1 of LAST year — the YTD pair compares against the same span a year
+ *  ago, so the fetch has to reach back that far. */
+function ytdSince(): string {
+  return new Date(Date.UTC(new Date().getFullYear() - 1, 0, 1)).toISOString();
+}
+
 async function load(): Promise<void> {
   loading.value = true;
-  const [w, acts] = await Promise.all([
+  const [w, acts, wkts] = await Promise.all([
     api.strengthToday().catch(() => null),
-    api.activities({ limit: 6 }).catch(() => [] as Activity[]),
+    api.activities({ limit: 2000, since: ytdSince() }).catch(() => [] as Activity[]),
+    api.strengthWorkouts({ limit: 400 }).catch(() => ({ count: 0, workouts: [] })),
   ]);
   workout.value = w ?? null;
   activities.value = Array.isArray(acts) ? acts : [];
+  workouts.value = ((wkts as any)?.workouts ?? [])
+    .filter((x: any) => !["regenerated", "planned", "skipped"].includes(x.status))
+    .filter((x: any) => !(x.split_focus === "cardio" && x.completed_by_activity_source));
   loading.value = false;
 }
-onMounted(() => {
-  // The refined skin renders <TrainRefined/> (its own data load); skip the
-  // classic fetch when it's active.
-  if (!isRefined.value) load();
+
+/** Same computation the Activities YTD card performs — shared inputs, so the
+ *  two surfaces can't report different totals. */
+const ytd = computed(() => {
+  const now = new Date();
+  const thisYear = now.getFullYear();
+  const lastYear = thisYear - 1;
+  const endLast = new Date(Date.UTC(lastYear, now.getMonth(), now.getDate()));
+  const a = { n: 0, dist: 0 };
+  const b = { n: 0, dist: 0 };
+  for (const r of activities.value) {
+    if (!r.start_at) continue;
+    const d = new Date(r.start_at);
+    const t = d.getFullYear() === thisYear && d <= now ? a
+      : d.getFullYear() === lastYear && d <= endLast ? b : null;
+    if (!t) continue;
+    t.n += 1; t.dist += r.distance_m ?? 0;
+  }
+  for (const w of workouts.value) {
+    if (w.status !== "completed" || !w.date) continue;
+    const d = new Date(w.date + "T00:00:00Z");
+    const t = d.getUTCFullYear() === thisYear && d <= now ? a
+      : d.getUTCFullYear() === lastYear && d <= endLast ? b : null;
+    if (!t) continue;
+    t.n += 1;
+  }
+  const pct = (x: number, y: number) => (y === 0 ? (x === 0 ? 0 : 100) : ((x - y) / y) * 100);
+  return { n: a.n, miles: a.dist / 1609.344, pctN: pct(a.n, b.n), pctDist: pct(a.dist, b.dist) };
 });
+onMounted(load);
 
 function go(path: string): void {
   router.push(path);
@@ -137,6 +173,11 @@ interface FeedRow {
   tone: "lime" | "cyan" | "amber" | "mag";
   value: string;
   unit: string;
+  /** Route to this row's OWN activity. Null when source/id is missing, in
+   *  which case the row falls back to the feed. Without this every row
+   *  opened /activities — the double-tap defect fixed in v0.7.360, which
+   *  the retired TrainRefined.vue carried and this screen never had. */
+  href: string | null;
 }
 
 function relDay(iso: string | null | undefined): string {
@@ -198,8 +239,17 @@ function classifyType(type: string | null | undefined): {
   return { icon: "🏃", tone: "cyan", isTrail: false, isStrength: false };
 }
 
+const RECENT_LIMIT = 6;
+
+/** The fetch is deliberately wide (a trailing year, for the YTD pair and the
+ *  calendar) but this feed is a PREVIEW — cap and sort it explicitly instead
+ *  of inheriting the fetch size. Without this the widened fetch renders every
+ *  activity since Jan 1 of last year under a "Recent" heading. */
 const recent = computed<FeedRow[]>(() =>
-  activities.value.map((a, i): FeedRow => {
+  [...activities.value]
+    .sort((x, y) => (y.start_at ?? "").localeCompare(x.start_at ?? ""))
+    .slice(0, RECENT_LIMIT)
+    .map((a, i): FeedRow => {
     const cls = classifyType(a?.type);
     const name = a?.name?.trim() || (a?.type ? titleCase(a.type) : "Activity");
     const day = relDay(a?.start_at);
@@ -234,14 +284,16 @@ const recent = computed<FeedRow[]>(() =>
       tone: cls.tone,
       value,
       unit,
+      href: a?.source && a?.source_id
+        ? `/activity/${a.source}/${a.source_id}`
+        : null,
     };
-  }),
+    }),
 );
 </script>
 
 <template>
-  <TrainRefined v-if="isRefined" />
-  <div v-else class="train-view">
+  <div class="train-view">
     <header class="head">
       <h1>Train</h1>
       <button class="weekchip" @click="go('/activities')">
@@ -319,14 +371,44 @@ const recent = computed<FeedRow[]>(() =>
     </button>
 
     <!-- Recent feed -->
-    <div class="cap">Recent</div>
+    <!-- This year + activity calendar, ported from the retired Neon Refined
+         Train tab so consolidating onto this screen loses nothing. -->
+    <div class="cap">This year</div>
+    <section class="ytd2">
+      <button class="ycell" @click="go('/activities')">
+        <span class="ylbl">Activities</span>
+        <span class="ynum num">{{ ytd.n }}</span>
+        <span class="ydelta" :class="ytd.pctN >= 0 ? 'up' : 'down'">
+          {{ ytd.pctN >= 0 ? '↑' : '↓' }} {{ Math.abs(ytd.pctN).toFixed(0) }}%
+        </span>
+      </button>
+      <button class="ycell" @click="go('/activities')">
+        <span class="ylbl">Distance</span>
+        <span class="ynum num">{{ ytd.miles.toFixed(0) }} <em>mi</em></span>
+        <span class="ydelta" :class="ytd.pctDist >= 0 ? 'up' : 'down'">
+          {{ ytd.pctDist >= 0 ? '↑' : '↓' }} {{ Math.abs(ytd.pctDist).toFixed(0) }}%
+        </span>
+      </button>
+    </section>
+
+    <div class="cap">Activity calendar</div>
+    <section class="calcard">
+      <ActivityYearCalendar :activities="activities" :workouts="workouts" compact />
+    </section>
+
+    <div class="cap cap-row">
+      <span>Recent</span>
+      <button v-if="recent.length > 0" class="see-all" @click="go('/activities')">
+        See all ›
+      </button>
+    </div>
 
     <template v-if="recent.length > 0">
       <button
         v-for="row in recent"
         :key="row.key"
         class="pill"
-        @click="go('/activities')"
+        @click="go(row.href ?? '/activities')"
       >
         <span class="pi" :class="`bg-${row.tone}`" :style="{ color: 'inherit' }">
           {{ row.icon }}
@@ -360,6 +442,27 @@ const recent = computed<FeedRow[]>(() =>
 </template>
 
 <style scoped>
+.cap-row { display: flex; align-items: center; justify-content: space-between; }
+.see-all {
+  background: none; border: 0; padding: 2px 4px; cursor: pointer;
+  color: var(--accent, #28e6ff); font-size: .72rem; font-weight: 700; letter-spacing: .06em;
+}
+.see-all:hover { text-decoration: underline; }
+
+.ytd2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px; }
+.ycell {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px;
+  padding: 12px 14px; cursor: pointer; color: inherit;
+}
+.ycell:hover { border-color: var(--accent, #28e6ff); }
+.ylbl { font-size: .66rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.ynum { font-size: 1.35rem; font-weight: 700; }
+.ynum em { font-style: normal; font-size: .8rem; color: var(--muted); }
+.ydelta { font-size: .72rem; font-weight: 600; }
+.ydelta.up { color: #22c55e; } .ydelta.down { color: #ef4444; }
+.calcard { background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+
 .train-view {
   --rn-bg: #0f1118;
   --rn-card: #181b27;

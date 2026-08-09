@@ -82,6 +82,9 @@ fun TrainHubScreen(
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var activities by remember { mutableStateOf<List<ActivityRow>>(emptyList()) }
     var upcoming by remember { mutableStateOf<List<UpcomingDay>>(emptyList()) }
+    var yearWorkouts by remember {
+        mutableStateOf<List<app.myvitals.sync.StrengthWorkoutSummary>>(emptyList())
+    }
     // 30-day strength stats — feeds the weekly dashboard + PR/streak cards.
     var stats by remember { mutableStateOf<app.myvitals.sync.StrengthStats?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -105,9 +108,27 @@ fun TrainHubScreen(
                     }.getOrNull()
                 }
                 val actsD = async(Dispatchers.IO) {
-                    // Load a wide range so the filter chips have something to
-                    // bite on — filtering is client-side over this list.
-                    runCatching { api.activities(limit = 100) }.getOrDefault(emptyList())
+                    // Wide enough for the filter chips AND the year calendar +
+                    // YTD pair: Jan 1 of LAST year, so the year-over-year
+                    // comparison has a prior-year bucket to compare against.
+                    runCatching {
+                        api.activities(limit = 2000, since = ytdSinceIso())
+                    }.getOrDefault(emptyList())
+                }
+                val yearWkD = async(Dispatchers.IO) {
+                    runCatching {
+                        api.strengthWorkouts().workouts
+                            .filter {
+                                it.status != "regenerated" && it.status != "planned" &&
+                                    it.status != "skipped"
+                            }
+                            // Cardio days auto-completed by an Activity are
+                            // already in the feed — counting both double-counts.
+                            .filter {
+                                !(it.splitFocus == "cardio" &&
+                                    it.completedByActivitySource != null)
+                            }
+                    }.getOrDefault(emptyList())
                 }
                 // Read-only schedule forecast → "Next session" card.
                 val upcomingD = async(Dispatchers.IO) {
@@ -120,6 +141,7 @@ fun TrainHubScreen(
                 activities = actsD.await()
                 upcoming = upcomingD.await()
                 stats = statsD.await()
+                yearWorkouts = yearWkD.await()
             }
         }.onFailure { Timber.w(it, "train hub load failed") }
         loading = false
@@ -193,6 +215,38 @@ fun TrainHubScreen(
 
         // ── Recent activities feed ───────────────────────────────────────
         Spacer(Modifier.height(20.dp))
+        // ── This year + activity calendar ──
+        // Ported from the Refined Train screen (v0.7.361/362) so consolidating
+        // onto this shell doesn't lose them. Both read the SAME shared helpers
+        // the Activities screen uses, so the numbers and the palette can't
+        // drift between surfaces.
+        val ytd = remember(activities, yearWorkouts) {
+            app.myvitals.ui.common.computeYtdComparison(activities, yearWorkouts)
+        }
+        val calYear = remember { java.time.LocalDate.now().year }
+        val calIndex = remember(activities, yearWorkouts, calYear) {
+            app.myvitals.ui.common.buildActivityCalendarIndex(
+                activities, yearWorkouts, calYear,
+            )
+        }
+        if (activities.isNotEmpty() || yearWorkouts.isNotEmpty()) {
+            CaptionRow("This year") {}
+            Spacer(Modifier.height(11.dp))
+            app.myvitals.ui.common.YtdStatPair(
+                cmp = ytd, neon = true, onClick = { onOpen("activities") },
+            )
+            Spacer(Modifier.height(18.dp))
+        }
+        if (calIndex.isNotEmpty()) {
+            CaptionRow("Activity calendar") {}
+            Spacer(Modifier.height(11.dp))
+            app.myvitals.ui.common.ActivityCalendarCard(
+                rows = activities, workouts = yearWorkouts,
+                neon = true, year = calYear, title = null,
+            )
+            Spacer(Modifier.height(18.dp))
+        }
+
         CaptionRow("Recent") {
             // Cheap "See all" affordance — only worth showing once there's a
             // feed to open into. Routes to the same full activity list as the
@@ -269,6 +323,12 @@ fun TrainHubScreen(
 }
 
 // ── Header week chip ──────────────────────────────────────────────────────
+/** Jan 1 of LAST year — the YTD pair compares against the same span a year
+ *  ago, so the fetch has to reach back that far. */
+private fun ytdSinceIso(): String =
+    java.time.LocalDate.of(java.time.LocalDate.now().year - 1, 1, 1)
+        .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toString()
+
 @Composable
 private fun WeekChip(count: Int, onClick: () -> Unit) {
     Row(

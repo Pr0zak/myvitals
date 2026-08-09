@@ -16,20 +16,40 @@ from ..db import models
 
 # ===== Readiness score (0-100, Whoop-style composite) ===============
 
-async def readiness_score(
+# ── Readiness banding ──────────────────────────────────────────────
+# Thresholds follow the Google Health convention (low ≤29 / moderate
+# 30-64 / high ≥65) so the word beside the number means the same thing a
+# user would expect from any other readiness surface.
+READINESS_BANDS = ((29.0, "low"), (64.0, "moderate"), (100.0, "high"))
+
+
+def readiness_band(score: float | None) -> str | None:
+    """low / moderate / high, or None when there's no score to band."""
+    if score is None:
+        return None
+    for ceiling, label in READINESS_BANDS:
+        if score <= ceiling:
+            return label
+    return "high"
+
+
+async def readiness_breakdown(
     db: AsyncSession, target: date, hrv: float | None,
     rhr: float | None, sleep_score: float | None,
     sleep_duration_s: int | None,
-) -> float | None:
-    """Composite of HRV, RHR, sleep — all relative to 28-day baselines.
+) -> dict[str, Any]:
+    """The readiness composite AND the drivers that produced it.
 
-    Returns None (not 0) when the baseline is too thin to be meaningful
-    or when too few input branches contribute. Was returning a misleading
-    near-zero score for early-morning daily_summary rows where the watch
-    had only logged a single elevated RHR sample against a 2-day baseline."""
-    # Pull 28-day baselines from daily_summary so we don't re-aggregate
-    # raw vitals here. Also count non-null days — z-scoring against a 2-day
-    # baseline is statistically meaningless.
+    Same maths as before — this is a refactor of `readiness_score`, which
+    now delegates here and returns only `["score"]`, so the number is
+    provably unchanged. The drivers were always computed and then thrown
+    away, which is why the UI could only ever render a bare figure with no
+    explanation of what moved it.
+
+    Each driver carries its raw value, its z-score against the 28-day
+    baseline, the 0-100 sub-score it contributed, and its weight, so a
+    client can render "HRV 62 ms ▲ +0.4σ" without recomputing anything.
+    """
     cutoff = target - timedelta(days=28)
     bl = (await db.execute(
         select(
@@ -43,35 +63,84 @@ async def readiness_score(
          .where(models.DailySummary.date < target)
     )).first()
     if bl is None:
-        return None
+        return {"score": None, "band": None, "drivers": [], "reason": "no baseline"}
     hrv_mu, hrv_sd, hrv_n, rhr_mu, rhr_sd, rhr_n = bl
 
-    # Need at least a week of baseline data before z-scoring is meaningful.
     MIN_BASELINE_DAYS = 7
-    parts: list[tuple[float, float]] = []  # (weight, score 0-100)
+    parts: list[tuple[float, float]] = []
+    drivers: list[dict[str, Any]] = []
 
     if (hrv is not None and hrv_mu and hrv_sd and hrv_sd > 0
             and (hrv_n or 0) >= MIN_BASELINE_DAYS):
-        # +1σ above baseline → 80, mean → 50, -1σ → 20.
         z = (hrv - float(hrv_mu)) / float(hrv_sd)
-        parts.append((0.40, max(0.0, min(100.0, 50 + 30 * z))))
+        sub = max(0.0, min(100.0, 50 + 30 * z))
+        parts.append((0.40, sub))
+        drivers.append({
+            "key": "hrv", "label": "HRV", "value": round(hrv, 1), "unit": "ms",
+            "z": round(z, 2), "sub_score": round(sub, 1), "weight": 0.40,
+            "baseline": round(float(hrv_mu), 1), "higher_is_better": True,
+        })
     if (rhr is not None and rhr_mu and rhr_sd and rhr_sd > 0
             and (rhr_n or 0) >= MIN_BASELINE_DAYS):
-        z = (rhr - float(rhr_mu)) / float(rhr_sd)  # lower is better → invert
-        parts.append((0.30, max(0.0, min(100.0, 50 - 30 * z))))
+        z = (rhr - float(rhr_mu)) / float(rhr_sd)
+        sub = max(0.0, min(100.0, 50 - 30 * z))
+        parts.append((0.30, sub))
+        drivers.append({
+            "key": "rhr", "label": "Resting HR", "value": round(rhr, 1),
+            "unit": "bpm", "z": round(z, 2), "sub_score": round(sub, 1),
+            "weight": 0.30, "baseline": round(float(rhr_mu), 1),
+            "higher_is_better": False,
+        })
     if sleep_score is not None:
-        parts.append((0.15, max(0.0, min(100.0, sleep_score))))
+        sub = max(0.0, min(100.0, sleep_score))
+        parts.append((0.15, sub))
+        drivers.append({
+            "key": "sleep_score", "label": "Sleep quality",
+            "value": round(sleep_score, 1), "unit": "", "z": None,
+            "sub_score": round(sub, 1), "weight": 0.15, "baseline": None,
+            "higher_is_better": True,
+        })
     if sleep_duration_s is not None:
-        # 8h target; below 6h → 0, at/above 8h → 100, linear in between.
         h = sleep_duration_s / 3600.0
-        parts.append((0.15, max(0.0, min(100.0, (h - 6.0) / 2.0 * 100))))
+        sub = max(0.0, min(100.0, (h - 6.0) / 2.0 * 100))
+        parts.append((0.15, sub))
+        drivers.append({
+            "key": "sleep_duration", "label": "Sleep duration",
+            "value": round(h, 1), "unit": "h", "z": None,
+            "sub_score": round(sub, 1), "weight": 0.15, "baseline": 8.0,
+            "higher_is_better": True,
+        })
 
-    # Require at least 0.45 total weight — otherwise the score is dominated
-    # by a single noisy input. Two of {HRV, RHR, sleep_score+duration} pass.
     w_total = sum(w for w, _ in parts)
     if not parts or w_total < 0.45:
-        return None
-    return round(sum(w * s for w, s in parts) / w_total, 1)
+        # Deliberately None rather than a number — a score dominated by one
+        # noisy input is worse than no score.
+        return {
+            "score": None, "band": None, "drivers": drivers,
+            "reason": "not enough inputs" if parts else "no inputs",
+        }
+    score = round(sum(w * s for w, s in parts) / w_total, 1)
+    return {
+        "score": score, "band": readiness_band(score),
+        "drivers": drivers, "reason": None,
+    }
+
+
+async def readiness_score(
+    db: AsyncSession, target: date, hrv: float | None,
+    rhr: float | None, sleep_score: float | None,
+    sleep_duration_s: int | None,
+) -> float | None:
+    """Composite of HRV, RHR, sleep — all relative to 28-day baselines.
+
+    Thin wrapper over `readiness_breakdown` so the score and the drivers
+    can never disagree. Returns None (not 0) when the baseline is too thin
+    or too few branches contribute.
+    """
+    out = await readiness_breakdown(
+        db, target, hrv, rhr, sleep_score, sleep_duration_s,
+    )
+    return out["score"]
 
 
 # ===== Training load (TSS / CTL / ATL / TSB) ========================

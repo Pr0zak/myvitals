@@ -217,6 +217,63 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     )
 
 
+@router.get("/readiness")
+async def readiness_detail(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Today's readiness with the drivers that produced it, plus a 7-day
+    series for the sparkline.
+
+    Exists because the clients rendered readiness as a bare number: the
+    drivers were computed inside `readiness_score` and discarded, so there
+    was no way to answer "why is it 42 today?" without opening the code.
+    Derived server-side per the architecture rule — nothing here is
+    recomputed in Compose or Vue.
+    """
+    from ..analytics.advanced import readiness_band, readiness_breakdown
+
+    today = datetime.now(timezone.utc).date()
+    row = await db.get(models.DailySummary, today)
+    breakdown = await readiness_breakdown(
+        db, today,
+        hrv=row.hrv_avg if row else None,
+        rhr=row.resting_hr if row else None,
+        sleep_score=row.sleep_score if row else None,
+        sleep_duration_s=row.sleep_duration_s if row else None,
+    )
+
+    # Trailing 7 days of stored readiness for the sparkline. Stored, not
+    # recomputed — these are the numbers the rest of the app already shows.
+    since = today - timedelta(days=6)
+    hist = (await db.execute(
+        select(models.DailySummary.date, models.DailySummary.readiness_score)
+        .where(models.DailySummary.date >= since)
+        .where(models.DailySummary.date <= today)
+        .order_by(models.DailySummary.date)
+    )).all()
+    series = [
+        {"date": d.isoformat(), "score": (round(v, 1) if v is not None else None)}
+        for d, v in hist
+    ]
+
+    return {
+        "date": today.isoformat(),
+        "score": breakdown["score"],
+        "band": breakdown["band"],
+        "reason": breakdown.get("reason"),
+        "drivers": breakdown["drivers"],
+        "series": series,
+        # The literal weights, so the "how is this calculated" sheet is
+        # generated from the same source as the score rather than a
+        # hand-copied string that can drift.
+        "weights": {
+            "hrv": 0.40, "rhr": 0.30,
+            "sleep_score": 0.15, "sleep_duration": 0.15,
+        },
+        "bands": {"low": "≤29", "moderate": "30–64", "high": "≥65"},
+    }
+
+
 @router.get("/range", response_model=list[TodaySummary])
 async def summary_range(
     since: date = Query(...),

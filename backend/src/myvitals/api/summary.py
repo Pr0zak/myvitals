@@ -284,6 +284,31 @@ async def readiness_detail(
     }
 
 
+@router.get("/tiles")
+async def summary_tiles(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Per-tile value + 14-day series + whether that value is good.
+
+    The vitals grid rendered bare numbers, which are unreadable without
+    knowing the user's own normal and which direction is better. All of
+    that judgement is made here rather than in Compose or Vue, so the two
+    grids cannot disagree — see the architecture rule in CLAUDE.md.
+    """
+    from ..analytics.tiles import tile_stats
+
+    # Local day, not UTC — see the note on `/summary/readiness`.
+    try:
+        from zoneinfo import ZoneInfo
+        local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        local_tz = timezone.utc
+    day = datetime.now(local_tz).date()
+
+    profile = await db.get(models.UserProfile, 1)
+    return {"date": day.isoformat(), "tiles": await tile_stats(db, day, profile)}
+
+
 @router.get("/range", response_model=list[TodaySummary])
 async def summary_range(
     since: date = Query(...),

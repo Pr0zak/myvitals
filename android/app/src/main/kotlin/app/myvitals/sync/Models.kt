@@ -1027,6 +1027,11 @@ data class DailySummary(
     // Newest HeartRate sample time from /summary/today — drives the
     // "synced Xm ago" freshness line on the neon Today screen.
     @Json(name = "last_sync") val lastSync: String? = null,
+    // Fields /summary/today backfilled from an EARLIER day, mapped to the
+    // date the value actually came from. Overnight metrics go missing until
+    // the watch syncs last night; without this the Body screen states a
+    // day-old HRV — or a three-month-old weight — as today's fact.
+    @Json(name = "carried_from") val carriedFrom: Map<String, String> = emptyMap(),
 )
 
 @JsonClass(generateAdapter = true)

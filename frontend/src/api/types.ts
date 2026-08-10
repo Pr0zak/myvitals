@@ -54,6 +54,9 @@ export interface TodaySummary {
   sleep_consistency_score: number | null;
   sleep_debt_h: number | null;
   last_sync: string | null;
+  /** Fields backfilled from an EARLIER day → the date they came from.
+   *  Present so a client never states a carried value as today's. */
+  carried_from?: Record<string, string>;
 }
 
 export interface Annotation {

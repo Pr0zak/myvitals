@@ -15,6 +15,20 @@ import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
 import { bpCategoryLabel } from "@/bp";
 
+/**
+ * "· from Aug 9" for a value /summary/today backfilled from an earlier day.
+ *
+ * This screen is headed "today". Without the marker it states a day-old HRV —
+ * or a three-month-old weight — as today's fact.
+ */
+function carried(field: string): string {
+  const iso = sum.value?.carried_from?.[field];
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00");
+  if (Number.isNaN(d.getTime())) return "";
+  return ` · from ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
 const router = useRouter();
 const loading = ref(true);
 const sum = ref<TodaySummary | null>(null);
@@ -105,6 +119,9 @@ function signed(n: number | null, d = 1): string {
         <div class="rmeta">
           <div class="rt">Recovery</div>
           <div class="rv">{{ fmt(recovery) }}</div>
+          <div v-if="carried('recovery_score')" class="rcarry">
+            {{ carried("recovery_score").replace(" · ", "") }}
+          </div>
         </div>
       </button>
     </header>
@@ -122,7 +139,7 @@ function signed(n: number | null, d = 1): string {
           </svg>
         </div>
         <div class="big">{{ fmt(restingHr) }}<span class="u">bpm</span></div>
-        <div class="sub"><span class="ctx">resting</span></div>
+        <div class="sub"><span class="ctx">resting{{ carried("resting_hr") }}</span></div>
       </button>
 
       <!-- HRV -->
@@ -135,7 +152,7 @@ function signed(n: number | null, d = 1): string {
           </svg>
         </div>
         <div class="big">{{ fmt(hrv) }}<span class="u">ms</span></div>
-        <div class="sub"><span class="ctx">overnight avg</span></div>
+        <div class="sub"><span class="ctx">overnight avg{{ carried("hrv_avg") }}</span></div>
       </button>
 
       <!-- Sleep -->
@@ -158,6 +175,9 @@ function signed(n: number | null, d = 1): string {
         <div class="sub">
           <span class="mag" v-if="sleepScore != null">score {{ fmt(sleepScore) }}</span>
           <span class="ctx" v-else>no night</span>
+          <span v-if="carried('sleep_duration_s')" class="ctx">
+            {{ carried("sleep_duration_s").replace(" · ", "") }}
+          </span>
         </div>
       </button>
 
@@ -210,7 +230,7 @@ function signed(n: number | null, d = 1): string {
           </svg>
         </div>
         <div class="big">{{ fmt(weightLb, 1) }}<span class="u">lb</span></div>
-        <div class="sub"><span class="ctx">latest</span></div>
+        <div class="sub"><span class="ctx">latest{{ carried("weight_kg") }}</span></div>
       </button>
 
       <!-- Skin temp -->
@@ -296,4 +316,5 @@ function signed(n: number | null, d = 1): string {
 .glowmag { filter: drop-shadow(0 0 4px rgba(255, 58, 216, 0.5)); }
 .glowlime { filter: drop-shadow(0 0 4px rgba(93, 255, 59, 0.5)); }
 .glowamber { filter: drop-shadow(0 0 4px rgba(255, 181, 46, 0.5)); }
+.rcarry { font-size: .58rem; color: var(--muted); line-height: 1.1; }
 </style>

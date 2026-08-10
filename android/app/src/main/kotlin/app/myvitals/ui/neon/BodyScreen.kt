@@ -56,6 +56,21 @@ import timber.log.Timber
  * onOpen routes: "vitals/HR", "vitals/HRV", "vitals/SLEEP", "vitals/STEPS",
  * "vitals/BP", "vitals/WEIGHT".
  */
+/**
+ * "· from Aug 9" for a value /summary/today backfilled from an earlier day.
+ *
+ * The screen is headed "today". Without this it states a day-old HRV — or a
+ * three-month-old weight — as today's fact, which is the same quiet lie the
+ * tiles endpoint was fixed for.
+ */
+private fun carriedSuffix(carried: Map<String, String>?, field: String): String {
+    val iso = carried?.get(field) ?: return ""
+    return runCatching {
+        val d = java.time.LocalDate.parse(iso)
+        " · from " + d.format(java.time.format.DateTimeFormatter.ofPattern("MMM d"))
+    }.getOrDefault("")
+}
+
 @Composable
 fun BodyScreen(
     settings: SettingsRepository,
@@ -153,7 +168,7 @@ fun BodyScreen(
                 value = fmt(sum?.restingHr),
                 unit = "bpm",
                 accent = NeonMV.Cyan,
-                sub = "resting",
+                sub = "resting" + carriedSuffix(sum?.carriedFrom, "resting_hr"),
                 loading = loading,
                 onClick = { onOpen("vitals/HR") },
                 spark = trend.map { it.restingHr?.toFloat() },
@@ -164,7 +179,7 @@ fun BodyScreen(
                 value = fmt(sum?.hrvAvg),
                 unit = "ms",
                 accent = NeonMV.Cyan,
-                sub = "overnight avg",
+                sub = "overnight avg" + carriedSuffix(sum?.carriedFrom, "hrv_avg"),
                 loading = loading,
                 onClick = { onOpen("vitals/HRV") },
                 spark = trend.map { it.hrvAvg?.toFloat() },
@@ -185,7 +200,8 @@ fun BodyScreen(
                 value = if (sleepH != null) "${sleepH}h${sleepM ?: 0}m" else "—",
                 unit = null,
                 accent = NeonMV.Magenta,
-                sub = if (score != null) "score ${fmt(score)}" else "no night",
+                sub = (if (score != null) "score ${fmt(score)}" else "no night") +
+                    carriedSuffix(sum?.carriedFrom, "sleep_duration_s"),
                 subColor = if (score != null) NeonMV.Magenta else NeonMV.Muted,
                 loading = loading,
                 onClick = { onOpen("vitals/SLEEP") },
@@ -228,7 +244,7 @@ fun BodyScreen(
                 value = if (weightLb != null) "%.1f".format(weightLb) else "—",
                 unit = "lb",
                 accent = NeonMV.Amber,
-                sub = "latest",
+                sub = "latest" + carriedSuffix(sum?.carriedFrom, "weight_kg"),
                 loading = loading,
                 onClick = { onOpen("vitals/WEIGHT") },
                 spark = trend.map { it.weightKg?.toFloat()?.times(2.20462f) },
@@ -264,7 +280,7 @@ fun BodyScreen(
                 value = recovery?.let { "%.0f".format(it) } ?: "—",
                 unit = "",
                 accent = NeonMV.Cyan,
-                sub = "HRV vs baseline",
+                sub = "HRV vs baseline" + carriedSuffix(sum?.carriedFrom, "recovery_score"),
                 loading = loading,
                 onClick = { onOpen("vitals/RECOVERY") },
             )
@@ -275,7 +291,7 @@ fun BodyScreen(
                 value = readiness?.let { "%.0f".format(it) } ?: "—",
                 unit = "",
                 accent = NeonMV.Lime,
-                sub = "HRV · RHR · sleep",
+                sub = "HRV · RHR · sleep" + carriedSuffix(sum?.carriedFrom, "readiness_score"),
                 loading = loading,
                 onClick = null,
             )

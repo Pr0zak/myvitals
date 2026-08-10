@@ -101,6 +101,40 @@ async def _series(
     return out
 
 
+async def _intermittent_series(
+    db: AsyncSession, time_col, value_col, day: date, days: int,
+    scale: float = 1.0,
+) -> list[dict[str, Any]]:
+    """Daily series for a metric that ISN'T measured every day.
+
+    Weight and blood pressure come from their own tables, not from
+    daily_summary — the nightly job leaves those columns null because you
+    don't weigh yourself every morning. Days with no reading stay null, so
+    the sparkline shows the real cadence of measurement rather than
+    implying a daily habit that doesn't exist.
+    """
+    since = day - timedelta(days=days - 1)
+    day_expr = func.date(time_col)
+    rows = dict(
+        (d, v) for d, v in (await db.execute(
+            select(day_expr, func.avg(value_col))
+            .where(func.date(time_col) >= since)
+            .where(func.date(time_col) <= day)
+            .where(value_col.is_not(None))
+            .group_by(day_expr)
+        )).all()
+    )
+    out = []
+    for i in range(days):
+        d = since + timedelta(days=i)
+        v = rows.get(d)
+        out.append({
+            "date": d.isoformat(),
+            "value": (round(float(v) * scale, 2) if v is not None else None),
+        })
+    return out
+
+
 async def tile_stats(
     db: AsyncSession, day: date, profile: Any | None = None,
 ) -> list[dict[str, Any]]:
@@ -136,6 +170,10 @@ async def tile_stats(
         kw.setdefault("status_reason", None)
         kw.setdefault("delta", None)
         kw.setdefault("baseline", None)
+        # Only intermittently-measured tiles carry these; present on every
+        # tile so clients can read one shape instead of branching per key.
+        kw.setdefault("as_of", None)
+        kw.setdefault("stale_days", None)
         tiles.append(kw)
 
     # ── personal-baseline metrics ────────────────────────────────────
@@ -215,8 +253,16 @@ async def tile_stats(
     # `status_reason` so the tile shows its working rather than asking the
     # user to trust a colour. Judged on the higher of the two categories,
     # since that is how the categories are defined.
-    sys_v = row.bp_systolic_avg if row else None
-    dia_v = row.bp_diastolic_avg if row else None
+    # Read from the cuff table, not daily_summary — the nightly job leaves
+    # those columns null on days with no reading, which is most days.
+    bp = (await db.execute(
+        select(models.BloodPressure.systolic, models.BloodPressure.diastolic,
+               models.BloodPressure.time)
+        .order_by(models.BloodPressure.time.desc()).limit(1)
+    )).first()
+    sys_v = float(bp[0]) if bp else None
+    dia_v = float(bp[1]) if bp else None
+    bp_as_of = bp[2].date() if bp else None
     status = reason = None
     if sys_v is not None and dia_v is not None:
         if sys_v < 120 and dia_v < 80:
@@ -232,8 +278,11 @@ async def tile_stats(
                if sys_v is not None and dia_v is not None else None),
         kind="target", higher_is_better=False,
         status=status, status_reason=reason,
-        series=await _series(
-            db, models.DailySummary.bp_systolic_avg, day, SERIES_DAYS))
+        as_of=(bp_as_of.isoformat() if bp_as_of else None),
+        stale_days=((day - bp_as_of).days if bp_as_of else None),
+        series=await _intermittent_series(
+            db, models.BloodPressure.time, models.BloodPressure.systolic,
+            day, SERIES_DAYS))
 
     # Recovery is already a 0-100 composite, so it carries its own scale —
     # banding it against a personal baseline would score a score.
@@ -255,11 +304,24 @@ async def tile_stats(
     # ── neutral metrics ──────────────────────────────────────────────
     # Weight has no universal good direction — it depends on a goal the
     # user may not have set. Report the trend and stay quiet about it.
-    wkg = row.weight_kg if row else None
+    # Same carry-forward as `/summary/today`: show the latest weigh-in
+    # rather than nothing on days without one. `as_of` / `stale_days` go
+    # with it — presenting a three-week-old reading as today's number
+    # without saying so is the kind of quiet lie a health app can't afford.
+    wrow = (await db.execute(
+        select(models.BodyMetric.weight_kg, models.BodyMetric.time)
+        .where(models.BodyMetric.weight_kg.is_not(None))
+        .order_by(models.BodyMetric.time.desc()).limit(1)
+    )).first()
+    wkg = float(wrow[0]) if wrow else None
+    w_as_of = wrow[1].date() if wrow else None
     add(key="weight", label="Weight", unit="lb",
         value=(round(wkg * KG_TO_LB, 1) if wkg is not None else None),
         kind="neutral", higher_is_better=None,
-        series=await _series(
-            db, models.DailySummary.weight_kg, day, SERIES_DAYS, scale=KG_TO_LB))
+        as_of=(w_as_of.isoformat() if w_as_of else None),
+        stale_days=((day - w_as_of).days if w_as_of else None),
+        series=await _intermittent_series(
+            db, models.BodyMetric.time, models.BodyMetric.weight_kg,
+            day, SERIES_DAYS, scale=KG_TO_LB))
 
     return tiles

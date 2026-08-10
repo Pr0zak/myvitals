@@ -13,6 +13,7 @@ import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
+import { bpCategoryLabel } from "@/bp";
 
 const router = useRouter();
 const loading = ref(true);
@@ -65,14 +66,13 @@ const stepsPct = computed<number | null>(() =>
 
 const bpSys = computed<number | null>(() => sum.value?.bp_systolic_avg ?? null);
 const bpDia = computed<number | null>(() => sum.value?.bp_diastolic_avg ?? null);
+// Shared classifier. The local one tested stage 1 as `s < 140 || d < 90`,
+// which is true for 139/92 and labelled a stage 2 reading "Elevated".
 const bpLabel = computed<string>(() => {
   const s = bpSys.value;
   const d = bpDia.value;
   if (s == null || d == null) return "—";
-  if (s < 120 && d < 80) return "Optimal";
-  if (s < 130 && d < 80) return "Normal";
-  if (s < 140 || d < 90) return "Elevated";
-  return "High";
+  return bpCategoryLabel(s, d);
 });
 
 const weightLb = computed<number | null>(() =>

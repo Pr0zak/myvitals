@@ -125,3 +125,47 @@ def test_a_stale_neutral_tile_still_discloses_its_age():
     assert t["status"] is None
     assert "90 days ago" in t["status_reason"]
     assert t["value"] == 252.0
+
+
+# ── blood pressure ────────────────────────────────────────────────────
+
+def test_bp_category_uses_the_higher_of_the_two_numbers():
+    """139/92 is stage 2 on the diastolic, not stage 1 on the systolic.
+
+    The first cut wrote stage 1 as `sys < 140 or dia < 90`, which is true
+    for 139/92 and swallowed every stage 2 reading whose systolic happened
+    to be under 140. It shipped and mislabelled the maintainer's own live
+    reading, which is how it was caught.
+    """
+    from myvitals.analytics.tiles import bp_category
+
+    assert bp_category(139, 92)[1].startswith("stage 2")
+    # ...and the mirror case: high systolic, fine diastolic.
+    assert bp_category(145, 78)[1].startswith("stage 2")
+
+
+@pytest.mark.parametrize("sys_v,dia_v,expected", [
+    (115, 75, "within the normal"),
+    (119, 79, "within the normal"),
+    (120, 79, "elevated"),
+    (129, 79, "elevated"),
+    (130, 79, "stage 1"),
+    (119, 80, "stage 1"),      # diastolic alone promotes it
+    (139, 89, "stage 1"),
+    (140, 79, "stage 2"),      # systolic alone promotes it
+    (119, 90, "stage 2"),      # diastolic alone promotes it
+    (139, 92, "stage 2"),      # the live reading that exposed the bug
+])
+def test_bp_category_boundaries(sys_v, dia_v, expected):
+    from myvitals.analytics.tiles import bp_category
+
+    assert expected in bp_category(sys_v, dia_v)[1]
+
+
+def test_normal_bp_is_the_only_good_one():
+    from myvitals.analytics.tiles import bp_category
+
+    assert bp_category(115, 75)[0] == GOOD
+    assert bp_category(125, 75)[0] == TYPICAL
+    assert bp_category(135, 85)[0] == WATCH
+    assert bp_category(150, 95)[0] == WATCH

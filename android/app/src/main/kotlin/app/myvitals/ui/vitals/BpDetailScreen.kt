@@ -316,23 +316,28 @@ private fun Stat(label: String, value: String) {
 }
 
 private fun bpCategory(sys: Int, dia: Int): Pair<String, Color> {
-    // ACC/AHA categories for systolic; pick worst of sys/dia.
+    // ACC/AHA categories; pick worst of sys/dia. This screen already had
+    // the "worst of the two" rule right — Body.vue and BodyScreen did not.
+    // Crisis added so it matches frontend/src/bp.ts and analytics/tiles.py.
     val sysCat = when {
         sys < 120 -> 0
         sys < 130 -> 1
         sys < 140 -> 2
-        else -> 3
+        sys < 180 -> 3
+        else -> 4
     }
     val diaCat = when {
         dia < 80 -> 0
         dia < 90 -> 2
-        else -> 3
+        dia < 120 -> 3
+        else -> 4
     }
     return when (maxOf(sysCat, diaCat)) {
         0 -> "Normal" to Color(0xFF22C55E)
         1 -> "Elevated" to Color(0xFFFBBF24)
         2 -> "Stage 1" to Color(0xFFF97316)
-        else -> "Stage 2" to Color(0xFFEF4444)
+        3 -> "Stage 2" to Color(0xFFEF4444)
+        else -> "Crisis" to Color(0xFFEF4444)
     }
 }
 

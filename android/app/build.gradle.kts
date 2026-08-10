@@ -112,6 +112,12 @@ dependencies {
 
     implementation("com.jakewharton.timber:timber:5.0.1")
 
+    // JVM unit tests. The wire models are the one part of the phone that can
+    // be verified without a device, and a parse failure would render an empty
+    // screen that compiles perfectly.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.moshi:moshi-kotlin:1.15.1")
+
     // Vico — Compose-native chart library used on Vitals detail screens.
     implementation("com.patrykandpatrick.vico:compose:2.1.0")
     implementation("com.patrykandpatrick.vico:compose-m3:2.1.0")

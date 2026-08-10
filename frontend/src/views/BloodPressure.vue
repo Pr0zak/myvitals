@@ -10,6 +10,7 @@ import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { chartTheme, isNeon } from "@/theme";
 import { fmtDateTime } from "@/format";
+import { bpCategory, bpCategoryLabel } from "@/bp";
 
 type Range = "30d" | "90d" | "1y" | "all";
 const RANGES: { key: Range; label: string; days: number | null }[] = [
@@ -75,13 +76,8 @@ const sorted = computed(() =>
 );
 
 // AHA category breakdown over the window
-function categoryOf(sys: number, dia: number): string {
-  if (sys >= 180 || dia >= 120) return "crisis";
-  if (sys >= 140 || dia >= 90)  return "stage2";
-  if (sys >= 130 || dia >= 80)  return "stage1";
-  if (sys >= 120) return "elevated";
-  return "normal";
-}
+// categoryOf now lives in @/bp so Body.vue can't drift from it.
+const categoryOf = bpCategory;
 const breakdown = computed(() => {
   const counts: Record<string, number> = { normal: 0, elevated: 0, stage1: 0, stage2: 0, crisis: 0 };
   for (const p of sorted.value) counts[categoryOf(p.systolic, p.diastolic)] += 1;
@@ -181,13 +177,7 @@ const tableRows = computed(() => {
 function fmtDate(s: string): string {
   return fmtDateTime(s);
 }
-function categoryLabel(s: number, d: number): string {
-  const labels: Record<string, string> = {
-    normal: "Normal", elevated: "Elevated", stage1: "Stage 1",
-    stage2: "Stage 2", crisis: "Crisis",
-  };
-  return labels[categoryOf(s, d)] ?? "Normal";
-}
+const categoryLabel = bpCategoryLabel;
 </script>
 
 <template>

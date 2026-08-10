@@ -457,14 +457,26 @@ private fun BloodPressureCard(
     loading: Boolean,
     onClick: () -> Unit,
 ) {
+    // Highest category first. A reading belongs to a category if EITHER
+    // number reaches it, so the category is the higher of the two. The old
+    // chain tested "sys < 140 || dia < 90 -> Elevated", which is true for
+    // 139/92 and labelled a stage 2 reading two categories too low. Tiers
+    // and wording now match frontend/src/bp.ts and analytics/tiles.py.
     val label = when {
         sys == null || dia == null -> "—"
-        sys < 120 && dia < 80 -> "Optimal"
-        sys < 130 && dia < 80 -> "Normal"
-        sys < 140 || dia < 90 -> "Elevated"
-        else -> "High"
+        sys >= 180 || dia >= 120 -> "Crisis"
+        sys >= 140 || dia >= 90 -> "Stage 2"
+        sys >= 130 || dia >= 80 -> "Stage 1"
+        sys >= 120 -> "Elevated"
+        else -> "Normal"
     }
-    val labelColor = if (sys != null && sys >= 140) NeonMV.Bad else NeonMV.Cyan
+    val labelColor = when (label) {
+        "Crisis", "Stage 2" -> NeonMV.Bad
+        "Stage 1" -> NeonMV.Amber
+        "Elevated" -> NeonMV.Amber
+        "Normal" -> NeonMV.Lime
+        else -> NeonMV.Muted
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()

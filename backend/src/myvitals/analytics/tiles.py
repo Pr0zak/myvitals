@@ -76,6 +76,34 @@ def _band_from_z(z: float, higher_is_better: bool) -> tuple[str, str]:
     return TYPICAL, "in your usual range"
 
 
+def bp_category(systolic: float, diastolic: float) -> tuple[str, str]:
+    """AHA blood-pressure category for a reading.
+
+    Tested HIGHEST category first. A reading falls in a category if EITHER
+    number reaches it, so 139/92 is stage 2 on the diastolic even though the
+    systolic alone would read as stage 1. Written as an ascending chain this
+    is easy to get backwards — the first cut used `sys < 140 or dia < 90` for
+    stage 1, which swallowed every stage 2 reading whose systolic happened to
+    be under 140. That is exactly the live reading this shipped against.
+
+    Tiers match `frontend/src/bp.ts`, which had this right already — the
+    crisis tier (180+/120+) was missing here and would have reported a
+    crisis-level reading as merely stage 2.
+
+    These are published reference ranges, not a diagnosis; the range itself
+    is echoed to the user so the tile shows its working.
+    """
+    if systolic >= 180 or diastolic >= 120:
+        return WATCH, "hypertensive crisis range (180+ or 120+)"
+    if systolic >= 140 or diastolic >= 90:
+        return WATCH, "stage 2 range (140+ or 90+)"
+    if systolic >= 130 or diastolic >= 80:
+        return WATCH, "stage 1 range (130-139 or 80-89)"
+    if systolic >= 120:
+        return TYPICAL, "elevated range (120-129 over under 80)"
+    return GOOD, "within the normal range (under 120/80)"
+
+
 def suppress_stale_verdict(tile: dict[str, Any]) -> dict[str, Any]:
     """Strip the verdict from a tile whose reading is too old to judge.
 
@@ -290,14 +318,13 @@ async def tile_stats(
     bp_as_of = bp[2].date() if bp else None
     status = reason = None
     if sys_v is not None and dia_v is not None:
-        if sys_v < 120 and dia_v < 80:
-            status, reason = GOOD, "within the normal range (under 120/80)"
-        elif sys_v < 130 and dia_v < 80:
-            status, reason = TYPICAL, "elevated range (120-129 over under 80)"
-        elif sys_v < 140 or dia_v < 90:
-            status, reason = WATCH, "stage 1 range (130-139 or 80-89)"
-        else:
-            status, reason = WATCH, "stage 2 range (140+ or 90+)"
+        # Tested HIGHEST category first. A reading falls in a category if
+        # EITHER number reaches it, so 139/92 is stage 2 on the diastolic
+        # even though the systolic alone would read as stage 1. Written as
+        # an ascending chain this is easy to get backwards — the first cut
+        # used `sys < 140 or dia < 90` for stage 1, which swallowed every
+        # stage 2 reading whose systolic happened to be under 140.
+        status, reason = bp_category(sys_v, dia_v)
     add(key="blood_pressure", label="Blood pressure", unit="mmHg",
         value=(f"{sys_v:.0f}/{dia_v:.0f}"
                if sys_v is not None and dia_v is not None else None),

@@ -1,0 +1,131 @@
+<script setup lang="ts">
+/**
+ * "Key metrics" — a titled section of identical MetricCards, 2-up.
+ *
+ * Replaces the previous VitalTiles grid, which invented its own card shape
+ * (outlined uppercase micro-pills, axis-less sparklines). The reference this
+ * project is modelled on uses ONE card everywhere and groups them under
+ * plain section headings, so the value is in the repetition — a bespoke
+ * card per surface is exactly what made the app feel disconnected.
+ *
+ * Data still comes from `/summary/tiles`; only the presentation changed.
+ */
+import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
+import { api } from "@/api/client";
+import type { VitalTile } from "@/api/types";
+import MetricCard from "./MetricCard.vue";
+
+const router = useRouter();
+const tiles = ref<VitalTile[]>([]);
+const loaded = ref(false);
+
+const ROUTE: Record<string, string> = {
+  hrv: "/hrv", resting_hr: "/heart-rate", steps: "/steps",
+  sleep_duration: "/sleep", blood_pressure: "/blood-pressure",
+  recovery: "/heart-rate", weight: "/weight",
+};
+
+/** Per-metric accent, matching the reference's habit of tinting each card's
+ *  chart by metric family rather than using one global colour. */
+const ACCENT: Record<string, string> = {
+  hrv: "#7ee2a8", resting_hr: "#7ee2a8", steps: "#5fd3c4",
+  sleep_duration: "#b39ddb", blood_pressure: "#7fc8f8",
+  recovery: "#7ee2a8", weight: "#e8b661",
+};
+
+const BAR = new Set(["steps"]);
+
+async function load() {
+  try {
+    tiles.value = (await api.summaryTiles()).tiles ?? [];
+  } catch {
+    tiles.value = [];
+  } finally {
+    loaded.value = true;
+  }
+}
+onMounted(load);
+
+/** Sentence-case chip text per metric, the way the reference words it —
+ *  "Goal not met" on a goal metric reads better than "Out of range". */
+function chipLabel(t: VitalTile): string | null {
+  if (!t.status) return null;
+  if (t.key === "steps") return t.status === "good" ? "Goal met" : "Goal not met";
+  if (t.key === "sleep_duration") {
+    return t.status === "good" ? "Goal met"
+      : t.status === "typical" ? "Near goal" : "Goal not met";
+  }
+  if (t.key === "blood_pressure") return t.status_reason?.split(" range")[0] ?? null;
+  return t.status === "watch" ? "Out of range" : "In range";
+}
+
+/** The qualifier line. The reference puts the remaining-to-goal here, which
+ *  is more useful than repeating the percentage the chip already implies. */
+function qualifier(t: VitalTile): string {
+  if (t.key === "steps" && typeof t.value === "number" && t.target) {
+    const left = Math.max(0, Math.round(t.target - t.value));
+    return left > 0 ? `Today • ${left.toLocaleString()} to go` : "Today • goal met";
+  }
+  if (t.stale_days != null && t.stale_days > 0) {
+    const d = new Date((t.as_of ?? "") + "T00:00:00");
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    }
+  }
+  return "Today";
+}
+
+function displayValue(t: VitalTile): number | string | null {
+  if (t.value == null) return null;
+  return typeof t.value === "number" && t.key === "steps"
+    ? t.value.toLocaleString() : t.value;
+}
+
+const shown = computed(() => tiles.value);
+</script>
+
+<template>
+  <section v-if="loaded && shown.length" class="km">
+    <h2 class="sect">Key metrics</h2>
+    <div class="grid">
+      <button v-for="t in shown" :key="t.key" class="cell"
+              @click="router.push(ROUTE[t.key] ?? '/')">
+        <MetricCard
+          :name="t.label"
+          :value="displayValue(t)"
+          :unit="t.unit"
+          :qualifier="qualifier(t)"
+          :status="t.status"
+          :status-label="chipLabel(t)"
+          :series="t.series"
+          :baseline="t.baseline"
+          :target="t.key === 'steps' ? t.target ?? null : null"
+          :chart="BAR.has(t.key) ? 'bar' : 'line'"
+          :accent="ACCENT[t.key] ?? '#7ee2a8'"
+        />
+      </button>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.km { margin: 18px 0; }
+.sect {
+  font-size: 1.35rem; font-weight: 400; color: #e9edf2;
+  margin: 0 0 12px; letter-spacing: -0.2px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 10px;
+  /* Each card sizes to its own content. Stretching rows to the tallest card
+     leaves large voids here because the metrics are heterogeneous — some
+     carry a chip and a bar chart, some have no readings in the last week. */
+  align-items: start;
+}
+.cell {
+  padding: 0; border: 0; background: none; cursor: pointer;
+  text-align: left; display: block; min-width: 0;
+}
+</style>

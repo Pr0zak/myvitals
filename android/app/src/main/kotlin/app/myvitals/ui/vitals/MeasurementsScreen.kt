@@ -54,6 +54,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import app.myvitals.ui.LocalAppTokens
 
 private data class Site(val key: String, val label: String,
                         val get: (CircumferencePoint) -> Double?)
@@ -70,6 +71,7 @@ private val SITES = listOf(
 
 @Composable
 fun MeasurementsScreen(settings: SettingsRepository, onBack: () -> Unit) {
+    val tok = LocalAppTokens.current
     val scope = rememberCoroutineScope()
     val accent = Color(0xFF38BDF8)
     var points by remember { mutableStateOf<List<CircumferencePoint>>(emptyList()) }
@@ -93,16 +95,16 @@ fun MeasurementsScreen(settings: SettingsRepository, onBack: () -> Unit) {
     }
     LaunchedEffect(Unit) { fetch() }
 
-    Column(Modifier.fillMaxSize().background(MV.Bg)) {
+    Column(Modifier.fillMaxSize().background(tok.bg)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = MV.OnSurface)
+                    tint = tok.onSurface)
             }
-            Text("Measurements", color = MV.OnSurface, fontSize = 16.sp,
+            Text("Measurements", color = tok.onSurface, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold)
         }
         LazyColumn(
@@ -112,9 +114,9 @@ fun MeasurementsScreen(settings: SettingsRepository, onBack: () -> Unit) {
             // Latest-per-site tiles
             if (latest.isNotEmpty()) {
                 item {
-                    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+                    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
                         Column(Modifier.padding(14.dp)) {
-                            Text("LATEST", color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                            Text("LATEST", color = tok.onSurfaceVariant, fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(6.dp))
                             SITES.filter { latest[it.key] != null }.chunked(3).forEach { rowSites ->
@@ -122,8 +124,8 @@ fun MeasurementsScreen(settings: SettingsRepository, onBack: () -> Unit) {
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     rowSites.forEach { s ->
                                         Column(Modifier.weight(1f)) {
-                                            Text(s.label, color = MV.OnSurfaceVariant, fontSize = 10.sp)
-                                            Text("${latest[s.key]} cm", color = MV.OnSurface,
+                                            Text(s.label, color = tok.onSurfaceVariant, fontSize = 10.sp)
+                                            Text("${latest[s.key]} cm", color = tok.onSurface,
                                                 fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                                         }
                                     }
@@ -135,9 +137,9 @@ fun MeasurementsScreen(settings: SettingsRepository, onBack: () -> Unit) {
                 }
                 // Trend
                 item {
-                    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+                    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
                         Column(Modifier.padding(14.dp)) {
-                            Text("TREND", color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                            Text("TREND", color = tok.onSurfaceVariant, fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(8.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -150,7 +152,7 @@ fun MeasurementsScreen(settings: SettingsRepository, onBack: () -> Unit) {
                                         label = { Text(s.label, fontSize = 12.sp) },
                                         colors = FilterChipDefaults.filterChipColors(
                                             selectedContainerColor = accent.copy(alpha = 0.20f),
-                                            selectedLabelColor = MV.OnSurface,
+                                            selectedLabelColor = tok.onSurface,
                                         ),
                                     )
                                 }
@@ -160,7 +162,7 @@ fun MeasurementsScreen(settings: SettingsRepository, onBack: () -> Unit) {
                             val vals = points.mapNotNull { site.get(it) }
                             if (vals.size < 2) {
                                 Text("Log 2+ ${site.label.lowercase()} entries to see a trend.",
-                                    color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                                    color = tok.onSurfaceVariant, fontSize = 12.sp)
                             } else {
                                 LineChart(vals, accent)
                             }
@@ -170,9 +172,9 @@ fun MeasurementsScreen(settings: SettingsRepository, onBack: () -> Unit) {
             }
             // Entry form
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+                Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
                     Column(Modifier.padding(14.dp)) {
-                        Text("LOG MEASUREMENTS", color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                        Text("LOG MEASUREMENTS", color = tok.onSurfaceVariant, fontSize = 11.sp,
                             fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(8.dp))
                         SITES.chunked(2).forEach { pair ->
@@ -225,10 +227,10 @@ fun MeasurementsScreen(settings: SettingsRepository, onBack: () -> Unit) {
                         ) { Text(if (saving) "Saving…" else "Save measurements") }
                         msg?.let {
                             Spacer(Modifier.height(6.dp))
-                            Text(it, color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                            Text(it, color = tok.onSurfaceVariant, fontSize = 12.sp)
                         }
                         Text("Leave a field blank to skip it. All entered sites share one timestamp.",
-                            color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                            color = tok.onSurfaceVariant, fontSize = 11.sp,
                             modifier = Modifier.padding(top = 6.dp))
                     }
                 }

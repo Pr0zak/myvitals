@@ -53,6 +53,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import app.myvitals.ui.LocalAppTokens
 
 private val STAGE_COLORS = mapOf(
     "deep" to Color(0xFF1E40AF),
@@ -72,6 +73,7 @@ fun SleepDetailScreen(
     settings: SettingsRepository,
     onBack: () -> Unit,
 ) {
+    val tok = LocalAppTokens.current
     val context = androidx.compose.ui.platform.LocalContext.current
     var nights by remember { mutableStateOf<List<SleepNight>>(emptyList()) }
     var selectedRaw by remember { mutableStateOf<List<SleepRawSegment>>(emptyList()) }
@@ -149,16 +151,16 @@ fun SleepDetailScreen(
         if (nights.isNotEmpty()) fetchRawForDay(selectedDay)
     }
 
-    Column(Modifier.fillMaxSize().background(MV.Bg)) {
+    Column(Modifier.fillMaxSize().background(tok.bg)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = MV.OnSurface)
+                    tint = tok.onSurface)
             }
-            Text("Sleep", color = MV.OnSurface, fontSize = 16.sp,
+            Text("Sleep", color = tok.onSurface, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
         app.myvitals.ui.common.DayNav(
@@ -166,10 +168,10 @@ fun SleepDetailScreen(
             onSelectedChange = { selectedDay = it },
         )
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant,
+            loading -> Text("Loading…", color = tok.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp))
             error != null && nights.isEmpty() ->
-                Text(error!!, color = MV.Red, modifier = Modifier.padding(16.dp))
+                Text(error!!, color = tok.red, modifier = Modifier.padding(16.dp))
             else -> app.myvitals.ui.common.PullableMetricBox(
                 refreshing = refreshing,
                 onRefresh = {
@@ -195,20 +197,21 @@ fun SleepDetailScreen(
 
 @Composable
 private fun LastNightHero(n: SleepNight?, isToday: Boolean = true) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
             Text(if (isToday) "LAST NIGHT" else "NIGHT OF " + (n?.date ?: "—"),
-                color = MV.OnSurfaceVariant,
+                color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             if (n == null) {
-                Text("—", color = MV.OnSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                Text("—", color = tok.onSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                 return@Card
             }
             val totalH = n.totalS / 3600
             val totalM = (n.totalS % 3600) / 60
-            Text("${totalH}h ${totalM}m", color = MV.OnSurface,
+            Text("${totalH}h ${totalM}m", color = tok.onSurface,
                 fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-            Text(formatStartEnd(n), color = MV.OnSurfaceVariant, fontSize = 12.sp)
+            Text(formatStartEnd(n), color = tok.onSurfaceVariant, fontSize = 12.sp)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 val byStage = n.stages.associate { it.stage to it.durationS }
@@ -218,13 +221,13 @@ private fun LastNightHero(n: SleepNight?, isToday: Boolean = true) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(8.dp)
                                 .clip(RoundedCornerShape(2.dp))
-                                .background(STAGE_COLORS[st] ?: MV.OnSurfaceDim))
+                                .background(STAGE_COLORS[st] ?: tok.onSurfaceDim))
                             Spacer(Modifier.width(4.dp))
                             Text(st.replaceFirstChar { it.titlecase() },
-                                color = MV.OnSurfaceDim, fontSize = 10.sp,
+                                color = tok.onSurfaceDim, fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold)
                         }
-                        Text("${s / 60}m", color = MV.OnSurface, fontSize = 13.sp,
+                        Text("${s / 60}m", color = tok.onSurface, fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold)
                     }
                 }
@@ -235,14 +238,15 @@ private fun LastNightHero(n: SleepNight?, isToday: Boolean = true) {
 
 @Composable
 private fun Hypnogram(segments: List<SleepRawSegment>) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("HYPNOGRAM", color = MV.OnSurfaceVariant,
+            Text("HYPNOGRAM", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             if (segments.isEmpty()) {
                 Text("No raw stage data for the last 48h.",
-                    color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                    color = tok.onSurfaceVariant, fontSize = 12.sp)
                 return@Card
             }
             val parsed = remember(segments) {
@@ -262,7 +266,7 @@ private fun Hypnogram(segments: List<SleepRawSegment>) {
                     for (i in 0..HYPNO_ORDER.size) {
                         val y = i * rowH
                         drawLine(
-                            color = MV.OnSurfaceDim.copy(alpha = 0.18f),
+                            color = tok.onSurfaceDim.copy(alpha = 0.18f),
                             start = Offset(0f, y), end = Offset(size.width, y),
                             strokeWidth = 0.7.dp.toPx(),
                         )
@@ -276,7 +280,7 @@ private fun Hypnogram(segments: List<SleepRawSegment>) {
                         val y0 = idx * rowH + rowH * 0.18f
                         val h = rowH * 0.64f
                         drawRect(
-                            color = STAGE_COLORS[stage] ?: MV.OnSurfaceDim,
+                            color = STAGE_COLORS[stage] ?: tok.onSurfaceDim,
                             topLeft = Offset(x0, y0),
                             size = Size((x1 - x0).coerceAtLeast(1f), h),
                         )
@@ -290,7 +294,7 @@ private fun Hypnogram(segments: List<SleepRawSegment>) {
                             Modifier.fillMaxWidth().height(140.dp * rowFraction),
                             contentAlignment = Alignment.CenterStart,
                         ) {
-                            Text(st, color = MV.OnSurfaceDim,
+                            Text(st, color = tok.onSurfaceDim,
                                 fontSize = 9.sp, fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(start = 2.dp))
                         }
@@ -300,10 +304,10 @@ private fun Hypnogram(segments: List<SleepRawSegment>) {
             // Time axis labels
             Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(formatLocalHour(tStart), color = MV.OnSurfaceDim, fontSize = 9.sp)
+                Text(formatLocalHour(tStart), color = tok.onSurfaceDim, fontSize = 9.sp)
                 Text(formatLocalHour((tStart + tEnd) / 2),
-                    color = MV.OnSurfaceDim, fontSize = 9.sp)
-                Text(formatLocalHour(tEnd), color = MV.OnSurfaceDim, fontSize = 9.sp)
+                    color = tok.onSurfaceDim, fontSize = 9.sp)
+                Text(formatLocalHour(tEnd), color = tok.onSurfaceDim, fontSize = 9.sp)
             }
         }
     }
@@ -311,14 +315,15 @@ private fun Hypnogram(segments: List<SleepRawSegment>) {
 
 @Composable
 private fun StageBreakdownChart(nights: List<SleepNight>) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
             Text("STAGE BREAKDOWN — ${nights.size} NIGHTS",
-                color = MV.OnSurfaceVariant,
+                color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             if (nights.isEmpty()) {
-                Text("No data.", color = MV.OnSurfaceVariant, fontSize = 12.sp)
+                Text("No data.", color = tok.onSurfaceVariant, fontSize = 12.sp)
                 return@Card
             }
             val maxTotal = (nights.maxOfOrNull { it.totalS } ?: 1).coerceAtLeast(1)
@@ -335,7 +340,7 @@ private fun StageBreakdownChart(nights: List<SleepNight>) {
                             val h = (s.toFloat() / maxTotal) * size.height
                             yCursor -= h
                             drawRect(
-                                color = STAGE_COLORS[st.lowercase()] ?: MV.OnSurfaceDim,
+                                color = STAGE_COLORS[st.lowercase()] ?: tok.onSurfaceDim,
                                 topLeft = Offset(x, yCursor),
                                 size = Size(barW, h),
                             )
@@ -348,7 +353,7 @@ private fun StageBreakdownChart(nights: List<SleepNight>) {
                 horizontalArrangement = Arrangement.SpaceBetween) {
                 for ((i, n) in nights.withIndex()) {
                     if (i % 2 == 0 || i == nights.lastIndex) {
-                        Text(shortDate(n.date), color = MV.OnSurfaceDim, fontSize = 9.sp)
+                        Text(shortDate(n.date), color = tok.onSurfaceDim, fontSize = 9.sp)
                     }
                 }
             }
@@ -358,13 +363,14 @@ private fun StageBreakdownChart(nights: List<SleepNight>) {
 
 @Composable
 private fun DurationTrend(nights: List<SleepNight>, goalH: Double) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("DURATION", color = MV.OnSurfaceVariant,
+            Text("DURATION", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(4.dp))
             if (nights.isEmpty()) {
-                Text("—", color = MV.OnSurface, fontSize = 16.sp); return@Card
+                Text("—", color = tok.onSurface, fontSize = 16.sp); return@Card
             }
             val avgH = nights.map { it.totalS }.average() / 3600.0
             val minN = nights.minByOrNull { it.totalS }
@@ -415,15 +421,16 @@ private fun SleepDurationLine(nights: List<SleepNight>, goalH: Float, color: Col
 
 @Composable
 private fun StageLegend() {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             for (st in HYPNO_ORDER) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(10.dp)
                         .clip(RoundedCornerShape(2.dp))
-                        .background(STAGE_COLORS[st] ?: MV.OnSurfaceDim))
+                        .background(STAGE_COLORS[st] ?: tok.onSurfaceDim))
                     Spacer(Modifier.width(4.dp))
-                    Text(st, color = MV.OnSurface, fontSize = 11.sp)
+                    Text(st, color = tok.onSurface, fontSize = 11.sp)
                 }
             }
         }
@@ -432,10 +439,11 @@ private fun StageLegend() {
 
 @Composable
 private fun Stat(label: String, value: String) {
+    val tok = LocalAppTokens.current
     Column {
-        Text(label, color = MV.OnSurfaceDim, fontSize = 10.sp,
+        Text(label, color = tok.onSurfaceDim, fontSize = 10.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(value, color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(value, color = tok.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

@@ -125,6 +125,14 @@ fun NeonAppShell(
             app.myvitals.ui.common.ConnectionBanner()
             val open: (String) -> Unit = { route -> nav.navigate(route) }
             val pad = PaddingValues(0.dp)
+            // Shared detail screens (Sleep, Heart rate, BP, Weight, Steps,
+            // Measurements) read LocalAppTokens rather than the classic MV
+            // palette, so inside this shell they render in neon. Outside it
+            // the default is the classic palette, unchanged. Without this
+            // provider the migration is a no-op.
+            androidx.compose.runtime.CompositionLocalProvider(
+                app.myvitals.ui.LocalAppTokens provides app.myvitals.ui.NeonTokens,
+            ) {
             NavHost(
                 navController = nav,
                 startDestination = NeonRoutes.TODAY,
@@ -282,6 +290,7 @@ fun NeonAppShell(
                         onToggleNeonShell = onToggleNeonShell,
                     )
                 }
+            }
             }
         }
     }

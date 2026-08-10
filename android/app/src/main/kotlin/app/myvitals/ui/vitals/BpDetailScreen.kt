@@ -50,11 +50,13 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import app.myvitals.ui.LocalAppTokens
 
 private data class BpReading(val ms: Long, val sys: Int, val dia: Int)
 
 @Composable
 fun BpDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
+    val tok = LocalAppTokens.current
     val context = androidx.compose.ui.platform.LocalContext.current
     var pts by remember { mutableStateOf<List<BpReading>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -100,25 +102,25 @@ fun BpDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     }
     LaunchedEffect(Unit) { load() }
 
-    Column(Modifier.fillMaxSize().background(MV.Bg)) {
+    Column(Modifier.fillMaxSize().background(tok.bg)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = MV.OnSurface)
+                    tint = tok.onSurface)
             }
             Icon(Vital.BP.icon, contentDescription = null, tint = Vital.BP.color,
                 modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Blood pressure", color = MV.OnSurface, fontSize = 16.sp,
+            Text("Blood pressure", color = tok.onSurface, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant,
+            loading -> Text("Loading…", color = tok.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp))
-            error != null -> Text(error!!, color = MV.Red, modifier = Modifier.padding(16.dp))
+            error != null -> Text(error!!, color = tok.red, modifier = Modifier.padding(16.dp))
             pts.isEmpty() -> Text("No readings in the last 90 days.",
-                color = MV.OnSurfaceVariant, modifier = Modifier.padding(16.dp))
+                color = tok.onSurfaceVariant, modifier = Modifier.padding(16.dp))
             else -> app.myvitals.ui.common.PullableMetricBox(
                 refreshing = refreshing,
                 onRefresh = {
@@ -142,16 +144,17 @@ fun BpDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
 
 @Composable
 private fun BpHero(latest: BpReading) {
+    val tok = LocalAppTokens.current
     val cat = bpCategory(latest.sys, latest.dia)
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("LATEST", color = MV.OnSurfaceVariant,
+            Text("LATEST", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Row(verticalAlignment = Alignment.Bottom) {
-                Text("${latest.sys}/${latest.dia}", color = MV.OnSurface,
+                Text("${latest.sys}/${latest.dia}", color = tok.onSurface,
                     fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.width(6.dp))
-                Text("mmHg", color = MV.OnSurfaceDim, fontSize = 12.sp,
+                Text("mmHg", color = tok.onSurfaceDim, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 6.dp))
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -160,7 +163,7 @@ private fun BpHero(latest: BpReading) {
                 Text(cat.first, color = cat.second, fontSize = 13.sp,
                     fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
-                Text(formatLocal(latest.ms), color = MV.OnSurfaceDim, fontSize = 11.sp)
+                Text(formatLocal(latest.ms), color = tok.onSurfaceDim, fontSize = 11.sp)
             }
         }
     }
@@ -168,9 +171,10 @@ private fun BpHero(latest: BpReading) {
 
 @Composable
 private fun BpChart(pts: List<BpReading>) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("TREND", color = MV.OnSurfaceVariant,
+            Text("TREND", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             val sysColor = Color(0xFFEF4444)
@@ -228,11 +232,11 @@ private fun BpChart(pts: List<BpReading>) {
                 }
                 Column(Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.SpaceBetween) {
-                    Text("$maxY", color = MV.OnSurfaceDim, fontSize = 9.sp,
+                    Text("$maxY", color = tok.onSurfaceDim, fontSize = 9.sp,
                         modifier = Modifier.padding(start = 4.dp))
-                    Text("${(minY + maxY) / 2}", color = MV.OnSurfaceDim, fontSize = 9.sp,
+                    Text("${(minY + maxY) / 2}", color = tok.onSurfaceDim, fontSize = 9.sp,
                         modifier = Modifier.padding(start = 4.dp))
-                    Text("$minY", color = MV.OnSurfaceDim, fontSize = 9.sp,
+                    Text("$minY", color = tok.onSurfaceDim, fontSize = 9.sp,
                         modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
                 }
             }
@@ -249,18 +253,20 @@ private fun BpChart(pts: List<BpReading>) {
 
 @Composable
 private fun LegendDot(color: Color, label: String) {
+    val tok = LocalAppTokens.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp)).background(color))
         Spacer(Modifier.width(4.dp))
-        Text(label, color = MV.OnSurfaceVariant, fontSize = 11.sp)
+        Text(label, color = tok.onSurfaceVariant, fontSize = 11.sp)
     }
 }
 
 @Composable
 private fun BpStats(pts: List<BpReading>) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("AVERAGES", color = MV.OnSurfaceVariant,
+            Text("AVERAGES", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
@@ -274,9 +280,10 @@ private fun BpStats(pts: List<BpReading>) {
 
 @Composable
 private fun BpHistoryList(pts: List<BpReading>) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("LAST READINGS", color = MV.OnSurfaceVariant,
+            Text("LAST READINGS", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(6.dp))
             for (r in pts) {
@@ -286,12 +293,12 @@ private fun BpHistoryList(pts: List<BpReading>) {
                     Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp))
                         .background(cat.second))
                     Spacer(Modifier.width(8.dp))
-                    Text("${r.sys}/${r.dia}", color = MV.OnSurface, fontSize = 13.sp,
+                    Text("${r.sys}/${r.dia}", color = tok.onSurface, fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.width(80.dp))
                     Text(cat.first, color = cat.second, fontSize = 11.sp,
                         modifier = Modifier.weight(1f))
-                    Text(formatLocal(r.ms), color = MV.OnSurfaceDim, fontSize = 11.sp)
+                    Text(formatLocal(r.ms), color = tok.onSurfaceDim, fontSize = 11.sp)
                 }
             }
         }
@@ -300,10 +307,11 @@ private fun BpHistoryList(pts: List<BpReading>) {
 
 @Composable
 private fun Stat(label: String, value: String) {
+    val tok = LocalAppTokens.current
     Column {
-        Text(label, color = MV.OnSurfaceDim, fontSize = 10.sp,
+        Text(label, color = tok.onSurfaceDim, fontSize = 10.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(value, color = MV.OnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(value, color = tok.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

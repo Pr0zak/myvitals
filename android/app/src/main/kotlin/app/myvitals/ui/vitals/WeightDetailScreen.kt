@@ -48,11 +48,13 @@ import org.json.JSONObject
 import timber.log.Timber
 import java.time.Instant
 import java.time.LocalDate
+import app.myvitals.ui.LocalAppTokens
 
 private data class WPoint(val ms: Long, val kg: Double)
 
 @Composable
 fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
+    val tok = LocalAppTokens.current
     val context = androidx.compose.ui.platform.LocalContext.current
     var range by remember { mutableStateOf(VitalRange.MONTH) }
     var pts by remember { mutableStateOf<List<WPoint>>(emptyList()) }
@@ -98,17 +100,17 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     }
     LaunchedEffect(range) { load() }
 
-    Column(Modifier.fillMaxSize().background(MV.Bg)) {
+    Column(Modifier.fillMaxSize().background(tok.bg)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = MV.OnSurface)
+                    tint = tok.onSurface)
             }
             Icon(Vital.WEIGHT.icon, contentDescription = null, tint = Vital.WEIGHT.color,
                 modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Weight", color = MV.OnSurface, fontSize = 16.sp,
+            Text("Weight", color = tok.onSurface, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
@@ -120,17 +122,17 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     label = { Text(r.label) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = Vital.WEIGHT.color.copy(alpha = 0.20f),
-                        selectedLabelColor = MV.OnSurface,
+                        selectedLabelColor = tok.onSurface,
                     ),
                 )
             }
         }
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant,
+            loading -> Text("Loading…", color = tok.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp))
-            error != null -> Text(error!!, color = MV.Red, modifier = Modifier.padding(16.dp))
+            error != null -> Text(error!!, color = tok.red, modifier = Modifier.padding(16.dp))
             pts.size < 2 -> Text("Need at least 2 weight readings in this window.",
-                color = MV.OnSurfaceVariant, modifier = Modifier.padding(16.dp))
+                color = tok.onSurfaceVariant, modifier = Modifier.padding(16.dp))
             else -> app.myvitals.ui.common.PullableMetricBox(
                 refreshing = refreshing,
                 onRefresh = {
@@ -153,25 +155,26 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
 
 @Composable
 private fun WeightHero(pts: List<WPoint>) {
+    val tok = LocalAppTokens.current
     val latestLb = pts.last().kg * 2.20462
     val firstLb = pts.first().kg * 2.20462
     val delta = latestLb - firstLb
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("LATEST", color = MV.OnSurfaceVariant,
+            Text("LATEST", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Row(verticalAlignment = Alignment.Bottom) {
-                Text("%.1f".format(latestLb), color = MV.OnSurface,
+                Text("%.1f".format(latestLb), color = tok.onSurface,
                     fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.width(6.dp))
-                Text("lb", color = MV.OnSurfaceDim, fontSize = 12.sp,
+                Text("lb", color = tok.onSurfaceDim, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 6.dp))
             }
             val arrow = if (delta > 0.05) "↑" else if (delta < -0.05) "↓" else "→"
             val color = when {
                 delta > 0.5 -> Color(0xFFFBBF24)
                 delta < -0.5 -> Color(0xFF60A5FA)
-                else -> MV.OnSurfaceDim
+                else -> tok.onSurfaceDim
             }
             Text("$arrow %+.1f lb in window".format(delta),
                 color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
@@ -181,9 +184,10 @@ private fun WeightHero(pts: List<WPoint>) {
 
 @Composable
 private fun WeightChart(pts: List<WPoint>, color: Color) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("TREND", color = MV.OnSurfaceVariant,
+            Text("TREND", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             val lbs = pts.map { it.kg * 2.20462 }
@@ -211,7 +215,7 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
                     for (yv in ticks) {
                         val py = padTop + ((maxV - yv) / span * plotH).toFloat()
                         drawLine(
-                            color = MV.OnSurfaceDim.copy(alpha = 0.18f),
+                            color = tok.onSurfaceDim.copy(alpha = 0.18f),
                             start = Offset(padX, py), end = Offset(size.width, py),
                             strokeWidth = 0.7.dp.toPx(),
                         )
@@ -244,12 +248,12 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
                 // Y-axis labels
                 Column(Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.SpaceBetween) {
-                    Text("%.1f".format(maxV), color = MV.OnSurfaceDim, fontSize = 9.sp,
+                    Text("%.1f".format(maxV), color = tok.onSurfaceDim, fontSize = 9.sp,
                         modifier = Modifier.padding(start = 4.dp))
                     Text("%.1f".format((minV + maxV) / 2),
-                        color = MV.OnSurfaceDim, fontSize = 9.sp,
+                        color = tok.onSurfaceDim, fontSize = 9.sp,
                         modifier = Modifier.padding(start = 4.dp))
-                    Text("%.1f".format(minV), color = MV.OnSurfaceDim, fontSize = 9.sp,
+                    Text("%.1f".format(minV), color = tok.onSurfaceDim, fontSize = 9.sp,
                         modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
                 }
             }
@@ -263,10 +267,11 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
 
 @Composable
 private fun WeightStats(pts: List<WPoint>) {
+    val tok = LocalAppTokens.current
     val lbs = pts.map { it.kg * 2.20462 }
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("STATS", color = MV.OnSurfaceVariant,
+            Text("STATS", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
@@ -281,9 +286,10 @@ private fun WeightStats(pts: List<WPoint>) {
 
 @Composable
 private fun Stat(label: String, value: String) {
+    val tok = LocalAppTokens.current
     Column {
-        Text(label, color = MV.OnSurfaceDim, fontSize = 10.sp,
+        Text(label, color = tok.onSurfaceDim, fontSize = 10.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(value, color = MV.OnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(value, color = tok.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }

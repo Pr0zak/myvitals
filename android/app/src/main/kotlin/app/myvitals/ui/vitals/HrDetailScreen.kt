@@ -57,6 +57,7 @@ import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.time.Instant
 import java.time.LocalDate
+import app.myvitals.ui.LocalAppTokens
 
 private val ZONE_COLORS = listOf(
     Color(0xFF38BDF8), Color(0xFF22C55E), Color(0xFFEAB308),
@@ -75,6 +76,7 @@ data class HrEventBand(
 
 @Composable
 fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
+    val tok = LocalAppTokens.current
     val context = androidx.compose.ui.platform.LocalContext.current
     var range by remember { mutableStateOf(VitalRange.DAY) }
     // Day selector — only visible when range == DAY. Drives the 24h
@@ -205,17 +207,17 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
         fetch()
     }
 
-    Column(Modifier.fillMaxSize().background(MV.Bg)) {
+    Column(Modifier.fillMaxSize().background(tok.bg)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = MV.OnSurface)
+                    tint = tok.onSurface)
             }
             Icon(Vital.HR.icon, contentDescription = null, tint = Vital.HR.color,
                 modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Heart rate", color = MV.OnSurface, fontSize = 16.sp,
+            Text("Heart rate", color = tok.onSurface, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
@@ -230,7 +232,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     label = { Text(r.label) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = Vital.HR.color.copy(alpha = 0.20f),
-                        selectedLabelColor = MV.OnSurface,
+                        selectedLabelColor = tok.onSurface,
                     ),
                 )
             }
@@ -242,10 +244,10 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
             )
         }
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant,
+            loading -> Text("Loading…", color = tok.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp))
             error != null && rows.isEmpty() && live.isEmpty() ->
-                Text(error!!, color = MV.Red, modifier = Modifier.padding(16.dp))
+                Text(error!!, color = tok.red, modifier = Modifier.padding(16.dp))
             else -> app.myvitals.ui.common.PullableMetricBox(
                 refreshing = refreshing,
                 onRefresh = {
@@ -288,14 +290,15 @@ private fun LiveHrChart(
     bands: List<HrEventBand> = emptyList(),
     annotations: List<app.myvitals.sync.Annotation> = emptyList(),
 ) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("LAST 24H", color = MV.OnSurfaceVariant,
+            Text("LAST 24H", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             if (points.size < 2) {
                 Text("No HR samples in the last 24h.",
-                    color = MV.OnSurfaceVariant, fontSize = 12.sp); return@Card
+                    color = tok.onSurfaceVariant, fontSize = 12.sp); return@Card
             }
             val parsed = remember(points) {
                 points.mapNotNull { p ->
@@ -381,7 +384,7 @@ private fun LiveHrChart(
                     for (yv in ticks) {
                         val py = padTop + ((yMax - yv) / ySpan) * plotH
                         drawLine(
-                            color = MV.OnSurfaceDim.copy(alpha = 0.15f),
+                            color = tok.onSurfaceDim.copy(alpha = 0.15f),
                             start = Offset(padX, py), end = Offset(size.width, py),
                             strokeWidth = 0.7.dp.toPx(),
                         )
@@ -406,7 +409,7 @@ private fun LiveHrChart(
                     // Avg dashed
                     val avgY = padTop + ((yMax - avgV.toFloat()) / ySpan) * plotH
                     drawLine(
-                        color = MV.OnSurfaceVariant.copy(alpha = 0.55f),
+                        color = tok.onSurfaceVariant.copy(alpha = 0.55f),
                         start = Offset(padX, avgY), end = Offset(size.width, avgY),
                         strokeWidth = 1.dp.toPx(),
                         pathEffect = PathEffect.dashPathEffect(
@@ -432,13 +435,13 @@ private fun LiveHrChart(
                 Column(Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.SpaceBetween) {
                     Text("${(maxV + 8).toInt()}",
-                        color = MV.OnSurfaceDim, fontSize = 9.sp,
+                        color = tok.onSurfaceDim, fontSize = 9.sp,
                         modifier = Modifier.padding(start = 4.dp))
                     Text("${((minV + maxV) / 2).toInt()}",
-                        color = MV.OnSurfaceDim, fontSize = 9.sp,
+                        color = tok.onSurfaceDim, fontSize = 9.sp,
                         modifier = Modifier.padding(start = 4.dp))
                     Text("${(minV - 8).coerceAtLeast(40.0).toInt()}",
-                        color = MV.OnSurfaceDim, fontSize = 9.sp,
+                        color = tok.onSurfaceDim, fontSize = 9.sp,
                         modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
                 }
             }
@@ -455,6 +458,7 @@ private fun LiveHrChart(
 
 @Composable
 private fun TimeInZone(points: List<TimePoint>, maxHr: Int) {
+    val tok = LocalAppTokens.current
     val zoneSecs = remember(points, maxHr) {
         val out = LongArray(5)
         val parsed = points.mapNotNull { p ->
@@ -467,9 +471,9 @@ private fun TimeInZone(points: List<TimePoint>, maxHr: Int) {
         }
         out
     }
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("TIME IN ZONE — 24H", color = MV.OnSurfaceVariant,
+            Text("TIME IN ZONE — 24H", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(6.dp))
             val total = zoneSecs.sum().coerceAtLeast(1)
@@ -490,11 +494,11 @@ private fun TimeInZone(points: List<TimePoint>, maxHr: Int) {
                     Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp))
                         .background(ZONE_COLORS[zi]))
                     Spacer(Modifier.width(6.dp))
-                    Text(zoneLabel(zi), color = MV.OnSurface, fontSize = 11.sp,
+                    Text(zoneLabel(zi), color = tok.onSurface, fontSize = 11.sp,
                         modifier = Modifier.weight(1f))
-                    Text(fmtSec(zoneSecs[zi]), color = MV.OnSurfaceVariant, fontSize = 11.sp,
+                    Text(fmtSec(zoneSecs[zi]), color = tok.onSurfaceVariant, fontSize = 11.sp,
                         modifier = Modifier.width(72.dp))
-                    Text("$pct%", color = MV.OnSurfaceDim, fontSize = 11.sp)
+                    Text("$pct%", color = tok.onSurfaceDim, fontSize = 11.sp)
                 }
             }
         }
@@ -503,23 +507,24 @@ private fun TimeInZone(points: List<TimePoint>, maxHr: Int) {
 
 @Composable
 private fun RestingHrTrend(rows: List<DailySummary>, range: VitalRange) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
             Text("RESTING HR — ${range.label.uppercase()}",
-                color = MV.OnSurfaceVariant,
+                color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             val pts = rows.map { it.restingHr?.toFloat() }
             val real = pts.filterNotNull()
             if (real.size < 2) {
                 Text("No resting HR data in this window.",
-                    color = MV.OnSurfaceVariant, fontSize = 12.sp); return@Card
+                    color = tok.onSurfaceVariant, fontSize = 12.sp); return@Card
             }
             Row(verticalAlignment = Alignment.Bottom) {
-                Text("%.0f".format(real.last()), color = MV.OnSurface,
+                Text("%.0f".format(real.last()), color = tok.onSurface,
                     fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.width(4.dp))
-                Text("bpm", color = MV.OnSurfaceDim, fontSize = 11.sp,
+                Text("bpm", color = tok.onSurfaceDim, fontSize = 11.sp,
                     modifier = Modifier.padding(bottom = 4.dp))
             }
             Spacer(Modifier.height(6.dp))
@@ -582,15 +587,17 @@ private fun fmtSec(s: Long): String {
 
 @Composable
 private fun Stat(label: String, value: String) {
+    val tok = LocalAppTokens.current
     Column {
-        Text(label, color = MV.OnSurfaceDim, fontSize = 10.sp,
+        Text(label, color = tok.onSurfaceDim, fontSize = 10.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(value, color = MV.OnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(value, color = tok.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
 @Composable
 private fun HrHistogram(points: List<TimePoint>) {
+    val tok = LocalAppTokens.current
     if (points.isEmpty()) return
     // 5-bpm bins so the chart isn't too jagged. The lo/hi range is
     // derived from the data itself rather than fixed (40-200 bpm) so
@@ -609,13 +616,13 @@ private fun HrHistogram(points: List<TimePoint>) {
         else (lo..hi step bin).map { it to (byBin[it] ?: 0) }
     }
     if (bins.isEmpty()) return
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("HR DISTRIBUTION — 24H", color = MV.OnSurfaceVariant,
+            Text("HR DISTRIBUTION — 24H", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(2.dp))
             Text("5-bpm bins · ${points.size} samples",
-                color = MV.OnSurfaceDim, fontSize = 10.sp)
+                color = tok.onSurfaceDim, fontSize = 10.sp)
             Spacer(Modifier.height(8.dp))
             val maxCount = (bins.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
             Box(Modifier.fillMaxWidth().height(120.dp)) {
@@ -636,8 +643,8 @@ private fun HrHistogram(points: List<TimePoint>) {
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("${bins.first().first}", color = MV.OnSurfaceDim, fontSize = 9.sp)
-                Text("${bins.last().first + 5}", color = MV.OnSurfaceDim, fontSize = 9.sp)
+                Text("${bins.first().first}", color = tok.onSurfaceDim, fontSize = 9.sp)
+                Text("${bins.last().first + 5}", color = tok.onSurfaceDim, fontSize = 9.sp)
             }
         }
     }
@@ -645,6 +652,7 @@ private fun HrHistogram(points: List<TimePoint>) {
 
 @Composable
 private fun WeekdayPattern(rows: List<DailySummary>) {
+    val tok = LocalAppTokens.current
     if (rows.isEmpty()) return
     val byDow = remember(rows) {
         val sums = DoubleArray(7)
@@ -665,9 +673,9 @@ private fun WeekdayPattern(rows: List<DailySummary>) {
         (0..6).map { i -> if (cnts[i] > 0) sums[i] / cnts[i] else null }
     }
     if (byDow.all { it == null }) return
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("RESTING HR · BY WEEKDAY", color = MV.OnSurfaceVariant,
+            Text("RESTING HR · BY WEEKDAY", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             val nonNull = byDow.filterNotNull()
@@ -682,7 +690,7 @@ private fun WeekdayPattern(rows: List<DailySummary>) {
                     Column(Modifier.weight(1f),
                         horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(if (v != null) "${v.toInt()}" else "—",
-                            color = MV.OnSurface, fontSize = 11.sp,
+                            color = tok.onSurface, fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(2.dp))
                         val frac = if (v != null) ((v - lo) / span).toFloat() else 0f
@@ -692,7 +700,7 @@ private fun WeekdayPattern(rows: List<DailySummary>) {
                             .clip(RoundedCornerShape(3.dp))
                             .background(Vital.HR.color.copy(alpha = if (v == null) 0.15f else 0.85f)))
                         Spacer(Modifier.height(2.dp))
-                        Text(labels[i], color = MV.OnSurfaceDim, fontSize = 10.sp)
+                        Text(labels[i], color = tok.onSurfaceDim, fontSize = 10.sp)
                     }
                 }
             }

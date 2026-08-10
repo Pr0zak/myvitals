@@ -52,12 +52,14 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import app.myvitals.ui.LocalAppTokens
 
 @Composable
 fun StepsDetailScreen(
     settings: SettingsRepository,
     onBack: () -> Unit,
 ) {
+    val tok = LocalAppTokens.current
     val context = androidx.compose.ui.platform.LocalContext.current
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
     var goal by remember { mutableStateOf(10_000) }
@@ -127,16 +129,16 @@ fun StepsDetailScreen(
     }
 
     val color = Vital.STEPS.color
-    Column(Modifier.fillMaxSize().background(MV.Bg)) {
+    Column(Modifier.fillMaxSize().background(tok.bg)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = MV.OnSurface)
+                    tint = tok.onSurface)
             }
-            Text("Steps", color = MV.OnSurface, fontSize = 16.sp,
+            Text("Steps", color = tok.onSurface, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
         app.myvitals.ui.common.DayNav(
@@ -144,9 +146,9 @@ fun StepsDetailScreen(
             onSelectedChange = { selectedDay = it },
         )
         when {
-            loading -> Text("Loading…", color = MV.OnSurfaceVariant,
+            loading -> Text("Loading…", color = tok.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp))
-            error != null && rows.isEmpty() -> Text(error!!, color = MV.Red,
+            error != null && rows.isEmpty() -> Text(error!!, color = tok.red,
                 modifier = Modifier.padding(16.dp))
             else -> PullableMetricBox(
                 refreshing = refreshing,
@@ -184,12 +186,13 @@ fun StepsDetailScreen(
 
 @Composable
 private fun TodayHero(today: DailySummary?, goal: Int, color: Color) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("TODAY", color = MV.OnSurfaceVariant,
+            Text("TODAY", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             val n = today?.stepsTotal ?: 0
-            Text("%,d".format(n), color = MV.OnSurface,
+            Text("%,d".format(n), color = tok.onSurface,
                 fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
             val pct = (n.toFloat() / goal.toFloat()).coerceAtLeast(0f).coerceAtMost(2f)
             Box(Modifier.fillMaxWidth().height(8.dp)
@@ -199,7 +202,7 @@ private fun TodayHero(today: DailySummary?, goal: Int, color: Color) {
             }
             Spacer(Modifier.height(4.dp))
             Text("${(pct * 100).toInt()}% of ${"%,d".format(goal)} goal",
-                color = MV.OnSurfaceDim, fontSize = 11.sp)
+                color = tok.onSurfaceDim, fontSize = 11.sp)
         }
     }
 }
@@ -222,10 +225,11 @@ private fun bucketByHour(points: List<TimePoint>, day: LocalDate): IntArray {
 
 @Composable
 private fun HourlyColumns(hourly: IntArray, color: Color, isToday: Boolean) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
             Text(if (isToday) "TODAY BY HOUR" else "BY HOUR",
-                color = MV.OnSurfaceVariant,
+                color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             val maxV = (hourly.max().coerceAtLeast(1)).toFloat()
@@ -247,11 +251,11 @@ private fun HourlyColumns(hourly: IntArray, color: Color, isToday: Boolean) {
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("00", color = MV.OnSurfaceDim, fontSize = 9.sp)
-                Text("06", color = MV.OnSurfaceDim, fontSize = 9.sp)
-                Text("12", color = MV.OnSurfaceDim, fontSize = 9.sp)
-                Text("18", color = MV.OnSurfaceDim, fontSize = 9.sp)
-                Text("23", color = MV.OnSurfaceDim, fontSize = 9.sp)
+                Text("00", color = tok.onSurfaceDim, fontSize = 9.sp)
+                Text("06", color = tok.onSurfaceDim, fontSize = 9.sp)
+                Text("12", color = tok.onSurfaceDim, fontSize = 9.sp)
+                Text("18", color = tok.onSurfaceDim, fontSize = 9.sp)
+                Text("23", color = tok.onSurfaceDim, fontSize = 9.sp)
             }
         }
     }
@@ -259,13 +263,14 @@ private fun HourlyColumns(hourly: IntArray, color: Color, isToday: Boolean) {
 
 @Composable
 private fun DailyColumns(rows: List<DailySummary>, goal: Int, color: Color) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    val tok = LocalAppTokens.current
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("LAST 30 DAYS", color = MV.OnSurfaceVariant,
+            Text("LAST 30 DAYS", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             if (rows.isEmpty()) {
-                Text("No data.", color = MV.OnSurfaceVariant, fontSize = 12.sp); return@Card
+                Text("No data.", color = tok.onSurfaceVariant, fontSize = 12.sp); return@Card
             }
             val maxV = (rows.maxOfOrNull { it.stepsTotal ?: 0 }
                 ?.coerceAtLeast(goal) ?: goal).toFloat()
@@ -299,10 +304,10 @@ private fun DailyColumns(rows: List<DailySummary>, goal: Int, color: Color) {
             Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween) {
                 rows.firstOrNull()?.date?.let {
-                    Text(shortDay(it), color = MV.OnSurfaceDim, fontSize = 9.sp)
+                    Text(shortDay(it), color = tok.onSurfaceDim, fontSize = 9.sp)
                 }
                 rows.lastOrNull()?.date?.let {
-                    Text(shortDay(it), color = MV.OnSurfaceDim, fontSize = 9.sp)
+                    Text(shortDay(it), color = tok.onSurfaceDim, fontSize = 9.sp)
                 }
             }
         }
@@ -311,13 +316,14 @@ private fun DailyColumns(rows: List<DailySummary>, goal: Int, color: Color) {
 
 @Composable
 private fun StepsStats(rows: List<DailySummary>, goal: Int) {
+    val tok = LocalAppTokens.current
     val totals = rows.mapNotNull { it.stepsTotal }
     val total = totals.sum()
     val avg = if (totals.isNotEmpty()) totals.average() else 0.0
     val daysHit = totals.count { it >= goal }
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("STATS", color = MV.OnSurfaceVariant,
+            Text("STATS", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
@@ -331,10 +337,11 @@ private fun StepsStats(rows: List<DailySummary>, goal: Int) {
 
 @Composable
 private fun StatPair(label: String, value: String) {
+    val tok = LocalAppTokens.current
     Column {
-        Text(label, color = MV.OnSurfaceDim, fontSize = 10.sp,
+        Text(label, color = tok.onSurfaceDim, fontSize = 10.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(value, color = MV.OnSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(value, color = tok.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

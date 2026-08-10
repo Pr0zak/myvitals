@@ -54,6 +54,44 @@ async def _today_row_is_stale(
     return False
 
 
+async def _ensure_fresh_today_row(
+    db: AsyncSession, today_local: date, day_start: datetime, day_end: datetime,
+) -> "models.DailySummary | None":
+    """Return today's daily_summary row, recomputing it first if stale.
+
+    Shared by `/today` and `/tiles`. An endpoint that reads the stored row
+    directly instead of coming through here shows a staler picture than the
+    rest of the app — which is exactly the "two surfaces disagree about the
+    same day" bug the architecture rule exists to prevent. It bit /tiles
+    immediately: weight and blood pressure read as absent while
+    /summary/today was already reporting both.
+    """
+    saved = (await db.execute(
+        select(models.DailySummary).where(models.DailySummary.date == today_local)
+    )).scalar_one_or_none()
+    if not await _today_row_is_stale(db, saved, today_local, day_start, day_end):
+        return saved
+    async with _lazy_compute_lock:
+        try:
+            # Re-read under the lock — another request may have just
+            # recomputed while we waited, making our compute redundant.
+            saved = (await db.execute(
+                select(models.DailySummary)
+                .where(models.DailySummary.date == today_local)
+            )).scalar_one_or_none()
+            if await _today_row_is_stale(db, saved, today_local, day_start, day_end):
+                from ..analytics.jobs import compute_daily_summary
+                await compute_daily_summary(today_local)
+                saved = (await db.execute(
+                    select(models.DailySummary)
+                    .where(models.DailySummary.date == today_local)
+                )).scalar_one_or_none()
+                log.info("recomputed stale daily_summary for %s", today_local)
+        except Exception as e:  # noqa: BLE001
+            log.warning("on-demand daily_summary recompute failed: %s", e)
+    return saved
+
+
 @router.get("/today", response_model=TodaySummary)
 async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     """
@@ -76,34 +114,11 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
 
     day_end = datetime.combine(today_local, datetime.max.time(), tzinfo=local_tz)
 
-    # 1. Try the persisted summary first.
-    result = await db.execute(
-        select(models.DailySummary).where(models.DailySummary.date == today_local)
-    )
-    saved = result.scalar_one_or_none()
-
-    # 1b. Stale-row repair: if today's row is missing sleep / HRV but the
-    # underlying tables have data, recompute on-demand. Replaces the
-    # cron-only model where a 03:00 row missed late-morning sleep data.
-    if await _today_row_is_stale(db, saved, today_local, midnight_local, day_end):
-        async with _lazy_compute_lock:
-            try:
-                # Re-read under the lock — another request may have just
-                # recomputed while we waited, making our compute redundant.
-                saved = (await db.execute(
-                    select(models.DailySummary)
-                    .where(models.DailySummary.date == today_local)
-                )).scalar_one_or_none()
-                if await _today_row_is_stale(db, saved, today_local, midnight_local, day_end):
-                    from ..analytics.jobs import compute_daily_summary
-                    await compute_daily_summary(today_local)
-                    saved = (await db.execute(
-                        select(models.DailySummary)
-                        .where(models.DailySummary.date == today_local)
-                    )).scalar_one_or_none()
-                    log.info("recomputed stale daily_summary for %s", today_local)
-            except Exception as e:  # noqa: BLE001
-                log.warning("on-demand daily_summary recompute failed: %s", e)
+    # 1. Persisted summary, with stale-row repair: if today's row is
+    # missing sleep / HRV but the underlying tables have data, it is
+    # recomputed on-demand. Replaces the cron-only model where a 03:00
+    # row missed late-morning sleep data.
+    saved = await _ensure_fresh_today_row(db, today_local, midnight_local, day_end)
 
     # 2. Compute live values as a fallback / supplement.
     # Pick a single canonical step source so the dashboard matches the
@@ -304,6 +319,13 @@ async def summary_tiles(
     except Exception:
         local_tz = timezone.utc
     day = datetime.now(local_tz).date()
+
+    # Same stale-row repair `/summary/today` does. Without it the tiles read
+    # a row the rest of the app has already moved past — weight and blood
+    # pressure showed as absent while /summary/today reported both.
+    midnight_local = datetime.combine(day, datetime.min.time(), tzinfo=local_tz)
+    day_end = datetime.combine(day, datetime.max.time(), tzinfo=local_tz)
+    await _ensure_fresh_today_row(db, day, midnight_local, day_end)
 
     profile = await db.get(models.UserProfile, 1)
     return {"date": day.isoformat(), "tiles": await tile_stats(db, day, profile)}

@@ -27,6 +27,42 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.sync.ReadinessDetail
 import app.myvitals.sync.ReadinessDriver
+import app.myvitals.ui.MV
+
+/**
+ * Colours + numeral style the hero needs, so the SAME component serves the
+ * neon shell and the classic screen. Duplicating the hero per theme would
+ * mean fixing every future readiness bug twice.
+ */
+data class HeroPalette(
+    val card: Color, val line: Color, val ink: Color,
+    val muted: Color, val link: Color,
+    val good: Color, val warn: Color, val bad: Color,
+    /** Neon uses the Space Grotesk numeral face; classic uses body type. */
+    val monoNumerals: Boolean,
+) {
+    companion object {
+        val Neon = HeroPalette(
+            card = NeonMV.Card, line = NeonMV.Line, ink = NeonMV.Ink,
+            muted = NeonMV.Muted, link = NeonMV.Cyan,
+            good = NeonMV.Lime, warn = NeonMV.Amber, bad = NeonMV.Bad,
+            monoNumerals = true,
+        )
+        val Classic = HeroPalette(
+            card = MV.SurfaceContainer, line = MV.OutlineVariant,
+            ink = MV.OnSurface, muted = MV.OnSurfaceVariant, link = MV.Amber,
+            good = MV.Green, warn = MV.Amber, bad = MV.Red,
+            monoNumerals = false,
+        )
+    }
+}
+
+/** Numeral readout that respects the active palette. */
+@Composable
+private fun HeroNumber(text: String, p: HeroPalette, size: Int, color: Color) {
+    if (p.monoNumerals) NeonNumber(text, size = size, color = color)
+    else Text(text, color = color, fontSize = size.sp, fontWeight = FontWeight.SemiBold)
+}
 
 /**
  * Readiness hero — the number, what it means, and what moved it.
@@ -49,22 +85,23 @@ fun ReadinessHero(
     modifier: Modifier = Modifier,
     onDriverClick: ((ReadinessDriver) -> Unit)? = null,
     onExplain: (() -> Unit)? = null,
+    palette: HeroPalette = HeroPalette.Neon,
 ) {
     if (detail == null) return
     val band = detail.band
-    val accent = bandColor(band)
+    val accent = bandColor(band, palette)
 
     Column(
         modifier
             .fillMaxWidth()
             .padding(bottom = 14.dp)
-            .background(NeonMV.Card, RoundedCornerShape(18.dp))
+            .background(palette.card, RoundedCornerShape(18.dp))
             .border(1.dp, accent.copy(alpha = 0.30f), RoundedCornerShape(18.dp))
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
         Text(
             "READINESS",
-            color = NeonMV.Muted, fontSize = 10.sp,
+            color = palette.muted, fontSize = 10.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp,
         )
         Spacer(Modifier.height(6.dp))
@@ -82,18 +119,18 @@ fun ReadinessHero(
                     // Never show a fabricated number. The backend returns null
                     // rather than a score dominated by one noisy input, and the
                     // reason is worth surfacing verbatim.
-                    Text("—", color = NeonMV.Muted, fontSize = 46.sp,
+                    Text("—", color = palette.muted, fontSize = 46.sp,
                         fontWeight = FontWeight.Bold)
                     Text(
                         detail.reason?.replaceFirstChar { it.uppercase() }
                             ?: "Not enough data yet",
-                        color = NeonMV.Muted, fontSize = 12.sp,
+                        color = palette.muted, fontSize = 12.sp,
                     )
                 } else {
                     Row(verticalAlignment = Alignment.Bottom) {
-                        NeonNumber(
+                        HeroNumber(
                             "%.0f".format(detail.score),
-                            size = 46, color = NeonMV.Ink,
+                            palette, size = 46, color = palette.ink,
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
@@ -104,7 +141,7 @@ fun ReadinessHero(
                         )
                     }
                     if (onExplain != null) {
-                        Text("How this is calculated", color = NeonMV.Cyan,
+                        Text("How this is calculated", color = palette.link,
                             fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
@@ -119,7 +156,7 @@ fun ReadinessHero(
         if (detail.drivers.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
             detail.drivers.forEach { d ->
-                DriverRow(d, onClick = onDriverClick?.let { cb -> { cb(d) } })
+                DriverRow(d, onDriverClick?.let { cb -> { cb(d) } }, palette)
             }
         }
     }
@@ -132,20 +169,25 @@ fun ReadinessHero(
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun ReadinessFormulaSheet(detail: ReadinessDetail, onDismiss: () -> Unit) {
+fun ReadinessFormulaSheet(
+    detail: ReadinessDetail,
+    palette: HeroPalette = HeroPalette.Neon,
+    // Last so the trailing-lambda call form stays available at call sites.
+    onDismiss: () -> Unit,
+) {
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = NeonMV.Card,
+        containerColor = palette.card,
     ) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
-            Text("How readiness is calculated", color = NeonMV.Ink,
+            Text("How readiness is calculated", color = palette.ink,
                 fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(10.dp))
             Text(
                 "A weighted blend of four signals, each scored against your "
                     + "own 28-day baseline — not a population average. 50 is "
                     + "your normal; higher is better than your normal.",
-                color = NeonMV.Muted, fontSize = 13.sp,
+                color = palette.muted, fontSize = 13.sp,
             )
             Spacer(Modifier.height(16.dp))
 
@@ -160,67 +202,67 @@ fun ReadinessFormulaSheet(detail: ReadinessDetail, onDismiss: () -> Unit) {
                     Modifier.fillMaxWidth().padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(label, color = NeonMV.Ink, fontSize = 13.sp,
+                    Text(label, color = palette.ink, fontSize = 13.sp,
                         modifier = Modifier.weight(1f))
                     if (d?.subScore != null) {
-                        NeonNumber("%.0f".format(d.subScore), size = 13,
-                            color = NeonMV.Ink)
+                        HeroNumber("%.0f".format(d.subScore), palette, size = 13,
+                            color = palette.ink)
                         Spacer(Modifier.width(10.dp))
                     } else {
-                        Text("not used today", color = NeonMV.Muted,
+                        Text("not used today", color = palette.muted,
                             fontSize = 11.sp)
                         Spacer(Modifier.width(10.dp))
                     }
-                    Text("%.0f%%".format(w * 100), color = NeonMV.Cyan,
+                    Text("%.0f%%".format(w * 100), color = palette.link,
                         fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
             Spacer(Modifier.height(14.dp))
-            Text("Bands", color = NeonMV.Muted, fontSize = 10.sp,
+            Text("Bands", color = palette.muted, fontSize = 10.sp,
                 fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                BandKey("Low", "≤29", NeonMV.Bad)
-                BandKey("Moderate", "30–64", NeonMV.Amber)
-                BandKey("High", "≥65", NeonMV.Lime)
+                BandKey("Low", "≤29", palette.bad, palette.muted)
+                BandKey("Moderate", "30–64", palette.warn, palette.muted)
+                BandKey("High", "≥65", palette.good, palette.muted)
             }
             Spacer(Modifier.height(14.dp))
             Text(
                 "When too few signals are available the score is withheld "
                     + "rather than guessed — a number driven by one noisy "
                     + "input is worse than no number.",
-                color = NeonMV.Muted, fontSize = 12.sp,
+                color = palette.muted, fontSize = 12.sp,
             )
         }
     }
 }
 
 @Composable
-private fun BandKey(label: String, range: String, tone: Color) {
+private fun BandKey(label: String, range: String, tone: Color, muted: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.width(8.dp).height(8.dp)
             .background(tone, RoundedCornerShape(4.dp)))
         Spacer(Modifier.width(5.dp))
-        Text("$label $range", color = NeonMV.Muted, fontSize = 11.sp)
+        Text("$label $range", color = muted, fontSize = 11.sp)
     }
 }
 
 /** Semantic band colour — independent of the shell accent. */
-private fun bandColor(band: String?): Color = when (band) {
-    "high" -> NeonMV.Lime
-    "moderate" -> NeonMV.Amber
-    "low" -> NeonMV.Bad
-    else -> NeonMV.Muted
+private fun bandColor(band: String?, p: HeroPalette): Color = when (band) {
+    "high" -> p.good
+    "moderate" -> p.warn
+    "low" -> p.bad
+    else -> p.muted
 }
 
 @Composable
-private fun DriverRow(d: ReadinessDriver, onClick: (() -> Unit)?) {
+private fun DriverRow(d: ReadinessDriver, onClick: (() -> Unit)?, p: HeroPalette) {
     // A driver is "good" when it pushed the score UP — i.e. its sub-score is
     // above the 50 midpoint. Using the raw z would invert for resting HR,
     // where lower is better; sub_score already accounts for direction.
     val good = (d.subScore ?: 50.0) >= 50.0
-    val tone = if (good) NeonMV.Lime else NeonMV.Bad
+    val tone = if (good) p.good else p.bad
     Row(
         Modifier
             .fillMaxWidth()
@@ -231,10 +273,10 @@ private fun DriverRow(d: ReadinessDriver, onClick: (() -> Unit)?) {
         Text(if (good) "▲" else "▼", color = tone, fontSize = 10.sp,
             fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(8.dp))
-        Text(d.label, color = NeonMV.Muted, fontSize = 12.sp,
+        Text(d.label, color = p.muted, fontSize = 12.sp,
             modifier = Modifier.weight(1f))
         d.value?.let {
-            NeonNumber(fmtDriver(d), size = 13, color = NeonMV.Ink)
+            HeroNumber(fmtDriver(d), p, size = 13, color = p.ink)
         }
         d.z?.let {
             Spacer(Modifier.width(8.dp))
@@ -295,8 +337,10 @@ private fun ReadinessSparkline(
         }
         drawPath(path, accent, style = Stroke(width = 2.5f))
         // Emphasise the endpoint — today is the value the header states.
+        // `?.let` already covers today being a gap: a null last element
+        // yields null, so no marker is drawn for a day with no score.
         points.lastOrNull()?.let { last ->
-            if (last != null) drawCircle(accent, radius = 3.5f, center = at(last, points.size - 1))
+            drawCircle(accent, radius = 3.5f, center = at(last, points.size - 1))
         }
     }
 }

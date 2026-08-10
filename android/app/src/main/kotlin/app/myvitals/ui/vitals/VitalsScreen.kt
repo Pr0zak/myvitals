@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
@@ -155,6 +156,9 @@ fun VitalsScreen(
     var lastWorkout by remember {
         mutableStateOf<app.myvitals.sync.StrengthWorkoutSummary?>(null)
     }
+    var readiness by remember {
+        mutableStateOf<app.myvitals.sync.ReadinessDetail?>(null)
+    }
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -199,6 +203,11 @@ fun VitalsScreen(
                 val rowsD = async(Dispatchers.IO) { api.summaryRange(since = since30) }
                 val todayD = async(Dispatchers.IO) {
                     runCatching { api.summaryToday() }.getOrNull()
+                }
+                // Readiness breakdown drives the hero. Non-fatal: an older
+                // backend without /summary/readiness just renders no hero.
+                val readyD = async(Dispatchers.IO) {
+                    runCatching { api.readinessDetail() }.getOrNull()
                 }
                 val hrD = async(Dispatchers.IO) {
                     runCatching {
@@ -285,6 +294,7 @@ fun VitalsScreen(
 
                 rows = rowsD.await()
                 today = todayD.await()
+                readiness = readyD.await()
                 hr = hrD.await()
                 weight = weightD.await()
                 bp = bpD.await()
@@ -348,6 +358,17 @@ fun VitalsScreen(
         sortedByPref.filter { it.name !in hidden }
     }
     var manageOpen by remember { mutableStateOf(false) }
+    var formulaOpen by remember { mutableStateOf(false) }
+
+    readiness?.let { r ->
+        if (formulaOpen) {
+            app.myvitals.ui.neon.ReadinessFormulaSheet(
+                detail = r,
+                onDismiss = { formulaOpen = false },
+                palette = app.myvitals.ui.neon.HeroPalette.Classic,
+            )
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(MV.Bg).padding(horizontal = 12.dp)) {
         Row(
@@ -455,6 +476,28 @@ fun VitalsScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 6.dp, horizontal = 0.dp),
         ) {
+            // Readiness leads the screen: it's the one number that summarises
+            // the rest of the grid. Spans both columns — squeezing a score,
+            // a band, a sparkline and four driver rows into a half-width
+            // tile would make all four unreadable.
+            if (readiness != null) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    app.myvitals.ui.neon.ReadinessHero(
+                        detail = readiness,
+                        palette = app.myvitals.ui.neon.HeroPalette.Classic,
+                        onExplain = { formulaOpen = true },
+                        onDriverClick = { d ->
+                            onOpenVitalDetail(
+                                when (d.key) {
+                                    "hrv" -> Vital.HRV
+                                    "rhr" -> Vital.HR
+                                    else -> Vital.SLEEP
+                                },
+                            )
+                        },
+                    )
+                }
+            }
             items(tiles, key = { it.name }) { v ->
                 when (v) {
                     // SKIN_TEMP / RECOVERY are drill-down destinations only —

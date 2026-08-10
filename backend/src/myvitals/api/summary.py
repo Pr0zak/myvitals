@@ -161,16 +161,21 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     # necessarily today's. Skin-temp delta gets the same carry-forward below
     # (today's night often has no computed delta).
     latest_body = (await db.execute(
-        select(models.BodyMetric.weight_kg, models.BodyMetric.body_fat_pct)
+        select(models.BodyMetric.weight_kg, models.BodyMetric.body_fat_pct,
+               models.BodyMetric.time)
         .where(models.BodyMetric.weight_kg.is_not(None))
         .order_by(models.BodyMetric.time.desc())
         .limit(1)
     )).first()
     latest_bp = (await db.execute(
-        select(models.BloodPressure.systolic, models.BloodPressure.diastolic)
+        select(models.BloodPressure.systolic, models.BloodPressure.diastolic,
+               models.BloodPressure.time)
         .order_by(models.BloodPressure.time.desc())
         .limit(1)
     )).first()
+    latest_body_on = latest_body[2].date().isoformat() if latest_body else None
+    latest_bp_on = latest_bp[2].date().isoformat() if latest_bp else None
+
     # Skin-temp delta is computed per night but not every night (needs a
     # baseline + an overnight reading), so today's row is often null even
     # though a recent night has one. Carry forward the latest non-null delta.
@@ -181,19 +186,31 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
         .limit(1)
     )).scalar()
 
+    # Which fields came from an earlier day rather than today's row. The
+    # carry-forward is intentional — a missing overnight sync shouldn't blank
+    # the whole screen — but it has to be visible, or the clients state
+    # yesterday's HRV, sleep and readiness as today's fact.
+    carried_from: dict[str, str] = {}
+
     def pick(field: str):
         v = getattr(saved, field, None) if saved else None
         if v is None and fallback is not None:
             v = getattr(fallback, field, None)
+            if v is not None:
+                carried_from[field] = fallback.date.isoformat()
         if v is None and latest_body is not None:
             if field == "weight_kg":
+                carried_from[field] = latest_body_on
                 return latest_body[0]
             if field == "body_fat_pct":
+                carried_from[field] = latest_body_on
                 return latest_body[1]
         if v is None and latest_bp is not None:
             if field == "bp_systolic_avg":
+                carried_from[field] = latest_bp_on
                 return latest_bp[0]
             if field == "bp_diastolic_avg":
+                carried_from[field] = latest_bp_on
                 return latest_bp[1]
         if v is None and field == "skin_temp_delta_avg" and latest_skin is not None:
             return latest_skin
@@ -222,6 +239,8 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
             sleep_debt_h=pick("sleep_debt_h"),
             fasting_hours=pick("fasting_hours"),
             last_sync=last_sync,
+            # Last, so every pick() above has already recorded into it.
+            carried_from=carried_from,
         )
 
     # No saved summaries at all — return live counts only.

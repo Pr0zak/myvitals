@@ -61,6 +61,13 @@ class TodaySummary(BaseModel):
     sleep_debt_h: float | None = None
     fasting_hours: float | None = None
     last_sync: datetime | None = None
+    # Fields whose value did NOT come from today's row but was carried
+    # forward from an earlier day, mapped to the date it came from.
+    # Overnight metrics go missing whenever the watch hasn't synced last
+    # night yet; without this the clients render a day-old HRV, sleep and
+    # readiness under a "today" heading with nothing to say otherwise.
+    # Additive and optional — existing consumers are unaffected.
+    carried_from: dict[str, str] = {}
 
 
 class AnnotationOut(BaseModel):

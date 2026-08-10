@@ -328,6 +328,10 @@ interface BackendApi {
     @GET("summary/readiness")
     suspend fun readinessDetail(): ReadinessDetail
 
+    /** Per-tile value, 14-day series and verdict. Judgement is server-side. */
+    @GET("summary/tiles")
+    suspend fun summaryTiles(): VitalTilesResponse
+
     /** Pure-statistics trend badges for the Today header. No LLM, no cost. */
     @GET("ai/badges")
     suspend fun aiBadges(): List<TrendBadge>

@@ -84,8 +84,12 @@ def suppress_stale_verdict(tile: dict[str, Any]) -> dict[str, Any]:
     the present and a months-old reading cannot support one.
     """
     sd = tile.get("stale_days")
-    if sd is not None and sd > STALE_VERDICT_DAYS and tile.get("status"):
+    if sd is not None and sd > STALE_VERDICT_DAYS:
+        # Drop the verdict if there was one...
         tile["status"] = None
+        # ...and disclose the age either way. A `neutral` tile never had a
+        # status to strip, so gating the message on one left weight showing
+        # a 90-day-old weigh-in with nothing to say it wasn't today's.
         tile["status_reason"] = f"last reading {sd} days ago"
     return tile
 

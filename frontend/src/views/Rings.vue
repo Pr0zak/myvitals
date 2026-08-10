@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import TrendBadges from "@/components/TrendBadges.vue";
 import ReadinessHero from "@/components/ReadinessHero.vue";
+import VitalTiles from "@/components/VitalTiles.vue";
 /**
  * Rings home — first screen of the "Vitality Neon" redesign (Direction D).
  * Glanceable goal rings + streak pills wired to the real backend. Tapping a
@@ -123,6 +124,8 @@ function fmt(n: number | null, d = 0): string {
     </div>
 
     <!-- Streaks & goals -->
+    <VitalTiles />
+
     <div class="list">
       <button class="pill" @click="go('/fasting')">
         <span class="pi cyan">⏱</span><span class="pn">Fasting</span>

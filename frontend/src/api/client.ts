@@ -343,6 +343,13 @@ export const api = {
     return data;
   },
 
+  /** Per-tile value, 14-day series and verdict. The judgement of what
+   *  counts as good is the server's — see analytics/tiles.py. */
+  async summaryTiles(): Promise<import("./types").VitalTilesResponse> {
+    const { data } = await http.get("/summary/tiles");
+    return data;
+  },
+
   async aiBadges(): Promise<Array<{
     key: string; label: string; value: string; subtitle: string;
     tone: "good" | "warn" | "bad" | "neutral";

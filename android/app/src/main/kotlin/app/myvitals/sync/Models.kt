@@ -805,6 +805,61 @@ data class ReadinessDetail(
     val weights: Map<String, Double> = emptyMap(),
 )
 
+// ── Vitals tiles (/summary/tiles) ────────────────────────────────
+//
+// The verdict is the SERVER's — see analytics/tiles.py. Nothing here
+// decides what counts as good, so the phone grid and the web grid can't
+// disagree about the same reading.
+
+@JsonClass(generateAdapter = true)
+data class VitalTilePoint(
+    val date: String,
+    val value: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class VitalTile(
+    val key: String,
+    val label: String,
+    val unit: String = "",
+    /** Number for most metrics, "139/92" for blood pressure — hence Any?. */
+    val value: Any? = null,
+    /** baseline | target | neutral */
+    val kind: String = "neutral",
+    @Json(name = "higher_is_better") val higherIsBetter: Boolean? = null,
+    val baseline: Double? = null,
+    val target: Double? = null,
+    val delta: Double? = null,
+    val z: Double? = null,
+    /** good | typical | watch, or null when the server withheld a verdict. */
+    val status: String? = null,
+    @Json(name = "status_reason") val statusReason: String? = null,
+    /** Set for intermittently-measured metrics: the reading's own date... */
+    @Json(name = "as_of") val asOf: String? = null,
+    /** ...and its age, so a stale value is never shown as if it were today's. */
+    @Json(name = "stale_days") val staleDays: Int? = null,
+    val series: List<VitalTilePoint> = emptyList(),
+) {
+    /** Moshi parses JSON numbers as Double, so an int-valued metric would
+     *  otherwise render as "5.0 steps". */
+    fun displayValue(): String {
+        val v = value ?: return "—"
+        if (v is String) return v
+        val d = (v as? Number)?.toDouble() ?: return v.toString()
+        return when {
+            key == "steps" -> "%,d".format(d.toLong())
+            d == d.toLong().toDouble() -> d.toLong().toString()
+            else -> "%.1f".format(d)
+        }
+    }
+}
+
+@JsonClass(generateAdapter = true)
+data class VitalTilesResponse(
+    val date: String,
+    val tiles: List<VitalTile> = emptyList(),
+)
+
 // ── Trend badges (/ai/badges — pure statistics, no LLM) ───────────
 
 @JsonClass(generateAdapter = true)

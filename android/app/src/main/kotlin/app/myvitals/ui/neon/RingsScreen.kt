@@ -71,6 +71,9 @@ fun RingsScreen(
     var fasting by remember { mutableStateOf<FastingSession?>(null) }
     var badges by remember { mutableStateOf<List<app.myvitals.sync.TrendBadge>>(emptyList()) }
     var readiness by remember { mutableStateOf<app.myvitals.sync.ReadinessDetail?>(null) }
+    var vitalTiles by remember {
+        mutableStateOf<List<app.myvitals.sync.VitalTile>>(emptyList())
+    }
     var showFormula by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     // Previously this screen could not fail, refresh, or report staleness: a
@@ -101,6 +104,11 @@ fun RingsScreen(
                 val readyD = async(Dispatchers.IO) {
                     runCatching { api.readinessDetail() }.getOrNull()
                 }
+                // Threshold semantics for the tile grid. Non-fatal: an older
+                // backend without /summary/tiles just renders no grid.
+                val tilesD = async(Dispatchers.IO) {
+                    runCatching { api.summaryTiles().tiles }.getOrDefault(emptyList())
+                }
                 val badgesD = async(Dispatchers.IO) {
                     runCatching { api.aiBadges() }.getOrDefault(emptyList())
                 }
@@ -124,6 +132,7 @@ fun RingsScreen(
                     fasting = fastingD.await()
                     badges = badgesD.await()
                     readyD.await()?.let { readiness = it }
+                    tilesD.await().takeIf { it.isNotEmpty() }?.let { vitalTiles = it }
                 }
             }
         } catch (e: Exception) {
@@ -170,6 +179,44 @@ fun RingsScreen(
             if (showFormula) ReadinessFormulaSheet(r) { showFormula = false }
         }
         FocusStrip(badges)
+
+        // Vitals grid with verdicts. Two per row: a value, a status word, a
+        // 14-day spark and the reason all need to stay legible.
+        if (vitalTiles.isNotEmpty()) {
+            val pal = app.myvitals.ui.common.TilePalette(
+                card = NeonMV.Card, line = NeonMV.Line, ink = NeonMV.Ink,
+                muted = NeonMV.Muted, good = NeonMV.Lime,
+                warn = NeonMV.Amber, bad = NeonMV.Bad,
+            )
+            vitalTiles.chunked(2).forEach { pair ->
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    pair.forEach { t ->
+                        Box(Modifier.weight(1f)) {
+                            app.myvitals.ui.common.VitalTileCard(
+                                tile = t, palette = pal,
+                                onClick = {
+                                    when (t.key) {
+                                        "hrv" -> onOpen("vitals/HRV")
+                                        "resting_hr" -> onOpen("vitals/HR")
+                                        "sleep_duration" -> onOpen("vitals/SLEEP")
+                                        "steps" -> onOpen("vitals/STEPS")
+                                        "weight" -> onOpen("vitals/WEIGHT")
+                                        "blood_pressure" -> onOpen("vitals/BP")
+                                        else -> Unit
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    // Odd tile count: keep the last row's card half-width
+                    // instead of letting it stretch across the whole row.
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
         error?.let {
             NeonErrorBanner(it) {
                 scope.launch { refreshing = true; try { load() } finally { refreshing = false } }

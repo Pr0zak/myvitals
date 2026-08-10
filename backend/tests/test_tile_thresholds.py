@@ -107,3 +107,21 @@ def test_a_stale_reading_is_reported_but_not_judged():
     edge = add(key="bp", value="139/92", status=WATCH,
                status_reason="stage 1 range", stale_days=STALE_VERDICT_DAYS)
     assert edge["status"] == WATCH, "the boundary day is still judgeable"
+
+
+def test_a_stale_neutral_tile_still_discloses_its_age():
+    """Weight has no verdict to strip, but still must not look current.
+
+    Gating the disclosure on there being a status left the weight tile
+    rendering a 90-day-old weigh-in as a bare number with nothing to
+    indicate it wasn't measured today.
+    """
+    from myvitals.analytics.tiles import suppress_stale_verdict
+
+    t = suppress_stale_verdict({
+        "key": "weight", "value": 252.0, "status": None,
+        "status_reason": None, "stale_days": 90,
+    })
+    assert t["status"] is None
+    assert "90 days ago" in t["status_reason"]
+    assert t["value"] == 252.0

@@ -333,3 +333,27 @@ export interface StrengthWorkoutDetail {
   deload_reason?: string | null;  // e.g. "low recovery 52"
   exercises: StrengthWorkoutExercise[];
 }
+
+/** One tile from GET /summary/tiles. The verdict (`status`) is decided
+ *  server-side — see analytics/tiles.py — so both clients agree. */
+export interface VitalTilePoint { date: string; value: number | null }
+export interface VitalTile {
+  key: string;
+  label: string;
+  unit: string;
+  value: number | string | null;
+  kind: "baseline" | "target" | "neutral";
+  higher_is_better: boolean | null;
+  baseline: number | null;
+  target?: number | null;
+  delta: number | null;
+  z?: number | null;
+  status: "good" | "typical" | "watch" | null;
+  status_reason: string | null;
+  /** Set for intermittently-measured metrics (weight, BP): the date of the
+   *  reading being shown, and how many days old it is. */
+  as_of: string | null;
+  stale_days: number | null;
+  series: VitalTilePoint[];
+}
+export interface VitalTilesResponse { date: string; tiles: VitalTile[] }

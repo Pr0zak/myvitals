@@ -180,43 +180,8 @@ fun RingsScreen(
         }
         FocusStrip(badges)
 
-        // Vitals grid with verdicts. Two per row: a value, a status word, a
-        // 14-day spark and the reason all need to stay legible.
-        if (vitalTiles.isNotEmpty()) {
-            val pal = app.myvitals.ui.common.TilePalette(
-                card = NeonMV.Card, line = NeonMV.Line, ink = NeonMV.Ink,
-                muted = NeonMV.Muted, good = NeonMV.Lime,
-                warn = NeonMV.Amber, bad = NeonMV.Bad,
-            )
-            vitalTiles.chunked(2).forEach { pair ->
-                Row(
-                    Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    pair.forEach { t ->
-                        Box(Modifier.weight(1f)) {
-                            app.myvitals.ui.common.VitalTileCard(
-                                tile = t, palette = pal,
-                                onClick = {
-                                    when (t.key) {
-                                        "hrv" -> onOpen("vitals/HRV")
-                                        "resting_hr" -> onOpen("vitals/HR")
-                                        "sleep_duration" -> onOpen("vitals/SLEEP")
-                                        "steps" -> onOpen("vitals/STEPS")
-                                        "weight" -> onOpen("vitals/WEIGHT")
-                                        "blood_pressure" -> onOpen("vitals/BP")
-                                        else -> Unit
-                                    }
-                                },
-                            )
-                        }
-                    }
-                    // Odd tile count: keep the last row's card half-width
-                    // instead of letting it stretch across the whole row.
-                    if (pair.size == 1) Spacer(Modifier.weight(1f))
-                }
-            }
-        }
+        // Key metrics — one card vocabulary, mirroring KeyMetrics.vue.
+        app.myvitals.ui.common.KeyMetrics(vitalTiles, onOpen)
         error?.let {
             NeonErrorBanner(it) {
                 scope.launch { refreshing = true; try { load() } finally { refreshing = false } }

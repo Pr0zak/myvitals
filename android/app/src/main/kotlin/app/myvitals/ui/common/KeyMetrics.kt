@@ -1,0 +1,132 @@
+package app.myvitals.ui.common
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.myvitals.sync.VitalTile
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
+/**
+ * "Key metrics" — a titled section of identical MetricCards, 2-up.
+ *
+ * Phone twin of `KeyMetrics.vue`, down to the chip wording and qualifier
+ * text, because the point of the redesign is that one card vocabulary is
+ * repeated everywhere rather than each surface inventing its own.
+ */
+@Composable
+fun KeyMetrics(
+    tiles: List<VitalTile>,
+    onOpen: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (tiles.isEmpty()) return
+    Column(modifier.fillMaxWidth()) {
+        Text(
+            "Key metrics", color = Color(0xFFE9EDF2),
+            fontSize = 21.sp, fontWeight = FontWeight.Normal,
+        )
+        Spacer(Modifier.height(12.dp))
+        tiles.chunked(2).forEach { pair ->
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                pair.forEach { t ->
+                    Box(Modifier.weight(1f)) {
+                        MetricCard(
+                            name = t.label,
+                            value = displayValue(t),
+                            unit = t.unit,
+                            qualifier = qualifier(t),
+                            series = t.series.map { it.value },
+                            dayLetters = t.series.map { dayLetter(it.date) },
+                            status = t.status,
+                            statusLabel = chipLabel(t),
+                            baseline = t.baseline,
+                            target = if (t.key == "steps") t.target else null,
+                            bars = t.key == "steps",
+                            accent = accentFor(t.key),
+                            onClick = { routeFor(t.key)?.let(onOpen) },
+                        )
+                    }
+                }
+                // Odd count: keep the last card half-width rather than
+                // letting it stretch across the row.
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+private fun accentFor(key: String): Color = when (key) {
+    "steps" -> Color(0xFF5FD3C4)
+    "sleep_duration" -> Color(0xFFB39DDB)
+    "blood_pressure" -> Color(0xFF7FC8F8)
+    "weight" -> Color(0xFFE8B661)
+    else -> Color(0xFF7EE2A8)
+}
+
+private fun routeFor(key: String): String? = when (key) {
+    "hrv" -> "vitals/HRV"
+    "resting_hr" -> "vitals/HR"
+    "steps" -> "vitals/STEPS"
+    "sleep_duration" -> "vitals/SLEEP"
+    "weight" -> "vitals/WEIGHT"
+    "blood_pressure" -> "vitals/BP"
+    "recovery" -> "vitals/RECOVERY"
+    else -> null
+}
+
+/** Sentence-case chip wording, matching the web. "Goal not met" reads
+ *  better than "Out of range" on a goal metric. */
+private fun chipLabel(t: VitalTile): String? = when {
+    t.status == null -> null
+    t.key == "steps" -> if (t.status == "good") "Goal met" else "Goal not met"
+    t.key == "sleep_duration" -> when (t.status) {
+        "good" -> "Goal met"
+        "typical" -> "Near goal"
+        else -> "Goal not met"
+    }
+    t.key == "blood_pressure" -> t.statusReason?.substringBefore(" range")
+    t.status == "watch" -> "Out of range"
+    else -> "In range"
+}
+
+/** The reference puts remaining-to-goal here, which beats repeating the
+ *  percentage the chip already implies. A carried value shows its date. */
+private fun qualifier(t: VitalTile): String {
+    val v = (t.value as? Number)?.toDouble()
+    if (t.key == "steps" && v != null && (t.target ?: 0.0) > 0) {
+        val left = ((t.target ?: 0.0) - v).toLong()
+        return if (left > 0) "Today • %,d to go".format(left) else "Today • goal met"
+    }
+    val sd = t.staleDays
+    if (sd != null && sd > 0 && t.asOf != null) {
+        return runCatching {
+            LocalDate.parse(t.asOf).format(DateTimeFormatter.ofPattern("MMM d"))
+        }.getOrDefault("Today")
+    }
+    return "Today"
+}
+
+private fun displayValue(t: VitalTile): String? =
+    if (t.value == null) null else t.displayValue()
+
+private fun dayLetter(iso: String): String = runCatching {
+    when (LocalDate.parse(iso).dayOfWeek.value) {
+        1 -> "M"; 2 -> "T"; 3 -> "W"; 4 -> "T"; 5 -> "F"; 6 -> "S"; else -> "S"
+    }
+}.getOrDefault("")

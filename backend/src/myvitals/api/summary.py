@@ -232,7 +232,17 @@ async def readiness_detail(
     """
     from ..analytics.advanced import readiness_band, readiness_breakdown
 
-    today = datetime.now(timezone.utc).date()
+    # "Today" must be the user's local day, not the UTC one. On Central
+    # time the UTC day rolls at 7pm CDT, so a UTC date here asked for
+    # tomorrow's daily_summary all evening — the row doesn't exist, the
+    # score came back null, and the hero showed "not enough data" from
+    # 7pm to midnight every single night. Same fix as `/summary/today`.
+    try:
+        from zoneinfo import ZoneInfo
+        local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        local_tz = timezone.utc
+    today = datetime.now(local_tz).date()
     row = await db.get(models.DailySummary, today)
     breakdown = await readiness_breakdown(
         db, today,

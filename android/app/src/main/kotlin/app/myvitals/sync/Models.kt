@@ -773,6 +773,38 @@ data class TrailOsmFetchAllResponse(
     @Json(name = "total_with_pins") val totalWithPins: Int = 0,
 )
 
+// ── Readiness detail (/summary/readiness) ─────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class ReadinessDriver(
+    val key: String,
+    val label: String,
+    val value: Double? = null,
+    val unit: String = "",
+    /** z against the 28-day baseline; null for the sleep branches. */
+    val z: Double? = null,
+    @Json(name = "sub_score") val subScore: Double? = null,
+    val weight: Double = 0.0,
+    val baseline: Double? = null,
+    @Json(name = "higher_is_better") val higherIsBetter: Boolean = true,
+)
+
+@JsonClass(generateAdapter = true)
+data class ReadinessPoint(val date: String, val score: Double? = null)
+
+@JsonClass(generateAdapter = true)
+data class ReadinessDetail(
+    val date: String,
+    val score: Double? = null,
+    /** low | moderate | high; null when there's no score. */
+    val band: String? = null,
+    /** Why there's no score, when there isn't one. */
+    val reason: String? = null,
+    val drivers: List<ReadinessDriver> = emptyList(),
+    val series: List<ReadinessPoint> = emptyList(),
+    val weights: Map<String, Double> = emptyMap(),
+)
+
 // ── Trend badges (/ai/badges — pure statistics, no LLM) ───────────
 
 @JsonClass(generateAdapter = true)

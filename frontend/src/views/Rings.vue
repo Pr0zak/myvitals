@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import TrendBadges from "@/components/TrendBadges.vue";
+import ReadinessHero from "@/components/ReadinessHero.vue";
 /**
  * Rings home — first screen of the "Vitality Neon" redesign (Direction D).
  * Glanceable goal rings + streak pills wired to the real backend. Tapping a
@@ -81,6 +82,7 @@ function fmt(n: number | null, d = 0): string {
       <span class="date">{{ today }}</span>
     </header>
 
+    <ReadinessHero />
     <TrendBadges />
 
     <!-- Goal rings -->

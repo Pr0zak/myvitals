@@ -70,6 +70,8 @@ fun RingsScreen(
     var sober by remember { mutableStateOf<SoberCurrentResponse?>(null) }
     var fasting by remember { mutableStateOf<FastingSession?>(null) }
     var badges by remember { mutableStateOf<List<app.myvitals.sync.TrendBadge>>(emptyList()) }
+    var readiness by remember { mutableStateOf<app.myvitals.sync.ReadinessDetail?>(null) }
+    var showFormula by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     // Previously this screen could not fail, refresh, or report staleness: a
     // bare runCatching with .getOrNull() on every inner call meant a dead
@@ -96,6 +98,9 @@ fun RingsScreen(
                 val soberD = async(Dispatchers.IO) {
                     runCatching { api.soberCurrent() }.getOrNull()
                 }
+                val readyD = async(Dispatchers.IO) {
+                    runCatching { api.readinessDetail() }.getOrNull()
+                }
                 val badgesD = async(Dispatchers.IO) {
                     runCatching { api.aiBadges() }.getOrDefault(emptyList())
                 }
@@ -118,6 +123,7 @@ fun RingsScreen(
                     sober = soberD.await()
                     fasting = fastingD.await()
                     badges = badgesD.await()
+                    readyD.await()?.let { readiness = it }
                 }
             }
         } catch (e: Exception) {
@@ -148,6 +154,21 @@ fun RingsScreen(
             scope.launch { refreshing = true; try { load() } finally { refreshing = false } }
         },
     ) {
+        // Hero: the number, its band, what moved it. Everything server-derived.
+        ReadinessHero(
+            detail = readiness,
+            onDriverClick = { d ->
+                when (d.key) {
+                    "hrv" -> onOpen("vitals/HRV")
+                    "rhr" -> onOpen("vitals/HR")
+                    else -> onOpen("vitals/SLEEP")
+                }
+            },
+            onExplain = { showFormula = true },
+        )
+        readiness?.let { r ->
+            if (showFormula) ReadinessFormulaSheet(r) { showFormula = false }
+        }
         FocusStrip(badges)
         error?.let {
             NeonErrorBanner(it) {

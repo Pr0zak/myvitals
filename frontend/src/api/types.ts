@@ -111,6 +111,32 @@ export interface StravaAppConfigStatus {
   callback_url: string | null;
 }
 
+export interface ReadinessDriver {
+  key: string;
+  label: string;
+  value: number | null;
+  unit: string;
+  /** z against the 28-day baseline; null for the sleep branches. */
+  z: number | null;
+  sub_score: number | null;
+  weight: number;
+  baseline: number | null;
+  higher_is_better: boolean;
+}
+
+export interface ReadinessDetail {
+  date: string;
+  score: number | null;
+  /** low | moderate | high; null when there's no score. */
+  band: "low" | "moderate" | "high" | null;
+  /** Why there's no score, when there isn't one. */
+  reason: string | null;
+  drivers: ReadinessDriver[];
+  series: Array<{ date: string; score: number | null }>;
+  weights: Record<string, number>;
+  bands: Record<string, string>;
+}
+
 /** One GPS track from `/activities/map` — simplified, map-rendering only. */
 export interface MapTrack {
   source: string;

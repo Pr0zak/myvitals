@@ -337,6 +337,12 @@ export const api = {
     return data;
   },
 
+  /** Readiness + the drivers that produced it, banded server-side. */
+  async readinessDetail(): Promise<import("./types").ReadinessDetail> {
+    const { data } = await http.get("/summary/readiness");
+    return data;
+  },
+
   async aiBadges(): Promise<Array<{
     key: string; label: string; value: string; subtitle: string;
     tone: "good" | "warn" | "bad" | "neutral";

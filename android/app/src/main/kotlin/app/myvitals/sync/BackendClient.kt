@@ -324,6 +324,10 @@ interface BackendApi {
     /** Every GPS-tracked activity as simplified polylines, for the map
      *  screen. Server-side RDP keeps this ~400 KB instead of the 3.4 MB
      *  the full-fidelity tracks would cost. */
+    /** Readiness + the drivers that produced it, banded server-side. */
+    @GET("summary/readiness")
+    suspend fun readinessDetail(): ReadinessDetail
+
     /** Pure-statistics trend badges for the Today header. No LLM, no cost. */
     @GET("ai/badges")
     suspend fun aiBadges(): List<TrendBadge>

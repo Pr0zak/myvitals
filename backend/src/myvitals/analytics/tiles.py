@@ -56,6 +56,13 @@ GOOD, TYPICAL, WATCH = "good", "typical", "watch"
 # rare enough that the grid isn't a wall of colour.
 Z_NOTABLE = 1.0
 
+# Past this, a carried-forward reading is reported but NOT judged. A
+# verdict is a claim about how you are *now*; "your blood pressure is in
+# the stage 1 range" off a two-month-old cuff reading is a claim the data
+# can't support. The value and its date still show — only the verdict is
+# withheld.
+STALE_VERDICT_DAYS = 14
+
 
 def _band_from_z(z: float, higher_is_better: bool) -> tuple[str, str]:
     """Status + a plain-language reason for a personal-baseline metric."""
@@ -67,6 +74,20 @@ def _band_from_z(z: float, higher_is_better: bool) -> tuple[str, str]:
     if favourable <= -Z_NOTABLE:
         return WATCH, f"{sigma} {side} your 28-day baseline"
     return TYPICAL, "in your usual range"
+
+
+def suppress_stale_verdict(tile: dict[str, Any]) -> dict[str, Any]:
+    """Strip the verdict from a tile whose reading is too old to judge.
+
+    Mutates and returns `tile`. The value and `as_of` survive — only the
+    status and its reason are replaced, because a status is a claim about
+    the present and a months-old reading cannot support one.
+    """
+    sd = tile.get("stale_days")
+    if sd is not None and sd > STALE_VERDICT_DAYS and tile.get("status"):
+        tile["status"] = None
+        tile["status_reason"] = f"last reading {sd} days ago"
+    return tile
 
 
 def _pct_of_target(value: float, target: float) -> float:
@@ -174,7 +195,7 @@ async def tile_stats(
         # tile so clients can read one shape instead of branching per key.
         kw.setdefault("as_of", None)
         kw.setdefault("stale_days", None)
-        tiles.append(kw)
+        tiles.append(suppress_stale_verdict(kw))
 
     # ── personal-baseline metrics ────────────────────────────────────
     hrv = row.hrv_avg if row else None

@@ -74,3 +74,36 @@ def test_pct_of_target_is_safe_when_no_target_is_set():
 def test_pct_of_target_is_a_percentage():
     assert _pct_of_target(5000, 10000) == pytest.approx(50.0)
     assert _pct_of_target(12000, 10000) == pytest.approx(120.0)
+
+
+# ── staleness ─────────────────────────────────────────────────────────
+
+def test_a_stale_reading_is_reported_but_not_judged():
+    """Verdicts are claims about NOW.
+
+    Blood pressure and weight carry forward the last reading, which can be
+    months old. Rendering "stage 1 range" off a 62-day-old cuff reading
+    states something current about the user that the data doesn't support.
+    The value and its date survive; only the verdict is withheld.
+    """
+    from myvitals.analytics.tiles import (
+        STALE_VERDICT_DAYS,
+        suppress_stale_verdict,
+    )
+
+    def add(**kw):
+        return suppress_stale_verdict(kw)
+
+    fresh = add(key="bp", value="139/92", status=WATCH,
+                status_reason="stage 1 range", stale_days=2)
+    assert fresh["status"] == WATCH
+
+    stale = add(key="bp", value="139/92", status=WATCH,
+                status_reason="stage 1 range", stale_days=62)
+    assert stale["status"] is None
+    assert "62 days ago" in stale["status_reason"]
+    assert stale["value"] == "139/92", "the reading itself must survive"
+
+    edge = add(key="bp", value="139/92", status=WATCH,
+               status_reason="stage 1 range", stale_days=STALE_VERDICT_DAYS)
+    assert edge["status"] == WATCH, "the boundary day is still judgeable"

@@ -178,6 +178,8 @@ interface FeedRow {
    *  opened /activities — the double-tap defect fixed in v0.7.360, which
    *  the retired TrainRefined.vue carried and this screen never had. */
   href: string | null;
+  /** ISO timestamp used only to interleave activities with workouts. */
+  sortAt?: string;
 }
 
 function relDay(iso: string | null | undefined): string {
@@ -247,7 +249,33 @@ const RECENT_LIMIT = 12;
  *  cap stays only as a backstop for an unusually heavy week. */
 const RECENT_DAYS = 7;
 
-const recent = computed<FeedRow[]>(() => {
+/** Completed STRENGTH sessions belong in Recent too. The page already loads
+ *  them — but only fed them to the activity calendar, so a workout you just
+ *  finished never appeared in the list right below it. They are a separate
+ *  entity from `activities` (cardio / Strava / Health Connect), so the feed
+ *  is a merge sorted by time, not two lists concatenated. */
+const recentWorkouts = computed<FeedRow[]>(() => {
+  const cutoff = Date.now() - RECENT_DAYS * 86_400_000;
+  return workouts.value
+    .filter((w) => {
+      if (w.status !== "completed") return false;
+      const t = Date.parse(`${w.date}T12:00:00`);
+      return Number.isFinite(t) && t >= cutoff;
+    })
+    .map((w): FeedRow => ({
+      key: `w:${w.date}`,
+      name: `${titleCase(w.split_focus ?? "Strength")} workout`,
+      sub: relDay(`${w.date}T12:00:00`),
+      icon: "🏋",
+      tone: "mag",
+      value: "",
+      unit: "",
+      href: `/workout/day/${w.date}`,
+      sortAt: `${w.date}T12:00:00`,
+    }));
+});
+
+const recentActivities = computed<FeedRow[]>(() => {
   const cutoff = Date.now() - RECENT_DAYS * 86_400_000;
   return [...activities.value]
     .filter((a) => {
@@ -294,9 +322,18 @@ const recent = computed<FeedRow[]>(() => {
       href: a?.source && a?.source_id
         ? `/activity/${a.source}/${a.source_id}`
         : null,
+      sortAt: a?.start_at ?? "",
     };
     });
 });
+
+/** One list, newest first. Sorting the two separately would put every
+ *  workout above every ride regardless of when they happened. */
+const recent = computed<FeedRow[]>(() =>
+  [...recentActivities.value, ...recentWorkouts.value]
+    .sort((a, b) => (b.sortAt ?? "").localeCompare(a.sortAt ?? ""))
+    .slice(0, RECENT_LIMIT),
+);
 </script>
 
 <template>

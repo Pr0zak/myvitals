@@ -77,6 +77,27 @@ import java.time.LocalDate
  *  calendar and YTD stats, so this window has to be applied explicitly. */
 private const val RECENT_DAYS = 7L
 
+/** One row of the Recent feed: either a logged activity or a completed
+ *  strength session. They come from different endpoints and have to be
+ *  interleaved by time, not concatenated. */
+private data class FeedEntry(
+    val at: java.time.Instant,
+    val activity: app.myvitals.sync.ActivityRow?,
+    val workout: app.myvitals.sync.StrengthWorkoutSummary?,
+)
+
+/** "Today" / "Yesterday" / "3d ago" for a feed row. */
+private fun relDay(at: java.time.Instant): String {
+    val d = at.atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+    val today = java.time.LocalDate.now()
+    val days = java.time.temporal.ChronoUnit.DAYS.between(d, today)
+    return when {
+        days <= 0L -> "Today"
+        days == 1L -> "Yesterday"
+        else -> "${days}d ago"
+    }
+}
+
 @Composable
 fun TrainHubScreen(
     settings: SettingsRepository,
@@ -204,6 +225,47 @@ fun TrainHubScreen(
             .take(25)
     }
 
+    // Completed STRENGTH sessions belong in "Recent" too. The screen already
+    // fetches them — but only fed them to the activity calendar, so a
+    // workout you just finished never appeared in the list right below it.
+    // They are a separate entity from `activities` (which is cardio /
+    // Strava / Health Connect), so the feed is a merge, not one query.
+    val recentWorkouts = remember(yearWorkouts, filter) {
+        if (filter != null) emptyList()   // the chips filter activity types
+        else {
+            val cutoffDay = java.time.LocalDate.now().minusDays(RECENT_DAYS)
+            yearWorkouts.filter { w ->
+                w.status == "completed" &&
+                    runCatching { java.time.LocalDate.parse(w.date) }
+                        .getOrNull()?.isAfter(cutoffDay) == true
+            }
+        }
+    }
+
+    // One list, newest first. Sorting the two separately would put every
+    // workout above every ride regardless of when they happened.
+    val feed = remember(shown, recentWorkouts) {
+        val items = shown.map { a ->
+            FeedEntry(
+                at = runCatching { java.time.Instant.parse(a.startAt) }
+                    .getOrNull() ?: java.time.Instant.EPOCH,
+                activity = a, workout = null,
+            )
+        } + recentWorkouts.map { w ->
+            FeedEntry(
+                at = runCatching { java.time.Instant.parse(w.completedAt ?: "") }
+                    .getOrNull()
+                    ?: runCatching {
+                        java.time.LocalDate.parse(w.date)
+                            .atTime(12, 0).atZone(java.time.ZoneId.systemDefault())
+                            .toInstant()
+                    }.getOrNull() ?: java.time.Instant.EPOCH,
+                activity = null, workout = w,
+            )
+        }
+        items.sortedByDescending { it.at }.take(25)
+    }
+
     NeonScreen(
         title = "Train",
         contentPadding = contentPadding,
@@ -302,7 +364,7 @@ fun TrainHubScreen(
                 value = null,
                 onClick = { onOpen("activities") },
             )
-        } else if (shown.isEmpty()) {
+        } else if (feed.isEmpty()) {
             // Two different empty states. `activities` holds the full fetched
             // YEAR, so the branch above almost never fires — falling through
             // to the filter message meant a quiet week read "No matching
@@ -318,7 +380,20 @@ fun TrainHubScreen(
                 onClick = { onOpen("activities") },
             )
         } else {
-            shown.forEach { a ->
+            feed.forEach { entry ->
+                val w = entry.workout
+                if (w != null) {
+                    ActivityPill(
+                        icon = Icons.Outlined.FitnessCenter,
+                        tone = NeonMV.Magenta,
+                        title = titleCase(w.splitFocus) + " workout",
+                        sub = relDay(entry.at),
+                        value = null,
+                        onClick = { onOpen("workout/day/${w.date}") },
+                    )
+                    return@forEach
+                }
+                val a = entry.activity ?: return@forEach
                 val cls = classify(a.type)
                 ActivityPill(
                     icon = cls.icon,

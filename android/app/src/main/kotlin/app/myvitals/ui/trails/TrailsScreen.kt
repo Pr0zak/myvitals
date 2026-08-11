@@ -38,6 +38,8 @@ import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.UnfoldLess
+import androidx.compose.material.icons.outlined.UnfoldMore
 import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.MoreVert
@@ -104,6 +106,8 @@ fun TrailsScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val neon = settings.neonShellEnabled
+    // Density is a per-user preference, persisted so it survives a relaunch.
+    var dense by remember { mutableStateOf(settings.trailsDense) }
     val bg = if (neon) NeonMV.Bg else MV.Bg
     val card = if (neon) NeonMV.Card else MV.SurfaceContainer
     val cardLow = if (neon) NeonMV.Bg else MV.SurfaceContainerLow
@@ -414,6 +418,15 @@ fun TrailsScreen(
                     // Map + Refresh stay visible; RainoutLine + the heavier link /
                     // OSM actions live in the overflow menu so the cluster stays a
                     // clean three-button row.
+                    NeonHeaderButton(
+                        if (dense) Icons.Outlined.UnfoldMore
+                        else Icons.Outlined.UnfoldLess,
+                        if (dense) "Switch to expanded rows"
+                        else "Switch to condensed rows",
+                    ) {
+                        dense = !dense
+                        settings.trailsDense = dense
+                    }
                     NeonHeaderButton(Icons.Outlined.Map, "Trail status map") {
                         showOverviewMap = true
                     }
@@ -546,7 +559,7 @@ fun TrailsScreen(
                 if (grouped.open.isNotEmpty()) {
                     item { GroupHeader("Open · ${grouped.open.size}", neon) }
                     items(grouped.open, key = { it.id }) { t ->
-                        TrailRow(t, nowMs, neon, osmCacheEpoch = osmCacheEpoch,
+                        TrailRow(t, nowMs, neon, dense = dense, osmCacheEpoch = osmCacheEpoch,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
@@ -557,7 +570,7 @@ fun TrailsScreen(
                 if (grouped.delayed.isNotEmpty()) {
                     item { GroupHeader("Delayed · ${grouped.delayed.size}", neon) }
                     items(grouped.delayed, key = { it.id }) { t ->
-                        TrailRow(t, nowMs, neon, osmCacheEpoch = osmCacheEpoch,
+                        TrailRow(t, nowMs, neon, dense = dense, osmCacheEpoch = osmCacheEpoch,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
@@ -568,7 +581,7 @@ fun TrailsScreen(
                 if (grouped.closed.isNotEmpty()) {
                     item { GroupHeader("Closed · ${grouped.closed.size}", neon) }
                     items(grouped.closed, key = { it.id }) { t ->
-                        TrailRow(t, nowMs, neon, osmCacheEpoch = osmCacheEpoch,
+                        TrailRow(t, nowMs, neon, dense = dense, osmCacheEpoch = osmCacheEpoch,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
@@ -579,7 +592,7 @@ fun TrailsScreen(
                 if (grouped.other.isNotEmpty()) {
                     item { GroupHeader("Other · ${grouped.other.size}", neon) }
                     items(grouped.other, key = { it.id }) { t ->
-                        TrailRow(t, nowMs, neon, osmCacheEpoch = osmCacheEpoch,
+                        TrailRow(t, nowMs, neon, dense = dense, osmCacheEpoch = osmCacheEpoch,
                             expanded = expandedTrail.value == t.id,
                             onTap = { togglePreview(t) },
                             onSubscribeToggle = { scope.launch { toggleSubscribe(t) } },
@@ -892,6 +905,10 @@ private fun TrailRow(
     t: Trail, nowMs: Long,
     neon: Boolean = false,
     expanded: Boolean = false,
+    /** Condensed rows: name + age only, tighter padding, no comment or meta.
+     *  Fits roughly twice as many trails on screen, which matters with 14
+     *  open trails and a status you scan rather than read. */
+    dense: Boolean = false,
     osmCacheEpoch: Int = 0,
     onTap: () -> Unit,
     onSubscribeToggle: () -> Unit,
@@ -924,7 +941,9 @@ private fun TrailRow(
     ) {
         Column {
             Row(
-                modifier = Modifier.padding(12.dp),
+                modifier = Modifier.padding(
+                    horizontal = 12.dp, vertical = if (dense) 7.dp else 12.dp,
+                ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (neon) {
@@ -946,6 +965,26 @@ private fun TrailRow(
                     Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(color))
                 }
                 Spacer(Modifier.width(10.dp))
+                if (dense) {
+                    // One line: name, then age pushed right. Everything the
+                    // expanded row adds (condition note, location, ride
+                    // counts) is detail you open a trail to read.
+                    Text(
+                        t.name, color = ink, fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    val denseAge = remember(nowMs, t.sourceTs, t.fetchedAt) {
+                        fmtAge(t.sourceTs ?: t.fetchedAt, nowMs)
+                    }
+                    if (denseAge.isNotEmpty()) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(denseAge, color = dim, fontSize = 11.sp)
+                    }
+                    return@Row
+                }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(t.name, color = ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     if (!t.comment.isNullOrBlank()) {

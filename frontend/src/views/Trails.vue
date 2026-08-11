@@ -17,6 +17,18 @@ import Card from "@/components/Card.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import TrailMap from "@/components/TrailMap.vue";
 
+/** Condensed rows: name + age only, tighter padding, no comment or meta.
+ *  Fits roughly three times as many trails on screen, which matters with
+ *  two dozen open trails and a status you scan rather than read.
+ *  Persisted — a density preference you have to re-set every visit is
+ *  worse than not offering one. */
+const DENSE_KEY = "myvitals.trails.dense";
+const dense = ref(localStorage.getItem(DENSE_KEY) === "1");
+function toggleDense() {
+  dense.value = !dense.value;
+  localStorage.setItem(DENSE_KEY, dense.value ? "1" : "0");
+}
+
 type Trail = Awaited<ReturnType<typeof api.trails>>["trails"][number];
 
 const trails = ref<Trail[]>([]);
@@ -416,10 +428,14 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
 </script>
 
 <template>
-  <main class="trails">
+  <main class="trails" :class="{ dense }">
     <header>
       <h1>Trails</h1>
       <div class="header-actions">
+        <button class="refresh" @click="toggleDense"
+                :title="dense ? 'Switch to expanded rows' : 'Switch to condensed rows'">
+          {{ dense ? "Expanded" : "Condensed" }}
+        </button>
         <RouterLink to="/trails/map" class="refresh"
                     title="View all trails on a map with status overlay">
           <MapIcon :size="14" /> Map
@@ -487,8 +503,11 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
                 <Pencil :size="14" />
               </button>
             </header>
-            <p v-if="t.comment" class="comment">{{ t.comment }}</p>
-            <p class="meta">
+            <span v-if="dense" class="denseage">
+              {{ fmtAge(t.source_ts || t.fetched_at) }}
+            </span>
+            <p v-if="t.comment && !dense" class="comment">{{ t.comment }}</p>
+            <p v-if="!dense" class="meta">
               <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
               <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
               <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
@@ -541,8 +560,11 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
                 <Pencil :size="14" />
               </button>
             </header>
-            <p v-if="t.comment" class="comment">{{ t.comment }}</p>
-            <p class="meta">
+            <span v-if="dense" class="denseage">
+              {{ fmtAge(t.source_ts || t.fetched_at) }}
+            </span>
+            <p v-if="t.comment && !dense" class="comment">{{ t.comment }}</p>
+            <p v-if="!dense" class="meta">
               <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
               <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
               <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
@@ -585,8 +607,11 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
                 <Pencil :size="14" />
               </button>
             </header>
-            <p v-if="t.comment" class="comment">{{ t.comment }}</p>
-            <p class="meta">
+            <span v-if="dense" class="denseage">
+              {{ fmtAge(t.source_ts || t.fetched_at) }}
+            </span>
+            <p v-if="t.comment && !dense" class="comment">{{ t.comment }}</p>
+            <p v-if="!dense" class="meta">
               <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
               <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
               <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
@@ -625,7 +650,10 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
                 <Star :size="16" />
               </button>
             </header>
-            <p v-if="t.comment" class="comment">{{ t.comment }}</p>
+            <span v-if="dense" class="denseage">
+              {{ fmtAge(t.source_ts || t.fetched_at) }}
+            </span>
+            <p v-if="t.comment && !dense" class="comment">{{ t.comment }}</p>
           </article>
         </div>
       </section>
@@ -698,6 +726,20 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
 </template>
 
 <style scoped>
+/* Condensed rows: the name and its age on one line. Everything the
+   expanded row adds — condition note, location, ride counts — is detail
+   you open a trail to read. */
+.dense .card { padding: 5px 12px; }
+.dense .card header { margin: 0; gap: 8px; }
+.dense .card strong { font-size: .92rem; }
+/* The map and edit-pin actions are detail affordances; in a scanning list
+   they set a height floor that defeats the point. The subscribe star stays
+   — it is the one action you use FROM the list. */
+.dense .card .map-toggle,
+.dense .card .edit-pin { display: none; }
+.dense .card .star { padding: 2px 4px; }
+.denseage { margin-left: auto; font-size: .74rem; color: var(--muted); }
+
 .trails { max-width: 880px; }
 header { display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 1rem; }

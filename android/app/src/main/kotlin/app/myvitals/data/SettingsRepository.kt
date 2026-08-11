@@ -67,6 +67,15 @@ class SettingsRepository(context: Context) {
      * shell that no longer exists.
      */
     @Suppress("unused")
+    /**
+     * Condensed trail rows. Persisted so the choice survives a relaunch —
+     * a density preference the user has to re-set every time is worse than
+     * not offering one.
+     */
+    var trailsDense: Boolean
+        get() = plain.getBoolean(KEY_TRAILS_DENSE, false)
+        set(value) = plain.edit().putBoolean(KEY_TRAILS_DENSE, value).apply()
+
     val neonShellEnabled: Boolean get() = true
 
 
@@ -95,6 +104,7 @@ class SettingsRepository(context: Context) {
     fun isConfigured(): Boolean = backendUrl.isNotBlank() && bearerToken.isNotBlank()
 
     companion object {
+        private const val KEY_TRAILS_DENSE = "trails_dense"
         private const val PLAIN_FILE = "myvitals_prefs"
         private const val SECURE_FILE = "myvitals_secure"
         private const val KEY_BACKEND_URL = "backend_url"

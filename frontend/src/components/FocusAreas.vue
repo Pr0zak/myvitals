@@ -35,22 +35,24 @@ function subtitle(key: string): string {
  *  exactly the kind of inconsistency this redesign is meant to remove. */
 const AREAS: Array<{
   key: string; label: string; d: string; route: string; tone: string;
+// Tones follow the shell domain palette so a tile agrees with the chart it
+// opens onto. Phone twin: the AREAS table in FocusAreas.kt.
 }> = [
-  { key: "heart", label: "Heart", route: "/heart-rate", tone: "#ff6b81",
+  { key: "heart", label: "Heart", route: "/heart-rate", tone: "#28e6ff",
     d: "M12 20s-7-4.6-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.4 12 20 12 20z" },
-  { key: "sleep", label: "Sleep", route: "/sleep", tone: "#b39ddb",
+  { key: "sleep", label: "Sleep", route: "/sleep", tone: "#ff3ad8",
     d: "M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" },
-  { key: "fitness", label: "Fitness", route: "/activities", tone: "#5fd3c4",
+  { key: "fitness", label: "Fitness", route: "/activities", tone: "#28e6ff",
     d: "M4 18l5-7 4 4 3-4 4 7z" },
-  { key: "strength", label: "Training", route: "/workout/strength/today", tone: "#7ee2a8",
+  { key: "strength", label: "Training", route: "/workout/strength/today", tone: "#ff5d7a",
     d: "M4 9v6M7 7v10M17 7v10M20 9v6M7 12h10" },
-  { key: "vitals", label: "Vitals", route: "/body", tone: "#7fc8f8",
+  { key: "vitals", label: "Vitals", route: "/body", tone: "#28e6ff",
     d: "M3 12h4l2-5 3 10 2-6 2 3h5" },
-  { key: "habits", label: "Habits", route: "/fasting", tone: "#e8b661",
+  { key: "habits", label: "Habits", route: "/fasting", tone: "#ffb52e",
     d: "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16zm0 3v5l3 2" },
-  { key: "trails", label: "Trails", route: "/trails", tone: "#7ee2a8",
+  { key: "trails", label: "Trails", route: "/trails", tone: "#5dff3b",
     d: "M3 19l5-8 3.5 5L15 9l6 10z" },
-  { key: "journal", label: "Journal", route: "/journal", tone: "#c7a8ff",
+  { key: "journal", label: "Journal", route: "/journal", tone: "#9b9bb0",
     d: "M5 4h9l5 5v11H5zM14 4v5h5M8 13h8M8 16h6" },
 ];
 </script>

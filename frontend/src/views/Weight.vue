@@ -253,13 +253,40 @@ const mainOption = computed(() => {
     tooltip: { trigger: "axis", ...t.tooltip },
     xAxis: { type: "time", axisLabel: t.axisLabel, splitLine: t.splitLine },
     yAxis: [
-      { type: "value", name: weightUnit.value, scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
+      // `scale: true` fits the DATA, and ECharts does not widen an axis to
+      // contain a markLine — so a goal below (or above) the plotted range
+      // drew no goal line at all, silently. Same class of bug as the clipped
+      // normal band on the heart-rate chart. Phone twin: `niceDomain`'s
+      // includeLo/includeHi.
+      {
+        type: "value", name: weightUnit.value, scale: true,
+        axisLabel: t.axisLabel, splitLine: t.splitLine,
+        ...goalAwareExtent(),
+      },
       { type: "value", name: "%", scale: true, axisLabel: t.axisLabel, splitLine: { show: false } },
     ],
     series,
     dataZoom: [{ type: "inside" }],
   };
 });
+
+/** Weight y-extent wide enough to contain the goal line, rounded outward. */
+function goalAwareExtent(): { min?: number; max?: number } {
+  const vals = sorted.value
+    .map((p) => weightVal(p.weight_kg))
+    .filter((v): v is number => v != null);
+  if (!vals.length) return {};
+  const gv = goalKg.value != null ? weightVal(goalKg.value) : null;
+  const lo = Math.min(...vals, gv ?? Infinity);
+  const hi = Math.max(...vals, gv ?? -Infinity);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return {};
+  const pad = Math.max((hi - lo) * 0.08, isImperial.value ? 1 : 0.5);
+  const step = isImperial.value ? 5 : 2;
+  return {
+    min: Math.floor((lo - pad) / step) * step,
+    max: Math.ceil((hi + pad) / step) * step,
+  };
+}
 
 // === Distribution histogram ===
 const histogramOption = computed(() => {

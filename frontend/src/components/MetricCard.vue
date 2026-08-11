@@ -126,11 +126,33 @@ const linePath = computed(() => {
   const s = scale.value;
   if (!s) return "";
   let d = "";
-  let started = false;
+  let prevIdx = -1;
   week.value.forEach((p, i) => {
-    if (p.value == null) { started = false; return; }
-    d += `${started ? "L" : "M"}${s.x(i).toFixed(1)} ${s.y(p.value).toFixed(1)} `;
-    started = true;
+    if (p.value == null) return;
+    d += `${prevIdx < 0 || i - prevIdx > 1 ? "M" : "L"}${s.x(i).toFixed(1)} ${s.y(p.value).toFixed(1)} `;
+    prevIdx = i;
+  });
+  return d.trim();
+});
+
+/**
+ * Dashed bridges across missing days. Phone twin: the `drawGapBridge` branch
+ * in `MetricCard.kt`. Without it the line just stops and restarts, which on a
+ * 7-day card leaves today as a lone dot floating away from the series — it
+ * reads as a rendering bug rather than as a day with no reading.
+ */
+const gapPath = computed(() => {
+  const s = scale.value;
+  if (!s) return "";
+  let d = "";
+  let prev: { x: number; y: number; i: number } | null = null;
+  week.value.forEach((p, i) => {
+    if (p.value == null) return;
+    const cur = { x: s.x(i), y: s.y(p.value), i };
+    if (prev && i - prev.i > 1) {
+      d += `M${prev.x.toFixed(1)} ${prev.y.toFixed(1)} L${cur.x.toFixed(1)} ${cur.y.toFixed(1)} `;
+    }
+    prev = cur;
   });
   return d.trim();
 });
@@ -210,6 +232,9 @@ const plottable = computed(
             stroke-linecap="round" stroke-linejoin="round"
             vector-effect="non-scaling-stroke"
           />
+          <!-- Dashed bridge over missing days — see gapPath. -->
+          <path v-if="gapPath" :d="gapPath" fill="none" :stroke="accent"
+                stroke-width="1.4" stroke-dasharray="2.5 2.5" opacity="0.5"/>
           <circle
             v-for="p in points" :key="p.i" :cx="p.x" :cy="p.y"
             :r="p.i === todayIdx ? 3.2 : 2.2" :fill="accent"

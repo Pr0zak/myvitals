@@ -73,6 +73,10 @@ import java.time.LocalDate
  * Color intent mirrors the web tokens: strength/move = Lime, cardio/heart =
  * Cyan, trails/elevation = Amber.
  */
+/** The Recent feed shows a WEEK. The fetch behind it spans a year for the
+ *  calendar and YTD stats, so this window has to be applied explicitly. */
+private const val RECENT_DAYS = 7L
+
 @Composable
 fun TrainHubScreen(
     settings: SettingsRepository,
@@ -174,14 +178,30 @@ fun TrainHubScreen(
     // Which filter chips actually have matches in the loaded list — never show
     // a chip that would yield an empty feed. "All" is always present.
     val availableFilters = remember(activities) {
-        ActivityFilter.entries.filter { f -> activities.any { f.matches(it.type) } }
+        val cutoff = java.time.Instant.now().minus(java.time.Duration.ofDays(RECENT_DAYS))
+        val inWindow = activities.filter { a ->
+            runCatching { java.time.Instant.parse(a.startAt) }
+                .getOrNull()?.isAfter(cutoff) ?: false
+        }
+        // Offer a chip only if it would yield something in the visible
+        // window — a "Row" chip that filters to nothing is a dead control.
+        ActivityFilter.entries.filter { f -> inWindow.any { f.matches(it.type) } }
     }
-    // The visible feed: filtered (client-side) then capped to a sane count so
-    // the page stays a "recent" hub, not an unbounded scroll.
+    // The visible feed is the LAST WEEK, not the last N rows. The fetch is
+    // deliberately wide (the calendar and the YTD pair need a year), and
+    // capping by count alone meant "Recent" listed activities months old
+    // whenever the week was quiet — a 25-row cap on a year of data is not a
+    // recency filter. The count cap stays as a backstop for a heavy week.
     val shown = remember(activities, filter) {
+        val cutoff = java.time.Instant.now().minus(java.time.Duration.ofDays(RECENT_DAYS))
         val f = filter
-        val base = if (f == null) activities else activities.filter { f.matches(it.type) }
-        base.take(25)
+        activities
+            .filter { a ->
+                runCatching { java.time.Instant.parse(a.startAt) }
+                    .getOrNull()?.isAfter(cutoff) ?: false
+            }
+            .filter { f == null || f.matches(it.type) }
+            .take(25)
     }
 
     NeonScreen(
@@ -249,7 +269,7 @@ fun TrainHubScreen(
             Spacer(Modifier.height(18.dp))
         }
 
-        CaptionRow("Recent") {
+        CaptionRow("Recent · last 7 days") {
             // Cheap "See all" affordance — only worth showing once there's a
             // feed to open into. Routes to the same full activity list as the
             // footer "All activities" link.
@@ -276,18 +296,24 @@ fun TrainHubScreen(
             ActivityPill(
                 icon = Icons.AutoMirrored.Outlined.DirectionsRun,
                 tone = NeonMV.Cyan,
-                title = if (loading) "Loading…" else "No recent activity",
+                title = if (loading) "Loading…"
+                    else "No activity in the last ${RECENT_DAYS.toInt()} days",
                 sub = "Tap to open your feed",
                 value = null,
                 onClick = { onOpen("activities") },
             )
         } else if (shown.isEmpty()) {
-            // Filtered to empty — keep the chips visible above and explain why.
+            // Two different empty states. `activities` holds the full fetched
+            // YEAR, so the branch above almost never fires — falling through
+            // to the filter message meant a quiet week read "No matching
+            // activities" with no filter set, blaming a control the user
+            // never touched.
             ActivityPill(
                 icon = Icons.AutoMirrored.Outlined.FormatListBulleted,
                 tone = NeonMV.Muted,
-                title = "No ${filter?.label ?: "matching"} activities",
-                sub = "Tap to open the full feed",
+                title = filter?.let { "No ${it.label} activities this week" }
+                    ?: "No activity in the last ${RECENT_DAYS.toInt()} days",
+                sub = "Tap to see your full history",
                 value = null,
                 onClick = { onOpen("activities") },
             )

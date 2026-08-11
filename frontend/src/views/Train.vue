@@ -239,14 +239,21 @@ function classifyType(type: string | null | undefined): {
   return { icon: "🏃", tone: "cyan", isTrail: false, isStrength: false };
 }
 
-const RECENT_LIMIT = 6;
+const RECENT_LIMIT = 12;
+/** "Recent" means the last WEEK, not the last N rows. The fetch behind this
+ *  is deliberately wide (a trailing year, for the YTD pair and the calendar),
+ *  and capping by count alone listed activities months old whenever the week
+ *  was quiet — a row cap on a year of data is not a recency filter. The count
+ *  cap stays only as a backstop for an unusually heavy week. */
+const RECENT_DAYS = 7;
 
-/** The fetch is deliberately wide (a trailing year, for the YTD pair and the
- *  calendar) but this feed is a PREVIEW — cap and sort it explicitly instead
- *  of inheriting the fetch size. Without this the widened fetch renders every
- *  activity since Jan 1 of last year under a "Recent" heading. */
-const recent = computed<FeedRow[]>(() =>
-  [...activities.value]
+const recent = computed<FeedRow[]>(() => {
+  const cutoff = Date.now() - RECENT_DAYS * 86_400_000;
+  return [...activities.value]
+    .filter((a) => {
+      const t = a?.start_at ? Date.parse(a.start_at) : NaN;
+      return Number.isFinite(t) && t >= cutoff;
+    })
     .sort((x, y) => (y.start_at ?? "").localeCompare(x.start_at ?? ""))
     .slice(0, RECENT_LIMIT)
     .map((a, i): FeedRow => {
@@ -288,8 +295,8 @@ const recent = computed<FeedRow[]>(() =>
         ? `/activity/${a.source}/${a.source_id}`
         : null,
     };
-    }),
-);
+    });
+});
 </script>
 
 <template>
@@ -397,10 +404,10 @@ const recent = computed<FeedRow[]>(() =>
     </section>
 
     <div class="cap cap-row">
-      <span>Recent</span>
-      <button v-if="recent.length > 0" class="see-all" @click="go('/activities')">
-        See all ›
-      </button>
+      <span>Recent · last 7 days</span>
+      <!-- Always reachable: an empty week is exactly when you want the
+           full history, so hiding this then was backwards. -->
+      <button class="see-all" @click="go('/activities')">See all ›</button>
     </div>
 
     <template v-if="recent.length > 0">
@@ -427,8 +434,8 @@ const recent = computed<FeedRow[]>(() =>
     <button v-else class="pill empty" @click="go('/activities')">
       <span class="pi bg-cyan">🏃</span>
       <span class="pn">
-        No recent activity
-        <small>Tap to open your feed</small>
+        No activity in the last 7 days
+        <small>Tap to see your full history</small>
       </span>
       <span class="chev">›</span>
     </button>

@@ -107,7 +107,7 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
                     tint = tok.onSurface)
             }
-            Icon(Vital.WEIGHT.icon, contentDescription = null, tint = Vital.WEIGHT.color,
+            Icon(Vital.WEIGHT.icon, contentDescription = null, tint = Vital.WEIGHT.accent,
                 modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
             Text("Weight", color = tok.onSurface, fontSize = 16.sp,
@@ -121,7 +121,7 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     onClick = { range = r },
                     label = { Text(r.label) },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Vital.WEIGHT.color.copy(alpha = 0.20f),
+                        selectedContainerColor = Vital.WEIGHT.accent.copy(alpha = 0.20f),
                         selectedLabelColor = tok.onSurface,
                     ),
                 )
@@ -145,7 +145,7 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     item { WeightHero(pts) }
-                    item { WeightChart(pts, Vital.WEIGHT.color) }
+                    item { WeightChart(pts, Vital.WEIGHT.accent) }
                     item { WeightStats(pts) }
                 }
             }
@@ -185,6 +185,7 @@ private fun WeightHero(pts: List<WPoint>) {
 @Composable
 private fun WeightChart(pts: List<WPoint>, color: Color) {
     val tok = LocalAppTokens.current
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
             Text("TREND", color = tok.onSurfaceVariant,
@@ -202,65 +203,60 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
             val sumX2 = xs.sumOf { it * it }
             val b = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
             val a = (sumY - b * sumX) / n
-            Box(Modifier.fillMaxWidth().height(180.dp)) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val padX = 32.dp.toPx()
-                    val padTop = 8.dp.toPx()
-                    val padBot = 14.dp.toPx()
-                    val plotW = size.width - padX
-                    val plotH = size.height - padTop - padBot
-                    val stepX = plotW / (n - 1).coerceAtLeast(1)
-                    // Ticks
-                    val ticks = listOf(maxV, (minV + maxV) / 2, minV)
-                    for (yv in ticks) {
-                        val py = padTop + ((maxV - yv) / span * plotH).toFloat()
-                        drawLine(
-                            color = tok.onSurfaceDim.copy(alpha = 0.18f),
-                            start = Offset(padX, py), end = Offset(size.width, py),
-                            strokeWidth = 0.7.dp.toPx(),
-                        )
-                    }
-                    // Trend line
-                    val ty0 = (a + b * 0).toFloat()
-                    val ty1 = (a + b * (n - 1)).toFloat()
-                    val tpy0 = padTop + ((maxV - ty0) / span * plotH).toFloat()
-                    val tpy1 = padTop + ((maxV - ty1) / span * plotH).toFloat()
-                    drawLine(
-                        color = color.copy(alpha = 0.55f),
-                        start = Offset(padX, tpy0), end = Offset(size.width, tpy1),
-                        strokeWidth = 1.2.dp.toPx(),
-                        pathEffect = PathEffect.dashPathEffect(
-                            floatArrayOf(5.dp.toPx(), 4.dp.toPx())
-                        ),
-                    )
-                    // Data line + dots
-                    val path = androidx.compose.ui.graphics.Path()
-                    for ((i, w) in lbs.withIndex()) {
-                        val x = padX + i * stepX
-                        val py = padTop + ((maxV - w) / span * plotH).toFloat()
-                        if (i == 0) path.moveTo(x, py) else path.lineTo(x, py)
-                        // De-smear: skip per-point dots once the window is dense.
-                        if (n <= 31) drawCircle(color = color, radius = 3.dp.toPx(),
-                            center = Offset(x, py))
-                    }
-                    drawPath(path = path, color = color, style = Stroke(width = 2.dp.toPx()))
+            Canvas(Modifier.fillMaxWidth().height(190.dp)) {
+                val domain = niceDomain(minV.toFloat(), maxV.toFloat(), targetTicks = 4)
+                val g = chartGeom(domain, ChartInsets(
+                    left = 34.dp.toPx(), top = 6.dp.toPx(),
+                    right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+                ))
+                // The labels used to be a separate SpaceBetween Column laid
+                // over the Canvas, so they spread across the whole box while
+                // the gridlines sat inside the padded plot — the numbers never
+                // lined up with the lines they labelled. Drawn together now.
+                drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface) {
+                    "%.0f".format(it)
                 }
-                // Y-axis labels
-                Column(Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.SpaceBetween) {
-                    Text("%.1f".format(maxV), color = tok.onSurfaceDim, fontSize = 9.sp,
-                        modifier = Modifier.padding(start = 4.dp))
-                    Text("%.1f".format((minV + maxV) / 2),
-                        color = tok.onSurfaceDim, fontSize = 9.sp,
-                        modifier = Modifier.padding(start = 4.dp))
-                    Text("%.1f".format(minV), color = tok.onSurfaceDim, fontSize = 9.sp,
-                        modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
+                // Regression trend
+                drawLine(
+                    color = color.copy(alpha = 0.55f),
+                    start = Offset(g.left, g.y(a.toFloat())),
+                    end = Offset(g.right, g.y((a + b * (n - 1)).toFloat())),
+                    strokeWidth = 1.2.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(
+                        floatArrayOf(5.dp.toPx(), 4.dp.toPx())
+                    ),
+                )
+                val path = androidx.compose.ui.graphics.Path()
+                val area = androidx.compose.ui.graphics.Path()
+                for ((i, w) in lbs.withIndex()) {
+                    val x = g.x(i, n); val py = g.y(w.toFloat())
+                    if (i == 0) {
+                        path.moveTo(x, py); area.moveTo(x, g.bottom); area.lineTo(x, py)
+                    } else { path.lineTo(x, py); area.lineTo(x, py) }
+                    // De-smear: skip per-point dots once the window is dense.
+                    if (n <= 31) drawCircle(color = color, radius = 2.5.dp.toPx(),
+                        center = Offset(x, py))
                 }
+                area.lineTo(g.x(n - 1, n), g.bottom); area.close()
+                drawPath(area, brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    listOf(color.copy(alpha = 0.22f), color.copy(alpha = 0f)),
+                    startY = g.top, endY = g.bottom,
+                ))
+                drawPath(path = path, color = color, style = Stroke(
+                    width = 2.dp.toPx(),
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                    join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                ))
+                drawLatestMarker(
+                    Offset(g.x(n - 1, n), g.y(lbs.last().toFloat())),
+                    color, tok.surfaceContainer,
+                )
+                drawXLabels(g, measurer, tok.onSurfaceDim, buildList {
+                    pts.firstOrNull()?.let { add(0f to shortMdOf(it.ms)) }
+                    if (n >= 5) add(0.5f to shortMdOf(pts[n / 2].ms))
+                    pts.lastOrNull()?.let { add(1f to shortMdOf(it.ms)) }
+                })
             }
-            ChartDateRow(
-                pts.firstOrNull()?.let { isoDate(it.ms) },
-                pts.lastOrNull()?.let { isoDate(it.ms) },
-            )
         }
     }
 }
@@ -292,4 +288,12 @@ private fun Stat(label: String, value: String) {
             fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         Text(value, color = tok.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
+}
+
+
+/** "M/d" for an epoch-ms x-axis tick. */
+private fun shortMdOf(ms: Long): String {
+    val d = java.time.Instant.ofEpochMilli(ms)
+        .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+    return "${d.monthValue}/${d.dayOfMonth}"
 }

@@ -97,6 +97,11 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     var selectedDay by remember { mutableStateOf(java.time.LocalDate.now()) }
     var live by remember { mutableStateOf<List<TimePoint>>(emptyList()) }
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
+    // Which range `rows` was actually fetched for. Without this the card
+    // renders the PREVIOUS range's series under the new range's title the
+    // moment you tap a tab — tapping 90d after 30d drew 30 days of history
+    // headed "RESTING HR — 90D", stats and date axis included.
+    var rowsRange by remember { mutableStateOf<VitalRange?>(null) }
     var bands by remember { mutableStateOf<List<HrEventBand>>(emptyList()) }
     var annotations by remember {
         mutableStateOf<List<app.myvitals.sync.Annotation>>(emptyList())
@@ -116,7 +121,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     suspend fun maybeShowCache() {
         val rowsKey = "hr_detail_rows_${range.name.lowercase()}"
         app.myvitals.data.JsonCache.read<List<DailySummary>>(context, rowsKey, rowsType)
-            ?.let { rows = it.value; loading = false }
+            ?.let { rows = it.value; rowsRange = range; loading = false }
     }
 
     suspend fun fetch() {
@@ -192,7 +197,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                         if (e < windowStart || s > windowEnd) continue
                         list += HrEventBand(s, e,
                             label = "${w.splitFocus} workout",
-                            color = Vital.WORKOUT.color)
+                            color = Vital.WORKOUT.accent)
                     }
                     bands = list
                     rows = emptyList()
@@ -200,6 +205,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     val since = LocalDate.now().minusDays(range.days.toLong() - 1).toString()
                     val fresh = withContext(Dispatchers.IO) { api.summaryRange(since = since) }
                     rows = fresh
+                    rowsRange = range
                     app.myvitals.data.JsonCache.write(
                         context,
                         "hr_detail_rows_${range.name.lowercase()}",
@@ -216,6 +222,12 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     }
 
     LaunchedEffect(range, selectedDay) {
+        // Drop the outgoing range's data before anything renders under the new
+        // title. maybeShowCache() puts it straight back when this range has
+        // been seen before, so the SWR warm-start still holds.
+        if (rowsRange != null && rowsRange != range) {
+            rows = emptyList(); rowsRange = null; loading = true
+        }
         maybeShowCache()
         fetch()
     }
@@ -227,7 +239,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
                     tint = tok.onSurface)
             }
-            Icon(Vital.HR.icon, contentDescription = null, tint = Vital.HR.color,
+            Icon(Vital.HR.icon, contentDescription = null, tint = Vital.HR.accent,
                 modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
             Text("Heart rate", color = tok.onSurface, fontSize = 16.sp,
@@ -244,7 +256,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     },
                     label = { Text(r.label) },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Vital.HR.color.copy(alpha = 0.20f),
+                        selectedContainerColor = Vital.HR.accent.copy(alpha = 0.20f),
                         selectedLabelColor = tok.onSurface,
                     ),
                 )
@@ -526,6 +538,8 @@ private fun RestingHrTrend(
     bandHigh: Double? = null,
 ) {
     val tok = LocalAppTokens.current
+    val measurer = rememberTextMeasurer()
+    val accent = Vital.HR.accent
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
             Text("RESTING HR — ${range.label.uppercase()}",
@@ -540,55 +554,109 @@ private fun RestingHrTrend(
             }
             Row(verticalAlignment = Alignment.Bottom) {
                 Text("%.0f".format(real.last()), color = tok.onSurface,
-                    fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+                    fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.width(4.dp))
                 Text("bpm", color = tok.onSurfaceDim, fontSize = 11.sp,
-                    modifier = Modifier.padding(bottom = 4.dp))
+                    modifier = Modifier.padding(bottom = 5.dp))
+                Spacer(Modifier.weight(1f))
+                // Where the latest reading sits against the window, so the big
+                // number means something without reading the chart.
+                val avg = real.average().toFloat()
+                val d = real.last() - avg
+                Text(
+                    if (kotlin.math.abs(d) < 0.5f) "at your ${range.label} average"
+                    else "%+.0f vs ${range.label} avg".format(d),
+                    color = tok.onSurfaceVariant, fontSize = 11.sp,
+                    modifier = Modifier.padding(bottom = 5.dp),
+                )
             }
-            Spacer(Modifier.height(6.dp))
-            Box(Modifier.fillMaxWidth().height(140.dp)) {
+            Spacer(Modifier.height(10.dp))
+            Box(Modifier.fillMaxWidth().height(170.dp)) {
                 Canvas(Modifier.fillMaxSize()) {
-                    val padTop = 4.dp.toPx()
-                    val padBot = 4.dp.toPx()
-                    val plotH = size.height - padTop - padBot
-                    val minY = real.min()
-                    val maxY = real.max()
-                    val span = (maxY - minY).coerceAtLeast(1f)
-                    val stepX = size.width / (pts.size - 1)
-                    // Shaded "your normal" zone from the server's bounds —
-                    // the same band the metric card and the web chart draw.
+                    // Force the server's band inside the domain. Left to the
+                    // data's own min..max, a band wider than the window (usual
+                    // on 7d) got clipped at the top edge and read as "every
+                    // reading is abnormal" — the opposite of the truth.
+                    val domain = niceDomain(
+                        lo = real.min(), hi = real.max(),
+                        includeLo = bandLow?.toFloat(), includeHi = bandHigh?.toFloat(),
+                    )
+                    val g = chartGeom(domain, ChartInsets(
+                        left = 26.dp.toPx(), top = 6.dp.toPx(),
+                        right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+                    ))
+                    drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface) {
+                        "%.0f".format(it)
+                    }
                     if (bandLow != null && bandHigh != null) {
-                        fun yAt(v: Float) = padTop + ((maxY - v) / span) * plotH
-                        val top = yAt(bandHigh.toFloat())
-                        val bot = yAt(bandLow.toFloat())
-                        drawRect(
-                            color = tok.onSurface.copy(alpha = 0.08f),
-                            topLeft = androidx.compose.ui.geometry.Offset(
-                                0f, minOf(top, bot),
-                            ),
-                            size = androidx.compose.ui.geometry.Size(
-                                size.width, kotlin.math.abs(bot - top),
-                            ),
-                        )
+                        drawNormalBand(g, bandLow.toFloat(), bandHigh.toFloat(), accent)
                     }
-                    val path = androidx.compose.ui.graphics.Path()
-                    var started = false
+
+                    // Area fill under the line, then the line itself. Gaps are
+                    // bridged with a dash so a missing day reads as a gap
+                    // rather than as a broken chart.
+                    val line = androidx.compose.ui.graphics.Path()
+                    val area = androidx.compose.ui.graphics.Path()
+                    var lastPt: Offset? = null
+                    var lastIdx = -1
+                    var latest: Offset? = null
                     for ((i, v) in pts.withIndex()) {
-                        if (v == null) { started = false; continue }
-                        val x = i * stepX
-                        val py = padTop + ((maxY - v) / span) * plotH
-                        if (!started) { path.moveTo(x, py); started = true }
-                        else path.lineTo(x, py)
-                        // De-smear: skip per-point dots once the window is dense.
-                        if (pts.size <= 31) drawCircle(color = Vital.HR.color,
-                            radius = 1.5.dp.toPx(), center = Offset(x, py))
+                        if (v == null) continue
+                        val p = Offset(g.x(i, pts.size), g.y(v))
+                        val prev = lastPt
+                        if (prev == null) {
+                            line.moveTo(p.x, p.y)
+                            area.moveTo(p.x, g.bottom); area.lineTo(p.x, p.y)
+                        } else if (i - lastIdx > 1) {
+                            // At least one day with no reading sits between
+                            // these two samples: dash across it instead of
+                            // drawing a solid segment that implies data.
+                            drawGapBridge(prev, p, accent)
+                            line.moveTo(p.x, p.y)
+                            area.lineTo(p.x, p.y)
+                        } else {
+                            line.lineTo(p.x, p.y)
+                            area.lineTo(p.x, p.y)
+                        }
+                        lastPt = p
+                        lastIdx = i
+                        latest = p
+                        if (pts.size <= 31) {
+                            drawCircle(accent.copy(alpha = 0.9f),
+                                radius = 1.8.dp.toPx(), center = p)
+                        }
                     }
-                    drawPath(path = path, color = Vital.HR.color,
-                        style = Stroke(width = 2.dp.toPx()))
+                    lastPt?.let { area.lineTo(it.x, g.bottom); area.close() }
+                    drawPath(
+                        area,
+                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                            listOf(accent.copy(alpha = 0.26f), accent.copy(alpha = 0f)),
+                            startY = g.top, endY = g.bottom,
+                        ),
+                    )
+                    drawPath(line, color = accent,
+                        style = Stroke(width = 2.dp.toPx(),
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                            join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                    latest?.let { drawLatestMarker(it, accent, tok.surfaceContainer) }
+
+                    drawXLabels(g, measurer, tok.onSurfaceDim, xTicks(rows))
                 }
             }
-            ChartDateRow(rows.firstOrNull()?.date, rows.lastOrNull()?.date)
-            Spacer(Modifier.height(6.dp))
+            if (bandLow != null && bandHigh != null) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(width = 14.dp, height = 8.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(accent.copy(alpha = 0.22f)))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "Usual range ${bandLow.toInt()}–${bandHigh.toInt()} bpm",
+                        color = tok.onSurfaceVariant, fontSize = 11.sp,
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 Stat("Min", "${real.min().toInt()} bpm")
                 Stat("Avg", "%.0f bpm".format(real.average()))
@@ -667,7 +735,7 @@ private fun HrHistogram(points: List<TimePoint>) {
                         val h = (c.toFloat() / maxCount) * size.height
                         val x = i * (barW + gapPx)
                         drawRect(
-                            color = Vital.HR.color,
+                            color = Vital.HR.accent,
                             topLeft = androidx.compose.ui.geometry.Offset(x, size.height - h),
                             size = androidx.compose.ui.geometry.Size(barW, h),
                         )
@@ -684,9 +752,25 @@ private fun HrHistogram(points: List<TimePoint>) {
     }
 }
 
+/** Start / middle / end dates for a daily-series x-axis. */
+private fun xTicks(rows: List<DailySummary>): List<Pair<Float, String>> {
+    if (rows.isEmpty()) return emptyList()
+    fun md(iso: String?): String? = runCatching {
+        val d = java.time.LocalDate.parse(iso)
+        "${d.monthValue}/${d.dayOfMonth}"
+    }.getOrNull()
+    val out = mutableListOf<Pair<Float, String>>()
+    md(rows.first().date)?.let { out += 0f to it }
+    if (rows.size >= 5) md(rows[rows.size / 2].date)?.let { out += 0.5f to it }
+    if (rows.size >= 2) md(rows.last().date)?.let { out += 1f to it }
+    return out
+}
+
 @Composable
 private fun WeekdayPattern(rows: List<DailySummary>) {
     val tok = LocalAppTokens.current
+    val measurer = rememberTextMeasurer()
+    val accent = Vital.HR.accent
     if (rows.isEmpty()) return
     val byDow = remember(rows) {
         val sums = DoubleArray(7)
@@ -713,30 +797,61 @@ private fun WeekdayPattern(rows: List<DailySummary>) {
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             val nonNull = byDow.filterNotNull()
-            val lo = nonNull.min()
-            val hi = nonNull.max()
-            val span = (hi - lo).coerceAtLeast(1.0)
             val labels = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
-            Row(Modifier.fillMaxWidth().height(110.dp),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                byDow.forEachIndexed { i, v ->
-                    Column(Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(if (v != null) "${v.toInt()}" else "—",
-                            color = tok.onSurface, fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(2.dp))
-                        val frac = if (v != null) ((v - lo) / span).toFloat() else 0f
-                        // Always render at least a sliver so a value isn't invisible
-                        val height = (16f + frac * 70f).dp
-                        Box(Modifier.fillMaxWidth().height(height)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(Vital.HR.color.copy(alpha = if (v == null) 0.15f else 0.85f)))
-                        Spacer(Modifier.height(2.dp))
-                        Text(labels[i], color = tok.onSurfaceDim, fontSize = 10.sp)
-                    }
+            val todayDow = java.time.LocalDate.now().dayOfWeek.value % 7  // Sun = 0
+            val mean = nonNull.average().toFloat()
+
+            // One Canvas for the whole chart. The previous layout put value +
+            // bar + day label in a Column inside a fixed-height Row: the
+            // tallest bar overflowed the Row, which pushed its day label off
+            // the bottom of the card. "Wed" was simply missing from the chart
+            // on every range, and the two tallest bars hung below the others'
+            // baseline. A single Canvas can't overflow — the bars are drawn
+            // into a plot rect that leaves the gutters alone.
+            Canvas(Modifier.fillMaxWidth().height(150.dp)) {
+                // Scaled against the same nice domain as the trend chart, not
+                // against the weekday min. Anchoring the shortest bar at zero
+                // height made a 62-vs-71 bpm spread look like a 5x difference.
+                val domain = niceDomain(
+                    lo = nonNull.min().toFloat(), hi = nonNull.max().toFloat(),
+                    targetTicks = 3, padFraction = 0.30f,
+                )
+                val g = chartGeom(domain, ChartInsets(
+                    left = 26.dp.toPx(), top = 14.dp.toPx(),
+                    right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+                ))
+                drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 3) {
+                    "%.0f".format(it)
                 }
+                val slot = g.slot(7)
+                val barW = slot * 0.58f
+                for (i in 0..6) {
+                    val v = byDow[i] ?: continue
+                    val cx = g.xBar(i, 7)
+                    val isToday = i == todayDow
+                    drawBar(
+                        g, cx, barW, g.y(v.toFloat()),
+                        accent.copy(alpha = if (isToday) 0.95f else 0.45f),
+                    )
+                    val lay = measurer.measure(
+                        "${v.toInt()}",
+                        androidx.compose.ui.text.TextStyle(
+                            color = if (isToday) tok.onSurface else tok.onSurfaceVariant,
+                            fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+                        ),
+                    )
+                    drawText(lay, topLeft = Offset(
+                        cx - lay.size.width / 2f,
+                        (g.y(v.toFloat()) - lay.size.height - 2.dp.toPx())
+                            .coerceAtLeast(0f),
+                    ))
+                }
+                drawReferenceLine(g, mean, tok.onSurfaceDim,
+                    measurer, "avg ${mean.toInt()}")
+                // Day labels live in the reserved bottom gutter, so a tall bar
+                // can never displace them.
+                drawXLabels(g, measurer, tok.onSurfaceDim,
+                    labels.indices.map { (it + 0.5f) / 7f to labels[it] })
             }
         }
     }

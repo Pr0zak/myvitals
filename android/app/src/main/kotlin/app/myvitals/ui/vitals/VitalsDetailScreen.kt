@@ -108,6 +108,7 @@ fun VitalsDetailScreen(
         else -> {}
     }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
     val context = androidx.compose.ui.platform.LocalContext.current
     var range by remember { mutableStateOf(VitalRange.MONTH) }
     // Day selector only meaningful at DAY range; resets to today
@@ -189,7 +190,7 @@ fun VitalsDetailScreen(
     val ink = if (neon) NeonMV.Ink else MV.OnSurface
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     val bad = if (neon) NeonMV.Bad else MV.Red
-    val accent: Color = if (neon) neonDomainColor(vital) else vital.color
+    val accent: Color = if (neon) vital.accent else vital.color
 
     Column(Modifier.fillMaxSize().background(bg)) {
         Row(
@@ -271,62 +272,75 @@ fun VitalsDetailScreen(
                                     modifier = Modifier.padding(20.dp),
                                 )
                             } else {
-                                val gridColor = if (neon) NeonMV.Line else MV.OnSurfaceDim
                                 androidx.compose.foundation.Canvas(
-                                    Modifier.fillMaxWidth().height(220.dp).padding(vertical = 8.dp),
+                                    Modifier.fillMaxWidth().height(230.dp).padding(vertical = 8.dp),
                                 ) {
                                     val real = ys.mapIndexed { i, v -> i to v }
                                         .filter { it.second.isFinite() }
                                     if (real.size < 2) return@Canvas
-                                    val minV = real.minOf { it.second }
-                                    val maxV = real.maxOf { it.second }
-                                    val span = (maxV - minV).coerceAtLeast(1e-6)
-                                    val padY = size.height * 0.08f
-                                    val plotH = size.height - 2 * padY
-                                    val stepX = size.width / (ys.size - 1).coerceAtLeast(1)
-                                    // Shaded "your normal" zone, from the
-                                    // server's bounds — same band the
-                                    // metric card draws.
                                     val bl = bandLow; val bh = bandHigh
-                                    if (bl != null && bh != null) {
-                                        fun yOf(v: Double) = size.height - padY -
-                                            (((v - minV) / span).toFloat() * plotH)
-                                        val top = yOf(bh); val bot = yOf(bl)
-                                        drawRect(
-                                            color = accent.copy(alpha = 0.10f),
-                                            topLeft = androidx.compose.ui.geometry.Offset(
-                                                0f, minOf(top, bot),
-                                            ),
-                                            size = androidx.compose.ui.geometry.Size(
-                                                size.width, kotlin.math.abs(bot - top),
-                                            ),
-                                        )
-                                    }
-                                    drawLine(
-                                        color = gridColor.copy(alpha = 0.25f),
-                                        start = androidx.compose.ui.geometry.Offset(0f, size.height - padY),
-                                        end = androidx.compose.ui.geometry.Offset(size.width, size.height - padY),
-                                        strokeWidth = 1.dp.toPx(),
+                                    // Same frame every detail chart now uses:
+                                    // labelled gridlines, the server's band
+                                    // forced inside the domain so it can't be
+                                    // clipped into looking like a wall, and a
+                                    // dated x-axis.
+                                    val domain = niceDomain(
+                                        lo = real.minOf { it.second }.toFloat(),
+                                        hi = real.maxOf { it.second }.toFloat(),
+                                        includeLo = bl?.toFloat(), includeHi = bh?.toFloat(),
+                                        zeroAnchored = vital == Vital.STEPS,
                                     )
-                                    val path = androidx.compose.ui.graphics.Path()
-                                    var started = false
+                                    val g = chartGeom(domain, ChartInsets(
+                                        left = 34.dp.toPx(), top = 6.dp.toPx(),
+                                        right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+                                    ))
+                                    drawGrid(g, measurer, muted, ink) { axisLabelFor(it, vital) }
+                                    if (bl != null && bh != null) {
+                                        drawNormalBand(g, bl.toFloat(), bh.toFloat(), accent)
+                                    }
+                                    val line = androidx.compose.ui.graphics.Path()
+                                    val area = androidx.compose.ui.graphics.Path()
                                     val drawDots = ys.size <= 31
+                                    var lastPt: androidx.compose.ui.geometry.Offset? = null
+                                    var lastIdx = -1
                                     for ((idx, v) in real) {
-                                        val x = idx * stepX
-                                        val y = (padY + ((maxV - v) / span) * plotH).toFloat()
-                                        if (!started) { path.moveTo(x, y); started = true }
-                                        else path.lineTo(x, y)
+                                        val pt = androidx.compose.ui.geometry.Offset(
+                                            g.x(idx, ys.size), g.y(v.toFloat()),
+                                        )
+                                        val prev = lastPt
+                                        if (prev == null) {
+                                            line.moveTo(pt.x, pt.y)
+                                            area.moveTo(pt.x, g.bottom); area.lineTo(pt.x, pt.y)
+                                        } else if (idx - lastIdx > 1) {
+                                            drawGapBridge(prev, pt, accent)
+                                            line.moveTo(pt.x, pt.y); area.lineTo(pt.x, pt.y)
+                                        } else {
+                                            line.lineTo(pt.x, pt.y); area.lineTo(pt.x, pt.y)
+                                        }
+                                        lastPt = pt; lastIdx = idx
                                         if (drawDots) drawCircle(
-                                            accent, radius = 2.dp.toPx(),
-                                            center = androidx.compose.ui.geometry.Offset(x, y),
+                                            accent.copy(alpha = 0.9f),
+                                            radius = 1.8.dp.toPx(), center = pt,
                                         )
                                     }
+                                    lastPt?.let { area.lineTo(it.x, g.bottom); area.close() }
                                     drawPath(
-                                        path, color = accent,
-                                        style = androidx.compose.ui.graphics.drawscope.Stroke(
-                                            width = 2.dp.toPx(),
+                                        area,
+                                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                            listOf(accent.copy(alpha = 0.24f),
+                                                   accent.copy(alpha = 0f)),
+                                            startY = g.top, endY = g.bottom,
                                         ),
                                     )
+                                    drawPath(
+                                        line, color = accent,
+                                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                            width = 2.dp.toPx(),
+                                            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                                            join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                                        ),
+                                    )
+                                    lastPt?.let { drawLatestMarker(it, accent, card) }
                                 }
                             }
 
@@ -366,17 +380,7 @@ private fun Stat(label: String, value: Float?, vital: Vital, neon: Boolean = fal
  * Sleep -> Magenta, Steps -> Lime (move), Weight -> Amber. Everything else
  * falls back to the classic per-vital color so unmapped domains stay sane.
  */
-private fun neonDomainColor(vital: Vital): Color = when (vital) {
-    Vital.HR, Vital.HRV, Vital.BP -> NeonMV.Cyan
-    Vital.SLEEP -> NeonMV.Magenta
-    Vital.STEPS -> NeonMV.Lime
-    Vital.WEIGHT -> NeonMV.Amber
-    Vital.SKIN_TEMP -> NeonMV.Amber
-    Vital.RECOVERY -> NeonMV.Cyan
-    Vital.SOBER -> NeonMV.Magenta
-    Vital.FASTING -> NeonMV.Cyan
-    else -> vital.color
-}
+private fun neonDomainColor(vital: Vital): Color = vital.accent
 
 private fun fmtForVital(v: Float, vital: Vital): String = when (vital) {
     Vital.HR -> "%.0f bpm".format(v)
@@ -490,4 +494,18 @@ private fun summaryXY(
     if (pairs.isEmpty()) return emptyList<Double>() to emptyList<Double>()
     val originDay = pairs.first().first
     return pairs.map { it.first - originDay } to pairs.map { it.second }
+}
+
+
+/**
+ * Axis-tick text. Deliberately terser than [fmtForVital]: a y-axis repeats its
+ * label four times, so units belong in the card header, not on every gridline.
+ */
+private fun axisLabelFor(v: Float, vital: Vital): String = when (vital) {
+    Vital.STEPS -> if (kotlin.math.abs(v) >= 1000f) "%.0fk".format(v / 1000f)
+                   else "%.0f".format(v)
+    Vital.SKIN_TEMP -> "%+.1f".format(v)
+    Vital.SLEEP, Vital.FASTING -> "%.0fh".format(v)
+    Vital.WEIGHT -> "%.0f".format(v)
+    else -> "%.0f".format(v)
 }

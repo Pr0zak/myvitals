@@ -298,19 +298,32 @@ const traceOption = computed(() => {
 function dailyLineOption(rows: TodaySummary[], color: string) {
   void chartTheme.value; void isNeon.value;
   const t = chartTheme.value;
-  const data = rows
-    .filter((r) => r.resting_hr != null)
-    .map((r) => [r.date, r.resting_hr]);
-  if (data.length === 0) return null;
+  // Keep the null days IN the series. Filtering them out let ECharts draw a
+  // straight segment from the day before to the day after, which invents a
+  // reading for a day the watch never recorded. Nulls break the line instead,
+  // and `gapBridge` dashes across the break so it reads as "no data here"
+  // rather than as a broken chart. Matches HrDetailScreen.kt.
+  const data = rows.map((r) => [r.date, r.resting_hr] as [string, number | null]);
+  if (!data.some((d) => d[1] != null)) return null;
   return {
-    grid: { left: 40, right: 16, top: 24, bottom: 28 },
+    grid: { left: 44, right: 16, top: 24, bottom: 28 },
     xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
              splitLine: t.splitLine },
-    yAxis: { type: "value", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
+    // The band has to be inside the axis extent or ECharts clips it — a band
+    // clipped at the top edge reads as "every reading is abnormal" when the
+    // truth is the opposite. `scale: true` alone fits the DATA, not the band.
+    yAxis: {
+      type: "value", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine,
+      ...bandAwareExtent(
+        data.map((d) => d[1]).filter((v): v is number => v != null),
+        bands.value.resting_hr?.low, bands.value.resting_hr?.high,
+      ),
+    },
     tooltip: { ...t.tooltip, trigger: "axis" },
     series: [{
       type: "line", name: "Resting HR",
       showSymbol: data.length < 90, smooth: true,
+      connectNulls: false,
       lineStyle: { color, width: 1.8 },
       itemStyle: { color },
       areaStyle: { color: `${color}1f` },
@@ -323,7 +336,50 @@ function dailyLineOption(rows: TodaySummary[], color: string) {
       markLine: profile.value?.resting_hr_baseline
         ? meanMarkLine(profile.value.resting_hr_baseline, "baseline")
         : undefined,
-    }],
+    }, gapBridgeSeries(data, color)],
+  };
+}
+
+/**
+ * y-axis min/max wide enough to contain both the data and the normal band,
+ * rounded outward to a multiple of 5 so the ticks stay readable.
+ */
+function bandAwareExtent(
+  values: number[], low?: number | null, high?: number | null,
+): { min?: number; max?: number } {
+  if (!values.length) return {};
+  const lo = Math.min(...values, low ?? Infinity);
+  const hi = Math.max(...values, high ?? -Infinity);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return {};
+  const pad = Math.max((hi - lo) * 0.12, 1);
+  return {
+    min: Math.floor((lo - pad) / 5) * 5,
+    max: Math.ceil((hi + pad) / 5) * 5,
+  };
+}
+
+/**
+ * A dashed line spanning each run of missing days, so a gap reads as a gap
+ * instead of as two disconnected fragments. Phone twin: `drawGapBridge`.
+ */
+function gapBridgeSeries(data: [string, number | null][], color: string) {
+  const segs: [string, number][][] = [];
+  let prev: [string, number] | null = null;
+  let gapped = false;
+  for (const [d, v] of data) {
+    if (v == null) { gapped = true; continue; }
+    if (prev && gapped) segs.push([prev, [d, v]]);
+    prev = [d, v];
+    gapped = false;
+  }
+  return {
+    type: "line", name: "gap", silent: true, showSymbol: false,
+    tooltip: { show: false },
+    lineStyle: { color, width: 1.4, type: "dashed", opacity: 0.5 },
+    itemStyle: { color },
+    // One flat array with a null between segments breaks the line between
+    // them, so every bridge is drawn by a single cheap series.
+    data: segs.flatMap((s, i) => (i ? [[null, null], ...s] : s)),
   };
 }
 const restingOption = computed(() =>

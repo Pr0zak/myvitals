@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
@@ -128,7 +129,7 @@ fun StepsDetailScreen(
         if (rows.isNotEmpty()) loadHourly(selectedDay)
     }
 
-    val color = Vital.STEPS.color
+    val color = Vital.STEPS.accent
     Column(Modifier.fillMaxSize().background(tok.bg)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -225,6 +226,7 @@ private fun bucketByHour(points: List<TimePoint>, day: LocalDate): IntArray {
 
 @Composable
 private fun HourlyColumns(hourly: IntArray, color: Color, isToday: Boolean) {
+    val measurer = rememberTextMeasurer()
     val tok = LocalAppTokens.current
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
@@ -232,30 +234,32 @@ private fun HourlyColumns(hourly: IntArray, color: Color, isToday: Boolean) {
                 color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
-            val maxV = (hourly.max().coerceAtLeast(1)).toFloat()
-            Box(Modifier.fillMaxWidth().height(120.dp)) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val gap = 1.5.dp.toPx()
-                    val barW = (size.width - gap * 23) / 24f
-                    for (h in 0 until 24) {
-                        val v = hourly[h].toFloat()
-                        val barH = (v / maxV) * size.height
-                        drawRect(
-                            color = if (v > 0) color else color.copy(alpha = 0.18f),
-                            topLeft = Offset(h * (barW + gap), size.height - barH),
-                            size = Size(barW, barH.coerceAtLeast(1f)),
-                        )
-                    }
+            Canvas(Modifier.fillMaxWidth().height(150.dp)) {
+                // Zero-anchored: for a count, the bar length IS the quantity,
+                // so the axis has to start at zero or the bars lie about
+                // ratios. (Physiology charts do the opposite — see niceDomain.)
+                val domain = niceDomain(
+                    lo = 0f, hi = hourly.max().coerceAtLeast(1).toFloat(),
+                    zeroAnchored = true, targetTicks = 3,
+                )
+                val g = chartGeom(domain, ChartInsets(
+                    left = 30.dp.toPx(), top = 6.dp.toPx(),
+                    right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+                ))
+                drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 3) {
+                    if (it >= 1000f) "%.0fk".format(it / 1000f) else "%.0f".format(it)
                 }
-            }
-            Spacer(Modifier.height(4.dp))
-            Row(Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("00", color = tok.onSurfaceDim, fontSize = 9.sp)
-                Text("06", color = tok.onSurfaceDim, fontSize = 9.sp)
-                Text("12", color = tok.onSurfaceDim, fontSize = 9.sp)
-                Text("18", color = tok.onSurfaceDim, fontSize = 9.sp)
-                Text("23", color = tok.onSurfaceDim, fontSize = 9.sp)
+                val barW = g.slot(24) * 0.7f
+                for (h in 0 until 24) {
+                    val v = hourly[h].toFloat()
+                    if (v <= 0f) continue
+                    drawBar(g, g.xBar(h, 24), barW, g.y(v), color)
+                }
+                drawXLabels(g, measurer, tok.onSurfaceDim, listOf(
+                    (0.5f / 24f) to "12a", (6.5f / 24f) to "6a",
+                    (12.5f / 24f) to "12p", (18.5f / 24f) to "6p",
+                    (23.5f / 24f) to "11p",
+                ))
             }
         }
     }
@@ -263,52 +267,50 @@ private fun HourlyColumns(hourly: IntArray, color: Color, isToday: Boolean) {
 
 @Composable
 private fun DailyColumns(rows: List<DailySummary>, goal: Int, color: Color) {
+    val measurer = rememberTextMeasurer()
     val tok = LocalAppTokens.current
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("LAST 30 DAYS", color = tok.onSurfaceVariant,
+            // Title counts the rows actually rendered. It was hard-coded
+            // "LAST 30 DAYS" no matter what the window held, so a short
+            // history advertised days it never drew.
+            Text("LAST ${rows.size} DAYS", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             if (rows.isEmpty()) {
                 Text("No data.", color = tok.onSurfaceVariant, fontSize = 12.sp); return@Card
             }
-            val maxV = (rows.maxOfOrNull { it.stepsTotal ?: 0 }
-                ?.coerceAtLeast(goal) ?: goal).toFloat()
-            Box(Modifier.fillMaxWidth().height(150.dp)) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val gap = 2.dp.toPx()
-                    val barW = (size.width - gap * (rows.size - 1)) / rows.size
-                    // Goal dashed line
-                    val gy = size.height - (goal / maxV) * size.height
-                    drawLine(
-                        color = color.copy(alpha = 0.4f),
-                        start = Offset(0f, gy), end = Offset(size.width, gy),
-                        strokeWidth = 1.dp.toPx(),
-                        pathEffect = PathEffect.dashPathEffect(
-                            floatArrayOf(6.dp.toPx(), 4.dp.toPx())
-                        ),
+            Canvas(Modifier.fillMaxWidth().height(170.dp)) {
+                val domain = niceDomain(
+                    lo = 0f,
+                    hi = (rows.maxOfOrNull { it.stepsTotal ?: 0 } ?: 0)
+                        .coerceAtLeast(goal).toFloat(),
+                    zeroAnchored = true, targetTicks = 4,
+                )
+                val g = chartGeom(domain, ChartInsets(
+                    left = 30.dp.toPx(), top = 6.dp.toPx(),
+                    right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+                ))
+                drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 4) {
+                    if (it >= 1000f) "%.0fk".format(it / 1000f) else "%.0f".format(it)
+                }
+                val barW = (g.slot(rows.size) * 0.72f).coerceAtLeast(1f)
+                for ((i, r) in rows.withIndex()) {
+                    val v = (r.stepsTotal ?: 0).toFloat()
+                    if (v <= 0f) continue
+                    drawBar(
+                        g, g.xBar(i, rows.size), barW, g.y(v),
+                        if (v >= goal) color else color.copy(alpha = 0.45f),
                     )
-                    for ((i, r) in rows.withIndex()) {
-                        val v = (r.stepsTotal ?: 0).toFloat()
-                        val h = (v / maxV) * size.height
-                        val barColor = if (v >= goal) color
-                                       else color.copy(alpha = 0.55f)
-                        drawRect(
-                            color = barColor,
-                            topLeft = Offset(i * (barW + gap), size.height - h),
-                            size = Size(barW, h),
-                        )
-                    }
                 }
-            }
-            Row(Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween) {
-                rows.firstOrNull()?.date?.let {
-                    Text(shortDay(it), color = tok.onSurfaceDim, fontSize = 9.sp)
-                }
-                rows.lastOrNull()?.date?.let {
-                    Text(shortDay(it), color = tok.onSurfaceDim, fontSize = 9.sp)
-                }
+                drawReferenceLine(g, goal.toFloat(), color, measurer,
+                    "goal ${"%,d".format(goal)}")
+                drawXLabels(g, measurer, tok.onSurfaceDim, buildList {
+                    rows.firstOrNull()?.date?.let { add(0f to shortDay(it)) }
+                    if (rows.size >= 5) rows[rows.size / 2].date
+                        ?.let { add(0.5f to shortDay(it)) }
+                    rows.lastOrNull()?.date?.let { add(1f to shortDay(it)) }
+                })
             }
         }
     }

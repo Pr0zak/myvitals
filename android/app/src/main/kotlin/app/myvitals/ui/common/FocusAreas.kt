@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.myvitals.ui.neon.NeonMV
 
 /**
  * "Focus areas" — phone twin of `FocusAreas.vue`.
@@ -79,15 +80,19 @@ private data class Area(
     val route: String, val tone: Color,
 )
 
+// Tones follow the shell's domain palette (see `Vital.accent`) so the tiles
+// agree with the chart you land on when you tap them. They were a separate
+// hand-picked set left over from the classic theme, which put a salmon heart
+// above a cyan heart-rate chart.
 private val AREAS = listOf(
-    Area("heart", "Heart", Icons.Outlined.FavoriteBorder, "vitals/HR", Color(0xFFFF6B81)),
-    Area("sleep", "Sleep", Icons.Outlined.Bedtime, "vitals/SLEEP", Color(0xFFB39DDB)),
-    Area("fitness", "Fitness", Icons.Outlined.DirectionsBike, "activities", Color(0xFF5FD3C4)),
-    Area("strength", "Training", Icons.Outlined.FitnessCenter, "workout/today", Color(0xFF7EE2A8)),
-    Area("vitals", "Vitals", Icons.Outlined.MonitorHeart, "vitals/HRV", Color(0xFF7FC8F8)),
-    Area("habits", "Habits", Icons.Outlined.Timer, "fasting", Color(0xFFE8B661)),
-    Area("trails", "Trails", Icons.Outlined.Landscape, "trails", Color(0xFF7EE2A8)),
-    Area("journal", "Journal", Icons.Outlined.EditNote, "journal", Color(0xFFC7A8FF)),
+    Area("heart", "Heart", Icons.Outlined.FavoriteBorder, "vitals/HR", NeonMV.Cyan),
+    Area("sleep", "Sleep", Icons.Outlined.Bedtime, "vitals/SLEEP", NeonMV.Magenta),
+    Area("fitness", "Fitness", Icons.Outlined.DirectionsBike, "activities", NeonMV.Cyan),
+    Area("strength", "Training", Icons.Outlined.FitnessCenter, "workout/today", NeonMV.Bad),
+    Area("vitals", "Vitals", Icons.Outlined.MonitorHeart, "vitals/HRV", NeonMV.Cyan),
+    Area("habits", "Habits", Icons.Outlined.Timer, "fasting", NeonMV.Amber),
+    Area("trails", "Trails", Icons.Outlined.Landscape, "trails", NeonMV.Lime),
+    Area("journal", "Journal", Icons.Outlined.EditNote, "journal", NeonMV.Muted),
 )
 
 @Composable

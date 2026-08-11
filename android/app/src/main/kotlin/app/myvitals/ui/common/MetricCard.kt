@@ -264,11 +264,31 @@ private fun WeekChart(
             }
         } else {
             val path = Path()
-            var started = false
+            var prev: Offset? = null
+            var prevIdx = -1
             points.forEachIndexed { i, v ->
-                if (v == null) { started = false; return@forEachIndexed }
+                if (v == null) return@forEachIndexed
                 val o = Offset(i * stepX, y(v))
-                if (!started) { path.moveTo(o.x, o.y); started = true } else path.lineTo(o.x, o.y)
+                val p0 = prev
+                if (p0 == null) {
+                    path.moveTo(o.x, o.y)
+                } else if (i - prevIdx > 1) {
+                    // A day with no reading sits between these two. The line
+                    // used to simply stop and restart, which on a 7-day card
+                    // left today as a lone dot floating away from the series —
+                    // it read as a rendering bug rather than a missing day.
+                    // Dash across the gap instead: continuous, still honest.
+                    drawLine(
+                        accent.copy(alpha = 0.35f), p0, o,
+                        strokeWidth = 1.4f * px,
+                        pathEffect = PathEffect.dashPathEffect(
+                            floatArrayOf(2.5f * px, 2.5f * px)),
+                    )
+                    path.moveTo(o.x, o.y)
+                } else {
+                    path.lineTo(o.x, o.y)
+                }
+                prev = o; prevIdx = i
             }
             drawPath(path, accent, style = Stroke(width = 1.6f * px))
             points.forEachIndexed { i, v ->

@@ -109,7 +109,7 @@ fun BpDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
                     tint = tok.onSurface)
             }
-            Icon(Vital.BP.icon, contentDescription = null, tint = Vital.BP.color,
+            Icon(Vital.BP.icon, contentDescription = null, tint = Vital.BP.accent,
                 modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
             Text("Blood pressure", color = tok.onSurface, fontSize = 16.sp,
@@ -172,6 +172,7 @@ private fun BpHero(latest: BpReading) {
 @Composable
 private fun BpChart(pts: List<BpReading>) {
     val tok = LocalAppTokens.current
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
             Text("TREND", color = tok.onSurfaceVariant,
@@ -180,67 +181,67 @@ private fun BpChart(pts: List<BpReading>) {
             val sysColor = Color(0xFFEF4444)
             val diaColor = Color(0xFFEC4899)
             val all = pts.flatMap { listOf(it.sys, it.dia) }
-            val minY = (all.min() - 5).coerceAtLeast(40)
-            val maxY = (all.max() + 5).coerceAtMost(220)
-            val span = (maxY - minY).coerceAtLeast(1)
-            Box(Modifier.fillMaxWidth().height(180.dp)) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val padX = 30.dp.toPx()
-                    val padTop = 6.dp.toPx()
-                    val padBot = 14.dp.toPx()
-                    val plotW = size.width - padX
-                    val plotH = size.height - padTop - padBot
-                    val tStart = pts.first().ms
-                    val tEnd = pts.last().ms.coerceAtLeast(tStart + 1)
-                    val tSpanF = (tEnd - tStart).toFloat()
-                    // Category bands (sys-axis only)
-                    val bands = listOf(
-                        0 to 120 to Color(0xFF22C55E),
-                        120 to 130 to Color(0xFFFBBF24),
-                        130 to 140 to Color(0xFFF97316),
-                        140 to 220 to Color(0xFFEF4444),
+            Canvas(Modifier.fillMaxWidth().height(190.dp)) {
+                val domain = niceDomain(
+                    all.min().toFloat(), all.max().toFloat(), targetTicks = 4,
+                )
+                val g = chartGeom(domain, ChartInsets(
+                    left = 30.dp.toPx(), top = 6.dp.toPx(),
+                    right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+                ))
+                val tStart = pts.first().ms
+                val tEnd = pts.last().ms.coerceAtLeast(tStart + 1)
+                val tSpanF = (tEnd - tStart).toFloat()
+                // Category bands (sys-axis only). These stay semantic
+                // green→red — a BP stage is a clinical fact, not a theme
+                // choice, so they do NOT follow the shell accent.
+                val catBands = listOf(
+                    0 to 120 to Color(0xFF22C55E),
+                    120 to 130 to Color(0xFFFBBF24),
+                    130 to 140 to Color(0xFFF97316),
+                    140 to 220 to Color(0xFFEF4444),
+                )
+                for ((rangePair, col) in catBands) {
+                    val (lo, hi) = rangePair
+                    if (hi <= domain.min || lo >= domain.max) continue
+                    val y0 = g.y(hi.toFloat()); val y1 = g.y(lo.toFloat())
+                    drawRect(
+                        color = col.copy(alpha = 0.07f),
+                        topLeft = Offset(g.left, y0),
+                        size = Size(g.width, (y1 - y0).coerceAtLeast(0f)),
                     )
-                    for ((rangePair, col) in bands) {
-                        val (lo, hi) = rangePair
-                        if (hi <= minY || lo >= maxY) continue
-                        val y0 = padTop + ((maxY - hi.coerceAtMost(maxY)) /
-                            span.toFloat() * plotH)
-                        val y1 = padTop + ((maxY - lo.coerceAtLeast(minY)) /
-                            span.toFloat() * plotH)
-                        drawRect(
-                            color = col.copy(alpha = 0.06f),
-                            topLeft = Offset(padX, y0),
-                            size = Size(plotW, (y1 - y0).coerceAtLeast(0f)),
-                        )
-                    }
-                    // Sys + dia lines
-                    fun drawSeries(getter: (BpReading) -> Int, color: Color) {
-                        val path = androidx.compose.ui.graphics.Path()
-                        for ((i, r) in pts.withIndex()) {
-                            val x = padX + ((r.ms - tStart) / tSpanF) * plotW
-                            val py = padTop + ((maxY - getter(r)) /
-                                span.toFloat() * plotH)
-                            if (i == 0) path.moveTo(x, py) else path.lineTo(x, py)
-                            // De-smear: skip per-point dots once the window is dense.
-                            if (pts.size <= 31) drawCircle(color = color, radius = 3.dp.toPx(),
-                                center = Offset(x, py))
-                        }
-                        drawPath(path = path, color = color, style = Stroke(width = 2.dp.toPx()))
-                    }
-                    drawSeries({ it.sys }, sysColor)
-                    drawSeries({ it.dia }, diaColor)
                 }
-                Column(Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.SpaceBetween) {
-                    Text("$maxY", color = tok.onSurfaceDim, fontSize = 9.sp,
-                        modifier = Modifier.padding(start = 4.dp))
-                    Text("${(minY + maxY) / 2}", color = tok.onSurfaceDim, fontSize = 9.sp,
-                        modifier = Modifier.padding(start = 4.dp))
-                    Text("$minY", color = tok.onSurfaceDim, fontSize = 9.sp,
-                        modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
+                // The y labels used to be a SpaceBetween Column laid over the
+                // Canvas, so they spread across the whole box while the plot
+                // sat inside its padding — the numbers never lined up with
+                // anything. Drawn on the same geometry as the data now.
+                drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface) {
+                    "%.0f".format(it)
                 }
+                fun drawSeries(getter: (BpReading) -> Int, color: Color) {
+                    val path = androidx.compose.ui.graphics.Path()
+                    for ((i, r) in pts.withIndex()) {
+                        val x = g.left + ((r.ms - tStart) / tSpanF) * g.width
+                        val py = g.y(getter(r).toFloat())
+                        if (i == 0) path.moveTo(x, py) else path.lineTo(x, py)
+                        // De-smear: skip per-point dots once the window is dense.
+                        if (pts.size <= 31) drawCircle(color = color, radius = 2.5.dp.toPx(),
+                            center = Offset(x, py))
+                    }
+                    drawPath(path = path, color = color, style = Stroke(
+                        width = 2.dp.toPx(),
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                        join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                    ))
+                }
+                drawSeries({ it.sys }, sysColor)
+                drawSeries({ it.dia }, diaColor)
+                drawXLabels(g, measurer, tok.onSurfaceDim, buildList {
+                    add(0f to shortMdOfMs(pts.first().ms))
+                    if (pts.size >= 5) add(0.5f to shortMdOfMs(pts[pts.size / 2].ms))
+                    add(1f to shortMdOfMs(pts.last().ms))
+                })
             }
-            ChartDateRow(isoDate(pts.first().ms), isoDate(pts.last().ms))
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -344,3 +345,11 @@ private fun bpCategory(sys: Int, dia: Int): Pair<String, Color> {
 private fun formatLocal(ms: Long): String =
     DateTimeFormatter.ofPattern("M/d h:mm a")
         .format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()))
+
+
+/** "M/d" for an epoch-ms x-axis tick. */
+private fun shortMdOfMs(ms: Long): String {
+    val d = java.time.Instant.ofEpochMilli(ms)
+        .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+    return "${d.monthValue}/${d.dayOfMonth}"
+}

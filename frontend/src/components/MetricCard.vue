@@ -46,19 +46,28 @@ const props = withDefaults(defineProps<{
   /** Dotted goal line. */
   target?: number | null;
   chart?: "line" | "bar";
+  /** How many trailing points to plot. Intermittent metrics pass 14. */
+  span?: number;
   accent?: string;
 }>(), {
   unit: "", qualifier: "Today", status: null, statusLabel: null,
   series: () => [], bandLow: null, bandHigh: null, target: null, chart: "line",
+  span: 7,
   accent: "#7ee2a8",
 });
 
 const WEEK = 7;
+/** Intermittently-measured metrics get the FULL 14-day series the server
+ *  already sends. Weight and blood pressure are taken every few weeks, so a
+ *  7-day window is usually empty and the card painted a bare weekday axis
+ *  over blank space — which reads as broken rather than as "measured
+ *  rarely". The server sends 14 points either way; the card was throwing
+ *  half of them away. */
 const W = 132;
 const H = 40;
 
 /** Last 7 points — the reference always shows a week. */
-const week = computed(() => (props.series ?? []).slice(-WEEK));
+const week = computed(() => (props.series ?? []).slice(-(props.span ?? WEEK)));
 
 const hasData = computed(() => props.value !== null && props.value !== undefined);
 
@@ -81,8 +90,12 @@ const chip = computed(() => {
   return { ...base, text: props.statusLabel ?? base.text };
 });
 
+/** At 14 points the weekday letters collide, so label alternate days. */
+const labelEvery = computed(() => (week.value.length > 8 ? 2 : 1));
+
 const days = computed(() =>
-  week.value.map((p) => {
+  week.value.map((p, i) => {
+    if (i % labelEvery.value !== 0 && i !== week.value.length - 1) return "";
     const d = new Date(p.date + "T00:00:00");
     return Number.isNaN(d.getTime())
       ? "" : ["S", "M", "T", "W", "T", "F", "S"][d.getDay()];
@@ -176,11 +189,11 @@ const plottable = computed(
     <div class="chartwrap">
       <svg class="spark" :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none">
         <rect
-          v-if="band" x="0" :y="band.y" :width="W" :height="band.h"
+          v-if="band && plottable" x="0" :y="band.y" :width="W" :height="band.h"
           :fill="accent" opacity="0.10"
         />
         <line
-          v-if="targetY != null" x1="0" :y1="targetY" :x2="W" :y2="targetY"
+          v-if="targetY != null && plottable" x1="0" :y1="targetY" :x2="W" :y2="targetY"
           :stroke="accent" stroke-width="1" stroke-dasharray="2 3"
           opacity="0.55" vector-effect="non-scaling-stroke"
         />
@@ -231,7 +244,7 @@ const plottable = computed(
 }
 .name {
   font-size: .78rem;
-  color: #b9bec6;
+  color: #9aa1a9;
   line-height: 1.25;
   margin-bottom: 6px;
 }

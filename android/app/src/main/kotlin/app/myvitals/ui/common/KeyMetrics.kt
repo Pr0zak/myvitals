@@ -75,9 +75,9 @@ fun KeyMetrics(
             byGroup.keys.filter { it !in groupOrder }
         heads.forEach { head ->
             Text(
-                head, color = Color(0xFFB9BEC6), fontSize = 13.sp,
+                head, color = Color(0xFFE9EDF2), fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
+                modifier = Modifier.padding(top = 18.dp, bottom = 10.dp),
             )
             (byGroup[head] ?: emptyList()).chunked(2).forEach { pair ->
             Row(
@@ -99,14 +99,15 @@ fun KeyMetrics(
                             bandHigh = t.bandHigh,
                             target = if (t.key == "steps") t.target else null,
                             bars = t.key == "steps",
+                            span = if (t.key in INTERMITTENT) 14 else 7,
                             accent = accentFor(t.key),
                             onClick = { routeFor(t.key)?.let(onOpen) },
                         )
                     }
                 }
-                // Odd count: keep the last card half-width rather than
-                // letting it stretch across the row.
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
+                // No Spacer: a lone trailing card fills the row rather
+                // than sitting beside a hole. Three of five rows rendered
+                // with an empty right half before this.
             }
             }
         }
@@ -117,6 +118,11 @@ fun KeyMetrics(
 
 /** Vital enum name → tiles key, so the saved preference (written against
  *  the old badge grid) still means something here. */
+/** Measured every few weeks, not daily — a 7-day window is usually empty
+ *  for these, so they plot the full 14 days the server sends rather than a
+ *  bare axis over blank space. */
+private val INTERMITTENT = setOf("weight", "blood_pressure")
+
 private val VITAL_TO_KEY = mapOf(
     "HR" to "resting_hr", "HRV" to "hrv", "SLEEP" to "sleep_duration",
     "STEPS" to "steps", "WEIGHT" to "weight", "BP" to "blood_pressure",

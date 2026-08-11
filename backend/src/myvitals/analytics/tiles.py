@@ -55,16 +55,26 @@ GOOD, TYPICAL, WATCH = "good", "typical", "watch"
 # Lives here rather than in each client: a grouping map duplicated on two
 # surfaces is one edit away from the two grids disagreeing about where a
 # metric belongs.
+# TWO groups, not four. Four headings over seven tiles is what made the
+# home read as unpolished: both grids pack 2-up WITHIN a group, so every
+# group boundary forces a row break. With Sleep and Daily activity holding
+# one tile each, three of five rows rendered with an empty right half and
+# there was a heading for every 1.75 cards. The reference's density comes
+# from groups of four to six; ours cannot fill a row if it splits seven
+# tiles four ways.
+#
+# The odd tile out is blood pressure, which is also the one that wants the
+# full width — "139/92 mmHg" is the longest value on the screen.
 TILE_GROUPS: dict[str, str] = {
-    "resting_hr": "Heart & recovery",
-    "hrv": "Heart & recovery",
-    "recovery": "Heart & recovery",
-    "sleep_duration": "Sleep",
-    "steps": "Daily activity",
-    "weight": "Body",
-    "blood_pressure": "Body",
+    "hrv": "Sleep & recovery",
+    "resting_hr": "Sleep & recovery",
+    "recovery": "Sleep & recovery",
+    "sleep_duration": "Sleep & recovery",
+    "steps": "Activity & body",
+    "weight": "Activity & body",
+    "blood_pressure": "Activity & body",
 }
-GROUP_ORDER = ["Heart & recovery", "Sleep", "Daily activity", "Body"]
+GROUP_ORDER = ["Sleep & recovery", "Activity & body"]
 
 # Which metrics each Focus area covers, so its "N tracked" subtitle counts
 # something real rather than being decorative.

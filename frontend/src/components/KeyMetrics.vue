@@ -51,6 +51,9 @@ const ACCENT: Record<string, string> = {
 };
 
 const BAR = new Set(["steps"]);
+/** Measured every few weeks, not daily — a 7-day window is usually empty
+ *  for these, so they plot the full 14 days the server sends. */
+const INTERMITTENT = new Set(["weight", "blood_pressure"]);
 
 async function load() {
   const [t, p] = await Promise.allSettled([api.summaryTiles(), api.getProfile()]);
@@ -173,6 +176,7 @@ const shown = computed(() => {
           :band-high="t.band_high"
           :target="t.key === 'steps' ? t.target ?? null : null"
           :chart="BAR.has(t.key) ? 'bar' : 'line'"
+          :span="INTERMITTENT.has(t.key) ? 14 : 7"
           :accent="ACCENT[t.key] ?? '#7ee2a8'"
         />
       </button>
@@ -182,7 +186,7 @@ const shown = computed(() => {
 </template>
 
 <style scoped>
-.km { margin: 18px 0; }
+.km { margin: 18px 0; max-width: 640px; }
 .sechead {
   display: flex; align-items: baseline; justify-content: space-between;
   margin-bottom: 4px;
@@ -193,22 +197,29 @@ const shown = computed(() => {
 }
 .group { margin-bottom: 14px; }
 .ghead {
-  font-size: .84rem; font-weight: 500; color: #b9bec6;
-  margin: 10px 0 8px; letter-spacing: 0;
+  font-size: 1rem; font-weight: 500; color: #e9edf2;
+  margin: 18px 0 10px; letter-spacing: 0;
 }
 .sect {
   font-size: 1.35rem; font-weight: 400; color: #e9edf2;
   margin: 0 0 12px; letter-spacing: -0.2px;
 }
+/* Exactly two columns, matching the phone and the reference. `auto-fill`
+   opened 4-6 columns on a desktop dashboard, so the two surfaces laid the
+   same data out differently and a lone card left a hole several columns
+   wide. minmax(0,1fr) rather than 1fr so the long "139/92 mmHg" value
+   can't push its column past its share. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  /* Each card sizes to its own content. Stretching rows to the tallest card
-     leaves large voids here because the metrics are heterogeneous — some
-     carry a chip and a bar chart, some have no readings in the last week. */
   align-items: start;
 }
+
+/* A lone trailing card spans the row instead of sitting beside a hole.
+   Hole-proof for any tile count — which matters because hiding a tile in
+   Settings changes the count at runtime. */
+.grid > .cell:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .cell {
   padding: 0; border: 0; background: none; cursor: pointer;
   text-align: left; display: block; min-width: 0;

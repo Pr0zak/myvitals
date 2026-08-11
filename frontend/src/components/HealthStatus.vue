@@ -17,6 +17,8 @@ import { api } from "@/api/client";
 import type { ReadinessDetail, VitalTilesResponse } from "@/api/types";
 import MetricCard from "./MetricCard.vue";
 
+defineProps<{ syncNote?: string | null }>();
+
 const readiness = ref<ReadinessDetail | null>(null);
 const roll = ref<VitalTilesResponse["summary"] | null>(null);
 const open = ref(false);
@@ -86,6 +88,9 @@ const ORDER: Array<[string, string]> = [
     <div v-if="rollText" class="roll">
       <span class="rl">Vitals</span>
       <span class="rv">{{ rollText }}</span>
+      <!-- Freshness qualifies these numbers, so it sits with them rather
+           than floating between sections as bare text. -->
+      <span v-if="syncNote" class="sync">{{ syncNote }}</span>
     </div>
 
     <button class="wide" @click="open = !open">
@@ -146,6 +151,7 @@ const ORDER: Array<[string, string]> = [
 }
 .rl { font-size: .8rem; color: #b9bec6; }
 .rv { font-size: 1.05rem; font-weight: 300; color: #e9edf2; }
+.sync { margin-left: auto; font-size: .7rem; color: #6f767f; }
 
 .wide {
   display: block; width: 100%; padding: 0; border: 0;

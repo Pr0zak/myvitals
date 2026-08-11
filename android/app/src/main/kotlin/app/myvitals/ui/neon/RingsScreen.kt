@@ -180,7 +180,15 @@ fun RingsScreen(
         // Health status: the roll-up + Readiness as a MetricCard. The old
         // hero was a third card style stacked above the Focus pills and the
         // Key metrics grid; readiness is a metric and now looks like one.
-        app.myvitals.ui.common.HealthStatus(readiness, rollup)
+        app.myvitals.ui.common.HealthStatus(
+            readiness = readiness,
+            rollup = rollup,
+            // Freshness belongs WITH the numbers it qualifies. As a bare
+            // Text between two sections it read as debug output.
+            syncNote = summary?.lastSync?.let { iso ->
+                syncAgeMinutes(iso)?.let { "Synced ${fmtSyncAge(it)}" }
+            },
+        )
 
 
         // Key metrics — one card vocabulary, mirroring KeyMetrics.vue.
@@ -208,20 +216,6 @@ fun RingsScreen(
         }
 
 
-        // ---- Last-sync freshness — is my data up to date? ----
-        // last_sync rides /summary/today (newest HR sample); no extra fetch.
-        val syncAge = summary?.lastSync?.let { syncAgeMinutes(it) }
-        if (syncAge != null) {
-            Text(
-                "Synced ${fmtSyncAge(syncAge)}",
-                color = if (syncAge > 360) NeonMV.Amber else NeonMV.Muted,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(bottom = 18.dp),
-            )
-        } else {
-            Spacer(Modifier.height(18.dp))
-        }
 
 
         // Narrative cards — what actually happened today, in plain words.

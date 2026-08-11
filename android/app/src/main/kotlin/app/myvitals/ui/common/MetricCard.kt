@@ -65,6 +65,8 @@ fun MetricCard(
     bandHigh: Double? = null,
     target: Double? = null,
     bars: Boolean = false,
+    /** Trailing points to plot; intermittent metrics pass 14. */
+    span: Int = WEEK,
     accent: Color = Color(0xFF7EE2A8),
     onClick: (() -> Unit)? = null,
 ) {
@@ -109,7 +111,7 @@ fun MetricCard(
 
         Spacer(Modifier.height(10.dp))
         WeekChart(
-            points = series.takeLast(WEEK),
+            points = series.takeLast(span),
             accent = accent,
             bandLow = bandLow,
             bandHigh = bandHigh,
@@ -118,7 +120,7 @@ fun MetricCard(
             modifier = Modifier.fillMaxWidth().height(40.dp),
         )
         Spacer(Modifier.height(3.dp))
-        WeekAxis(dayLetters.takeLast(WEEK))
+        WeekAxis(dayLetters.takeLast(span))
 
         if (chip != null) {
             Spacer(Modifier.height(10.dp))
@@ -160,8 +162,11 @@ private fun WeekAxis(days: List<String>) {
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
+        // At 14 points the weekday letters collide; label alternate days.
+        val every = if (days.size > 8) 2 else 1
         days.forEachIndexed { i, d ->
             val today = i == days.size - 1
+            val label = if (i % every == 0 || today) d else ""
             Box(
                 Modifier
                     .then(
@@ -172,7 +177,7 @@ private fun WeekAxis(days: List<String>) {
                     .padding(horizontal = 4.dp),
             ) {
                 Text(
-                    d,
+                    label,
                     color = if (today) Color(0xFF0D0F12) else Color(0xFF6F767F),
                     fontSize = 9.sp,
                     fontWeight = if (today) FontWeight.SemiBold else FontWeight.Normal,
@@ -219,8 +224,11 @@ private fun WeekChart(
         fun y(v: Double) = size.height - ((v - lo) / (hi - lo)).toFloat() * size.height
         val stepX = if (points.size > 1) size.width / (points.size - 1) else size.width
 
-        // Shaded "your normal" band, drawn from the server's bounds.
-        if (bandLow != null && bandHigh != null) {
+        // Only when there is a series to reference — otherwise the band
+        // and the goal line float over an empty chart on a scale nothing
+        // grounds, and always land dead centre.
+        val plottable = real.isNotEmpty()
+        if (plottable && bandLow != null && bandHigh != null) {
             val top = y(bandHigh)
             val bot = y(bandLow)
             drawRect(
@@ -229,7 +237,7 @@ private fun WeekChart(
                 size = Size(size.width, kotlin.math.abs(bot - top)),
             )
         }
-        target?.let { t ->
+        if (plottable) target?.let { t ->
             drawLine(
                 accent.copy(alpha = 0.55f),
                 Offset(0f, y(t)), Offset(size.width, y(t)),

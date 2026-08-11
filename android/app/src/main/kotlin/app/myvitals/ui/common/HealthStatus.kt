@@ -39,6 +39,9 @@ fun HealthStatus(
     readiness: ReadinessDetail?,
     rollup: VitalTilesRollup?,
     modifier: Modifier = Modifier,
+    /** e.g. "Synced 32m ago" — shown beside the roll-up, because freshness
+     *  qualifies these numbers rather than standing on its own. */
+    syncNote: String? = null,
 ) {
     var open by remember { mutableStateOf(false) }
 
@@ -60,7 +63,11 @@ fun HealthStatus(
                     "${rollup.inRange} of ${rollup.judged} in range",
                     color = Color(0xFFE9EDF2), fontSize = 16.sp,
                     fontWeight = FontWeight.Light,
+                    modifier = Modifier.weight(1f),
                 )
+                syncNote?.let {
+                    Text(it, color = Color(0xFF6F767F), fontSize = 11.sp)
+                }
             }
             Spacer(Modifier.height(10.dp))
         }

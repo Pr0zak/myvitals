@@ -31,15 +31,23 @@ fun KeyMetrics(
     tiles: List<VitalTile>,
     onOpen: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** The user's saved tile order, as Vital enum names. The classic home
+     *  has always let people reorder and hide tiles; that preference has to
+     *  survive the redesign rather than be quietly dropped. Empty = the
+     *  catalog order. */
+    order: List<String> = emptyList(),
+    /** Vital enum names the user has hidden. */
+    hidden: Set<String> = emptySet(),
 ) {
-    if (tiles.isEmpty()) return
+    val ordered = applyPreference(tiles, order, hidden)
+    if (ordered.isEmpty()) return
     Column(modifier.fillMaxWidth()) {
         Text(
             "Key metrics", color = Color(0xFFE9EDF2),
             fontSize = 21.sp, fontWeight = FontWeight.Normal,
         )
         Spacer(Modifier.height(12.dp))
-        tiles.chunked(2).forEach { pair ->
+        ordered.chunked(2).forEach { pair ->
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -69,6 +77,27 @@ fun KeyMetrics(
             }
         }
     }
+}
+
+/** Vital enum name → tiles key, so the saved preference (written against
+ *  the old badge grid) still means something here. */
+private val VITAL_TO_KEY = mapOf(
+    "HR" to "resting_hr", "HRV" to "hrv", "SLEEP" to "sleep_duration",
+    "STEPS" to "steps", "WEIGHT" to "weight", "BP" to "blood_pressure",
+    "RECOVERY" to "recovery",
+)
+
+private fun applyPreference(
+    tiles: List<VitalTile>, order: List<String>, hidden: Set<String>,
+): List<VitalTile> {
+    val hiddenKeys = hidden.mapNotNull { VITAL_TO_KEY[it] }.toSet()
+    val visible = tiles.filter { it.key !in hiddenKeys }
+    if (order.isEmpty()) return visible
+    val rank = order.mapNotNull { VITAL_TO_KEY[it] }
+        .withIndex().associate { (i, k) -> k to i }
+    // Anything the saved order doesn't mention tail-appends in catalog
+    // order rather than disappearing.
+    return visible.sortedBy { rank[it.key] ?: Int.MAX_VALUE }
 }
 
 private fun accentFor(key: String): Color = when (key) {

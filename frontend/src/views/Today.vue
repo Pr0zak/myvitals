@@ -19,14 +19,12 @@ import type {
 import "@/styles/today-tokens.css";
 
 import PageHeader from "@/components/today/PageHeader.vue";
-import TrendBadges from "@/components/TrendBadges.vue";
-import ReadinessHero from "@/components/ReadinessHero.vue";
-import Hero from "@/components/today/Hero.vue";
+import HealthStatus from "@/components/HealthStatus.vue";
+import KeyMetrics from "@/components/KeyMetrics.vue";
+import FocusAreas from "@/components/FocusAreas.vue";
 import LiveVitals from "@/components/today/LiveVitals.vue";
 import WatchStatus from "@/components/today/WatchStatus.vue";
 import ActivityRow from "@/components/today/ActivityRow.vue";
-import BodyMetrics from "@/components/today/BodyMetrics.vue";
-import BloodPressure from "@/components/today/BloodPressure.vue";
 import AnnotationLog from "@/components/today/AnnotationLog.vue";
 import GoalsTile from "@/components/today/GoalsTile.vue";
 import LifestyleStrip from "@/components/today/LifestyleStrip.vue";
@@ -594,19 +592,8 @@ async function refreshAnnotations() {
     <!-- Focus: pure-statistics trend badges from /ai/badges. The component
          existed and worked but was imported by no view — the one signal that
          answers "is anything notable today?" was computed and discarded. -->
-    <ReadinessHero />
-    <TrendBadges />
+    <HealthStatus />
 
-    <Hero
-      v-if="summary"
-      :readiness="heroReadiness"
-      :readiness-tone="heroReadinessTone"
-      :verdict="aiVerdict?.content ?? null"
-      :ai-enabled="!!aiCfg?.enabled"
-      :anchors="heroAnchors"
-      :scores="heroScores"
-      :on-verdict-refresh="refreshVerdict"
-    />
 
     <LiveVitals
       :hr="liveHr"
@@ -616,24 +603,7 @@ async function refreshAnnotations() {
 
     <WatchStatus/>
 
-    <div class="two-col body-row">
-      <BodyMetrics
-        :latest-lb="latestLb"
-        :goal-lb="goalLb"
-        :series="weightLbSeries"
-        :delta30-lb="delta30Lb"
-        :from-label="weightFromLabel"
-        :to-label="weightToLabel"
-        :as-of-label="weightAsOfLabel"
-      />
-      <BloodPressure
-        :latest="bpSeries?.latest ?? null"
-        :sys="bpSysSeries"
-        :dia="bpDiaSeries"
-        :as-of-label="bpAsOfLabel"
-        @log="openBp"
-      />
-    </div>
+    <KeyMetrics />
 
     <ActivityRow
       :cardio="cardioCell"
@@ -659,6 +629,8 @@ async function refreshAnnotations() {
       <LifestyleStrip :sober="soberCurrent" :fasting="fastingCurrent"/>
       <GoalsTile :goals="goals"/>
     </div>
+
+    <FocusAreas />
 
     <Footer :version="version"/>
   </div>

@@ -19,6 +19,19 @@ import MetricCard from "./MetricCard.vue";
 const router = useRouter();
 const tiles = ref<VitalTile[]>([]);
 const loaded = ref(false);
+/** The user's saved tile order / hidden set, as Vital enum names. The
+ *  phone has always let people reorder and hide these; honouring the same
+ *  preference here keeps the two grids in the same order, which is the
+ *  whole point of one card vocabulary. */
+const order = ref<string[]>([]);
+const hidden = ref<string[]>([]);
+
+/** Vital enum name → tiles key, so a preference written against the old
+ *  badge grid still means something. */
+const VITAL_TO_KEY: Record<string, string> = {
+  HR: "resting_hr", HRV: "hrv", SLEEP: "sleep_duration", STEPS: "steps",
+  WEIGHT: "weight", BP: "blood_pressure", RECOVERY: "recovery",
+};
 
 const ROUTE: Record<string, string> = {
   hrv: "/hrv", resting_hr: "/heart-rate", steps: "/steps",
@@ -37,13 +50,14 @@ const ACCENT: Record<string, string> = {
 const BAR = new Set(["steps"]);
 
 async function load() {
-  try {
-    tiles.value = (await api.summaryTiles()).tiles ?? [];
-  } catch {
-    tiles.value = [];
-  } finally {
-    loaded.value = true;
+  const [t, p] = await Promise.allSettled([api.summaryTiles(), api.getProfile()]);
+  tiles.value = t.status === "fulfilled" ? (t.value.tiles ?? []) : [];
+  if (p.status === "fulfilled") {
+    const extra = (p.value as { extra?: Record<string, unknown> })?.extra ?? {};
+    order.value = (extra.vitals_order as string[]) ?? [];
+    hidden.value = (extra.vitals_hidden as string[]) ?? [];
   }
+  loaded.value = true;
 }
 onMounted(load);
 
@@ -82,7 +96,20 @@ function displayValue(t: VitalTile): number | string | null {
     ? t.value.toLocaleString() : t.value;
 }
 
-const shown = computed(() => tiles.value);
+const shown = computed(() => {
+  const hide = new Set(hidden.value.map((v) => VITAL_TO_KEY[v]).filter(Boolean));
+  const visible = tiles.value.filter((t) => !hide.has(t.key));
+  if (!order.value.length) return visible;
+  const rank = new Map(
+    order.value.map((v) => VITAL_TO_KEY[v]).filter(Boolean)
+      .map((k, i) => [k, i] as const),
+  );
+  // Anything the saved order doesn't mention tail-appends rather than
+  // disappearing.
+  return [...visible].sort(
+    (a, b) => (rank.get(a.key) ?? 1e9) - (rank.get(b.key) ?? 1e9),
+  );
+});
 </script>
 
 <template>

@@ -156,6 +156,12 @@ fun VitalsScreen(
     var lastWorkout by remember {
         mutableStateOf<app.myvitals.sync.StrengthWorkoutSummary?>(null)
     }
+    var vitalTiles by remember {
+        mutableStateOf<List<app.myvitals.sync.VitalTile>>(emptyList())
+    }
+    var rollup by remember {
+        mutableStateOf<app.myvitals.sync.VitalTilesRollup?>(null)
+    }
     var readiness by remember {
         mutableStateOf<app.myvitals.sync.ReadinessDetail?>(null)
     }
@@ -208,6 +214,9 @@ fun VitalsScreen(
                 // backend without /summary/readiness just renders no hero.
                 val readyD = async(Dispatchers.IO) {
                     runCatching { api.readinessDetail() }.getOrNull()
+                }
+                val tilesD = async(Dispatchers.IO) {
+                    runCatching { api.summaryTiles() }.getOrNull()
                 }
                 val hrD = async(Dispatchers.IO) {
                     runCatching {
@@ -295,6 +304,10 @@ fun VitalsScreen(
                 rows = rowsD.await()
                 today = todayD.await()
                 readiness = readyD.await()
+                tilesD.await()?.let { r ->
+                    if (r.tiles.isNotEmpty()) vitalTiles = r.tiles
+                    rollup = r.summary
+                }
                 hr = hrD.await()
                 weight = weightD.await()
                 bp = bpD.await()
@@ -470,76 +483,46 @@ fun VitalsScreen(
             onRefresh = { scope.launch { loading = true; load() } },
             modifier = Modifier.weight(1f),
         ) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(vertical = 6.dp, horizontal = 0.dp),
+        // Same three sections as the neon home, same cards. The classic
+        // shell rendered a wholly different badge grid; carrying two
+        // vocabularies is what made the app feel like two apps.
+        androidx.compose.foundation.lazy.LazyColumn(
+            contentPadding = PaddingValues(vertical = 6.dp),
         ) {
-            // Readiness leads the screen: it's the one number that summarises
-            // the rest of the grid. Spans both columns — squeezing a score,
-            // a band, a sparkline and four driver rows into a half-width
-            // tile would make all four unreadable.
-            if (readiness != null) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    app.myvitals.ui.neon.ReadinessHero(
-                        detail = readiness,
-                        palette = app.myvitals.ui.neon.HeroPalette.Classic,
-                        onExplain = { formulaOpen = true },
-                        onDriverClick = { d ->
-                            onOpenVitalDetail(
-                                when (d.key) {
-                                    "hrv" -> Vital.HRV
-                                    "rhr" -> Vital.HR
-                                    else -> Vital.SLEEP
-                                },
-                            )
-                        },
-                    )
-                }
+            item {
+                app.myvitals.ui.common.HealthStatus(readiness, rollup)
+                Spacer(Modifier.height(18.dp))
             }
-            items(tiles, key = { it.name }) { v ->
-                when (v) {
-                    // SKIN_TEMP / RECOVERY are drill-down destinations only —
-                    // they're reachable from the neon home tiles but are not
-                    // members of `canonicalOrder`, so they never appear in this
-                    // grid. Branch defensively rather than crash if that changes.
-                    Vital.SKIN_TEMP, Vital.RECOVERY -> Unit
-                    Vital.SOBER -> SoberBadge(sober, onClick = onOpenSober)
-                    Vital.FASTING -> FastingBadge(fasting, nowMs, onClick = onOpenFasting)
-                    Vital.COACH -> CoachBadge(onClick = onOpenCoach)
-                    Vital.JOURNAL -> JournalBadge(onClick = onOpenJournal)
-                    Vital.HR -> HrBadge(hr, today, rows, nowMs,
-                        onClick = { onOpenVitalDetail(v) })
-                    Vital.HRV -> HrvBadge(rows, nowMs, onClick = { onOpenVitalDetail(v) })
-                    Vital.SLEEP -> SleepBadge(today, rows, nowMs, onClick = { onOpenVitalDetail(v) })
-                    Vital.STEPS -> StepsBadge(
-                        todayCount = today?.stepsTotal ?: rows.lastOrNull()?.stepsTotal,
-                        goal = profile?.stepsGoal() ?: 10_000,
-                        lastDate = today?.date ?: rows.lastOrNull()?.date,
-                        nowMs = nowMs,
-                        onClick = { onOpenVitalDetail(v) },
-                    )
-                    Vital.WORKOUT -> WorkoutBadge(lastWorkout, nowMs, onClick = onOpenWorkout)
-                    Vital.ACTIVITY -> ActivityBadge(
-                        lastActivity, nowMs,
-                        onClick = {
-                            lastActivity?.let { onOpenActivity(it.source, it.sourceId) }
-                        },
-                    )
-                    Vital.TRAILS -> TrailsBadge(
-                        open = trailCounts.first,
-                        delayed = trailCounts.second,
-                        closed = trailCounts.third,
-                        onClick = onOpenTrails,
-                    )
-                    Vital.WEIGHT -> WeightBadge(
-                        weight, profile?.weightGoalKg, nowMs,
-                        onClick = { onOpenVitalDetail(v) },
-                    )
-                    Vital.MEASUREMENTS -> MeasurementsBadge(onClick = { onOpenVitalDetail(v) })
-                    Vital.BP -> BpBadge(bp, nowMs, onClick = { onOpenVitalDetail(v) })
-                }
+            item {
+                app.myvitals.ui.common.KeyMetrics(
+                    tiles = vitalTiles,
+                    onOpen = { route ->
+                        val key = route.substringAfter("vitals/", "")
+                        runCatching { Vital.valueOf(key) }.getOrNull()
+                            ?.let(onOpenVitalDetail)
+                    },
+                    // The classic home's reorder / hide preference survives.
+                    order = profile?.extra?.vitalsOrder ?: emptyList(),
+                    hidden = profile?.extra?.vitalsHidden?.toSet() ?: emptySet(),
+                )
+                Spacer(Modifier.height(18.dp))
+            }
+            item {
+                app.myvitals.ui.common.FocusAreas(onOpen = { route ->
+                    when (route) {
+                        "trails" -> onOpenTrails()
+                        "journal" -> onOpenJournal()
+                        "fasting" -> onOpenFasting()
+                        "workout/today" -> onOpenWorkout()
+                        "activities" -> onOpenActivity("", "")
+                        else -> {
+                            val key = route.substringAfter("vitals/", "")
+                            runCatching { Vital.valueOf(key) }.getOrNull()
+                                ?.let(onOpenVitalDetail)
+                        }
+                    }
+                })
+                Spacer(Modifier.height(24.dp))
             }
         }
         }  // end PullToRefreshBox

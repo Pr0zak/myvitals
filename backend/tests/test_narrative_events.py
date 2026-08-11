@@ -27,11 +27,11 @@ def at(hour: int, minute: int = 0) -> datetime:
 
 def test_a_short_afternoon_session_is_a_nap():
     # The real reading that motivated this: 12:45 PM local, 52 minutes.
-    assert classify_session(at(12, 45), 52 * 60, is_longest_of_day=False) == "nap"
+    assert classify_session(at(12, 45), 52 * 60) == "nap"
 
 
 def test_a_full_night_is_never_a_nap():
-    assert classify_session(at(22, 30), 8 * 3600, is_longest_of_day=True) == "sleep"
+    assert classify_session(at(22, 30), 8 * 3600) == "sleep"
 
 
 def test_an_early_morning_session_is_not_a_nap_even_if_short():
@@ -40,16 +40,16 @@ def test_an_early_morning_session_is_not_a_nap_even_if_short():
     Duration alone would call this a nap and tell the user they napped at
     3am, which is both wrong and faintly insulting.
     """
-    assert classify_session(at(3, 0), 90 * 60, is_longest_of_day=False) == "sleep"
+    assert classify_session(at(3, 0), 90 * 60) == "sleep"
 
 
-def test_the_days_longest_session_is_always_the_night():
-    """A badly-slept 2-hour night is still the night.
-
-    If the user only managed 2 hours starting at noon, calling it a nap
-    would leave the day with no sleep recorded at all.
-    """
-    assert classify_session(at(12, 0), 2 * 3600, is_longest_of_day=True) == "sleep"
+def test_a_lone_midday_session_is_still_a_nap():
+    """Regression: the first cut forced the day's longest session to be a
+    night, so a day whose ONLY sleep was a 52-minute lunchtime nap rendered
+    "Sleep tracked · you slept 52 min" — asserting the nap was the night.
+    If the only sleep on record is a midday nap, the night is missing."""
+    assert classify_session(at(12, 45), 52 * 60) == "nap"
+    assert classify_session(at(12, 0), 2 * 3600) == "nap"
 
 
 @pytest.mark.parametrize("hour,expected", [
@@ -59,13 +59,11 @@ def test_the_days_longest_session_is_always_the_night():
     (20, "sleep"),   # boundary: evening reads as night
 ])
 def test_nap_window_boundaries(hour, expected):
-    assert classify_session(at(hour), 40 * 60, is_longest_of_day=False) == expected
+    assert classify_session(at(hour), 40 * 60) == expected
 
 
 def test_a_session_at_the_duration_threshold_is_a_night():
-    assert classify_session(
-        at(13), NAP_MAX_SECONDS, is_longest_of_day=False,
-    ) == "sleep"
+    assert classify_session(at(13), NAP_MAX_SECONDS) == "sleep"
 
 
 # ── stage overlap clamping ────────────────────────────────────────────

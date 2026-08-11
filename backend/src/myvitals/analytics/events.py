@@ -85,19 +85,22 @@ def clamp_stage_durations(
     return out
 
 
-def classify_session(
-    start_local: datetime, duration_s: int, is_longest_of_day: bool,
-) -> str:
-    """`nap` or `sleep`.
+def classify_session(start_local: datetime, duration_s: int) -> str:
+    """`nap` or `sleep`, from duration and local start hour.
 
-    Duration alone is not enough — a short, broken night is still a night —
-    so a session only becomes a nap when it is BOTH short and started
-    during waking hours, and is not the day's longest session. That last
-    clause is what stops a badly-slept 2-hour night from being labelled a
-    nap when it is the only sleep the user got.
+    Duration alone is not enough — a fragmented 90-minute night is still a
+    night — so a session is a nap only when it is BOTH short and started
+    during waking hours. The start-hour test is what protects the broken
+    night: it begins at 3 AM, outside the nap window.
+
+    An earlier version also forced the day's LONGEST session to be a night,
+    meaning to protect a badly-slept short night. Live data showed that
+    backfiring immediately: on a day whose only recorded sleep was 52
+    minutes at 12:45 PM, the card read "Sleep tracked · you slept 52 min",
+    asserting that lunchtime nap was the user's night. If the only sleep on
+    record is a midday nap, the truthful reading is that the night is
+    missing — not that the nap was it.
     """
-    if is_longest_of_day:
-        return "sleep"
     if duration_s >= NAP_MAX_SECONDS:
         return "sleep"
     if NAP_START_HOUR_MIN <= start_local.hour < NAP_START_HOUR_MAX:
@@ -129,18 +132,13 @@ async def day_events(
     if not sessions:
         return []
 
-    # Which session is the day's longest decides nap-vs-night below.
-    longest = max(
-        sessions, key=lambda s: (s.end_at - s.start_at).total_seconds(),
-    )
-
     events: list[dict[str, Any]] = []
     for s in sessions:
         duration_s = int((s.end_at - s.start_at).total_seconds())
         if duration_s <= 0:
             continue
         start_local = s.start_at.astimezone(tzinfo)
-        kind = classify_session(start_local, duration_s, s is longest)
+        kind = classify_session(start_local, duration_s)
 
         stage_rows = (await db.execute(
             select(

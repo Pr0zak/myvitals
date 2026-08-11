@@ -290,7 +290,13 @@ private fun JournalRow(a: Annotation, neon: Boolean) {
         }.getOrDefault("—")
     }
     val summary = remember(a.payload) {
-        a.payload.entries.joinToString(" · ") { (_, v) -> v.toString() }
+        // A JSON payload value can be null, and Kotlin's platform type for a
+        // Moshi-parsed map does not enforce otherwise — `v.toString()` on a
+        // null NPE'd and took the whole screen down. Skip nulls rather than
+        // printing "null" at the user.
+        a.payload.entries
+            .mapNotNull { (_, v) -> v?.toString()?.takeIf { it.isNotBlank() } }
+            .joinToString(" · ")
             .ifBlank { "—" }
     }
     val icon: ImageVector = when (a.type) {

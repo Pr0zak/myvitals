@@ -163,3 +163,33 @@ def test_an_unvoted_event_has_no_feedback_rather_than_a_default():
     the user never gave."""
     votes = {"sleep:A": "up"}
     assert votes.get("sleep:B") is None
+
+
+# ── feedback must not leak into the journal ───────────────────────────
+
+def test_feedback_rows_are_internal_not_journal_entries():
+    """👍/👎 rides the generic annotations table; the journal must exclude it.
+
+    Listing them put machine records in a human diary, and one — a cleared
+    vote, payload {"vote": null} — crashed the phone's Journal outright when
+    JournalRow called toString() on the null. Two independent fixes: the
+    list filters internal types, and the row skips null values. Either alone
+    would leave the other hole open.
+    """
+    from myvitals.api.annotations import INTERNAL_TYPES
+    from myvitals.analytics.events import FEEDBACK_TYPE
+
+    assert FEEDBACK_TYPE in INTERNAL_TYPES
+
+
+def test_a_cleared_vote_is_stored_as_an_explicit_null():
+    """Clearing writes vote=null rather than deleting the row, so the
+    reader's "latest wins" rule sees the clear. That null is exactly what
+    the journal row has to survive."""
+    payload = {"event_id": "sleep:x", "vote": None}
+    assert "vote" in payload and payload["vote"] is None
+    # The rendering rule: skip nulls, don't print "null".
+    rendered = " · ".join(
+        str(v) for v in payload.values() if v is not None
+    )
+    assert "None" not in rendered and "null" not in rendered

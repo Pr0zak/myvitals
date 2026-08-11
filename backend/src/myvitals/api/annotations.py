@@ -58,6 +58,11 @@ async def create_annotation(
     )
 
 
+# Annotation types written by the app for its own bookkeeping rather than
+# by the user. They are not journal entries and must not appear as such.
+INTERNAL_TYPES = ("event_feedback",)
+
+
 @router.get("/journal", response_model=list[AnnotationOut])
 async def list_annotations(
     since: datetime | None = Query(None),
@@ -77,6 +82,14 @@ async def list_annotations(
         stmt = stmt.where(models.Annotation.ts <= until)
     if type:
         stmt = stmt.where(models.Annotation.type == type)
+    else:
+        # The annotations table is a general key/value store, not only the
+        # user's journal. `event_feedback` rows are internal 👍/👎 on
+        # narrative cards; listing them put machine records in a human diary
+        # — and one of them (a cleared vote, payload {"vote": null}) crashed
+        # the phone's Journal outright. Explicitly asking for the type still
+        # returns them, so nothing is hidden from a deliberate query.
+        stmt = stmt.where(models.Annotation.type.notin_(INTERNAL_TYPES))
 
     result = await db.execute(stmt)
     return [

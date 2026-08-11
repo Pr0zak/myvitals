@@ -400,6 +400,29 @@ async def summary_tiles(
     }
 
 
+@router.get("/events")
+async def summary_events(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Plain-language cards for today's sleep, with hypnogram segments.
+
+    Deterministic and free — no LLM. See analytics/events.py for why, and
+    for the stage-overlap clamping the raw rows need.
+    """
+    from ..analytics.events import day_events
+
+    try:
+        from zoneinfo import ZoneInfo
+        local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        local_tz = timezone.utc
+    day = datetime.now(local_tz).date()
+    return {
+        "date": day.isoformat(),
+        "events": await day_events(db, day, local_tz),
+    }
+
+
 @router.get("/range", response_model=list[TodaySummary])
 async def summary_range(
     since: date = Query(...),

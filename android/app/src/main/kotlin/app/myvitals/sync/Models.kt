@@ -873,6 +873,45 @@ data class VitalTilesResponse(
     val summary: VitalTilesRollup? = null,
 )
 
+// ── Narrative event cards (/summary/events) ──────────────────────
+//
+// Wording and nap-vs-night classification are the SERVER's — see
+// analytics/events.py — so both clients say the same sentence.
+
+@JsonClass(generateAdapter = true)
+data class NarrativeSegment(
+    val start: String,
+    val stage: String,
+    @Json(name = "duration_s") val durationS: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class NarrativeStageTotal(
+    val stage: String,
+    @Json(name = "duration_s") val durationS: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class NarrativeEvent(
+    val id: String,
+    /** nap | sleep */
+    val kind: String,
+    val headline: String,
+    val detail: String,
+    val start: String,
+    val end: String,
+    @Json(name = "duration_s") val durationS: Int = 0,
+    val title: String? = null,
+    val stages: List<NarrativeStageTotal> = emptyList(),
+    val segments: List<NarrativeSegment> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class NarrativeEventsResponse(
+    val date: String,
+    val events: List<NarrativeEvent> = emptyList(),
+)
+
 // ── Trend badges (/ai/badges — pure statistics, no LLM) ───────────
 
 @JsonClass(generateAdapter = true)

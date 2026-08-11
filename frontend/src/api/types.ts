@@ -374,3 +374,27 @@ export interface VitalTilesResponse {
   /** Health-status roll-up, counted server-side so the surfaces agree. */
   summary?: VitalTilesRollup;
 }
+
+/** One card from GET /summary/events. Wording and nap-vs-night
+ *  classification are the server's — see analytics/events.py. */
+export interface NarrativeSegment {
+  start: string;
+  stage: string;
+  duration_s: number;
+}
+export interface NarrativeEvent {
+  id: string;
+  kind: "nap" | "sleep";
+  headline: string;
+  detail: string;
+  start: string;
+  end: string;
+  duration_s: number;
+  title: string | null;
+  stages: Array<{ stage: string; duration_s: number }>;
+  segments: NarrativeSegment[];
+}
+export interface NarrativeEventsResponse {
+  date: string;
+  events: NarrativeEvent[];
+}

@@ -156,6 +156,9 @@ fun VitalsScreen(
     var lastWorkout by remember {
         mutableStateOf<app.myvitals.sync.StrengthWorkoutSummary?>(null)
     }
+    var narrativeEvents by remember {
+        mutableStateOf<List<app.myvitals.sync.NarrativeEvent>>(emptyList())
+    }
     var vitalTiles by remember {
         mutableStateOf<List<app.myvitals.sync.VitalTile>>(emptyList())
     }
@@ -217,6 +220,9 @@ fun VitalsScreen(
                 }
                 val tilesD = async(Dispatchers.IO) {
                     runCatching { api.summaryTiles() }.getOrNull()
+                }
+                val eventsD = async(Dispatchers.IO) {
+                    runCatching { api.summaryEvents().events }.getOrDefault(emptyList())
                 }
                 val hrD = async(Dispatchers.IO) {
                     runCatching {
@@ -304,6 +310,7 @@ fun VitalsScreen(
                 rows = rowsD.await()
                 today = todayD.await()
                 readiness = readyD.await()
+                narrativeEvents = eventsD.await()
                 tilesD.await()?.let { r ->
                     if (r.tiles.isNotEmpty()) vitalTiles = r.tiles
                     rollup = r.summary
@@ -505,6 +512,10 @@ fun VitalsScreen(
                     order = profile?.extra?.vitalsOrder ?: emptyList(),
                     hidden = profile?.extra?.vitalsHidden?.toSet() ?: emptySet(),
                 )
+                Spacer(Modifier.height(18.dp))
+            }
+            item {
+                app.myvitals.ui.common.NarrativeCards(narrativeEvents)
                 Spacer(Modifier.height(18.dp))
             }
             item {

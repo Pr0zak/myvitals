@@ -71,6 +71,14 @@ function chipLabel(t: VitalTile): string | null {
       : t.status === "typical" ? "Near goal" : "Goal not met";
   }
   if (t.key === "blood_pressure") return t.status_reason?.split(" range")[0] ?? null;
+  // A 0-100 composite has no "range" to be in — "In range" on a recovery
+  // of 35 reads as reassurance the number does not support. The server
+  // already words these ("recovered" / "partially recovered" /
+  // "under-recovered"); use its wording.
+  if (t.key === "recovery") {
+    const r = t.status_reason;
+    return r ? r[0].toUpperCase() + r.slice(1) : null;
+  }
   return t.status === "watch" ? "Out of range" : "In range";
 }
 

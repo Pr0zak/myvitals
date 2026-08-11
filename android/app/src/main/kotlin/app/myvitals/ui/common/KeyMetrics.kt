@@ -131,6 +131,10 @@ private fun chipLabel(t: VitalTile): String? = when {
         else -> "Goal not met"
     }
     t.key == "blood_pressure" -> t.statusReason?.substringBefore(" range")
+    // A 0-100 composite has no "range" to be in — "In range" on a recovery
+    // of 35 reads as reassurance the number does not support. Use the
+    // server's wording: recovered / partially recovered / under-recovered.
+    t.key == "recovery" -> t.statusReason?.replaceFirstChar { it.uppercase() }
     t.status == "watch" -> "Out of range"
     else -> "In range"
 }

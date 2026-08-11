@@ -21,6 +21,7 @@ import "@/styles/today-tokens.css";
 import PageHeader from "@/components/today/PageHeader.vue";
 import HealthStatus from "@/components/HealthStatus.vue";
 import KeyMetrics from "@/components/KeyMetrics.vue";
+import NarrativeCards from "@/components/NarrativeCards.vue";
 import FocusAreas from "@/components/FocusAreas.vue";
 import LiveVitals from "@/components/today/LiveVitals.vue";
 import WatchStatus from "@/components/today/WatchStatus.vue";
@@ -604,6 +605,8 @@ async function refreshAnnotations() {
     <WatchStatus/>
 
     <KeyMetrics />
+
+    <NarrativeCards />
 
     <ActivityRow
       :cardio="cardioCell"

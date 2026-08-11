@@ -332,6 +332,10 @@ interface BackendApi {
     @GET("summary/tiles")
     suspend fun summaryTiles(): VitalTilesResponse
 
+    /** Narrative cards for today (sleep + naps) with hypnogram segments. */
+    @GET("summary/events")
+    suspend fun summaryEvents(): NarrativeEventsResponse
+
     /** Pure-statistics trend badges for the Today header. No LLM, no cost. */
     @GET("ai/badges")
     suspend fun aiBadges(): List<TrendBadge>

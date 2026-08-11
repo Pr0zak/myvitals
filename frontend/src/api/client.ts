@@ -364,6 +364,14 @@ export const api = {
 
   /** Per-tile value, 14-day series and verdict. The judgement of what
    *  counts as good is the server's — see analytics/tiles.py. */
+  /** Narrative cards for today (sleep + naps), with hypnogram segments. */
+  summaryEvents(): Promise<import("./types").NarrativeEventsResponse> {
+    return coalesce("/summary/events", async () => {
+      const { data } = await http.get("/summary/events");
+      return data;
+    });
+  },
+
   summaryTiles(): Promise<import("./types").VitalTilesResponse> {
     return coalesce("/summary/tiles", async () => {
       const { data } = await http.get("/summary/tiles");

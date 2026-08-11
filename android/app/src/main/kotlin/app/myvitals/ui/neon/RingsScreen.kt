@@ -73,6 +73,9 @@ fun RingsScreen(
     var rollup by remember {
         mutableStateOf<app.myvitals.sync.VitalTilesRollup?>(null)
     }
+    var narrativeEvents by remember {
+        mutableStateOf<List<app.myvitals.sync.NarrativeEvent>>(emptyList())
+    }
     var vitalTiles by remember {
         mutableStateOf<List<app.myvitals.sync.VitalTile>>(emptyList())
     }
@@ -111,6 +114,9 @@ fun RingsScreen(
                 val tilesD = async(Dispatchers.IO) {
                     runCatching { api.summaryTiles() }.getOrNull()
                 }
+                val eventsD = async(Dispatchers.IO) {
+                    runCatching { api.summaryEvents().events }.getOrDefault(emptyList())
+                }
                 val fastingD = async(Dispatchers.IO) {
                     runCatching {
                         val r = api.fastingCurrent()
@@ -130,6 +136,7 @@ fun RingsScreen(
                     sober = soberD.await()
                     fasting = fastingD.await()
                     readyD.await()?.let { readiness = it }
+                    narrativeEvents = eventsD.await()
                     tilesD.await()?.let { r ->
                         if (r.tiles.isNotEmpty()) vitalTiles = r.tiles
                         rollup = r.summary
@@ -209,6 +216,9 @@ fun RingsScreen(
             Spacer(Modifier.height(18.dp))
         }
 
+
+        // Narrative cards — what actually happened today, in plain words.
+        app.myvitals.ui.common.NarrativeCards(narrativeEvents)
 
         // Focus areas — navigation, not a dashboard. Replaces the pill list.
         app.myvitals.ui.common.FocusAreas(onOpen)

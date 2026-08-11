@@ -2,6 +2,7 @@
 import HealthStatus from "@/components/HealthStatus.vue";
 import FocusAreas from "@/components/FocusAreas.vue";
 import KeyMetrics from "@/components/KeyMetrics.vue";
+import NarrativeCards from "@/components/NarrativeCards.vue";
 /**
  * Rings home — first screen of the "Vitality Neon" redesign (Direction D).
  * Glanceable goal rings + streak pills wired to the real backend. Tapping a
@@ -89,6 +90,8 @@ function fmt(n: number | null, d = 0): string {
 
     <!-- Streaks & goals -->
     <KeyMetrics />
+
+    <NarrativeCards />
 
     <FocusAreas />
 

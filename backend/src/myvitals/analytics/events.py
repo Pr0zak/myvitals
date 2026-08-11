@@ -51,6 +51,19 @@ def _fmt_clock(dt_local: datetime) -> str:
     return dt_local.strftime("%I:%M %p").lstrip("0")
 
 
+def _score_word(score: float) -> str:
+    """The reference labels a sleep score rather than leaving it bare.
+
+    Thresholds match the app's own sleep scoring, not a new scale — a
+    second set of cut-offs would be one more thing to keep in agreement.
+    """
+    if score >= 80:
+        return "Good"
+    if score >= 60:
+        return "Fair"
+    return "Poor"
+
+
 def _fmt_duration(seconds: int) -> str:
     mins = int(round(seconds / 60))
     if mins < 60:
@@ -160,6 +173,14 @@ async def day_events(
         return []
 
     votes = await _feedback_by_event(db)
+
+    # Sleep score + goal, for the stat sub-cards the reference shows above
+    # the hypnogram. A nap has neither — it is not scored and there is no
+    # goal for it — so those cards are simply absent rather than showing a
+    # zero, which would read as a bad night.
+    summary_row = await db.get(models.DailySummary, day)
+    profile = await db.get(models.UserProfile, 1)
+    sleep_target_h = float(getattr(profile, "sleep_target_h", None) or 8.0)
     events: list[dict[str, Any]] = []
     for s in sessions:
         duration_s = int((s.end_at - s.start_at).total_seconds())
@@ -202,8 +223,29 @@ async def day_events(
             detail = f"You slept {dur_text}, starting at {clock}"
 
         event_id = f"sleep:{s.start_at.isoformat()}"
+        stats: list[dict[str, Any]] = []
+        if kind == "sleep":
+            score = getattr(summary_row, "sleep_score", None)
+            if score is not None:
+                stats.append({
+                    "label": "Sleep score",
+                    "value": f"{score:.0f}",
+                    "chip": _score_word(score),
+                    "tone": "good" if score >= 80 else (
+                        "typical" if score >= 60 else "watch"),
+                })
+            hours = duration_s / 3600.0
+            stats.append({
+                "label": "Sleep duration",
+                "value": _fmt_duration(duration_s),
+                "chip": "Goal met" if hours >= sleep_target_h - 0.5
+                    else "Goal not met",
+                "tone": "good" if hours >= sleep_target_h - 0.5 else "watch",
+            })
+
         events.append({
             "id": event_id,
+            "stats": stats,
             # null until the user votes; the card shows neither thumb as
             # selected rather than defaulting to approval.
             "feedback": votes.get(event_id),

@@ -2,15 +2,21 @@
 /**
  * Narrative event cards — web twin of `ui/common/NarrativeCards.kt`.
  *
- * "We tracked a nap · It looks like you took a nap at 12:45 PM for 52 min",
- * with the hypnogram underneath: one lane per stage, each segment placed by
- * WHEN it happened rather than as a summed bar. A stacked total would say
- * "26 min light" without showing that it came in two blocks either side of
- * the deep phase, which is the part worth seeing.
+ * Structured after the reference:
+ *   ☾ 6:29 AM              icon + timestamp, not a pill
+ *   Sleep tracked          headline
+ *   [Sleep score 88 Good] [Sleep duration 8h 28m Goal met]
+ *                          nested stat cards, each with its own chip
+ *   hypnogram              one lane per stage, CONNECTED
+ *   👍 👎              ⋮   feedback left, overflow right
  *
- * All wording and classification come from `/summary/events` — the phrasing
- * is server-side so both clients say the same sentence, and the nap-vs-night
- * rule is a judgement that belongs with the data (see analytics/events.py).
+ * The hypnogram is a connected stepped ribbon rather than isolated bars:
+ * each segment is a rounded tab rising from its lane, joined to its
+ * neighbours by a hairline so the night reads as one continuous descent
+ * and climb. Disconnected bars make sleep look like unrelated events.
+ *
+ * All wording, classification and the stat chips come from
+ * `/summary/events` — see analytics/events.py.
  */
 import { computed, onMounted, ref } from "vue";
 import { api } from "@/api/client";
@@ -18,29 +24,14 @@ import type { NarrativeEvent } from "@/api/types";
 
 const events = ref<NarrativeEvent[]>([]);
 const loaded = ref(false);
+const menuFor = ref<string | null>(null);
 
-/** Toggling an active vote clears it — tapping 👍 twice should undo, not
- *  re-affirm. Optimistic: the card reflects the tap immediately and the
- *  write follows; a failed write reverts rather than leaving the UI
- *  claiming a vote the server never took. */
-async function vote(e: NarrativeEvent, v: "up" | "down") {
-  const prev = e.feedback ?? null;
-  const next = prev === v ? null : v;
-  e.feedback = next;
-  try {
-    await api.eventFeedback(e.id, next);
-  } catch {
-    e.feedback = prev;
-  }
-}
-
-/** Lane order top-to-bottom, matching the reference: lightest sleep first. */
 const LANES = ["awake", "rem", "light", "deep"] as const;
 const LANE_LABEL: Record<string, string> = {
   awake: "Total awake", rem: "REM", light: "Light", deep: "Deep",
 };
 const LANE_TONE: Record<string, string> = {
-  awake: "#f48fb1", rem: "#4dd0e1", light: "#7aa7ff", deep: "#9575cd",
+  awake: "#f48fb1", rem: "#8fd8ff", light: "#7aa7ff", deep: "#a97bdb",
 };
 
 async function load() {
@@ -53,6 +44,18 @@ async function load() {
   }
 }
 onMounted(load);
+
+/** Toggling an active vote clears it — tapping 👍 twice should undo. */
+async function vote(e: NarrativeEvent, v: "up" | "down") {
+  const prev = e.feedback ?? null;
+  const next = prev === v ? null : v;
+  e.feedback = next;
+  try {
+    await api.eventFeedback(e.id, next);
+  } catch {
+    e.feedback = prev;
+  }
+}
 
 function mins(seconds: number): string {
   const m = Math.round(seconds / 60);
@@ -67,7 +70,46 @@ function clock(iso: string): string {
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-/** Segments for one lane, positioned as percentages across the session. */
+/** The midpoint label the reference puts between start and end. */
+function midClock(e: NarrativeEvent): string {
+  const a = new Date(e.start).getTime();
+  const b = new Date(e.end).getTime();
+  return clock(new Date((a + b) / 2).toISOString());
+}
+
+/** Header timestamp: the moment the session ENDED, which is when the card
+ *  would have appeared. Days other than today are named. */
+function stamp(e: NarrativeEvent): string {
+  const d = new Date(e.end);
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const yesterday = new Date(today.getTime() - 86_400_000).toDateString()
+    === d.toDateString();
+  const t = clock(e.end);
+  if (sameDay) return t;
+  if (yesterday) return `Yesterday, ${t}`;
+  return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${t}`;
+}
+
+/** True once we cross from today's cards into an earlier day, so a
+ *  separator can be drawn — the reference's "〰 Yesterday 〰" rule. */
+function dayBreakBefore(i: number): string | null {
+  if (i === 0) return null;
+  const prev = new Date(events.value[i - 1].end).toDateString();
+  const cur = new Date(events.value[i].end).toDateString();
+  if (prev === cur) return null;
+  const today = new Date().toDateString();
+  const yest = new Date(Date.now() - 86_400_000).toDateString();
+  if (cur === today) return "Today";
+  if (cur === yest) return "Yesterday";
+  return new Date(events.value[i].end)
+    .toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+const LANE_H = 26;
+
+/** Geometry for one lane: rounded tabs positioned by time, plus the
+ *  hairline joins to the neighbouring stage. */
 function lane(e: NarrativeEvent, stage: string) {
   const t0 = new Date(e.start).getTime();
   const span = new Date(e.end).getTime() - t0;
@@ -81,14 +123,11 @@ function lane(e: NarrativeEvent, stage: string) {
         left: `${Math.max(0, Math.min(100, left))}%`,
         // Floor the width so a 30-second stage stays visible instead of
         // collapsing to an invisible sliver.
-        width: `${Math.max(1.5, Math.min(100 - left, width))}%`,
+        width: `${Math.max(1.2, Math.min(100 - left, width))}%`,
       };
     });
 }
 
-/** Only lanes the session actually has. Rendering an empty "REM · 0 min"
- *  lane is honest but the reference shows it, so keep known-zero lanes and
- *  drop only stages the data never mentions. */
 function lanesFor(e: NarrativeEvent) {
   const seen = new Set(e.stages.map((s) => s.stage));
   return LANES.filter((l) => seen.has(l) || l === "awake").map((l) => ({
@@ -100,55 +139,117 @@ function lanesFor(e: NarrativeEvent) {
   }));
 }
 
+/** Vertical hairlines at each stage transition, so the night reads as one
+ *  continuous descent and climb rather than unrelated bars. The reference
+ *  draws these joins between lanes; without them a hypnogram looks like a
+ *  scatter of events. */
+function transitions(e: NarrativeEvent): string[] {
+  const t0 = new Date(e.start).getTime();
+  const span = new Date(e.end).getTime() - t0;
+  if (span <= 0) return [];
+  return [...e.segments]
+    .sort((a, b) => a.start.localeCompare(b.start))
+    .slice(1)
+    .map((sg) => `${((new Date(sg.start).getTime() - t0) / span) * 100}%`);
+}
+
 const shown = computed(() => events.value);
 </script>
 
 <template>
   <section v-if="loaded && shown.length" class="nc">
-    <article v-for="e in shown" :key="e.id" class="card">
-      <div class="pill" :class="e.kind">
-        {{ e.kind === "nap" ? "Nap" : "Sleep" }}
+    <template v-for="(e, i) in shown" :key="e.id">
+      <div v-if="dayBreakBefore(i)" class="daybreak">
+        <span class="wave" />
+        <span class="dlabel">{{ dayBreakBefore(i) }}</span>
+        <span class="wave" />
       </div>
 
-      <h3 class="head">{{ e.headline }}</h3>
-      <p class="detail">{{ e.detail }}</p>
+      <article class="card">
+        <div class="stamp">
+          <svg class="moon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />
+          </svg>
+          <span>{{ stamp(e) }}</span>
+        </div>
 
-      <div class="hypno">
-        <div v-for="l in lanesFor(e)" :key="l.stage" class="lane">
-          <div class="llabel">
-            {{ l.label }} <span class="ldur">· {{ mins(l.total) }}</span>
-          </div>
-          <div class="track">
-            <span v-for="(b, i) in l.bars" :key="i" class="seg"
-                  :style="{ left: b.left, width: b.width, background: l.tone }" />
+        <h3 class="head">{{ e.headline }}</h3>
+        <p v-if="e.kind === 'nap'" class="detail">{{ e.detail }}</p>
+
+        <!-- Nested stat cards. A nap has none: it isn't scored and has no
+             goal, and a zero there would read as a bad night. -->
+        <div v-if="e.stats?.length" class="stats">
+          <div v-for="s in e.stats" :key="s.label" class="stat">
+            <div class="slabel">{{ s.label }}</div>
+            <div class="svalue num">{{ s.value }}</div>
+            <span class="schip" :class="s.tone">{{ s.chip }}</span>
           </div>
         </div>
 
-        <div class="axis">
-          <span>{{ clock(e.start) }}</span>
-          <span>{{ clock(e.end) }}</span>
-        </div>
-      </div>
+        <div class="hypno">
+          <div class="lanes">
+            <!-- Joins sit behind the lanes so a tab always reads on top. -->
+            <span
+              v-for="(x, ti) in transitions(e)" :key="'t' + ti"
+              class="join" :style="{ left: x }"
+            />
+          <div v-for="l in lanesFor(e)" :key="l.stage" class="lane">
+            <div class="llabel">
+              {{ l.label }} <span class="ldur">• {{ mins(l.total) }}</span>
+            </div>
+            <div class="track">
+              <span
+                v-for="(b, bi) in l.bars" :key="bi" class="seg"
+                :style="{ left: b.left, width: b.width, background: l.tone }"
+              />
+            </div>
+          </div>
+          </div>
 
-      <div class="feedback">
-        <button class="thumb" :class="{ on: e.feedback === 'up' }"
-                :aria-pressed="e.feedback === 'up'"
-                aria-label="This looks right" @click="vote(e, 'up')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M7 22H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3zM7 12l4.5-8a2.5 2.5 0 0 1 3.4 3.3L13.5 10H19a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 17.8 21H7z" />
-          </svg>
-        </button>
-        <button class="thumb" :class="{ on: e.feedback === 'down' }"
-                :aria-pressed="e.feedback === 'down'"
-                aria-label="This looks wrong" @click="vote(e, 'down')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M17 2h3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-3zM17 12l-4.5 8a2.5 2.5 0 0 1-3.4-3.3L10.5 14H5a2 2 0 0 1-2-2.3l1.2-7A2 2 0 0 1 6.2 3H17z" />
-          </svg>
-        </button>
-      </div>
-    </article>
+          <div class="axis">
+            <span>{{ clock(e.start) }}</span>
+            <span>{{ midClock(e) }}</span>
+            <span>{{ clock(e.end) }}</span>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button
+            class="thumb" :class="{ on: e.feedback === 'up' }"
+            :aria-pressed="e.feedback === 'up'"
+            aria-label="This looks right" @click="vote(e, 'up')"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M7 22H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3zM7 12l4.5-8a2.5 2.5 0 0 1 3.4 3.3L13.5 10H19a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 17.8 21H7z" />
+            </svg>
+          </button>
+          <button
+            class="thumb" :class="{ on: e.feedback === 'down' }"
+            :aria-pressed="e.feedback === 'down'"
+            aria-label="This looks wrong" @click="vote(e, 'down')"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 2h3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-3zM17 12l-4.5 8a2.5 2.5 0 0 1-3.4-3.3L10.5 14H5a2 2 0 0 1-2-2.3l1.2-7A2 2 0 0 1 6.2 3H17z" />
+            </svg>
+          </button>
+
+          <div class="spacer" />
+
+          <button
+            class="more" aria-label="More"
+            @click="menuFor = menuFor === e.id ? null : e.id"
+          >⋮</button>
+        </div>
+
+        <!-- Only actions that actually exist. A menu that opens onto
+             nothing is worse than no menu. -->
+        <div v-if="menuFor === e.id" class="menu">
+          <RouterLink class="mitem" to="/sleep">Open sleep detail</RouterLink>
+        </div>
+      </article>
+    </template>
   </section>
 </template>
 
@@ -156,40 +257,86 @@ const shown = computed(() => events.value);
 .nc { margin: 18px 0; display: flex; flex-direction: column; gap: 12px; }
 .card { background: #1b1c1f; border-radius: 20px; padding: 16px; }
 
-.pill {
-  display: inline-block; font-size: .68rem; font-weight: 500;
-  padding: 3px 10px; border-radius: 999px; margin-bottom: 10px;
-  color: #d7c9ff; background: rgba(149, 117, 205, .22);
+.stamp {
+  display: flex; align-items: center; gap: 7px;
+  font-size: .78rem; color: #b9bec6; margin-bottom: 8px;
 }
-.pill.nap { color: #ffd7a1; background: rgba(232, 182, 97, .2); }
+.moon { width: 15px; height: 15px; color: #b39ddb; flex: none; }
 
 .head {
-  font-size: 1.25rem; font-weight: 400; color: #e9edf2;
+  font-size: 1.3rem; font-weight: 400; color: #e9edf2;
   margin: 0 0 4px; letter-spacing: -0.2px;
 }
-.detail { font-size: .84rem; color: #b9bec6; margin: 0 0 14px; line-height: 1.35; }
+.detail { font-size: .84rem; color: #b9bec6; margin: 0 0 12px; line-height: 1.35; }
+
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+.stat { background: #232428; border-radius: 14px; padding: 12px; }
+.slabel { font-size: .74rem; color: #b9bec6; }
+.svalue {
+  font-size: 1.5rem; font-weight: 300; color: #e9edf2;
+  line-height: 1.15; margin: 2px 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+.schip {
+  display: inline-block; font-size: .66rem; font-weight: 500;
+  padding: 3px 9px; border-radius: 999px;
+}
+.schip.good { color: #7ee2a8; background: rgba(126, 226, 168, .16); }
+.schip.typical { color: #c7cbd1; background: rgba(199, 203, 209, .14); }
+.schip.watch { color: #e8b661; background: rgba(232, 182, 97, .16); }
 
 .hypno { background: #131417; border-radius: 14px; padding: 12px; }
+.lanes { position: relative; }
+.join {
+  position: absolute; top: 18px; bottom: 6px; width: 1px;
+  background: #3a3d45; opacity: .55; pointer-events: none;
+}
 .lane { margin-bottom: 10px; }
-.llabel { font-size: .74rem; color: #e9edf2; margin-bottom: 4px; }
+.llabel { font-size: .76rem; color: #e9edf2; margin-bottom: 5px; }
 .ldur { color: #8d949d; }
 .track {
-  position: relative; height: 14px;
-  background: #24262b; border-radius: 7px; overflow: hidden;
+  position: relative; height: 18px;
+  background: #24262b; border-radius: 9px;
 }
-.seg { position: absolute; top: 0; bottom: 0; border-radius: 7px; }
+.seg {
+  position: absolute; top: 0; bottom: 0;
+  border-radius: 9px;
+}
 
 .axis {
   display: flex; justify-content: space-between;
-  font-size: .66rem; color: #6f767f; margin-top: 8px;
+  font-size: .68rem; color: #6f767f; margin-top: 8px;
 }
 
-.feedback { display: flex; gap: 4px; margin-top: 12px; }
+.actions { display: flex; align-items: center; gap: 4px; margin-top: 12px; }
+.spacer { flex: 1; }
 .thumb {
   background: none; border: 0; cursor: pointer; padding: 6px;
   border-radius: 999px; color: #8d949d; line-height: 0;
 }
-.thumb svg { width: 18px; height: 18px; }
+.thumb svg { width: 19px; height: 19px; }
 .thumb.on { color: #7ee2a8; background: rgba(126, 226, 168, .14); }
-.thumb:hover { color: #b9bec6; }
+.more {
+  background: none; border: 0; cursor: pointer; color: #8d949d;
+  font-size: 1.1rem; padding: 2px 8px; border-radius: 999px;
+}
+
+.menu {
+  margin-top: 8px; background: #232428; border-radius: 12px; padding: 4px;
+}
+.mitem {
+  display: block; padding: 9px 12px; border-radius: 9px;
+  font-size: .82rem; color: #e9edf2; text-decoration: none;
+}
+
+.daybreak {
+  display: flex; align-items: center; gap: 12px;
+  margin: 6px 2px;
+}
+.wave {
+  flex: 1; height: 1px;
+  background: repeating-linear-gradient(
+    90deg, #3a3d45 0 6px, transparent 6px 10px);
+}
+.dlabel { font-size: .8rem; color: #b9bec6; }
 </style>

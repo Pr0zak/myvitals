@@ -388,8 +388,17 @@ export interface NarrativeSegment {
   stage: string;
   duration_s: number;
 }
+export interface NarrativeStat {
+  label: string;
+  value: string;
+  chip: string;
+  tone: "good" | "typical" | "watch";
+}
 export interface NarrativeEvent {
   id: string;
+  /** Nested stat cards (sleep score / duration). Empty for a nap — it is
+   *  not scored and has no goal. */
+  stats?: NarrativeStat[];
   /** "up" | "down", or null when the user hasn't voted. */
   feedback: string | null;
   kind: "nap" | "sleep";

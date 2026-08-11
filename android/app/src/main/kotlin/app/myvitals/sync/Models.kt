@@ -904,6 +904,15 @@ data class NarrativeStageTotal(
 )
 
 @JsonClass(generateAdapter = true)
+data class NarrativeStat(
+    val label: String,
+    val value: String,
+    val chip: String,
+    /** good | typical | watch */
+    val tone: String = "typical",
+)
+
+@JsonClass(generateAdapter = true)
 data class NarrativeEvent(
     val id: String,
     /** "up" | "down", or null when the user hasn't voted. */
@@ -916,6 +925,9 @@ data class NarrativeEvent(
     val end: String,
     @Json(name = "duration_s") val durationS: Int = 0,
     val title: String? = null,
+    /** Nested stat cards (sleep score / duration). Empty for a nap — it is
+     *  not scored and has no goal, and a zero would read as a bad night. */
+    val stats: List<NarrativeStat> = emptyList(),
     val stages: List<NarrativeStageTotal> = emptyList(),
     val segments: List<NarrativeSegment> = emptyList(),
 )

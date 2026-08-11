@@ -221,6 +221,7 @@ fun RingsScreen(
         // Narrative cards — what actually happened today, in plain words.
         app.myvitals.ui.common.NarrativeCards(
             events = narrativeEvents,
+            onOpenDetail = { onOpen("vitals/SLEEP") },
             onVote = { id, vote ->
                 // Optimistic: reflect the tap now, write after. A rejected
                 // write reverts rather than leaving a thumb lit for a vote

@@ -392,12 +392,15 @@ private fun WeekChip(count: Int, onClick: () -> Unit) {
 // ── Caption eyebrow (web `.cap`) ──────────────────────────────────────────
 @Composable
 private fun Caption(text: String) {
+    // Sentence case at the shared section size. The uppercase mono eyebrow
+    // was a leftover vocabulary: every other section on every other screen
+    // now uses this, and a screen that shouts its headings while its
+    // neighbours speak reads as a different app.
     Text(
-        text.uppercase(),
-        color = NeonMV.Muted,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 1.4.sp,
+        text,
+        color = Color(0xFFE9EDF2),
+        fontSize = 21.sp,
+        fontWeight = FontWeight.Normal,
     )
 }
 

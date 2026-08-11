@@ -465,7 +465,7 @@ const recent = computed<FeedRow[]>(() => {
 .cap-row { display: flex; align-items: center; justify-content: space-between; }
 .see-all {
   background: none; border: 0; padding: 2px 4px; cursor: pointer;
-  color: var(--accent, #28e6ff); font-size: .72rem; font-weight: 700; letter-spacing: .06em;
+  color: #8ab4f8; font-size: .82rem; font-weight: 400; letter-spacing: 0;
 }
 .see-all:hover { text-decoration: underline; }
 
@@ -529,14 +529,16 @@ const recent = computed<FeedRow[]>(() => {
   transform: scale(0.96);
 }
 
+/* Sentence case at the shared section size. The uppercase mono eyebrow was
+   a leftover vocabulary — every other section on every other screen uses
+   this, and a screen that shouts its headings while its neighbours speak
+   reads as a different app. */
 .cap {
-  font-family: "Space Grotesk", "Geist Mono", monospace;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--rn-mut);
-  text-transform: uppercase;
-  margin: 6px 0 11px;
+  font-size: 1.35rem;
+  font-weight: 400;
+  letter-spacing: -0.2px;
+  color: #e9edf2;
+  margin: 18px 0 10px;
 }
 
 .seg {

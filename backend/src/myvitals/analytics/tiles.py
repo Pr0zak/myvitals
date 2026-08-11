@@ -63,15 +63,21 @@ GOOD, TYPICAL, WATCH = "good", "typical", "watch"
 # from groups of four to six; ours cannot fill a row if it splits seven
 # tiles four ways.
 #
-# The odd tile out is blood pressure, which is also the one that wants the
-# full width — "139/92 mmHg" is the longest value on the screen.
+# With skin temp the count is EIGHT, so 4 + 4 leaves no orphan at all and
+# nothing needs to span. Skin temp sits with the body metrics rather than
+# with sleep: it is a body reading, and putting it in Sleep & recovery made
+# that group five — which pushed a "No data" card to full width, giving the
+# emptiest card on the screen the most prominence.
+#
+# The full-span rule stays as a safety net: hiding a tile in Settings makes
+# a group odd again at runtime.
 TILE_GROUPS: dict[str, str] = {
     "hrv": "Sleep & recovery",
     "resting_hr": "Sleep & recovery",
     "recovery": "Sleep & recovery",
     "sleep_duration": "Sleep & recovery",
-    "skin_temp": "Sleep & recovery",
     "steps": "Activity & body",
+    "skin_temp": "Activity & body",
     "weight": "Activity & body",
     "blood_pressure": "Activity & body",
 }

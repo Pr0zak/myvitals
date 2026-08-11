@@ -38,9 +38,6 @@ function dash(pct: number): string {
 const today = computed(() =>
   new Date().toLocaleDateString([], { month: "short", day: "numeric" }),
 );
-const stepsToGoal = computed(() =>
-  steps.value != null ? Math.max(0, stepGoal.value - steps.value) : null,
-);
 
 async function load() {
   loading.value = true;
@@ -94,13 +91,6 @@ function fmt(n: number | null, d = 0): string {
 
     <FocusAreas />
 
-    <button v-if="stepsToGoal != null && stepsToGoal > 0" class="cta" @click="go('/steps')">
-      <span class="ct">
-        <span class="h3">Almost there!</span>
-        <span class="p">{{ stepsToGoal.toLocaleString() }} steps to close your Move ring</span>
-      </span>
-      <span class="goarrow">→</span>
-    </button>
   </div>
 </template>
 
@@ -140,15 +130,4 @@ function fmt(n: number | null, d = 0): string {
 .pv b.mag { color: var(--rn-mag); } .pv b.lime { color: var(--rn-lime); }
 .pv .ok { color: var(--rn-lime); } .pv .chev { color: var(--rn-mut); }
 
-.cta { width: 100%; margin-top: 18px; border-radius: 26px; padding: 22px; display: flex; align-items: center; gap: 14px;
-  cursor: pointer; color: inherit; text-align: left;
-  background: linear-gradient(120deg, rgba(93, 255, 59, 0.22), rgba(93, 255, 59, 0.05));
-  border: 1px solid rgba(93, 255, 59, 0.30); transition: transform 0.12s ease; }
-.cta:active { transform: scale(0.99); }
-.cta .ct { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-.cta .h3 { font-size: 21px; font-weight: 800; }
-.cta .p { color: #c7d8c0; font-size: 14px; }
-.cta .goarrow { width: 54px; height: 54px; border-radius: 50%; background: var(--rn-lime); color: #063b00;
-  display: flex; align-items: center; justify-content: center; box-shadow: 0 0 26px rgba(93, 255, 59, 0.55);
-  font-size: 24px; flex: 0 0 auto; }
 </style>

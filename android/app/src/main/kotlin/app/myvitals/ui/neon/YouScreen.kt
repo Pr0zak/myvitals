@@ -563,11 +563,10 @@ private fun LinkPill(
 @Composable
 private fun SectionCap(text: String) {
     Text(
-        text.uppercase(),
-        color = NeonMV.Muted,
+        text,
+        color = NeonMV.Ink,
         fontFamily = NeonNumberFamily,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 1.5.sp,
+        fontSize = 21.sp,
+        fontWeight = FontWeight.Normal,
     )
 }

@@ -63,13 +63,6 @@ import timber.log.Timber
  * three-month-old weight — as today's fact, which is the same quiet lie the
  * tiles endpoint was fixed for.
  */
-private fun carriedSuffix(carried: Map<String, String>?, field: String): String {
-    val iso = carried?.get(field) ?: return ""
-    return runCatching {
-        val d = java.time.LocalDate.parse(iso)
-        " · from " + d.format(java.time.format.DateTimeFormatter.ofPattern("MMM d"))
-    }.getOrDefault("")
-}
 
 @Composable
 fun BodyScreen(
@@ -82,6 +75,10 @@ fun BodyScreen(
     var profile by remember { mutableStateOf<ProfileResponse?>(null) }
     // 14-day daily-summary window powering the inline sparklines on each card.
     var trend by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
+    var vitalTiles by remember {
+        mutableStateOf<List<app.myvitals.sync.VitalTile>>(emptyList())
+    }
+    var groupOrder by remember { mutableStateOf<List<String>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
@@ -106,6 +103,9 @@ fun BodyScreen(
                 val sumD = async(Dispatchers.IO) {
                     runCatching { api.summaryToday() }.getOrNull()
                 }
+                val tilesD = async(Dispatchers.IO) {
+                    runCatching { api.summaryTiles() }.getOrNull()
+                }
                 val profileD = async(Dispatchers.IO) {
                     runCatching { api.profile() }.getOrNull()
                 }
@@ -127,6 +127,10 @@ fun BodyScreen(
                     JsonCache.write(context, BODY_PROFILE_KEY, ProfileResponse::class.java, it)
                 }
                 trendD.await()?.let { trend = it }
+                tilesD.await()?.let { r ->
+                    if (r.tiles.isNotEmpty()) vitalTiles = r.tiles
+                    groupOrder = r.groupOrder
+                }
             }
         }.onFailure { Timber.w(it, "body load failed") }
         loading = false
@@ -138,201 +142,28 @@ fun BodyScreen(
     NeonScreen(
         title = "Body",
         contentPadding = contentPadding,
-        headerTrailing = { RecoveryPill(recovery) { onOpen("vitals/HR") } },
     ) {
-        Text(
-            "Vitals & recovery · today",
-            color = NeonMV.Muted,
-            fontFamily = NeonNumberFamily,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.4.sp,
-            modifier = Modifier.padding(bottom = 12.dp),
+        // The SAME cards the home uses. This screen used to declare its own
+        // private MetricCard and render gradient-tinted cards with uppercase
+        // labels — a second card vocabulary, which is exactly what the
+        // redesign exists to remove. It showed the same seven metrics as
+        // Key metrics, in a different language, with its own client-side
+        // blood-pressure verdict that ignored staleness.
+        app.myvitals.ui.common.KeyMetrics(
+            tiles = vitalTiles,
+            onOpen = onOpen,
+            order = profile?.extra?.vitalsOrder ?: emptyList(),
+            hidden = profile?.extra?.vitalsHidden?.toSet() ?: emptySet(),
+            groupOrder = groupOrder,
         )
 
-        // No data and not loading (cold/offline failure or a genuinely empty
-        // day) — render a single hint card rather than a grid of blank "—"
-        // tiles, which read as broken. SWR above means this only shows on a
-        // truly cold cache; once a day has synced, the cached summary fills in.
-        if (sum == null && !loading) {
+        if (vitalTiles.isEmpty() && !loading) {
             EmptyHintCard()
-            Spacer(Modifier.height(24.dp))
-            return@NeonScreen
         }
-
-        // ---- Row 1: Heart rate · HRV ----
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MetricCard(
-                modifier = Modifier.weight(1f),
-                label = "Heart rate",
-                value = fmt(sum?.restingHr),
-                unit = "bpm",
-                accent = NeonMV.Cyan,
-                sub = "resting" + carriedSuffix(sum?.carriedFrom, "resting_hr"),
-                loading = loading,
-                onClick = { onOpen("vitals/HR") },
-                spark = trend.map { it.restingHr?.toFloat() },
-            )
-            MetricCard(
-                modifier = Modifier.weight(1f),
-                label = "HRV",
-                value = fmt(sum?.hrvAvg),
-                unit = "ms",
-                accent = NeonMV.Cyan,
-                sub = "overnight avg" + carriedSuffix(sum?.carriedFrom, "hrv_avg"),
-                loading = loading,
-                onClick = { onOpen("vitals/HRV") },
-                spark = trend.map { it.hrvAvg?.toFloat() },
-            )
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // ---- Row 2: Sleep · Steps ----
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            val sleepS = sum?.sleepDurationS
-            val sleepH = sleepS?.let { it / 3600 }
-            val sleepM = sleepS?.let { (it % 3600) / 60 }
-            val score = sum?.sleepScore
-            MetricCard(
-                modifier = Modifier.weight(1f),
-                label = "Sleep",
-                value = if (sleepH != null) "${sleepH}h${sleepM ?: 0}m" else "—",
-                unit = null,
-                accent = NeonMV.Magenta,
-                sub = (if (score != null) "score ${fmt(score)}" else "no night") +
-                    carriedSuffix(sum?.carriedFrom, "sleep_duration_s"),
-                subColor = if (score != null) NeonMV.Magenta else NeonMV.Muted,
-                loading = loading,
-                onClick = { onOpen("vitals/SLEEP") },
-                spark = trend.map { it.sleepDurationS?.toFloat() },
-            )
-            val steps = sum?.stepsTotal
-            val stepsPct = steps?.let { Math.round(it.toFloat() / stepGoal * 100) }
-            MetricCard(
-                modifier = Modifier.weight(1f),
-                label = "Steps",
-                value = steps?.let { "%,d".format(it) } ?: "—",
-                unit = null,
-                accent = NeonMV.Lime,
-                sub = if (stepsPct != null) "$stepsPct% of ${stepGoal / 1000}k" else "of ${stepGoal / 1000}k",
-                subColor = if (stepsPct != null) NeonMV.Lime else NeonMV.Muted,
-                loading = loading,
-                onClick = { onOpen("vitals/STEPS") },
-                spark = trend.map { it.stepsTotal?.toFloat() },
-            )
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // ---- Row 3: Blood pressure (full width) ----
-        BloodPressureCard(
-            sys = sum?.bpSystolicAvg,
-            dia = sum?.bpDiastolicAvg,
-            loading = loading,
-            onClick = { onOpen("vitals/BP") },
-        )
-
-        Spacer(Modifier.height(12.dp))
-
-        // ---- Row 4: Weight · Skin temp (skin temp non-clickable) ----
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            val weightLb = sum?.weightKg?.let { it * 2.20462 }
-            MetricCard(
-                modifier = Modifier.weight(1f),
-                label = "Weight",
-                value = if (weightLb != null) "%.1f".format(weightLb) else "—",
-                unit = "lb",
-                accent = NeonMV.Amber,
-                sub = "latest" + carriedSuffix(sum?.carriedFrom, "weight_kg"),
-                loading = loading,
-                onClick = { onOpen("vitals/WEIGHT") },
-                spark = trend.map { it.weightKg?.toFloat()?.times(2.20462f) },
-            )
-            // Skin temp overnight delta vs baseline (signed). Same field the
-            // web Body card shows; surfaced via DailySummary.skinTempDeltaAvg.
-            // Drillable as of v0.7.365 — Vital.SKIN_TEMP now exists and the
-            // generic series path charts it off daily_summary. Reads "—" when
-            // there's genuinely no reading (e.g. the PW3/PW4 firmware bug).
-            val skinDelta = sum?.skinTempDeltaAvg
-            MetricCard(
-                modifier = Modifier.weight(1f),
-                label = "Skin temp",
-                value = skinDelta?.let { (if (it >= 0) "+" else "") + "%.1f".format(it) } ?: "—",
-                unit = "°C",
-                accent = NeonMV.Amber,
-                sub = "vs baseline",
-                loading = loading,
-                onClick = { onOpen("vitals/SKIN_TEMP") },
-            )
-        }
-
-        // ---- Row 5: Recovery · Readiness ----
-        // Both were only ever surfaced on the retired Neon Refined home. They
-        // are the app's best-engineered numbers (readiness is a weighted
-        // z-score composite vs 28-day baselines) and were invisible on this
-        // shell entirely.
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MetricCard(
-                modifier = Modifier.weight(1f),
-                label = "Recovery",
-                value = recovery?.let { "%.0f".format(it) } ?: "—",
-                unit = "",
-                accent = NeonMV.Cyan,
-                sub = "HRV vs baseline" + carriedSuffix(sum?.carriedFrom, "recovery_score"),
-                loading = loading,
-                onClick = { onOpen("vitals/RECOVERY") },
-            )
-            val readiness = sum?.readinessScore
-            MetricCard(
-                modifier = Modifier.weight(1f),
-                label = "Readiness",
-                value = readiness?.let { "%.0f".format(it) } ?: "—",
-                unit = "",
-                accent = NeonMV.Lime,
-                sub = "HRV · RHR · sleep" + carriedSuffix(sum?.carriedFrom, "readiness_score"),
-                loading = loading,
-                onClick = null,
-            )
-        }
-
         Spacer(Modifier.height(24.dp))
     }
 }
 
-/** Cyan recovery pill in the header — drills to the HR detail (no RECOVERY vital). */
-@Composable
-private fun RecoveryPill(recovery: Double?, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .clip(NeonPillShape)
-            .background(NeonMV.Cyan.copy(alpha = 0.10f))
-            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.32f), NeonPillShape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 13.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier
-                .size(8.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(NeonMV.Cyan),
-        )
-        Spacer(Modifier.width(9.dp))
-        Column {
-            Text(
-                "RECOVERY",
-                color = NeonMV.Cyan,
-                fontFamily = NeonNumberFamily,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.2.sp,
-            )
-            NeonNumber(fmt(recovery), color = NeonMV.Ink, size = 19)
-        }
-    }
-}
 
 /**
  * Centered "no data" hint shown when today's summary failed to load (cold
@@ -383,170 +214,8 @@ private fun EmptyHintCard() {
  * the web cards get from drop-shadow filters. `onClick = null` renders a
  * non-interactive card (skin temp).
  */
-@Composable
-private fun MetricCard(
-    label: String,
-    value: String,
-    unit: String?,
-    accent: Color,
-    sub: String,
-    loading: Boolean,
-    onClick: (() -> Unit)?,
-    subColor: Color = NeonMV.Muted,
-    spark: List<Float?>? = null,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier
-            .height(124.dp)
-            .clip(NeonCardShape)
-            // Slightly stronger surface than the flat Card fill: a faint
-            // accent-tinted top-to-bottom wash over the elevated card colour
-            // so the tile reads as a lit surface, not an empty rectangle.
-            .background(NeonMV.CardHigh)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(accent.copy(alpha = 0.10f), Color.Transparent),
-                ),
-            )
-            .border(1.dp, accent.copy(alpha = 0.26f), NeonCardShape)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
-    ) {
-        // Bolder variant: the 14-day trend rides the lower half of the card as
-        // a faint accent backdrop behind the value, not a thin line under it.
-        if (spark != null && spark.count { it != null } >= 2) {
-            app.myvitals.ui.vitals.SparkLine(
-                values = spark,
-                color = accent.copy(alpha = 0.30f),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp)
-                    .align(Alignment.BottomCenter),
-            )
-        }
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 13.dp),
-        ) {
-            Text(
-                label.uppercase(),
-                color = accent.copy(alpha = 0.85f),
-                fontFamily = NeonNumberFamily,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.2.sp,
-            )
-            Spacer(Modifier.weight(1f))
-            Row(verticalAlignment = Alignment.Bottom) {
-                NeonNumber(
-                    if (loading && value == "—") "…" else value,
-                    color = NeonMV.Ink,
-                    size = 25,
-                )
-                if (unit != null) {
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        unit,
-                        color = NeonMV.Muted,
-                        fontFamily = NeonNumberFamily,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 3.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.height(7.dp))
-            Text(
-                sub,
-                color = subColor,
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.Medium,
-            )
-        }
-    }
-}
 
 /** Full-width blood-pressure card with a category verdict (cyan). */
-@Composable
-private fun BloodPressureCard(
-    sys: Double?,
-    dia: Double?,
-    loading: Boolean,
-    onClick: () -> Unit,
-) {
-    // Highest category first. A reading belongs to a category if EITHER
-    // number reaches it, so the category is the higher of the two. The old
-    // chain tested "sys < 140 || dia < 90 -> Elevated", which is true for
-    // 139/92 and labelled a stage 2 reading two categories too low. Tiers
-    // and wording now match frontend/src/bp.ts and analytics/tiles.py.
-    val label = when {
-        sys == null || dia == null -> "—"
-        sys >= 180 || dia >= 120 -> "Crisis"
-        sys >= 140 || dia >= 90 -> "Stage 2"
-        sys >= 130 || dia >= 80 -> "Stage 1"
-        sys >= 120 -> "Elevated"
-        else -> "Normal"
-    }
-    val labelColor = when (label) {
-        "Crisis", "Stage 2" -> NeonMV.Bad
-        "Stage 1" -> NeonMV.Amber
-        "Elevated" -> NeonMV.Amber
-        "Normal" -> NeonMV.Lime
-        else -> NeonMV.Muted
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(NeonCardShape)
-            .background(NeonMV.CardHigh)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(NeonMV.Cyan.copy(alpha = 0.10f), Color.Transparent),
-                ),
-            )
-            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.26f), NeonCardShape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Column {
-            Text(
-                "BLOOD PRESSURE",
-                color = NeonMV.Cyan.copy(alpha = 0.85f),
-                fontFamily = NeonNumberFamily,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.2.sp,
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
-                NeonNumber(
-                    if (sys != null && dia != null) "${fmt(sys)}/${fmt(dia)}"
-                    else if (loading) "…" else "—",
-                    color = NeonMV.Ink,
-                    size = 27,
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    "mmHg",
-                    color = NeonMV.Muted,
-                    fontFamily = NeonNumberFamily,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 3.dp),
-                )
-            }
-            Spacer(Modifier.height(7.dp))
-            Text(
-                label,
-                color = labelColor,
-                fontFamily = NeonNumberFamily,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-    }
-}
 
 // ============================================================
 // SWR cache keys (grep "JsonCache.write" to audit)
@@ -558,5 +227,3 @@ private const val BODY_PROFILE_KEY = "neon_body_profile"
 // ============================================================
 // Formatters (mirror the web `fmt` helper)
 // ============================================================
-
-private fun fmt(n: Double?): String = if (n == null) "—" else "%.0f".format(n)

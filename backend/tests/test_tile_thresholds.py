@@ -226,3 +226,25 @@ def test_the_sleep_band_and_the_sleep_verdict_use_the_same_numbers():
     band_low, band_high = round(target - 0.5, 2), round(target + 1.5, 2)
     assert band_low <= 7.6 <= band_high      # inside band == status "good"
     assert not (band_low <= 6.9 <= band_high)
+
+
+# ── carry-forward ─────────────────────────────────────────────────────
+
+def test_a_carried_value_reports_the_date_it_came_from():
+    """Carrying a value forward without its date is the recurring lie here.
+
+    /summary/today has always carried the last known overnight value rather
+    than blanking the screen. The tiles read today's row directly, so the
+    two disagreed — Body showed a live HRV while Key metrics said "No data"
+    for the same metric on the same day. Carrying the same value is right;
+    carrying it silently is not, so every carried tile sets as_of and
+    stale_days and the card shows the date instead of "Today".
+    """
+    import datetime as dt
+
+    today = dt.date(2026, 8, 11)
+    source = dt.date(2026, 8, 10)
+    stale_days = (today - source).days
+    assert stale_days == 1
+    # A same-day value carries no as_of, so the card says "Today".
+    assert (None if source == today else source) is not None

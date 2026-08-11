@@ -70,6 +70,7 @@ TILE_GROUPS: dict[str, str] = {
     "resting_hr": "Sleep & recovery",
     "recovery": "Sleep & recovery",
     "sleep_duration": "Sleep & recovery",
+    "skin_temp": "Sleep & recovery",
     "steps": "Activity & body",
     "weight": "Activity & body",
     "blood_pressure": "Activity & body",
@@ -263,6 +264,34 @@ async def tile_stats(
     """
     row = await db.get(models.DailySummary, day)
 
+    # Overnight metrics go missing until the watch syncs last night, and
+    # /summary/today has always carried the last known value forward rather
+    # than blanking the screen. The tiles read today's row directly, so the
+    # two disagreed: Body showed a live HRV while Key metrics said "No
+    # data" for the same metric on the same day.
+    #
+    # Carry the same values, and record WHERE each came from so the card
+    # can say "Aug 10" instead of "Today". A carried value shown without
+    # its date is the quiet lie this codebase keeps having to fix.
+    fallback = (await db.execute(
+        select(models.DailySummary)
+        .where(models.DailySummary.date < day)
+        .where(models.DailySummary.recovery_score.is_not(None))
+        .order_by(models.DailySummary.date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    def carried(field: str):
+        """(value, as_of) — today's if present, else the last known."""
+        v = getattr(row, field, None) if row else None
+        if v is not None:
+            return v, None
+        if fallback is not None:
+            fv = getattr(fallback, field, None)
+            if fv is not None:
+                return fv, fallback.date
+        return None, None
+
     cutoff = day - timedelta(days=BASELINE_WINDOW_DAYS)
     bl = (await db.execute(
         select(
@@ -305,7 +334,7 @@ async def tile_stats(
         tiles.append(suppress_stale_verdict(kw))
 
     # ── personal-baseline metrics ────────────────────────────────────
-    hrv = row.hrv_avg if row else None
+    hrv, hrv_as_of = carried("hrv_avg")
     status = reason = None
     delta = z = None
     if hrv is not None and hrv_mu is not None:
@@ -313,7 +342,9 @@ async def tile_stats(
         if hrv_sd and float(hrv_sd) > 0 and (hrv_n or 0) >= MIN_BASELINE_DAYS:
             z = (hrv - float(hrv_mu)) / float(hrv_sd)
             status, reason = _band_from_z(z, higher_is_better=True)
-    add(key="hrv", label="HRV", unit="ms",
+    add(key="hrv",
+        as_of=(hrv_as_of.isoformat() if hrv_as_of else None),
+        stale_days=((day - hrv_as_of).days if hrv_as_of else None), label="HRV", unit="ms",
         value=(round(hrv, 1) if hrv is not None else None),
         kind="baseline", higher_is_better=True,
         baseline=(round(float(hrv_mu), 1) if hrv_mu is not None else None),
@@ -321,7 +352,7 @@ async def tile_stats(
         status=status, status_reason=reason,
         series=await _series(db, models.DailySummary.hrv_avg, day, SERIES_DAYS))
 
-    rhr = row.resting_hr if row else None
+    rhr, rhr_as_of = carried("resting_hr")
     status = reason = None
     delta = z = None
     if rhr is not None and rhr_mu is not None:
@@ -329,7 +360,9 @@ async def tile_stats(
         if rhr_sd and float(rhr_sd) > 0 and (rhr_n or 0) >= MIN_BASELINE_DAYS:
             z = (rhr - float(rhr_mu)) / float(rhr_sd)
             status, reason = _band_from_z(z, higher_is_better=False)
-    add(key="resting_hr", label="Resting HR", unit="bpm",
+    add(key="resting_hr",
+        as_of=(rhr_as_of.isoformat() if rhr_as_of else None),
+        stale_days=((day - rhr_as_of).days if rhr_as_of else None), label="Resting HR", unit="bpm",
         value=(round(rhr, 1) if rhr is not None else None),
         kind="baseline", higher_is_better=False,
         baseline=(round(float(rhr_mu), 1) if rhr_mu is not None else None),
@@ -357,7 +390,7 @@ async def tile_stats(
         status=status, status_reason=reason,
         series=await _series(db, models.DailySummary.steps_total, day, SERIES_DAYS))
 
-    sleep_s = row.sleep_duration_s if row else None
+    sleep_s, sleep_as_of = carried("sleep_duration_s")
     sleep_h = round(sleep_s / 3600.0, 2) if sleep_s else None
     status = reason = None
     delta = None
@@ -372,7 +405,9 @@ async def tile_stats(
             status, reason = TYPICAL, f"{abs(delta):.1f} h under target"
         else:
             status, reason = WATCH, f"{abs(delta):.1f} h under target"
-    add(key="sleep_duration", label="Sleep", unit="h", value=sleep_h,
+    add(key="sleep_duration",
+        as_of=(sleep_as_of.isoformat() if sleep_as_of else None),
+        stale_days=((day - sleep_as_of).days if sleep_as_of else None), label="Sleep", unit="h", value=sleep_h,
         kind="target", higher_is_better=True, target=sleep_target,
         # The band IS the good zone the status test above uses, so the
         # chart and the verdict can't tell different stories. Derived from
@@ -425,7 +460,7 @@ async def tile_stats(
 
     # Recovery is already a 0-100 composite, so it carries its own scale —
     # banding it against a personal baseline would score a score.
-    rec = row.recovery_score if row else None
+    rec, rec_as_of = carried("recovery_score")
     status = reason = None
     if rec is not None:
         if rec >= 65:
@@ -434,7 +469,9 @@ async def tile_stats(
             status, reason = TYPICAL, "partially recovered"
         else:
             status, reason = WATCH, "under-recovered"
-    add(key="recovery", label="Recovery", unit="",
+    add(key="recovery",
+        as_of=(rec_as_of.isoformat() if rec_as_of else None),
+        stale_days=((day - rec_as_of).days if rec_as_of else None), label="Recovery", unit="",
         value=(round(rec) if rec is not None else None),
         kind="target", higher_is_better=True, target=100,
         # 65+ is "recovered" per the status test above — the same numbers,
@@ -442,6 +479,18 @@ async def tile_stats(
         band_low=65.0, band_high=100.0,
         status=status, status_reason=reason,
         series=await _series(db, models.DailySummary.recovery_score, day, SERIES_DAYS))
+
+    # Skin temperature deviation. Neutral: the sign is meaningful (a rise
+    # can precede illness) but there is no threshold this app can defend,
+    # so it reports the number and its trend without a verdict.
+    skin, skin_as_of = carried("skin_temp_delta_avg")
+    add(key="skin_temp",
+        as_of=(skin_as_of.isoformat() if skin_as_of else None),
+        stale_days=((day - skin_as_of).days if skin_as_of else None), label="Skin temp", unit="°C",
+        value=(round(skin, 1) if skin is not None else None),
+        kind="neutral", higher_is_better=None,
+        series=await _series(
+            db, models.DailySummary.skin_temp_delta_avg, day, SERIES_DAYS))
 
     # ── neutral metrics ──────────────────────────────────────────────
     # Weight has no universal good direction — it depends on a goal the

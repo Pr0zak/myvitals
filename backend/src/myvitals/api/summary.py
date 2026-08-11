@@ -54,6 +54,36 @@ async def _today_row_is_stale(
     return False
 
 
+async def live_steps_today(
+    db: AsyncSession, day_start: datetime, end: datetime,
+) -> int:
+    """Today's step count from the raw samples, not the stored column.
+
+    `daily_summary.steps_total` is only written by `compute_daily_summary`,
+    which is no longer scheduled and whose lazy re-run is gated on missing
+    sleep / HRV — so mid-day the stored column is whatever it was when that
+    last fired, or absent entirely. /summary/today has always computed this
+    live; /summary/tiles read the column and consequently showed a step
+    count hours out of date next to a live one on the same screen.
+
+    Picks a single canonical source so the count matches the user's wrist
+    rather than summing phone and watch pedometers, which fire on different
+    minute boundaries and would roughly double the total.
+    """
+    from ..analytics.jobs import pick_canonical_steps_source
+
+    canonical = await pick_canonical_steps_source(db, day_start, end)
+    if not canonical:
+        return 0
+    total = await db.execute(
+        select(func.coalesce(func.sum(models.Steps.count), 0))
+        .where(models.Steps.source == canonical)
+        .where(models.Steps.time >= day_start)
+        .where(models.Steps.time <= end)
+    )
+    return int(total.scalar() or 0)
+
+
 async def _ensure_fresh_today_row(
     db: AsyncSession, today_local: date, day_start: datetime, day_end: datetime,
 ) -> "models.DailySummary | None":
@@ -121,21 +151,7 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     saved = await _ensure_fresh_today_row(db, today_local, midnight_local, day_end)
 
     # 2. Compute live values as a fallback / supplement.
-    # Pick a single canonical step source so the dashboard matches the
-    # user's wrist. Shared helper with the daily_summary nightly job —
-    # same logic both paths, no drift between persisted and live counts.
-    from ..analytics.jobs import pick_canonical_steps_source
-    canonical = await pick_canonical_steps_source(db, midnight_local, end)
-    if canonical:
-        single = await db.execute(
-            select(func.coalesce(func.sum(models.Steps.count), 0))
-            .where(models.Steps.source == canonical)
-            .where(models.Steps.time >= midnight_local)
-            .where(models.Steps.time <= end)
-        )
-        steps_total = int(single.scalar() or 0)
-    else:
-        steps_total = 0
+    steps_total = await live_steps_today(db, midnight_local, end)
 
     last_sync_result = await db.execute(select(func.max(models.HeartRate.time)))
     last_sync = last_sync_result.scalar()
@@ -277,7 +293,13 @@ async def readiness_detail(
     except Exception:
         local_tz = timezone.utc
     today = datetime.now(local_tz).date()
-    row = await db.get(models.DailySummary, today)
+    # Same stale-row repair the other two day-facing endpoints do. Without
+    # it readiness could report "no inputs" from a row that /summary/today
+    # had already recomputed — the surfaces-disagree bug again, with the
+    # hero as the one telling the wrong story.
+    midnight_local = datetime.combine(today, datetime.min.time(), tzinfo=local_tz)
+    day_end = datetime.combine(today, datetime.max.time(), tzinfo=local_tz)
+    row = await _ensure_fresh_today_row(db, today, midnight_local, day_end)
     breakdown = await readiness_breakdown(
         db, today,
         hrv=row.hrv_avg if row else None,
@@ -295,9 +317,20 @@ async def readiness_detail(
         .where(models.DailySummary.date <= today)
         .order_by(models.DailySummary.date)
     )).all()
+    # Pad every day in the window. Skipping absent rows makes the sparkline
+    # close its gaps — implying continuity the data doesn't have — and puts
+    # the "today" emphasis on the last day that HAPPENED to have a row.
+    # `tiles.py:_series` already pads; this is the same contract.
+    by_day = {d: v for d, v in hist}
     series = [
-        {"date": d.isoformat(), "score": (round(v, 1) if v is not None else None)}
-        for d, v in hist
+        {
+            "date": (since + timedelta(days=i)).isoformat(),
+            "score": (
+                round(by_day[since + timedelta(days=i)], 1)
+                if by_day.get(since + timedelta(days=i)) is not None else None
+            ),
+        }
+        for i in range((today - since).days + 1)
     ]
 
     return {
@@ -347,7 +380,9 @@ async def summary_tiles(
     await _ensure_fresh_today_row(db, day, midnight_local, day_end)
 
     profile = await db.get(models.UserProfile, 1)
-    tiles = await tile_stats(db, day, profile)
+    # Same live count /summary/today uses — see live_steps_today.
+    steps_now = await live_steps_today(db, midnight_local, datetime.now(timezone.utc))
+    tiles = await tile_stats(db, day, profile, steps_override=steps_now)
 
     # "Vitals 3 of 5 in range" — the reference's Health status line. Counted
     # here rather than in the clients: it is a roll-up of server verdicts,

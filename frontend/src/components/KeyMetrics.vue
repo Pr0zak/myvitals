@@ -92,8 +92,12 @@ function qualifier(t: VitalTile): string {
 
 function displayValue(t: VitalTile): number | string | null {
   if (t.value == null) return null;
-  return typeof t.value === "number" && t.key === "steps"
-    ? t.value.toLocaleString() : t.value;
+  if (typeof t.value !== "number") return t.value;
+  if (t.key === "steps") return t.value.toLocaleString();
+  // Match the phone's formatting exactly. The server sends sleep to two
+  // decimals; passing it through printed "7.35 h" on web against "7.4" on
+  // the phone — the same number rendered as two different readings.
+  return Number.isInteger(t.value) ? String(t.value) : t.value.toFixed(1);
 }
 
 const shown = computed(() => {

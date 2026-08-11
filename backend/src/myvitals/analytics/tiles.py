@@ -30,7 +30,7 @@ would mean guessing at a goal the user never set.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, select
@@ -195,8 +195,32 @@ async def _intermittent_series(
     return out
 
 
+def _local_date(ts, day: date) -> date:
+    """Calendar date of a timestamp in the user's timezone.
+
+    Reading timestamps are tz-aware UTC while `day` arrives already resolved
+    locally, so a bare `.date()` mixes zones: a cuff reading taken at 8pm
+    Central lands on the next UTC day and its reported age is a day off.
+    Third appearance of the UTC-vs-local trap here — see
+    test_local_day_boundary.py.
+    """
+    if ts is None:
+        return day
+    if getattr(ts, "tzinfo", None) is None:
+        return ts.date()
+    try:
+        from zoneinfo import ZoneInfo
+
+        from ..config import settings
+        local = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+        return ts.astimezone(local).date()
+    except Exception:
+        return ts.date()
+
+
 async def tile_stats(
     db: AsyncSession, day: date, profile: Any | None = None,
+    steps_override: int | None = None,
 ) -> list[dict[str, Any]]:
     """Every vital tile's number, trend and verdict for `day`.
 
@@ -279,7 +303,10 @@ async def tile_stats(
         series=await _series(db, models.DailySummary.resting_hr, day, SERIES_DAYS))
 
     # ── target metrics ───────────────────────────────────────────────
-    steps = row.steps_total if row else None
+    # The stored column goes stale within the day — see live_steps_today.
+    steps = steps_override if steps_override is not None else (
+        row.steps_total if row else None
+    )
     status = reason = None
     if steps is not None:
         pct = _pct_of_target(steps, steps_goal)
@@ -331,7 +358,7 @@ async def tile_stats(
     )).first()
     sys_v = float(bp[0]) if bp else None
     dia_v = float(bp[1]) if bp else None
-    bp_as_of = bp[2].date() if bp else None
+    bp_as_of = _local_date(bp[2], day) if bp else None
     status = reason = None
     if sys_v is not None and dia_v is not None:
         # Tested HIGHEST category first. A reading falls in a category if
@@ -382,7 +409,7 @@ async def tile_stats(
         .order_by(models.BodyMetric.time.desc()).limit(1)
     )).first()
     wkg = float(wrow[0]) if wrow else None
-    w_as_of = wrow[1].date() if wrow else None
+    w_as_of = _local_date(wrow[1], day) if wrow else None
     add(key="weight", label="Weight", unit="lb",
         value=(round(wkg * KG_TO_LB, 1) if wkg is not None else None),
         kind="neutral", higher_is_better=None,

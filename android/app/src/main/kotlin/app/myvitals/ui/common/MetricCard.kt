@@ -193,13 +193,16 @@ private fun WeekChart(
     modifier: Modifier = Modifier,
 ) {
     val real = points.filterNotNull()
-    if (real.isEmpty()) {
-        // Space is still reserved so a metric with no readings this week
-        // lines up with one that has them.
+    val extras = listOfNotNull(bandLow, bandHigh, target)
+    if (real.isEmpty() && extras.isEmpty()) {
+        // Nothing to draw at all — reserve the space so a metric with no
+        // readings still lines up with one that has them.
         Box(modifier)
         return
     }
-    val extras = listOfNotNull(bandLow, bandHigh, target)
+    // With no readings this week but a band or goal known, the web still
+    // paints them; bailing early here made the two cards disagree about
+    // whether a metric HAS a normal range.
     val all = real + extras
     var lo = all.min()
     var hi = all.max()
@@ -208,6 +211,11 @@ private fun WeekChart(
     lo -= pad; hi += pad
 
     Canvas(modifier) {
+        // Geometry in dp. Raw DrawScope floats are physical pixels, so on a
+        // 2.75x-density phone these strokes came out ~1/3 the weight of the
+        // web card's — every other constant in this file is already matched
+        // in dp/sp.
+        val px = density
         fun y(v: Double) = size.height - ((v - lo) / (hi - lo)).toFloat() * size.height
         val stepX = if (points.size > 1) size.width / (points.size - 1) else size.width
 
@@ -225,13 +233,13 @@ private fun WeekChart(
             drawLine(
                 accent.copy(alpha = 0.55f),
                 Offset(0f, y(t)), Offset(size.width, y(t)),
-                strokeWidth = 1.5f,
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 6f)),
+                strokeWidth = 1f * px,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(2f * px, 3f * px)),
             )
         }
 
         if (bars) {
-            val bw = maxOf(4f, size.width / (points.size * 2f))
+            val bw = maxOf(4f * px, size.width / (points.size * 2f))
             points.forEachIndexed { i, v ->
                 if (v == null) return@forEachIndexed
                 val top = y(v)
@@ -239,7 +247,7 @@ private fun WeekChart(
                     accent.copy(alpha = if (i == points.size - 1) 1f else 0.45f),
                     topLeft = Offset(i * stepX - bw / 2, top),
                     size = Size(bw, size.height - top),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f, 2f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f * px, 2f * px),
                 )
             }
         } else {
@@ -250,13 +258,13 @@ private fun WeekChart(
                 val o = Offset(i * stepX, y(v))
                 if (!started) { path.moveTo(o.x, o.y); started = true } else path.lineTo(o.x, o.y)
             }
-            drawPath(path, accent, style = Stroke(width = 2.2f))
+            drawPath(path, accent, style = Stroke(width = 1.6f * px))
             points.forEachIndexed { i, v ->
                 if (v == null) return@forEachIndexed
                 val last = i == points.size - 1
                 drawCircle(
                     accent.copy(alpha = if (last) 1f else 0.75f),
-                    radius = if (last) 4f else 2.8f,
+                    radius = if (last) 3.2f * px else 2.2f * px,
                     center = Offset(i * stepX, y(v)),
                 )
             }

@@ -171,7 +171,14 @@ fun RingsScreen(
 
 
         // Key metrics — one card vocabulary, mirroring KeyMetrics.vue.
-        app.myvitals.ui.common.KeyMetrics(vitalTiles, onOpen)
+        app.myvitals.ui.common.KeyMetrics(
+            tiles = vitalTiles,
+            onOpen = onOpen,
+            // The neon home was ignoring the reorder / hide preference the
+            // classic home honours, so the same user saw two orders.
+            order = profile?.extra?.vitalsOrder ?: emptyList(),
+            hidden = profile?.extra?.vitalsHidden?.toSet() ?: emptySet(),
+        )
         error?.let {
             NeonErrorBanner(it) {
                 scope.launch { refreshing = true; try { load() } finally { refreshing = false } }

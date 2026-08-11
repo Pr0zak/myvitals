@@ -69,6 +69,25 @@ function rangeToQuery(p: RangeParams): Record<string, string> {
   return out;
 }
 
+/**
+ * De-dupe concurrent GETs of the same immutable-per-load resource.
+ *
+ * HealthStatus and KeyMetrics both mount on the home and both need
+ * /summary/tiles (one keeps `summary`, the other keeps `tiles`), and both
+ * need /profile. That was four requests where two would do, fired close
+ * enough together to race. Keyed by URL and cleared as soon as the promise
+ * settles, so this is a request coalescer, not a cache — a later load still
+ * fetches fresh data.
+ */
+const inflight = new Map<string, Promise<unknown>>();
+function coalesce<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const existing = inflight.get(key) as Promise<T> | undefined;
+  if (existing) return existing;
+  const p = run().finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
 export const api = {
   async heartRate(p: RangeParams = {}): Promise<HeartRateSeries> {
     const { data } = await http.get<HeartRateSeries>("/query/heartrate", { params: rangeToQuery(p) });
@@ -345,9 +364,11 @@ export const api = {
 
   /** Per-tile value, 14-day series and verdict. The judgement of what
    *  counts as good is the server's — see analytics/tiles.py. */
-  async summaryTiles(): Promise<import("./types").VitalTilesResponse> {
-    const { data } = await http.get("/summary/tiles");
-    return data;
+  summaryTiles(): Promise<import("./types").VitalTilesResponse> {
+    return coalesce("/summary/tiles", async () => {
+      const { data } = await http.get("/summary/tiles");
+      return data;
+    });
   },
 
   async aiBadges(): Promise<Array<{
@@ -647,7 +668,7 @@ export const api = {
     return data;
   },
 
-  async getProfile(): Promise<{
+  getProfile(): Promise<{
     id: number; birth_date: string | null; sex: string | null;
     height_cm: number | null; weight_goal_kg: number | null;
     resting_hr_baseline: number | null; activity_level: string | null;
@@ -657,8 +678,10 @@ export const api = {
                resting_hr_baseline_auto?: number | null;
                hr_zones?: { zone: number; label: string; low: number; high: number }[] };
   }> {
-    const { data } = await http.get("/profile");
-    return data;
+    return coalesce("/profile", async () => {
+      const { data } = await http.get("/profile");
+      return data;
+    });
   },
 
   async discoveries(days = 90): Promise<{ x_metric: string; y_metric: string; n: number; pearson_r: number }[]> {

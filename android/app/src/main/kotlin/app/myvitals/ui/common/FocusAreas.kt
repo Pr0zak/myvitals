@@ -44,7 +44,9 @@ import androidx.compose.ui.unit.sp
 fun FocusAreas(
     onOpen: (String) -> Unit,
     modifier: Modifier = Modifier,
-    counts: Map<String, String> = emptyMap(),
+    /** "N tracked" per area, counted server-side from the tiles that have a
+     *  value today — a constant subtitle would be decoration. */
+    counts: Map<String, app.myvitals.sync.FocusCount> = emptyMap(),
 ) {
     Column(modifier.fillMaxWidth()) {
         Text(
@@ -59,7 +61,11 @@ fun FocusAreas(
             ) {
                 pair.forEach { a ->
                     Box(Modifier.weight(1f)) {
-                        AreaTile(a, counts[a.key] ?: "Open") { onOpen(a.route) }
+                        val c = counts[a.key]
+                        AreaTile(
+                            a,
+                            if (c != null) "${c.tracked} tracked" else "Open",
+                        ) { onOpen(a.route) }
                     }
                 }
                 if (pair.size == 1) Spacer(Modifier.weight(1f))

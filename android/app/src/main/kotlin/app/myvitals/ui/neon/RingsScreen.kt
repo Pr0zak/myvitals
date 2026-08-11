@@ -70,6 +70,10 @@ fun RingsScreen(
     var sober by remember { mutableStateOf<SoberCurrentResponse?>(null) }
     var fasting by remember { mutableStateOf<FastingSession?>(null) }
     var readiness by remember { mutableStateOf<app.myvitals.sync.ReadinessDetail?>(null) }
+    var groupOrder by remember { mutableStateOf<List<String>>(emptyList()) }
+    var focusCounts by remember {
+        mutableStateOf<Map<String, app.myvitals.sync.FocusCount>>(emptyMap())
+    }
     var rollup by remember {
         mutableStateOf<app.myvitals.sync.VitalTilesRollup?>(null)
     }
@@ -140,6 +144,8 @@ fun RingsScreen(
                     tilesD.await()?.let { r ->
                         if (r.tiles.isNotEmpty()) vitalTiles = r.tiles
                         rollup = r.summary
+                        groupOrder = r.groupOrder
+                        focusCounts = r.focusAreas
                     }
                 }
             }
@@ -185,6 +191,7 @@ fun RingsScreen(
             // classic home honours, so the same user saw two orders.
             order = profile?.extra?.vitalsOrder ?: emptyList(),
             hidden = profile?.extra?.vitalsHidden?.toSet() ?: emptySet(),
+            groupOrder = groupOrder,
         )
         error?.let {
             NeonErrorBanner(it) {
@@ -221,7 +228,7 @@ fun RingsScreen(
         app.myvitals.ui.common.NarrativeCards(narrativeEvents)
 
         // Focus areas — navigation, not a dashboard. Replaces the pill list.
-        app.myvitals.ui.common.FocusAreas(onOpen)
+        app.myvitals.ui.common.FocusAreas(onOpen, counts = focusCounts)
 
         Spacer(Modifier.height(24.dp))
     }

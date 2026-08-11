@@ -25,6 +25,9 @@ const loaded = ref(false);
  *  whole point of one card vocabulary. */
 const order = ref<string[]>([]);
 const hidden = ref<string[]>([]);
+/** Section headings and their order — both from the server, so the two
+ *  grids can't disagree about where a metric belongs. */
+const groupOrder = ref<string[]>([]);
 
 /** Vital enum name → tiles key, so a preference written against the old
  *  badge grid still means something. */
@@ -52,6 +55,7 @@ const BAR = new Set(["steps"]);
 async function load() {
   const [t, p] = await Promise.allSettled([api.summaryTiles(), api.getProfile()]);
   tiles.value = t.status === "fulfilled" ? (t.value.tiles ?? []) : [];
+  if (t.status === "fulfilled") groupOrder.value = t.value.group_order ?? [];
   if (p.status === "fulfilled") {
     const extra = (p.value as { extra?: Record<string, unknown> })?.extra ?? {};
     order.value = (extra.vitals_order as string[]) ?? [];
@@ -108,6 +112,27 @@ function displayValue(t: VitalTile): number | string | null {
   return Number.isInteger(t.value) ? String(t.value) : t.value.toFixed(1);
 }
 
+/** Tiles bucketed under their server-assigned heading, in server order.
+ *  A group with nothing in it is dropped rather than rendering an empty
+ *  heading. */
+const grouped = computed(() => {
+  const byGroup = new Map<string, VitalTile[]>();
+  for (const t of shown.value) {
+    const g = t.group ?? "Other";
+    if (!byGroup.has(g)) byGroup.set(g, []);
+    byGroup.get(g)!.push(t);
+  }
+  const ordered = groupOrder.value.length ? groupOrder.value : [...byGroup.keys()];
+  const out = ordered
+    .filter((g) => byGroup.has(g))
+    .map((g) => ({ name: g, tiles: byGroup.get(g)! }));
+  // Anything the server didn't order still appears, rather than vanishing.
+  for (const [g, ts] of byGroup) {
+    if (!ordered.includes(g)) out.push({ name: g, tiles: ts });
+  }
+  return out;
+});
+
 const shown = computed(() => {
   const hide = new Set(hidden.value.map((v) => VITAL_TO_KEY[v]).filter(Boolean));
   const visible = tiles.value.filter((t) => !hide.has(t.key));
@@ -126,9 +151,15 @@ const shown = computed(() => {
 
 <template>
   <section v-if="loaded && shown.length" class="km">
-    <h2 class="sect">Key metrics</h2>
-    <div class="grid">
-      <button v-for="t in shown" :key="t.key" class="cell"
+    <div class="sechead">
+      <h2 class="sect">Key metrics</h2>
+      <button class="edit" @click="router.push('/settings')">Edit</button>
+    </div>
+
+    <div v-for="g in grouped" :key="g.name" class="group">
+      <h3 class="ghead">{{ g.name }}</h3>
+      <div class="grid">
+      <button v-for="t in g.tiles" :key="t.key" class="cell"
               @click="router.push(ROUTE[t.key] ?? '/')">
         <MetricCard
           :name="t.label"
@@ -145,12 +176,26 @@ const shown = computed(() => {
           :accent="ACCENT[t.key] ?? '#7ee2a8'"
         />
       </button>
+      </div>
     </div>
   </section>
 </template>
 
 <style scoped>
 .km { margin: 18px 0; }
+.sechead {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 4px;
+}
+.edit {
+  background: none; border: 0; cursor: pointer;
+  color: #8ab4f8; font-size: .82rem; padding: 4px 2px;
+}
+.group { margin-bottom: 14px; }
+.ghead {
+  font-size: .84rem; font-weight: 500; color: #b9bec6;
+  margin: 10px 0 8px; letter-spacing: 0;
+}
 .sect {
   font-size: 1.35rem; font-weight: 400; color: #e9edf2;
   margin: 0 0 12px; letter-spacing: -0.2px;

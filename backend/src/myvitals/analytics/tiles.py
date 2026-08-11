@@ -51,6 +51,30 @@ KG_TO_LB = 2.2046226218
 # and not a score — a tile has room for one word.
 GOOD, TYPICAL, WATCH = "good", "typical", "watch"
 
+# Section headings for the Key metrics grid, and the order they appear in.
+# Lives here rather than in each client: a grouping map duplicated on two
+# surfaces is one edit away from the two grids disagreeing about where a
+# metric belongs.
+TILE_GROUPS: dict[str, str] = {
+    "resting_hr": "Heart & recovery",
+    "hrv": "Heart & recovery",
+    "recovery": "Heart & recovery",
+    "sleep_duration": "Sleep",
+    "steps": "Daily activity",
+    "weight": "Body",
+    "blood_pressure": "Body",
+}
+GROUP_ORDER = ["Heart & recovery", "Sleep", "Daily activity", "Body"]
+
+# Which metrics each Focus area covers, so its "N tracked" subtitle counts
+# something real rather than being decorative.
+FOCUS_AREAS: dict[str, list[str]] = {
+    "heart": ["resting_hr", "hrv", "blood_pressure"],
+    "sleep": ["sleep_duration"],
+    "vitals": ["hrv", "resting_hr", "recovery", "blood_pressure", "weight"],
+    "fitness": ["steps"],
+}
+
 # How far from baseline before a metric stops being "typical". 1.0σ is
 # about the 16th/84th percentile — frequent enough to be informative,
 # rare enough that the grid isn't a wall of colour.
@@ -250,6 +274,7 @@ async def tile_stats(
     tiles: list[dict[str, Any]] = []
 
     def add(**kw):
+        kw.setdefault("group", TILE_GROUPS.get(kw.get("key", ""), "Other"))
         # Explicit band bounds so no client has to know the rule.
         bl = kw.get("baseline")
         if bl is not None and kw.get("band_low") is None:

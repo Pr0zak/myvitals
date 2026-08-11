@@ -352,6 +352,8 @@ export interface VitalTile {
    *  health judgement and lives in analytics/tiles.py, not in a client. */
   band_low: number | null;
   band_high: number | null;
+  /** Section heading for the Key metrics grid, assigned server-side. */
+  group?: string;
   target?: number | null;
   delta: number | null;
   z?: number | null;
@@ -373,6 +375,10 @@ export interface VitalTilesResponse {
   tiles: VitalTile[];
   /** Health-status roll-up, counted server-side so the surfaces agree. */
   summary?: VitalTilesRollup;
+  /** Section headings in display order. */
+  group_order?: string[];
+  /** Per-focus-area "N tracked" counts. */
+  focus_areas?: Record<string, { tracked: number; total: number }>;
 }
 
 /** One card from GET /summary/events. Wording and nap-vs-night

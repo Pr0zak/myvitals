@@ -388,10 +388,25 @@ async def summary_tiles(
     # here rather than in the clients: it is a roll-up of server verdicts,
     # and two surfaces disagreeing on the count would be the same bug class
     # as two surfaces disagreeing on a value.
+    from ..analytics.tiles import FOCUS_AREAS, GROUP_ORDER
+
     judged = [t for t in tiles if t.get("status")]
+    # "3 tracked" per Focus area — counted from tiles that actually have a
+    # value today, so the subtitle reports something real instead of a
+    # constant. Counted server-side for the same reason the grouping is.
+    with_data = {t["key"] for t in tiles if t.get("value") is not None}
+    focus = {
+        area: {
+            "tracked": sum(1 for k in keys if k in with_data),
+            "total": len(keys),
+        }
+        for area, keys in FOCUS_AREAS.items()
+    }
     return {
         "date": day.isoformat(),
         "tiles": tiles,
+        "group_order": GROUP_ORDER,
+        "focus_areas": focus,
         "summary": {
             "judged": len(judged),
             "in_range": sum(1 for t in judged if t["status"] != "watch"),

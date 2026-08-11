@@ -162,6 +162,10 @@ fun VitalsScreen(
     var vitalTiles by remember {
         mutableStateOf<List<app.myvitals.sync.VitalTile>>(emptyList())
     }
+    var groupOrder by remember { mutableStateOf<List<String>>(emptyList()) }
+    var focusCounts by remember {
+        mutableStateOf<Map<String, app.myvitals.sync.FocusCount>>(emptyMap())
+    }
     var rollup by remember {
         mutableStateOf<app.myvitals.sync.VitalTilesRollup?>(null)
     }
@@ -314,6 +318,8 @@ fun VitalsScreen(
                 tilesD.await()?.let { r ->
                     if (r.tiles.isNotEmpty()) vitalTiles = r.tiles
                     rollup = r.summary
+                        groupOrder = r.groupOrder
+                        focusCounts = r.focusAreas
                 }
                 hr = hrD.await()
                 weight = weightD.await()
@@ -499,6 +505,8 @@ fun VitalsScreen(
                     // The classic home's reorder / hide preference survives.
                     order = profile?.extra?.vitalsOrder ?: emptyList(),
                     hidden = profile?.extra?.vitalsHidden?.toSet() ?: emptySet(),
+                    groupOrder = groupOrder,
+                    onEdit = { manageOpen = true },
                 )
                 Spacer(Modifier.height(18.dp))
             }
@@ -507,7 +515,7 @@ fun VitalsScreen(
                 Spacer(Modifier.height(18.dp))
             }
             item {
-                app.myvitals.ui.common.FocusAreas(onOpen = { route ->
+                app.myvitals.ui.common.FocusAreas(counts = focusCounts, onOpen = { route ->
                     when (route) {
                         "trails" -> onOpenTrails()
                         "journal" -> onOpenJournal()

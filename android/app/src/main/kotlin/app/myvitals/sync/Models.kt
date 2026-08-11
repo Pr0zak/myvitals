@@ -832,6 +832,8 @@ data class VitalTile(
      *  computing it here too is how two surfaces drift. */
     @Json(name = "band_low") val bandLow: Double? = null,
     @Json(name = "band_high") val bandHigh: Double? = null,
+    /** Section heading for the Key metrics grid, assigned server-side. */
+    val group: String? = null,
     val target: Double? = null,
     val delta: Double? = null,
     val z: Double? = null,
@@ -866,11 +868,21 @@ data class VitalTilesRollup(
 )
 
 @JsonClass(generateAdapter = true)
+data class FocusCount(
+    val tracked: Int = 0,
+    val total: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
 data class VitalTilesResponse(
     val date: String,
     val tiles: List<VitalTile> = emptyList(),
     /** Health-status roll-up, counted server-side so surfaces agree. */
     val summary: VitalTilesRollup? = null,
+    /** Section headings in display order. */
+    @Json(name = "group_order") val groupOrder: List<String> = emptyList(),
+    /** Per-focus-area "N tracked" counts. */
+    @Json(name = "focus_areas") val focusAreas: Map<String, FocusCount> = emptyMap(),
 )
 
 // ── Narrative event cards (/summary/events) ──────────────────────

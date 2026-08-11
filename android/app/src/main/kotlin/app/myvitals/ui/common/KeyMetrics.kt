@@ -1,5 +1,6 @@
 package app.myvitals.ui.common
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,16 +39,47 @@ fun KeyMetrics(
     order: List<String> = emptyList(),
     /** Vital enum names the user has hidden. */
     hidden: Set<String> = emptySet(),
+    /** Section headings in display order, from the server. */
+    groupOrder: List<String> = emptyList(),
+    /** Opens the tile reorder / hide sheet, mirroring the web's Edit link. */
+    onEdit: (() -> Unit)? = null,
 ) {
     val ordered = applyPreference(tiles, order, hidden)
     if (ordered.isEmpty()) return
     Column(modifier.fillMaxWidth()) {
-        Text(
-            "Key metrics", color = Color(0xFFE9EDF2),
-            fontSize = 21.sp, fontWeight = FontWeight.Normal,
-        )
-        Spacer(Modifier.height(12.dp))
-        ordered.chunked(2).forEach { pair ->
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.Bottom,
+        ) {
+            Text(
+                "Key metrics", color = Color(0xFFE9EDF2),
+                fontSize = 21.sp, fontWeight = FontWeight.Normal,
+            )
+            if (onEdit != null) {
+                Text(
+                    "Edit", color = Color(0xFF8AB4F8), fontSize = 13.sp,
+                    modifier = Modifier
+                        .clickable(onClick = onEdit)
+                        .padding(4.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+
+        // Bucketed under the server's headings, in the server's order. A
+        // grouping map duplicated per client is one edit from the two grids
+        // disagreeing about where a metric belongs.
+        val byGroup = ordered.groupBy { it.group ?: "Other" }
+        val heads = groupOrder.filter { byGroup.containsKey(it) } +
+            byGroup.keys.filter { it !in groupOrder }
+        heads.forEach { head ->
+            Text(
+                head, color = Color(0xFFB9BEC6), fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
+            )
+            (byGroup[head] ?: emptyList()).chunked(2).forEach { pair ->
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -76,9 +108,12 @@ fun KeyMetrics(
                 // letting it stretch across the row.
                 if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
+            }
         }
     }
 }
+
+
 
 /** Vital enum name → tiles key, so the saved preference (written against
  *  the old badge grid) still means something here. */

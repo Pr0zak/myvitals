@@ -10,14 +10,25 @@
  * Counts come from data the home already loads; nothing extra is fetched
  * just to populate a label.
  */
+import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-
-defineProps<{
-  /** key → "N tracked" style subtitle, e.g. { heart: "3 tracked" }. */
-  counts?: Record<string, string>;
-}>();
+import { api } from "@/api/client";
 
 const router = useRouter();
+
+/** "3 tracked" per area, counted server-side from the tiles that actually
+ *  have a value today — a constant subtitle would be decoration. */
+const counts = ref<Record<string, { tracked: number; total: number }>>({});
+onMounted(async () => {
+  try {
+    counts.value = (await api.summaryTiles()).focus_areas ?? {};
+  } catch { /* the grid is still navigable without its counts */ }
+});
+
+function subtitle(key: string): string {
+  const c = counts.value[key];
+  return c ? `${c.tracked} tracked` : "Open";
+}
 
 /** Inline SVG paths rather than text glyphs. Half the glyphs (⬛, ⛰, ◐)
  *  fall back to a box or an emoji depending on the platform font, which is
@@ -57,7 +68,7 @@ const AREAS: Array<{
         </svg>
         <span class="meta">
           <span class="lab">{{ a.label }}</span>
-          <span class="sub">{{ counts?.[a.key] ?? "Open" }}</span>
+          <span class="sub">{{ subtitle(a.key) }}</span>
         </span>
       </button>
     </div>

@@ -109,19 +109,24 @@ fun TodayHero(
             }
 
             // Saturated chips
+            // No fixed height: pinning this column to the ring's 168dp left
+            // each chip ~50dp for ~61dp of content, and the values were
+            // clipped mid-glyph. The chips size to their content and the
+            // row takes the taller of the two, as the web flexbox already
+            // did.
             Column(
-                Modifier.weight(1f).height(168.dp),
+                Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 HeroChip("Steps", display("steps"), Color(0xFF0F4F45),
-                    Color(0xFF7FE6D2), Modifier.weight(1f)) { onOpen("vitals/STEPS") }
+                    Color(0xFF7FE6D2)) { onOpen("vitals/STEPS") }
                 HeroChip(
                     "Readiness",
                     readiness?.let { "%.0f".format(it) } ?: "—",
-                    Color(0xFF123C56), Color(0xFF8FD0F5), Modifier.weight(1f),
+                    Color(0xFF123C56), Color(0xFF8FD0F5),
                 ) { onOpen("vitals/HR") }
                 HeroChip("Sleep", display("sleep_duration"), Color(0xFF3D2A5C),
-                    Color(0xFFC9ADF5), Modifier.weight(1f)) { onOpen("vitals/SLEEP") }
+                    Color(0xFFC9ADF5)) { onOpen("vitals/SLEEP") }
             }
         }
 

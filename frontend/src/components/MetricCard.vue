@@ -38,15 +38,18 @@ const props = withDefaults(defineProps<{
   statusLabel?: string | null;
   /** Oldest-first daily points; nulls are gaps. */
   series?: Array<{ date: string; value: number | null }>;
-  /** Draws the shaded "your normal" band. */
-  baseline?: number | null;
+  /** Shaded "your normal" band, as explicit bounds from the server. The
+   *  rule that produces them is a health judgement and lives in
+   *  analytics/tiles.py, not here. */
+  bandLow?: number | null;
+  bandHigh?: number | null;
   /** Dotted goal line. */
   target?: number | null;
   chart?: "line" | "bar";
   accent?: string;
 }>(), {
   unit: "", qualifier: "Today", status: null, statusLabel: null,
-  series: () => [], baseline: null, target: null, chart: "line",
+  series: () => [], bandLow: null, bandHigh: null, target: null, chart: "line",
   accent: "#7ee2a8",
 });
 
@@ -90,7 +93,8 @@ const todayIdx = computed(() => week.value.length - 1);
 
 const scale = computed(() => {
   const vals = week.value.map((p) => p.value).filter((v): v is number => v != null);
-  const extra = [props.baseline, props.target].filter((v): v is number => v != null);
+  const extra = [props.bandLow, props.bandHigh, props.target]
+    .filter((v): v is number => v != null);
   const all = [...vals, ...extra];
   if (!all.length) return null;
   let lo = Math.min(...all);
@@ -139,14 +143,12 @@ const bars = computed(() => {
   }));
 });
 
-/** The shaded "your normal" band — ±8% of baseline, matching the reference's
- *  soft region rather than a hard line. */
+/** The shaded "your normal" band, drawn from the server's bounds. */
 const band = computed(() => {
   const s = scale.value;
-  if (!s || props.baseline == null) return null;
-  const spread = Math.abs(props.baseline) * 0.08;
-  const top = s.y(props.baseline + spread);
-  const bot = s.y(props.baseline - spread);
+  if (!s || props.bandLow == null || props.bandHigh == null) return null;
+  const top = s.y(props.bandHigh);
+  const bot = s.y(props.bandLow);
   return { y: Math.min(top, bot), h: Math.abs(bot - top) };
 });
 

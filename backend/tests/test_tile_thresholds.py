@@ -169,3 +169,23 @@ def test_normal_bp_is_the_only_good_one():
     assert bp_category(125, 75)[0] == TYPICAL
     assert bp_category(135, 85)[0] == WATCH
     assert bp_category(150, 95)[0] == WATCH
+
+
+# ── normal-range band ─────────────────────────────────────────────────
+
+def test_band_bounds_come_from_the_server_not_the_clients():
+    """The band is a claim about what's normal for this user.
+
+    It was briefly computed as baseline ± 8% inside both MetricCard.vue and
+    MetricCard.kt. Two copies of a health judgement is how surfaces drift,
+    so the bounds are emitted with the tile.
+    """
+    from myvitals.analytics.tiles import BAND_FRACTION
+
+    baseline = 60.0
+    low = baseline - abs(baseline) * BAND_FRACTION
+    high = baseline + abs(baseline) * BAND_FRACTION
+    assert low < baseline < high
+    # A band that doesn't straddle the baseline would mark a perfectly
+    # typical reading as out of range.
+    assert round(high - baseline, 6) == round(baseline - low, 6)

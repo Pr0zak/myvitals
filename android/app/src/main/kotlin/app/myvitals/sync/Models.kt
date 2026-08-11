@@ -828,6 +828,10 @@ data class VitalTile(
     val kind: String = "neutral",
     @Json(name = "higher_is_better") val higherIsBetter: Boolean? = null,
     val baseline: Double? = null,
+    /** Explicit "your normal" bounds. The rule lives in analytics/tiles.py;
+     *  computing it here too is how two surfaces drift. */
+    @Json(name = "band_low") val bandLow: Double? = null,
+    @Json(name = "band_high") val bandHigh: Double? = null,
     val target: Double? = null,
     val delta: Double? = null,
     val z: Double? = null,

@@ -56,6 +56,13 @@ GOOD, TYPICAL, WATCH = "good", "typical", "watch"
 # rare enough that the grid isn't a wall of colour.
 Z_NOTABLE = 1.0
 
+# Half-width of the "your normal" band, as a fraction of baseline. Lives
+# here rather than in each client: the band is a statement about what
+# counts as normal for this user, which is a health judgement and belongs
+# server-side. It was briefly duplicated in MetricCard.vue and
+# MetricCard.kt, which is how two surfaces drift.
+BAND_FRACTION = 0.08
+
 # Past this, a carried-forward reading is reported but NOT judged. A
 # verdict is a claim about how you are *now*; "your blood pressure is in
 # the stage 1 range" off a two-month-old cuff reading is a claim the data
@@ -219,6 +226,15 @@ async def tile_stats(
     tiles: list[dict[str, Any]] = []
 
     def add(**kw):
+        # Explicit band bounds so no client has to know the rule.
+        bl = kw.get("baseline")
+        if bl is not None:
+            spread = abs(bl) * BAND_FRACTION
+            kw.setdefault("band_low", round(bl - spread, 2))
+            kw.setdefault("band_high", round(bl + spread, 2))
+        else:
+            kw.setdefault("band_low", None)
+            kw.setdefault("band_high", None)
         kw.setdefault("status", None)
         kw.setdefault("status_reason", None)
         kw.setdefault("delta", None)

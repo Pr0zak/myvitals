@@ -61,7 +61,8 @@ fun MetricCard(
     modifier: Modifier = Modifier,
     status: String? = null,
     statusLabel: String? = null,
-    baseline: Double? = null,
+    bandLow: Double? = null,
+    bandHigh: Double? = null,
     target: Double? = null,
     bars: Boolean = false,
     accent: Color = Color(0xFF7EE2A8),
@@ -110,7 +111,8 @@ fun MetricCard(
         WeekChart(
             points = series.takeLast(WEEK),
             accent = accent,
-            baseline = baseline,
+            bandLow = bandLow,
+            bandHigh = bandHigh,
             target = target,
             bars = bars,
             modifier = Modifier.fillMaxWidth().height(40.dp),
@@ -184,7 +186,8 @@ private fun WeekAxis(days: List<String>) {
 private fun WeekChart(
     points: List<Double?>,
     accent: Color,
-    baseline: Double?,
+    bandLow: Double?,
+    bandHigh: Double?,
     target: Double?,
     bars: Boolean,
     modifier: Modifier = Modifier,
@@ -196,7 +199,7 @@ private fun WeekChart(
         Box(modifier)
         return
     }
-    val extras = listOfNotNull(baseline, target)
+    val extras = listOfNotNull(bandLow, bandHigh, target)
     val all = real + extras
     var lo = all.min()
     var hi = all.max()
@@ -208,11 +211,10 @@ private fun WeekChart(
         fun y(v: Double) = size.height - ((v - lo) / (hi - lo)).toFloat() * size.height
         val stepX = if (points.size > 1) size.width / (points.size - 1) else size.width
 
-        // Shaded "your normal" band — soft region, not a hard line.
-        baseline?.let { b ->
-            val spread = kotlin.math.abs(b) * 0.08
-            val top = y(b + spread)
-            val bot = y(b - spread)
+        // Shaded "your normal" band, drawn from the server's bounds.
+        if (bandLow != null && bandHigh != null) {
+            val top = y(bandHigh)
+            val bot = y(bandLow)
             drawRect(
                 accent.copy(alpha = 0.10f),
                 topLeft = Offset(0f, minOf(top, bot)),

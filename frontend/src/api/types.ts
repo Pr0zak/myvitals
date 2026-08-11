@@ -348,6 +348,10 @@ export interface VitalTile {
   kind: "baseline" | "target" | "neutral";
   higher_is_better: boolean | null;
   baseline: number | null;
+  /** Explicit "your normal" bounds. The rule that produces them is a
+   *  health judgement and lives in analytics/tiles.py, not in a client. */
+  band_low: number | null;
+  band_high: number | null;
   target?: number | null;
   delta: number | null;
   z?: number | null;

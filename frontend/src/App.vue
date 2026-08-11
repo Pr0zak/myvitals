@@ -337,21 +337,25 @@ main {
 }
 
 /* Banner */
+/* Matches the card vocabulary rather than shouting above it: rounded, no
+   accent rail, and quiet enough that content is still the first thing the
+   eye lands on. It is a notice, not an alarm. */
 .banner {
   display: block;
   margin: 0.8rem 1.5rem;
-  padding: 0.6rem 0.9rem;
-  background: rgba(234, 179, 8, 0.10);
-  border-left: 3px solid var(--warn);
-  color: var(--warn);
+  padding: 0.7rem 0.95rem;
+  border-radius: 14px;
+  background: rgba(232, 182, 97, 0.10);
+  border-left: 0;
+  color: #e8b661;
   text-decoration: none;
   font-size: 0.9rem;
   border-radius: 8px;
 }
-.banner:hover { background: rgba(234, 179, 8, 0.16); }
+.banner:hover { background: rgba(232, 182, 97, 0.16); }
 .banner-perms {
   background: rgba(239, 68, 68, 0.12);
-  border-left-color: var(--bad);
+  color: #ff8a9b;
   color: var(--bad);
 }
 .banner-perms .muted-mono {

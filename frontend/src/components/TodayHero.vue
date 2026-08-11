@@ -137,12 +137,15 @@ const dash = computed(() => {
 .hero { margin: 4px 0 18px; max-width: 640px; }
 .top { display: flex; gap: 12px; align-items: stretch; }
 
+/* Height comes from the row, not a fixed number: the chips column grew to
+   172px and the ring stopped at 168, leaving a visible 4px step. */
 .ring {
-  position: relative; flex: none; width: 168px; height: 168px;
+  position: relative; flex: none; width: 168px; min-height: 168px;
   background: #1b1c1f; border: 0; border-radius: 22px;
   cursor: pointer; padding: 0; color: inherit;
 }
 .ring svg { width: 100%; height: 100%; display: block; }
+.top > .ring { align-self: stretch; }
 .rtext {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; align-items: center;

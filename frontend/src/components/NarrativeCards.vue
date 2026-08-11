@@ -10,10 +10,10 @@
  *   hypnogram              one lane per stage, CONNECTED
  *   👍 👎              ⋮   feedback left, overflow right
  *
- * The hypnogram is a connected stepped ribbon rather than isolated bars:
- * each segment is a rounded tab rising from its lane, joined to its
- * neighbours by a hairline so the night reads as one continuous descent
- * and climb. Disconnected bars make sleep look like unrelated events.
+ * The hypnogram is one lane per stage, each segment a rounded tab placed by
+ * WHEN it happened. An earlier version drew hairlines between lanes to join
+ * the stages; at a real night's density they stacked into heavy grey bars
+ * that were louder than the stages themselves, so they are gone.
  *
  * All wording, classification and the stat chips come from
  * `/summary/events` — see analytics/events.py.
@@ -108,8 +108,7 @@ function dayBreakBefore(i: number): string | null {
 
 const LANE_H = 26;
 
-/** Geometry for one lane: rounded tabs positioned by time, plus the
- *  hairline joins to the neighbouring stage. */
+/** Geometry for one lane: rounded tabs positioned by time. */
 function lane(e: NarrativeEvent, stage: string) {
   const t0 = new Date(e.start).getTime();
   const span = new Date(e.end).getTime() - t0;
@@ -139,19 +138,6 @@ function lanesFor(e: NarrativeEvent) {
   }));
 }
 
-/** Vertical hairlines at each stage transition, so the night reads as one
- *  continuous descent and climb rather than unrelated bars. The reference
- *  draws these joins between lanes; without them a hypnogram looks like a
- *  scatter of events. */
-function transitions(e: NarrativeEvent): string[] {
-  const t0 = new Date(e.start).getTime();
-  const span = new Date(e.end).getTime() - t0;
-  if (span <= 0) return [];
-  return [...e.segments]
-    .sort((a, b) => a.start.localeCompare(b.start))
-    .slice(1)
-    .map((sg) => `${((new Date(sg.start).getTime() - t0) / span) * 100}%`);
-}
 
 const shown = computed(() => events.value);
 </script>
@@ -188,11 +174,6 @@ const shown = computed(() => events.value);
 
         <div class="hypno">
           <div class="lanes">
-            <!-- Joins sit behind the lanes so a tab always reads on top. -->
-            <span
-              v-for="(x, ti) in transitions(e)" :key="'t' + ti"
-              class="join" :style="{ left: x }"
-            />
           <div v-for="l in lanesFor(e)" :key="l.stage" class="lane">
             <div class="llabel">
               {{ l.label }} <span class="ldur">• {{ mins(l.total) }}</span>
@@ -287,10 +268,6 @@ const shown = computed(() => events.value);
 
 .hypno { background: #131417; border-radius: 14px; padding: 12px; }
 .lanes { position: relative; }
-.join {
-  position: absolute; top: 18px; bottom: 6px; width: 1px;
-  background: #3a3d45; opacity: .55; pointer-events: none;
-}
 .lane { margin-bottom: 10px; }
 .llabel { font-size: .76rem; color: #e9edf2; margin-bottom: 5px; }
 .ldur { color: #8d949d; }

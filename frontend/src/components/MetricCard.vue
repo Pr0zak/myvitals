@@ -241,6 +241,7 @@ const plottable = computed(
   display: flex;
   flex-direction: column;
   min-width: 0;
+  height: 100%;
 }
 .name {
   font-size: .78rem;
@@ -285,6 +286,9 @@ const plottable = computed(
 
 .chip {
   align-self: flex-start;
+  /* Anchored to the bottom so chips line up across a row and a missing
+     chart becomes balanced padding rather than a short card. */
+  margin-top: auto;
   font-size: .66rem;
   font-weight: 500;
   margin-block-start: 10px;

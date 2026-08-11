@@ -209,11 +209,15 @@ const shown = computed(() => {
    same data out differently and a lone card left a hole several columns
    wide. minmax(0,1fr) rather than 1fr so the long "139/92 mmHg" value
    can't push its column past its share. */
+/* Rows stretch and the chip anchors to the card bottom, so a card with a
+   shorter chart (weight and blood pressure are measured weekly, so theirs
+   is often empty) ends level with its neighbour instead of stopping short.
+   Sizing to content left visibly ragged bottoms across every row. */
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  align-items: start;
+  align-items: stretch;
 }
 
 /* A lone trailing card spans the row instead of sitting beside a hole.

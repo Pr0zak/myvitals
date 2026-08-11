@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -76,6 +77,7 @@ fun MetricCard(
     Column(
         modifier
             .fillMaxWidth()
+            .fillMaxHeight()
             .background(Color(0xFF1B1C1F), RoundedCornerShape(20.dp))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 12.dp),
@@ -123,7 +125,9 @@ fun MetricCard(
         WeekAxis(dayLetters.takeLast(span))
 
         if (chip != null) {
-            Spacer(Modifier.height(10.dp))
+            // Pushed to the bottom so chips line up across a row and a
+            // missing chart becomes balanced padding, not a short card.
+            Spacer(Modifier.weight(1f, fill = false).height(10.dp))
             Box(
                 Modifier
                     .background(chip.bg, RoundedCornerShape(999.dp))

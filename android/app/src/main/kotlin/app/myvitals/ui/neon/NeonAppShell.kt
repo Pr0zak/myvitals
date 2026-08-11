@@ -95,8 +95,6 @@ fun NeonAppShell(
     onBackfill: (Int) -> Unit,
     onOpenLogs: () -> Unit,
     onClearBuffer: () -> Unit,
-    neonShellEnabled: Boolean,
-    onToggleNeonShell: (Boolean) -> Unit,
 ) {
     val nav = rememberNavController()
 
@@ -286,8 +284,6 @@ fun NeonAppShell(
                         onBackfill = onBackfill,
                         onOpenLogs = onOpenLogs,
                         onClearBuffer = onClearBuffer,
-                        neonShellEnabled = neonShellEnabled,
-                        onToggleNeonShell = onToggleNeonShell,
                     )
                 }
             }

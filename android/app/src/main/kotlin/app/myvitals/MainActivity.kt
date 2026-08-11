@@ -48,7 +48,6 @@ import app.myvitals.debug.LogViewerActivity
 import app.myvitals.health.HealthConnectGateway
 import app.myvitals.sync.SyncWorker
 import app.myvitals.ui.MV
-import app.myvitals.ui.MyVitalsTheme
 import app.myvitals.ui.JournalScreen
 import app.myvitals.ui.SettingsScreen
 import app.myvitals.ui.SoberHomeScreen
@@ -138,14 +137,7 @@ class MainActivity : ComponentActivity() {
         settings.clearRetiredRefinedHomeFlag()
 
         setContent {
-            var neonEnabled by remember { mutableStateOf(settings.neonShellEnabled) }
-            val toggleNeon: (Boolean) -> Unit = { on ->
-                settings.neonShellEnabled = on
-                neonEnabled = on
-            }
-
-            // Settings actions shared by both shells (defined once so the neon
-            // shell's reused SettingsScreen behaves identically to the classic).
+            // Settings actions, defined once for the single shell.
             val onRequestPermissions: () -> Unit = {
                 Timber.d("Requesting HC permissions: %s", gateway.requiredPermissions)
                 permissionLauncher.launch(gateway.requiredPermissions)
@@ -188,7 +180,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            if (neonEnabled) {
+            // ONE shell. The Classic / Vitality Neon choice is retired: both
+            // rendered the same cards after the redesign, so the setting
+            // chose between two navigations of the same app while costing a
+            // second implementation of every screen it touched.
+            run {
                 NeonTheme {
                     NeonAppShell(
                         settings = settings,
@@ -202,249 +198,12 @@ class MainActivity : ComponentActivity() {
                         onBackfill = onBackfill,
                         onOpenLogs = onOpenLogs,
                         onClearBuffer = onClearBuffer,
-                        neonShellEnabled = neonEnabled,
-                        onToggleNeonShell = toggleNeon,
                     )
                 }
                 return@setContent
             }
 
-            MyVitalsTheme {
-                val nav = rememberNavController()
-                // Read the `shortcut_route` extra on every onCreate /
-                // singleTop re-launch and navigate to that tab. The
-                // intent comes from a static app shortcut declared in
-                // res/xml/shortcuts.xml — Workouts and Trails today.
-                val routeFromShortcut = intent?.getStringExtra("shortcut_route")
-                LaunchedEffect(routeFromShortcut) {
-                    val target = routeFromShortcut
-                    if (!target.isNullOrEmpty() && target in setOf(
-                            Routes.WORKOUT, Routes.TRAILS, Routes.VITALS,
-                            Routes.ACTIVITIES, Routes.SETTINGS, Routes.SOBER,
-                            Routes.FASTING, Routes.JOURNAL,
-                        )
-                    ) {
-                        nav.navigateTab(target)
-                        // Consume the extra so onResume doesn't re-fire on
-                        // every Lifecycle event.
-                        intent?.removeExtra("shortcut_route")
-                    }
-                }
-                Scaffold(
-                    bottomBar = { BottomBar(nav) },
-                    containerColor = MV.Bg,
-                ) { padding ->
-                  androidx.compose.foundation.layout.Column(
-                      modifier = Modifier.fillMaxSize().padding(padding),
-                  ) {
-                    // App-wide offline / can't-reach-server status bar so
-                    // the user always knows why they're seeing saved data.
-                    app.myvitals.ui.common.ConnectionBanner()
-                    NavHost(
-                        navController = nav,
-                        startDestination = Routes.VITALS,
-                        modifier = Modifier.fillMaxSize().weight(1f)
-                            .swipeBetweenTopTabs(nav),
-                    ) {
-                        composable(Routes.VITALS) {
-                            app.myvitals.ui.vitals.VitalsScreen(
-                                settings = settings,
-                                onOpenSettings = { nav.navigateTab(Routes.SETTINGS) },
-                                onOpenSober = { nav.navigate(Routes.SOBER) },
-                                onOpenFasting = { nav.navigate(Routes.FASTING) },
-                                onOpenCoach = { nav.navigate(Routes.COACH) },
-                                onOpenJournal = { nav.navigate(Routes.JOURNAL) },
-                                onOpenVitalDetail = { v ->
-                                    nav.navigate(Routes.vitalDetail(v.name))
-                                },
-                                onOpenWorkout = { nav.navigateTab(Routes.WORKOUT) },
-                                onOpenActivity = { source, sourceId ->
-                                    nav.navigate(Routes.activityDetail(source, sourceId))
-                                },
-                                onOpenTrails = { nav.navigateTab(Routes.TRAILS) },
-                            )
-                        }
-                        composable(
-                            Routes.VITAL_DETAIL,
-                            arguments = listOf(
-                                androidx.navigation.navArgument("key") {
-                                    type = androidx.navigation.NavType.StringType
-                                },
-                            ),
-                        ) { entry ->
-                            val key = entry.arguments?.getString("key") ?: "HR"
-                            val vital = runCatching {
-                                app.myvitals.ui.vitals.Vital.valueOf(key)
-                            }.getOrDefault(app.myvitals.ui.vitals.Vital.HR)
-                            app.myvitals.ui.vitals.VitalsDetailScreen(
-                                settings = settings,
-                                vital = vital,
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(Routes.SOBER) {
-                            SoberHomeScreen(
-                                settings = settings,
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(Routes.FASTING) {
-                            app.myvitals.ui.FastingScreen(
-                                settings = settings,
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(Routes.COACH) {
-                            app.myvitals.ui.CoachScreen(
-                                settings = settings,
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(Routes.JOURNAL) {
-                            JournalScreen(
-                                settings = settings,
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(Routes.WORKOUT) {
-                            StrengthTodayScreen(
-                                settings = settings,
-                                onOpenHistory = { nav.navigate(Routes.WORKOUT_HISTORY) },
-                                onOpenCatalog = { nav.navigate(Routes.WORKOUT_CATALOG) },
-                                onOpenTrainingPrefs = { nav.navigate(Routes.WORKOUT_TRAINING_PREFS) },
-                                onOpenEquipment = { nav.navigate(Routes.WORKOUT_EQUIPMENT) },
-                                onOpenCoach = { nav.navigate(Routes.COACH) },
-                                onOpenDay = { date -> nav.navigate(Routes.workoutDay(date)) },
-                                onOpenCharts = { nav.navigate(Routes.WORKOUT_CHARTS) },
-                            )
-                        }
-                        composable(Routes.WORKOUT_HISTORY) {
-                            StrengthHistoryScreen(
-                                settings = settings,
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(Routes.WORKOUT_CHARTS) {
-                            app.myvitals.ui.strength.WorkoutChartsScreen(
-                                settings = settings,
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(
-                            Routes.WORKOUT_DAY,
-                            arguments = listOf(
-                                androidx.navigation.navArgument("date") {
-                                    type = androidx.navigation.NavType.StringType
-                                },
-                            ),
-                        ) { entry ->
-                            app.myvitals.ui.strength.StrengthDayViewScreen(
-                                settings = settings,
-                                dateIso = entry.arguments?.getString("date") ?: "",
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(Routes.WORKOUT_CATALOG) {
-                            StrengthCatalogScreen(
-                                settings = settings,
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(Routes.WORKOUT_TRAINING_PREFS) {
-                            StrengthTrainingPrefsScreen(
-                                settings = settings,
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(Routes.WORKOUT_EQUIPMENT) {
-                            StrengthEquipmentScreen(
-                                settings = settings,
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(Routes.ACTIVITIES) {
-                            app.myvitals.ui.activities.ActivitiesScreen(
-                                settings = settings,
-                                onOpenActivity = { source, sourceId ->
-                                    nav.navigate(Routes.activityDetail(source, sourceId))
-                                },
-                                onOpenStrengthDay = { date ->
-                                    nav.navigate(Routes.workoutDay(date))
-                                },
-                                onOpenMap = { nav.navigate(Routes.ACTIVITY_MAP) },
-                            )
-                        }
-                        composable(Routes.ACTIVITY_MAP) {
-                            app.myvitals.ui.activities.ActivityMapScreen(
-                                settings = settings,
-                                onBack = { nav.popBackStack() },
-                                onOpenActivity = { source, sourceId ->
-                                    nav.navigate(Routes.activityDetail(source, sourceId))
-                                },
-                            )
-                        }
-                        composable(
-                            Routes.ACTIVITY_DETAIL,
-                            arguments = listOf(
-                                androidx.navigation.navArgument("source") {
-                                    type = androidx.navigation.NavType.StringType
-                                },
-                                androidx.navigation.navArgument("sourceId") {
-                                    type = androidx.navigation.NavType.StringType
-                                },
-                            ),
-                        ) { entry ->
-                            app.myvitals.ui.activities.ActivityDetailScreen(
-                                settings = settings,
-                                source = entry.arguments?.getString("source") ?: "",
-                                sourceId = entry.arguments?.getString("sourceId") ?: "",
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(Routes.TRAILS) {
-                            TrailsScreen(
-                                settings = settings,
-                                onOpenTrailVisits = { trailId ->
-                                    nav.navigate(Routes.trailVisits(trailId))
-                                },
-                            )
-                        }
-                        composable(
-                            Routes.TRAIL_VISITS,
-                            arguments = listOf(
-                                androidx.navigation.navArgument("trailId") {
-                                    type = androidx.navigation.NavType.LongType
-                                },
-                            ),
-                        ) { entry ->
-                            app.myvitals.ui.trails.TrailVisitsScreen(
-                                settings = settings,
-                                trailId = entry.arguments?.getLong("trailId") ?: 0L,
-                                onBack = { nav.popBackStack() },
-                                onOpenActivity = { source, sourceId ->
-                                    nav.navigate(Routes.activityDetail(source, sourceId))
-                                },
-                            )
-                        }
-                        composable(Routes.SETTINGS) {
-                            SettingsScreen(
-                                settings = settings,
-                                isHealthConnectAvailable = gateway.isAvailable(),
-                                hasPermissions = { gateway.hasAllPermissionsAsync() },
-                                onRequestPermissions = onRequestPermissions,
-                                onSyncNow = onSyncNow,
-                                onSyncLogs = onSyncLogs,
-                                onBackfill = onBackfill,
-                                onOpenLogs = onOpenLogs,
-                                onClearBuffer = onClearBuffer,
-                                neonShellEnabled = neonEnabled,
-                                onToggleNeonShell = toggleNeon,
-                            )
-                        }
-                    }
-                  }
-                }
-            }
+            
         }
     }
 }

@@ -277,35 +277,6 @@ fun SettingsScreen(
             )
         }
 
-        // ── Appearance ──
-        item {
-            Section(title = "Appearance", neon = neon) {
-                // Two modes, not three. "Neon Refined" was removed in
-                // v0.7.366 — it was a separate information architecture
-                // rather than a skin, and on it Sleep, Steps and Measurements
-                // had no reachable entry point at all.
-                val mode = when {
-                    neonShellEnabled -> "neon"
-                    else -> "classic"
-                }
-                Card {
-                    ThemeOptionRow(
-                        selected = mode == "classic",
-                        label = "Classic",
-                        subtitle = "System light/dark, classic side-nav",
-                        onClick = { onToggleNeonShell(false) },
-                    )
-                    HorizontalDivider(color = MV.OutlineVariant)
-                    ThemeOptionRow(
-                        selected = mode == "neon",
-                        label = "✦ Vitality Neon",
-                        subtitle = "Obsidian neon 6-tab shell",
-                        onClick = { onToggleNeonShell(true) },
-                    )
-                }
-            }
-        }
-
         // ── Connection ──
         item {
             Section(title = "Connection", neon = neon) {

@@ -56,13 +56,19 @@ class SettingsRepository(context: Context) {
         set(value) = plain.edit().putBoolean(KEY_PERMS_LOST, value).apply()
 
     /**
-     * Opt-in "Vitality Neon" shell — the 6-tab neon redesign that mirrors the
-     * web theme. Off by default: the classic 5-tab shell stays the released
-     * experience until the user flips this in Settings → Appearance.
+     * RETIRED in v0.7.393 — the Classic / Vitality Neon choice is gone and
+     * the neon shell is the only shell.
+     *
+     * Kept as a constant rather than deleted because ~15 screens read it as
+     * a styling flag (`val neon = settings.neonShellEnabled`). Returning
+     * true makes every one of them take the neon branch without a
+     * fifteen-file edit, and the reads can be unwound at leisure. It no
+     * longer touches storage, so a stale stored value can't resurrect a
+     * shell that no longer exists.
      */
-    var neonShellEnabled: Boolean
-        get() = plain.getBoolean(KEY_NEON_SHELL, false)
-        set(value) = plain.edit().putBoolean(KEY_NEON_SHELL, value).apply()
+    @Suppress("unused")
+    val neonShellEnabled: Boolean get() = true
+
 
     /**
      * RETIRED in v0.7.366. "Neon Refined" was a third information

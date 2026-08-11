@@ -10,8 +10,15 @@ function systemPrefersDark(): boolean {
     && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
 }
 
+// Neon is the default for anyone who hasn't chosen. The phone's
+// Classic/Neon shell split was retired in v0.7.393 — there is one app
+// identity now, and a new web visitor should land on it rather than on the
+// palette the redesign replaced. Light and dark remain available: unlike
+// the phone's split, these are palettes over ONE component tree, not a
+// second implementation, and light mode is a real accessibility choice
+// rather than duplicated work.
 export const themeChoice = ref<ThemeChoice>(
-  (localStorage.getItem(KEY) as ThemeChoice | null) ?? "dark"
+  (localStorage.getItem(KEY) as ThemeChoice | null) ?? "neon"
 );
 
 /** The actually-applied theme (resolves "auto" against the system).

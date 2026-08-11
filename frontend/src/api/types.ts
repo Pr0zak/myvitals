@@ -375,6 +375,9 @@ export interface VitalTilesResponse {
   tiles: VitalTile[];
   /** Health-status roll-up, counted server-side so the surfaces agree. */
   summary?: VitalTilesRollup;
+  /** Weekly steps progress for the hero ring, summed server-side against
+   *  seven days of the user's own daily goal. */
+  week?: { label: string; done: number; goal: number; pct: number };
   /** Section headings in display order. */
   group_order?: string[];
   /** Per-focus-area "N tracked" counts. */

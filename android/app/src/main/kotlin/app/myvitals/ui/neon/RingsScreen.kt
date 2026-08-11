@@ -71,6 +71,7 @@ fun RingsScreen(
     var fasting by remember { mutableStateOf<FastingSession?>(null) }
     var readiness by remember { mutableStateOf<app.myvitals.sync.ReadinessDetail?>(null) }
     var groupOrder by remember { mutableStateOf<List<String>>(emptyList()) }
+    var week by remember { mutableStateOf<app.myvitals.sync.WeekProgress?>(null) }
     var focusCounts by remember {
         mutableStateOf<Map<String, app.myvitals.sync.FocusCount>>(emptyMap())
     }
@@ -145,6 +146,7 @@ fun RingsScreen(
                         if (r.tiles.isNotEmpty()) vitalTiles = r.tiles
                         rollup = r.summary
                         groupOrder = r.groupOrder
+                        week = r.week
                         focusCounts = r.focusAreas
                     }
                 }
@@ -177,6 +179,14 @@ fun RingsScreen(
             scope.launch { refreshing = true; try { load() } finally { refreshing = false } }
         },
     ) {
+        // Hero: weekly ring + saturated chips + actions, per the reference.
+        app.myvitals.ui.common.TodayHero(
+            tiles = vitalTiles,
+            week = week,
+            readiness = readiness?.score,
+            onOpen = onOpen,
+        )
+
         // Health status: the roll-up + Readiness as a MetricCard. The old
         // hero was a third card style stacked above the Focus pills and the
         // Key metrics grid; readiness is a metric and now looks like one.

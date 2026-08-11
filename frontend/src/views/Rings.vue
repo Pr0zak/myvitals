@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TodayHero from "@/components/TodayHero.vue";
 import HealthStatus from "@/components/HealthStatus.vue";
 import FocusAreas from "@/components/FocusAreas.vue";
 import KeyMetrics from "@/components/KeyMetrics.vue";
@@ -81,6 +82,7 @@ function fmt(n: number | null, d = 0): string {
       <span class="date">{{ today }}</span>
     </header>
 
+    <TodayHero />
     <HealthStatus />
 
     <!-- Goal rings -->

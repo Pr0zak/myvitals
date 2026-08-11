@@ -874,12 +874,22 @@ data class FocusCount(
 )
 
 @JsonClass(generateAdapter = true)
+data class WeekProgress(
+    val label: String = "Weekly steps",
+    val done: Int = 0,
+    val goal: Int = 0,
+    val pct: Double = 0.0,
+)
+
+@JsonClass(generateAdapter = true)
 data class VitalTilesResponse(
     val date: String,
     val tiles: List<VitalTile> = emptyList(),
     /** Health-status roll-up, counted server-side so surfaces agree. */
     val summary: VitalTilesRollup? = null,
     /** Section headings in display order. */
+    /** Weekly steps progress for the hero ring, summed server-side. */
+    val week: WeekProgress? = null,
     @Json(name = "group_order") val groupOrder: List<String> = emptyList(),
     /** Per-focus-area "N tracked" counts. */
     @Json(name = "focus_areas") val focusAreas: Map<String, FocusCount> = emptyMap(),

@@ -403,9 +403,27 @@ async def summary_tiles(
         }
         for area, keys in FOCUS_AREAS.items()
     }
+    # Weekly steps progress, for the hero ring. Summed from the tile series
+    # that is already loaded rather than a second query, and expressed
+    # against seven days of the user's OWN daily goal — not an invented
+    # weekly target.
+    steps_tile = next((t for t in tiles if t["key"] == "steps"), None)
+    week_done = int(sum(
+        p["value"] for p in (steps_tile or {}).get("series", [])[-7:]
+        if p.get("value") is not None
+    ))
+    week_goal = int((steps_tile or {}).get("target") or 0) * 7
+    week = {
+        "label": "Weekly steps",
+        "done": week_done,
+        "goal": week_goal,
+        "pct": round(week_done / week_goal * 100, 1) if week_goal else 0.0,
+    }
+
     return {
         "date": day.isoformat(),
         "tiles": tiles,
+        "week": week,
         "group_order": GROUP_ORDER,
         "focus_areas": focus,
         "summary": {

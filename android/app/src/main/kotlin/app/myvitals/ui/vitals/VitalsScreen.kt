@@ -378,18 +378,6 @@ fun VitalsScreen(
         sortedByPref.filter { it.name !in hidden }
     }
     var manageOpen by remember { mutableStateOf(false) }
-    var formulaOpen by remember { mutableStateOf(false) }
-
-    readiness?.let { r ->
-        if (formulaOpen) {
-            app.myvitals.ui.neon.ReadinessFormulaSheet(
-                detail = r,
-                onDismiss = { formulaOpen = false },
-                palette = app.myvitals.ui.neon.HeroPalette.Classic,
-            )
-        }
-    }
-
     Column(Modifier.fillMaxSize().background(MV.Bg).padding(horizontal = 12.dp)) {
         Row(
             Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 6.dp),

@@ -34,9 +34,6 @@ function dash(pct: number): string {
   const p = Math.max(0, Math.min(100, pct));
   return `${((p / 100) * C).toFixed(1)} ${C.toFixed(1)}`;
 }
-const movePct = computed(() =>
-  steps.value != null ? Math.min(100, (steps.value / stepGoal.value) * 100) : 0,
-);
 const today = computed(() =>
   new Date().toLocaleDateString([], { month: "short", day: "numeric" }),
 );

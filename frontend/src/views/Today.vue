@@ -258,51 +258,7 @@ const stepsGoal = computed(() => {
   const extra = (profile.value as any)?.extra ?? {};
   return Math.max(1, (extra.steps_goal as number) ?? 10_000);
 });
-const sleepGoalH = computed(() => {
-  const extra = (profile.value as any)?.extra ?? {};
-  return (extra.sleep_goal_h as number) ?? 8;
-});
 
-const heroAnchors = computed(() => {
-  const s = summary.value;
-  if (!s) return [];
-  const sleepDelta = (s.sleep_duration_s != null && baseline7d.value.sleep != null)
-    ? Math.round((s.sleep_duration_s - baseline7d.value.sleep) / 60) : null;
-  const rhrDelta = (s.resting_hr != null && baseline7d.value.rhr != null)
-    ? Math.round(s.resting_hr - baseline7d.value.rhr) : null;
-  const hrvDelta = (s.hrv_avg != null && baseline7d.value.hrv != null)
-    ? Math.round(s.hrv_avg - baseline7d.value.hrv) : null;
-  const stepsPct = s.steps_total != null
-    ? Math.round((s.steps_total / stepsGoal.value) * 100) : null;
-  const stepsBaselinePct = baseline7d.value.steps != null
-    ? Math.round((baseline7d.value.steps / stepsGoal.value) * 100) : null;
-  const stepsDelta = stepsPct != null && stepsBaselinePct != null
-    ? stepsPct - stepsBaselinePct : null;
-  return [
-    {
-      label: "Sleep",
-      value: fmtSleepHM(s.sleep_duration_s),
-      sub: s.sleep_score != null ? `· ${Math.round(s.sleep_score)}` : null,
-      delta: sleepDelta, invert: false, suffix: "m",
-    },
-    {
-      label: "Resting HR",
-      value: s.resting_hr != null ? `${Math.round(s.resting_hr)}` : "—",
-      unit: "bpm", delta: rhrDelta, invert: true, suffix: "",
-    },
-    {
-      label: "HRV",
-      value: s.hrv_avg != null ? `${Math.round(s.hrv_avg)}` : "—",
-      unit: "ms", delta: hrvDelta, invert: false, suffix: "",
-    },
-    {
-      label: "Steps",
-      value: s.steps_total != null ? s.steps_total.toLocaleString() : "—",
-      unit: `/ ${(stepsGoal.value / 1000).toFixed(0)}k`,
-      delta: stepsDelta, invert: false, suffix: "%",
-    },
-  ];
-});
 
 function tone(score: number | null, lo = 50, hi = 70): "good" | "warn" | "bad" {
   if (score == null) return "warn";
@@ -311,43 +267,7 @@ function tone(score: number | null, lo = 50, hi = 70): "good" | "warn" | "bad" {
   return "good";
 }
 
-const heroScores = computed(() => {
-  const s = summary.value;
-  if (!s) return [];
-  // 7d sparks per metric
-  const recoverySpark = summary7d.value
-    .map((r) => r.recovery_score).filter((v): v is number => v != null);
-  const readinessSpark = summary7d.value
-    .map((r) => r.readiness_score).filter((v): v is number => v != null);
-  const sleepSparkScore = summary7d.value
-    .map((r) => r.sleep_score).filter((v): v is number => v != null);
-  const tsbSpark = summary7d.value
-    .map((r) => r.tsb).filter((v): v is number => v != null);
-  return [
-    {
-      label: "Recovery", value: s.recovery_score != null ? Math.round(s.recovery_score) : null,
-      tone: tone(s.recovery_score) as any, spark: recoverySpark, mode: "line" as const,
-    },
-    {
-      label: "Readiness", value: s.readiness_score != null ? Math.round(s.readiness_score) : null,
-      tone: tone(s.readiness_score) as any, spark: readinessSpark, mode: "line" as const,
-    },
-    {
-      // Each value is a discrete per-night score — bars communicate
-      // that better than a smoothed line.
-      label: "Sleep", value: s.sleep_score != null ? Math.round(s.sleep_score) : null,
-      tone: tone(s.sleep_score) as any, spark: sleepSparkScore, mode: "bar" as const,
-    },
-    {
-      label: "TSB", value: s.tsb != null ? Math.round(s.tsb) : null,
-      tone: (s.tsb != null && s.tsb < -10 ? "warn" : "good") as any,
-      spark: tsbSpark, mode: "line" as const,
-    },
-  ];
-});
 
-const heroReadiness = computed(() => Math.round(summary.value?.readiness_score ?? 0));
-const heroReadinessTone = computed(() => tone(summary.value?.readiness_score ?? null));
 
 // Downsample 24h points into N equal-width buckets. Empty buckets
 // are emitted as nulls so the sparkline draws genuine gaps rather
@@ -513,44 +433,7 @@ const KG_TO_LB = 2.20462;
 const weightLbSeries = computed(() =>
   weightSeries.value.map((p) => +(p.weight_kg * KG_TO_LB).toFixed(1)),
 );
-const latestLb = computed(() =>
-  weightLbSeries.value.length ? weightLbSeries.value[weightLbSeries.value.length - 1] : null,
-);
-const goalLb = computed(() => {
-  const kg = profile.value?.weight_goal_kg;
-  return kg != null ? +(kg * KG_TO_LB).toFixed(1) : null;
-});
-const delta30Lb = computed(() => {
-  if (weightLbSeries.value.length < 2) return null;
-  return weightLbSeries.value[weightLbSeries.value.length - 1] - weightLbSeries.value[0];
-});
-const weightFromLabel = computed(() => {
-  if (!weightSeries.value.length) return "—";
-  return new Date(weightSeries.value[0].date).toLocaleDateString([], { month: "short", day: "numeric" });
-});
-const weightToLabel = computed(() =>
-  new Date().toLocaleDateString([], { month: "short", day: "numeric" }),
-);
-const weightAsOfLabel = computed(() => {
-  const last = weightSeries.value[weightSeries.value.length - 1];
-  if (!last) return null;
-  return new Date(last.date).toLocaleString([], {
-    weekday: "short", hour: "2-digit", minute: "2-digit",
-  });
-});
 
-const bpSysSeries = computed(() =>
-  (bpSeries.value?.points ?? []).map((p) => p.systolic),
-);
-const bpDiaSeries = computed(() =>
-  (bpSeries.value?.points ?? []).map((p) => p.diastolic),
-);
-const bpAsOfLabel = computed(() => {
-  const t = bpSeries.value?.latest?.time;
-  return t ? new Date(t).toLocaleString([], {
-    weekday: "short", hour: "2-digit", minute: "2-digit",
-  }) : null;
-});
 
 // ── Annotation log chips ──
 const annotationChips = computed(() =>

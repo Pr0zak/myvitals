@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import TrendBadges from "@/components/TrendBadges.vue";
-import ReadinessHero from "@/components/ReadinessHero.vue";
+import HealthStatus from "@/components/HealthStatus.vue";
+import FocusAreas from "@/components/FocusAreas.vue";
 import KeyMetrics from "@/components/KeyMetrics.vue";
 /**
  * Rings home — first screen of the "Vitality Neon" redesign (Direction D).
@@ -83,70 +83,14 @@ function fmt(n: number | null, d = 0): string {
       <span class="date">{{ today }}</span>
     </header>
 
-    <ReadinessHero />
-    <TrendBadges />
+    <HealthStatus />
 
     <!-- Goal rings -->
-    <div class="rings">
-      <button class="ring" @click="go('/sleep')" aria-label="Sleep detail">
-        <svg viewBox="0 0 100 100">
-          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--rn-track)" stroke-width="9" />
-          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--rn-mag)" stroke-width="9"
-            stroke-linecap="round" :stroke-dasharray="dash(sleepScore ?? 0)"
-            transform="rotate(-90 50 50)" style="filter:drop-shadow(0 0 5px var(--rn-mag))" />
-          <text x="50" y="58" text-anchor="middle" font-size="22" fill="var(--rn-mag)">☾</text>
-        </svg>
-        <div class="lab">SLEEP</div>
-        <div class="pct">{{ fmt(sleepScore) }}<small v-if="sleepScore != null">%</small></div>
-      </button>
-      <button class="ring" @click="go('/steps')" aria-label="Move / steps detail">
-        <svg viewBox="0 0 100 100">
-          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--rn-track)" stroke-width="9" />
-          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--rn-lime)" stroke-width="9"
-            stroke-linecap="round" :stroke-dasharray="dash(movePct)"
-            transform="rotate(-90 50 50)" style="filter:drop-shadow(0 0 6px var(--rn-lime))" />
-          <text x="50" y="58" text-anchor="middle" font-size="22" fill="var(--rn-lime)">🏃</text>
-        </svg>
-        <div class="lab">MOVE</div>
-        <div class="pct">{{ steps != null ? Math.round(movePct) : "—" }}<small v-if="steps != null">%</small></div>
-      </button>
-      <button class="ring" @click="go('/heart-rate')" aria-label="Recovery detail">
-        <svg viewBox="0 0 100 100">
-          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--rn-track)" stroke-width="9" />
-          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--rn-cyan)" stroke-width="9"
-            stroke-linecap="round" :stroke-dasharray="dash(recoveryScore ?? 0)"
-            transform="rotate(-90 50 50)" style="filter:drop-shadow(0 0 5px var(--rn-cyan))" />
-          <text x="50" y="58" text-anchor="middle" font-size="22" fill="var(--rn-cyan)">♥</text>
-        </svg>
-        <div class="lab">RECOVERY</div>
-        <div class="pct">{{ fmt(recoveryScore) }}<small v-if="recoveryScore != null">%</small></div>
-      </button>
-    </div>
 
     <!-- Streaks & goals -->
     <KeyMetrics />
 
-    <div class="list">
-      <button class="pill" @click="go('/fasting')">
-        <span class="pi cyan">⏱</span><span class="pn">Fasting</span>
-        <span class="pv">
-          <b>{{ fmt(fastH, 0) }}</b> / {{ fastTarget }}h
-          <span v-if="fastH != null && fastH >= fastTarget" class="ok">✓</span>
-        </span>
-      </button>
-      <button class="pill" @click="go('/sober')">
-        <span class="pi mag">🔥</span><span class="pn">Sober</span>
-        <span class="pv"><b class="mag">{{ soberDays != null ? Math.floor(soberDays) : "—" }}</b> days</span>
-      </button>
-      <button class="pill" @click="go('/steps')">
-        <span class="pi lime">👟</span><span class="pn">Steps</span>
-        <span class="pv"><b class="lime">{{ steps != null ? steps.toLocaleString() : "—" }}</b> / {{ stepGoal.toLocaleString() }}</span>
-      </button>
-      <button class="pill" @click="go('/workout/strength/today')">
-        <span class="pi cyan">🏋</span><span class="pn">Workout</span>
-        <span class="pv">Today's plan <span class="chev">›</span></span>
-      </button>
-    </div>
+    <FocusAreas />
 
     <button v-if="stepsToGoal != null && stepsToGoal > 0" class="cta" @click="go('/steps')">
       <span class="ct">

@@ -855,9 +855,18 @@ data class VitalTile(
 }
 
 @JsonClass(generateAdapter = true)
+data class VitalTilesRollup(
+    val judged: Int = 0,
+    @Json(name = "in_range") val inRange: Int = 0,
+    val total: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
 data class VitalTilesResponse(
     val date: String,
     val tiles: List<VitalTile> = emptyList(),
+    /** Health-status roll-up, counted server-side so surfaces agree. */
+    val summary: VitalTilesRollup? = null,
 )
 
 // ── Trend badges (/ai/badges — pure statistics, no LLM) ───────────

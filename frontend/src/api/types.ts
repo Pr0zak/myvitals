@@ -359,4 +359,14 @@ export interface VitalTile {
   stale_days: number | null;
   series: VitalTilePoint[];
 }
-export interface VitalTilesResponse { date: string; tiles: VitalTile[] }
+export interface VitalTilesRollup {
+  judged: number;
+  in_range: number;
+  total: number;
+}
+export interface VitalTilesResponse {
+  date: string;
+  tiles: VitalTile[];
+  /** Health-status roll-up, counted server-side so the surfaces agree. */
+  summary?: VitalTilesRollup;
+}

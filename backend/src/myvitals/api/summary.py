@@ -347,7 +347,22 @@ async def summary_tiles(
     await _ensure_fresh_today_row(db, day, midnight_local, day_end)
 
     profile = await db.get(models.UserProfile, 1)
-    return {"date": day.isoformat(), "tiles": await tile_stats(db, day, profile)}
+    tiles = await tile_stats(db, day, profile)
+
+    # "Vitals 3 of 5 in range" — the reference's Health status line. Counted
+    # here rather than in the clients: it is a roll-up of server verdicts,
+    # and two surfaces disagreeing on the count would be the same bug class
+    # as two surfaces disagreeing on a value.
+    judged = [t for t in tiles if t.get("status")]
+    return {
+        "date": day.isoformat(),
+        "tiles": tiles,
+        "summary": {
+            "judged": len(judged),
+            "in_range": sum(1 for t in judged if t["status"] != "watch"),
+            "total": len(tiles),
+        },
+    }
 
 
 @router.get("/range", response_model=list[TodaySummary])

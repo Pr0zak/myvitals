@@ -69,8 +69,10 @@ fun RingsScreen(
     var profile by remember { mutableStateOf<ProfileResponse?>(null) }
     var sober by remember { mutableStateOf<SoberCurrentResponse?>(null) }
     var fasting by remember { mutableStateOf<FastingSession?>(null) }
-    var badges by remember { mutableStateOf<List<app.myvitals.sync.TrendBadge>>(emptyList()) }
     var readiness by remember { mutableStateOf<app.myvitals.sync.ReadinessDetail?>(null) }
+    var rollup by remember {
+        mutableStateOf<app.myvitals.sync.VitalTilesRollup?>(null)
+    }
     var vitalTiles by remember {
         mutableStateOf<List<app.myvitals.sync.VitalTile>>(emptyList())
     }
@@ -107,10 +109,7 @@ fun RingsScreen(
                 // Threshold semantics for the tile grid. Non-fatal: an older
                 // backend without /summary/tiles just renders no grid.
                 val tilesD = async(Dispatchers.IO) {
-                    runCatching { api.summaryTiles().tiles }.getOrDefault(emptyList())
-                }
-                val badgesD = async(Dispatchers.IO) {
-                    runCatching { api.aiBadges() }.getOrDefault(emptyList())
+                    runCatching { api.summaryTiles() }.getOrNull()
                 }
                 val fastingD = async(Dispatchers.IO) {
                     runCatching {
@@ -130,9 +129,11 @@ fun RingsScreen(
                     profile = p0
                     sober = soberD.await()
                     fasting = fastingD.await()
-                    badges = badgesD.await()
                     readyD.await()?.let { readiness = it }
-                    tilesD.await().takeIf { it.isNotEmpty() }?.let { vitalTiles = it }
+                    tilesD.await()?.let { r ->
+                        if (r.tiles.isNotEmpty()) vitalTiles = r.tiles
+                        rollup = r.summary
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -163,22 +164,11 @@ fun RingsScreen(
             scope.launch { refreshing = true; try { load() } finally { refreshing = false } }
         },
     ) {
-        // Hero: the number, its band, what moved it. Everything server-derived.
-        ReadinessHero(
-            detail = readiness,
-            onDriverClick = { d ->
-                when (d.key) {
-                    "hrv" -> onOpen("vitals/HRV")
-                    "rhr" -> onOpen("vitals/HR")
-                    else -> onOpen("vitals/SLEEP")
-                }
-            },
-            onExplain = { showFormula = true },
-        )
-        readiness?.let { r ->
-            if (showFormula) ReadinessFormulaSheet(r) { showFormula = false }
-        }
-        FocusStrip(badges)
+        // Health status: the roll-up + Readiness as a MetricCard. The old
+        // hero was a third card style stacked above the Focus pills and the
+        // Key metrics grid; readiness is a metric and now looks like one.
+        app.myvitals.ui.common.HealthStatus(readiness, rollup)
+
 
         // Key metrics — one card vocabulary, mirroring KeyMetrics.vue.
         app.myvitals.ui.common.KeyMetrics(vitalTiles, onOpen)
@@ -196,44 +186,6 @@ fun RingsScreen(
             )
         }
 
-        // ---- Goal rings ----
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 4.dp, bottom = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            GoalRing(
-                label = "SLEEP",
-                pct = (sleepScore ?: 0.0).toFloat(),
-                valueText = sleepScore?.let { "${it.roundToInt()}" } ?: "—",
-                showPercent = sleepScore != null,
-                glyph = "☾",
-                color = NeonMV.Magenta,
-                onClick = { onOpen("vitals/SLEEP") },
-                modifier = Modifier.weight(1f),
-            )
-            GoalRing(
-                label = "MOVE",
-                pct = movePct,
-                valueText = if (steps != null) "${movePct.roundToInt()}" else "—",
-                showPercent = steps != null,
-                glyph = "🏃",
-                color = NeonMV.Lime,
-                onClick = { onOpen("vitals/STEPS") },
-                modifier = Modifier.weight(1f),
-            )
-            GoalRing(
-                label = "RECOVERY",
-                pct = (recoveryScore ?: 0.0).toFloat(),
-                valueText = recoveryScore?.let { "${it.roundToInt()}" } ?: "—",
-                showPercent = recoveryScore != null,
-                glyph = "♥",
-                color = NeonMV.Cyan,
-                onClick = { onOpen("vitals/HR") },
-                modifier = Modifier.weight(1f),
-            )
-        }
 
         // ---- Last-sync freshness — is my data up to date? ----
         // last_sync rides /summary/today (newest HR sample); no extra fetch.
@@ -250,83 +202,9 @@ fun RingsScreen(
             Spacer(Modifier.height(18.dp))
         }
 
-        // ---- Streaks & goals ----
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            val fastH = fasting?.takeIf { it.isActive }?.elapsedH
-            val fastTarget = fasting?.targetHours ?: 16.0
-            PillRow(
-                glyph = "⏱",
-                accent = NeonMV.Cyan,
-                name = "Fasting",
-                onClick = { onOpen("fasting") },
-            ) {
-                NeonNumber(
-                    fastH?.let { "${it.roundToInt()}" } ?: "—",
-                    color = NeonMV.Ink,
-                    size = 15,
-                )
-                Text(
-                    " / ${fastTarget.roundToInt()}h",
-                    color = NeonMV.Muted,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                if (fastH != null && fastH >= fastTarget) {
-                    Spacer(Modifier.width(6.dp))
-                    Text("✓", color = NeonMV.Lime, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                }
-            }
 
-            val soberDays = sober?.days
-            PillRow(
-                glyph = "🔥",
-                accent = NeonMV.Magenta,
-                name = "Sober",
-                onClick = { onOpen("sober") },
-            ) {
-                NeonNumber(
-                    soberDays?.let { "$it" } ?: "—",
-                    color = NeonMV.Magenta,
-                    size = 15,
-                )
-                Text(" days", color = NeonMV.Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
-
-            PillRow(
-                glyph = "👟",
-                accent = NeonMV.Lime,
-                name = "Steps",
-                onClick = { onOpen("vitals/STEPS") },
-            ) {
-                NeonNumber(
-                    steps?.let { "%,d".format(it) } ?: "—",
-                    color = NeonMV.Lime,
-                    size = 15,
-                )
-                Text(
-                    " / ${"%,d".format(stepGoal)}",
-                    color = NeonMV.Muted,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-
-            PillRow(
-                glyph = "🏋",
-                accent = NeonMV.Cyan,
-                name = "Workout",
-                onClick = { onOpen("workout/today") },
-            ) {
-                Text(
-                    "Today's plan",
-                    color = NeonMV.Muted,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("›", color = NeonMV.Muted, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            }
-        }
+        // Focus areas — navigation, not a dashboard. Replaces the pill list.
+        app.myvitals.ui.common.FocusAreas(onOpen)
 
         Spacer(Modifier.height(24.dp))
     }

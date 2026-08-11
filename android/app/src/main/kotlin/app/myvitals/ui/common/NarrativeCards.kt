@@ -1,6 +1,7 @@
 package app.myvitals.ui.common
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -11,8 +12,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ThumbDown
+import androidx.compose.material.icons.outlined.ThumbUp
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -41,11 +47,13 @@ import java.time.format.DateTimeFormatter
 fun NarrativeCards(
     events: List<NarrativeEvent>,
     modifier: Modifier = Modifier,
+    /** null clears the vote. Toggling an active thumb should undo it. */
+    onVote: ((String, String?) -> Unit)? = null,
 ) {
     if (events.isEmpty()) return
     Column(modifier.fillMaxWidth()) {
         events.forEach { e ->
-            EventCard(e)
+            EventCard(e, onVote)
             Spacer(Modifier.height(12.dp))
         }
     }
@@ -61,7 +69,7 @@ private val LANE_TONE = mapOf(
 )
 
 @Composable
-private fun EventCard(e: NarrativeEvent) {
+private fun EventCard(e: NarrativeEvent, onVote: ((String, String?) -> Unit)?) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -116,6 +124,44 @@ private fun EventCard(e: NarrativeEvent) {
                 Text(clock(e.end), color = Color(0xFF6F767F), fontSize = 10.sp)
             }
         }
+
+        if (onVote != null) {
+            Spacer(Modifier.height(12.dp))
+            // Optimism lives in the caller: it flips local state, then
+            // writes. A vote the server rejected must not stay lit.
+            Row {
+                Thumb(
+                    up = true, active = e.feedback == "up",
+                    onClick = { onVote(e.id, if (e.feedback == "up") null else "up") },
+                )
+                Spacer(Modifier.width(4.dp))
+                Thumb(
+                    up = false, active = e.feedback == "down",
+                    onClick = { onVote(e.id, if (e.feedback == "down") null else "down") },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun Thumb(up: Boolean, active: Boolean, onClick: () -> Unit) {
+    val tint = if (active) Color(0xFF7EE2A8) else Color(0xFF8D949D)
+    Box(
+        Modifier
+            .background(
+                if (active) Color(0x247EE2A8) else Color.Transparent,
+                RoundedCornerShape(999.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(6.dp),
+    ) {
+        Icon(
+            if (up) Icons.Outlined.ThumbUp else Icons.Outlined.ThumbDown,
+            contentDescription = if (up) "This looks right" else "This looks wrong",
+            tint = tint,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 

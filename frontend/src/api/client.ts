@@ -364,6 +364,14 @@ export const api = {
 
   /** Per-tile value, 14-day series and verdict. The judgement of what
    *  counts as good is the server's — see analytics/tiles.py. */
+  /** Record 👍/👎 on a narrative card. `null` clears a previous vote. */
+  async eventFeedback(eventId: string, vote: "up" | "down" | null) {
+    const { data } = await http.post(
+      `/summary/events/${encodeURIComponent(eventId)}/feedback`, { vote },
+    );
+    return data;
+  },
+
   /** Narrative cards for today (sleep + naps), with hypnogram segments. */
   summaryEvents(): Promise<import("./types").NarrativeEventsResponse> {
     return coalesce("/summary/events", async () => {

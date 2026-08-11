@@ -19,6 +19,21 @@ import type { NarrativeEvent } from "@/api/types";
 const events = ref<NarrativeEvent[]>([]);
 const loaded = ref(false);
 
+/** Toggling an active vote clears it — tapping 👍 twice should undo, not
+ *  re-affirm. Optimistic: the card reflects the tap immediately and the
+ *  write follows; a failed write reverts rather than leaving the UI
+ *  claiming a vote the server never took. */
+async function vote(e: NarrativeEvent, v: "up" | "down") {
+  const prev = e.feedback ?? null;
+  const next = prev === v ? null : v;
+  e.feedback = next;
+  try {
+    await api.eventFeedback(e.id, next);
+  } catch {
+    e.feedback = prev;
+  }
+}
+
 /** Lane order top-to-bottom, matching the reference: lightest sleep first. */
 const LANES = ["awake", "rem", "light", "deep"] as const;
 const LANE_LABEL: Record<string, string> = {
@@ -114,6 +129,25 @@ const shown = computed(() => events.value);
           <span>{{ clock(e.end) }}</span>
         </div>
       </div>
+
+      <div class="feedback">
+        <button class="thumb" :class="{ on: e.feedback === 'up' }"
+                :aria-pressed="e.feedback === 'up'"
+                aria-label="This looks right" @click="vote(e, 'up')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M7 22H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3zM7 12l4.5-8a2.5 2.5 0 0 1 3.4 3.3L13.5 10H19a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 17.8 21H7z" />
+          </svg>
+        </button>
+        <button class="thumb" :class="{ on: e.feedback === 'down' }"
+                :aria-pressed="e.feedback === 'down'"
+                aria-label="This looks wrong" @click="vote(e, 'down')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 2h3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-3zM17 12l-4.5 8a2.5 2.5 0 0 1-3.4-3.3L10.5 14H5a2 2 0 0 1-2-2.3l1.2-7A2 2 0 0 1 6.2 3H17z" />
+          </svg>
+        </button>
+      </div>
     </article>
   </section>
 </template>
@@ -149,4 +183,13 @@ const shown = computed(() => events.value);
   display: flex; justify-content: space-between;
   font-size: .66rem; color: #6f767f; margin-top: 8px;
 }
+
+.feedback { display: flex; gap: 4px; margin-top: 12px; }
+.thumb {
+  background: none; border: 0; cursor: pointer; padding: 6px;
+  border-radius: 999px; color: #8d949d; line-height: 0;
+}
+.thumb svg { width: 18px; height: 18px; }
+.thumb.on { color: #7ee2a8; background: rgba(126, 226, 168, .14); }
+.thumb:hover { color: #b9bec6; }
 </style>

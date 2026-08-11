@@ -3,7 +3,8 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -436,6 +437,41 @@ async def summary_events(
         "date": day.isoformat(),
         "events": await day_events(db, day, local_tz),
     }
+
+
+class EventFeedbackIn(BaseModel):
+    """`up`, `down`, or null to clear a previous vote."""
+    vote: str | None = None
+
+
+@router.post("/events/{event_id:path}/feedback")
+async def event_feedback(
+    event_id: str,
+    body: EventFeedbackIn,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Record 👍/👎 on a narrative card.
+
+    Stored as a generic annotation rather than in a new table — the
+    annotations row is already {ts, type, payload, note}, which is exactly
+    this shape, so no migration. Re-voting writes a newer row and the
+    reader takes the latest, so a card carries one vote rather than a pile.
+
+    `event_id` uses :path because the id embeds an ISO timestamp with
+    colons; without it the route would not match.
+    """
+    from ..analytics.events import FEEDBACK_TYPE
+
+    if body.vote not in (None, "up", "down"):
+        raise HTTPException(status_code=422, detail="vote must be up, down or null")
+
+    db.add(models.Annotation(
+        ts=datetime.now(timezone.utc),
+        type=FEEDBACK_TYPE,
+        payload={"event_id": event_id, "vote": body.vote},
+    ))
+    await db.commit()
+    return {"ok": True, "event_id": event_id, "vote": body.vote}
 
 
 @router.get("/range", response_model=list[TodaySummary])

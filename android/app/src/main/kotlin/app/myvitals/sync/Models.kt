@@ -906,6 +906,8 @@ data class NarrativeStageTotal(
 @JsonClass(generateAdapter = true)
 data class NarrativeEvent(
     val id: String,
+    /** "up" | "down", or null when the user hasn't voted. */
+    val feedback: String? = null,
     /** nap | sleep */
     val kind: String,
     val headline: String,
@@ -916,6 +918,12 @@ data class NarrativeEvent(
     val title: String? = null,
     val stages: List<NarrativeStageTotal> = emptyList(),
     val segments: List<NarrativeSegment> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class EventFeedbackRequest(
+    /** null clears a previous vote. */
+    val vote: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

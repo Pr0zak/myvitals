@@ -108,6 +108,33 @@ def classify_session(start_local: datetime, duration_s: int) -> str:
     return "sleep"
 
 
+FEEDBACK_TYPE = "event_feedback"
+
+
+async def _feedback_by_event(db: AsyncSession) -> dict[str, str]:
+    """Existing 👍/👎 per event id.
+
+    Stored as generic annotations (type="event_feedback") rather than a new
+    table — the annotations row is already {ts, type, payload JSON, note},
+    which is exactly this shape, and it avoids a migration for what is one
+    field. The newest row per event wins, so changing a vote overwrites
+    rather than accumulating.
+    """
+    rows = (await db.execute(
+        select(models.Annotation.payload, models.Annotation.ts)
+        .where(models.Annotation.type == FEEDBACK_TYPE)
+        .order_by(models.Annotation.ts)
+    )).all()
+    out: dict[str, str] = {}
+    for payload, _ts in rows:
+        if not isinstance(payload, dict):
+            continue
+        eid, vote = payload.get("event_id"), payload.get("vote")
+        if eid and vote:
+            out[eid] = vote
+    return out
+
+
 async def day_events(
     db: AsyncSession, day: date, tzinfo: Any,
 ) -> list[dict[str, Any]]:
@@ -132,6 +159,7 @@ async def day_events(
     if not sessions:
         return []
 
+    votes = await _feedback_by_event(db)
     events: list[dict[str, Any]] = []
     for s in sessions:
         duration_s = int((s.end_at - s.start_at).total_seconds())
@@ -173,8 +201,12 @@ async def day_events(
             headline = "Sleep tracked"
             detail = f"You slept {dur_text}, starting at {clock}"
 
+        event_id = f"sleep:{s.start_at.isoformat()}"
         events.append({
-            "id": f"sleep:{s.start_at.isoformat()}",
+            "id": event_id,
+            # null until the user votes; the card shows neither thumb as
+            # selected rather than defaulting to approval.
+            "feedback": votes.get(event_id),
             "kind": kind,
             "headline": headline,
             "detail": detail,

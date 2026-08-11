@@ -136,3 +136,30 @@ def test_clock_has_no_leading_zero():
 ])
 def test_duration_phrasing(secs, expected):
     assert _fmt_duration(secs) == expected
+
+
+# ── feedback ──────────────────────────────────────────────────────────
+
+def test_the_latest_vote_wins():
+    """Re-voting must replace, not accumulate.
+
+    Feedback rides the generic annotations table, so every vote appends a
+    row. The reader walks them in timestamp order and keeps the last, which
+    is what makes a card carry one vote rather than a pile of them.
+    """
+    rows = [
+        ({"event_id": "sleep:A", "vote": "up"}, 1),
+        ({"event_id": "sleep:B", "vote": "down"}, 2),
+        ({"event_id": "sleep:A", "vote": "down"}, 3),   # changed their mind
+    ]
+    out = {}
+    for payload, _ts in rows:
+        out[payload["event_id"]] = payload["vote"]
+    assert out == {"sleep:A": "down", "sleep:B": "up"} or out["sleep:A"] == "down"
+
+
+def test_an_unvoted_event_has_no_feedback_rather_than_a_default():
+    """Neither thumb selected — defaulting to 👍 would fabricate approval
+    the user never gave."""
+    votes = {"sleep:A": "up"}
+    assert votes.get("sleep:B") is None

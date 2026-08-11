@@ -511,7 +511,24 @@ fun VitalsScreen(
                 Spacer(Modifier.height(18.dp))
             }
             item {
-                app.myvitals.ui.common.NarrativeCards(narrativeEvents)
+                app.myvitals.ui.common.NarrativeCards(
+            events = narrativeEvents,
+            onVote = { id, vote ->
+                // Optimistic: reflect the tap now, write after. A rejected
+                // write reverts rather than leaving a thumb lit for a vote
+                // the server never took.
+                val before = narrativeEvents
+                narrativeEvents = narrativeEvents.map {
+                    if (it.id == id) it.copy(feedback = vote) else it
+                }
+                scope.launch {
+                    runCatching {
+                        BackendClient.create(settings.backendUrl, settings.bearerToken)
+                            .eventFeedback(id, app.myvitals.sync.EventFeedbackRequest(vote))
+                    }.onFailure { narrativeEvents = before }
+                }
+            },
+        )
                 Spacer(Modifier.height(18.dp))
             }
             item {

@@ -336,6 +336,13 @@ interface BackendApi {
     @GET("summary/events")
     suspend fun summaryEvents(): NarrativeEventsResponse
 
+    /** Record 👍/👎 on a narrative card; null vote clears it. */
+    @POST("summary/events/{eventId}/feedback")
+    suspend fun eventFeedback(
+        @Path(value = "eventId", encoded = false) eventId: String,
+        @Body body: EventFeedbackRequest,
+    ): okhttp3.ResponseBody
+
     /** Pure-statistics trend badges for the Today header. No LLM, no cost. */
     @GET("ai/badges")
     suspend fun aiBadges(): List<TrendBadge>

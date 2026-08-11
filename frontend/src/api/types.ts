@@ -390,6 +390,8 @@ export interface NarrativeSegment {
 }
 export interface NarrativeEvent {
   id: string;
+  /** "up" | "down", or null when the user hasn't voted. */
+  feedback: string | null;
   kind: "nap" | "sleep";
   headline: string;
   detail: string;

@@ -125,8 +125,8 @@ PAIRS: list[tuple[str, str, str]] = [
      "android/app/src/main/kotlin/app/myvitals/ui/vitals/VitalsScreen.kt",
      "Sleep view (phone surfaces it inside VitalsScreen)"),
     ("frontend/src/views/HeartRate.vue",
-     "android/app/src/main/kotlin/app/myvitals/ui/vitals/VitalsScreen.kt",
-     "Heart rate view"),
+     "android/app/src/main/kotlin/app/myvitals/ui/vitals/HrDetailScreen.kt",
+     "Heart rate detail view"),
     ("frontend/src/views/Weight.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/vitals/VitalsScreen.kt",
      "Weight view"),
@@ -174,7 +174,35 @@ def previous_tag() -> str:
     return out.stdout.strip()
 
 
+def check_map_integrity() -> list[str]:
+    """Pair rows that point at files which no longer exist.
+
+    A row naming a deleted file silently checks nothing — the gate keeps
+    reporting green for a surface that has no counterpart any more. Worse,
+    a row can point at the WRONG counterpart and still look healthy: this
+    map had HeartRate.vue paired with the phone HOME screen rather than the
+    HR detail screen, so a change to either was measured against a file
+    that had no reason to move with it.
+    """
+    import os
+
+    stale = []
+    for web_path, phone_path, _label in PAIRS:
+        for path in (web_path, phone_path):
+            if not os.path.exists(path):
+                stale.append(path)
+    return stale
+
+
 def main() -> int:
+    stale = check_map_integrity()
+    if stale:
+        print("⚠ parity map references files that do not exist:")
+        for path in stale:
+            print(f"    {path}")
+        print("  A row naming a deleted file checks nothing. Fix the map.")
+        return 1
+
     since = sys.argv[1] if len(sys.argv) > 1 else previous_tag()
     changed = changed_files(since)
     if not changed:

@@ -76,6 +76,19 @@ data class HrEventBand(
 
 @Composable
 fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
+    // Server-derived normal band for resting HR — same bounds the metric
+    // card shades. Never recomputed here.
+    var bandLow by remember { mutableStateOf<Double?>(null) }
+    var bandHigh by remember { mutableStateOf<Double?>(null) }
+    LaunchedEffect(Unit) {
+        runCatching {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            api.summaryTiles().tiles.firstOrNull { it.key == "resting_hr" }?.let {
+                bandLow = it.bandLow; bandHigh = it.bandHigh
+            }
+        }
+    }
+
     val tok = LocalAppTokens.current
     val context = androidx.compose.ui.platform.LocalContext.current
     var range by remember { mutableStateOf(VitalRange.DAY) }
@@ -264,7 +277,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     item { TimeInZone(live, maxHr) }
                     item { HrHistogram(live) }
                 } else {
-                    item { RestingHrTrend(rows, range) }
+                    item { RestingHrTrend(rows, range, bandLow, bandHigh) }
                     item { WeekdayPattern(rows) }
                 }
             }
@@ -506,7 +519,12 @@ private fun TimeInZone(points: List<TimePoint>, maxHr: Int) {
 }
 
 @Composable
-private fun RestingHrTrend(rows: List<DailySummary>, range: VitalRange) {
+private fun RestingHrTrend(
+    rows: List<DailySummary>,
+    range: VitalRange,
+    bandLow: Double? = null,
+    bandHigh: Double? = null,
+) {
     val tok = LocalAppTokens.current
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
@@ -537,6 +555,22 @@ private fun RestingHrTrend(rows: List<DailySummary>, range: VitalRange) {
                     val maxY = real.max()
                     val span = (maxY - minY).coerceAtLeast(1f)
                     val stepX = size.width / (pts.size - 1)
+                    // Shaded "your normal" zone from the server's bounds —
+                    // the same band the metric card and the web chart draw.
+                    if (bandLow != null && bandHigh != null) {
+                        fun yAt(v: Float) = padTop + ((maxY - v) / span) * plotH
+                        val top = yAt(bandHigh.toFloat())
+                        val bot = yAt(bandLow.toFloat())
+                        drawRect(
+                            color = tok.onSurface.copy(alpha = 0.08f),
+                            topLeft = androidx.compose.ui.geometry.Offset(
+                                0f, minOf(top, bot),
+                            ),
+                            size = androidx.compose.ui.geometry.Size(
+                                size.width, kotlin.math.abs(bot - top),
+                            ),
+                        )
+                    }
                     val path = androidx.compose.ui.graphics.Path()
                     var started = false
                     for ((i, v) in pts.withIndex()) {

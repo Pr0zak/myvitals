@@ -252,11 +252,11 @@ async def tile_stats(
     def add(**kw):
         # Explicit band bounds so no client has to know the rule.
         bl = kw.get("baseline")
-        if bl is not None:
+        if bl is not None and kw.get("band_low") is None:
             spread = abs(bl) * BAND_FRACTION
-            kw.setdefault("band_low", round(bl - spread, 2))
-            kw.setdefault("band_high", round(bl + spread, 2))
-        else:
+            kw["band_low"] = round(bl - spread, 2)
+            kw["band_high"] = round(bl + spread, 2)
+        elif kw.get("band_low") is None:
             kw.setdefault("band_low", None)
             kw.setdefault("band_high", None)
         kw.setdefault("status", None)
@@ -339,6 +339,11 @@ async def tile_stats(
             status, reason = WATCH, f"{abs(delta):.1f} h under target"
     add(key="sleep_duration", label="Sleep", unit="h", value=sleep_h,
         kind="target", higher_is_better=True, target=sleep_target,
+        # The band IS the good zone the status test above uses, so the
+        # chart and the verdict can't tell different stories. Derived from
+        # the user's own target — not a clinical range.
+        band_low=round(sleep_target - 0.5, 2),
+        band_high=round(sleep_target + 1.5, 2),
         delta=delta, status=status, status_reason=reason,
         series=await _series(
             db, models.DailySummary.sleep_duration_s, day, SERIES_DAYS,
@@ -372,6 +377,10 @@ async def tile_stats(
         value=(f"{sys_v:.0f}/{dia_v:.0f}"
                if sys_v is not None and dia_v is not None else None),
         kind="target", higher_is_better=False,
+        # The stage-1 systolic boundary, as a reference LINE rather than a
+        # band. A band needs a lower bound and the AHA categories define
+        # none, so drawing one would mean inventing a clinical threshold.
+        target=130.0,
         status=status, status_reason=reason,
         as_of=(bp_as_of.isoformat() if bp_as_of else None),
         stale_days=((day - bp_as_of).days if bp_as_of else None),
@@ -393,6 +402,9 @@ async def tile_stats(
     add(key="recovery", label="Recovery", unit="",
         value=(round(rec) if rec is not None else None),
         kind="target", higher_is_better=True, target=100,
+        # 65+ is "recovered" per the status test above — the same numbers,
+        # so the shaded zone and the chip always agree.
+        band_low=65.0, band_high=100.0,
         status=status, status_reason=reason,
         series=await _series(db, models.DailySummary.recovery_score, day, SERIES_DAYS))
 

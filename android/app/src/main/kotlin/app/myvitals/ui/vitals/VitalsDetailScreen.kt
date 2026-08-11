@@ -74,6 +74,28 @@ fun VitalsDetailScreen(
     vital: Vital,
     onBack: () -> Unit,
 ) {
+    // Server-derived normal band for this metric — the same bounds the
+    // metric card shades. Never recomputed here: the rule is a health
+    // judgement in analytics/tiles.py.
+    var bandLow by remember { mutableStateOf<Double?>(null) }
+    var bandHigh by remember { mutableStateOf<Double?>(null) }
+    LaunchedEffect(vital) {
+        runCatching {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val key = when (vital) {
+                Vital.HRV -> "hrv"
+                Vital.HR -> "resting_hr"
+                Vital.RECOVERY -> "recovery"
+                Vital.SLEEP -> "sleep_duration"
+                else -> null
+            }
+            key?.let { k ->
+                api.summaryTiles().tiles.firstOrNull { it.key == k }?.let {
+                    bandLow = it.bandLow; bandHigh = it.bandHigh
+                }
+            }
+        }
+    }
     when (vital) {
         Vital.SLEEP -> { SleepDetailScreen(settings, onBack); return }
         Vital.STEPS -> { StepsDetailScreen(settings, onBack); return }
@@ -262,6 +284,24 @@ fun VitalsDetailScreen(
                                     val padY = size.height * 0.08f
                                     val plotH = size.height - 2 * padY
                                     val stepX = size.width / (ys.size - 1).coerceAtLeast(1)
+                                    // Shaded "your normal" zone, from the
+                                    // server's bounds — same band the
+                                    // metric card draws.
+                                    val bl = bandLow; val bh = bandHigh
+                                    if (bl != null && bh != null) {
+                                        fun yOf(v: Double) = size.height - padY -
+                                            (((v - minV) / span).toFloat() * plotH)
+                                        val top = yOf(bh); val bot = yOf(bl)
+                                        drawRect(
+                                            color = accent.copy(alpha = 0.10f),
+                                            topLeft = androidx.compose.ui.geometry.Offset(
+                                                0f, minOf(top, bot),
+                                            ),
+                                            size = androidx.compose.ui.geometry.Size(
+                                                size.width, kotlin.math.abs(bot - top),
+                                            ),
+                                        )
+                                    }
                                     drawLine(
                                         color = gridColor.copy(alpha = 0.25f),
                                         start = androidx.compose.ui.geometry.Offset(0f, size.height - padY),

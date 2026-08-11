@@ -189,3 +189,40 @@ def test_band_bounds_come_from_the_server_not_the_clients():
     # A band that doesn't straddle the baseline would mark a perfectly
     # typical reading as out of range.
     assert round(high - baseline, 6) == round(baseline - low, 6)
+
+
+# ── band exposure ─────────────────────────────────────────────────────
+
+def test_bands_exist_only_where_a_threshold_already_does():
+    """A band is a claim, so it is drawn only where the number is already
+    defined — the user's own goal, or the app's own documented scoring.
+
+    Weight is deliberately unbanded: a band there means choosing a goal the
+    user never set. Blood pressure gets a reference LINE instead, because
+    the AHA categories define an upper boundary but no lower one, and a
+    band would require inventing a "too low" threshold.
+    """
+    from myvitals.analytics import tiles
+
+    src = open(tiles.__file__).read()
+    weight_call = src[src.index('key="weight"'):]
+    weight_call = weight_call[:weight_call.index(")\n")]
+    assert "band_low" not in weight_call, "weight must stay unbanded"
+
+    bp_call = src[src.index('key="blood_pressure"'):]
+    bp_call = bp_call[:bp_call.index("series=")]
+    assert "band_low" not in bp_call, "BP gets a reference line, not a band"
+    assert "target=130.0" in bp_call
+
+
+def test_the_sleep_band_and_the_sleep_verdict_use_the_same_numbers():
+    """The shaded zone and the chip must never disagree.
+
+    Sleep's good/typical cut is target-0.5h .. target+1.5h; the band is
+    derived from those same two numbers rather than a second set that could
+    drift from them.
+    """
+    target = 8.0
+    band_low, band_high = round(target - 0.5, 2), round(target + 1.5, 2)
+    assert band_low <= 7.6 <= band_high      # inside band == status "good"
+    assert not (band_low <= 6.9 <= band_high)

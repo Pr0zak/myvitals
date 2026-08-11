@@ -218,3 +218,69 @@ export function meanMarkLine(value: number | null, label = "avg") {
     data: [{ yAxis: value }],
   };
 }
+
+/**
+ * The shaded "your normal" band, as a y-axis markArea.
+ *
+ * Bounds come from `/summary/tiles` (band_low / band_high) — the rule that
+ * produces them is a health judgement and lives in analytics/tiles.py, so
+ * the detail chart, the metric card and the phone all shade the same zone.
+ *
+ * markArea is ONE PER SERIES, and several views already spend that slot on
+ * time-based bands (workout windows, the sleep block). Pair this with
+ * `bandHostSeries` in those cases rather than overwriting theirs.
+ */
+export function normalBandMarkArea(
+  low: number | null | undefined,
+  high: number | null | undefined,
+  color?: string,
+) {
+  if (low == null || high == null) return undefined;
+  const t = chartTheme.value;
+  const tone = color ?? t.palette.hrv ?? "#7ee2a8";
+  return {
+    silent: true,
+    itemStyle: { color: tone, opacity: 0.1 },
+    label: {
+      show: true,
+      position: "insideTopRight" as const,
+      formatter: "Your normal",
+      color: t.axisLabel.color,
+      fontSize: 9,
+      opacity: 0.8,
+    },
+    data: [[{ yAxis: low }, { yAxis: high }]],
+  };
+}
+
+/**
+ * An empty series that exists only to carry a markArea.
+ *
+ * The escape hatch for charts whose real series already uses its one
+ * markArea slot — the pattern HeartRate.vue already uses for its sleep
+ * band.
+ */
+export function bandHostSeries(markArea: unknown, name = "Your normal") {
+  return {
+    type: "line" as const,
+    name,
+    data: [] as number[],
+    showSymbol: false,
+    silent: true,
+    markArea,
+  };
+}
+
+/**
+ * A single markLine DATA ENTRY for a target/threshold, not a whole
+ * markLine object — markLine is one-per-series but its `data` is a list,
+ * so appending composes with existing lines instead of replacing them.
+ */
+export function targetMarkLineItem(value: number, label: string) {
+  const t = chartTheme.value;
+  return {
+    yAxis: value,
+    lineStyle: { color: t.palette.steps, type: "dashed" as const, opacity: 0.55 },
+    label: { show: true, formatter: label, color: t.axisLabel.color, fontSize: 9 },
+  };
+}

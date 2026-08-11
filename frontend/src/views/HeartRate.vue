@@ -27,6 +27,7 @@ import {
   soberResetMarkLine, timeAxisFormatter, workoutMarkArea,
 } from "@/components/charts/chartHelpers";
 import type { SleepNight } from "@/api/types";
+import { normalBandMarkArea } from "@/components/charts/chartHelpers";
 
 type RangeKey = "24h" | "7d" | "30d" | "90d" | "1y";
 const RANGES: Array<{ key: RangeKey; label: string; days: number }> = [
@@ -314,6 +315,11 @@ function dailyLineOption(rows: TodaySummary[], color: string) {
       itemStyle: { color },
       areaStyle: { color: `${color}1f` },
       data,
+      // Resting HR's own normal band. markArea is free on this series —
+      // the time-based bands live on the 24h trace, not here.
+      markArea: normalBandMarkArea(
+        bands.value.resting_hr?.low, bands.value.resting_hr?.high,
+      ),
       markLine: profile.value?.resting_hr_baseline
         ? meanMarkLine(profile.value.resting_hr_baseline, "baseline")
         : undefined,
@@ -325,6 +331,19 @@ const restingOption = computed(() =>
 );
 
 // ── Daily HRV ──
+/** Server-derived normal bands for the two metrics on this page. Fetched
+ *  once — client.ts coalesces concurrent /summary/tiles callers — and never
+ *  recomputed here; the ±rule is a health judgement in analytics/tiles.py. */
+const bands = ref<Record<string, { low: number | null; high: number | null }>>({});
+onMounted(async () => {
+  try {
+    const r = await api.summaryTiles();
+    for (const t of r.tiles ?? []) {
+      bands.value[t.key] = { low: t.band_low, high: t.band_high };
+    }
+  } catch { /* a chart without its band is still a chart */ }
+});
+
 const hrvOption = computed(() => {
   void chartTheme.value; void isNeon.value;
   const t = chartTheme.value;
@@ -346,6 +365,10 @@ const hrvOption = computed(() => {
       lineStyle: { color: hrvColor, width: 1.8 },
       itemStyle: { color: hrvColor },
       areaStyle: { color: `${hrvColor}1f` }, data,
+      // markArea slot is free on this series — no time bands here.
+      markArea: normalBandMarkArea(
+        bands.value.hrv?.low, bands.value.hrv?.high, hrvColor,
+      ),
     }],
   };
 });

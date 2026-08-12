@@ -268,6 +268,9 @@ interface BackendApi {
     @POST("query/circumference")
     suspend fun logCircumference(@Body body: CircumferenceIn): Map<String, String>
 
+    @GET("summary/training-load")
+    suspend fun trainingLoad(): TrainingLoad
+
     @GET("summary/range")
     suspend fun summaryRange(
         @retrofit2.http.Query("since") since: String,

@@ -678,3 +678,90 @@ async def today_snapshot(
     for name, value in results:
         snapshot[name] = value
     return snapshot
+
+
+@router.get("/training-load")
+async def training_load(
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    """Weekly training load against a personal target band.
+
+    Google Health dropped daily cardio goals for weekly load targets, on the
+    grounds that a daily number punishes an ordinary rest day. This is that,
+    expressed in the units this app already computes.
+
+    The band is not invented. ATL is a 7-day exponentially-weighted load and
+    CTL a 42-day one, so ATL/CTL is exactly the acute-to-chronic workload
+    ratio, whose 0.8-1.3 "sweet spot" is the standard reading in the training
+    literature. Expressing that ratio back in load units gives a target band of
+    0.8-1.3 x (CTL x 7) — the same judgement, in the number the user sees.
+
+    Returns null bounds rather than a guess when there is no chronic load to
+    compare against: a first week of training has no meaningful target.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:  # noqa: BLE001
+        local_tz = timezone.utc
+    today = datetime.now(local_tz).date()
+    since = today - timedelta(days=6)
+
+    # Computed from SOURCE rows across a 42-day window, not read from
+    # daily_summary.training_stress_score. That column is only rewritten when a
+    # day's summary is recomputed, and the staleness heuristic watches sleep and
+    # HRV — so making strength sessions count would not have reached a single
+    # historical day, and this card would have reported zero for a week the user
+    # demonstrably trained.
+    from ..analytics.advanced import training_load_by_day
+    chronic_days = 42
+    by_day = await training_load_by_day(
+        db, today - timedelta(days=chronic_days - 1), today,
+    )
+
+    daily = [
+        {
+            "date": (since + timedelta(days=i)).isoformat(),
+            "load": by_day.get(since + timedelta(days=i), 0.0),
+        }
+        for i in range(7)
+    ]
+    week_load = round(sum(x["load"] for x in daily), 1)
+
+    # Rolling-average acute:chronic ratio (Gabbett), rather than the EWMA pair
+    # stored on daily_summary: the stored CTL/ATL were accumulated while
+    # strength counted for nothing, so they understate chronic load until they
+    # re-converge. A rolling mean over source rows is correct immediately.
+    chronic_total = sum(by_day.values())
+    chronic_week = chronic_total / (chronic_days / 7.0)
+
+    target_low = target_high = acwr = None
+    band = "unknown"
+    if chronic_week > 0:
+        target_low = round(chronic_week * 0.8, 1)
+        target_high = round(chronic_week * 1.3, 1)
+        acwr = round(week_load / chronic_week, 2)
+        band = (
+            "under" if week_load < target_low
+            else "optimal" if week_load <= target_high
+            else "overreaching"
+        )
+
+    latest = (await db.execute(
+        select(models.DailySummary.ctl, models.DailySummary.atl)
+        .where(models.DailySummary.date <= today)
+        .order_by(models.DailySummary.date.desc()).limit(1)
+    )).first()
+    ctl = float(latest[0]) if latest and latest[0] is not None else None
+    atl = float(latest[1]) if latest and latest[1] is not None else None
+
+    return {
+        "week_load": week_load,
+        "target_low": target_low,
+        "target_high": target_high,
+        "acwr": acwr,
+        "band": band,
+        "ctl": ctl,
+        "atl": atl,
+        "daily": daily,
+    }

@@ -21,6 +21,7 @@ import "@/styles/today-tokens.css";
 import PageHeader from "@/components/today/PageHeader.vue";
 import TodayHero from "@/components/TodayHero.vue";
 import HealthStatus from "@/components/HealthStatus.vue";
+import WeeklyLoad from "@/components/WeeklyLoad.vue";
 import KeyMetrics from "@/components/KeyMetrics.vue";
 import NarrativeCards from "@/components/NarrativeCards.vue";
 import FocusAreas from "@/components/FocusAreas.vue";
@@ -478,6 +479,7 @@ async function refreshAnnotations() {
          existed and worked but was imported by no view — the one signal that
          answers "is anything notable today?" was computed and discarded. -->
     <TodayHero />
+    <WeeklyLoad />
     <HealthStatus />
 
 

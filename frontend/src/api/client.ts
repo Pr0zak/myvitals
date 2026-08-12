@@ -380,6 +380,15 @@ export const api = {
     });
   },
 
+  /** Weekly training load vs the acute:chronic target band. Coalesced —
+   *  Today mounts this alongside the tiles call. */
+  trainingLoad(): Promise<import("./types").TrainingLoad> {
+    return coalesce("/summary/training-load", async () => {
+      const { data } = await http.get("/summary/training-load");
+      return data;
+    });
+  },
+
   summaryTiles(): Promise<import("./types").VitalTilesResponse> {
     return coalesce("/summary/tiles", async () => {
       const { data } = await http.get("/summary/tiles");

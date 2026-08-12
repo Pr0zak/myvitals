@@ -187,6 +187,11 @@ fun RingsScreen(
             onOpen = onOpen,
         )
 
+        // Weekly load, replacing the daily-goal framing for training. Sits
+        // directly under the hero because it answers the same question the
+        // ring does — "am I on track this week" — for effort rather than steps.
+        app.myvitals.ui.common.WeeklyLoad(settings)
+
         // Health status: the roll-up + Readiness as a MetricCard. The old
         // hero was a third card style stacked above the Focus pills and the
         // Key metrics grid; readiness is a metric and now looks like one.

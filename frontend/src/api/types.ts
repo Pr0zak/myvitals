@@ -421,3 +421,17 @@ export interface NarrativeEventsResponse {
   date: string;
   events: NarrativeEvent[];
 }
+
+
+/** GET /summary/training-load — weekly load against the acute:chronic band.
+ *  The band and the verdict are the server's; clients render, never judge. */
+export interface TrainingLoad {
+  week_load: number;
+  target_low: number | null;
+  target_high: number | null;
+  acwr: number | null;
+  band: "under" | "optimal" | "overreaching" | "unknown" | string;
+  ctl: number | null;
+  atl: number | null;
+  daily: Array<{ date: string; load: number }>;
+}

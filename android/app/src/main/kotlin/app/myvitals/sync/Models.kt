@@ -1339,3 +1339,24 @@ data class StravaCookieStatusResponse(
     // reconnect banner on the Activities screen.
     @Json(name = "needs_reconnect") val needsReconnect: Boolean = false,
 )
+
+
+/** GET /summary/training-load — weekly load against the acute:chronic band.
+ *  The band and the verdict are the server's; the client renders, never judges. */
+@JsonClass(generateAdapter = true)
+data class TrainingLoadDay(
+    val date: String = "",
+    val load: Double = 0.0,
+)
+
+@JsonClass(generateAdapter = true)
+data class TrainingLoad(
+    @Json(name = "week_load") val weekLoad: Double = 0.0,
+    @Json(name = "target_low") val targetLow: Double? = null,
+    @Json(name = "target_high") val targetHigh: Double? = null,
+    val acwr: Double? = null,
+    val band: String = "unknown",
+    val ctl: Double? = null,
+    val atl: Double? = null,
+    val daily: List<TrainingLoadDay> = emptyList(),
+)

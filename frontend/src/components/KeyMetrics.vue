@@ -42,12 +42,18 @@ const ROUTE: Record<string, string> = {
   recovery: "/heart-rate", weight: "/weight",
 };
 
-/** Per-metric accent, matching the reference's habit of tinting each card's
- *  chart by metric family rather than using one global colour. */
+/**
+ * Per-metric accent — the accent of the DETAIL VIEW this card opens.
+ *
+ * This was a separate hand-picked set left over from the classic theme, so a
+ * mint-green "Resting HR" card opened a cyan heart-rate chart. Same domain
+ * palette as the phone's `Vital.accent`: heart family cyan, sleep magenta,
+ * move lime, weight/temp amber.
+ */
 const ACCENT: Record<string, string> = {
-  hrv: "#7ee2a8", resting_hr: "#7ee2a8", steps: "#5fd3c4",
-  sleep_duration: "#b39ddb", blood_pressure: "#7fc8f8",
-  recovery: "#7ee2a8", weight: "#e8b661",
+  resting_hr: "#28e6ff", hrv: "#28e6ff", blood_pressure: "#28e6ff",
+  recovery: "#28e6ff", sleep_duration: "#ff3ad8", steps: "#5dff3b",
+  weight: "#ffb52e", skin_temp: "#ffb52e",
 };
 
 const BAR = new Set(["steps"]);
@@ -177,7 +183,7 @@ const shown = computed(() => {
           :target="t.key === 'steps' ? t.target ?? null : null"
           :chart="BAR.has(t.key) ? 'bar' : 'line'"
           :span="INTERMITTENT.has(t.key) ? 14 : 7"
-          :accent="ACCENT[t.key] ?? '#7ee2a8'"
+          :accent="ACCENT[t.key] ?? '#28e6ff'"
         />
       </button>
       </div>

@@ -66,14 +66,17 @@ onMounted(async () => {
   } catch { /* the chip shows a dash */ }
 });
 
+// Chip tint = the accent of the view it opens. The old set was hand-picked
+// classic teal / navy / plum, so tapping the green Steps chip landed on a lime
+// chart and the plum Sleep chip on a magenta one.
 const CHIPS = computed(() => [
   { key: "steps", label: "Steps", value: display("steps"),
-    bg: "#0f4f45", fg: "#7fe6d2", route: "/steps" },
+    fg: "#5dff3b", route: "/steps" },
   { key: "readiness", label: "Readiness",
     value: readiness.value == null ? "—" : String(Math.round(readiness.value)),
-    bg: "#123c56", fg: "#8fd0f5", route: "/heart-rate" },
+    fg: "#28e6ff", route: "/heart-rate" },
   { key: "sleep_duration", label: "Sleep", value: display("sleep_duration"),
-    bg: "#3d2a5c", fg: "#c9adf5", route: "/sleep" },
+    fg: "#ff3ad8", route: "/sleep" },
 ]);
 
 /** Inset so the stroke (plus its round cap) clears the card's corner
@@ -91,9 +94,24 @@ const dash = computed(() => {
     <div class="top">
       <button class="ring" @click="router.push('/steps')" aria-label="Weekly steps">
         <svg viewBox="0 0 120 120">
-          <circle cx="60" cy="60" :r="R" fill="none" stroke="#2a2d34" stroke-width="11" />
+          <defs>
+            <linearGradient id="ringgrad" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%" stop-color="#5dff3b"/>
+              <stop offset="55%" stop-color="#5dff3b"/>
+              <stop offset="100%" stop-color="#28e6ff"/>
+            </linearGradient>
+          </defs>
+          <circle cx="60" cy="60" :r="R" fill="none" stroke="#23263a" stroke-width="11" />
+          <!-- Bloom: the same arc, wide and faint, under the crisp one. A neon
+               tube is a bright core inside a halo; a flat stroke on a dark
+               ground reads as plastic. -->
           <circle
-            cx="60" cy="60" :r="R" fill="none" stroke="#5b8cff" stroke-width="11"
+            cx="60" cy="60" :r="R" fill="none" stroke="#5dff3b" stroke-width="26"
+            opacity="0.10" stroke-linecap="round" :stroke-dasharray="C.toFixed(1)"
+            :stroke-dashoffset="dash.toFixed(1)" transform="rotate(-90 60 60)"
+          />
+          <circle
+            cx="60" cy="60" :r="R" fill="none" stroke="url(#ringgrad)" stroke-width="11"
             stroke-linecap="round" :stroke-dasharray="C.toFixed(1)"
             :stroke-dashoffset="dash.toFixed(1)" transform="rotate(-90 60 60)"
           />
@@ -111,7 +129,7 @@ const dash = computed(() => {
       <div class="chips">
         <button
           v-for="c in CHIPS" :key="c.key" class="chip"
-          :style="{ background: c.bg, color: c.fg }"
+          :style="{ borderColor: c.fg, color: c.fg }"
           @click="router.push(c.route)"
         >
           <span class="clabel">{{ c.label }}</span>
@@ -141,7 +159,7 @@ const dash = computed(() => {
    172px and the ring stopped at 168, leaving a visible 4px step. */
 .ring {
   position: relative; flex: none; width: 168px; min-height: 168px;
-  background: #1b1c1f; border: 0; border-radius: 22px;
+  background: #181b27; border: 1px solid rgba(93, 255, 59, .22); border-radius: 22px;
   cursor: pointer; padding: 0; color: inherit;
 }
 .ring svg { width: 100%; height: 100%; display: block; }
@@ -152,25 +170,35 @@ const dash = computed(() => {
   justify-content: center; gap: 1px;
 }
 .rlabel { font-size: .62rem; color: #b9bec6; }
-.rpct { font-size: 1.7rem; font-weight: 300; color: #e9edf2; line-height: 1.1; }
+.rpct {
+  font-size: 1.85rem; font-weight: 300; color: #ececf5; line-height: 1.1;
+  text-shadow: 0 0 18px rgba(93, 255, 59, .35);
+  font-variant-numeric: tabular-nums;
+}
 .rsub { font-size: .64rem; color: #8d949d; }
 
 .chips { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* Dark surface + thin luminous border, the idiom the neon shell already uses
+   for its Fasting / Sober cards. A tinted FILL measured as a muddy mid-tone
+   over the near-black card — rgb(30,59,38) for lime — which reads as washed
+   out rather than neon. Neon is a bright edge on a dark ground. */
 .chip {
   flex: 1; display: flex; flex-direction: column; justify-content: center;
-  gap: 1px; border: 0; border-radius: 18px; padding: 10px 14px;
+  gap: 1px; border: 1px solid; border-radius: 18px; padding: 10px 14px;
   cursor: pointer; text-align: left; min-width: 0;
+  background: #181b27;
 }
 .clabel { font-size: .72rem; opacity: .85; }
 .cvalue {
-  font-size: 1.25rem; font-weight: 400; color: #fff;
+  font-size: 1.25rem; font-weight: 400; color: #ececf5;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 .actions { display: flex; gap: 10px; margin-top: 12px; }
 .act {
-  flex: 1; border: 0; border-radius: 999px; padding: 11px 0;
-  background: #143a52; color: #cfe6f7; font-size: .9rem;
+  flex: 1; border-radius: 999px; padding: 11px 0;
+  background: #181b27; border: 1px solid rgba(40, 230, 255, .45);
+  color: #28e6ff; font-size: .9rem;
   cursor: pointer; font-weight: 500;
 }
 .plus { font-weight: 400; margin-right: 2px; }

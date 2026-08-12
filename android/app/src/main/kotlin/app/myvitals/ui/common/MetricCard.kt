@@ -26,6 +26,10 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import app.myvitals.ui.neon.NeonMV
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -68,7 +72,7 @@ fun MetricCard(
     bars: Boolean = false,
     /** Trailing points to plot; intermittent metrics pass 14. */
     span: Int = WEEK,
-    accent: Color = Color(0xFF7EE2A8),
+    accent: Color = NeonMV.Cyan,
     onClick: (() -> Unit)? = null,
 ) {
     val hasData = value != null
@@ -78,12 +82,13 @@ fun MetricCard(
         modifier
             .fillMaxWidth()
             .fillMaxHeight()
-            .background(Color(0xFF1B1C1F), RoundedCornerShape(20.dp))
+            .background(NeonMV.Card, RoundedCornerShape(20.dp))
+            .border(1.dp, accent.copy(alpha = 0.16f), RoundedCornerShape(20.dp))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 12.dp),
     ) {
         Text(
-            name, color = Color(0xFFB9BEC6), fontSize = 12.sp,
+            name, color = NeonMV.Muted, fontSize = 12.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(6.dp))
@@ -91,7 +96,13 @@ fun MetricCard(
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 value ?: "No data",
-                color = Color(0xFFE9EDF2),
+                style = androidx.compose.ui.text.TextStyle(
+                    fontFeatureSettings = "tnum",
+                    shadow = androidx.compose.ui.graphics.Shadow(
+                        color = accent.copy(alpha = 0.28f), blurRadius = 18f,
+                    ),
+                ),
+                color = NeonMV.Ink,
                 // Light weight is the reference's most recognisable trait.
                 fontWeight = FontWeight.Light,
                 fontSize = if (hasData) 30.sp else 23.sp,
@@ -112,17 +123,34 @@ fun MetricCard(
         }
 
         Spacer(Modifier.height(10.dp))
-        WeekChart(
-            points = series.takeLast(span),
-            accent = accent,
-            bandLow = bandLow,
-            bandHigh = bandHigh,
-            target = target,
-            bars = bars,
-            modifier = Modifier.fillMaxWidth().height(40.dp),
-        )
-        Spacer(Modifier.height(3.dp))
-        WeekAxis(dayLetters.takeLast(span))
+        val plotted = series.takeLast(span)
+        if (plotted.none { it != null }) {
+            // With nothing to plot this drew an empty 40dp rectangle over a row
+            // of weekday letters — on Weight, BP and Skin temp that is most of
+            // the card saying nothing at all. Say why instead.
+            Box(
+                Modifier.fillMaxWidth().height(46.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (span == 0) "No readings yet"
+                    else "No readings in the last $span days",
+                    color = Color(0xFF8D949D), fontSize = 11.sp,
+                )
+            }
+        } else {
+            WeekChart(
+                points = plotted,
+                accent = accent,
+                bandLow = bandLow,
+                bandHigh = bandHigh,
+                target = target,
+                bars = bars,
+                modifier = Modifier.fillMaxWidth().height(40.dp),
+            )
+            Spacer(Modifier.height(3.dp))
+            WeekAxis(dayLetters.takeLast(span))
+        }
 
         if (chip != null) {
             // Pushed to the bottom so chips line up across a row and a
@@ -151,9 +179,11 @@ private fun chipFor(hasData: Boolean, status: String?, label: String?): Chip? {
         return Chip(Color(0xFF8D949D), Color(0x1F8D949D), "No data")
     }
     return when (status) {
-        "good" -> Chip(Color(0xFF7EE2A8), Color(0x247EE2A8), label ?: "In range")
-        "typical" -> Chip(Color(0xFFC7CBD1), Color(0x1FC7CBD1), label ?: "In range")
-        "watch" -> Chip(Color(0xFFE8B661), Color(0x24E8B661), label ?: "Out of range")
+        // Semantic — a verdict, not a domain — but on the shell's own ramp so
+        // the chips stop reading as another app's, sitting on a neon card.
+        "good" -> Chip(NeonMV.Lime, NeonMV.Lime.copy(alpha = 0.13f), label ?: "In range")
+        "typical" -> Chip(NeonMV.Muted, NeonMV.Muted.copy(alpha = 0.12f), label ?: "In range")
+        "watch" -> Chip(NeonMV.Amber, NeonMV.Amber.copy(alpha = 0.14f), label ?: "Out of range")
         else -> null
     }
 }
@@ -299,7 +329,13 @@ private fun WeekChart(
                 }
                 prev = o; prevIdx = i
             }
-            drawPath(path, accent, style = Stroke(width = 1.6f * px))
+            // Bloom under the stroke — a flat 1.6dp line on a dark card reads
+            // as a hairline scratch; the halo is what makes it read as lit.
+            drawPath(path, accent.copy(alpha = 0.14f),
+                style = Stroke(width = 5.0f * px, cap = StrokeCap.Round,
+                               join = StrokeJoin.Round))
+            drawPath(path, accent, style = Stroke(width = 1.8f * px,
+                cap = StrokeCap.Round, join = StrokeJoin.Round))
             points.forEachIndexed { i, v ->
                 if (v == null) return@forEachIndexed
                 val last = i == points.size - 1

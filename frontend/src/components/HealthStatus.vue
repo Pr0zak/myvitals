@@ -94,6 +94,8 @@ const ORDER: Array<[string, string]> = [
     </div>
 
     <button class="wide" @click="open = !open">
+      <!-- Readiness is a recovery / heart-family metric: cyan, the same accent
+           as its detail view and as the phone card. -->
       <MetricCard
         name="Readiness"
         :value="value"
@@ -102,7 +104,7 @@ const ORDER: Array<[string, string]> = [
         :status="status"
         :status-label="chipLabel"
         :series="series"
-        accent="#7ee2a8"
+        accent="#28e6ff"
       />
     </button>
 

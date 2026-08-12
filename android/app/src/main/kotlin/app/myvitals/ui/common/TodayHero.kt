@@ -2,6 +2,7 @@ package app.myvitals.ui.common
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,10 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import app.myvitals.ui.neon.NeonMV
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.sync.VitalTile
@@ -67,30 +72,68 @@ fun TodayHero(
     }
 
     Column(modifier.fillMaxWidth().padding(bottom = 18.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // IntrinsicSize.Min lets the ring card take the row's height instead of
+        // a fixed 168dp. With three chips beside it the chips column is taller,
+        // so the ring card stopped short and left a notch of background beside
+        // the last chip. The web flexbox already did this via align-self.
+        Row(
+            Modifier.height(IntrinsicSize.Min),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             // Ring
             Box(
                 Modifier
-                    .size(168.dp)
-                    .background(Color(0xFF1B1C1F), RoundedCornerShape(22.dp))
+                    .width(168.dp)
+                    .fillMaxHeight()
+                    .background(NeonMV.Card, RoundedCornerShape(22.dp))
+                    .border(1.dp, NeonMV.Lime.copy(alpha = 0.22f), RoundedCornerShape(22.dp))
                     .clickable { onOpen("vitals/STEPS") },
                 contentAlignment = Alignment.Center,
             ) {
                 val pct = (week?.pct ?: 0.0).coerceIn(0.0, 100.0)
-                Canvas(Modifier.fillMaxSize().padding(18.dp)) {
+                // 10dp, not 18: the card now fills the row height, so the arc —
+                // sized to min(w,h) — was left floating small with a deep
+                // margin above and below it.
+                Canvas(Modifier.fillMaxSize().padding(10.dp)) {
                     val stroke = 11.dp.toPx()
-                    val inset = stroke / 2
-                    val arcSize = Size(size.width - stroke, size.height - stroke)
+                    // Draw into a centred SQUARE. The card now fills the row's
+                    // height (taller than it is wide once there are three
+                    // chips beside it), and an arc sized to the full canvas
+                    // came out as an ellipse.
+                    val d = minOf(size.width, size.height) - stroke
+                    val left = (size.width - d) / 2f
+                    val top = (size.height - d) / 2f
+                    val arcSize = Size(d, d)
                     drawArc(
-                        color = Color(0xFF2A2D34), startAngle = 0f, sweepAngle = 360f,
-                        useCenter = false, topLeft = Offset(inset, inset),
+                        color = NeonMV.Track, startAngle = 0f, sweepAngle = 360f,
+                        useCenter = false, topLeft = Offset(left, top),
                         size = arcSize, style = Stroke(stroke),
                     )
                     if (pct > 0) {
+                        val sweep = (pct / 100.0 * 360.0).toFloat()
+                        // Bloom: the same arc drawn wide and faint under the
+                        // crisp one. A neon tube is a bright core in a halo,
+                        // and a flat stroke on a dark ground reads as plastic.
+                        for ((mult, alpha) in listOf(2.6f to 0.10f, 1.7f to 0.18f)) {
+                            drawArc(
+                                color = NeonMV.Lime.copy(alpha = alpha),
+                                startAngle = -90f, sweepAngle = sweep,
+                                useCenter = false, topLeft = Offset(left, top),
+                                size = arcSize,
+                                style = Stroke(stroke * mult, cap = StrokeCap.Round),
+                            )
+                        }
+                        // Lime → cyan along the sweep, so a long week visibly
+                        // travels rather than just getting longer.
                         drawArc(
-                            color = Color(0xFF5B8CFF), startAngle = -90f,
-                            sweepAngle = (pct / 100.0 * 360.0).toFloat(),
-                            useCenter = false, topLeft = Offset(inset, inset),
+                            brush = Brush.sweepGradient(
+                                0.00f to NeonMV.Lime,
+                                0.45f to NeonMV.Lime,
+                                1.00f to NeonMV.Cyan,
+                                center = Offset(left + d / 2f, top + d / 2f),
+                            ),
+                            startAngle = -90f, sweepAngle = sweep,
+                            useCenter = false, topLeft = Offset(left, top),
                             size = arcSize,
                             style = Stroke(stroke, cap = StrokeCap.Round),
                         )
@@ -98,12 +141,20 @@ fun TodayHero(
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(week?.label ?: "Weekly steps",
-                        color = Color(0xFFB9BEC6), fontSize = 10.sp)
-                    Text("${Math.round(pct)}%", color = Color(0xFFE9EDF2),
-                        fontSize = 27.sp, fontWeight = FontWeight.Light)
+                        color = NeonMV.Muted, fontSize = 10.sp)
+                    Text(
+                        "${Math.round(pct)}%", color = NeonMV.Ink,
+                        fontSize = 30.sp, fontWeight = FontWeight.Light,
+                        style = androidx.compose.ui.text.TextStyle(
+                            shadow = androidx.compose.ui.graphics.Shadow(
+                                color = NeonMV.Lime.copy(alpha = 0.35f),
+                                blurRadius = 22f,
+                            ),
+                        ),
+                    )
                     Text(
                         "%,d of %,d".format(week?.done ?: 0, week?.goal ?: 0),
-                        color = Color(0xFF8D949D), fontSize = 10.sp,
+                        color = NeonMV.Muted, fontSize = 10.sp,
                     )
                 }
             }
@@ -118,15 +169,19 @@ fun TodayHero(
                 Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                HeroChip("Steps", display("steps"), Color(0xFF0F4F45),
-                    Color(0xFF7FE6D2)) { onOpen("vitals/STEPS") }
+                // Chip tint = the accent of the screen it opens. The old set
+                // was hand-picked classic teal/navy/plum, so tapping the green
+                // Steps chip landed on a lime chart.
+                HeroChip("Steps", display("steps"), NeonMV.Card, NeonMV.Lime) { onOpen("vitals/STEPS") }
                 HeroChip(
                     "Readiness",
                     readiness?.let { "%.0f".format(it) } ?: "—",
-                    Color(0xFF123C56), Color(0xFF8FD0F5),
+                    NeonMV.Card, NeonMV.Cyan,
                 ) { onOpen("vitals/HR") }
-                HeroChip("Sleep", display("sleep_duration"), Color(0xFF3D2A5C),
-                    Color(0xFFC9ADF5)) { onOpen("vitals/SLEEP") }
+                HeroChip("Sleep", display("sleep_duration"),
+                    NeonMV.Card, NeonMV.Magenta) {
+                    onOpen("vitals/SLEEP")
+                }
             }
         }
 
@@ -144,16 +199,25 @@ private fun HeroChip(
     label: String, value: String, bg: Color, fg: Color,
     modifier: Modifier = Modifier, onClick: () -> Unit,
 ) {
+    // Dark surface + thin luminous border + luminous label — the idiom the
+    // neon shell already uses for the Fasting / Sober cards.
+    //
+    // A tinted FILL was the obvious first move and it looked wrong: an accent
+    // at 16% over the near-black card lands on a muddy mid-tone — measured
+    // (30,59,38) for lime, (22,56,72) for cyan — which reads as a washed-out
+    // block rather than a neon one. Neon comes from a bright edge against a
+    // dark ground, not from diluting the bright colour.
     Column(
         modifier
             .fillMaxWidth()
-            .background(bg, RoundedCornerShape(18.dp))
+            .background(NeonMV.Card, RoundedCornerShape(18.dp))
+            .border(1.dp, fg.copy(alpha = 0.45f), RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.Center,
     ) {
         Text(label, color = fg, fontSize = 12.sp)
-        Text(value, color = Color.White, fontSize = 19.sp,
+        Text(value, color = NeonMV.Ink, fontSize = 19.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
@@ -162,12 +226,13 @@ private fun HeroChip(
 private fun HeroAction(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(
         modifier
-            .background(Color(0xFF143A52), RoundedCornerShape(999.dp))
+            .background(NeonMV.Card, RoundedCornerShape(999.dp))
+            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = Color(0xFFCFE6F7), fontSize = 14.sp,
+        Text(label, color = NeonMV.Cyan, fontSize = 14.sp,
             fontWeight = FontWeight.Medium)
     }
 }

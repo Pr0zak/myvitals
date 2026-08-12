@@ -20,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import app.myvitals.ui.vitals.Vital
+import app.myvitals.ui.vitals.accent
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.sync.ReadinessDetail
@@ -84,6 +86,11 @@ fun HealthStatus(
             dayLetters = readiness?.series?.map { dayLetter(it.date) } ?: emptyList(),
             status = bandStatus(readiness?.band),
             statusLabel = readiness?.band?.replaceFirstChar { it.uppercase() },
+            // Readiness is a recovery / heart-family metric: cyan, the same
+            // accent as its detail view and as the web card. Stated rather
+            // than inherited from MetricCard's default, so a change to that
+            // default cannot silently split the two surfaces.
+            accent = Vital.RECOVERY.accent,
             onClick = { open = !open },
         )
 

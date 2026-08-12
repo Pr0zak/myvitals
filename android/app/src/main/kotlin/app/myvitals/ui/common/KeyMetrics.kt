@@ -16,6 +16,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import app.myvitals.ui.vitals.Vital
+import app.myvitals.ui.vitals.accent
+import app.myvitals.ui.neon.NeonMV
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.sync.VitalTile
@@ -151,24 +154,30 @@ private fun applyPreference(
     return visible.sortedBy { rank[it.key] ?: Int.MAX_VALUE }
 }
 
-private fun accentFor(key: String): Color = when (key) {
-    "steps" -> Color(0xFF5FD3C4)
-    "sleep_duration" -> Color(0xFFB39DDB)
-    "blood_pressure" -> Color(0xFF7FC8F8)
-    "weight" -> Color(0xFFE8B661)
-    else -> Color(0xFF7EE2A8)
-}
+/**
+ * The accent of the DETAIL SCREEN this card opens.
+ *
+ * These were a separate hand-picked set left over from the classic theme, so a
+ * mint-green "Resting HR" card opened a cyan heart-rate chart and an amber
+ * Weight card opened an amber one only by coincidence. Deriving both from the
+ * same `Vital` the card routes to means they cannot drift apart again.
+ */
+private fun accentFor(key: String): Color = vitalFor(key)?.accent ?: NeonMV.Cyan
 
-private fun routeFor(key: String): String? = when (key) {
-    "hrv" -> "vitals/HRV"
-    "resting_hr" -> "vitals/HR"
-    "steps" -> "vitals/STEPS"
-    "sleep_duration" -> "vitals/SLEEP"
-    "weight" -> "vitals/WEIGHT"
-    "blood_pressure" -> "vitals/BP"
-    "recovery" -> "vitals/RECOVERY"
+private fun vitalFor(key: String): Vital? = when (key) {
+    "hrv" -> Vital.HRV
+    "resting_hr" -> Vital.HR
+    "steps" -> Vital.STEPS
+    "sleep_duration" -> Vital.SLEEP
+    "weight" -> Vital.WEIGHT
+    "blood_pressure" -> Vital.BP
+    "recovery" -> Vital.RECOVERY
+    "skin_temp" -> Vital.SKIN_TEMP
     else -> null
 }
+
+private fun routeFor(key: String): String? =
+    vitalFor(key)?.let { "vitals/${it.name}" }
 
 /** Sentence-case chip wording, matching the web. "Goal not met" reads
  *  better than "Out of range" on a goal metric. */

@@ -53,7 +53,7 @@ const props = withDefaults(defineProps<{
   unit: "", qualifier: "Today", status: null, statusLabel: null,
   series: () => [], bandLow: null, bandHigh: null, target: null, chart: "line",
   span: 7,
-  accent: "#7ee2a8",
+  accent: "#28e6ff",
 });
 
 const WEEK = 7;
@@ -72,9 +72,12 @@ const week = computed(() => (props.series ?? []).slice(-(props.span ?? WEEK)));
 const hasData = computed(() => props.value !== null && props.value !== undefined);
 
 const CHIP: Record<string, { fg: string; bg: string; text: string }> = {
-  good: { fg: "#7ee2a8", bg: "rgba(126,226,168,.14)", text: "In range" },
-  typical: { fg: "#c7cbd1", bg: "rgba(199,203,209,.12)", text: "In range" },
-  watch: { fg: "#e8b661", bg: "rgba(232,182,97,.14)", text: "Out of range" },
+  // Semantic — these encode a verdict, not a domain — but drawn from the
+  // shell's own ramp (lime / muted / amber) rather than the classic mint and
+  // sand, which read as a different app's chips sitting on a neon card.
+  good: { fg: "#5dff3b", bg: "rgba(93,255,59,.13)", text: "In range" },
+  typical: { fg: "#9b9bb0", bg: "rgba(155,155,176,.12)", text: "In range" },
+  watch: { fg: "#ffb52e", bg: "rgba(255,181,46,.14)", text: "Out of range" },
 };
 
 const NO_DATA_CHIP = { fg: "#8d949d", bg: "rgba(141,148,157,.12)", text: "No data" };
@@ -210,13 +213,20 @@ const targetY = computed(() => {
   return s && props.target != null ? s.y(props.target) : null;
 });
 
+/** Why the chart is blank, in the chart's place. */
+const emptyNote = computed(() => {
+  const span = props.series?.length ?? 0;
+  if (span === 0) return "No readings yet";
+  return `No readings in the last ${span} days`;
+});
+
 const plottable = computed(
   () => week.value.filter((p) => p.value != null).length >= 1,
 );
 </script>
 
 <template>
-  <div class="mc">
+  <div class="mc" :style="{ '--mc-accent': accent }">
     <div class="name">{{ name }}</div>
 
     <div v-if="hasData" class="value">
@@ -226,7 +236,14 @@ const plottable = computed(
 
     <div v-if="qualifier" class="qual">{{ qualifier }}</div>
 
-    <div class="chartwrap">
+    <!-- With nothing to plot, the chart area was a blank rectangle the height
+         of a real chart plus a row of weekday letters under it — on Weight,
+         BP and Skin temp that is most of the card saying nothing. Say why
+         instead. -->
+    <div v-if="!plottable" class="chartwrap empty">
+      <span class="emptynote">{{ emptyNote }}</span>
+    </div>
+    <div v-else class="chartwrap">
       <svg class="spark" :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none">
         <rect
           v-if="band && plottable" x="0" :y="band.y" :width="W" :height="band.h"
@@ -245,8 +262,15 @@ const plottable = computed(
           />
         </g>
         <g v-else-if="plottable">
+          <!-- Bloom under the stroke: a flat 1.6px line on a dark card reads
+               as a hairline scratch; the halo is what makes it read as lit. -->
           <path
-            :d="linePath" fill="none" :stroke="accent" stroke-width="1.6"
+            :d="linePath" fill="none" :stroke="accent" stroke-width="5"
+            opacity="0.14" stroke-linecap="round" stroke-linejoin="round"
+            vector-effect="non-scaling-stroke"
+          />
+          <path
+            :d="linePath" fill="none" :stroke="accent" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round"
             vector-effect="non-scaling-stroke"
           />
@@ -277,8 +301,17 @@ const plottable = computed(
 </template>
 
 <style scoped>
+.chartwrap.empty {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 46px;
+}
+.emptynote { font-size: .72rem; color: var(--muted, #8d949d); text-align: center; }
+
 .mc {
-  background: var(--mc-surface, #1b1c1f);
+  background: var(--mc-surface, #181b27);
+  /* Hairline in this card's own domain accent, so a grid reads as a set of
+     domains rather than eight identical slabs. */
+  border: 1px solid color-mix(in srgb, var(--mc-accent, #28e6ff) 16%, transparent);
   border-radius: 20px;
   padding: 14px 14px 12px;
   display: flex;
@@ -305,6 +338,8 @@ const plottable = computed(
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-shadow: 0 0 16px color-mix(in srgb, var(--mc-accent, #28e6ff) 28%, transparent);
+  font-variant-numeric: tabular-nums;
 }
 .value.nodata { font-size: 1.45rem; }
 .unit { font-size: .85rem; font-weight: 400; color: #b9bec6; margin-left: 4px; }

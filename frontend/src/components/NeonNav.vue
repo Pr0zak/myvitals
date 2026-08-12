@@ -83,13 +83,19 @@ const activeIndex = computed(() => {
 }
 .tab.on .glow { opacity: 1; }
 
-/* Mobile: bottom bar */
+/* Mobile: M3 Expressive FLOATING toolbar, not a docked bottom bar.
+   Expressive retires the bottom app bar for docked and floating toolbars.
+   Floating lets the page ground run underneath, so the app reads as one
+   continuous surface rather than a pane sitting on a shelf.
+   Phone twin: the toolbar in NeonAppShell.kt. */
 .neon-nav {
-  left: 0; right: 0; bottom: 0;
+  left: 10px; right: 10px;
+  bottom: calc(10px + env(safe-area-inset-bottom));
   justify-content: space-around;
-  padding: 12px 4px calc(12px + env(safe-area-inset-bottom));
-  border-radius: 22px 22px 0 0;
-  border-bottom: 0; border-left: 0; border-right: 0;
+  padding: 8px 6px;
+  border-radius: 999px;
+  border: 1px solid #262b3d;
+  box-shadow: 0 14px 34px -16px rgba(0, 0, 0, .95);
 }
 
 /* Desktop: left rail */

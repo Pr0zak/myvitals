@@ -186,9 +186,15 @@ fun TodayHero(
         }
 
         Spacer(Modifier.height(12.dp))
-        // Both go somewhere real — no decorative buttons.
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            HeroAction("+ Log", Modifier.weight(1f)) { onOpen("journal") }
+        // Both go somewhere real — no decorative buttons. "Log" is an M3 FAB
+        // menu rather than a second flat button: it used to be a single label
+        // that navigated to the journal, leaving everything else you might
+        // record two or three taps deep on unrelated screens.
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            LogFabMenu(Modifier.weight(1f), onOpen = onOpen)
             HeroAction("Start", Modifier.weight(1f)) { onOpen("workout/today") }
         }
     }

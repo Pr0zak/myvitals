@@ -184,6 +184,8 @@ const shown = computed(() => {
           :chart="BAR.has(t.key) ? 'bar' : 'line'"
           :span="INTERMITTENT.has(t.key) ? 14 : 7"
           :accent="ACCENT[t.key] ?? '#28e6ff'"
+          :delta="t.delta"
+          :higher-is-better="t.higher_is_better"
         />
       </button>
       </div>

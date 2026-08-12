@@ -256,22 +256,13 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
             Text("Heart rate", color = tok.onSurface, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            VitalRange.entries.forEach { r ->
-                FilterChip(
-                    selected = r == range,
-                    onClick = {
+        app.myvitals.ui.common.VitalRangeGroup(
+            selected = range,
+            accent = Vital.HR.accent,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        ) { r ->
                         range = r
                         if (r != VitalRange.DAY) selectedDay = java.time.LocalDate.now()
-                    },
-                    label = { Text(r.label) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Vital.HR.accent.copy(alpha = 0.20f),
-                        selectedLabelColor = tok.onSurface,
-                    ),
-                )
-            }
         }
         if (range == VitalRange.DAY) {
             app.myvitals.ui.common.DayNav(

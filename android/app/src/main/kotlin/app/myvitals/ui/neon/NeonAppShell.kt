@@ -23,6 +23,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -296,22 +316,78 @@ fun NeonAppShell(
 private fun NeonBottomBar(nav: NavHostController) {
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination?.route
-    NavigationBar(containerColor = Color(0xFF14161E)) {
-        NEON_TABS.forEach { tab ->
-            val selected = tab.domain(current)
-            NavigationBarItem(
-                selected = selected,
-                onClick = { nav.navigateTopTab(tab.route) },
-                icon = { Icon(tab.icon, contentDescription = tab.label) },
-                label = { Text(tab.label) },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = tab.color,
-                    selectedTextColor = tab.color,
-                    unselectedIconColor = NeonMV.Muted,
-                    unselectedTextColor = NeonMV.Muted,
-                    indicatorColor = tab.color.copy(alpha = 0.16f),
-                ),
-            )
+    // Material 3 Expressive floating toolbar, replacing the bottom app bar.
+    //
+    // M3 Expressive explicitly retires the bottom app bar in favour of docked
+    // and floating toolbars. Floating buys three things here: the obsidian
+    // ground runs underneath it so the app reads as one continuous surface;
+    // the active tab can carry its label INLINE instead of every tab stacking
+    // a caption under its icon; and dropping four redundant captions reclaims
+    // roughly 14dp of vertical space on a 6.3" screen.
+    Box(
+        Modifier
+            .fillMaxWidth()
+            // NavigationBar applied the system gesture/button insets for free;
+            // a hand-rolled bar does not, and the toolbar landed underneath the
+            // Android back/home/recents strip with its labels cut in half.
+            .navigationBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color(0xFF1B1F2E))
+                .border(1.dp, Color(0xFF262B3D), RoundedCornerShape(999.dp))
+                .padding(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NEON_TABS.forEach { tab ->
+                val selected = tab.domain(current)
+                // The selected tab widens to fit its label; the rest collapse
+                // to their icon. Spring, not a duration — M3 Expressive's
+                // motion-physics model is what makes the bar feel like it has
+                // weight instead of repainting.
+                val weight by animateFloatAsState(
+                    targetValue = if (selected) 2.4f else 1f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioLowBouncy,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                    label = "tab-weight",
+                )
+                Row(
+                    Modifier
+                        .weight(weight)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(
+                            if (selected) tab.color.copy(alpha = 0.16f) else Color.Transparent,
+                        )
+                        .clickable { nav.navigateTopTab(tab.route) }
+                        .padding(vertical = 10.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        tab.icon,
+                        contentDescription = tab.label,
+                        tint = if (selected) tab.color else NeonMV.Muted,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    // Label only on the active tab — that is the space the
+                    // floating bar buys back.
+                    AnimatedVisibility(visible = selected) {
+                        Row {
+                            Spacer(Modifier.width(7.dp))
+                            Text(
+                                tab.label, color = tab.color, fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold, maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

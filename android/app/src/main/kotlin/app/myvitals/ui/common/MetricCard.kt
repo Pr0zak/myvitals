@@ -30,6 +30,7 @@ import app.myvitals.ui.neon.NeonMV
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -66,6 +67,13 @@ fun MetricCard(
     modifier: Modifier = Modifier,
     status: String? = null,
     statusLabel: String? = null,
+    /** value − baseline, straight from /summary/tiles. Rendered as a signed
+     *  chip under the value: the number alone says where you are, the delta
+     *  says which way you are moving, and the server already computes it. */
+    delta: Double? = null,
+    /** Which direction is good, for colouring the delta. Null = no defensible
+     *  direction (weight, skin temp) — shown neutral rather than judged. */
+    higherIsBetter: Boolean? = null,
     bandLow: Double? = null,
     bandHigh: Double? = null,
     target: Double? = null,
@@ -103,9 +111,14 @@ fun MetricCard(
                     ),
                 ),
                 color = NeonMV.Ink,
-                // Light weight is the reference's most recognisable trait.
-                fontWeight = FontWeight.Light,
-                fontSize = if (hasData) 30.sp else 23.sp,
+                // M3 Expressive's emphasized scale. This was 30sp Light — a
+                // deliberate early choice so a grid of cards wouldn't read as a
+                // spreadsheet. Google went the other way, and on a card whose
+                // entire job is one number, weight IS the hierarchy. Tight
+                // tracking keeps a four-character value on one line at 2-up.
+                fontWeight = if (hasData) FontWeight.Bold else FontWeight.Light,
+                letterSpacing = if (hasData) (-1.6).sp else 0.sp,
+                fontSize = if (hasData) 40.sp else 23.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             if (hasData && unit.isNotBlank()) {
@@ -121,6 +134,33 @@ fun MetricCard(
             Text(qualifier, color = Color(0xFF8D949D), fontSize = 11.sp,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
+        if (delta != null && hasData && kotlin.math.abs(delta) >= 0.05) {
+            val better = when (higherIsBetter) {
+                true -> delta > 0
+                false -> delta < 0
+                null -> null          // no defensible direction: don't judge
+            }
+            val tone = when (better) {
+                true -> NeonMV.Lime
+                false -> NeonMV.Amber
+                null -> NeonMV.Muted
+            }
+            Spacer(Modifier.height(5.dp))
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(tone.copy(alpha = 0.12f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    "${if (delta > 0) "▲" else "▼"} " +
+                        "%.1f vs baseline".format(kotlin.math.abs(delta)),
+                    color = tone, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
 
         Spacer(Modifier.height(10.dp))
         val plotted = series.takeLast(span)

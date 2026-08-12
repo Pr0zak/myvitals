@@ -45,6 +45,12 @@ const props = withDefaults(defineProps<{
   bandHigh?: number | null;
   /** Dotted goal line. */
   target?: number | null;
+  /** value − baseline, straight from /summary/tiles. The number says where you
+   *  are; the delta says which way you are moving. */
+  delta?: number | null;
+  /** Which direction is good. Null = no defensible direction (weight, skin
+   *  temp) — shown neutral rather than judged. */
+  higherIsBetter?: boolean | null;
   chart?: "line" | "bar";
   /** How many trailing points to plot. Intermittent metrics pass 14. */
   span?: number;
@@ -52,6 +58,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   unit: "", qualifier: "Today", status: null, statusLabel: null,
   series: () => [], bandLow: null, bandHigh: null, target: null, chart: "line",
+  delta: null, higherIsBetter: null,
   span: 7,
   accent: "#28e6ff",
 });
@@ -213,6 +220,19 @@ const targetY = computed(() => {
   return s && props.target != null ? s.y(props.target) : null;
 });
 
+const deltaChip = computed(() => {
+  const d = props.delta;
+  if (d == null || !hasData.value || Math.abs(d) < 0.05) return null;
+  const better = props.higherIsBetter == null
+    ? null
+    : (props.higherIsBetter ? d > 0 : d < 0);
+  const tone = better == null ? "#9b9bb0" : better ? "#5dff3b" : "#ffb52e";
+  return {
+    tone,
+    text: `${d > 0 ? "▲" : "▼"} ${Math.abs(d).toFixed(1)} vs baseline`,
+  };
+});
+
 /** Why the chart is blank, in the chart's place. */
 const emptyNote = computed(() => {
   const span = props.series?.length ?? 0;
@@ -235,6 +255,11 @@ const plottable = computed(
     <div v-else class="value nodata">No data</div>
 
     <div v-if="qualifier" class="qual">{{ qualifier }}</div>
+
+    <span
+      v-if="deltaChip" class="delta"
+      :style="{ color: deltaChip.tone, background: `color-mix(in srgb, ${deltaChip.tone} 12%, transparent)` }"
+    >{{ deltaChip.text }}</span>
 
     <!-- With nothing to plot, the chart area was a blank rectangle the height
          of a real chart plus a row of weekday letters under it — on Weight,
@@ -301,6 +326,12 @@ const plottable = computed(
 </template>
 
 <style scoped>
+.delta {
+  align-self: flex-start; font-size: .68rem; font-weight: 600;
+  border-radius: 999px; padding: 3px 9px; margin-top: 5px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
 .chartwrap.empty {
   display: flex; align-items: center; justify-content: center;
   min-height: 46px;
@@ -328,12 +359,16 @@ const plottable = computed(
 
 /* Light weight and large — the reference's most recognisable trait. A bold
    value here makes the whole grid read as a spreadsheet. */
+/* M3 Expressive's emphasized scale. This was 1.9rem/300 — a deliberate early
+   choice so a grid of cards wouldn't read as a spreadsheet. Google went the
+   other way, and on a card whose entire job is one number, weight IS the
+   hierarchy. Tight tracking keeps a four-character value on one line at 2-up. */
 .value {
-  font-size: 1.9rem;
-  font-weight: 300;
-  color: #e9edf2;
-  line-height: 1.1;
-  letter-spacing: -0.5px;
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: #ececf5;
+  line-height: 1.02;
+  letter-spacing: -0.045em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
@@ -341,7 +376,7 @@ const plottable = computed(
   text-shadow: 0 0 16px color-mix(in srgb, var(--mc-accent, #28e6ff) 28%, transparent);
   font-variant-numeric: tabular-nums;
 }
-.value.nodata { font-size: 1.45rem; }
+.value.nodata { font-size: 1.45rem; font-weight: 300; letter-spacing: -0.5px; }
 .unit { font-size: .85rem; font-weight: 400; color: #b9bec6; margin-left: 4px; }
 .qual { font-size: .7rem; color: #8d949d; margin-top: 2px; }
 

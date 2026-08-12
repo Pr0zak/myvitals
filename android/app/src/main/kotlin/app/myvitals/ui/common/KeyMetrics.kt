@@ -107,6 +107,8 @@ fun KeyMetrics(
                             dayLetters = t.series.map { dayLetter(it.date) },
                             status = t.status,
                             statusLabel = chipLabel(t),
+                            delta = t.delta,
+                            higherIsBetter = t.higherIsBetter,
                             bandLow = t.bandLow,
                             bandHigh = t.bandHigh,
                             target = if (t.key == "steps") t.target else null,

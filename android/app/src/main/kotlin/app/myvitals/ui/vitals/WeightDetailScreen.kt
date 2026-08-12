@@ -113,19 +113,12 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
             Text("Weight", color = tok.onSurface, fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            VitalRange.entries.forEach { r ->
-                FilterChip(
-                    selected = r == range,
-                    onClick = { range = r },
-                    label = { Text(r.label) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Vital.WEIGHT.accent.copy(alpha = 0.20f),
-                        selectedLabelColor = tok.onSurface,
-                    ),
-                )
-            }
+        app.myvitals.ui.common.VitalRangeGroup(
+            selected = range,
+            accent = Vital.WEIGHT.accent,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        ) { r ->
+                        range = r
         }
         when {
             loading -> Text("Loading…", color = tok.onSurfaceVariant,

@@ -43,18 +43,44 @@ defineEmits<{ (e: "update:modelValue", v: T): void }>();
 </template>
 
 <style scoped>
-.range-tabs { display: flex; gap: 0.3rem; flex-wrap: wrap; align-items: center; }
+/* Material 3 Expressive button group.
+   M3 Expressive replaced the row-of-equal-outlined-chips pattern with button
+   groups, whose defining behaviour is that the SELECTED item widens and its
+   neighbours yield. This control sits at the top of every detail view and is
+   the most-clicked thing in the app; four identical pills make the current
+   range something you read rather than see.
+   The widening uses a slightly overshooting curve rather than a linear ease —
+   M3 Expressive swapped easing/duration for a motion-physics model, and the
+   overshoot is what makes the control feel like it has weight. */
+.range-tabs {
+  display: flex; gap: 0.25rem; align-items: center;
+  background: var(--bg, #0f1118); padding: 0.25rem;
+  border-radius: var(--r-pill, 999px);
+}
 .range-pill {
-  background: var(--surface); color: var(--muted);
-  border: 1px solid var(--border); border-radius: var(--r-pill, 999px);
-  padding: 0.3rem 0.85rem; cursor: pointer; font-size: 0.8rem;
-  transition: background var(--motion-fast, 120ms), color var(--motion-fast, 120ms),
-              border-color var(--motion-fast, 120ms);
+  flex: 1 1 0; min-width: 0;
+  background: transparent; color: var(--muted);
+  border: 0; border-radius: var(--r-pill, 999px);
+  padding: 0.42rem 0.6rem; cursor: pointer; font-size: 0.8rem;
+  white-space: nowrap; text-overflow: clip;
+  transition: flex-grow 320ms cubic-bezier(.2, .9, .24, 1.15),
+              background var(--motion-fast, 140ms),
+              color var(--motion-fast, 140ms);
 }
 .range-pill:hover { color: var(--text); }
 .range-pill.active {
-  background: var(--accent); color: var(--surface); border-color: var(--accent);
+  flex-grow: 2.1;
+  background: var(--accent); color: var(--surface);
+  font-weight: 600;
 }
 .range-pill.dim { opacity: 0.45; cursor: not-allowed; }
 .range-pill.dim:hover { color: var(--muted); }
+
+/* Slotted extras (e.g. HeartRate's PatternsLink) must not be stretched by the
+   flex distribution the pills rely on. */
+.range-tabs > :not(.range-pill) { flex: 0 0 auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .range-pill { transition: background 140ms, color 140ms; }
+}
 </style>

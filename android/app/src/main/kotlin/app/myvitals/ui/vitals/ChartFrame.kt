@@ -41,7 +41,14 @@ import kotlin.math.pow
  */
 
 /** A y-domain rounded outward to human numbers, plus the tick values on it. */
-data class ChartDomain(val min: Float, val max: Float, val ticks: List<Float>) {
+data class ChartDomain(
+    val min: Float,
+    val max: Float,
+    val ticks: List<Float>,
+    /** Spacing between ticks. Callers format labels; this tells them how many
+     *  decimals the labels actually need. */
+    val step: Float = 1f,
+) {
     val span: Float get() = (max - min).coerceAtLeast(1e-6f)
 }
 
@@ -104,6 +111,15 @@ fun DrawScope.chartGeom(domain: ChartDomain, insets: ChartInsets): ChartGeom =
  * [zeroAnchored] pins the bottom of the domain at zero — right for counts
  * (steps, sample bins) where the bar length IS the quantity, wrong for
  * physiology (a resting-HR chart from 0 is a flat line at the top).
+ *
+ * [minStep] is the smallest tick spacing the caller's label format can
+ * actually express. Pass 1f whenever labels are formatted "%.0f": the nice
+ * ladder includes 2.5, so a 59-66 bpm window picked step 2.5 and printed
+ * 58 / 60 / 62 / 65 / 68 on five evenly spaced lines — half of them rounded
+ * to a value the gridline is not at. Worse, a near-flat 70-71 window picked
+ * 0.5 and printed 70 / 70 / 70 / 71 / 72, labelling three different lines
+ * with the same number. An axis you cannot read a value off is exactly what
+ * this file exists to prevent.
  */
 fun niceDomain(
     lo: Float,
@@ -113,6 +129,7 @@ fun niceDomain(
     targetTicks: Int = 4,
     zeroAnchored: Boolean = false,
     padFraction: Float = 0.12f,
+    minStep: Float = 0f,
 ): ChartDomain {
     var dLo = minOf(lo, includeLo ?: lo)
     var dHi = maxOf(hi, includeHi ?: hi)
@@ -130,7 +147,7 @@ fun niceDomain(
     var rawHi = dHi + pad
     if (zeroAnchored && rawHi <= 0f) rawHi = 1f
 
-    val step = niceStep((rawHi - rawLo) / targetTicks.coerceAtLeast(1))
+    val step = niceStep((rawHi - rawLo) / targetTicks.coerceAtLeast(1), minStep)
     val min = if (zeroAnchored) 0f else floor(rawLo / step) * step
     val max = ceil(rawHi / step) * step
 
@@ -143,22 +160,33 @@ fun niceDomain(
             add(t); t += step; guard++
         }
     }
-    return ChartDomain(min, max, ticks)
+    return ChartDomain(min, max, ticks, step)
 }
 
-/** 1 / 2 / 2.5 / 5 × 10^n — the steps people actually read axes in. */
-private fun niceStep(rough: Float): Float {
-    if (rough <= 0f || !rough.isFinite()) return 1f
+/**
+ * 1 / 2 / 2.5 / 5 × 10^n — the steps people actually read axes in — subject to
+ * the step being a whole multiple of [unit], the caller's label resolution.
+ *
+ * The constraint matters because the 2.5 rung produces half-integer ticks.
+ * A 59-66 bpm window wants a step near 2.17, picks 2.5, and an integer-
+ * formatted axis then prints 58 / 60 / 62 / 65 / 68 for gridlines actually at
+ * 57.5 / 60 / 62.5 / 65 / 67.5 — evenly spaced lines carrying unevenly spaced
+ * numbers, half of them off by 0.5. Requiring a multiple of 1 skips 2.5 and
+ * lands on 5: 55 / 60 / 65 / 70.
+ */
+private fun niceStep(rough: Float, unit: Float = 0f): Float {
+    if (rough <= 0f || !rough.isFinite()) return maxOf(unit, 1f)
     val mag = 10f.pow(floor(log10(rough.toDouble())).toFloat())
-    val norm = rough / mag
-    val mult = when {
-        norm <= 1f -> 1f
-        norm <= 2f -> 2f
-        norm <= 2.5f -> 2.5f
-        norm <= 5f -> 5f
-        else -> 10f
+    val rungs = floatArrayOf(1f, 2f, 2.5f, 5f, 10f, 20f, 25f, 50f, 100f)
+    for (m in rungs) {
+        val cand = m * mag
+        if (cand < rough - 1e-6f) continue
+        if (unit <= 0f) return cand
+        // Whole multiple of unit? (tolerant, these are floats)
+        val k = cand / unit
+        if (kotlin.math.abs(k - kotlin.math.round(k)) < 1e-3f) return cand
     }
-    return mult * mag
+    return maxOf(rungs.last() * mag, unit)
 }
 
 private fun axisStyle(color: Color) = TextStyle(

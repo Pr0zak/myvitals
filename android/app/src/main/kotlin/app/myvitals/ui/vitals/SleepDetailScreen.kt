@@ -392,30 +392,44 @@ private fun DurationTrend(nights: List<SleepNight>, goalH: Double) {
 
 @Composable
 private fun SleepDurationLine(nights: List<SleepNight>, goalH: Float, color: Color) {
+    val tok = LocalAppTokens.current
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
     Canvas(Modifier.fillMaxSize()) {
         if (nights.size < 2) return@Canvas
         val ys = nights.map { it.totalS.toFloat() / 3600f }
-        val minY = ys.min()
-        val maxY = ys.max()
-        val span = (maxY - minY).coerceAtLeast(1f)
-        val padY = size.height * 0.15f
-        val plotH = size.height - 2 * padY
-        val stepX = size.width / (ys.size - 1)
-        // Goal line — sourced from /profile.extra.sleep_goal_h.
-        val gy = size.height - padY - ((goalH - minY) / span) * plotH
-        drawLine(
-            color = color.copy(alpha = 0.30f),
-            start = Offset(0f, gy), end = Offset(size.width, gy),
-            strokeWidth = 1.dp.toPx(),
+        // The goal has to be INSIDE the domain or it is drawn off-canvas. The
+        // old scale was the data's own min..max, so on any window where every
+        // night fell short of the goal the goal line was painted above the top
+        // edge and vanished — exactly the stretch where you want to see how
+        // far short you are. The axis was also absent entirely, so a 20-minute
+        // wobble filled the full height and looked like a collapse.
+        // Zero-anchored: a duration is a count, and padding below the minimum
+        // produced a "-5h" gridline — there is no such thing as negative sleep.
+        val domain = niceDomain(
+            lo = 0f, hi = maxOf(ys.max(), goalH),
+            targetTicks = 3, minStep = 1f, zeroAnchored = true,
         )
+        val g = chartGeom(domain, ChartInsets(
+            left = 24.dp.toPx(), top = 6.dp.toPx(),
+            right = 4.dp.toPx(), bottom = 4.dp.toPx(),
+        ))
+        drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 3) {
+            "%.0fh".format(it)
+        }
+        // Goal line — sourced from /profile.extra.sleep_goal_h.
+        drawReferenceLine(g, goalH, color, measurer, "goal ${"%.1f".format(goalH)}h")
         val path = androidx.compose.ui.graphics.Path()
         for ((i, y) in ys.withIndex()) {
-            val x = i * stepX
-            val py = size.height - padY - ((y - minY) / span) * plotH
+            val x = g.x(i, ys.size)
+            val py = g.y(y)
             if (i == 0) path.moveTo(x, py) else path.lineTo(x, py)
             drawCircle(color = color, radius = 2.dp.toPx(), center = Offset(x, py))
         }
-        drawPath(path = path, color = color, style = Stroke(width = 2.dp.toPx()))
+        drawPath(path = path, color = color, style = Stroke(
+            width = 2.dp.toPx(),
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            join = androidx.compose.ui.graphics.StrokeJoin.Round,
+        ))
     }
 }
 

@@ -240,7 +240,7 @@ private fun HourlyColumns(hourly: IntArray, color: Color, isToday: Boolean) {
                 // ratios. (Physiology charts do the opposite — see niceDomain.)
                 val domain = niceDomain(
                     lo = 0f, hi = hourly.max().coerceAtLeast(1).toFloat(),
-                    zeroAnchored = true, targetTicks = 3,
+                    zeroAnchored = true, targetTicks = 3, minStep = 1f,
                 )
                 val g = chartGeom(domain, ChartInsets(
                     left = 30.dp.toPx(), top = 6.dp.toPx(),
@@ -285,7 +285,7 @@ private fun DailyColumns(rows: List<DailySummary>, goal: Int, color: Color) {
                     lo = 0f,
                     hi = (rows.maxOfOrNull { it.stepsTotal ?: 0 } ?: 0)
                         .coerceAtLeast(goal).toFloat(),
-                    zeroAnchored = true, targetTicks = 4,
+                    zeroAnchored = true, targetTicks = 4, minStep = 1f,
                 )
                 val g = chartGeom(domain, ChartInsets(
                     left = 30.dp.toPx(), top = 6.dp.toPx(),

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { zeroAxisIncluding } from "@/chartAxis";
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
@@ -232,7 +233,20 @@ const stackedNightsOption = computed(() => {
     grid: { left: 50, right: 12, top: 30, bottom: 28 },
     legend: { textStyle: t.axisLabel, top: 4 },
     xAxis: { type: "category", data: dates, axisLabel: t.axisLabel },
-    yAxis: { type: "value", name: "minutes", axisLabel: t.axisLabel, splitLine: t.splitLine, nameTextStyle: t.axisLabel },
+    // Same markLine trap as Steps: the axis is sized from the stacked totals,
+    // so a target above every night's actual sleep drew nothing at all — the
+    // chronically-short case where the target matters most.
+    yAxis: {
+      type: "value", name: "minutes", axisLabel: t.axisLabel,
+      splitLine: t.splitLine, nameTextStyle: t.axisLabel,
+      // Bound by each night's STACKED total (what actually sizes the axis)
+      // together with the target line.
+      ...zeroAxisIncluding(
+        nights.value.map((n) =>
+          n.stages.reduce((a, x) => a + x.duration_s / 60, 0)),
+        sleepTargetH.value != null ? sleepTargetH.value * 60 : null,
+      ),
+    },
     tooltip: { trigger: "axis", ...t.tooltip },
     series,
     dataZoom: [{ type: "inside" }],

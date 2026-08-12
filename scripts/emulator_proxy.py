@@ -27,6 +27,15 @@ proxy swaps in the real credential on the way out. That means:
   - nothing secret can appear in a screenshot of the Settings screen.
 
 Listens on the host; the emulator reaches it at 10.0.2.2:8900.
+
+READ-ONLY BY DEFAULT. The emulator runs the same app as the phone, so its
+SyncWorker cheerfully posts diagnostics to production — and because the
+emulator has no Health Connect grants, those say "0 of 13 permissions". The
+dashboard's health banner reads the MOST RECENT heartbeat regardless of which
+device sent it, so a test install raises a false "Health Connect is denying
+reads on the phone" alarm on the real dashboard and keeps re-raising it every
+15 minutes. Writes that would corrupt shared state are refused here instead of
+being cleaned up afterwards. Set ALLOW_WRITES=1 if you genuinely need them.
 """
 import os
 import sys
@@ -39,13 +48,33 @@ TOKEN = os.environ["REAL_TOKEN"]
 HOP = {"host", "connection", "authorization", "content-length",
        "transfer-encoding", "keep-alive"}
 
+ALLOW_WRITES = os.environ.get("ALLOW_WRITES") == "1"
+
+# Endpoints where a test client writes state the real phone owns. Refused with
+# a 200 so the app's own retry/buffer logic doesn't treat it as an outage.
+BLOCKED_WRITES = ("/ingest/heartbeat", "/ingest/batch", "/logs")
+
 
 class Proxy(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def _blocked(self) -> None:
+        """Swallow a state-writing POST without forwarding it."""
+        payload = b'{"status":"ok","note":"blocked by emulator_proxy"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+        print(f"BLOCKED write {self.path}", file=sys.stderr)
+
     def _relay(self, method: str) -> None:
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else None
+        if (not ALLOW_WRITES and method == "POST"
+                and any(self.path.startswith(b) for b in BLOCKED_WRITES)):
+            self._blocked()
+            return
         req = urllib.request.Request(
             UPSTREAM + self.path, data=body, method=method,
         )

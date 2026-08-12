@@ -265,6 +265,27 @@ fun VitalsDetailScreen(
                             // its async model producer loaded. Dots are dropped
                             // above ~1 month of points so dense ranges don't smear.
                             val ys = seriesYs
+                            // Index i maps to (since + i days): summaryXY now
+                            // returns EVERY day in the window, holes included,
+                            // so the mapping is linear and these three labels
+                            // are exact. On the 24h range the x positions are
+                            // sample indices rather than clock time, so no
+                            // labels are drawn rather than misleading ones.
+                            val xAxisTicks: List<Pair<Float, String>> =
+                                if (range == VitalRange.DAY || ys.size < 2) emptyList()
+                                else {
+                                    val end = java.time.LocalDate.now()
+                                    val start = end.minusDays(ys.size - 1L)
+                                    fun md(d: java.time.LocalDate) =
+                                        "${d.monthValue}/${d.dayOfMonth}"
+                                    buildList {
+                                        add(0f to md(start))
+                                        if (ys.size >= 5) {
+                                            add(0.5f to md(start.plusDays(ys.size / 2L)))
+                                        }
+                                        add(1f to md(end))
+                                    }
+                                }
                             if (ys.size < 2) {
                                 Text(
                                     "Not enough data in this window.",
@@ -289,6 +310,9 @@ fun VitalsDetailScreen(
                                         hi = real.maxOf { it.second }.toFloat(),
                                         includeLo = bl?.toFloat(), includeHi = bh?.toFloat(),
                                         zeroAnchored = vital == Vital.STEPS,
+                                        // Skin temp labels to 1dp; every
+                                        // other vital's axis is integral.
+                                        minStep = if (vital == Vital.SKIN_TEMP) 0.1f else 1f,
                                     )
                                     val g = chartGeom(domain, ChartInsets(
                                         left = 34.dp.toPx(), top = 6.dp.toPx(),
@@ -341,6 +365,12 @@ fun VitalsDetailScreen(
                                         ),
                                     )
                                     lastPt?.let { drawLatestMarker(it, accent, card) }
+
+                                    // The bottom gutter was reserved but left
+                                    // empty, so the chart had no x axis at all
+                                    // — you could not tell which end was
+                                    // recent.
+                                    drawXLabels(g, measurer, muted, xAxisTicks)
                                 }
                             }
 
@@ -484,14 +514,23 @@ private fun tsXY(points: List<TimePoint>): Pair<List<Double>, List<Double>> {
 private fun summaryXY(
     rows: List<DailySummary>, sel: (DailySummary) -> Double?,
 ): Pair<List<Double>, List<Double>> {
+    // A day with no reading becomes NaN, NOT a dropped row. Dropping it closed
+    // the gap up: the chart plots by list index, so two points either side of a
+    // missing week rendered as neighbours joined by a solid line — a reading
+    // invented for a day that has none. Skin temp in particular has been null
+    // for long stretches since the PW3/PW4 firmware bug, so its 30d chart was
+    // a straight line drawn over data that does not exist. NaN survives to the
+    // Canvas, where isFinite() filters it out of the path and the
+    // `idx - lastIdx > 1` test fires drawGapBridge.
     val pairs = rows.mapNotNull { row ->
-        val v = sel(row) ?: return@mapNotNull null
         val day = runCatching {
             LocalDate.parse(row.date, DateTimeFormatter.ISO_LOCAL_DATE).toEpochDay()
         }.getOrNull() ?: return@mapNotNull null
-        day.toDouble() to v
+        day.toDouble() to (sel(row) ?: Double.NaN)
     }
-    if (pairs.isEmpty()) return emptyList<Double>() to emptyList<Double>()
+    if (pairs.none { it.second.isFinite() }) {
+        return emptyList<Double>() to emptyList<Double>()
+    }
     val originDay = pairs.first().first
     return pairs.map { it.first - originDay } to pairs.map { it.second }
 }

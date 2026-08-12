@@ -204,7 +204,8 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
             val b = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
             val a = (sumY - b * sumX) / n
             Canvas(Modifier.fillMaxWidth().height(190.dp)) {
-                val domain = niceDomain(minV.toFloat(), maxV.toFloat(), targetTicks = 4)
+                val domain = niceDomain(minV.toFloat(), maxV.toFloat(), targetTicks = 4,
+                    minStep = 1f)
                 val g = chartGeom(domain, ChartInsets(
                     left = 34.dp.toPx(), top = 6.dp.toPx(),
                     right = 4.dp.toPx(), bottom = 16.dp.toPx(),

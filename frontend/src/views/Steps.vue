@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { zeroAxisIncluding } from "@/chartAxis";
 /**
  * Steps detail view (VITALS-1). Three panels:
  *   1. 24h live trace (the StepsSeries already powering the LiveVitals chip)
@@ -155,7 +156,16 @@ const dailyOption = computed(() => {
   return {
     grid: { left: 48, right: 12, top: 24, bottom: 28 },
     xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter }, splitLine: t.splitLine },
-    yAxis: { type: "value", scale: false, axisLabel: t.axisLabel, splitLine: t.splitLine },
+    // ECharts will not widen an axis to contain a markLine, so on any window
+    // where every day fell short of the goal the goal line was simply absent —
+    // exactly the window where you most want to see how far short you were.
+    yAxis: {
+      type: "value", scale: false, axisLabel: t.axisLabel, splitLine: t.splitLine,
+      ...zeroAxisIncluding(
+        data.map((d) => (typeof d[1] === "number" ? d[1] : null)),
+        stepsGoal.value || null,
+      ),
+    },
     tooltip: { trigger: "axis", ...t.tooltip },
     series: [
       {
@@ -165,7 +175,11 @@ const dailyOption = computed(() => {
         markLine: stepsGoal.value > 0 ? {
           symbol: ["none", "none"], silent: true,
           lineStyle: { color: goalLineColor.value, type: "dashed" as const, opacity: 0.7 },
-          label: { show: true, formatter: `goal ${stepsGoal.value.toLocaleString()}`, color: t.axisLabel.color, fontSize: 9 },
+          // Default position is the right end, where the grid's 12px right
+          // margin clips it to a single letter.
+          label: { show: true, position: "insideStartTop" as const,
+                   formatter: `goal ${stepsGoal.value.toLocaleString()}`,
+                   color: t.axisLabel.color, fontSize: 9 },
           data: [{ yAxis: stepsGoal.value }],
         } : undefined,
       },

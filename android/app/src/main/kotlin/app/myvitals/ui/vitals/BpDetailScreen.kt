@@ -184,6 +184,7 @@ private fun BpChart(pts: List<BpReading>) {
             Canvas(Modifier.fillMaxWidth().height(190.dp)) {
                 val domain = niceDomain(
                     all.min().toFloat(), all.max().toFloat(), targetTicks = 4,
+                    minStep = 1f,
                 )
                 val g = chartGeom(domain, ChartInsets(
                     left = 30.dp.toPx(), top = 6.dp.toPx(),
@@ -238,7 +239,12 @@ private fun BpChart(pts: List<BpReading>) {
                 drawSeries({ it.dia }, diaColor)
                 drawXLabels(g, measurer, tok.onSurfaceDim, buildList {
                     add(0f to shortMdOfMs(pts.first().ms))
-                    if (pts.size >= 5) add(0.5f to shortMdOfMs(pts[pts.size / 2].ms))
+                    // The series is placed by TIME, so the middle label has to
+                    // be the temporal midpoint. Using pts[size/2] — the median
+                    // by index — pinned an August date at the centre of a
+                    // 90-day axis whose centre is mid-June, because BP is
+                    // measured ad hoc and the readings are not evenly spaced.
+                    if (pts.size >= 5) add(0.5f to shortMdOfMs(tStart + (tEnd - tStart) / 2))
                     add(1f to shortMdOfMs(pts.last().ms))
                 })
             }

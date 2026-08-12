@@ -406,18 +406,27 @@ const hrvOption = computed(() => {
   // HRV is a heart-family metric → neon cyan; every other theme keeps the
   // chartTheme green byte-for-byte.
   const hrvColor = isNeon.value ? "#28e6ff" : t.palette.hrv;
+  // Keep null days as holes, same as the resting-HR chart above. Filtering
+  // them let ECharts join the days either side of a gap with a solid segment,
+  // inventing an HRV reading for a night the watch did not record.
   const data = dailyRows.value
-    .filter((r) => r.hrv_avg != null)
-    .map((r) => [r.date, r.hrv_avg]);
-  if (data.length === 0) return null;
+    .map((r) => [r.date, r.hrv_avg] as [string, number | null]);
+  if (!data.some((d) => d[1] != null)) return null;
   return {
-    grid: { left: 40, right: 16, top: 24, bottom: 28 },
+    grid: { left: 44, right: 16, top: 24, bottom: 28 },
     xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
              splitLine: t.splitLine },
-    yAxis: { type: "value", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
+    yAxis: {
+      type: "value", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine,
+      ...bandAwareExtent(
+        data.map((d) => d[1]).filter((v): v is number => v != null),
+        bands.value.hrv?.low, bands.value.hrv?.high,
+      ),
+    },
     tooltip: { ...t.tooltip, trigger: "axis" },
     series: [{
       type: "line", name: "HRV (ms)", showSymbol: data.length < 90, smooth: true,
+      connectNulls: false,
       lineStyle: { color: hrvColor, width: 1.8 },
       itemStyle: { color: hrvColor },
       areaStyle: { color: `${hrvColor}1f` }, data,
@@ -425,7 +434,7 @@ const hrvOption = computed(() => {
       markArea: normalBandMarkArea(
         bands.value.hrv?.low, bands.value.hrv?.high, hrvColor,
       ),
-    }],
+    }, gapBridgeSeries(data, hrvColor)],
   };
 });
 

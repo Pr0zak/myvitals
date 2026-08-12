@@ -580,6 +580,7 @@ private fun RestingHrTrend(
                     val domain = niceDomain(
                         lo = real.min(), hi = real.max(),
                         includeLo = bandLow?.toFloat(), includeHi = bandHigh?.toFloat(),
+                        minStep = 1f,   // labels are "%.0f" bpm
                     )
                     val g = chartGeom(domain, ChartInsets(
                         left = 26.dp.toPx(), top = 6.dp.toPx(),
@@ -658,9 +659,12 @@ private fun RestingHrTrend(
             }
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                Stat("Min", "${real.min().toInt()} bpm")
+                // Round, don't truncate. The hero above uses "%.0f" (HALF_UP),
+                // so with a max of 58.9 the hero said 59 and this said 58 —
+                // a headline number larger than the stated maximum.
+                Stat("Min", "${kotlin.math.round(real.min()).toInt()} bpm")
                 Stat("Avg", "%.0f bpm".format(real.average()))
-                Stat("Max", "${real.max().toInt()} bpm")
+                Stat("Max", "${kotlin.math.round(real.max()).toInt()} bpm")
             }
         }
     }
@@ -814,7 +818,7 @@ private fun WeekdayPattern(rows: List<DailySummary>) {
                 // height made a 62-vs-71 bpm spread look like a 5x difference.
                 val domain = niceDomain(
                     lo = nonNull.min().toFloat(), hi = nonNull.max().toFloat(),
-                    targetTicks = 3, padFraction = 0.30f,
+                    targetTicks = 3, padFraction = 0.30f, minStep = 1f,
                 )
                 val g = chartGeom(domain, ChartInsets(
                     left = 26.dp.toPx(), top = 14.dp.toPx(),
@@ -834,7 +838,7 @@ private fun WeekdayPattern(rows: List<DailySummary>) {
                         accent.copy(alpha = if (isToday) 0.95f else 0.45f),
                     )
                     val lay = measurer.measure(
-                        "${v.toInt()}",
+                        "${kotlin.math.round(v).toInt()}",
                         androidx.compose.ui.text.TextStyle(
                             color = if (isToday) tok.onSurface else tok.onSurfaceVariant,
                             fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
@@ -846,12 +850,22 @@ private fun WeekdayPattern(rows: List<DailySummary>) {
                             .coerceAtLeast(0f),
                     ))
                 }
-                drawReferenceLine(g, mean, tok.onSurfaceDim,
-                    measurer, "avg ${mean.toInt()}")
+                // No label: drawReferenceLine puts it at the right edge, which
+                // is exactly where Saturday's bar value sits. The caption
+                // under the chart carries the number instead.
+                drawReferenceLine(g, mean, tok.onSurfaceDim)
                 // Day labels live in the reserved bottom gutter, so a tall bar
                 // can never displace them.
                 drawXLabels(g, measurer, tok.onSurfaceDim,
                     labels.indices.map { (it + 0.5f) / 7f to labels[it] })
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(width = 14.dp, height = 1.dp)
+                    .background(tok.onSurfaceDim))
+                Spacer(Modifier.width(6.dp))
+                Text("Average ${kotlin.math.round(mean).toInt()} bpm across this window",
+                    color = tok.onSurfaceVariant, fontSize = 11.sp)
             }
         }
     }

@@ -1,10 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108">
-  <!-- Obsidian tile so the neon rings glow -->
-  <rect width="108" height="108" rx="22" fill="#0F1118"/>
-  <!-- Vitality tri-ring: sleep (magenta) / move (lime) / recovery (cyan) -->
-  <g fill="none" stroke-linecap="round" stroke-width="9" transform="rotate(-90 54 54)">
-    <circle cx="54" cy="54" r="36" stroke="#FF3AD8" stroke-dasharray="172 999"/>
-    <circle cx="54" cy="54" r="25" stroke="#5DFF3B" stroke-dasharray="110 999"/>
-    <circle cx="54" cy="54" r="14" stroke="#28E6FF" stroke-dasharray="72 999"/>
-  </g>
+  <!-- myvitals "orbit markers". Tracks and halos are omitted here: at 16-32px
+       they are sub-pixel and only muddy the beads, which are what read. -->
+  <rect width="108" height="108" rx="24" fill="#0F1118"/>
+  <path d="M70.06 31.06A28 28 0 1 1 27.69 63.58" fill="none" stroke="#FF3AD8"
+        stroke-width="5.5" stroke-linecap="round"/>
+  <path d="M40.05 52.78A14 14 0 1 1 64.72 63" fill="none" stroke="#5DFF3B"
+        stroke-width="5" stroke-linecap="round"/>
+  <circle cx="27.69" cy="63.58" r="7" fill="#FF3AD8"/>
+  <circle cx="64.72" cy="63" r="5.8" fill="#5DFF3B"/>
+  <circle cx="54" cy="54" r="5.5" fill="#28E6FF"/>
 </svg>

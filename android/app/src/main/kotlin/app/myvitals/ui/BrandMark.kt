@@ -13,10 +13,17 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Inline myvitals brand mark — the "vitality" tri-ring: sleep (magenta),
- * move (lime), recovery (cyan). Same mark as `ic_launcher_foreground.xml`,
- * the dashboard AppLogo, and the favicon. Rendered with Canvas arcs so it
- * scales freely.
+ * Inline myvitals brand mark — "orbit markers": three quiet tracks with a fat
+ * endpoint bead riding each, sleep (magenta) / move (lime) / recovery (cyan).
+ * The bead is the same "today" marker the charts draw, so the mark is built
+ * from the app's own vocabulary rather than a generic ring gauge.
+ *
+ * The beads sit at three different radii AND angles. That asymmetry is what
+ * stops it reading as a bullseye, and it is what carries the mark through the
+ * monochrome themed-icon variant where colour is gone.
+ *
+ * Same mark as `ic_launcher_foreground.xml`, the dashboard AppLogo and the
+ * favicon. Rendered with Canvas arcs so it scales freely.
  *
  * The legacy `heart` / `trace` color params no longer pick the mark's colors
  * (it is always the three brand rings), but the **alpha** of `heart` is still
@@ -32,31 +39,48 @@ fun BrandMark(
 ) {
     val tint = heart.alpha
     Canvas(modifier = Modifier.size(dimension)) {
-        val s = this.size.minDimension
-        val w = s * 0.085f
-        val stroke = Stroke(width = w, cap = StrokeCap.Round)
+        // Geometry mirrors the 108-unit vector so every surface draws the same
+        // mark; 0.87 is the same scale the launcher icon uses to clear the
+        // 66dp adaptive-icon safe circle.
+        val u = this.size.minDimension / 108f
+        fun p(x: Float, y: Float) =
+            Offset((54f + (x - 54f) * 0.87f) * u, (54f + (y - 54f) * 0.87f) * u)
 
-        // diameter fraction, sweep fraction (of 360°), color — outer→inner.
-        // `tint` carries the caller's requested opacity (1f for the normal mark,
-        // ~0.05f for the faint Settings watermark).
-        data class Ring(val diam: Float, val sweep: Float, val color: Color)
-        val rings = listOf(
-            Ring(0.78f, 0.76f, Color(0xFFFF3AD8).copy(alpha = tint)), // sleep
-            Ring(0.54f, 0.70f, Color(0xFF5DFF3B).copy(alpha = tint)), // move
-            Ring(0.30f, 0.82f, Color(0xFF28E6FF).copy(alpha = tint)), // recovery
+        val stroke = Stroke(width = 4f * 0.87f * u, cap = StrokeCap.Round)
+
+        // orbit radius, sweep start/extent (deg), bead radius, colour
+        data class Orbit(
+            val r: Float, val start: Float, val sweep: Float,
+            val bead: Float, val bx: Float, val by: Float, val color: Color,
         )
-        for (r in rings) {
-            val d = s * r.diam
-            val inset = (s - d) / 2f
+        val orbits = listOf(
+            Orbit(29f, -111f, 288f, 6.0f, 26.75f, 63.92f,
+                Color(0xFFFF3AD8).copy(alpha = tint)),   // sleep
+            Orbit(19.5f, 130f, 280f, 5.5f, 68.94f, 66.53f,
+                Color(0xFF5DFF3B).copy(alpha = tint)),   // move
+            Orbit(10f, 20f, 295f, 5.0f, 55.74f, 44.15f,
+                Color(0xFF28E6FF).copy(alpha = tint)),   // recovery
+        )
+        for (o in orbits) {
+            val rr = o.r * 0.87f * u
+            val c = p(54f, 54f)
             drawArc(
-                color = r.color,
-                startAngle = -90f,
-                sweepAngle = r.sweep * 360f,
+                color = o.color.copy(alpha = o.color.alpha * 0.9f),
+                startAngle = o.start,
+                sweepAngle = o.sweep,
                 useCenter = false,
-                topLeft = Offset(inset, inset),
-                size = Size(d, d),
+                topLeft = Offset(c.x - rr, c.y - rr),
+                size = Size(rr * 2, rr * 2),
                 style = stroke,
             )
+        }
+        // Beads last so they sit over the tracks, each with the same soft halo
+        // the charts give the latest reading.
+        for (o in orbits) {
+            val centre = p(o.bx, o.by)
+            drawCircle(o.color.copy(alpha = o.color.alpha * 0.16f),
+                radius = (o.bead + 2.6f) * 0.87f * u, center = centre)
+            drawCircle(o.color, radius = o.bead * 0.87f * u, center = centre)
         }
     }
 }

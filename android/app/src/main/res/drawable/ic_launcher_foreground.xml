@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon foreground: the myvitals "vitality" tri-ring — sleep
-     (magenta) / move (lime) / recovery (cyan), the same trio the Today home
-     draws. The 108x108 viewport leaves an 18dp margin; the rings live inside
-     the 72x72 safe zone (outer r=36 → spans 18..90). Matches the dashboard
-     AppLogo + favicon. Strokes use trimPathEnd to open each ring. -->
+<!-- Adaptive icon foreground: the myvitals "orbit markers" mark — three
+     quiet tracks with a fat endpoint bead riding each, the same "today"
+     marker the charts draw. Sleep (magenta) / move (lime) / recovery
+     (cyan).
+
+     Scaled to 0.87 about the centre: at full size the outer bead's halo
+     reached r=37.6 from centre, so a circular launcher mask (r=36, and a
+     66dp safe circle of r=33) would have shaved the one element carrying
+     the identity. The dotted inter-bead tracks from the web mark are
+     omitted — VectorDrawable has no stroke-dasharray, and they are
+     sub-pixel at launcher size anyway. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -12,30 +18,43 @@
     <group
         android:pivotX="54"
         android:pivotY="54"
-        android:rotation="-90">
-        <!-- Outer ring — sleep (magenta) -->
+        android:scaleX="0.87"
+        android:scaleY="0.87">
         <path
+            android:pathData="M48.96,25.44 A29.00,29.00 0 1,1 26.75,63.92"
             android:strokeColor="#FF3AD8"
-            android:strokeWidth="8"
-            android:strokeLineCap="round"
-            android:trimPathStart="0"
-            android:trimPathEnd="0.76"
-            android:pathData="M54,18 A36,36 0 1 1 53.99,18" />
-        <!-- Middle ring — move (lime) -->
+            android:strokeWidth="4.0"
+            android:strokeLineCap="round" />
         <path
+            android:pathData="M39.06,66.53 A19.50,19.50 0 1,1 68.94,66.53"
             android:strokeColor="#5DFF3B"
-            android:strokeWidth="8"
-            android:strokeLineCap="round"
-            android:trimPathStart="0"
-            android:trimPathEnd="0.70"
-            android:pathData="M54,29 A25,25 0 1 1 53.99,29" />
-        <!-- Inner ring — recovery (cyan) -->
+            android:strokeWidth="4.0"
+            android:strokeLineCap="round" />
         <path
+            android:pathData="M63.40,57.42 A10.00,10.00 0 1,1 55.74,44.15"
             android:strokeColor="#28E6FF"
-            android:strokeWidth="8"
-            android:strokeLineCap="round"
-            android:trimPathStart="0"
-            android:trimPathEnd="0.82"
-            android:pathData="M54,40 A14,14 0 1 1 53.99,40" />
+            android:strokeWidth="4.0"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M18.15,63.92 a8.60,8.60 0 1,0 17.20,0 a8.60,8.60 0 1,0 -17.20,0"
+            android:fillColor="#FF3AD8"
+            android:fillAlpha="0.16" />
+        <path
+            android:pathData="M20.75,63.92 a6.00,6.00 0 1,0 12.00,0 a6.00,6.00 0 1,0 -12.00,0"
+            android:fillColor="#FF3AD8" />
+        <path
+            android:pathData="M60.84,66.53 a8.10,8.10 0 1,0 16.20,0 a8.10,8.10 0 1,0 -16.20,0"
+            android:fillColor="#5DFF3B"
+            android:fillAlpha="0.16" />
+        <path
+            android:pathData="M63.44,66.53 a5.50,5.50 0 1,0 11.00,0 a5.50,5.50 0 1,0 -11.00,0"
+            android:fillColor="#5DFF3B" />
+        <path
+            android:pathData="M48.14,44.15 a7.60,7.60 0 1,0 15.20,0 a7.60,7.60 0 1,0 -15.20,0"
+            android:fillColor="#28E6FF"
+            android:fillAlpha="0.16" />
+        <path
+            android:pathData="M50.74,44.15 a5.00,5.00 0 1,0 10.00,0 a5.00,5.00 0 1,0 -10.00,0"
+            android:fillColor="#28E6FF" />
     </group>
 </vector>

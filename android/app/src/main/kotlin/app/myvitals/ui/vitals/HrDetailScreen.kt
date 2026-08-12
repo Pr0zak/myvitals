@@ -96,6 +96,9 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     // window so the user can scroll back through prior days.
     var selectedDay by remember { mutableStateOf(java.time.LocalDate.now()) }
     var live by remember { mutableStateOf<List<TimePoint>>(emptyList()) }
+    // Server-computed over the RAW rows; `live` is 2-minute bucket means.
+    var liveMin by remember { mutableStateOf<Double?>(null) }
+    var liveMax by remember { mutableStateOf<Double?>(null) }
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
     // Which range `rows` was actually fetched for. Without this the card
     // renders the PREVIOUS range's series under the new range's title the
@@ -168,7 +171,10 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                             api.journalList(since = sinceIso, until = untilIso, limit = 50)
                         }.getOrDefault(emptyList())
                     }
-                    live = liveD.await().points
+                    val liveSeries = liveD.await()
+                    live = liveSeries.points
+                    liveMin = liveSeries.minBpm
+                    liveMax = liveSeries.maxBpm
                     annotations = annoD.await()
 
                     // Build event bands for the day's window. Off-wrist
@@ -285,7 +291,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (range == VitalRange.DAY) {
-                    item { LiveHrChart(live, maxHr, bands, annotations) }
+                    item { LiveHrChart(live, maxHr, bands, annotations, selectedDay, liveMin, liveMax) }
                     item { TimeInZone(live, maxHr) }
                     item { HrHistogram(live) }
                 } else {
@@ -314,15 +320,32 @@ private fun LiveHrChart(
     maxHr: Int,
     bands: List<HrEventBand> = emptyList(),
     annotations: List<app.myvitals.sync.Annotation> = emptyList(),
+    day: java.time.LocalDate = java.time.LocalDate.now(),
+    trueMin: Double? = null,
+    trueMax: Double? = null,
 ) {
     val tok = LocalAppTokens.current
+    // The same window fetch() asked the backend for, so the x-axis and the
+    // data agree about what "this day" means.
+    val zone = java.time.ZoneId.systemDefault()
+    val dayStartMs = day.atStartOfDay(zone).toInstant().toEpochMilli()
+    val dayEndMs = if (day == java.time.LocalDate.now()) Instant.now().toEpochMilli()
+                   else day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("LAST 24H", color = tok.onSurfaceVariant,
+            // DayNav can scroll back to any past day, so "LAST 24H" was a
+            // lie on every day but today.
+            val isToday = day == java.time.LocalDate.now()
+            Text(
+                if (isToday) "LAST 24H"
+                else "${day.dayOfWeek.name.take(3)} ${day.monthValue}/${day.dayOfMonth}",
+                color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             if (points.size < 2) {
-                Text("No HR samples in the last 24h.",
+                Text(
+                    if (isToday) "No HR samples in the last 24h."
+                    else "No HR samples on this day.",
                     color = tok.onSurfaceVariant, fontSize = 12.sp); return@Card
             }
             val parsed = remember(points) {
@@ -363,8 +386,14 @@ private fun LiveHrChart(
                     val padBot = 16.dp.toPx()
                     val plotW = size.width - padX
                     val plotH = size.height - padTop - padBot
-                    val tStart = sampled.first().first
-                    val tEnd = sampled.last().first
+                    // Anchor x to the DAY, not to first/last sample. Using the
+                    // sample extent stretched a short run of readings across
+                    // the full width: a watch worn 09:00-11:00 drew a chart
+                    // that looked like 24 hours of data, and the workout bands
+                    // (which ARE positioned by wall-clock) landed on the wrong
+                    // part of it.
+                    val tStart = dayStartMs
+                    val tEnd = dayEndMs
                     val tSpan = (tEnd - tStart).toFloat().coerceAtLeast(1f)
                     val yMin = (minV - 8).coerceAtLeast(40.0).toFloat()
                     val yMax = (maxV + 8).coerceAtMost(220.0).toFloat()
@@ -455,6 +484,30 @@ private fun LiveHrChart(
                             style = emojiStyle,
                         )
                     }
+
+                    // Clock labels. The 16dp bottom gutter was reserved and
+                    // left empty, so a 24h trace had no time axis at all —
+                    // you could see a spike but not when it happened.
+                    val axisStyle = TextStyle(
+                        color = tok.onSurfaceDim, fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    val zoneId = java.time.ZoneId.systemDefault()
+                    for (frac in listOf(0f, 0.25f, 0.5f, 0.75f, 1f)) {
+                        val ms = tStart + ((tEnd - tStart) * frac).toLong()
+                        val lt = Instant.ofEpochMilli(ms).atZone(zoneId)
+                        val h = lt.hour
+                        val label = when {
+                            h == 0 -> "12a"
+                            h < 12 -> "${h}a"
+                            h == 12 -> "12p"
+                            else -> "${h - 12}p"
+                        }
+                        val lay = textMeasurer.measure(label, axisStyle)
+                        val x = (padX + frac * plotW - lay.size.width / 2f)
+                            .coerceIn(0f, size.width - lay.size.width)
+                        drawText(lay, topLeft = Offset(x, size.height - padBot + 2.dp.toPx()))
+                    }
                 }
                 // Y-axis label column
                 Column(Modifier.fillMaxSize(),
@@ -472,10 +525,15 @@ private fun LiveHrChart(
             }
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                Stat("Min", "${minV.toInt()} bpm")
+                // Server's raw-row extremes when available: minV/maxV are
+                // taken from 2-minute bucket means, which flatten a short
+                // sprint and put this card at odds with the Activities feed's
+                // per-activity max_hr for the same session.
+                Stat("Min", "${kotlin.math.round(trueMin ?: minV).toInt()} bpm")
                 Stat("Avg", "%.0f bpm".format(avgV))
-                Stat("Max", "${maxV.toInt()} bpm")
-                Stat("Samples", "${points.size}")
+                Stat("Max", "${kotlin.math.round(trueMax ?: maxV).toInt()} bpm")
+                // These are 2-minute windows, not raw samples.
+                Stat("Readings", "${points.size}")
             }
         }
     }
@@ -702,8 +760,9 @@ private fun Stat(label: String, value: String) {
 }
 
 @Composable
-private fun HrHistogram(points: List<TimePoint>) {
+private fun HrHistogram(points: List<TimePoint>, bucketSeconds: Int = 120) {
     val tok = LocalAppTokens.current
+    val measurer = rememberTextMeasurer()
     if (points.isEmpty()) return
     // 5-bpm bins so the chart isn't too jagged. The lo/hi range is
     // derived from the data itself rather than fixed (40-200 bpm) so
@@ -727,30 +786,41 @@ private fun HrHistogram(points: List<TimePoint>) {
             Text("HR DISTRIBUTION — 24H", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(2.dp))
-            Text("5-bpm bins · ${points.size} samples",
-                color = tok.onSurfaceDim, fontSize = 10.sp)
+            // The series is 2-minute buckets, not raw samples, so "N samples"
+            // was counting the wrong thing. Each bucket is a fixed slice of
+            // time, which makes MINUTES the honest — and more useful — y-axis:
+            // "how long was I in this band", not "how many rows landed here".
+            Text("5-bpm bins · time in band", color = tok.onSurfaceDim, fontSize = 10.sp)
             Spacer(Modifier.height(8.dp))
-            val maxCount = (bins.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
-            Box(Modifier.fillMaxWidth().height(120.dp)) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val gapPx = 2f
-                    val barW = (size.width - gapPx * (bins.size - 1)) / bins.size
-                    bins.forEachIndexed { i, (_, c) ->
-                        val h = (c.toFloat() / maxCount) * size.height
-                        val x = i * (barW + gapPx)
-                        drawRect(
-                            color = Vital.HR.accent,
-                            topLeft = androidx.compose.ui.geometry.Offset(x, size.height - h),
-                            size = androidx.compose.ui.geometry.Size(barW, h),
-                        )
-                    }
+            val perBucketMin = bucketSeconds / 60f
+            val mins = bins.map { it.second * perBucketMin }
+            Canvas(Modifier.fillMaxWidth().height(150.dp)) {
+                val domain = niceDomain(
+                    lo = 0f, hi = (mins.maxOrNull() ?: 1f).coerceAtLeast(1f),
+                    zeroAnchored = true, targetTicks = 3, minStep = 1f,
+                )
+                val g = chartGeom(domain, ChartInsets(
+                    left = 30.dp.toPx(), top = 6.dp.toPx(),
+                    right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+                ))
+                // Bar heights were unreadable: the tallest bin always touched
+                // the top of the box, so a day spent flat at 58 bpm and a day
+                // with a broad spread drew the same picture.
+                drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 3) {
+                    if (it >= 60f) "%.0fh".format(it / 60f) else "%.0fm".format(it)
                 }
-            }
-            Spacer(Modifier.height(4.dp))
-            Row(Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("${bins.first().first}", color = tok.onSurfaceDim, fontSize = 9.sp)
-                Text("${bins.last().first + 5}", color = tok.onSurfaceDim, fontSize = 9.sp)
+                val barW = g.slot(bins.size) * 0.8f
+                mins.forEachIndexed { i, m ->
+                    if (m <= 0f) return@forEachIndexed
+                    drawBar(g, g.xBar(i, bins.size), barW, g.y(m), Vital.HR.accent)
+                }
+                drawXLabels(g, measurer, tok.onSurfaceDim, buildList {
+                    add(0f to "${bins.first().first}")
+                    if (bins.size >= 5) {
+                        add(0.5f to "${bins[bins.size / 2].first}")
+                    }
+                    add(1f to "${bins.last().first + 5}")
+                })
             }
         }
     }

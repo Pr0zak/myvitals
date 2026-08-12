@@ -73,7 +73,9 @@ private val SITES = listOf(
 fun MeasurementsScreen(settings: SettingsRepository, onBack: () -> Unit) {
     val tok = LocalAppTokens.current
     val scope = rememberCoroutineScope()
-    val accent = Color(0xFF38BDF8)
+    // Was a hard-coded classic sky blue — byte-identical to the retired
+    // Vital.MEASUREMENTS palette entry, inside a neon shell.
+    val accent = Vital.MEASUREMENTS.accent
     var points by remember { mutableStateOf<List<CircumferencePoint>>(emptyList()) }
     var latest by remember { mutableStateOf<Map<String, Double>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
@@ -164,7 +166,9 @@ fun MeasurementsScreen(settings: SettingsRepository, onBack: () -> Unit) {
                                 Text("Log 2+ ${site.label.lowercase()} entries to see a trend.",
                                     color = tok.onSurfaceVariant, fontSize = 12.sp)
                             } else {
-                                LineChart(vals, accent)
+                                LineChart(vals, accent,
+                                    points.filter { site.get(it) != null }
+                                        .map { it.time })
                             }
                         }
                     }
@@ -240,21 +244,50 @@ fun MeasurementsScreen(settings: SettingsRepository, onBack: () -> Unit) {
 }
 
 @Composable
-private fun LineChart(values: List<Double>, color: Color) {
-    Canvas(Modifier.fillMaxWidth().height(160.dp)) {
+private fun LineChart(values: List<Double>, color: Color, dates: List<String> = emptyList()) {
+    val tok = LocalAppTokens.current
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    Canvas(Modifier.fillMaxWidth().height(180.dp)) {
         if (values.size < 2) return@Canvas
-        val minV = values.min()
-        val maxV = values.max()
-        val span = (maxV - minV).takeIf { it > 0.0001 } ?: 1.0
-        val stepX = size.width / (values.size - 1)
-        val pad = 8f
-        val h = size.height - pad * 2
-        val pts = values.mapIndexed { i, v ->
-            Offset(i * stepX, pad + (h - ((v - minV) / span * h).toFloat()))
+        // The domain was the data's own min..max with no axis at all, so a
+        // 0.5 cm difference between two entries filled the full height and
+        // read as a transformation. A body measurement moves slowly; the axis
+        // is the only thing that says whether a change is big.
+        val domain = niceDomain(
+            lo = values.min().toFloat(), hi = values.max().toFloat(),
+            targetTicks = 3, minStep = 0.5f, padFraction = 0.25f,
+        )
+        val g = chartGeom(domain, ChartInsets(
+            left = 32.dp.toPx(), top = 6.dp.toPx(),
+            right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+        ))
+        drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 3) {
+            "%.1f".format(it)
         }
-        for (i in 0 until pts.size - 1) {
-            drawLine(color, pts[i], pts[i + 1], strokeWidth = 3f)
+        val pts = values.mapIndexed { i, v -> Offset(g.x(i, values.size), g.y(v.toFloat())) }
+        val path = androidx.compose.ui.graphics.Path()
+        pts.forEachIndexed { i, o -> if (i == 0) path.moveTo(o.x, o.y) else path.lineTo(o.x, o.y) }
+        drawPath(path, color = color, style = Stroke(
+            width = 2.dp.toPx(),
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            join = androidx.compose.ui.graphics.StrokeJoin.Round,
+        ))
+        pts.forEach { drawCircle(color, radius = 3.dp.toPx(), center = it, style = Stroke(width = 2f)) }
+        pts.lastOrNull()?.let { drawLatestMarker(it, color, tok.surfaceContainer) }
+        // Points are spaced by index, not by date — entries are logged ad hoc,
+        // so the labels say WHICH entries the ends are, not a linear timeline.
+        if (dates.size == values.size) {
+            drawXLabels(g, measurer, tok.onSurfaceDim, buildList {
+                shortMd(dates.first())?.let { add(0f to it) }
+                shortMd(dates.last())?.let { add(1f to it) }
+            })
         }
-        pts.forEach { drawCircle(color, radius = 4f, center = it, style = Stroke(width = 2f)) }
     }
 }
+
+/** "M/d" from an ISO instant, or null if it will not parse. */
+private fun shortMd(iso: String?): String? = runCatching {
+    val d = java.time.Instant.parse(iso)
+        .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+    "${d.monthValue}/${d.dayOfMonth}"
+}.getOrNull()

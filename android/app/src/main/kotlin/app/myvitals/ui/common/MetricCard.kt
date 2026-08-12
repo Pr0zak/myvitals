@@ -251,14 +251,23 @@ private fun WeekChart(
         }
 
         if (bars) {
-            val bw = maxOf(4f * px, size.width / (points.size * 2f))
+            // Bars get their own geometry, not the line's. `stepX` spaces
+            // points at i × W/(n-1), so `x - bw/2` hung the first bar half off
+            // the left edge and today's half off the right. And `y()` is
+            // anchored at the data minimum less padding, so bar LENGTH encoded
+            // (v - lo)/(hi - lo) instead of the value — an ordinary steps week
+            // of 6-9k rendered as a cliff. A bar chart of a count starts at
+            // zero. Web twin: the `bars` computed in MetricCard.vue.
+            val slot = size.width / points.size
+            val bw = maxOf(3f * px, slot * 0.62f)
+            val top = maxOf(real.maxOrNull() ?: 0.0, target ?: 0.0, 0.0)
             points.forEachIndexed { i, v ->
-                if (v == null) return@forEachIndexed
-                val top = y(v)
+                if (v == null || top <= 0.0) return@forEachIndexed
+                val barTop = size.height - ((v / top).toFloat() * size.height)
                 drawRoundRect(
                     accent.copy(alpha = if (i == points.size - 1) 1f else 0.45f),
-                    topLeft = Offset(i * stepX - bw / 2, top),
-                    size = Size(bw, size.height - top),
+                    topLeft = Offset((i + 0.5f) * slot - bw / 2f, barTop),
+                    size = Size(bw, size.height - barTop),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f * px, 2f * px),
                 )
             }

@@ -163,11 +163,12 @@ fun StepsDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     item {
-                        // Pick the row matching selectedDay; fall back to
-                        // the last row when there's no summary yet.
+                        // No fallback to rows.lastOrNull(): a day with no
+                        // summary row (outside the fetched window, or simply
+                        // empty) silently rendered the MOST RECENT day's step
+                        // count under the selected day's heading.
                         val dayRow = rows.firstOrNull { it.date == selectedDay.toString() }
-                            ?: rows.lastOrNull()
-                        TodayHero(dayRow, goal, color)
+                        TodayHero(dayRow, goal, color, selectedDay)
                     }
                     hourly?.let { hr ->
                         if (hr.sum() > 0) item {
@@ -186,22 +187,44 @@ fun StepsDetailScreen(
 }
 
 @Composable
-private fun TodayHero(today: DailySummary?, goal: Int, color: Color) {
+private fun TodayHero(
+    today: DailySummary?,
+    goal: Int,
+    color: Color,
+    day: LocalDate = LocalDate.now(),
+) {
     val tok = LocalAppTokens.current
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("TODAY", color = tok.onSurfaceVariant,
+            // DayNav scrolls back through history, so a literal "TODAY" was
+            // wrong on every day but today — and it sat directly above the
+            // hourly chart, which DOES retitle itself, so the two cards
+            // contradicted each other on the same screen.
+            Text(
+                if (day == LocalDate.now()) "TODAY"
+                else "${day.dayOfWeek.name.take(3)} ${day.monthValue}/${day.dayOfMonth}",
+                color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            val n = today?.stepsTotal ?: 0
+            if (today == null) {
+                Text("—", color = tok.onSurface,
+                    fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+                Text("No step data for this day",
+                    color = tok.onSurfaceDim, fontSize = 11.sp)
+                return@Column
+            }
+            val n = today.stepsTotal ?: 0
             Text("%,d".format(n), color = tok.onSurface,
                 fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-            val pct = (n.toFloat() / goal.toFloat()).coerceAtLeast(0f).coerceAtMost(2f)
+            val raw = if (goal > 0) n.toFloat() / goal.toFloat() else 0f
+            val pct = raw.coerceAtLeast(0f)
             Box(Modifier.fillMaxWidth().height(8.dp)
                 .background(color.copy(alpha = 0.15f))) {
                 Box(Modifier.fillMaxWidth(fraction = pct.coerceAtMost(1f)).height(8.dp)
                     .background(color))
             }
             Spacer(Modifier.height(4.dp))
+            // The bar caps at 100%, the number does not — it used to clamp at
+            // 200%, so a genuine 3x day read as "200% of goal".
             Text("${(pct * 100).toInt()}% of ${"%,d".format(goal)} goal",
                 color = tok.onSurfaceDim, fontSize = 11.sp)
         }

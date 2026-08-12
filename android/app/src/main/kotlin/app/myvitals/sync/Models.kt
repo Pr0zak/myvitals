@@ -1205,6 +1205,12 @@ data class SleepRawSegment(
 data class TimeSeries(
     val points: List<TimePoint> = emptyList(),
     val avg: Double? = null,
+    // True extremes over the raw rows. `points` may be bucket AVERAGES (the
+    // HR trace requests 2-minute buckets), so min/max taken from them are
+    // flattened — a 40s sprint inside a 2-minute bucket disappears into the
+    // mean. Server computes these from the unbucketed table.
+    @Json(name = "min_bpm") val minBpm: Double? = null,
+    @Json(name = "max_bpm") val maxBpm: Double? = null,
 )
 
 @JsonClass(generateAdapter = true)

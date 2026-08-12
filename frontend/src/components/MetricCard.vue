@@ -165,16 +165,34 @@ const points = computed(() => {
     .filter((p): p is { x: number; y: number; i: number } => p != null);
 });
 
+/**
+ * Bars get their own mapping, not the line's.
+ *
+ * Two things were wrong with reusing `scale`. Its `x` is the LINE mapping
+ * (i × W/(n-1)), so with `x - bw/2` the first bar hung half off the left edge
+ * and today's half off the right — on a 7-day steps card that is two of the
+ * seven bars clipped, including the one you look at. And its `y` is anchored
+ * at the data minimum less 18% padding, so bar LENGTH encoded
+ * (v - lo)/(hi - lo) rather than the value: an ordinary steps week where every
+ * day was 6-9k rendered as a cliff from a sliver to full height.
+ *
+ * A bar chart of a count has to start at zero, and its slots have to be
+ * inside the box. Kotlin twin: `ChartGeom.xBar` + `zeroAnchored`.
+ */
 const bars = computed(() => {
-  const s = scale.value;
-  if (!s) return [];
-  const bw = Math.max(4, W / (week.value.length * 2));
+  const n = week.value.length;
+  if (!n) return [];
+  const vals = week.value.map((p) => p.value).filter((v): v is number => v != null);
+  const top = Math.max(...vals, props.target ?? 0, 0);
+  const slot = W / n;
+  const bw = Math.max(3, slot * 0.62);
+  const yOf = (v: number) => (top <= 0 ? H : H - (v / top) * H);
   return week.value.map((p, i) => ({
     i,
-    x: s.x(i) - bw / 2,
+    x: (i + 0.5) * slot - bw / 2,
     w: bw,
-    y: p.value == null ? H : s.y(p.value),
-    h: p.value == null ? 0 : H - s.y(p.value),
+    y: p.value == null ? H : yOf(p.value),
+    h: p.value == null ? 0 : H - yOf(p.value),
   }));
 });
 

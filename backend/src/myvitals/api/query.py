@@ -125,11 +125,33 @@ async def get_heartrate(
         return HeartRateSeries(points=[])
 
     values = [p.value for p in points]
+    stats_min = min(values)
+    stats_max = max(values)
+    stats_avg = sum(values) / len(values)
+    if bucket_seconds:
+        # `points` are per-bucket AVERAGES, so their extremes are not the
+        # window's extremes: a 40-second sprint at 168 inside a 2-minute
+        # bucket that also holds 120 comes back as ~135. Reporting that as
+        # "Max" put the HR screen at odds with the Activities feed, which
+        # carries a real per-activity max_hr for the same session. One extra
+        # indexed aggregate over the raw rows costs far less than shipping
+        # them, and keeps the two screens telling the same story.
+        from sqlalchemy import text as _text
+        agg = (await db.execute(
+            _text(
+                "SELECT min(bpm), max(bpm), avg(bpm) FROM vitals_heartrate "
+                "WHERE time >= :start AND time <= :end"
+            ),
+            {"start": start, "end": end},
+        )).first()
+        if agg and agg[0] is not None:
+            stats_min, stats_max, stats_avg = float(agg[0]), float(agg[1]), float(agg[2])
+
     return HeartRateSeries(
         points=points,
-        avg=sum(values) / len(values),
-        min_bpm=min(values),
-        max_bpm=max(values),
+        avg=stats_avg,
+        min_bpm=stats_min,
+        max_bpm=stats_max,
     )
 
 

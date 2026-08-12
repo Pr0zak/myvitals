@@ -535,6 +535,16 @@ private fun LiveHrChart(
                 // These are 2-minute windows, not raw samples.
                 Stat("Readings", "${points.size}")
             }
+            if (trueMax != null && trueMax > maxV + 1) {
+                Spacer(Modifier.height(6.dp))
+                // Otherwise the card reads as a contradiction: "Max 163" above
+                // a trace that visibly tops out near 141. Both are right — the
+                // line is a 2-minute mean, the stat is the raw peak.
+                Text(
+                    "Line is a 2-minute average; Min/Max are from every reading.",
+                    color = tok.onSurfaceDim, fontSize = 10.sp,
+                )
+            }
         }
     }
 }

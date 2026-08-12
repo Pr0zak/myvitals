@@ -370,7 +370,14 @@ private fun StageBreakdownChart(nights: List<SleepNight>) {
     val tok = LocalAppTokens.current
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("STAGE BREAKDOWN — ${nights.size} NIGHTS",
+            // Count NIGHTS, not sessions. An afternoon nap is a sleep session
+            // but it is not a night, and counting it both inflated this number
+            // and dropped a 40-minute bar into a chart of full nights.
+            val nightCount = nights.count { it.kind != "nap" }
+            val napCount = nights.size - nightCount
+            Text(
+                "STAGE BREAKDOWN — $nightCount NIGHTS" +
+                    if (napCount > 0) " + $napCount NAP${if (napCount > 1) "S" else ""}" else "",
                 color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
@@ -449,12 +456,17 @@ private fun DurationTrend(nights: List<SleepNight>, goalH: Double) {
             Text("DURATION", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(4.dp))
-            if (nights.isEmpty()) {
+            // Nights only. A 45-minute nap averaged in with eight-hour nights
+            // pulled the headline down and made "Min" the nap's length rather
+            // than that of the shortest night. Explains a 5.6h average over a
+            // window whose bars are mostly 7-8h.
+            val actualNights = nights.filter { it.kind != "nap" }
+            if (actualNights.isEmpty()) {
                 Text("—", color = tok.onSurface, fontSize = 16.sp); return@Card
             }
-            val avgH = nights.map { it.totalS }.average() / 3600.0
-            val minN = nights.minByOrNull { it.totalS }
-            val maxN = nights.maxByOrNull { it.totalS }
+            val avgH = actualNights.map { it.totalS }.average() / 3600.0
+            val minN = actualNights.minByOrNull { it.totalS }
+            val maxN = actualNights.maxByOrNull { it.totalS }
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 Stat("Avg", "%.1f h".format(avgH))
                 if (minN != null) Stat("Min", "%.1f h".format(minN.totalS / 3600.0))
@@ -466,7 +478,7 @@ private fun DurationTrend(nights: List<SleepNight>, goalH: Double) {
             // legend mapping that blue to light sleep, this line read as a
             // light-sleep series rather than total duration.
             Box(Modifier.fillMaxWidth().height(96.dp)) {
-                SleepDurationLine(nights, goalH = goalH.toFloat(),
+                SleepDurationLine(actualNights, goalH = goalH.toFloat(),
                     color = Vital.SLEEP.accent)
             }
         }

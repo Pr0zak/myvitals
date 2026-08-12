@@ -31,6 +31,9 @@ export interface SleepNight {
   end: string;
   total_s: number;
   stages: SleepStageBucket[];
+  /** "sleep" or "nap", classified server-side (analytics/events.py). Older
+   *  backends omit it; treat a missing value as "sleep". */
+  kind?: string;
 }
 
 export interface TodaySummary {

@@ -7,6 +7,7 @@ from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import require_any
+from ..config import settings
 from ..db import models
 from ..db.session import get_session
 from ..schemas import (
@@ -337,6 +338,22 @@ async def get_sleep_raw(
         {"time": t.isoformat(), "stage": s, "duration_s": d}
         for t, s, d in result.all()
     ]
+
+
+def _classify(start_at: datetime, total_s: int) -> str:
+    """nap vs night, via the same rule the narrative cards use.
+
+    Imported lazily and defensively: this is a read endpoint, and a failure to
+    classify should degrade to "sleep" rather than 500 the whole range.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        from ..analytics.events import classify_session
+        tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+        return classify_session(start_at.astimezone(tz), total_s)
+    except Exception:  # noqa: BLE001
+        return "sleep"
 
 
 @router.get("/sleep/range", response_model=list[SleepNight])

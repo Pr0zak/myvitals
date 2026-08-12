@@ -1192,6 +1192,9 @@ data class SleepNight(
     val end: String? = null,
     @Json(name = "total_s") val totalS: Int,
     val stages: List<SleepStageBucket> = emptyList(),
+    /** "sleep" or "nap", classified server-side. Defaults to "sleep" so an
+     *  older backend that omits it behaves exactly as before. */
+    val kind: String = "sleep",
 )
 
 @JsonClass(generateAdapter = true)

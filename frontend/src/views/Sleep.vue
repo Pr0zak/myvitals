@@ -300,12 +300,17 @@ const consistencyOption = computed(() => {
 });
 
 const stats = computed(() => {
-  if (nights.value.length === 0) return null;
-  const totals = nights.value.map((n) => n.total_s);
+  // Naps are sleep sessions but they are not nights. Averaging a 45-minute
+  // doze in with eight-hour nights pulled the headline average down and made
+  // "Min" the length of the nap rather than of your shortest night.
+  const actualNights = nights.value.filter((n) => n.kind !== "nap");
+  if (actualNights.length === 0) return null;
+  const totals = actualNights.map((n) => n.total_s);
   const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
   const min = Math.min(...totals);
   const max = Math.max(...totals);
-  return { avg, min, max, count: nights.value.length };
+  return { avg, min, max, count: actualNights.length,
+           naps: nights.value.length - actualNights.length };
 });
 
 // Most-recent-first, capped at the visible window (default 7 nights;

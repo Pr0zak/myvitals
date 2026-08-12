@@ -70,6 +70,7 @@ import com.patrykandpatrick.vico.compose.common.fill
 import com.patrykandpatrick.vico.core.cartesian.axis.HorizontalAxis
 import com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
+import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
 import com.patrykandpatrick.vico.core.cartesian.data.columnSeries
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
@@ -97,8 +98,16 @@ fun WorkoutChartsScreen(
     var volumeTrend by remember { mutableStateOf<List<StrengthWeeklyPoint>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Which range `stats` was fetched for. Without it, tapping a different
+    // range chip left the PREVIOUS range's charts on screen under the new
+    // chip — the same defect the heart-rate screen had, where 90d rendered
+    // 30 days of history.
+    var statsRange by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(days) {
+        if (statsRange != null && statsRange != days) {
+            stats = null; statsRange = null; loading = true
+        }
         if (!settings.isConfigured()) {
             error = "Backend not configured."; loading = false; return@LaunchedEffect
         }
@@ -107,6 +116,7 @@ fun WorkoutChartsScreen(
             context, cacheKey, StrengthStats::class.java,
         )?.let {
             stats = it.value
+            statsRange = days
             loading = false
         }
         if (stats == null) { loading = true }
@@ -115,6 +125,7 @@ fun WorkoutChartsScreen(
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val fresh = withContext(Dispatchers.IO) { api.strengthStats(days = days) }
             stats = fresh
+            statsRange = days
             app.myvitals.data.JsonCache.write(
                 context, cacheKey, StrengthStats::class.java, fresh,
             )
@@ -282,6 +293,10 @@ private fun DailyVolumeCard(s: StrengthStats, neon: Boolean) {
             // card and simply could not be read.
             val axisInk = app.myvitals.ui.LocalAppTokens.current.onSurfaceVariant
             val producer = remember { CartesianChartModelProducer() }
+            // x is an offset from the first day, so the axis printed 0, 5, 10…
+            // — numbers that mean nothing without knowing the origin. Keep the
+            // origin so the formatter can turn them back into dates.
+            var xOrigin by remember { mutableStateOf(0L) }
             LaunchedEffect(s) {
                 val pairs = s.daily.mapIndexedNotNull { _, d ->
                     runCatching {
@@ -290,9 +305,18 @@ private fun DailyVolumeCard(s: StrengthStats, neon: Boolean) {
                 }
                 if (pairs.isEmpty()) return@LaunchedEffect
                 val origin = pairs.first().first
+                xOrigin = origin.toLong()
                 val xs = pairs.map { it.first - origin }
                 val ys = pairs.map { it.second }
                 producer.runTransaction { lineSeries { series(x = xs, y = ys) } }
+            }
+            val dateFormatter = remember(xOrigin) {
+                CartesianValueFormatter { _, value, _ ->
+                    runCatching {
+                        val d = LocalDate.ofEpochDay(xOrigin + value.toLong())
+                        "${d.monthValue}/${d.dayOfMonth}"
+                    }.getOrDefault("")
+                }
             }
             // Default Vico line layer (stable across data shapes + devices).
             // The neon feel comes from the obsidian card + lime muscle bars;
@@ -305,6 +329,7 @@ private fun DailyVolumeCard(s: StrengthStats, neon: Boolean) {
                     ),
                     bottomAxis = HorizontalAxis.rememberBottom(
                         label = rememberAxisLabelComponent(color = axisInk),
+                        valueFormatter = dateFormatter,
                     ),
                 ),
                 modelProducer = producer,

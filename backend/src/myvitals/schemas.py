@@ -37,6 +37,12 @@ class SleepNight(BaseModel):
     end: datetime
     total_s: int
     stages: list[SleepStageBucket]
+    # "sleep" or "nap", from analytics.events.classify_session — the same rule
+    # the narrative cards use. Without it clients counted every session as a
+    # night, so an afternoon nap made "STAGE BREAKDOWN - 13 NIGHTS" out of
+    # twelve nights and a doze on the sofa, and dragged the nightly average
+    # down with a 40-minute "night".
+    kind: str = "sleep"
 
 
 class TodaySummary(BaseModel):

@@ -29,6 +29,8 @@ const menuFor = ref<string | null>(null);
 const LANES = ["awake", "rem", "light", "deep"] as const;
 const LANE_LABEL: Record<string, string> = {
   awake: "Total awake", rem: "REM", light: "Light", deep: "Deep",
+  asleep: "Asleep", restless: "Restless", out_of_bed: "Out of bed",
+  unmeasurable: "Unmeasurable", unknown: "Unknown",
 };
 const LANE_TONE: Record<string, string> = {
   awake: "#f48fb1", rem: "#8fd8ff", light: "#7aa7ff", deep: "#a97bdb",
@@ -129,12 +131,18 @@ function lane(e: NarrativeEvent, stage: string) {
 
 function lanesFor(e: NarrativeEvent) {
   const seen = new Set(e.stages.map((s) => s.stage));
-  return LANES.filter((l) => seen.has(l) || l === "awake").map((l) => ({
+  // Render whatever the server sent, known stages first. Filtering to a fixed
+  // four dropped Fitbit's classic levels (asleep / restless) entirely, so a
+  // night recorded in that vocabulary drew an empty hypnogram under a headline
+  // that said you slept eight hours.
+  const order = [...LANES.filter((l) => seen.has(l) || l === "awake"),
+                 ...[...seen].filter((s) => !LANES.includes(s as never)).sort()];
+  return order.map((l) => ({
     stage: l,
-    label: LANE_LABEL[l],
+    label: LANE_LABEL[l] ?? l,
     total: e.stages.find((s) => s.stage === l)?.duration_s ?? 0,
     bars: lane(e, l),
-    tone: LANE_TONE[l],
+    tone: LANE_TONE[l] ?? "#8d949d",
   }));
 }
 

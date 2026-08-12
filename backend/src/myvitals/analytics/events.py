@@ -43,7 +43,26 @@ NAP_START_HOUR_MAX = 20
 # Hard cap so a bad import can't turn the home screen into a wall of cards.
 MAX_EVENTS = 12
 
-STAGE_ORDER = ["awake", "rem", "light", "deep"]
+# Known stages, ordered shallowest-first. Anything else the watch reports is
+# still returned (see day_events) — this only fixes the ORDER of the ones we
+# recognise, it does not filter.
+#
+# Both of Fitbit's vocabularies are in the database: "stages"
+# (light / deep / rem / wake) and the older classic "levels"
+# (asleep / restless / awake). Listing only four of them here meant clients
+# that mirrored this list rendered neither `asleep` (5.3k rows) nor
+# `restless` (5.1k rows) nor `wake` (1.8k rows).
+STAGE_ORDER = ["awake", "restless", "rem", "light", "asleep", "deep"]
+
+# `wake` and `awake` are the same thing spelled two ways, and splitting them
+# meant a night's awake total was reported twice under different keys and each
+# half was drawn (or dropped) independently.
+STAGE_SYNONYMS = {"wake": "awake", "wakeup": "awake"}
+
+
+def _canonical_stage(stage: str | None) -> str:
+    s = (stage or "").lower().strip()
+    return STAGE_SYNONYMS.get(s, s)
 
 
 def _fmt_clock(dt_local: datetime) -> str:
@@ -92,7 +111,7 @@ def clamp_stage_durations(
             continue
         out.append({
             "start": start.isoformat(),
-            "stage": (stage or "").lower(),
+            "stage": _canonical_stage(stage),
             "duration_s": clamped,
         })
     return out

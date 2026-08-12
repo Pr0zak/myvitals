@@ -57,6 +57,7 @@ import app.myvitals.sync.StrengthWeeklyPoint
 import app.myvitals.ui.MV
 import app.myvitals.ui.neon.NeonMV
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
+import com.patrykandpatrick.vico.compose.cartesian.axis.rememberAxisLabelComponent
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottom
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStart
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberColumnCartesianLayer
@@ -275,6 +276,11 @@ private fun DailyVolumeCard(s: StrengthStats, neon: Boolean) {
             // push every data change through runTransaction below; keying the
             // remember on `s` recreated it when SWR swapped cached→fresh stats,
             // which is what crashed the screen.
+            // Vico's default axis label colour follows the SYSTEM dark-mode
+            // flag, but this app is always dark — so on a phone set to light
+            // mode the axis numbers were painted near-black on the obsidian
+            // card and simply could not be read.
+            val axisInk = app.myvitals.ui.LocalAppTokens.current.onSurfaceVariant
             val producer = remember { CartesianChartModelProducer() }
             LaunchedEffect(s) {
                 val pairs = s.daily.mapIndexedNotNull { _, d ->
@@ -294,8 +300,12 @@ private fun DailyVolumeCard(s: StrengthStats, neon: Boolean) {
             CartesianChartHost(
                 chart = rememberCartesianChart(
                     rememberLineCartesianLayer(),
-                    startAxis = VerticalAxis.rememberStart(),
-                    bottomAxis = HorizontalAxis.rememberBottom(),
+                    startAxis = VerticalAxis.rememberStart(
+                        label = rememberAxisLabelComponent(color = axisInk),
+                    ),
+                    bottomAxis = HorizontalAxis.rememberBottom(
+                        label = rememberAxisLabelComponent(color = axisInk),
+                    ),
                 ),
                 modelProducer = producer,
                 scrollState = rememberVicoScrollState(),
@@ -319,6 +329,11 @@ private fun WeeklyVolumeCard(trend: List<StrengthWeeklyPoint>, neon: Boolean) {
             // single producer for the host's lifetime, data pushed via
             // runTransaction. Column layer instead of line (bars read as a
             // mesocycle load trend). x = week index, y = volume lb.
+            // Vico's default axis label colour follows the SYSTEM dark-mode
+            // flag, but this app is always dark — so on a phone set to light
+            // mode the axis numbers were painted near-black on the obsidian
+            // card and simply could not be read.
+            val axisInk = app.myvitals.ui.LocalAppTokens.current.onSurfaceVariant
             val producer = remember { CartesianChartModelProducer() }
             LaunchedEffect(trend) {
                 if (trend.size < 2) return@LaunchedEffect
@@ -329,8 +344,12 @@ private fun WeeklyVolumeCard(trend: List<StrengthWeeklyPoint>, neon: Boolean) {
             CartesianChartHost(
                 chart = rememberCartesianChart(
                     rememberColumnCartesianLayer(),
-                    startAxis = VerticalAxis.rememberStart(),
-                    bottomAxis = HorizontalAxis.rememberBottom(),
+                    startAxis = VerticalAxis.rememberStart(
+                        label = rememberAxisLabelComponent(color = axisInk),
+                    ),
+                    bottomAxis = HorizontalAxis.rememberBottom(
+                        label = rememberAxisLabelComponent(color = axisInk),
+                    ),
                 ),
                 modelProducer = producer,
                 scrollState = rememberVicoScrollState(),
@@ -439,6 +458,11 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
             }
             // Single stable producer (see DailyVolumeCard) — data updates flow
             // through runTransaction keyed on (selected, s, metric), never a new producer.
+            // Vico's default axis label colour follows the SYSTEM dark-mode
+            // flag, but this app is always dark — so on a phone set to light
+            // mode the axis numbers were painted near-black on the obsidian
+            // card and simply could not be read.
+            val axisInk = app.myvitals.ui.LocalAppTokens.current.onSurfaceVariant
             val producer = remember { CartesianChartModelProducer() }
             LaunchedEffect(selected, s, metric) {
                 val pairs = pts.mapNotNull { p ->
@@ -457,8 +481,12 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
             CartesianChartHost(
                 chart = rememberCartesianChart(
                     rememberLineCartesianLayer(),
-                    startAxis = VerticalAxis.rememberStart(),
-                    bottomAxis = HorizontalAxis.rememberBottom(),
+                    startAxis = VerticalAxis.rememberStart(
+                        label = rememberAxisLabelComponent(color = axisInk),
+                    ),
+                    bottomAxis = HorizontalAxis.rememberBottom(
+                        label = rememberAxisLabelComponent(color = axisInk),
+                    ),
                 ),
                 modelProducer = producer,
                 scrollState = rememberVicoScrollState(),

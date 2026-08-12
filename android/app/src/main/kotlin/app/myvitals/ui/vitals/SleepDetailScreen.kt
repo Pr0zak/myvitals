@@ -37,6 +37,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
@@ -61,12 +62,36 @@ private val STAGE_COLORS = mapOf(
     "light" to Color(0xFF60A5FA),
     "awake" to Color(0xFFF97316),
     "wake" to Color(0xFFF97316),
+    // Fitbit's CLASSIC sleep levels (asleep / restless / awake), as opposed to
+    // its stages (light / deep / rem / wake). Both vocabularies are in the
+    // database — 5.3k "asleep" and 5.1k "restless" segments — and neither had
+    // a colour or a hypnogram row, so a night recorded in classic levels drew
+    // an almost empty hypnogram above a stage-breakdown bar showing a full
+    // night's sleep. Two charts on one screen disagreeing.
+    "asleep" to Color(0xFF3B82F6),
+    "restless" to Color(0xFF93C5FD),
     "out_of_bed" to Color(0xFF94A3B8),
+    "unmeasurable" to Color(0xFF64748B),
     "unknown" to Color(0xFF64748B),
 )
 
-// Vertical order (top → bottom) when drawing hypnogram bands
-private val HYPNO_ORDER = listOf("awake", "rem", "light", "deep")
+/** Spellings of the same thing. `wake` had a colour but no row, so 1.8k
+ *  segments were drawn as nothing at all. */
+private val STAGE_SYNONYMS = mapOf("wake" to "awake")
+
+private fun canonicalStage(raw: String): String {
+    val s = raw.lowercase()
+    return STAGE_SYNONYMS[s] ?: s
+}
+
+/** Vertical order (top → bottom), shallowest first. Rows are chosen from the
+ *  stages actually present, so a classic-levels night shows
+ *  awake/restless/asleep and a staged night shows awake/rem/light/deep,
+ *  instead of a fixed four that silently discarded 39% of all segments. */
+private val HYPNO_ORDER = listOf(
+    "awake", "restless", "rem", "light", "asleep", "deep",
+    "out_of_bed", "unmeasurable", "unknown",
+)
 
 @Composable
 fun SleepDetailScreen(
@@ -188,7 +213,12 @@ fun SleepDetailScreen(
                     item { Hypnogram(selectedRaw) }
                     item { StageBreakdownChart(nights.takeLast(14)) }
                     item { DurationTrend(nights.takeLast(14), goalH) }
-                    item { StageLegend() }
+                    item {
+                        StageLegend(
+                            nights.flatMap { n -> n.stages.map { canonicalStage(it.stage) } }
+                                .toSet(),
+                        )
+                    }
                 }
             }
         }
@@ -245,69 +275,91 @@ private fun Hypnogram(segments: List<SleepRawSegment>) {
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             if (segments.isEmpty()) {
-                Text("No raw stage data for the last 48h.",
+                Text("No stage detail synced for this night yet.",
                     color = tok.onSurfaceVariant, fontSize = 12.sp)
                 return@Card
             }
+            val measurer = androidx.compose.ui.text.rememberTextMeasurer()
             val parsed = remember(segments) {
                 segments.mapNotNull { s ->
                     val t = runCatching { Instant.parse(s.time).toEpochMilli() }
                         .getOrNull() ?: return@mapNotNull null
-                    Triple(t, t + s.durationS * 1000L, s.stage.lowercase())
+                    Triple(t, t + s.durationS * 1000L, canonicalStage(s.stage))
                 }
+            }
+            // Only rows that actually occur tonight, so a classic-levels night
+            // isn't padded with four empty stage lanes (and vice versa).
+            val rows = remember(parsed) {
+                val present = parsed.mapTo(HashSet()) { it.third }
+                HYPNO_ORDER.filter { it in present }
+                    .ifEmpty { HYPNO_ORDER.take(1) }
             }
             val tStart = parsed.minOfOrNull { it.first } ?: return@Card
             val tEnd = parsed.maxOfOrNull { it.second } ?: return@Card
-            Box(Modifier.fillMaxWidth().height(140.dp)) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val span = (tEnd - tStart).toFloat().coerceAtLeast(1f)
-                    val rowH = size.height / HYPNO_ORDER.size
-                    // Faint bg gridlines per stage
-                    for (i in 0..HYPNO_ORDER.size) {
-                        val y = i * rowH
-                        drawLine(
-                            color = tok.onSurfaceDim.copy(alpha = 0.18f),
-                            start = Offset(0f, y), end = Offset(size.width, y),
-                            strokeWidth = 0.7.dp.toPx(),
-                        )
-                    }
-                    // Per-segment colored band on the matching row
-                    for ((s, e, stage) in parsed) {
-                        val idx = HYPNO_ORDER.indexOf(stage).takeIf { it >= 0 }
-                            ?: continue
-                        val x0 = ((s - tStart).toFloat() / span) * size.width
-                        val x1 = ((e - tStart).toFloat() / span) * size.width
-                        val y0 = idx * rowH + rowH * 0.18f
-                        val h = rowH * 0.64f
-                        drawRect(
-                            color = STAGE_COLORS[stage] ?: tok.onSurfaceDim,
-                            topLeft = Offset(x0, y0),
-                            size = Size((x1 - x0).coerceAtLeast(1f), h),
-                        )
-                    }
+            val chartH = (rows.size * 30).coerceAtLeast(90).dp
+            Canvas(Modifier.fillMaxWidth().height(chartH)) {
+                // Labels used to be a Column laid OVER the canvas, printing on
+                // top of the first ~40 minutes of every night. They get their
+                // own gutter now.
+                val gutter = 44.dp.toPx()
+                val axisH = 14.dp.toPx()
+                val plotW = size.width - gutter
+                val plotH = size.height - axisH
+                val span = (tEnd - tStart).toFloat().coerceAtLeast(1f)
+                val rowH = plotH / rows.size
+                val labelStyle = androidx.compose.ui.text.TextStyle(
+                    color = tok.onSurfaceDim, fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                for ((i, st) in rows.withIndex()) {
+                    val y = i * rowH
+                    drawLine(
+                        color = tok.onSurfaceDim.copy(alpha = 0.14f),
+                        start = Offset(gutter, y + rowH), end = Offset(size.width, y + rowH),
+                        strokeWidth = 0.7.dp.toPx(),
+                    )
+                    val lay = measurer.measure(st, labelStyle)
+                    drawText(lay, topLeft = Offset(
+                        (gutter - 6.dp.toPx() - lay.size.width).coerceAtLeast(0f),
+                        y + (rowH - lay.size.height) / 2f,
+                    ))
                 }
-                // Stage labels on the left
-                Column(Modifier.fillMaxSize()) {
-                    val rowFraction = 1f / HYPNO_ORDER.size
-                    for (st in HYPNO_ORDER) {
-                        Box(
-                            Modifier.fillMaxWidth().height(140.dp * rowFraction),
-                            contentAlignment = Alignment.CenterStart,
-                        ) {
-                            Text(st, color = tok.onSurfaceDim,
-                                fontSize = 9.sp, fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(start = 2.dp))
-                        }
-                    }
+                for ((s, e, stage) in parsed) {
+                    val idx = rows.indexOf(stage).takeIf { it >= 0 } ?: continue
+                    val x0 = gutter + ((s - tStart).toFloat() / span) * plotW
+                    val x1 = gutter + ((e - tStart).toFloat() / span) * plotW
+                    val y0 = idx * rowH + rowH * 0.18f
+                    drawRect(
+                        color = STAGE_COLORS[stage] ?: tok.onSurfaceDim,
+                        topLeft = Offset(x0, y0),
+                        size = Size((x1 - x0).coerceAtLeast(1f), rowH * 0.64f),
+                    )
                 }
-            }
-            // Time axis labels
-            Row(Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(formatLocalHour(tStart), color = tok.onSurfaceDim, fontSize = 9.sp)
-                Text(formatLocalHour((tStart + tEnd) / 2),
-                    color = tok.onSurfaceDim, fontSize = 9.sp)
-                Text(formatLocalHour(tEnd), color = tok.onSurfaceDim, fontSize = 9.sp)
+                // Hourly ticks rather than three rounded labels, so you can
+                // actually read WHEN a stage happened.
+                val axisStyle = androidx.compose.ui.text.TextStyle(
+                    color = tok.onSurfaceDim, fontSize = 9.sp,
+                )
+                val hourMs = 3_600_000L
+                val zoneId = java.time.ZoneId.systemDefault()
+                var tick = java.time.Instant.ofEpochMilli(tStart).atZone(zoneId)
+                    .withMinute(0).withSecond(0).withNano(0)
+                    .plusHours(1).toInstant().toEpochMilli()
+                val stepH = if (tEnd - tStart > 8 * hourMs) 2L else 1L
+                while (tick <= tEnd) {
+                    val x = gutter + ((tick - tStart).toFloat() / span) * plotW
+                    drawLine(
+                        color = tok.onSurfaceDim.copy(alpha = 0.10f),
+                        start = Offset(x, 0f), end = Offset(x, plotH),
+                        strokeWidth = 0.7.dp.toPx(),
+                    )
+                    val lay = measurer.measure(formatLocalHour(tick), axisStyle)
+                    drawText(lay, topLeft = Offset(
+                        (x - lay.size.width / 2f).coerceIn(0f, size.width - lay.size.width),
+                        plotH + 2.dp.toPx(),
+                    ))
+                    tick += stepH * hourMs
+                }
             }
         }
     }
@@ -326,36 +378,64 @@ private fun StageBreakdownChart(nights: List<SleepNight>) {
                 Text("No data.", color = tok.onSurfaceVariant, fontSize = 12.sp)
                 return@Card
             }
-            val maxTotal = (nights.maxOfOrNull { it.totalS } ?: 1).coerceAtLeast(1)
-            Box(Modifier.fillMaxWidth().height(150.dp)) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val gap = 3.dp.toPx()
-                    val barW = (size.width - gap * (nights.size - 1)) / nights.size
-                    for ((i, n) in nights.withIndex()) {
-                        val x = i * (barW + gap)
-                        var yCursor = size.height
-                        // Stack from bottom: deep → light → rem → awake
-                        for (st in listOf("deep", "light", "rem", "awake", "wake", "out_of_bed", "unknown")) {
-                            val s = n.stages.firstOrNull { it.stage.equals(st, true) }?.durationS ?: continue
-                            val h = (s.toFloat() / maxTotal) * size.height
-                            yCursor -= h
-                            drawRect(
-                                color = STAGE_COLORS[st.lowercase()] ?: tok.onSurfaceDim,
-                                topLeft = Offset(x, yCursor),
-                                size = Size(barW, h),
-                            )
-                        }
-                    }
-                }
+            val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+            // Stack order, deepest at the bottom. Built from the canonical
+            // vocabulary so Fitbit's classic levels (asleep / restless) are
+            // stacked too — the old hard-coded list omitted them, so a night
+            // recorded that way drew an almost-empty bar.
+            val stackOrder = listOf(
+                "deep", "asleep", "light", "rem", "restless", "awake",
+                "out_of_bed", "unmeasurable", "unknown",
+            )
+            // Scale by the STACKED height, not by totalS. totalS is asleep-only
+            // on most sources while the stack includes awake, so a restless
+            // night's bar overflowed the top of the box.
+            val stackTotals = nights.map { n ->
+                n.stages.sumOf { it.durationS }.toFloat() / 3600f
             }
-            // Date strip — show every other day to keep it readable
-            Row(Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween) {
+            Canvas(Modifier.fillMaxWidth().height(170.dp)) {
+                val domain = niceDomain(
+                    lo = 0f, hi = (stackTotals.maxOrNull() ?: 1f).coerceAtLeast(1f),
+                    zeroAnchored = true, targetTicks = 3, minStep = 1f,
+                )
+                val g = chartGeom(domain, ChartInsets(
+                    left = 26.dp.toPx(), top = 6.dp.toPx(),
+                    right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+                ))
+                drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 3) {
+                    "%.0fh".format(it)
+                }
+                val barW = g.slot(nights.size) * 0.74f
                 for ((i, n) in nights.withIndex()) {
-                    if (i % 2 == 0 || i == nights.lastIndex) {
-                        Text(shortDate(n.date), color = tok.onSurfaceDim, fontSize = 9.sp)
+                    val cx = g.xBar(i, nights.size)
+                    var acc = 0f
+                    for (st in stackOrder) {
+                        val secs = n.stages
+                            .firstOrNull { canonicalStage(it.stage) == st }?.durationS ?: continue
+                        val hrs = secs.toFloat() / 3600f
+                        val yTop = g.y(acc + hrs)
+                        val yBot = g.y(acc)
+                        drawRect(
+                            color = STAGE_COLORS[st] ?: tok.onSurfaceDim,
+                            topLeft = Offset(cx - barW / 2f, yTop),
+                            size = Size(barW, (yBot - yTop).coerceAtLeast(0f)),
+                        )
+                        acc += hrs
                     }
                 }
+                // Labels placed under the bars they name. The old strip used
+                // SpaceBetween over a FILTERED subset, so the dates spread
+                // evenly across the width and sat under the wrong bars.
+                drawXLabels(g, measurer, tok.onSurfaceDim, buildList {
+                    nights.firstOrNull()?.let { add((0.5f / nights.size) to shortDate(it.date)) }
+                    if (nights.size >= 5) {
+                        val m = nights.size / 2
+                        add(((m + 0.5f) / nights.size) to shortDate(nights[m].date))
+                    }
+                    if (nights.size >= 2) nights.lastOrNull()?.let {
+                        add(((nights.size - 0.5f) / nights.size) to shortDate(it.date))
+                    }
+                })
             }
         }
     }
@@ -382,9 +462,12 @@ private fun DurationTrend(nights: List<SleepNight>, goalH: Double) {
                 Stat("Goal", "%.1f h".format(goalH))
             }
             Spacer(Modifier.height(8.dp))
-            Box(Modifier.fillMaxWidth().height(60.dp)) {
+            // Not a stage colour: drawn in "light sleep" blue directly above a
+            // legend mapping that blue to light sleep, this line read as a
+            // light-sleep series rather than total duration.
+            Box(Modifier.fillMaxWidth().height(96.dp)) {
                 SleepDurationLine(nights, goalH = goalH.toFloat(),
-                    color = STAGE_COLORS["light"] ?: Color(0xFF60A5FA))
+                    color = Vital.SLEEP.accent)
             }
         }
     }
@@ -434,11 +517,20 @@ private fun SleepDurationLine(nights: List<SleepNight>, goalH: Float, color: Col
 }
 
 @Composable
-private fun StageLegend() {
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+private fun StageLegend(present: Set<String> = emptySet()) {
     val tok = LocalAppTokens.current
+    // Only the stages this window actually contains, and wrapping. The order
+    // grew from four entries to nine to cover both Fitbit vocabularies, which
+    // a single non-wrapping Row silently ran off the right edge of the card.
+    val shown = HYPNO_ORDER.filter { present.isEmpty() || it in present }
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
-        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            for (st in HYPNO_ORDER) {
+        androidx.compose.foundation.layout.FlowRow(
+            Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            for (st in shown) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(10.dp)
                         .clip(RoundedCornerShape(2.dp))

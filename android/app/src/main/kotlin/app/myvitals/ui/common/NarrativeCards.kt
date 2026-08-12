@@ -150,13 +150,16 @@ private fun midClock(e: NarrativeEvent): String = runCatching {
         .format(Instant.ofEpochMilli((a + b) / 2).atZone(ZoneId.systemDefault()))
 }.getOrDefault("")
 
-private val LANES = listOf("awake", "rem", "light", "deep")
+private val LANES = listOf("awake", "restless", "rem", "light", "asleep", "deep")
 private val LANE_LABEL = mapOf(
     "awake" to "Total awake", "rem" to "REM", "light" to "Light", "deep" to "Deep",
+    "asleep" to "Asleep", "restless" to "Restless", "out_of_bed" to "Out of bed",
+    "unmeasurable" to "Unmeasurable", "unknown" to "Unknown",
 )
 private val LANE_TONE = mapOf(
     "awake" to Color(0xFFF48FB1), "rem" to Color(0xFF4DD0E1),
     "light" to Color(0xFF7AA7FF), "deep" to Color(0xFF9575CD),
+    "asleep" to Color(0xFF3B82F6), "restless" to Color(0xFF93C5FD),
 )
 
 @Composable
@@ -210,10 +213,16 @@ private fun EventCard(
                 .padding(12.dp),
         ) {
             val seen = e.stages.map { it.stage }.toSet()
-            LANES.filter { it in seen || it == "awake" }.forEach { stage ->
+            // Render whatever the server sent, known stages first. A fixed
+            // four dropped Fitbit's classic levels (asleep / restless), so a
+            // night recorded in that vocabulary drew an empty hypnogram under
+            // a headline claiming eight hours of sleep.
+            val lanes = LANES.filter { it in seen || it == "awake" } +
+                seen.filter { it !in LANES }.sorted()
+            lanes.forEach { stage ->
                 val total = e.stages.firstOrNull { it.stage == stage }?.durationS ?: 0
                 Text(
-                    "${LANE_LABEL[stage]} · ${fmtMins(total)}",
+                    "${LANE_LABEL[stage] ?: stage} · ${fmtMins(total)}",
                     color = Color(0xFFE9EDF2), fontSize = 12.sp,
                 )
                 Spacer(Modifier.height(4.dp))

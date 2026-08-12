@@ -14,12 +14,19 @@ import { chartTheme, isNeon } from "@/theme";
 import { fmtTime, fmtDateTime } from "@/format";
 
 // Classic stage palette (byte-for-byte unchanged for non-neon themes).
+// Both of Fitbit's vocabularies reach the client: "stages"
+// (light/deep/rem/wake) and the classic "levels" (asleep/restless/awake).
+// Without entries here the classic levels fell through to the fallback grey,
+// so a night recorded that way charted as a featureless slab.
 const STAGE_COLORS_CLASSIC: Record<string, string> = {
   awake: "#f97316",
   rem: "#a78bfa",
   light: "#60a5fa",
   deep: "#1e40af",
+  asleep: "#3b82f6",
+  restless: "#93c5fd",
   out_of_bed: "#94a3b8",
+  unmeasurable: "#64748b",
   unknown: "#64748b",
 };
 // Vitality Neon sleep-stage palette.
@@ -28,7 +35,10 @@ const STAGE_COLORS_NEON: Record<string, string> = {
   rem: "#28e6ff",
   light: "#6f7bff",
   deep: "#ff3ad8",
+  asleep: "#4b8bff",
+  restless: "#9fc6ff",
   out_of_bed: "#9b9bb0",
+  unmeasurable: "#9b9bb0",
   unknown: "#9b9bb0",
 };
 const stageColors = computed<Record<string, string>>(() =>
@@ -36,7 +46,8 @@ const stageColors = computed<Record<string, string>>(() =>
 );
 
 // Order top-to-bottom in the hypnogram (REM is shallowest after awake)
-const STAGE_ORDER = ["awake", "rem", "light", "deep"];
+// Shallowest-first; unrecognised stages are appended, not dropped.
+const STAGE_ORDER = ["awake", "restless", "rem", "light", "asleep", "deep"];
 
 const nights = ref<SleepNight[]>([]);
 const lastNightRaw = ref<{ time: string; stage: string; duration_s: number }[]>([]);

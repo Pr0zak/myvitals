@@ -731,7 +731,7 @@ const minHrInWindow = computed(() => hr24.value?.min_bpm ?? null);
       <!-- Activity HR correlation -->
       <Card v-if="activityHrOption" :title="`Avg HR by activity type · ${cur.label}`" :flat="true">
         <div class="chart-sm"><VChart :option="activityHrOption" autoresize/></div>
-        <p class="hint">Average HR per session, grouped by activity type. Strength = red, Concept2 = violet, cardio = HR red.</p>
+        <p class="hint">Average HR per session, grouped by activity type.</p>
       </Card>
 
       <!-- Daily HRV -->

@@ -297,7 +297,9 @@ private fun DailyColumns(rows: List<DailySummary>, goal: Int, color: Color) {
             // Title counts the rows actually rendered. It was hard-coded
             // "LAST 30 DAYS" no matter what the window held, so a short
             // history advertised days it never drew.
-            Text("LAST ${rows.size} DAYS", color = tok.onSurfaceVariant,
+            Text(
+                if (rows.size == 1) "LAST DAY" else "LAST ${rows.size} DAYS",
+                color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             if (rows.isEmpty()) {

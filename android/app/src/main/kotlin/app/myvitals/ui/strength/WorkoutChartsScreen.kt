@@ -374,7 +374,11 @@ private fun MuscleGroupCard(s: StrengthStats, neon: Boolean) {
             if (s.perMuscle.isEmpty()) {
                 Text("—", color = muted, fontSize = 12.sp); return@Card
             }
-            val total = s.perMuscle.sumOf { it.volumeLb }.coerceAtLeast(1.0)
+            // Scale to the LARGEST muscle, not the sum of all of them. Against
+            // the sum, the top muscle in an eight-way split fills a quarter of
+            // its track and everything else is a stub — the chart compares
+            // muscles to each other, not to the total.
+            val total = s.perMuscle.maxOfOrNull { it.volumeLb }?.coerceAtLeast(1.0) ?: 1.0
             for (m in s.perMuscle.take(8)) {
                 Row(Modifier.padding(vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically) {

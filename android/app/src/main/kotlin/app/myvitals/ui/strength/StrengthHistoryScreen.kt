@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Box
@@ -169,10 +170,31 @@ private fun MuscleVolumeCard(settings: SettingsRepository, neon: Boolean) {
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    // SWR, the pattern the detail screens already use. This card lives in a
+    // LazyColumn item, so scrolling it off screen DISPOSES it — `remember`
+    // resets and LaunchedEffect(Unit) refetched, flashing "Loading…" over a
+    // card you had already read, every single time you scrolled back.
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    fun applyResp(resp: app.myvitals.sync.MuscleVolumeResponse) {
+        windowDays = resp.windowDays
+        rows = resp.muscles.toList().sortedWith(
+            compareBy<Pair<String, MuscleVolumeRow>> { it.second.sets == 0 }
+                .thenByDescending { it.second.sets }
+                .thenBy { it.first }
+        )
+        loading = false
+    }
     LaunchedEffect(Unit) {
+        app.myvitals.data.JsonCache.read<app.myvitals.sync.MuscleVolumeResponse>(
+            ctx, "muscle_volume_7d", app.myvitals.sync.MuscleVolumeResponse::class.java,
+        )?.let { applyResp(it.value) }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val resp = withContext(Dispatchers.IO) { api.strengthMuscleVolume(7) }
+            app.myvitals.data.JsonCache.write(
+                ctx, "muscle_volume_7d",
+                app.myvitals.sync.MuscleVolumeResponse::class.java, resp,
+            )
             windowDays = resp.windowDays
             // Sort: non-zero by descending sets, then zero-volume alphabetical.
             rows = resp.muscles.toList().sortedWith(
@@ -326,24 +348,32 @@ private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String, 
 
 @Composable
 private fun YearStrip(year: String, byDate: Map<String, String>, neon: Boolean) {
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
     // Build a 53-column × 7-row grid for the year. Walk every day from
     // Jan 1 → Dec 31 and place cells by ISO week + day-of-week.
     val firstDay = remember(year) {
         java.time.LocalDate.of(year.toInt(), 1, 1)
     }
     val daysInYear = remember(year) { firstDay.lengthOfYear() }
-    val cellSize = 10.dp
-    val cellGap = 2.dp
-    androidx.compose.foundation.layout.Box {
+    // Cells are SIZED FROM THE AVAILABLE WIDTH. They used to be a fixed 10dp
+    // on a 2dp gap, which is 53 x 12 = 634dp of grid drawn into a card about
+    // 320dp wide — so roughly half the year was painted outside the canvas
+    // and clipped away, silently. A year view that shows seven months is
+    // worse than one with smaller squares.
+    androidx.compose.foundation.layout.BoxWithConstraints {
+        val totalCols = 53
+        val cellSize = (maxWidth / (totalCols + (totalCols - 1) * 0.22f))
+        val cellGap = cellSize * 0.22f
+        val labelH = 11.dp
         androidx.compose.foundation.Canvas(
             modifier = Modifier
-                .height((cellSize.value * 7 + cellGap.value * 6).dp)
+                .height(cellSize * 7 + cellGap * 6 + labelH)
                 .fillMaxWidth(),
         ) {
             val cellPx = cellSize.toPx()
             val gapPx = cellGap.toPx()
-            val totalCols = 53
             val originX = 0f
+            val gridTop = labelH.toPx()
             // Origin Jan 1 might not be a Sunday, so first column is partial.
             val startDow = firstDay.dayOfWeek.value % 7  // ISO Mon=1..Sun=7 → Sun=0
             for (i in 0 until daysInYear) {
@@ -360,12 +390,30 @@ private fun YearStrip(year: String, byDate: Map<String, String>, neon: Boolean) 
                     else -> if (neon) NeonMV.Lime else androidx.compose.ui.graphics.Color(0xFFEF4444)
                 }
                 val x = originX + col * (cellPx + gapPx)
-                val y = row * (cellPx + gapPx)
+                val y = gridTop + row * (cellPx + gapPx)
                 drawRect(
                     color = color,
                     topLeft = androidx.compose.ui.geometry.Offset(x, y),
                     size = androidx.compose.ui.geometry.Size(cellPx, cellPx),
                 )
+            }
+            // Month labels — the strip carried only a year, so you could see
+            // a streak but not when in the year it happened.
+            val monthStyle = androidx.compose.ui.text.TextStyle(
+                color = if (neon) NeonMV.Muted else MV.OnSurfaceDim, fontSize = 8.sp,
+            )
+            for (m in 1..12 step 2) {
+                val first = java.time.LocalDate.of(year.toInt(), m, 1)
+                val idx = first.dayOfYear - 1
+                val col = (idx + startDow) / 7
+                val lay = measurer.measure(
+                    first.month.name.take(3).lowercase()
+                        .replaceFirstChar { it.uppercase() },
+                    monthStyle,
+                )
+                val lx = (originX + col * (cellPx + gapPx))
+                    .coerceAtMost(size.width - lay.size.width)
+                drawText(lay, topLeft = androidx.compose.ui.geometry.Offset(lx, 0f))
             }
         }
         Text(

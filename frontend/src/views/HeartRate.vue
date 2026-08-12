@@ -314,8 +314,15 @@ function dailyLineOption(rows: TodaySummary[], color: string) {
     // truth is the opposite. `scale: true` alone fits the DATA, not the band.
     yAxis: {
       type: "value", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine,
+      // The baseline markLine shares this axis, so it must be inside the
+      // extent too — otherwise the one reference you compare against is the
+      // one that silently isn't drawn.
       ...bandAwareExtent(
-        data.map((d) => d[1]).filter((v): v is number => v != null),
+        [
+          ...data.map((d) => d[1]).filter((v): v is number => v != null),
+          ...(profile.value?.resting_hr_baseline != null
+            ? [profile.value.resting_hr_baseline] : []),
+        ],
         bands.value.resting_hr?.low, bands.value.resting_hr?.high,
       ),
     },

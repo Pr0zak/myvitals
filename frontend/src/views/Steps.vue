@@ -205,8 +205,11 @@ const weekdayOption = computed(() => {
     buckets[idx].sum += r.steps_total;
     buckets[idx].count += 1;
   }
-  const data = buckets.map((b) => b.count > 0 ? Math.round(b.sum / b.count) : 0);
-  if (data.every((v) => v === 0)) return null;
+  // null, not 0: a weekday with no readings is unknown, not a day you walked
+  // zero steps. Rendering it as a zero bar dragged the visible average down
+  // and made a gap in the data look like a rest day.
+  const data = buckets.map((b) => b.count > 0 ? Math.round(b.sum / b.count) : null);
+  if (data.every((v) => v == null)) return null;
   return {
     grid: { left: 48, right: 12, top: 24, bottom: 28 },
     xAxis: { type: "category", data: DOW, axisLabel: t.axisLabel },

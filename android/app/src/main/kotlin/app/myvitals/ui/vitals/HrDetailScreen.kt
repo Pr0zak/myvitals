@@ -80,11 +80,16 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     // card shades. Never recomputed here.
     var bandLow by remember { mutableStateOf<Double?>(null) }
     var bandHigh by remember { mutableStateOf<Double?>(null) }
+    // The web chart draws the server's baseline as a reference line; the phone
+    // drew only the band, so the two surfaces gave different readings of the
+    // same chart.
+    var baseline by remember { mutableStateOf<Double?>(null) }
     LaunchedEffect(Unit) {
         runCatching {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             api.summaryTiles().tiles.firstOrNull { it.key == "resting_hr" }?.let {
                 bandLow = it.bandLow; bandHigh = it.bandHigh
+                baseline = it.baseline
             }
         }
     }
@@ -295,7 +300,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     item { TimeInZone(live, maxHr) }
                     item { HrHistogram(live) }
                 } else {
-                    item { RestingHrTrend(rows, range, bandLow, bandHigh) }
+                    item { RestingHrTrend(rows, range, bandLow, bandHigh, baseline) }
                     item { WeekdayPattern(rows) }
                 }
             }
@@ -604,6 +609,7 @@ private fun RestingHrTrend(
     range: VitalRange,
     bandLow: Double? = null,
     bandHigh: Double? = null,
+    baseline: Double? = null,
 ) {
     val tok = LocalAppTokens.current
     val measurer = rememberTextMeasurer()
@@ -647,7 +653,15 @@ private fun RestingHrTrend(
                     // reading is abnormal" — the opposite of the truth.
                     val domain = niceDomain(
                         lo = real.min(), hi = real.max(),
-                        includeLo = bandLow?.toFloat(), includeHi = bandHigh?.toFloat(),
+                        // Baseline shares this axis, so it has to be inside
+                        // the extent or it is the one reference you compare
+                        // against and the one silently not drawn.
+                        includeLo = minOf(
+                            bandLow ?: Double.MAX_VALUE, baseline ?: Double.MAX_VALUE,
+                        ).takeIf { it != Double.MAX_VALUE }?.toFloat(),
+                        includeHi = maxOf(
+                            bandHigh ?: -Double.MAX_VALUE, baseline ?: -Double.MAX_VALUE,
+                        ).takeIf { it != -Double.MAX_VALUE }?.toFloat(),
                         minStep = 1f,   // labels are "%.0f" bpm
                     )
                     val g = chartGeom(domain, ChartInsets(
@@ -659,6 +673,10 @@ private fun RestingHrTrend(
                     }
                     if (bandLow != null && bandHigh != null) {
                         drawNormalBand(g, bandLow.toFloat(), bandHigh.toFloat(), accent)
+                    }
+                    baseline?.let {
+                        drawReferenceLine(g, it.toFloat(), tok.onSurfaceVariant,
+                            measurer, "baseline ${kotlin.math.round(it).toInt()}")
                     }
 
                     // Area fill under the line, then the line itself. Gaps are

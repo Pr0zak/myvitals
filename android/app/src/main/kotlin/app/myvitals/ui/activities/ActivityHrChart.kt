@@ -28,6 +28,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import app.myvitals.ui.vitals.ChartInsets
+import app.myvitals.ui.vitals.chartGeom
+import app.myvitals.ui.vitals.drawGapBridge
+import app.myvitals.ui.vitals.drawGrid
+import app.myvitals.ui.vitals.drawReferenceLine
+import app.myvitals.ui.vitals.drawXLabels
+import app.myvitals.ui.vitals.niceDomain
+import app.myvitals.ui.LocalAppTokens
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.sync.TimePoint
@@ -43,6 +51,17 @@ private val ZONE_COLORS = listOf(
 )
 private val ZONE_LABELS = listOf("Z1", "Z2", "Z3", "Z4", "Z5")
 
+/** A gap longer than this is a dropout, not a reading. */
+private const val DROPOUT_MS = 60_000L
+
+private fun z0(bpm: Double, maxHr: Int): Int = zoneFor(bpm, maxHr)
+
+/** "12:34" elapsed. */
+private fun fmtElapsed(secs: Long): String {
+    val m = secs / 60
+    return if (m >= 60) "%d:%02d".format(m / 60, m % 60) else "%d min".format(m)
+}
+
 private fun zoneFor(bpm: Double, maxHr: Int): Int {
     val pct = bpm / maxHr
     return when {
@@ -56,9 +75,14 @@ private fun zoneFor(bpm: Double, maxHr: Int): Int {
 
 @Composable
 fun ActivityHrChart(points: List<TimePoint>, maxHr: Int = 190) {
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
+    // This chart hard-coded the classic MV.* palette while its host screen and
+    // the shell around it are theme-aware, so it rendered as a navy card in a
+    // neon app.
+    val tok = LocalAppTokens.current
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("HEART RATE", color = MV.OnSurfaceVariant,
+            Text("HEART RATE", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
             if (points.size < 2) {
@@ -95,103 +119,82 @@ fun ActivityHrChart(points: List<TimePoint>, maxHr: Int = 190) {
                 for (i in 0 until sampled.size - 1) {
                     val (t0, v) = sampled[i]
                     val (t1, _) = sampled[i + 1]
-                    val z = zoneFor(v, maxHr)
-                    out[z] += (t1 - t0) / 1000L
+                    // Don't charge a recording gap to a zone.
+                    if (t1 - t0 > DROPOUT_MS) continue
+                    out[z0(v, maxHr)] += (t1 - t0) / 1000L
                 }
                 out
             }
 
-            Box(Modifier.fillMaxWidth().height(180.dp)) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val padX = 28.dp.toPx()  // leave room for y-axis labels
-                    val padTop = 8.dp.toPx()
-                    val padBot = 16.dp.toPx()
-                    val plotW = size.width - padX
-                    val plotH = size.height - padTop - padBot
-                    val tStart = sampled.first().first
-                    val tEnd = sampled.last().first
-                    val tSpan = (tEnd - tStart).toFloat().coerceAtLeast(1f)
+            Canvas(Modifier.fillMaxWidth().height(190.dp)) {
+                val domain = niceDomain(
+                    lo = minBpm.toFloat(), hi = maxBpm.toFloat(),
+                    targetTicks = 3, minStep = 1f,
+                )
+                val g = chartGeom(domain, ChartInsets(
+                    left = 30.dp.toPx(), top = 6.dp.toPx(),
+                    right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+                ))
+                val tStart = sampled.first().first
+                val tEnd = sampled.last().first
+                val tSpan = (tEnd - tStart).toFloat().coerceAtLeast(1f)
 
-                    // Y range — pad min/max a bit.
-                    val yMin = (minBpm - 10).coerceAtLeast(40.0).toFloat()
-                    val yMax = (maxBpm + 10).coerceAtMost(220.0).toFloat()
-                    val ySpan = (yMax - yMin).coerceAtLeast(1f)
-
-                    // Zone background bands (faint).
-                    val zoneEdges = listOf(0.50, 0.60, 0.70, 0.80, 0.90, 1.00)
-                    for (zi in 0..4) {
-                        val lo = (maxHr * zoneEdges[zi]).toFloat()
-                        val hi = (maxHr * zoneEdges[zi + 1]).toFloat()
-                        if (hi < yMin || lo > yMax) continue
-                        val y0 = padTop + ((yMax - hi.coerceAtMost(yMax)) / ySpan) * plotH
-                        val y1 = padTop + ((yMax - lo.coerceAtLeast(yMin)) / ySpan) * plotH
-                        drawRect(
-                            color = ZONE_COLORS[zi].copy(alpha = 0.07f),
-                            topLeft = Offset(padX, y0),
-                            size = Size(plotW, (y1 - y0).coerceAtLeast(0f)),
-                        )
-                    }
-
-                    // Y-axis tick lines + labels via raw drawText? — Compose
-                    // Canvas doesn't have a text helper, so we leave the
-                    // numeric labels to a Row outside; we just draw faint
-                    // gridlines.
-                    val ticks = listOf(yMin, (yMin + yMax) / 2f, yMax)
-                    for (yv in ticks) {
-                        val py = padTop + ((yMax - yv) / ySpan) * plotH
-                        drawLine(
-                            color = MV.OnSurfaceDim.copy(alpha = 0.18f),
-                            start = Offset(padX, py),
-                            end = Offset(size.width, py),
-                            strokeWidth = 0.7.dp.toPx(),
-                        )
-                    }
-
-                    // Per-segment colored line — pick the zone of the
-                    // segment's mean.
-                    for (i in 0 until sampled.size - 1) {
-                        val (t0, v0) = sampled[i]
-                        val (t1, v1) = sampled[i + 1]
-                        val mean = (v0 + v1) * 0.5
-                        val zi = zoneFor(mean, maxHr)
-                        val x0 = padX + ((t0 - tStart).toFloat() / tSpan) * plotW
-                        val x1 = padX + ((t1 - tStart).toFloat() / tSpan) * plotW
-                        val y0 = padTop + ((yMax - v0.toFloat()) / ySpan) * plotH
-                        val y1 = padTop + ((yMax - v1.toFloat()) / ySpan) * plotH
-                        drawLine(
-                            color = ZONE_COLORS[zi],
-                            start = Offset(x0, y0),
-                            end = Offset(x1, y1),
-                            strokeWidth = 2.dp.toPx(),
-                        )
-                    }
-
-                    // Avg line
-                    val avgY = padTop + ((yMax - avgBpm.toFloat()) / ySpan) * plotH
-                    drawLine(
-                        color = MV.OnSurfaceVariant.copy(alpha = 0.5f),
-                        start = Offset(padX, avgY), end = Offset(size.width, avgY),
-                        strokeWidth = 1.dp.toPx(),
-                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
-                            floatArrayOf(4.dp.toPx(), 3.dp.toPx())
-                        ),
+                // Zone bands. The edge list used to start at 0.50 x maxHr while
+                // zoneFor() puts everything below 0.60 in Z1 — so an easy ride
+                // spent below 50% sat on unpainted background while the chart's
+                // own colouring called it Z1. Bands now follow the same
+                // thresholds the line colouring uses.
+                val zoneEdges = listOf(0.0, 0.60, 0.70, 0.80, 0.90, 10.0)
+                for (zi in 0..4) {
+                    val lo = (maxHr * zoneEdges[zi]).toFloat()
+                    val hi = (maxHr * zoneEdges[zi + 1]).toFloat()
+                    if (hi < domain.min || lo > domain.max) continue
+                    val y0 = g.y(hi); val y1 = g.y(lo)
+                    drawRect(
+                        color = ZONE_COLORS[zi].copy(alpha = 0.07f),
+                        topLeft = Offset(g.left, y0),
+                        size = Size(g.width, (y1 - y0).coerceAtLeast(0f)),
                     )
                 }
-                // Y-axis labels overlaid as Text rows
-                Column(
-                    Modifier.fillMaxSize().padding(start = 0.dp, end = 0.dp),
-                    verticalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("${(maxBpm + 10).toInt()}", color = MV.OnSurfaceDim, fontSize = 9.sp,
-                        modifier = Modifier.padding(start = 4.dp))
-                    Spacer(Modifier.height(0.dp))
-                    Text("${((minBpm + maxBpm) / 2).toInt()}",
-                        color = MV.OnSurfaceDim, fontSize = 9.sp,
-                        modifier = Modifier.padding(start = 4.dp))
-                    Text("${(minBpm - 10).coerceAtLeast(40.0).toInt()}",
-                        color = MV.OnSurfaceDim, fontSize = 9.sp,
-                        modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
+
+                // Labels used to be a SpaceBetween Column laid over the canvas
+                // with a stray zero-height Spacer as a fourth child, so free
+                // space split into three gaps and the middle number sat ~20dp
+                // below the gridline it named. It also read (min+max)/2 while
+                // the gridline was at the padded midpoint — two different
+                // numbers. One geometry now.
+                drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 3) {
+                    "%.0f".format(it)
                 }
+
+                // Per-segment coloured line — zone of the segment's mean.
+                for (i in 0 until sampled.size - 1) {
+                    val (t0, v0) = sampled[i]
+                    val (t1, v1) = sampled[i + 1]
+                    val x0 = g.left + ((t0 - tStart).toFloat() / tSpan) * g.width
+                    val x1 = g.left + ((t1 - tStart).toFloat() / tSpan) * g.width
+                    val y0 = g.y(v0.toFloat()); val y1 = g.y(v1.toFloat())
+                    // A gap in the recording is not a heart rate. Bridging it
+                    // with a solid coloured segment invented a reading AND
+                    // charged the missing minutes to whichever zone the
+                    // interpolation happened to cross.
+                    if (t1 - t0 > DROPOUT_MS) {
+                        drawGapBridge(Offset(x0, y0), Offset(x1, y1), tok.onSurfaceDim)
+                        continue
+                    }
+                    drawLine(
+                        color = ZONE_COLORS[zoneFor((v0 + v1) * 0.5, maxHr)],
+                        start = Offset(x0, y0), end = Offset(x1, y1),
+                        strokeWidth = 2.dp.toPx(),
+                    )
+                }
+
+                drawReferenceLine(g, avgBpm.toFloat(), tok.onSurfaceVariant,
+                    measurer, "avg ${avgBpm.toInt()}")
+                drawXLabels(g, measurer, tok.onSurfaceDim, listOf(
+                    0f to "0:00",
+                    1f to fmtElapsed((tEnd - tStart) / 1000L),
+                ))
             }
             Spacer(Modifier.height(6.dp))
             Row {

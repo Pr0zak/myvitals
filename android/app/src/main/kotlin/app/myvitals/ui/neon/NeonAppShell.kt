@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -331,7 +332,13 @@ private fun NeonBottomBar(nav: NavHostController) {
             // a hand-rolled bar does not, and the toolbar landed underneath the
             // Android back/home/recents strip with its labels cut in half.
             .navigationBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            // Extra clearance at the bottom. Under GESTURE navigation
+            // navigationBarsPadding() is only the ~24dp handle, so the bar sat
+            // right on the system gesture strip: taps in its lower few dp were
+            // swallowed and the tab simply did not change. Verified on the
+            // emulator switched to gestural — y<=2295 registered, y=2305 did
+            // not, while the bar still looked tappable down to ~2330.
+            .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 18.dp),
     ) {
         Row(
             Modifier
@@ -365,7 +372,11 @@ private fun NeonBottomBar(nav: NavHostController) {
                             if (selected) tab.color.copy(alpha = 0.16f) else Color.Transparent,
                         )
                         .clickable { nav.navigateTopTab(tab.route) }
-                        .padding(vertical = 10.dp),
+                        // 48dp minimum touch target. A 20dp icon on 10dp
+                        // padding gave 40dp, under the platform minimum, which
+                        // is a miss you feel rather than see.
+                        .heightIn(min = 48.dp)
+                        .padding(vertical = 6.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

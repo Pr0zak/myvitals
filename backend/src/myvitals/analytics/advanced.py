@@ -165,12 +165,32 @@ TYPE_INTENSITY = {
 }
 
 
+def _local_tz():
+    """The user's timezone, for bucketing instants into calendar days.
+
+    The CT runs TZ=UTC while the user is Central, so `start_at.date()` puts an
+    evening session on tomorrow. This is the recurring local-day trap in
+    CLAUDE.md, reaching training load: a 7pm workout landed on the next day's
+    bar and, at a week boundary, in the next week entirely.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        from ..config import settings
+        return ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:  # noqa: BLE001
+        return timezone.utc
+
+
 async def daily_training_stress(
     db: AsyncSession, target: date,
 ) -> float | None:
     """Sum of suffer_score for the day, or duration*intensity fallback."""
-    day_start = datetime.combine(target, time.min, tzinfo=timezone.utc)
-    day_end = datetime.combine(target, time.max, tzinfo=timezone.utc)
+    # LOCAL midnight-to-midnight, expressed as instants. Combining a date with
+    # UTC gave a window shifted by the local offset, so an evening activity
+    # counted toward the following day.
+    tz = _local_tz()
+    day_start = datetime.combine(target, time.min, tzinfo=tz)
+    day_end = datetime.combine(target, time.max, tzinfo=tz)
     rows = (await db.execute(
         select(models.Activity.duration_s, models.Activity.suffer_score, models.Activity.type)
         .where(models.Activity.start_at >= day_start)
@@ -213,8 +233,7 @@ async def _strength_training_stress(
             models.StrengthWorkout.split_focus,
         )
         .where(models.StrengthWorkout.status == "completed")
-        .where(models.StrengthWorkout.started_at >= day_start)
-        .where(models.StrengthWorkout.started_at <= day_end)
+        .where(models.StrengthWorkout.date == day_start.date())
     )).all()
     total = 0.0
     for started, completed, paused_s, focus in rows:
@@ -258,10 +277,15 @@ async def sleep_consistency_score(
     σ=0 → 100, σ=120min → 0 (linear). Uses circular stats so a 23:30 bed
     time and a 00:30 bed time count as 1h apart, not 23h.
     """
+    # Local, like every other day window here. The slop is only at the two
+    # edges of a 14-day statistical window so the score barely moves, but
+    # leaving one UTC instance in place is how this bug keeps finding a way
+    # back in.
+    _tz = _local_tz()
     cutoff_start = datetime.combine(
-        target - timedelta(days=window_days), time.min, tzinfo=timezone.utc,
+        target - timedelta(days=window_days), time.min, tzinfo=_tz,
     )
-    cutoff_end = datetime.combine(target, time.max, tzinfo=timezone.utc)
+    cutoff_end = datetime.combine(target, time.max, tzinfo=_tz)
     rows = (await db.execute(
         select(models.SleepStage.time, models.SleepStage.duration_s)
         .where(models.SleepStage.time >= cutoff_start)
@@ -426,8 +450,9 @@ async def training_load_by_day(
 
     Two grouped queries for the whole window rather than one pair per day.
     """
-    start = datetime.combine(since, time.min, tzinfo=timezone.utc)
-    end = datetime.combine(until, time.max, tzinfo=timezone.utc)
+    tz = _local_tz()
+    start = datetime.combine(since, time.min, tzinfo=tz)
+    end = datetime.combine(until, time.max, tzinfo=tz)
     out: dict[date, float] = {}
 
     acts = (await db.execute(
@@ -440,33 +465,40 @@ async def training_load_by_day(
         .where(models.Activity.start_at >= start)
         .where(models.Activity.start_at <= end)
     )).all()
+    tz = _local_tz()
     for start_at, dur_s, suffer, atype in acts:
-        d = start_at.date()
+        d = start_at.astimezone(tz).date()
         if suffer is not None and suffer > 0:
             out[d] = out.get(d, 0.0) + float(suffer)
         elif dur_s:
             intensity = TYPE_INTENSITY.get(str(atype or "").lower(), 0.5)
             out[d] = out.get(d, 0.0) + (dur_s / 60.0) * intensity
 
+    # Filtered and bucketed on `date`, the plan's LOCAL calendar day, which the
+    # table already stores. Using started_at.date() would bucket a 7pm session
+    # onto tomorrow.
     lifts = (await db.execute(
         select(
+            models.StrengthWorkout.date,
             models.StrengthWorkout.started_at,
             models.StrengthWorkout.completed_at,
             models.StrengthWorkout.total_paused_s,
             models.StrengthWorkout.split_focus,
         )
         .where(models.StrengthWorkout.status == "completed")
-        .where(models.StrengthWorkout.started_at >= start)
-        .where(models.StrengthWorkout.started_at <= end)
+        .where(models.StrengthWorkout.date >= since)
+        .where(models.StrengthWorkout.date <= until)
     )).all()
-    for started, completed, paused_s, focus in lifts:
+    for wdate, started, completed, paused_s, focus in lifts:
+        # No start time means no duration to score. Sessions marked complete
+        # without ever being started (the "mark done" path on cardio days)
+        # contribute nothing rather than a made-up number.
         if not started or not completed:
             continue
         net_s = (completed - started).total_seconds() - float(paused_s or 0)
         if net_s <= 0:
             continue
         key = "yoga" if str(focus or "").lower() == "yoga" else "strength"
-        d = started.date()
-        out[d] = out.get(d, 0.0) + (net_s / 60.0) * TYPE_INTENSITY.get(key, 0.6)
+        out[wdate] = out.get(wdate, 0.0) + (net_s / 60.0) * TYPE_INTENSITY.get(key, 0.6)
 
     return {k: round(v, 1) for k, v in out.items()}

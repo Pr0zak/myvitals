@@ -71,6 +71,12 @@ const activeIndex = computed(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
+  /* 48px minimum touch target. The phone bar shipped 40dp tabs and taps near
+     their edge missed; the same minimum applies here, and a bar pinned to the
+     bottom of a phone browser is exactly where a thumb lands imprecisely. */
+  min-height: 48px;
+  padding: 0 4px;
   gap: 5px;
   font-size: 11px;
   font-weight: 600;

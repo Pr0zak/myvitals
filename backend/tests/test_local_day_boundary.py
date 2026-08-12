@@ -13,7 +13,9 @@ source and fails on the specific expression that causes it.
 import ast
 import pathlib
 
-API = pathlib.Path(__file__).resolve().parents[1] / "src" / "myvitals" / "api"
+SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "myvitals"
+API = SRC / "api"
+ANALYTICS = SRC / "analytics"
 
 # Modules whose endpoints resolve a calendar day the user actually sees.
 DAY_FACING_MODULES = ["summary.py"]
@@ -76,3 +78,70 @@ def test_the_guard_actually_catches_the_pattern():
         "instant = datetime.now(timezone.utc)\n"   # fine — not a date
     )
     assert _utc_today_calls(good) == []
+
+
+# ── Second shape of the same bug ────────────────────────────────────────
+#
+# The first guard catches `datetime.now(timezone.utc).date()` in the API layer.
+# It did not catch the ANALYTICS layer combining a calendar date with UTC to
+# build a day window:
+#
+#     day_start = datetime.combine(target, time.min, tzinfo=timezone.utc)
+#
+# For a Central user that window runs 7pm-7pm, so an evening workout is
+# attributed to the following day — which put a Tuesday session on Wednesday's
+# bar in the weekly-load card, and at a week boundary in the following week.
+#
+# Windows anchored to a CLOCK HOUR rather than midnight (a "night" of
+# 22:00→09:00) are a different question and deliberately not flagged here;
+# they are listed in KNOWN_CLOCK_WINDOWS so this test states what it does not
+# cover instead of implying the whole layer is clean.
+
+KNOWN_CLOCK_WINDOWS = {
+    # module: why it is exempt
+    "sleep.py": "18:00→14:00 night window, not a midnight-to-midnight day",
+    "baselines.py": "22:00→09:00 night window for nightly RHR",
+}
+
+
+def _utc_day_windows(tree: ast.AST) -> list[int]:
+    """`datetime.combine(<date>, time.min|max, tzinfo=timezone.utc)` lines."""
+    hits = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if not (isinstance(fn, ast.Attribute) and fn.attr == "combine"):
+            continue
+        # Second arg is a midnight/end-of-day sentinel?
+        if len(node.args) < 2:
+            continue
+        a1 = node.args[1]
+        is_midnight = (
+            isinstance(a1, ast.Attribute) and a1.attr in {"min", "max"}
+            and isinstance(a1.value, ast.Name) and a1.value.id == "time"
+        )
+        if not is_midnight:
+            continue
+        for kw in node.keywords:
+            if kw.arg != "tzinfo":
+                continue
+            v = kw.value
+            if isinstance(v, ast.Attribute) and v.attr == "utc":
+                hits.append(node.lineno)
+    return hits
+
+
+def test_analytics_day_windows_are_local():
+    offenders = []
+    for path in sorted(ANALYTICS.glob("*.py")):
+        if path.name in KNOWN_CLOCK_WINDOWS:
+            continue
+        tree = ast.parse(path.read_text())
+        offenders += [f"{path.name}:{ln}" for ln in _utc_day_windows(tree)]
+    assert not offenders, (
+        "calendar day combined with UTC to build a day window: "
+        + ", ".join(offenders)
+        + " — for a Central user this runs 7pm-7pm, so an evening activity is "
+        "attributed to the following day. Use the configured local tz."
+    )

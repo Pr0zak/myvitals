@@ -399,7 +399,7 @@ private fun StageBreakdownChart(nights: List<SleepNight>) {
             // night's bar overflowed the top of the box.
             val stackTotals = nights.map { n ->
                 n.stages.sumOf { it.durationS }.toFloat() / 3600f
-            }
+            }.ifEmpty { listOf(1f) }
             Canvas(Modifier.fillMaxWidth().height(170.dp)) {
                 val domain = niceDomain(
                     lo = 0f, hi = (stackTotals.maxOrNull() ?: 1f).coerceAtLeast(1f),
@@ -412,9 +412,14 @@ private fun StageBreakdownChart(nights: List<SleepNight>) {
                 drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 3) {
                     "%.0fh".format(it)
                 }
-                val barW = g.slot(nights.size) * 0.74f
-                for ((i, n) in nights.withIndex()) {
-                    val cx = g.xBar(i, nights.size)
+                // Bars sit on the same continuous day axis as the trend line:
+                // a missing night leaves an empty slot instead of pulling the
+                // next night's bar up against the previous one.
+                val slots = onDayAxis(nights)
+                val barW = g.slot(slots.size) * 0.74f
+                for ((i, n) in slots.withIndex()) {
+                    if (n == null) continue
+                    val cx = g.xBar(i, slots.size)
                     var acc = 0f
                     for (st in stackOrder) {
                         val secs = n.stages
@@ -434,13 +439,15 @@ private fun StageBreakdownChart(nights: List<SleepNight>) {
                 // SpaceBetween over a FILTERED subset, so the dates spread
                 // evenly across the width and sat under the wrong bars.
                 drawXLabels(g, measurer, tok.onSurfaceDim, buildList {
-                    nights.firstOrNull()?.let { add((0.5f / nights.size) to shortDate(it.date)) }
-                    if (nights.size >= 5) {
-                        val m = nights.size / 2
-                        add(((m + 0.5f) / nights.size) to shortDate(nights[m].date))
+                    val n = slots.size
+                    slots.firstOrNull { it != null }?.let {
+                        add((0.5f / n) to shortDate(it.date))
                     }
-                    if (nights.size >= 2) nights.lastOrNull()?.let {
-                        add(((nights.size - 0.5f) / nights.size) to shortDate(it.date))
+                    if (n >= 5) slots[n / 2]?.let {
+                        add(((n / 2 + 0.5f) / n) to shortDate(it.date))
+                    }
+                    if (n >= 2) slots.lastOrNull { it != null }?.let {
+                        add(((n - 0.5f) / n) to shortDate(it.date))
                     }
                 })
             }
@@ -485,13 +492,36 @@ private fun DurationTrend(nights: List<SleepNight>, goalH: Double) {
     }
 }
 
+/**
+ * Expand a sparse night list onto a CONTINUOUS day axis, one slot per calendar
+ * day from the first night to the last, with null where no night was recorded.
+ *
+ * Both sleep charts placed points and bars by LIST INDEX, so a week with two
+ * missing nights closed the gap up: the nights either side rendered as
+ * neighbours and the line drew a smooth slope across days that have no data.
+ * A gap in the record is not a trend.
+ */
+private fun onDayAxis(nights: List<SleepNight>): List<SleepNight?> {
+    val byDate = nights.associateBy { it.date }
+    val days = nights.mapNotNull { runCatching { java.time.LocalDate.parse(it.date) }.getOrNull() }
+    val first = days.minOrNull() ?: return nights
+    val last = days.maxOrNull() ?: return nights
+    val span = java.time.temporal.ChronoUnit.DAYS.between(first, last).toInt()
+    // Guard against a pathological range blowing the chart up.
+    if (span < 0 || span > 400) return nights
+    return (0..span).map { byDate[first.plusDays(it.toLong()).toString()] }
+}
+
 @Composable
 private fun SleepDurationLine(nights: List<SleepNight>, goalH: Float, color: Color) {
     val tok = LocalAppTokens.current
     val measurer = androidx.compose.ui.text.rememberTextMeasurer()
     Canvas(Modifier.fillMaxSize()) {
         if (nights.size < 2) return@Canvas
-        val ys = nights.map { it.totalS.toFloat() / 3600f }
+        val slots = onDayAxis(nights)
+        val ys = slots.map { it?.let { n -> n.totalS.toFloat() / 3600f } }
+        val real = ys.filterNotNull()
+        if (real.isEmpty()) return@Canvas
         // The goal has to be INSIDE the domain or it is drawn off-canvas. The
         // old scale was the data's own min..max, so on any window where every
         // night fell short of the goal the goal line was painted above the top
@@ -501,7 +531,7 @@ private fun SleepDurationLine(nights: List<SleepNight>, goalH: Float, color: Col
         // Zero-anchored: a duration is a count, and padding below the minimum
         // produced a "-5h" gridline — there is no such thing as negative sleep.
         val domain = niceDomain(
-            lo = 0f, hi = maxOf(ys.max(), goalH),
+            lo = 0f, hi = maxOf(real.max(), goalH),
             targetTicks = 3, minStep = 1f, zeroAnchored = true,
         )
         val g = chartGeom(domain, ChartInsets(
@@ -514,11 +544,20 @@ private fun SleepDurationLine(nights: List<SleepNight>, goalH: Float, color: Col
         // Goal line — sourced from /profile.extra.sleep_goal_h.
         drawReferenceLine(g, goalH, color, measurer, "goal ${"%.1f".format(goalH)}h")
         val path = androidx.compose.ui.graphics.Path()
+        var prev: Offset? = null
+        var prevIdx = -1
         for ((i, y) in ys.withIndex()) {
-            val x = g.x(i, ys.size)
-            val py = g.y(y)
-            if (i == 0) path.moveTo(x, py) else path.lineTo(x, py)
-            drawCircle(color = color, radius = 2.dp.toPx(), center = Offset(x, py))
+            if (y == null) continue
+            val p = Offset(g.x(i, ys.size), g.y(y))
+            val p0 = prev
+            when {
+                p0 == null -> path.moveTo(p.x, p.y)
+                // A night with no record sits between these two.
+                i - prevIdx > 1 -> { drawGapBridge(p0, p, color); path.moveTo(p.x, p.y) }
+                else -> path.lineTo(p.x, p.y)
+            }
+            drawCircle(color = color, radius = 2.dp.toPx(), center = p)
+            prev = p; prevIdx = i
         }
         drawPath(path = path, color = color, style = Stroke(
             width = 2.dp.toPx(),

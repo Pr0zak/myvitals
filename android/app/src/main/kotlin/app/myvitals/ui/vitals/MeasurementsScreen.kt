@@ -264,7 +264,21 @@ private fun LineChart(values: List<Double>, color: Color, dates: List<String> = 
         drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 3) {
             "%.1f".format(it)
         }
-        val pts = values.mapIndexed { i, v -> Offset(g.x(i, values.size), g.y(v.toFloat())) }
+        // Place points by DATE, not by list position. Measurements are logged
+        // ad hoc — three in one week then nothing for a month — and even
+        // spacing drew that month-long gap as one ordinary step, which reads
+        // as a steady trend rather than two readings far apart. The end labels
+        // said the real dates, so the chart contradicted its own axis.
+        val ms = dates.mapNotNull { runCatching { java.time.Instant.parse(it).toEpochMilli() }
+            .getOrNull() }
+        val byTime = ms.size == values.size && ms.size >= 2 && ms.last() > ms.first()
+        val t0 = ms.firstOrNull() ?: 0L
+        val tSpan = ((ms.lastOrNull() ?: 1L) - t0).toFloat().coerceAtLeast(1f)
+        val pts = values.mapIndexed { i, v ->
+            val x = if (byTime) g.left + ((ms[i] - t0).toFloat() / tSpan) * g.width
+                    else g.x(i, values.size)
+            Offset(x, g.y(v.toFloat()))
+        }
         val path = androidx.compose.ui.graphics.Path()
         pts.forEachIndexed { i, o -> if (i == 0) path.moveTo(o.x, o.y) else path.lineTo(o.x, o.y) }
         drawPath(path, color = color, style = Stroke(

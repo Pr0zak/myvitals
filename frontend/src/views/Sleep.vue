@@ -195,12 +195,38 @@ const hypnogramOption = computed(() => {
 });
 
 // === Last N nights stacked bar ===
+/**
+ * Expand the sparse night list onto a CONTINUOUS day axis — one slot per
+ * calendar day from first to last, null where nothing was recorded.
+ *
+ * A category axis built from only the nights present closes the gaps up, so
+ * two nights either side of a missing week render as neighbours and the chart
+ * implies continuity it does not have. Phone twin: `onDayAxis` in
+ * SleepDetailScreen.kt.
+ */
+function onDayAxis(list: SleepNight[]): Array<{ date: string; night: SleepNight | null }> {
+  if (list.length === 0) return [];
+  const byDate = new Map(list.map((n) => [n.date, n]));
+  const times = list.map((n) => new Date(n.date + "T00:00:00").getTime())
+    .filter((t) => Number.isFinite(t));
+  if (times.length === 0) return list.map((n) => ({ date: n.date, night: n }));
+  const first = Math.min(...times);
+  const days = Math.round((Math.max(...times) - first) / 86_400_000);
+  // Guard against a pathological range building a huge array.
+  if (days < 0 || days > 400) return list.map((n) => ({ date: n.date, night: n }));
+  return Array.from({ length: days + 1 }, (_, i) => {
+    const d = new Date(first + i * 86_400_000).toISOString().slice(0, 10);
+    return { date: d, night: byDate.get(d) ?? null };
+  });
+}
+
 const stackedNightsOption = computed(() => {
   void chartTheme.value;
   void isNeon.value;
   const t = chartTheme.value;
   const STAGE_COLORS = stageColors.value;
-  const dates = nights.value.map((n) => n.date);
+  const slots = onDayAxis(nights.value);
+  const dates = slots.map((s) => s.date);
   const allStages = Array.from(new Set(nights.value.flatMap((n) => n.stages.map((s) => s.stage))));
   const orderedStages = [...STAGE_ORDER, ...allStages.filter((s) => !STAGE_ORDER.includes(s))];
 
@@ -208,8 +234,11 @@ const stackedNightsOption = computed(() => {
     name: stage,
     type: "bar",
     stack: "sleep",
-    data: nights.value.map((n) => {
-      const s = n.stages.find((x) => x.stage === stage);
+    // null, not 0, for a day with no night: an unrecorded night is not a
+    // night of zero sleep, and a zero-height stack reads as one.
+    data: slots.map(({ night }) => {
+      if (!night) return null;
+      const s = night.stages.find((x) => x.stage === stage);
       return s ? +(s.duration_s / 60).toFixed(0) : 0;
     }),
     itemStyle: { color: STAGE_COLORS[stage] ?? "#64748b" },
@@ -395,8 +424,13 @@ function fmtNightDate(n: SleepNight): string {
         </div>
 
         <ul class="recent-nights">
-          <li v-for="n in recentNights" :key="n.date">
-            <span class="rn-date">{{ fmtNightDate(n) }}</span>
+          <li v-for="n in recentNights" :key="`${n.date}-${n.start}`">
+            <span class="rn-date">
+              {{ fmtNightDate(n) }}
+              <!-- The stats beside this list count nights only, so an
+                   unlabelled nap made the two disagree about the same data. -->
+              <span v-if="n.kind === 'nap'" class="rn-nap">nap</span>
+            </span>
             <span class="rn-window mono">
               {{ fmtTime(new Date(n.start)) }}
               <span class="dim">→</span>
@@ -412,7 +446,7 @@ function fmtNightDate(n: SleepNight): string {
                 @click="expandedRecent = !expandedRecent">
           {{ expandedRecent
               ? `Show last 7 only`
-              : `Show all ${allRecentNights.length} nights →` }}
+              : `Show all ${allRecentNights.length} sessions →` }}
         </button>
       </Card>
 
@@ -471,6 +505,9 @@ function fmtNightDate(n: SleepNight): string {
 }
 .rn-toggle:hover { text-decoration: underline; }
 
+.rn-nap { font-size: 0.66rem; text-transform: uppercase; letter-spacing: .06em;
+          color: var(--muted); border: 1px solid currentColor; border-radius: 999px;
+          padding: 0 .35em; margin-left: .4em; vertical-align: middle; }
 .recent-nights {
   list-style: none; padding: 0; margin: 0;
   display: flex; flex-direction: column; gap: 0.4rem;

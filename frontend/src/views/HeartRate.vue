@@ -618,18 +618,21 @@ const yoyOption = computed(() => {
   void chartTheme.value; void isNeon.value;
   const t = chartTheme.value;
   const hrColor = hrLineColor.value;
+  // Keep the null days on BOTH series, same as every other chart on this page.
+  // Filtering them let ECharts join the readings either side of a gap with a
+  // smooth segment — and on the year-ago line, which is a year of history,
+  // that could span weeks of missing data as one confident curve to compare
+  // yourself against.
   const cur = dailyRows.value
-    .filter((r) => r.resting_hr != null)
-    .map((r) => [new Date(r.date + "T00:00:00").getTime(), r.resting_hr]);
+    .map((r) => [new Date(r.date + "T00:00:00").getTime(), r.resting_hr] as
+      [number, number | null]);
   // Year-ago series gets shifted forward by 1 year so both lines share an x-axis.
-  const yoy = yearAgoRows.value
-    .filter((r) => r.resting_hr != null)
-    .map((r) => {
-      const d = new Date(r.date + "T00:00:00");
-      d.setFullYear(d.getFullYear() + 1);
-      return [d.getTime(), r.resting_hr];
-    });
-  if (cur.length === 0 && yoy.length === 0) return null;
+  const yoy = yearAgoRows.value.map((r) => {
+    const d = new Date(r.date + "T00:00:00");
+    d.setFullYear(d.getFullYear() + 1);
+    return [d.getTime(), r.resting_hr] as [number, number | null];
+  });
+  if (!cur.some((d) => d[1] != null) && !yoy.some((d) => d[1] != null)) return null;
   return {
     legend: { textStyle: t.axisLabel, top: 0 },
     grid: { left: 40, right: 16, top: 30, bottom: 28 },
@@ -640,12 +643,14 @@ const yoyOption = computed(() => {
     series: [
       {
         type: "line", name: "This period", smooth: true, showSymbol: cur.length < 90,
+        connectNulls: false,
         lineStyle: { color: hrColor, width: 1.8 },
         itemStyle: { color: hrColor },
         data: cur,
       },
       {
         type: "line", name: "Same period last year", smooth: true, showSymbol: false,
+        connectNulls: false,
         lineStyle: { color: t.palette.steps, width: 1.4, type: "dashed" },
         itemStyle: { color: t.palette.steps },
         data: yoy,

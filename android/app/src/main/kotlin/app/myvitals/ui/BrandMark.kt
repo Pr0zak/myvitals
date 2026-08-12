@@ -46,14 +46,27 @@ fun BrandMark(
         fun p(x: Float, y: Float) =
             Offset((54f + (x - 54f) * 0.87f) * u, (54f + (y - 54f) * 0.87f) * u)
 
-        val stroke = Stroke(width = 4f * 0.87f * u, cap = StrokeCap.Round)
+        // Below ~48dp the halos bleed into the strokes and the outer bead
+        // merges with its own orbit — the same mush the old tri-ring had at
+        // small size, just milder. The favicon already solves this by dropping
+        // to two orbits and a solid centre pip; do the same here rather than
+        // shipping a crowded 32dp mark.
+        val small = dimension < 48.dp
+        val stroke = Stroke(width = (if (small) 5.5f else 4f) * 0.87f * u,
+                            cap = StrokeCap.Round)
 
         // orbit radius, sweep start/extent (deg), bead radius, colour
         data class Orbit(
             val r: Float, val start: Float, val sweep: Float,
             val bead: Float, val bx: Float, val by: Float, val color: Color,
         )
-        val orbits = listOf(
+        val orbits = if (small) listOf(
+            // Two orbits with wider openings; recovery becomes the centre pip.
+            Orbit(28f, -145f, 250f, 7.0f, 27.69f, 63.58f,
+                Color(0xFFFF3AD8).copy(alpha = tint)),   // sleep
+            Orbit(14f, 35f, 250f, 5.8f, 64.72f, 63.00f,
+                Color(0xFF5DFF3B).copy(alpha = tint)),   // move
+        ) else listOf(
             Orbit(29f, -111f, 288f, 6.0f, 26.75f, 63.92f,
                 Color(0xFFFF3AD8).copy(alpha = tint)),   // sleep
             Orbit(19.5f, 130f, 280f, 5.5f, 68.94f, 66.53f,
@@ -78,9 +91,18 @@ fun BrandMark(
         // the charts give the latest reading.
         for (o in orbits) {
             val centre = p(o.bx, o.by)
-            drawCircle(o.color.copy(alpha = o.color.alpha * 0.16f),
-                radius = (o.bead + 2.6f) * 0.87f * u, center = centre)
+            // No halo in the small form — it is what did the smudging.
+            if (!small) {
+                drawCircle(o.color.copy(alpha = o.color.alpha * 0.16f),
+                    radius = (o.bead + 2.6f) * 0.87f * u, center = centre)
+            }
             drawCircle(o.color, radius = o.bead * 0.87f * u, center = centre)
+        }
+        if (small) {
+            drawCircle(
+                Color(0xFF28E6FF).copy(alpha = tint),
+                radius = 5.5f * 0.87f * u, center = p(54f, 54f),
+            )
         }
     }
 }

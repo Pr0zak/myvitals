@@ -32,3 +32,25 @@ def test_helper_is_not_silently_degrading():
         "_classify returned the same label for a nap and a full night — the "
         "fallback is swallowing a real error (a missing import, most likely)"
     )
+
+
+def test_every_sleepnight_builder_classifies():
+    """All four SleepNight construction sites must set `kind`.
+
+    The first version of this change patched only the canonical-session branch
+    of /sleep/range. The data actually flows through the stage-CLUSTERING
+    fallback, so every session came back with the schema default "sleep" — a
+    lunchtime 48-minute session was labelled a night, which is exactly the bug
+    the change was supposed to fix and looks identical to it from outside.
+    """
+    import pathlib
+    import re
+
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "src" / "myvitals" / "api" / "query.py").read_text()
+    builders = len(re.findall(r"SleepNight\(", src))
+    classified = src.count("kind=_classify")
+    assert builders == classified, (
+        f"{builders} SleepNight(...) construction sites but only {classified} "
+        "set kind= — the unclassified ones silently fall back to 'sleep'"
+    )

@@ -76,6 +76,22 @@ def _resolve_range(
     return start, end
 
 
+def _classify(start_at: datetime, total_s: int) -> str:
+    """nap vs night, via the same rule the narrative cards use.
+
+    Imported lazily and defensively: this is a read endpoint, and a failure to
+    classify should degrade to "sleep" rather than 500 the whole range.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        from ..analytics.events import classify_session
+        tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+        return classify_session(start_at.astimezone(tz), total_s)
+    except Exception:  # noqa: BLE001
+        return "sleep"
+
+
 @router.get("/heartrate", response_model=HeartRateSeries)
 async def get_heartrate(
     since: datetime | None = Query(None),
@@ -260,12 +276,14 @@ async def get_last_sleep(
                 clamped = min(dur, max(0, int((eff_end - ts).total_seconds())))
             by_stage[stage] = by_stage.get(stage, 0) + clamped
         asleep_s = sum(v for k, v in by_stage.items() if k != "awake")
+        total_s = asleep_s or int((eff_end - sess.start_at).total_seconds())
         return SleepNight(
             date=sess.start_at.date(),
             start=sess.start_at,
             end=eff_end,
-            total_s=asleep_s or int((eff_end - sess.start_at).total_seconds()),
+            total_s=total_s,
             stages=[SleepStageBucket(stage=k, duration_s=v) for k, v in by_stage.items()],
+            kind=_classify(sess.start_at, total_s),
         )
 
     # 2. Fallback: stage-walk. Same as before.
@@ -311,12 +329,14 @@ async def get_last_sleep(
     # tile and the detail screen show the same number.
     asleep_s = sum(v for k, v in by_stage.items() if k != "awake")
     fallback = max(int((end_t - start_t).total_seconds()), sum(by_stage.values()))
+    total_s = asleep_s or fallback
     return SleepNight(
         date=start_t.date(),
         start=start_t,
         end=end_t,
-        total_s=asleep_s or fallback,
+        total_s=total_s,
         stages=[SleepStageBucket(stage=k, duration_s=v) for k, v in by_stage.items()],
+        kind=_classify(start_t, total_s),
     )
 
 
@@ -338,22 +358,6 @@ async def get_sleep_raw(
         {"time": t.isoformat(), "stage": s, "duration_s": d}
         for t, s, d in result.all()
     ]
-
-
-def _classify(start_at: datetime, total_s: int) -> str:
-    """nap vs night, via the same rule the narrative cards use.
-
-    Imported lazily and defensively: this is a read endpoint, and a failure to
-    classify should degrade to "sleep" rather than 500 the whole range.
-    """
-    try:
-        from zoneinfo import ZoneInfo
-
-        from ..analytics.events import classify_session
-        tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
-        return classify_session(start_at.astimezone(tz), total_s)
-    except Exception:  # noqa: BLE001
-        return "sleep"
 
 
 @router.get("/sleep/range", response_model=list[SleepNight])
@@ -392,12 +396,14 @@ async def get_sleep_range(
                     clamped = min(dur, max(0, int((s.end_at - ts).total_seconds())))
                 by_stage[stage] = by_stage.get(stage, 0) + clamped
             asleep_s = sum(v for k, v in by_stage.items() if k != "awake")
+            total_s = asleep_s or int((s.end_at - s.start_at).total_seconds())
             out.append(SleepNight(
                 date=s.start_at.date(),
                 start=s.start_at,
                 end=s.end_at,
-                total_s=asleep_s or int((s.end_at - s.start_at).total_seconds()),
+                total_s=total_s,
                 stages=[SleepStageBucket(stage=k, duration_s=v) for k, v in by_stage.items()],
+                kind=_classify(s.start_at, total_s),
             ))
         return out
 
@@ -438,12 +444,18 @@ async def get_sleep_range(
             by_stage[stage] = by_stage.get(stage, 0) + clamped
         asleep_s = sum(v for k, v in by_stage.items() if k != "awake")
         fallback = max(int((end_t - start_t).total_seconds()), sum(by_stage.values()))
+        total_s = asleep_s or fallback
         out.append(SleepNight(
             date=start_t.date(),
             start=start_t,
             end=end_t,
-            total_s=asleep_s or fallback,
+            total_s=total_s,
             stages=[SleepStageBucket(stage=k, duration_s=v) for k, v in by_stage.items()],
+            # Classify here TOO. This clustering fallback is the path that
+            # actually runs on this data — patching only the canonical-session
+            # branch above left every session labelled with the schema default,
+            # which looks identical to "classification is off".
+            kind=_classify(start_t, total_s),
         ))
     return out
 

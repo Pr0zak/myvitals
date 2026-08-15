@@ -916,6 +916,11 @@ export const api = {
     started_at?: string | null;
     completed_at?: string | null;
     notes?: string | null;
+    // SKIP-1: on the transition into "completed", mark every slot with no
+    // logged sets as skipped. Server-side default is true (the phone's
+    // notification action has no UI to confirm in) — an interactive
+    // surface asks first, then sends this explicitly.
+    close_remaining?: boolean;
   }): Promise<import("./types").StrengthWorkoutDetail> {
     const { data } = await http.patch(`/workout/strength/workouts/${id}`, body);
     return data;
@@ -981,6 +986,19 @@ export const api = {
   ): Promise<{ exercise_id: string; pref: string }> {
     const { data } = await http.put(
       `/workout/strength/exercises/${exerciseId}/pref`, { pref },
+    );
+    return data;
+  },
+
+  /** SKIP-1 — decline one exercise slot, or undo. Returns the whole workout
+   *  with its progress counters already recomputed, so callers replace their
+   *  workout state with the response instead of refetching. 409 when the slot
+   *  already has real logged sets. */
+  async patchStrengthWorkoutExercise(
+    workoutExerciseId: number, body: { skipped: boolean },
+  ): Promise<import("./types").StrengthWorkoutDetail> {
+    const { data } = await http.patch(
+      `/workout/strength/workout-exercises/${workoutExerciseId}`, body,
     );
     return data;
   },

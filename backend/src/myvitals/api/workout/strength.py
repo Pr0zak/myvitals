@@ -19,6 +19,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...analytics import strength as strength_algo
@@ -643,6 +644,13 @@ class WorkoutExerciseOut(BaseModel):
     # workout-status gate — auto-skip flips forgotten-to-finish sessions to
     # "skipped" even though their sets are real).
     last_sets: list[LastSetOut] = []
+    # SKIP-1: the user explicitly declined this slot. Clients render it
+    # collapsed with an Undo affordance instead of a live logging table,
+    # and count it as accounted-for so the exercise stops floating to the
+    # top of an already-finished session. Distinct from "sets == []",
+    # which means "never touched" — the AI reviewer consumes the
+    # difference (deliberate skip vs forgotten exercise).
+    skipped: bool = False
     sets: list[SetOut] = []
 
 
@@ -685,6 +693,22 @@ class WorkoutOut(BaseModel):
     # ("recovery 52", "readiness 28").
     deload_factor: float = 1.0
     deload_reason: str | None = None
+    # SKIP-1 progress counters, computed server-side. Four separate client
+    # formulas used to derive these independently and disagreed — the web
+    # set pip excluded skipped sets while the phone's included them, so the
+    # same session could read differently on the two surfaces. Per the
+    # architecture rule (server is the source of truth for any number a
+    # user sees), both clients now render these verbatim.
+    #
+    # An exercise counts as done when it is skipped outright, or when its
+    # accounted sets (logged or individually skipped) reach target_sets.
+    # `sets_done` counts accounted sets, capped per exercise at target_sets
+    # so extra sets can't push a session over 100%; a skipped exercise
+    # contributes its whole target.
+    exercises_done: int = 0
+    exercises_total: int = 0
+    sets_done: int = 0
+    sets_total: int = 0
     exercises: list[WorkoutExerciseOut] = []
 
 
@@ -699,6 +723,17 @@ class WorkoutPatch(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     notes: str | None = None
+    # SKIP-1 — on the transition into "completed", mark every exercise slot
+    # that has no logged sets as skipped, so a finished session doesn't keep
+    # rendering live logging tables for exercises the user walked away from.
+    #
+    # Defaults to True because the completion path is not always interactive:
+    # the Android notification action completes a workout with no UI in which
+    # to confirm anything. The interactive surfaces ask first (a dialog naming
+    # the un-logged exercises) and then send this explicitly, which is what
+    # keeps "I chose to skip" distinguishable from "I forgot" for the AI
+    # reviewer. Every flag it sets is reversible from the client.
+    close_remaining: bool = True
 
 
 class CompleteCardioBody(BaseModel):
@@ -781,6 +816,22 @@ def _program_badge(state: dict) -> str:
     return f"Linear · +{inc}/session"
 
 
+def _accounted_sets(wex_out: WorkoutExerciseOut) -> int:
+    """Sets on this slot the user has dealt with — logged or individually
+    skipped — capped at the prescription so an extra set can't inflate the
+    session's progress past 100%. A skipped slot accounts for all of them."""
+    if wex_out.skipped:
+        return wex_out.target_sets
+    n = sum(1 for s in wex_out.sets if s.actual_reps is not None or s.skipped)
+    return min(n, wex_out.target_sets)
+
+
+def _exercise_done(wex_out: WorkoutExerciseOut) -> bool:
+    """Nothing left to do on this slot. The single definition both clients
+    consume via WorkoutOut.exercises_done — see the note there."""
+    return wex_out.skipped or _accounted_sets(wex_out) >= wex_out.target_sets
+
+
 def _wex_to_out(
     wex: models.StrengthWorkoutExercise,
     sets: list[models.StrengthSet],
@@ -808,6 +859,7 @@ def _wex_to_out(
         ),
         program_scheme=_program_badge(prog) if prog else None,
         last_sets=last_sets or [],
+        skipped=bool(wex.skipped),
         sets=[_set_to_out(s) for s in sorted(sets, key=lambda x: x.set_number)],
     )
 
@@ -912,6 +964,11 @@ async def _hydrate_workout(
         if w.readiness_score_used is not None and w.readiness_score_used < 30:
             bits.append(f"readiness {round(w.readiness_score_used)}")
         deload_reason = ("low " + " / ".join(bits)) if bits else "low recovery"
+    ex_out = [
+        _wex_to_out(wex, sets_by_wex.get(wex.id, []), pairs_lb, wrist_lb,
+                    last_by_ex.get(wex.exercise_id), program_by_id)
+        for wex in wex_rows
+    ]
     return WorkoutOut(
         id=w.id,
         date=w.date,
@@ -935,11 +992,11 @@ async def _hydrate_workout(
         fasting_context=await strength_algo._active_fasting_context(db),
         deload_factor=df,
         deload_reason=deload_reason,
-        exercises=[
-            _wex_to_out(wex, sets_by_wex.get(wex.id, []), pairs_lb, wrist_lb,
-                        last_by_ex.get(wex.exercise_id), program_by_id)
-            for wex in wex_rows
-        ],
+        exercises_done=sum(1 for e in ex_out if _exercise_done(e)),
+        exercises_total=len(ex_out),
+        sets_done=sum(_accounted_sets(e) for e in ex_out),
+        sets_total=sum(e.target_sets for e in ex_out),
+        exercises=ex_out,
     )
 
 
@@ -1162,6 +1219,44 @@ async def _advance_program_on_complete(
     eq.payload = payload  # reassign → SQLAlchemy flags the JSON col dirty
 
 
+async def _close_remaining_exercises(db: AsyncSession, workout_id: int) -> int:
+    """SKIP-1 — mark every exercise in this workout that has no logged sets
+    as skipped. Returns how many it flipped.
+
+    "No logged sets" means no set row with an actual_reps value: a slot whose
+    sets are all individually skipped is already accounted for, and a slot
+    with partial work keeps its partial record (the user did some of it, and
+    the AI reviewer should see the shortfall as missed, not declined).
+
+    Deliberately does NOT write placeholder StrengthSet rows. Fabricating
+    sets for work that never happened feeds recent_mobility_history's fail
+    counter, which lowers the next hold prescription, and inflates the
+    deload payload's missed_or_skipped_sets, which reads as fatigue.
+    """
+    slots = (
+        select(models.StrengthWorkoutExercise.id)
+        .where(models.StrengthWorkoutExercise.workout_id == workout_id)
+        .scalar_subquery()
+    )
+    # Scoped to this workout's slots so the NOT IN doesn't scan the whole
+    # set table. workout_exercise_id is non-nullable, so the usual
+    # NOT IN + NULL trap doesn't apply.
+    worked = (
+        select(models.StrengthSet.workout_exercise_id)
+        .where(models.StrengthSet.workout_exercise_id.in_(slots))
+        .where(models.StrengthSet.actual_reps.isnot(None))
+        .scalar_subquery()
+    )
+    res = await db.execute(
+        sa_update(models.StrengthWorkoutExercise)
+        .where(models.StrengthWorkoutExercise.workout_id == workout_id)
+        .where(models.StrengthWorkoutExercise.skipped.is_(False))
+        .where(models.StrengthWorkoutExercise.id.notin_(worked))
+        .values(skipped=True)
+    )
+    return int(res.rowcount or 0)
+
+
 @router.patch("/workouts/{workout_id}", response_model=WorkoutOut)
 async def patch_workout(
     workout_id: int,
@@ -1172,6 +1267,8 @@ async def patch_workout(
     if w is None:
         raise HTTPException(status_code=404, detail="workout not found")
     data = body.model_dump(exclude_unset=True)
+    # Not a column — pop it before the setattr loop below.
+    close_remaining = bool(data.pop("close_remaining", True))
 
     # WP-14 pause/resume accounting. Pause/resume ride on the generic
     # status patch (so the phone's offline write-buffer covers them for
@@ -1201,6 +1298,13 @@ async def patch_workout(
     for field, value in data.items():
         setattr(w, field, value)
     if became_completed:
+        # Stamp the finish server-side when the client didn't send one.
+        # complete_cardio already does this; the generic patch used to rely
+        # on the client, so a notification-action complete left it null.
+        if w.completed_at is None:
+            w.completed_at = datetime.now(timezone.utc)
+        if close_remaining:
+            await _close_remaining_exercises(db, w.id)
         await _advance_program_on_complete(db, w)
     await db.commit()
     await db.refresh(w)
@@ -1508,6 +1612,53 @@ async def upcoming_workouts(
         })
         last_done = d  # treat this scheduled day as the new "last" for spacing
     return {"count": len(out), "upcoming": out}
+
+
+class WorkoutExercisePatch(BaseModel):
+    skipped: bool
+
+
+@router.patch("/workout-exercises/{wex_id}", response_model=WorkoutOut)
+async def patch_workout_exercise(
+    wex_id: int,
+    body: WorkoutExercisePatch,
+    db: AsyncSession = Depends(get_session),
+) -> WorkoutOut:
+    """SKIP-1 — mark one exercise slot skipped, or un-skip it.
+
+    Returns the whole rehydrated workout rather than just the slot, so the
+    caller picks up the recomputed progress counters in the same round trip
+    (they're workout-level, and the clients render them verbatim).
+
+    Un-skipping is the Undo path and is always allowed. Skipping a slot that
+    already has real logged sets is refused — the sets are the record of work
+    performed, and hiding them behind a skip flag would quietly drop them out
+    of the exercise-done count while leaving them in every tonnage aggregate.
+    Delete the sets first if that's genuinely the intent.
+    """
+    wex = await db.get(models.StrengthWorkoutExercise, wex_id)
+    if wex is None:
+        raise HTTPException(status_code=404, detail="workout exercise not found")
+    if body.skipped and not wex.skipped:
+        logged = (await db.execute(
+            select(func.count())
+            .select_from(models.StrengthSet)
+            .where(models.StrengthSet.workout_exercise_id == wex_id)
+            .where(models.StrengthSet.actual_reps.isnot(None))
+            .where(models.StrengthSet.skipped.is_(False))
+        )).scalar_one()
+        if logged:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{logged} set(s) already logged for this exercise",
+            )
+    wex.skipped = body.skipped
+    w = await db.get(models.StrengthWorkout, wex.workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="workout not found")
+    await db.commit()
+    await db.refresh(w)
+    return await _hydrate_workout(db, w)
 
 
 @router.post("/workout-exercises/{wex_id}/swap", response_model=WorkoutExerciseOut)

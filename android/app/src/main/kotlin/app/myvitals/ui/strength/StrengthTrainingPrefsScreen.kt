@@ -215,6 +215,23 @@ fun StrengthTrainingPrefsScreen(
                         modifier = Modifier.padding(top = 6.dp),
                     )
 
+                    ToggleRow(
+                        label = "Mobility cool-down",
+                        hint = "Adds 2 yoga poses (~30 s holds) to the end of "
+                            + "each strength workout.",
+                        checked = t.includeMobility,
+                        onCheckedChange = { update(t.copy(includeMobility = it)) },
+                        accent = accent, ink = ink, muted = muted,
+                    )
+                    ToggleRow(
+                        label = "Yoga on rest days",
+                        hint = "Generates a 5-pose yoga flow (~45 s holds) instead "
+                            + "of leaving recovery days empty.",
+                        checked = t.yogaOnRestDays,
+                        onCheckedChange = { update(t.copy(yogaOnRestDays = it)) },
+                        accent = accent, ink = ink, muted = muted,
+                    )
+
                     // ── PROG-1 program mode ──
                     ProgramModeSection(
                         program = t.program,
@@ -240,6 +257,35 @@ fun StrengthTrainingPrefsScreen(
                 }
             }
         }
+    }
+}
+
+/** Label + helper text + Switch. Copy is kept word-for-word in step with
+ *  StrengthEquipment.vue's toggles — the two surfaces describing the same
+ *  setting differently is its own kind of parity bug. */
+@Composable
+private fun ToggleRow(
+    label: String,
+    hint: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    accent: androidx.compose.ui.graphics.Color,
+    ink: androidx.compose.ui.graphics.Color,
+    muted: androidx.compose.ui.graphics.Color,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(label, color = ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(hint, color = muted, fontSize = 11.sp)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(checkedTrackColor = accent),
+        )
     }
 }
 

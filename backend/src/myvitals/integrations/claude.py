@@ -976,6 +976,12 @@ Use the `give_strength_review` tool to return your response. Schema:
 Be specific. Reference actual numbers from the data. Never alarmist.
 If the session was unremarkable, say so honestly in the headline.
 Never make up exercises that aren't in the data.
+
+An exercise with `skipped_exercise: true` was deliberately declined by the
+user — not forgotten, and not a failure. Do not treat it as missed work or
+as a sign of poor adherence. Only `missed_sets` represents prescribed work
+that went unaccounted for. Skipped cool-down or mobility slots in particular
+are a scheduling choice and rarely worth a concern bullet.
 """
 
 
@@ -1040,7 +1046,17 @@ async def build_strength_review_payload(
             ],
             "avg_rating": round(avg_rating, 2) if avg_rating is not None else None,
             "skipped_sets": sum(1 for s in sets if s.skipped),
-            "missed_sets": wex.target_sets - len(logged) - sum(1 for s in sets if s.skipped),
+            # SKIP-1: a slot the user explicitly declined reports as skipped,
+            # not as missed. Before the flag existed, walking away from an
+            # exercise was indistinguishable from forgetting it, and this
+            # payload told the reviewer the user had missed the whole
+            # prescription. `missed_sets` is now genuinely "prescribed work
+            # that went unaccounted for".
+            "skipped_exercise": bool(getattr(wex, "skipped", False)),
+            "missed_sets": (
+                0 if getattr(wex, "skipped", False)
+                else wex.target_sets - len(logged) - sum(1 for s in sets if s.skipped)
+            ),
         })
 
     # Trailing 4-week comparison: per-exercise avg rating + tonnage by muscle

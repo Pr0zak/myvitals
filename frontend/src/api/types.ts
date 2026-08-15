@@ -309,6 +309,10 @@ export interface StrengthWorkoutExercise {
   program_scheme?: string | null;  // PROG-1: "Greyskull LP · AMRAP last · +5" badge on program lifts
   // LOG-1: previous session's working sets, for a faint "last: 30×8 · 30×8" ghost line.
   last_sets?: { set_number: number; weight_lb: number | null; reps: number | null }[];
+  // SKIP-1: the user explicitly declined this slot. Distinct from an empty
+  // `sets` array, which means "never touched" — render collapsed with an
+  // Undo instead of a live logging table.
+  skipped?: boolean;
   sets: StrengthSet[];
 }
 
@@ -337,6 +341,13 @@ export interface StrengthWorkoutDetail {
   // < 1.0 → show "load eased for recovery — Use full weight" banner.
   deload_factor?: number;
   deload_reason?: string | null;  // e.g. "low recovery 52"
+  // SKIP-1 progress counters, computed server-side. The only source for
+  // these numbers on either surface — the clients used to derive them
+  // independently and disagreed over whether skipped sets counted.
+  exercises_done?: number;
+  exercises_total?: number;
+  sets_done?: number;
+  sets_total?: number;
   exercises: StrengthWorkoutExercise[];
 }
 

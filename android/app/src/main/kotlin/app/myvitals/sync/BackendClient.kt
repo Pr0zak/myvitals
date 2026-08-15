@@ -194,6 +194,13 @@ interface BackendApi {
         @Path("wexId") wexId: Long, @Body body: SwapBody,
     ): StrengthWorkoutExerciseRow
 
+    /** SKIP-1 — decline one slot, or un-skip it. 409 when the slot already
+     *  carries real logged sets. Responds with the whole workout. */
+    @PATCH("workout/strength/workout-exercises/{wexId}")
+    suspend fun patchStrengthWorkoutExercise(
+        @Path("wexId") wexId: Long, @Body body: WorkoutExercisePatchRequest,
+    ): StrengthWorkoutDetail
+
     // ── Trails ────────────────────────────────────────────────
     @GET("trails")
     suspend fun trails(): TrailsResponse

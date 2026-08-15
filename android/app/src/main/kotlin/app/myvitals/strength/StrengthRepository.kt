@@ -12,6 +12,7 @@ import app.myvitals.sync.StrengthRecoveryResponse
 import app.myvitals.sync.StrengthSetRow
 import app.myvitals.sync.StrengthWorkoutDetail
 import app.myvitals.sync.StrengthWorkoutSummary
+import app.myvitals.sync.WorkoutExercisePatchRequest
 import app.myvitals.sync.WorkoutPatchRequest
 import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.Moshi
@@ -40,6 +41,8 @@ class StrengthRepository(
         moshi.adapter(LogSetRequest::class.java)
     private val patchAdapter: JsonAdapter<WorkoutPatchRequest> =
         moshi.adapter(WorkoutPatchRequest::class.java)
+    private val wexPatchAdapter: JsonAdapter<WorkoutExercisePatchRequest> =
+        moshi.adapter(WorkoutExercisePatchRequest::class.java)
 
     private fun api() = BackendClient.create(settings.backendUrl, settings.bearerToken)
 
@@ -157,20 +160,136 @@ class StrengthRepository(
         // waiting for the next online sync.
         val cached = planCache.loadPlan()
             ?: throw IllegalStateException("no cached plan to update offline")
-        val mutated = cached.copy(
-            status = body.status ?: cached.status,
-            completedAt = body.completedAt ?: cached.completedAt,
+        val newStatus = body.status ?: cached.status
+        // SKIP-1 — mirror the server's close-remaining sweep locally. Without
+        // it an offline Finish leaves every un-logged slot un-skipped until
+        // the write replays, which is the exact bug SKIP-1 fixes: a finished
+        // session still offering live logging tables. Same rule as
+        // _close_remaining_exercises — a slot carrying any real logged rep
+        // keeps its partial record and is left alone. A null close_remaining
+        // means the key is omitted and the server default (true) applies.
+        val closeRemaining = body.closeRemaining != false
+        val becameCompleted = newStatus == "completed" && cached.status != "completed"
+        val exercises =
+            if (becameCompleted && closeRemaining) {
+                cached.exercises.map { wex ->
+                    if (wex.sets.none { it.actualReps != null }) wex.copy(skipped = true)
+                    else wex
+                }
+            } else cached.exercises
+        val mutated = withRecountedProgress(
+            cached.copy(
+                status = newStatus,
+                completedAt = body.completedAt ?: cached.completedAt,
+                exercises = exercises,
+            ),
         )
         planCache.savePlan(mutated)
         return mutated
     }
 
-    suspend fun completeWorkout(workoutId: Long): StrengthWorkoutDetail =
+    /**
+     * Recompute the four progress counters over a locally-mutated plan.
+     *
+     * This is the deliberate, offline-only exception to "the server publishes
+     * the counters and the clients render them verbatim". A buffered write has
+     * no server response to read them from, so without this an offline skip
+     * collapses the card while the progress pip stays behind. The formulas
+     * mirror the backend's `_accounted_sets` / `_exercise_done` exactly, and
+     * the next successful fetch overwrites all four with the authoritative
+     * numbers.
+     */
+    private fun withRecountedProgress(
+        plan: StrengthWorkoutDetail,
+    ): StrengthWorkoutDetail {
+        fun accounted(wex: app.myvitals.sync.StrengthWorkoutExerciseRow): Int =
+            if (wex.skipped) wex.targetSets
+            else minOf(
+                wex.sets.count { it.actualReps != null || it.skipped },
+                wex.targetSets,
+            )
+        fun done(wex: app.myvitals.sync.StrengthWorkoutExerciseRow): Boolean =
+            wex.skipped || accounted(wex) >= wex.targetSets
+        return plan.copy(
+            exercisesDone = plan.exercises.count { done(it) },
+            exercisesTotal = plan.exercises.size,
+            setsDone = plan.exercises.sumOf { accounted(it) },
+            setsTotal = plan.exercises.sumOf { it.targetSets },
+        )
+    }
+
+    /** SKIP-1 — decline one exercise slot, or un-skip it (the Undo path).
+     *  The response is the whole workout with its progress counters already
+     *  recomputed, so callers replace their workout state with it outright.
+     *
+     *  Buffered offline like the status patches. A 4xx is deliberately NOT
+     *  buffered: the 409 "sets already logged" refusal is a decision the user
+     *  has to see, and replaying it later would only fail again. */
+    suspend fun skipExercise(wexId: Long, skipped: Boolean): StrengthWorkoutDetail =
+        withContext(Dispatchers.IO) {
+            if (!app.myvitals.sync.NetworkStatus.isOnline(context)) {
+                return@withContext bufferSkipExercise(wexId, skipped)
+            }
+            try {
+                val updated = api().patchStrengthWorkoutExercise(
+                    wexId, WorkoutExercisePatchRequest(skipped),
+                )
+                planCache.savePlan(updated)
+                updated
+            } catch (e: retrofit2.HttpException) {
+                // attempts=0 reduces the predicate to "the server rejects this
+                // exact body and always will" — the 409 case, plus a stale id.
+                if (shouldDropBuffered(e, 0)) throw IllegalStateException(serverDetail(e), e)
+                Timber.w(e, "skipExercise %s buffered (HTTP %s)", wexId, e.code())
+                bufferSkipExercise(wexId, skipped)
+            } catch (e: Exception) {
+                Timber.w(e, "skipExercise %s buffered (skipped=%s)", wexId, skipped)
+                bufferSkipExercise(wexId, skipped)
+            }
+        }
+
+    /** Queue a slot skip for replay and collapse the card locally.
+     *
+     *  The progress counters are recomputed over the mutated plan (see
+     *  [withRecountedProgress]) — leaving them at their last server value made
+     *  an offline skip collapse the card while the pip stayed behind, which
+     *  reads as a broken screen rather than a queued write. */
+    private suspend fun bufferSkipExercise(
+        wexId: Long, skipped: Boolean,
+    ): StrengthWorkoutDetail {
+        AppDatabase.get(context).bufferedWorkoutWrites().insert(
+            app.myvitals.data.BufferedWorkoutWrite(
+                kind = "skip_exercise",
+                path = wexId.toString(),
+                jsonBody = wexPatchAdapter.toJson(WorkoutExercisePatchRequest(skipped)),
+                createdAtEpochS = System.currentTimeMillis() / 1000,
+            ),
+        )
+        val cached = planCache.loadPlan()
+            ?: throw IllegalStateException("no cached plan to update offline")
+        val mutated = withRecountedProgress(
+            cached.copy(
+                exercises = cached.exercises.map {
+                    if (it.id == wexId) it.copy(skipped = skipped) else it
+                },
+            ),
+        )
+        planCache.savePlan(mutated)
+        return mutated
+    }
+
+    /** [closeRemaining] null omits the key so the server default (true)
+     *  stands — that's the notification-action path, which has no UI in which
+     *  to confirm. The interactive screens ask first and pass it explicitly. */
+    suspend fun completeWorkout(
+        workoutId: Long, closeRemaining: Boolean? = null,
+    ): StrengthWorkoutDetail =
         patchWithBuffer(
             workoutId,
             WorkoutPatchRequest(
                 status = "completed",
                 completedAt = java.time.Instant.now().toString(),
+                closeRemaining = closeRemaining,
             ),
         )
 
@@ -349,6 +468,11 @@ class StrengthRepository(
                             app.myvitals.sync.ExercisePrefBody(row.jsonBody.trim('"')),
                         )
                     }
+                    "skip_exercise" -> {
+                        // SKIP-1 — path is the workout_exercise id, not a workout id.
+                        val body = wexPatchAdapter.fromJson(row.jsonBody) ?: continue
+                        api().patchStrengthWorkoutExercise(row.path.toLong(), body)
+                    }
                     else -> {
                         Timber.w("Unknown buffered kind: %s", row.kind)
                     }
@@ -391,6 +515,21 @@ class StrengthRepository(
             val code = (e as? retrofit2.HttpException)?.code()
             if (code != null && code in 400..499 && code != 408 && code != 429) return true
             return attempts + 1 >= MAX_FLUSH_ATTEMPTS
+        }
+
+        /**
+         * FastAPI puts the human-readable reason in `{"detail": "…"}`.
+         * HttpException's own message is just "HTTP 409 Conflict", which tells
+         * the user nothing about which sets are in the way — so pull the detail
+         * out and fall back to the status line only if the body isn't ours.
+         */
+        private fun serverDetail(e: retrofit2.HttpException): String = try {
+            e.response()?.errorBody()?.string()
+                ?.let { org.json.JSONObject(it).optString("detail") }
+                ?.takeIf { it.isNotBlank() }
+                ?: e.message()
+        } catch (_: Exception) {
+            e.message()
         }
     }
 }

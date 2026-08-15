@@ -97,8 +97,10 @@ function fmtDate(iso: string): string {
         </div>
       </Card>
 
+      <!-- SKIP-1: a declined slot is muted so history doesn't read it as an
+           untouched prescription the user might still get to. -->
       <Card v-for="wex in workout.exercises" :key="wex.id"
-            class="ex-card" :flat="true">
+            class="ex-card" :class="{ skipped: wex.skipped }" :flat="true">
         <div class="ex-name">{{ wex.exercise_id.replace(/_/g, " ") }}</div>
         <div class="ex-target">
           {{ wex.target_sets }}×{{
@@ -107,6 +109,10 @@ function fmtDate(iso: string): string {
               : `${wex.target_reps_low}-${wex.target_reps_high}`
           }}{{ wex.target_weight_lb !== null ? ` @ ${wex.target_weight_lb}lb` : "" }}
         </div>
+        <!-- Stands in for the set lines this slot will never have. Without
+             it a declined exercise is indistinguishable from one that was
+             simply never reached. -->
+        <div v-if="wex.skipped" class="ex-skipped">Skipped</div>
         <ul v-if="wex.sets.length" class="sets">
           <li v-for="s in [...wex.sets].sort((a, b) => a.set_number - b.set_number)"
               :key="s.set_number"
@@ -150,6 +156,11 @@ function fmtDate(iso: string): string {
 .status-pip.skipped { color: var(--muted); }
 .status-pip.planned { color: var(--accent, #ef4444); }
 .ex-card { padding: 0.8rem; margin-bottom: 0.5rem; }
+.ex-card.skipped .ex-name { color: var(--muted); font-weight: 500; }
+.ex-skipped {
+  margin-top: 0.3rem; font-size: 0.78rem; font-weight: 600;
+  color: var(--muted);
+}
 .ex-name { font-weight: 600; text-transform: capitalize; }
 .ex-target { color: var(--muted); font-size: 0.85rem;
              font-family: 'Geist Mono', ui-monospace, monospace; }

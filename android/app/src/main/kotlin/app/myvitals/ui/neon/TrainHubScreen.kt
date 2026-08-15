@@ -175,14 +175,11 @@ fun TrainHubScreen(
     }
 
     // ── Derived plan summary (mirrors the web computeds) ──────────────────
-    val exercises = workout?.exercises ?: emptyList()
-    val totalExercises: Int? = if (workout != null) exercises.size else null
-    val doneExercises: Int = exercises.count { ex ->
-        val target = ex.targetSets
-        if (ex.sets.isEmpty() || target <= 0) return@count false
-        val accounted = ex.sets.count { it.skipped || it.loggedAt != null }
-        accounted >= target
-    }
+    // SKIP-1 — server-computed. This ring used to count accounted sets itself,
+    // which disagreed with the workout screen's own tally (and ignored slots
+    // the user had declined outright).
+    val totalExercises: Int? = workout?.exercisesTotal
+    val doneExercises: Int = workout?.exercisesDone ?: 0
     val splitLabel = workout?.splitFocus?.let { titleCase(it) } ?: "Rest Day"
     val isRest = workout == null || workout!!.splitFocus.contains("rest", ignoreCase = true)
     val ringPct: Float = totalExercises?.takeIf { it > 0 }

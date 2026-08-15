@@ -240,6 +240,11 @@ data class StrengthWorkoutExerciseRow(
     @Json(name = "program_scheme") val programScheme: String? = null,
     // LOG-1: previous session's working sets, for a faint "last: 30×8 · 30×8" line.
     @Json(name = "last_sets") val lastSets: List<LastSet> = emptyList(),
+    // SKIP-1: the user explicitly declined this slot — distinct from
+    // "sets is empty", which means never touched. Renders collapsed with an
+    // Undo affordance instead of a live logging table. False-by-default so a
+    // cached plan from before the field existed reads as "not declined".
+    val skipped: Boolean = false,
     val sets: List<StrengthSetRow> = emptyList(),
 )
 
@@ -264,6 +269,15 @@ data class StrengthWorkoutDetail(
     @Json(name = "paused_at") val pausedAt: String? = null,
     @Json(name = "total_paused_s") val totalPausedS: Int = 0,
     val notes: String? = null,
+    // SKIP-1 progress counters, computed server-side. Both surfaces used to
+    // derive these locally with formulas that disagreed (the web pip excluded
+    // individually-skipped sets, this one included them), so the same session
+    // read differently depending on which screen you opened. Render verbatim —
+    // do not re-derive from `exercises`.
+    @Json(name = "exercises_done") val exercisesDone: Int = 0,
+    @Json(name = "exercises_total") val exercisesTotal: Int = 0,
+    @Json(name = "sets_done") val setsDone: Int = 0,
+    @Json(name = "sets_total") val setsTotal: Int = 0,
     val exercises: List<StrengthWorkoutExerciseRow> = emptyList(),
 )
 
@@ -1230,6 +1244,19 @@ data class WorkoutPatchRequest(
     @Json(name = "started_at") val startedAt: String? = null,
     @Json(name = "completed_at") val completedAt: String? = null,
     val notes: String? = null,
+    // SKIP-1 — on the transition into "completed", ask the server to mark
+    // every slot with no logged sets as skipped. Nullable so the key is
+    // omitted entirely when unset and the server default (true) stands: the
+    // notification action completes a workout with no UI to confirm in.
+    // Interactive surfaces ask first and then send this explicitly.
+    @Json(name = "close_remaining") val closeRemaining: Boolean? = null,
+)
+
+/** PATCH /workout/strength/workout-exercises/{id} — SKIP-1. Returns the
+ *  whole workout so the caller picks up the recomputed progress counters. */
+@JsonClass(generateAdapter = true)
+data class WorkoutExercisePatchRequest(
+    val skipped: Boolean,
 )
 
 /** POST /workout/strength/workouts/{id}/complete-cardio. Mints a manual

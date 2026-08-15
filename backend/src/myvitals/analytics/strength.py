@@ -2092,6 +2092,43 @@ def adjust_mobility_target(
     return low, high
 
 
+def select_mobility_poses(
+    catalog: list[dict],
+    seed: str,
+    *,
+    exercise_prefs: dict[str, str] | None = None,
+    recent_frequency: dict[str, int] | None = None,
+    count: int = 2,
+) -> list[dict]:
+    """Pick the poses for the cool-down block appended to a strength day.
+
+    Two fixes over the original inline picker, which was a bare
+    `rng.sample` over every mobility entry in the catalog:
+
+    - `exercise_prefs` is honoured. Disabling a pose used to work for
+      strength slots (select_exercises_for_split filters on it) but was
+      silently ignored here, so a pose the user had explicitly turned off
+      kept getting appended to every workout.
+    - Rotation pressure, matching the main slots and the finishers:
+      least-used-in-the-last-4-weeks wins, with seeded jitter breaking
+      ties. Uniform sampling kept landing on the same couple of poses.
+    """
+    prefs = exercise_prefs or {}
+    freq = recent_frequency or {}
+    pool = [
+        e for e in catalog
+        if e.get("movement_pattern") == "mobility"
+        and "bodyweight" in (e.get("equipment") or [])
+        and prefs.get(e["id"]) != "disabled"
+    ]
+    if not pool:
+        return []
+    rng = random.Random(seed + "::mobility")
+    jitter = {e["id"]: rng.random() for e in pool}
+    ranked = sorted(pool, key=lambda e: (freq.get(e["id"], 0), jitter[e["id"]]))
+    return ranked[:min(count, len(ranked))]
+
+
 async def last_target_weight_for_exercise(
     db: AsyncSession, exercise_id: str
 ) -> tuple[float | None, float | None, float | None]:
@@ -3012,14 +3049,13 @@ async def generate_plan(
     # to the end of the plan when the user has opted in. Reps are interpreted
     # as seconds-to-hold by the UI; sets=1, weight=null, rest=15.
     if include_mobility:
-        mobility_pool = [
-            e for e in CATALOG
-            if e.get("movement_pattern") == "mobility"
-            and "bodyweight" in (e.get("equipment") or [])
-        ]
         mobility_history = await recent_mobility_history(db)
-        if mobility_pool:
-            picks = rng.sample(mobility_pool, k=min(2, len(mobility_pool)))
+        picks = select_mobility_poses(
+            CATALOG, seed,
+            exercise_prefs=exercise_prefs,
+            recent_frequency=recent_frequency,
+        )
+        if picks:
             for j, ex in enumerate(picks):
                 bilateral = bool(ex.get("is_bilateral", False))
                 timed = ex.get("is_timed", True)
@@ -3036,8 +3072,11 @@ async def generate_plan(
                     target_reps_low=rl, target_reps_high=rh,
                     target_weight_lb=None, target_rest_s=15,
                 ))
+            # Count from the actual picks — disabling poses can shrink the
+            # pool below the requested two.
             notes.append(
-                "Mobility block appended — 2 yoga poses, ~30 s hold each."
+                f"Mobility block appended — {len(picks)} yoga "
+                f"pose{'s' if len(picks) != 1 else ''}, ~30 s hold each."
             )
 
     # FAST-18 note — only when modulation actually changed the plan.

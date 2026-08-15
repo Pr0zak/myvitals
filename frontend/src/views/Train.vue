@@ -92,25 +92,14 @@ const weekCount = computed<number>(() => {
 });
 
 // ── Hero ring: completed exercises / total ────────────────────────────
-const totalExercises = computed<number | null>(() => {
-  const ex = workout.value?.exercises;
-  return Array.isArray(ex) ? ex.length : null;
-});
+// Both counters come from the server (SKIP-1). Deriving "done" here is
+// how this ring and the workout page ended up disagreeing about the same
+// session — the definition lives in one place now.
+const totalExercises = computed<number | null>(() =>
+  workout.value ? workout.value.exercises_total ?? 0 : null
+);
 
-const doneExercises = computed<number>(() => {
-  const ex = workout.value?.exercises;
-  if (!Array.isArray(ex)) return 0;
-  return ex.filter((e) => {
-    const sets = e?.sets;
-    const target = e?.target_sets ?? 0;
-    if (!Array.isArray(sets) || sets.length === 0 || target <= 0) return false;
-    // "Done" = every prescribed set is either logged or explicitly skipped.
-    const accounted = sets.filter(
-      (s) => s?.skipped === true || s?.logged_at != null,
-    ).length;
-    return accounted >= target;
-  }).length;
-});
+const doneExercises = computed<number>(() => workout.value?.exercises_done ?? 0);
 
 const ringPct = computed<number>(() => {
   const total = totalExercises.value;

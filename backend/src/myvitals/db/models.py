@@ -506,6 +506,16 @@ class StrengthWorkoutExercise(Base):
     target_weight_lb: Mapped[float | None] = mapped_column(Float, nullable=True)
     target_rest_s: Mapped[int] = mapped_column(Integer, default=90)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The user declined this slot. Distinct from "has no logged sets yet":
+    # this records an explicit decision, so the AI reviewer can tell a
+    # deliberate skip from a forgotten exercise. Deliberately NOT expressed
+    # as placeholder skipped StrengthSet rows — those poison the mobility
+    # hold-time tuner (which counts a skipped set as a failed one) and the
+    # deload signal. Set by PATCH /workout-exercises/{id} and by the
+    # close-remaining sweep on workout completion.
+    skipped: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
 
 
 class StrengthSet(Base):

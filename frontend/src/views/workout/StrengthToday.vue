@@ -214,6 +214,10 @@ async function loadAll() {
   if (!queryToken.value) { loading.value = false; return; }
   loading.value = true;
   error.value = "";
+  // A skip refusal describes the plan as it was; once we refetch, the sets
+  // it complained about may be gone. Clearing here stops a stale 409 from
+  // sitting on the card for the rest of the session.
+  skipError.value = null;
   try {
     const [w, r, cat, hist, eq, up] = await Promise.all([
       api.strengthToday(),
@@ -286,9 +290,16 @@ function printWorkout() {
     const unit = wex.is_timed ? "s" : "";
     const wt = wex.target_weight_lb ? `${wex.target_weight_lb} lb` : "—";
     const notes = [wex.program_scheme, wex.load_hint].filter(Boolean).join(" · ");
-    return `<tr><td>${i + 1}</td><td>${escapeHtml(exName(wex.exercise_id))}</td>`
+    // SKIP-1: a declined slot still prints — the sheet is the day's plan,
+    // and blanking the row would renumber everything against the screen —
+    // but it prints as declined, with the write-in box filled in for you.
+    // Handing someone a worksheet inviting them to log a slot they already
+    // said no to is the same lie the on-screen live table used to tell.
+    const logged = wex.skipped ? "Skipped" : "";
+    return `<tr${wex.skipped ? ' class="skipped"' : ""}><td>${i + 1}</td>`
+      + `<td>${escapeHtml(exName(wex.exercise_id))}</td>`
       + `<td>${wex.target_sets} × ${rep}${unit}</td><td>${wt}</td>`
-      + `<td>${escapeHtml(notes)}</td><td class="log"></td></tr>`;
+      + `<td>${escapeHtml(notes)}</td><td class="log">${logged}</td></tr>`;
   }).join("");
   const notesBlock = w.notes ? `<p class="notes">${escapeHtml(w.notes)}</p>` : "";
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)} — ${escapeHtml(dateStr)}</title>`
@@ -298,6 +309,7 @@ function printWorkout() {
     + `table{width:100%;border-collapse:collapse;font-size:12px}`
     + `th,td{border:1px solid #999;padding:5px 7px;text-align:left;vertical-align:top}`
     + `th{background:#eee;font-weight:600} td.log,th.log{width:22%}`
+    + `tr.skipped td{color:#777} tr.skipped td.log{font-style:italic}`
     + `.notes{font-size:11px;color:#333;font-style:italic;margin:14px 0 0}`
     + `.foot{font-size:10px;color:#888;margin:18px 0 0}`
     + `@page{margin:1.4cm}`
@@ -656,31 +668,76 @@ function isSetLogged(wex: StrengthWorkoutExercise, setNum: number): boolean {
 }
 
 function isExerciseDone(wex: StrengthWorkoutExercise): boolean {
+  // SKIP-1: a declined slot is accounted for — otherwise it reads as
+  // "not started", keeps a live logging table open on a finished session
+  // and steals the current-exercise highlight.
+  if (wex.skipped) return true;
   for (let n = 1; n <= wex.target_sets; n++) {
     if (!isSetLogged(wex, n)) return false;
   }
   return true;
 }
 
-const completedSetsCount = computed(() => {
-  if (!workout.value) return 0;
-  let n = 0;
-  for (const ex of workout.value.exercises) {
-    for (const s of ex.sets) if (s.actual_reps != null && !s.skipped) n++;
-  }
-  return n;
-});
+// A finished session isn't writable, whatever its slots look like.
+const sessionOver = computed(() =>
+  workout.value?.status === "completed" || workout.value?.status === "skipped"
+);
 
-const totalSetsCount = computed(() =>
-  workout.value?.exercises.reduce((acc, ex) => acc + ex.target_sets, 0) ?? 0
+// SKIP-1 — the single notion of a slot with nothing left to do: declined,
+// fully accounted for, or belonging to a session that's over. Ordering, the
+// NOW highlight and the render branch all read this one predicate so they
+// can't disagree.
+//
+// The status arm is what fixes every workout completed *before* SKIP-1
+// shipped: the server's close-remaining sweep only fires on the completed
+// transition and is deliberately not retroactive, so those slots still
+// arrive with skipped=false and no sets — and used to render a live
+// logging table on a session finished weeks ago. Display truth only; it
+// writes nothing.
+function isSlotClosed(wex: StrengthWorkoutExercise): boolean {
+  return isExerciseDone(wex) || sessionOver.value;
+}
+
+// Did the user account for any of this slot at all? Distinguishes a slot
+// the session simply ran out of time for (nothing at all — the "Not logged"
+// strip) from one carrying real, partial work, which must keep showing its
+// set chips. Mirrors the phone's `wex.sets.none { it.actualReps != null ||
+// it.skipped }` guard so the two surfaces branch identically.
+function hasAccountedSets(wex: StrengthWorkoutExercise): boolean {
+  return wex.sets.some((s) => s.actual_reps != null || s.skipped);
+}
+
+// SKIP-1: progress counters are server-computed and rendered verbatim.
+// Both surfaces used to derive them locally with different rules (the web
+// pip excluded individually-skipped sets, the phone's counted them), so
+// the same session could read differently depending on where you looked.
+const completedSetsCount = computed(() => workout.value?.sets_done ?? 0);
+const totalSetsCount = computed(() => workout.value?.sets_total ?? 0);
+const doneExercisesCount = computed(() => workout.value?.exercises_done ?? 0);
+const totalExercisesCount = computed(() => workout.value?.exercises_total ?? 0);
+
+// Slots the user never put a rep into. Completing closes these out as
+// skipped server-side, so the confirmation names them first — same
+// definition as the backend's _close_remaining_exercises (a partially
+// logged slot keeps its partial record and is left alone).
+const unloggedExercises = computed<StrengthWorkoutExercise[]>(() =>
+  workout.value?.exercises.filter(
+    (wex) => !wex.skipped && !wex.sets.some((s) => s.actual_reps != null),
+  ) ?? []
 );
 
 // Surface a "workout finished?" confirmation the moment the last
 // prescribed set is logged. Less intrusive than auto-completing —
 // user might want to add bonus sets — but more discoverable than the
-// small "Complete workout" button at the bottom of the page.
+// small "Complete workout" button at the bottom of the page. The same
+// dialog doubles as the pre-flight confirmation when Complete is tapped
+// with exercises still unlogged.
 const showCompleteDialog = ref(false);
 const completeDialogDismissed = ref(false);
+// Which of the two prompts is on screen. They share a card but not a
+// dismiss: backing out of the Complete pre-flight must change *nothing*,
+// while dismissing the auto prompt latches so it doesn't re-pop.
+const completeDialogMode = ref<"auto" | "preflight">("auto");
 const allSetsDone = computed(() =>
   totalSetsCount.value > 0
   && completedSetsCount.value >= totalSetsCount.value
@@ -688,24 +745,107 @@ const allSetsDone = computed(() =>
 watch(allSetsDone, (done, prev) => {
   if (done && !prev && !completeDialogDismissed.value
       && workout.value && workout.value.status !== "completed") {
+    completeDialogMode.value = "auto";
     showCompleteDialog.value = true;
   }
 });
+// Complete CTA entry point: ask before closing out anything unlogged,
+// finish straight away when every slot is already accounted for.
+async function requestComplete() {
+  if (unloggedExercises.value.length > 0) {
+    completeDialogMode.value = "preflight";
+    showCompleteDialog.value = true;
+    return;
+  }
+  await completeWorkout(false);
+}
 async function finishFromDialog() {
   showCompleteDialog.value = false;
-  await completeWorkout();
+  await completeWorkout(true);
 }
 function dismissCompleteDialog() {
   showCompleteDialog.value = false;
-  // Don't re-pop on every recomposition. User explicitly chose to
-  // keep going; honour that until the next workout.
-  completeDialogDismissed.value = true;
+  // Only the auto prompt latches: the user explicitly chose to keep going,
+  // so honour that until the next workout. "Go back" on the pre-flight is a
+  // pure cancel — routing it through here used to suppress the auto prompt
+  // for the rest of the session as a side effect.
+  if (completeDialogMode.value === "auto") completeDialogDismissed.value = true;
 }
+
+// Canonical confirmation copy, verbatim across web and phone. Assembled
+// here rather than interpolated in the template so the singular / plural
+// forms and the punctuation can't drift with the markup's whitespace.
+// Names come from the catalog lookup that titles the cards — never slugs.
+const completeDialogTitle = computed(() => {
+  if (completeDialogMode.value !== "preflight") return "Workout complete?";
+  return unloggedExercises.value.length === 1
+    ? "Finish with unlogged exercise?"
+    : "Finish with unlogged exercises?";
+});
+const completeDialogBody = computed(() => {
+  if (completeDialogMode.value !== "preflight") {
+    return `All ${totalSetsCount.value} prescribed sets accounted for. Finish `
+      + "and stamp the session, or keep going if you want to add bonus work.";
+  }
+  const names = unloggedExercises.value.map((u) => exName(u.exercise_id)).join(", ");
+  return unloggedExercises.value.length === 1
+    ? `1 exercise unlogged: ${names}. Mark it skipped and finish?`
+    : `${unloggedExercises.value.length} exercises unlogged: ${names}. `
+      + "Mark them skipped and finish?";
+});
+const completeDialogDismissLabel = computed(() =>
+  completeDialogMode.value === "preflight" ? "Go back" : "Keep going"
+);
 
 const currentExercise = computed(() => {
   if (!workout.value) return null;
-  return workout.value.exercises.find((ex) => !isExerciseDone(ex)) ?? null;
+  // Closed slots — done, declined, or belonging to a finished session —
+  // never take the NOW highlight; it walks past them to the next real one,
+  // and lands on nothing once the session is over.
+  return workout.value.exercises.find((ex) => !isSlotClosed(ex)) ?? null;
 });
+
+// Swap and Skip share one guard: the slot has no real work logged against
+// it and the session is still live. Once actuals exist they belong to
+// this exercise, and neither rewriting nor hiding the slot is honest.
+function canSkipOrSwap(wex: StrengthWorkoutExercise): boolean {
+  if (sessionOver.value) return false;
+  return !wex.sets.some((s) => s.actual_reps != null);
+}
+
+// Skip failures land on the offending card, not in the page-level `error`
+// — that one sits ahead of the workout in the v-else-if chain, so setting
+// it would swap the whole plan out for a one-line message.
+const skipError = ref<{ wexId: number; message: string } | null>(null);
+
+// Any skip PATCH in flight disables every Skip/Undo button, not just the one
+// that was tapped. Each PATCH returns the whole workout as it looked when the
+// server handled it, so two overlapping skips race their responses and the
+// slower one lands last, wiping the other's flag until the next refresh.
+// The in-flight *label* still keys off the specific slot.
+const skipInFlight = computed(() => busy.value.startsWith("skip-ex-"));
+
+// SKIP-1 — decline one slot, or undo. The response carries the whole
+// workout with counters recomputed, so there's no reload here.
+async function setExerciseSkipped(wex: StrengthWorkoutExercise, skipped: boolean) {
+  busy.value = `skip-ex-${wex.id}`;
+  skipError.value = null;
+  try {
+    workout.value = await api.patchStrengthWorkoutExercise(wex.id, { skipped });
+  } catch (e: unknown) {
+    // 409 = real sets already logged for this slot; the detail says how many.
+    let message: string;
+    if (e && typeof e === "object" && "response" in e) {
+      const resp = (e as { response?: { status?: number; data?: { detail?: string } } }).response;
+      message = resp?.data?.detail ?? `HTTP ${resp?.status}`;
+    } else {
+      message = e instanceof Error ? e.message : String(e);
+    }
+    skipError.value = { wexId: wex.id, message };
+  } finally {
+    busy.value = "";
+  }
+}
 
 async function logFailed(wex: StrengthWorkoutExercise, setNum: number): Promise<boolean> {
   // Shortcut: mark the set as failed (rating=1) using whatever weight is
@@ -825,13 +965,17 @@ function supersetNextUp(wex: StrengthWorkoutExercise): number | null {
   return null;
 }
 
-async function completeWorkout() {
+// `closeRemaining` is always passed explicitly: this surface has a UI in
+// which to ask, so it never leans on the server-side default (which exists
+// for the phone's notification action).
+async function completeWorkout(closeRemaining: boolean) {
   if (!workout.value) return;
   busy.value = "complete";
   try {
     await api.patchStrengthWorkout(workout.value.id, {
       status: "completed",
       completed_at: new Date().toISOString(),
+      close_remaining: closeRemaining,
     });
     await loadAll();
     stopRest();
@@ -1259,7 +1403,7 @@ useVisibilityRefresh(loadAll);
 
       <!-- Exercise list -->
       <div v-for="(wex, idx) in workout.exercises" :key="wex.id" class="ex-card"
-           :class="{ current: currentExercise?.id === wex.id, done: isExerciseDone(wex), superset: !!wex.superset_id }"
+           :class="{ current: currentExercise?.id === wex.id, done: isSlotClosed(wex), superset: !!wex.superset_id }"
            :style="wex.superset_id ? { borderLeftColor: supersetColor(wex.superset_id) } : {}">
         <div v-if="wex.superset_id" class="ss-banner" :style="{ color: supersetColor(wex.superset_id) }">
           ⇄ Superset {{ wex.superset_id }} — alternate with <strong>{{ supersetPartnerName(wex.superset_id, wex.id) }}</strong>
@@ -1282,19 +1426,48 @@ useVisibilityRefresh(loadAll);
           📈 {{ wex.program_scheme }}
         </p>
 
-        <!-- LOAD-1: how to load it (only when micro-loaders are needed) -->
-        <p v-if="wex.load_hint && !isExerciseDone(wex)" class="load-hint">
+        <!-- LOAD-1: how to load it (only when micro-loaders are needed).
+             Both hints are instructions for work you're about to do, so
+             they're suppressed on any closed slot — including an unlogged
+             one on a session that's already over. -->
+        <p v-if="wex.load_hint && !isSlotClosed(wex)" class="load-hint">
           🏋 {{ wex.load_hint }}
         </p>
 
         <!-- LOG-1: what you did last time (rep-based rows only) -->
-        <p v-if="lastSetsSummary(wex) && !isExerciseDone(wex) && !isTimedExercise(wex)"
+        <p v-if="lastSetsSummary(wex) && !isSlotClosed(wex) && !isTimedExercise(wex)"
            class="last-hint">
           ↩ last: {{ lastSetsSummary(wex) }}
         </p>
 
-        <!-- Completed state: collapse to chip summary instead of greyed-out inputs -->
-        <div v-if="isExerciseDone(wex)" class="done-summary">
+        <p v-if="skipError?.wexId === wex.id" class="err skip-err">
+          {{ skipError.message }}
+        </p>
+
+        <!-- Closed slots, in order of what they mean. Nothing below here
+             renders a live logging table — that's the whole point: a
+             finished session is a record, not a worksheet. -->
+
+        <!-- SKIP-1: declined slot — a muted strip with an Undo. -->
+        <div v-if="wex.skipped" class="skip-strip">
+          <span>Skipped</span>
+          <!-- Undo rides the same guard as Skip. On a session that's over,
+               un-skipping would drop the slot into the "Not logged" strip
+               below with no way back — a one-way write against a past
+               session. The phone blocks it for the same reason. -->
+          <button v-if="canSkipOrSwap(wex)" class="undo-btn"
+                  :disabled="skipInFlight"
+                  @click="setExerciseSkipped(wex, false)">
+            {{ busy === `skip-ex-${wex.id}` ? 'Restoring…' : 'Undo' }}
+          </button>
+        </div>
+
+        <!-- Completed state: collapse to chip summary instead of greyed-out
+             inputs. A partially logged slot on a finished session lands here
+             too — those sets are real work and must stay visible, rather
+             than being hidden behind the "Not logged" strip below. -->
+        <div v-else-if="isExerciseDone(wex) || (sessionOver && hasAccountedSets(wex))"
+             class="done-summary">
           <span v-for="s in [...wex.sets].sort((a, b) => a.set_number - b.set_number)"
                 :key="s.set_number"
                 class="set-chip"
@@ -1306,7 +1479,15 @@ useVisibilityRefresh(loadAll);
           </span>
         </div>
 
-        <div v-else class="ex-body" v-if="ex(wex.exercise_id)">
+        <!-- Session's over and this slot was never accounted for — the
+             pre-SKIP-1 sessions the server sweep never touched land here.
+             Stated, not offered: no Undo (there's nothing to undo) and no
+             logging controls (the session isn't writable). -->
+        <div v-else-if="sessionOver" class="skip-strip not-logged">
+          <span>Not logged</span>
+        </div>
+
+        <div v-else-if="ex(wex.exercise_id)" class="ex-body">
           <div class="media">
             <!-- Real demo photo wins over the violet-tinted icon.
                  Photos are .jpg from the base catalog; icons are .png
@@ -1326,10 +1507,15 @@ useVisibilityRefresh(loadAll);
             <a class="yt" :href="youtubeUrl(wex.exercise_id)" target="_blank" rel="noreferrer">
               Watch form video on YouTube ↗
             </a>
-            <button v-if="wex.sets.filter(s => s.actual_reps != null).length === 0"
-                    class="swap-btn" @click="openSwap(wex.id)">
-              Swap exercise
-            </button>
+            <div v-if="canSkipOrSwap(wex)" class="slot-actions">
+              <button class="swap-btn" @click="openSwap(wex.id)">
+                Swap exercise
+              </button>
+              <button class="swap-btn" :disabled="skipInFlight"
+                      @click="setExerciseSkipped(wex, true)">
+                {{ busy === `skip-ex-${wex.id}` ? 'Skipping…' : 'Skip exercise' }}
+              </button>
+            </div>
           </div>
 
           <div class="sets">
@@ -1462,8 +1648,12 @@ useVisibilityRefresh(loadAll);
           </button>
         </template>
         <template v-else>
-          <button class="primary big-btn" :disabled="completedSetsCount === 0 || busy === 'complete'"
-                  @click="completeWorkout">
+          <!-- Enabled for any live session: finishing one you walked away
+               from without logging a thing is the flagship SKIP-1 flow, and
+               a zero-sets gate here made it unreachable on web (the phone
+               never had one). The confirmation names what gets closed out. -->
+          <button class="primary big-btn" :disabled="busy === 'complete'"
+                  @click="requestComplete">
             Complete workout
             <small>({{ completedSetsCount }}/{{ totalSetsCount }} sets)</small>
           </button>
@@ -1494,7 +1684,12 @@ useVisibilityRefresh(loadAll);
         </div>
       </div>
 
-      <Card v-else title="Workout complete" :subtitle="`${completedSetsCount} sets logged`" :flat="true">
+      <!-- Summary for a finished session. Was chained as the v-else of the
+           swap modal above, so it rendered on every status whenever the
+           swap drawer happened to be closed. -->
+      <Card v-if="workout.status === 'completed'" title="Workout complete"
+            :subtitle="`${completedSetsCount}/${totalSetsCount} sets · ${doneExercisesCount}/${totalExercisesCount} exercises`"
+            :flat="true">
         <p class="hint">
           Nicely done. Today's session is logged — you'll see the next-session
           weight progression baked in tomorrow.
@@ -1572,18 +1767,20 @@ useVisibilityRefresh(loadAll);
       </div>
     </div>
 
-    <!-- Workout-complete confirmation. Pops on the false → true
-         transition of allSetsDone; user can finish now or keep
-         going (e.g. bonus sets). -->
+    <!-- Workout-complete confirmation, in two modes. "auto" pops on the
+         false → true transition of allSetsDone; user can finish now or
+         keep going (e.g. bonus sets), and keeping going suppresses it for
+         the session. "preflight" opens from the Complete CTA when slots
+         are still unlogged, names them (SKIP-1) and closes them out as
+         skipped on finish — its "Go back" is a pure cancel. -->
     <div v-if="showCompleteDialog" class="cd-backdrop" @click.self="dismissCompleteDialog">
       <div class="cd-card">
-        <h2>Workout complete?</h2>
-        <p class="cd-sub">
-          All {{ totalSetsCount }} prescribed sets logged. Finish and stamp
-          the session, or keep going if you want to add bonus work.
-        </p>
+        <h2>{{ completeDialogTitle }}</h2>
+        <p class="cd-sub">{{ completeDialogBody }}</p>
         <div class="cd-actions">
-          <button class="ghost" @click="dismissCompleteDialog">Keep going</button>
+          <button class="ghost" @click="dismissCompleteDialog">
+            {{ completeDialogDismissLabel }}
+          </button>
           <button class="primary" :disabled="busy === 'complete'" @click="finishFromDialog">
             {{ busy === 'complete' ? 'Finishing…' : 'Finish workout' }}
           </button>
@@ -1808,6 +2005,26 @@ h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
 .row-actions { display: flex; gap: 0.3rem; align-items: center; }
 button.ghost.small.fail { color: #f87171; border-color: #b91c1c44; }
 button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: #ef4444; }
+
+.skip-err { font-size: 0.78rem; margin: 0.4rem 0 0; }
+
+/* SKIP-1 declined slot — one muted strip in place of the logging table */
+.skip-strip {
+  display: flex; align-items: center; gap: 0.6rem;
+  margin-top: 0.7rem; padding-top: 0.7rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.78rem; color: var(--muted);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  letter-spacing: 0.04em; text-transform: uppercase;
+}
+.undo-btn {
+  padding: 0.15rem 0.5rem; font-size: 0.72rem;
+  color: var(--text-soft); background: var(--bg-2);
+  border: 1px solid var(--line); border-radius: 5px; cursor: pointer;
+  text-transform: none; letter-spacing: normal;
+}
+.undo-btn:hover { color: var(--text); border-color: var(--accent, #ef4444); }
+.undo-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* Done-state chip summary — matches claude.ai/design workout bundle */
 .done-summary { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.7rem;
@@ -2090,6 +2307,11 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
   border-radius: 5px; cursor: pointer;
 }
 .swap-btn:hover { color: var(--text); border-color: var(--accent, #ef4444); }
+.swap-btn:disabled { opacity: 0.5; cursor: default; }
+/* Stack Swap / Skip — the media column is too narrow to sit them side by side */
+.slot-actions { display: flex; flex-direction: column; align-items: stretch;
+                gap: 0.3rem; margin-top: 0.4rem; }
+.slot-actions .swap-btn { margin-top: 0; justify-content: center; }
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100;
   display: flex; justify-content: flex-end; }
 .drawer.swap-drawer { width: min(420px, 100%); height: 100%;
@@ -2406,6 +2628,19 @@ html[data-theme="neon"] button.ghost.small.fail:hover {
   color: #fff; background: var(--rn-red); border-color: var(--rn-red);
 }
 html[data-theme="neon"] .ok { color: var(--rn-lime); }
+
+/* Skipped slot strip */
+html[data-theme="neon"] .skip-strip {
+  border-color: var(--rn-track); color: var(--rn-mut);
+  font-family: 'Space Grotesk', monospace;
+}
+html[data-theme="neon"] .undo-btn {
+  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
+  color: var(--rn-mut);
+}
+html[data-theme="neon"] .undo-btn:hover {
+  color: var(--rn-cyan); border-color: rgba(40,230,255,0.45);
+}
 
 /* Done-state chips — rating-tinted */
 html[data-theme="neon"] .done-summary { border-color: var(--rn-track); }

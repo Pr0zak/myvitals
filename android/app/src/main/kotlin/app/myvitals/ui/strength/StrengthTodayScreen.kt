@@ -220,6 +220,17 @@ fun StrengthTodayScreen(
     var showCardioLog by remember { mutableStateOf(false) }
     var cardioLogging by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // SKIP-1 — per-slot skip plumbing.
+    //  - the in-flight id disables that card's Skip / Undo: a double tap races
+    //    two whole-workout responses into the same state.
+    //  - a skip refusal (the 409 "N set(s) already logged for this exercise")
+    //    lands on the offending card, never in the screen-level error slot —
+    //    a message about one exercise shouldn't read as "the plan failed".
+    var skipBusyWexId by remember { mutableStateOf<Long?>(null) }
+    var skipError by remember { mutableStateOf<Pair<Long, String>?>(null) }
+    // Completion PATCH in flight — the Complete CTA stays disabled until it
+    // settles so a second tap can't double-finish the session.
+    var finishing by remember { mutableStateOf(false) }
     // Offline plumbing — banner above the workout shows "offline" when
     // network is down or "N pending sync" when set logs are buffered.
     val online by app.myvitals.ui.common.rememberOnlineState()
@@ -250,6 +261,9 @@ fun StrengthTodayScreen(
     suspend fun reload() {
         loading = true
         error = null
+        // A skip refusal is about the plan we're replacing — carrying it onto
+        // the fresh one would strand a message on a card it no longer describes.
+        skipError = null
         try {
             val plan = repo.today()
             val rec = if (plan == null) repo.recovery() else null
@@ -273,10 +287,83 @@ fun StrengthTodayScreen(
     // vars must be in scope at use site.
     var showCompleteDialog by remember(workout?.id) { mutableStateOf(false) }
     var completeDialogDismissed by remember(workout?.id) { mutableStateOf(false) }
-    val totalSets = workout?.exercises?.sumOf { it.targetSets } ?: 0
-    val completedSets = workout?.exercises?.flatMap { it.sets }
-        ?.count { it.actualReps != null && !it.skipped } ?: 0
-    val allSetsDone = totalSets > 0 && completedSets >= totalSets
+    // SKIP-1 — server-computed progress. Both surfaces used to count these
+    // themselves and disagreed, so these are read verbatim and never re-derived.
+    val setsTotal = workout?.setsTotal ?: 0
+    val setsDone = workout?.setsDone ?: 0
+    val allSetsDone = setsTotal > 0 && setsDone >= setsTotal
+
+    // SKIP-1 — the slots the server would close as skipped if we finished
+    // right now: nothing real logged against them and not already declined.
+    // Mirrors _close_remaining_exercises so the dialog names exactly what
+    // the flag will touch. Catalog names, never raw slugs.
+    val unloggedNames: List<String> = workout?.exercises.orEmpty()
+        .filter { ex ->
+            !ex.skipped && ex.sets.none { it.actualReps != null }
+        }
+        .map { catalog[it.exerciseId]?.name ?: it.exerciseId.replace('_', ' ') }
+    // Non-empty → the finish confirmation is open, listing these names.
+    var confirmSkipNames by remember(workout?.id) { mutableStateOf<List<String>>(emptyList()) }
+
+    fun finishWorkout(closeRemaining: Boolean) {
+        val id = workout?.id ?: return
+        scope.launch {
+            finishing = true
+            try { workout = repo.completeWorkout(id, closeRemaining); reload() }
+            catch (e: Exception) { error = e.message?.take(160) }
+            finally { finishing = false }
+        }
+    }
+
+    /** Single entry point for every interactive "Complete workout" tap.
+     *  Asks before letting the server close un-logged slots; completes
+     *  straight through when there's nothing to close. */
+    fun requestFinish() {
+        if (unloggedNames.isEmpty()) finishWorkout(closeRemaining = false)
+        else confirmSkipNames = unloggedNames
+    }
+
+    if (confirmSkipNames.isNotEmpty()) {
+        val n = confirmSkipNames.size
+        val names = confirmSkipNames.joinToString(", ")
+        // Copy here is canonical and shared verbatim with StrengthToday.vue —
+        // the two surfaces wording the same decision differently is its own
+        // kind of parity bug.
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmSkipNames = emptyList() },
+            title = {
+                Text(
+                    if (n == 1) "Finish with unlogged exercise?"
+                    else "Finish with unlogged exercises?",
+                )
+            },
+            text = {
+                Text(
+                    if (n == 1) "1 exercise unlogged: $names. Mark it skipped and finish?"
+                    else "$n exercises unlogged: $names. Mark them skipped and finish?",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        confirmSkipNames = emptyList()
+                        finishWorkout(closeRemaining = true)
+                    },
+                    enabled = !finishing,
+                ) { Text(if (finishing) "Finishing…" else "Finish workout", color = pal.good) }
+            },
+            // "Go back" closes the dialog and does nothing else. In particular
+            // it must NOT set completeDialogDismissed — that would suppress the
+            // separate auto "Workout complete?" prompt for the rest of the
+            // session, which the user never asked to silence.
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { confirmSkipNames = emptyList() },
+                ) { Text("Go back") }
+            },
+        )
+    }
+
     LaunchedEffect(allSetsDone, workout?.status) {
         if (allSetsDone
             && !completeDialogDismissed
@@ -292,7 +379,7 @@ fun StrengthTodayScreen(
             title = { Text("Workout complete?") },
             text = {
                 Text(
-                    "All $totalSets prescribed sets logged. Finish and stamp " +
+                    "All $setsTotal prescribed sets accounted for. Finish and stamp " +
                     "the session, or keep going if you want to add bonus work.",
                 )
             },
@@ -300,10 +387,7 @@ fun StrengthTodayScreen(
                 androidx.compose.material3.TextButton(
                     onClick = {
                         showCompleteDialog = false
-                        scope.launch {
-                            try { workout = repo.completeWorkout(workout!!.id); reload() }
-                            catch (e: Exception) { error = e.message?.take(160) }
-                        }
+                        requestFinish()
                     },
                 ) { Text("Finish workout", color = pal.good) }
             },
@@ -431,15 +515,12 @@ fun StrengthTodayScreen(
             )
             // Quick stats pip when a plan exists
             workout?.let { p ->
-                val total = p.exercises.sumOf { it.targetSets }
-                val done = p.exercises.flatMap { it.sets }
-                    .count { it.actualReps != null || it.skipped }
                 Box(
                     Modifier.clip(RoundedCornerShape(50))
                         .background(pal.cardLow)
                         .padding(horizontal = 8.dp, vertical = 3.dp),
                 ) {
-                    Text("$done/$total sets",
+                    Text("${p.setsDone}/${p.setsTotal} sets",
                         color = pal.muted, fontSize = 11.sp)
                 }
                 Spacer(Modifier.width(4.dp))
@@ -722,8 +803,8 @@ fun StrengthTodayScreen(
 
         // Session progress bar — sets done / total for this workout. Lives in
         // the fixed header so it stays pinned while the exercise list scrolls.
-        if (totalSets > 0 && plan.exercises.isNotEmpty()) {
-            val frac = (completedSets.toFloat() / totalSets).coerceIn(0f, 1f)
+        if (setsTotal > 0 && plan.exercises.isNotEmpty()) {
+            val frac = (setsDone.toFloat() / setsTotal).coerceIn(0f, 1f)
             val barColor = if (allSetsDone) pal.good else pal.accent
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -737,7 +818,7 @@ fun StrengthTodayScreen(
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "$completedSets/$totalSets",
+                    "$setsDone/$setsTotal",
                     color = if (allSetsDone) pal.good else pal.muted,
                     fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                 )
@@ -805,6 +886,13 @@ fun StrengthTodayScreen(
             Spacer(Modifier.height(8.dp))
         }
 
+        // SKIP-1 — a session that's over accepts no more writes. Every slot in
+        // it is CLOSED (see isSlotClosed), which is what stops a workout
+        // completed before SKIP-1 shipped from still rendering live logging
+        // tables: the server's close-remaining sweep only fires on the
+        // completed transition and is deliberately not retroactive.
+        val sessionOver = plan.status == "completed" || plan.status == "skipped"
+
         // Float incomplete exercises to the top so the active set card
         // is always visible without scrolling. Within a superset PAIR,
         // alternate by completed-set count (log set 1 of A, then 1 of B,
@@ -812,14 +900,23 @@ fun StrengthTodayScreen(
         // exercises stay in their natural order so the user finishes all
         // sets of A before moving to B — bouncing breaks focus on
         // compound lifts. Done exercises drop to the bottom for reference.
-        val orderedExercises = remember(plan.exercises) {
-            fun completedCount(w: app.myvitals.sync.StrengthWorkoutExerciseRow): Int =
-                w.sets.count { it.actualReps != null || it.skipped }
-            fun isDone(w: app.myvitals.sync.StrengthWorkoutExerciseRow): Boolean =
-                completedCount(w) >= w.targetSets
+        val orderedExercises = remember(plan.exercises, sessionOver) {
+            // Nothing is actionable once the session is over, so nothing
+            // floats: render the prescription in its own order.
+            if (sessionOver) return@remember plan.exercises.sortedBy { it.orderIndex }
 
-            val incomplete = plan.exercises.filter { !isDone(it) }
-            val complete = plan.exercises.filter { isDone(it) }
+            // Which bucket a slot lands in is decided by its SETS alone — the
+            // slot-level skip flag is deliberately not consulted here, so
+            // tapping Skip can never move a card. Demoting the one-line strip
+            // to the end of the list the moment it's tapped is disorienting
+            // mid-session; the user still reads it as "the third thing I was
+            // going to do". A declined slot leaves the NOW highlight (below)
+            // and the superset alternation (via accountedSets), nothing else.
+            fun setsComplete(w: app.myvitals.sync.StrengthWorkoutExerciseRow): Boolean =
+                w.sets.count { it.actualReps != null || it.skipped } >= w.targetSets
+
+            val incomplete = plan.exercises.filter { !setsComplete(it) }
+            val complete = plan.exercises.filter { setsComplete(it) }
                 .sortedBy { it.orderIndex }
 
             val groupedIncomplete = incomplete
@@ -831,11 +928,13 @@ fun StrengthTodayScreen(
                         // slice until all its sets are done.
                         exs.sortedBy { it.orderIndex }
                     } else {
-                        // Superset partners: alternate by completed-count
+                        // Superset partners: alternate by accounted-count
                         // so the next set is always on the partner who's
-                        // behind.
+                        // behind. A declined partner counts as fully
+                        // accounted, so it never wins the alternation with
+                        // its zero logged sets.
                         exs.sortedWith(
-                            compareBy({ completedCount(it) }, { it.orderIndex }),
+                            compareBy({ accountedSets(it) }, { it.orderIndex }),
                         )
                     }
                 }
@@ -848,8 +947,10 @@ fun StrengthTodayScreen(
         // not-yet-finished exercise in render order. Every exercise still shows
         // its own entry form (you can log out of order), but only this one gets
         // the NOW chip + strong highlight so the screen has one clear focus.
+        // A closed slot — declined, finished, or part of a finished session —
+        // is never it.
         val currentExerciseId = orderedExercises.firstOrNull { ex ->
-            ex.sets.count { it.actualReps != null || it.skipped } < ex.targetSets
+            !isSlotClosed(ex, plan.status)
         }?.id
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
             isRefreshing = loading,
@@ -1065,12 +1166,27 @@ fun StrengthTodayScreen(
                 }
             }
             items(orderedExercises, key = { it.id }) { wex ->
-                val canSwap = wex.sets.none { it.actualReps != null && !it.skipped }
+                // SKIP-1 — Swap and Skip share one guard: nothing real logged
+                // against this slot AND the session still open to edits. Once
+                // actuals exist they belong to this exercise, and neither
+                // rewriting nor hiding the slot is honest.
+                val canEditSlot = !sessionOver &&
+                    wex.sets.none { it.actualReps != null && !it.skipped }
                 ExerciseCard(
                     wex = wex,
                     info = catalog[wex.exerciseId],
                     inputs = setInputs,
-                    canSwap = canSwap,
+                    canSwap = canEditSlot,
+                    canSkip = canEditSlot,
+                    closed = isSlotClosed(wex, plan.status),
+                    skipBusy = skipBusyWexId == wex.id,
+                    // Any skip in flight disables every Skip/Undo button, not
+                    // just the tapped one. Each PATCH returns the whole workout
+                    // as the server saw it, so two overlapping skips race their
+                    // responses and the slower one lands last, wiping the
+                    // other's flag until the next refresh.
+                    skipLocked = skipBusyWexId != null,
+                    skipError = skipError?.takeIf { it.first == wex.id }?.second,
                     isCurrentExercise = wex.id == currentExerciseId,
                     onLogSet = onLogSet@{ setNum, weight, reps, rating, setType ->
                         // WP-14: resume before logging — a paused session
@@ -1123,6 +1239,24 @@ fun StrengthTodayScreen(
                         openYouTube(context, slug, name)
                     },
                     onSwap = { swapWexId = wex.id },
+                    // The PATCH answers with the whole workout, counters
+                    // included, so there's nothing left to refetch.
+                    onSkipChange = { skipped ->
+                        scope.launch {
+                            skipBusyWexId = wex.id
+                            skipError = null
+                            try {
+                                workout = repo.skipExercise(wex.id, skipped)
+                            } catch (e: Exception) {
+                                Timber.w(e, "skipExercise %s failed", wex.id)
+                                // Verbatim server detail ("N set(s) already
+                                // logged for this exercise") on the card it's
+                                // about — the screen-level slot would read as
+                                // a plan-wide failure.
+                                skipError = wex.id to (e.message ?: "Skip failed")
+                            } finally { skipBusyWexId = null }
+                        }
+                    },
                     onSetPref = { pref ->
                         scope.launch {
                             try {
@@ -1173,17 +1307,21 @@ fun StrengthTodayScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = pal.info),
                         ) { Text("Resume workout") }
                     } else {
+                        // SKIP-1 — the CTA is live whenever the session is
+                        // (this whole block is already gated on that) and no
+                        // completion is in flight. There is deliberately no
+                        // "you haven't logged anything yet" gate: finishing a
+                        // session you walked away from is the flagship SKIP-1
+                        // flow, and the confirmation names what it will close.
                         Button(
                             onClick = {
                                 if (isCardioDay) {
                                     showCardioLog = true
                                 } else {
-                                    scope.launch {
-                                        try { workout = repo.completeWorkout(plan.id); reload() }
-                                        catch (e: Exception) { error = e.message?.take(160) }
-                                    }
+                                    requestFinish()
                                 }
                             },
+                            enabled = !finishing,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 12.dp),
@@ -1191,10 +1329,16 @@ fun StrengthTodayScreen(
                                 containerColor = pal.good, contentColor = NeonMV.OnAccent,
                             ) else ButtonDefaults.buttonColors(containerColor = MV.Green),
                         ) {
-                            Text(if (isCardioDay) "Log this workout" else "Complete workout")
+                            Text(
+                                when {
+                                    isCardioDay -> "Log this workout"
+                                    finishing -> "Finishing…"
+                                    else -> "Complete workout"
+                                },
+                            )
                         }
                         // WP-14 — Pause, for strength sessions already underway.
-                        val started = completedSets > 0 || plan.status == "in_progress"
+                        val started = setsDone > 0 || plan.status == "in_progress"
                         if (!isCardioDay && started) {
                             OutlinedButton(
                                 onClick = {
@@ -1246,6 +1390,14 @@ fun StrengthTodayScreen(
                                     Text("Redo", color = pal.muted, fontSize = 12.sp)
                                 }
                             }
+                            // SKIP-1 — what the session actually amounted to,
+                            // straight from the server counters. Same subtitle
+                            // as the web's "Workout complete" card.
+                            Text(
+                                "${plan.setsDone}/${plan.setsTotal} sets · " +
+                                    "${plan.exercisesDone}/${plan.exercisesTotal} exercises",
+                                color = pal.muted, fontSize = 12.sp,
+                            )
                             Spacer(Modifier.height(12.dp))
                             ReviewBlock(
                                 review = review,
@@ -1580,11 +1732,8 @@ private fun RestDayCard(reason: String, generating: Boolean, onForceGenerate: ()
 }
 
 @Composable
-private fun ContextRow(plan: StrengthWorkoutDetail, totalSets: Int) {
+private fun ContextRow(plan: StrengthWorkoutDetail) {
     val pal = LocalStrengthPalette.current
-    val completedSets = plan.exercises.flatMap { it.sets }
-        .count { !it.skipped && it.actualReps != null }
-    val target = plan.exercises.sumOf { it.targetSets }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             "${plan.splitFocus.replaceFirstChar { it.titlecase() }} day · "
@@ -1592,7 +1741,7 @@ private fun ContextRow(plan: StrengthWorkoutDetail, totalSets: Int) {
             color = pal.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ContextChip("$completedSets/$target sets")
+            ContextChip("${plan.setsDone}/${plan.setsTotal} sets")
             plan.recoveryScoreUsed?.let { ContextChip("recovery ${it.toInt()}") }
             plan.sleepHUsed?.let { ContextChip("sleep ${"%.1f".format(it)}h") }
         }
@@ -2475,16 +2624,99 @@ private data class SetInput(
     var setType: String = "working",  // working | warmup | drop | failure (SETTYPE-1)
 )
 
+/**
+ * SKIP-1 — sets on this slot the user has dealt with, logged or individually
+ * skipped, capped at the prescription so a bonus set can't push the slot past
+ * its target. Mirrors the backend's `_accounted_sets`; the workout-level
+ * counters still come from the server and are rendered verbatim.
+ */
+internal fun accountedSets(wex: StrengthWorkoutExerciseRow): Int =
+    if (wex.skipped) wex.targetSets
+    else minOf(
+        wex.sets.count { it.actualReps != null || it.skipped },
+        wex.targetSets,
+    )
+
+/** Nothing left to do on this slot — declined outright, or every prescribed
+ *  set accounted for. Mirrors the backend's `_exercise_done`. */
+internal fun isSlotSettled(wex: StrengthWorkoutExerciseRow): Boolean =
+    wex.skipped || accountedSets(wex) >= wex.targetSets
+
+/**
+ * SKIP-1 — the single notion of a CLOSED slot: one nothing can be logged
+ * against any more. Either the slot is settled, or the session it belongs to
+ * is over. A closed slot never takes the NOW highlight, never floats to the
+ * top of the list, and never renders a live set-entry form — which is what
+ * stops a workout finished before SKIP-1 shipped (the server's close-remaining
+ * sweep is deliberately not retroactive) from still offering to log work the
+ * user walked away from. It is display truth only: it writes nothing.
+ */
+internal fun isSlotClosed(wex: StrengthWorkoutExerciseRow, workoutStatus: String): Boolean =
+    isSlotSettled(wex) || workoutStatus == "completed" || workoutStatus == "skipped"
+
+/**
+ * The muted one-line form a closed slot takes when there's nothing to show:
+ * "Skipped" (declined, with an Undo while the session is still live) or
+ * "Not logged" (never touched, on a session that's already over). Neither
+ * renders a set-entry form — that's the whole point.
+ */
+@Composable
+private fun SlotStrip(
+    label: String,
+    state: String,
+    error: String? = null,
+    trailing: @Composable () -> Unit = {},
+) {
+    val pal = LocalStrengthPalette.current
+    Card(
+        colors = CardDefaults.cardColors(containerColor = pal.cardLow),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.padding(
+                    start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp,
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    label,
+                    color = pal.dim, fontSize = 14.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(state, color = pal.muted, fontSize = 12.sp)
+                trailing()
+            }
+            error?.let {
+                Text(
+                    it, color = pal.bad, fontSize = 11.sp,
+                    modifier = Modifier.padding(
+                        start = 14.dp, end = 14.dp, bottom = 6.dp,
+                    ),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ExerciseCard(
     wex: StrengthWorkoutExerciseRow,
     info: StrengthExerciseInfo?,
     inputs: androidx.compose.runtime.snapshots.SnapshotStateMap<String, SetInput>,
     canSwap: Boolean,
+    canSkip: Boolean = false,
+    // SKIP-1 — see isSlotClosed. Suppresses every writable affordance.
+    closed: Boolean = false,
+    // The slot's own Skip / Undo PATCH is in flight, and its last failure.
+    skipBusy: Boolean = false,
+    skipLocked: Boolean = false,
+    skipError: String? = null,
     isCurrentExercise: Boolean = true,
     onLogSet: (setNum: Int, weight: Double?, reps: Int?, rating: Int?, setType: String) -> Unit,
     onYouTube: (slug: String, name: String) -> Unit,
     onSwap: () -> Unit,
+    onSkipChange: (Boolean) -> Unit = {},
     onSetPref: (String) -> Unit = {},
     partnerName: String? = null,
     backendBaseUrl: String = "",
@@ -2494,6 +2726,39 @@ private fun ExerciseCard(
     val iconViolet = if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA)
     val iconVioletBg = if (pal.neon) NeonMV.Magenta.copy(alpha = 0.12f) else Color(0x14A78BFA)
     val name = info?.name ?: wex.exerciseId.replace('_', ' ')
+    // SKIP-1 — a declined slot collapses to a muted one-line strip. No NOW
+    // highlight, no writable set table: the whole point is that a finished
+    // session stops offering to log work the user walked away from.
+    if (wex.skipped) {
+        SlotStrip(
+            label = "${wex.orderIndex + 1}. $name",
+            state = "Skipped",
+            error = skipError,
+        ) {
+            // Undo rides the same guard as Skip: on a session that's over,
+            // un-skipping would be a one-way trip into the "Not logged" strip
+            // below with no way back.
+            if (canSkip) {
+                TextButton(
+                    onClick = { onSkipChange(false) },
+                    enabled = !skipLocked,
+                ) {
+                    Text(
+                        if (skipBusy) "Restoring…" else "Undo",
+                        color = pal.accent, fontSize = 12.sp,
+                    )
+                }
+            }
+        }
+        return
+    }
+    // The session is over and this slot was never touched. It is NOT a skip —
+    // the user didn't decline it, the sweep just never ran over this workout —
+    // so it says so plainly: no Undo, no logging controls, no set-entry form.
+    if (closed && wex.sets.none { it.actualReps != null || it.skipped }) {
+        SlotStrip(label = "${wex.orderIndex + 1}. $name", state = "Not logged")
+        return
+    }
     val nextSet = (1..wex.targetSets).firstOrNull { n ->
         wex.sets.none { it.setNumber == n && (it.actualReps != null || it.skipped) }
     }
@@ -2639,8 +2904,28 @@ private fun ExerciseCard(
                         Text(" Swap", color = pal.muted, fontSize = 12.sp)
                     }
                 }
+                if (canSkip) {
+                    TextButton(
+                        onClick = { onSkipChange(true) },
+                        // Disabled while the PATCH is in flight — a double tap
+                        // races two whole-workout responses into the same state.
+                        enabled = !skipLocked,
+                    ) {
+                        Icon(Icons.Filled.SkipNext, contentDescription = null,
+                            tint = pal.muted, modifier = Modifier.size(14.dp))
+                        Text(
+                            if (skipBusy) " Skipping…" else " Skip",
+                            color = pal.muted, fontSize = 12.sp,
+                        )
+                    }
+                }
                 Spacer(Modifier.weight(1f))
                 ExercisePrefMenu(onSetPref)
+            }
+            // A skip refusal — the 409 "N set(s) already logged for this
+            // exercise" — belongs on the card it names, verbatim.
+            skipError?.let {
+                Text(it, color = pal.bad, fontSize = 11.sp)
             }
             // Sets
             val timed = isTimedExercise(wex, info)
@@ -2667,7 +2952,7 @@ private fun ExerciseCard(
                             sideLabel = bilateralSideLabel(n, wex.targetSets, info),
                         )
                     }
-                } else if (timed && n == nextSet) {
+                } else if (timed && n == nextSet && !closed) {
                     TimedSetRow(
                         n = n, holdSeconds = wex.targetRepsLow,
                         exerciseName = name,
@@ -2683,7 +2968,10 @@ private fun ExerciseCard(
                     )
                 } else if (timed) {
                     PendingSetRow(n, bilateralSideLabel(n, wex.targetSets, info))
-                } else if (n == nextSet) {
+                    // A closed slot falls through to the read-only pending row:
+                    // partial work stays visible, but the session is over (or
+                    // this slot is settled) so there's nothing to log into.
+                } else if (n == nextSet && !closed) {
                     // Inherit weight/reps from the most recently logged
                     // set of THIS exercise so an edit on set 1 carries
                     // forward to sets 2…N. Fall back to the planned
@@ -3785,7 +4073,13 @@ private fun buildWorkoutShareText(
         val unit = if (wex.isTimed) "s" else ""
         val wt = wex.targetWeightLb?.let { " @ ${fmtW(it)} lb" } ?: ""
         sb.append("${i + 1}. $name — ${wex.targetSets}×$rep$unit$wt")
-        val extra = listOfNotNull(wex.programScheme, wex.loadHint).joinToString(" · ")
+        val extra = listOfNotNull(
+            // SKIP-1 — a declined slot was prescribed but never performed.
+            // Annotated rather than dropped so the export keeps the plan's
+            // numbering and still matches what the screen shows.
+            if (wex.skipped) "skipped" else null,
+            wex.programScheme, wex.loadHint,
+        ).joinToString(" · ")
         if (extra.isNotBlank()) sb.append("  ($extra)")
         sb.append("\n")
     }

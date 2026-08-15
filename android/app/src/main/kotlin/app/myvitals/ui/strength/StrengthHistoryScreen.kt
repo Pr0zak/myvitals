@@ -515,7 +515,13 @@ private fun DetailList(plan: StrengthWorkoutDetail, catalog: Map<String, Strengt
                         )
                     }
                     if (wex.sets.isEmpty()) {
-                        Text("No sets logged.", color = dim, fontSize = 12.sp)
+                        // SKIP-1: "skipped" is a decision, "no sets logged" is
+                        // an absence. Saying the same thing for both loses
+                        // exactly the distinction the flag was added to record.
+                        Text(
+                            if (wex.skipped) "Skipped." else "No sets logged.",
+                            color = dim, fontSize = 12.sp,
+                        )
                     }
                 }
             }

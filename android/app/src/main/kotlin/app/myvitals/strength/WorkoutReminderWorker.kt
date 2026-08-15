@@ -63,7 +63,11 @@ class WorkoutReminderWorker(
 
             val split = plan.splitFocus.replace('_', ' ')
                 .replaceFirstChar(Char::titlecase)
-            val sets = plan.exercises.flatMap { it.sets }.size
+            // Prescribed sets, from the server counter. This used to count
+            // persisted set ROWS — which on a freshly generated day is always
+            // zero, so the 8am reminder read "0 sets · 6 exercises" every
+            // morning. SKIP-1 made the real number available.
+            val sets = plan.setsTotal
             val firstThree = plan.exercises.take(3).joinToString("\n") { wex ->
                 val name = wex.exerciseId.replace('_', ' ')
                     .replaceFirstChar(Char::titlecase)

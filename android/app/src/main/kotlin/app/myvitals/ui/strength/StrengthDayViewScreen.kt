@@ -205,24 +205,37 @@ private fun DayHeader(w: StrengthWorkoutDetail, neon: Boolean) {
 @Composable
 private fun DayExerciseCard(wex: app.myvitals.sync.StrengthWorkoutExerciseRow, neon: Boolean) {
     val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    // SKIP-1 — a declined slot is muted so history doesn't read it as an
+    // untouched prescription the user might still get to.
+    val cardLow = if (neon) NeonMV.Card else MV.SurfaceContainerLow
     val ink = if (neon) NeonMV.Ink else MV.OnSurface
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     val setInk = if (neon) NeonMV.Muted else MV.OnSurfaceDim
     Card(
-        colors = CardDefaults.cardColors(containerColor = card),
+        colors = CardDefaults.cardColors(
+            containerColor = if (wex.skipped) cardLow else card,
+        ),
         shape = if (neon) NeonCardShape else CardDefaults.shape,
         border = if (neon) BorderStroke(1.dp, NeonMV.Line) else null,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(14.dp)) {
             Text(wex.exerciseId.replace('_', ' '),
-                color = ink, fontSize = 15.sp,
+                color = if (wex.skipped) muted else ink, fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold)
             val rep = if (wex.targetRepsLow == wex.targetRepsHigh)
                 "${wex.targetRepsLow}" else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
             val w = wex.targetWeightLb?.let { " @ ${it}lb" } ?: ""
             Text("${wex.targetSets}×$rep$w",
                 color = muted, fontSize = 12.sp)
+            // SKIP-1 — the marker stands in for the set lines this slot will
+            // never have. Without it a declined exercise is indistinguishable
+            // from one that was simply never reached.
+            if (wex.skipped) {
+                Spacer(Modifier.height(2.dp))
+                Text("  Skipped", color = muted, fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold)
+            }
             // Logged sets (if any)
             for (s in wex.sets.sortedBy { it.setNumber }) {
                 if (s.actualReps != null) {

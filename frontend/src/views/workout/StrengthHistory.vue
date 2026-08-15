@@ -280,7 +280,10 @@ const calendarHeight = computed(() => {
                 </tr>
               </tbody>
             </table>
-            <p v-else class="hint">No sets logged.</p>
+            <!-- SKIP-1: "skipped" is a decision, "no sets logged" is an
+                 absence. Saying the same thing for both loses exactly the
+                 distinction the flag was added to record. -->
+            <p v-else class="hint">{{ ex.skipped ? 'Skipped.' : 'No sets logged.' }}</p>
           </div>
         </template>
       </div>

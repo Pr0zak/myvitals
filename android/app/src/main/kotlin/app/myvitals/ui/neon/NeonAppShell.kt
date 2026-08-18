@@ -403,11 +403,41 @@ private fun NeonBottomBar(nav: NavHostController) {
     }
 }
 
-/** Tab navigation with state save/restore, mirroring the classic shell. */
+/**
+ * Tab navigation. A tab tap always lands on that tab's own root screen.
+ *
+ * This used to carry `saveState = true` / `restoreState = true`, the pattern
+ * every bottom-nav sample shows. Those flags do not merely remember a scroll
+ * position: they save and restore the tab's whole nested back stack. So after
+ * drilling Body → Heart rate, tapping Body did not show Body — it restored
+ * Heart rate. Verified on an emulator against the pre-fix build: from a cold
+ * start, You → Journal → Today → You landed on **Journal**, not You.
+ *
+ * That is what made the bar feel stuck. Every tap out of a detail screen
+ * risked being thrown straight back into it, and because the saved stacks
+ * live in the NavController rather than on disk, force-quitting the app was
+ * the only reliable way to clear them — which is exactly the workaround the
+ * bug report described.
+ *
+ * Restoring a nested stack is a defensible pattern for tabs that are
+ * independent workspaces. It is the wrong one here: these five are views onto
+ * the same day, the leftmost is literally labelled "Today", and a tab bar
+ * whose destination depends on invisible history is not predictable. So the
+ * tap is now unconditional — pop back to the start destination and go to the
+ * tab root — and pressing the same tab again while drilled in pops back out
+ * to its root, which is the standard Android behaviour and is what people
+ * are reaching for when they tap a tab a second time.
+ */
 private fun NavHostController.navigateTopTab(route: String) {
+    // Already on this tab's root: nothing to do. Without this the tab would
+    // pop and re-push itself, visibly reloading the screen under the finger.
+    if (currentDestination?.route == route) return
+
     navigate(route) {
-        popUpTo(graph.findStartDestination().id) { saveState = true }
+        // No saveState: the saved stack is the thing that was resurrecting
+        // detail screens. Popping inclusively and re-adding gives every tab
+        // tap the same, predictable result.
+        popUpTo(graph.findStartDestination().id) { inclusive = true }
         launchSingleTop = true
-        restoreState = true
     }
 }

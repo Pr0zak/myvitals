@@ -173,7 +173,7 @@ async def update_config(
         raise HTTPException(
             status_code=400,
             detail=f"{effective_provider} needs a base URL "
-                   "(e.g. http://10.0.0.5:11434/v1 for Ollama)",
+                   "(e.g. http://ollama.example.lan:11434/v1)",
         )
     if body.custom_instructions is not None:
         # Truncate rather than reject: silently losing the tail is worse than

@@ -61,7 +61,7 @@ def test_openai_compatible_requires_a_usable_base_url():
 @pytest.mark.parametrize("url", [
     "file:///etc/passwd",
     "gopher://internal/",
-    "http://user:hunter2@10.0.0.5/v1",
+    "http://user:hunter2@example.lan/v1",
     "",
     "not-a-url",
 ])
@@ -75,7 +75,7 @@ def test_a_lan_address_is_allowed_because_that_is_the_point():
     """Blocking RFC1918 would defeat the feature: pointing at Ollama on the
     LAN is the entire reason for it. The mitigation is that only the single
     authenticated user can set this, and that it is logged when used."""
-    assert validate_base_url("http://10.0.0.5:11434/v1/") == "http://10.0.0.5:11434/v1"
+    assert validate_base_url("http://ollama.example.lan:11434/v1/") == "http://ollama.example.lan:11434/v1"
 
 
 # --------------------------------------------------------------------------

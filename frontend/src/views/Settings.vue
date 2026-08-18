@@ -1733,7 +1733,7 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
         <label v-if="aiProvider !== 'anthropic'" class="ai-instructions">
           <span>Base URL</span>
           <input v-model="aiBaseUrl" type="url" class="add-search"
-                 placeholder="http://10.0.0.5:11434/v1"/>
+                 placeholder="http://ollama.lan:11434/v1"/>
           <div class="ai-instructions-foot">
             <span class="muted">
               Anthropic is the only provider with prompt caching, so switching

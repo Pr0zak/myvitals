@@ -1111,9 +1111,20 @@ async def strength_nudge_endpoint(
     from ..integrations.claude import (
         build_strength_nudge_payload, strength_nudge,
     )
+    # The full catalog resolves names for whatever is already in the plan —
+    # including exercises the user has since disabled or lost the equipment
+    # for, which still need to render. The SWAP POOL is a different question,
+    # so it is gated separately on the generator's own selection rule.
     catalog_by_id = strength_algo.CATALOG_BY_ID
+    from .workout.strength import _equipment_payload
+    equip = await _equipment_payload(db)
+    selectable_ids = strength_algo.selectable_catalog_ids(
+        equip, equip.get("exercise_prefs") or {},
+    )
 
-    payload = await build_strength_nudge_payload(db, workout_id, catalog_by_id)
+    payload = await build_strength_nudge_payload(
+        db, workout_id, catalog_by_id, selectable_ids,
+    )
     payload_hash = _ai_cache_key(cfg, f"strength_nudge:{workout_id}", payload)
     range_kind = f"strength_nudge:{workout_id}"
     cached = (await db.execute(
@@ -1133,7 +1144,9 @@ async def strength_nudge_endpoint(
             "input_tokens": cached.input_tokens, "output_tokens": cached.output_tokens,
         }
 
-    result = await strength_nudge(db, workout_id, cfg, catalog_by_id)
+    result = await strength_nudge(
+        db, workout_id, cfg, catalog_by_id, selectable_ids,
+    )
     cfg.calls_today += 1
     summary = models.AiSummary(
         generated_at=datetime.now(timezone.utc),

@@ -1252,6 +1252,7 @@ Use the `give_variety_nudge` tool. Suggest 0-2 swaps. Rules:
 
 async def build_strength_nudge_payload(
     db: AsyncSession, workout_id: int, catalog_by_id: dict[str, dict],
+    selectable_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Bounded payload for variety nudge.
 
@@ -1307,20 +1308,44 @@ async def build_strength_nudge_payload(
             if entry["last_seen"] is None or iso > entry["last_seen"]:
                 entry["last_seen"] = iso
 
-    # Catalog filtered by today's plan's primary-muscle universe + the
-    # available equipment (already represented by what the generator
-    # picked from). Cap at 60 entries to keep the payload small.
+    # The pool the model may swap from. Two filters, both load-bearing.
+    #
+    # `selectable_ids` is the generator's own rule — equipment the user owns,
+    # exercises they have not disabled, superseded duplicates removed. The
+    # comment this replaces claimed equipment was "already represented by
+    # what the generator picked from", but the pool was built from the WHOLE
+    # catalog, so the model was free to suggest a barbell lift to someone who
+    # owns dumbbells, or an exercise the user had explicitly turned off. That
+    # reads as the coach not having read the settings, and it spends a call
+    # to produce advice that cannot be taken.
+    #
+    # Already-in-today's-plan exercises are excluded too: suggesting a swap
+    # to something already prescribed today is never a variety improvement.
     today_muscles = {p["primary_muscle"] for p in today_plan if p.get("primary_muscle")}
-    available_catalog = []
+    in_plan = {p.get("exercise_id") for p in today_plan}
+    candidates = []
     for cid, info in catalog_by_id.items():
-        if info.get("primary_muscle") in today_muscles:
-            available_catalog.append({
-                "exercise_id": cid,
-                "name": info.get("name", cid),
-                "primary_muscle": info.get("primary_muscle"),
-                "movement_pattern": info.get("movement_pattern"),
-            })
-    available_catalog = available_catalog[:60]
+        if info.get("primary_muscle") not in today_muscles:
+            continue
+        if cid in in_plan:
+            continue
+        if selectable_ids is not None and cid not in selectable_ids:
+            continue
+        candidates.append({
+            "exercise_id": cid,
+            "name": info.get("name", cid),
+            "primary_muscle": info.get("primary_muscle"),
+            "movement_pattern": info.get("movement_pattern"),
+        })
+    # Least-recently-used first rather than dict order, then capped. The old
+    # [:60] slice took whatever the catalog happened to list first, which
+    # biased every suggestion toward the same alphabetical head and worked
+    # against the variety the feature exists to provide.
+    candidates.sort(key=lambda c: (
+        recent_history.get(c["exercise_id"], {}).get("count", 0),
+        c["name"],
+    ))
+    available_catalog = candidates[:60]
 
     return {
         "today": {
@@ -1336,11 +1361,14 @@ async def build_strength_nudge_payload(
 async def strength_nudge(
     db: AsyncSession, workout_id: int, cfg: models.AiConfig,
     catalog_by_id: dict[str, dict],
+    selectable_ids: set[str] | None = None,
 ) -> AiResult:
     """Generate up to 2 variety-swap suggestions for today's plan."""
     if not cfg.enabled or not cfg.anthropic_api_key:
         raise RuntimeError("AI is disabled or no API key configured")
-    payload = await build_strength_nudge_payload(db, workout_id, catalog_by_id)
+    payload = await build_strength_nudge_payload(
+        db, workout_id, catalog_by_id, selectable_ids,
+    )
     if not payload:
         raise RuntimeError("workout not found")
     user_text = (

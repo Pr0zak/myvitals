@@ -1103,6 +1103,30 @@ def _name_family(name: str) -> str:
     return core[-1] if core else name.lower()
 
 
+def selectable_catalog_ids(
+    equipment: dict[str, Any],
+    exercise_prefs: dict[str, str] | None = None,
+) -> set[str]:
+    """Ids the generator would actually consider, as a set.
+
+    Three filters, matching what `select_exercises_for_split` applies:
+    equipment the user owns, exercises they have not disabled, and the
+    supersede list that keeps duplicate rows out of selection.
+
+    Extracted so the AI surfaces can be gated on the same rule. The variety
+    nudge used to receive the whole catalog and was free to suggest swapping
+    in a barbell exercise for someone who owns dumbbells, or an exercise the
+    user had explicitly turned off — which reads as the coach not having read
+    the settings, and costs a call to produce advice that cannot be taken.
+    """
+    prefs = exercise_prefs or {}
+    allowed = filter_catalog_for_equipment(CATALOG_SELECTABLE, equipment)
+    return {
+        e["id"] for e in allowed
+        if prefs.get(e["id"]) != "disabled"
+    }
+
+
 def filter_catalog_for_equipment(
     catalog: list[dict[str, Any]], equipment: dict[str, Any]
 ) -> list[dict[str, Any]]:

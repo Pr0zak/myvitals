@@ -24,6 +24,39 @@ log = logging.getLogger(__name__)
 _lazy_compute_lock = asyncio.Lock()
 
 
+def _local_tz() -> Any:
+    """The user's timezone, falling back to UTC when it will not resolve."""
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        return timezone.utc
+
+
+def resolve_day(requested: date | None = None) -> tuple[date, Any, bool]:
+    """Resolve a day-facing request to ``(day, tzinfo, is_today)``.
+
+    A user-facing "today" is the user's LOCAL day, never the UTC one. The
+    container runs TZ=UTC while the user is Central, so the UTC date rolls at
+    7pm CDT and any endpoint deriving a calendar day from UTC starts
+    answering for tomorrow every evening. That bug has shipped three separate
+    times -- ``/summary/today``, then ``/summary/readiness`` in v0.7.369, and
+    ``today_snapshot`` was still carrying a bare ``date.today()`` when TD-3
+    found it. Every day-facing endpoint calls this now rather than repeating
+    the block.
+
+    ``is_today`` matters as much as the date. Several endpoints repair a
+    stale ``daily_summary`` row and splice in a live step count before
+    answering, and both of those are only ever correct for the current day --
+    doing either while looking at last Tuesday would rewrite history from
+    today's samples.
+    """
+    tz = _local_tz()
+    today = datetime.now(tz).date()
+    day = requested or today
+    return day, tz, day == today
+
+
 async def _today_row_is_stale(
     db: AsyncSession, saved: "models.DailySummary | None",
     today_local: date, day_start: datetime, day_end: datetime,
@@ -270,6 +303,7 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
 
 @router.get("/readiness")
 async def readiness_detail(
+    date_: date | None = Query(None, alias="date"),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Today's readiness with the drivers that produced it, plus a 7-day
@@ -283,24 +317,19 @@ async def readiness_detail(
     """
     from ..analytics.advanced import readiness_band, readiness_breakdown
 
-    # "Today" must be the user's local day, not the UTC one. On Central
-    # time the UTC day rolls at 7pm CDT, so a UTC date here asked for
-    # tomorrow's daily_summary all evening — the row doesn't exist, the
-    # score came back null, and the hero showed "not enough data" from
-    # 7pm to midnight every single night. Same fix as `/summary/today`.
-    try:
-        from zoneinfo import ZoneInfo
-        local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
-    except Exception:
-        local_tz = timezone.utc
-    today = datetime.now(local_tz).date()
-    # Same stale-row repair the other two day-facing endpoints do. Without
-    # it readiness could report "no inputs" from a row that /summary/today
-    # had already recomputed — the surfaces-disagree bug again, with the
-    # hero as the one telling the wrong story.
-    midnight_local = datetime.combine(today, datetime.min.time(), tzinfo=local_tz)
-    day_end = datetime.combine(today, datetime.max.time(), tzinfo=local_tz)
-    row = await _ensure_fresh_today_row(db, today, midnight_local, day_end)
+    today, local_tz, is_today = resolve_day(date_)
+    # Stale-row repair, but only for the current day. Without it readiness
+    # could report "no inputs" from a row that /summary/today had already
+    # recomputed — the surfaces-disagree bug again, with the hero as the one
+    # telling the wrong story. Running it for a PAST day would be worse than
+    # not running it at all: it would rebuild a historical row from whatever
+    # samples exist now.
+    if is_today:
+        midnight_local = datetime.combine(today, datetime.min.time(), tzinfo=local_tz)
+        day_end = datetime.combine(today, datetime.max.time(), tzinfo=local_tz)
+        row = await _ensure_fresh_today_row(db, today, midnight_local, day_end)
+    else:
+        row = await db.get(models.DailySummary, today)
     breakdown = await readiness_breakdown(
         db, today,
         hrv=row.hrv_avg if row else None,
@@ -354,6 +383,7 @@ async def readiness_detail(
 
 @router.get("/tiles")
 async def summary_tiles(
+    date_: date | None = Query(None, alias="date"),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Per-tile value + 14-day series + whether that value is good.
@@ -365,24 +395,22 @@ async def summary_tiles(
     """
     from ..analytics.tiles import tile_stats
 
-    # Local day, not UTC — see the note on `/summary/readiness`.
-    try:
-        from zoneinfo import ZoneInfo
-        local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
-    except Exception:
-        local_tz = timezone.utc
-    day = datetime.now(local_tz).date()
-
-    # Same stale-row repair `/summary/today` does. Without it the tiles read
-    # a row the rest of the app has already moved past — weight and blood
-    # pressure showed as absent while /summary/today reported both.
+    day, local_tz, is_today = resolve_day(date_)
     midnight_local = datetime.combine(day, datetime.min.time(), tzinfo=local_tz)
-    day_end = datetime.combine(day, datetime.max.time(), tzinfo=local_tz)
-    await _ensure_fresh_today_row(db, day, midnight_local, day_end)
+
+    steps_now: int | None = None
+    if is_today:
+        # Same stale-row repair `/summary/today` does. Without it the tiles
+        # read a row the rest of the app has already moved past — weight and
+        # blood pressure showed as absent while /summary/today reported both.
+        # Both this and the live step count are today-only by nature: a past
+        # day's row is finished, and splicing this minute's step total into
+        # last Tuesday would be a fabrication.
+        day_end = datetime.combine(day, datetime.max.time(), tzinfo=local_tz)
+        await _ensure_fresh_today_row(db, day, midnight_local, day_end)
+        steps_now = await live_steps_today(db, midnight_local, datetime.now(timezone.utc))
 
     profile = await db.get(models.UserProfile, 1)
-    # Same live count /summary/today uses — see live_steps_today.
-    steps_now = await live_steps_today(db, midnight_local, datetime.now(timezone.utc))
     tiles = await tile_stats(db, day, profile, steps_override=steps_now)
 
     # "Vitals 3 of 5 in range" — the reference's Health status line. Counted
@@ -436,6 +464,7 @@ async def summary_tiles(
 
 @router.get("/events")
 async def summary_events(
+    date_: date | None = Query(None, alias="date"),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Plain-language cards for today's sleep, with hypnogram segments.
@@ -445,12 +474,7 @@ async def summary_events(
     """
     from ..analytics.events import day_events
 
-    try:
-        from zoneinfo import ZoneInfo
-        local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
-    except Exception:
-        local_tz = timezone.utc
-    day = datetime.now(local_tz).date()
+    day, local_tz, _is_today = resolve_day(date_)
     return {
         "date": day.isoformat(),
         "events": await day_events(db, day, local_tz),
@@ -640,7 +664,10 @@ async def today_snapshot(
     day_ago = now - _td(days=1)
     seven_ago = (now - _td(days=7)).date()
     thirty_ago = now - _td(days=30)
-    today_local = date.today()
+    # date.today() reads the CONTAINER's clock, and the container runs
+    # TZ=UTC — so this was the local-day bug wearing a different hat, silent
+    # every evening after the UTC rollover.
+    today_local, _tz, _is_today = resolve_day()
 
     # SQLAlchemy AsyncSession can't run concurrent ops, so each parallel
     # handler gets its own session. The request-scoped `db` is only used

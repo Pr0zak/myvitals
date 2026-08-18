@@ -127,6 +127,43 @@ onMounted(async () => {
 </template>
 
 <style>
+/* ── Off-today ambient tint (TD-3) ────────────────────────────────────────
+ * DayNav stamps `data-day-relation` on <html> while the selected day is not
+ * today, and the whole nav chrome picks it up — a coloured edge plus a faint
+ * wash, rather than one small label in a corner.
+ *
+ * Borrowed from SparkyFitness, where it exists because a date-scoped app
+ * makes it very easy to sit on the wrong day and read stale numbers as
+ * current. It earns its place here for a sharper reason: this app has
+ * shipped the UTC-versus-local day bug three separate times, so "which day
+ * am I actually looking at" is a question the UI should answer without being
+ * asked.
+ *
+ * `future` exists for completeness; DayNav caps forward navigation at today,
+ * so nothing should reach it in practice. */
+:root[data-day-relation="past"] {
+  --day-tint: var(--warn, #eab308);
+}
+:root[data-day-relation="future"] {
+  --day-tint: var(--accent, #38bdf8);
+}
+:root[data-day-relation="past"] .side-nav,
+:root[data-day-relation="future"] .side-nav,
+:root[data-day-relation="past"] .neon-nav,
+:root[data-day-relation="future"] .neon-nav {
+  border-color: color-mix(in srgb, var(--day-tint) 55%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--day-tint) 22%, transparent);
+}
+:root[data-day-relation="past"] .main-col::before,
+:root[data-day-relation="future"] .main-col::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: color-mix(in srgb, var(--day-tint) 6%, transparent);
+}
+
 :root,
 [data-theme="dark"] {
   /* Deeper, design-spec palette */

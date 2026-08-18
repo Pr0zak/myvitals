@@ -131,6 +131,12 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/views/HeartRate.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/vitals/HrDetailScreen.kt",
      "Heart rate detail view"),
+    # TD-3 added this row. The phone has had day navigation on its detail
+    # screens since they were written and the web had none, which the gate
+    # could not see because there was no web file to pair with DayNav.kt.
+    ("frontend/src/components/DayNav.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/common/DayNav.kt",
+     "Day picker (‹ date › + Today chip, off-today tint)"),
     ("frontend/src/views/Weight.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/vitals/WeightDetailScreen.kt",
      "Weight view"),

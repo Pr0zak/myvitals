@@ -218,9 +218,15 @@ export const api = {
     return data;
   },
 
-  async listAnnotations(opts: { since?: Date | string; type?: string; limit?: number } = {}): Promise<Annotation[]> {
+  async listAnnotations(
+    opts: { since?: Date | string; until?: Date | string; type?: string; limit?: number } = {},
+  ): Promise<Annotation[]> {
     const params: Record<string, string | number> = {};
     if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;
+    // The backend has always accepted `until` (api/annotations.py); only the
+    // client omitted it, which is why a day-scoped view could ask for a
+    // window and still get everything after its start.
+    if (opts.until) params.until = opts.until instanceof Date ? opts.until.toISOString() : opts.until;
     if (opts.type) params.type = opts.type;
     if (opts.limit) params.limit = opts.limit;
     const { data } = await http.get<Annotation[]>("/journal", { params });

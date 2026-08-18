@@ -1,5 +1,9 @@
 package app.myvitals.ui.common
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,7 +43,19 @@ import java.time.format.DateTimeFormatter
  *
  * Used on detail screens that render a single day of data so the user
  * can scroll history without losing the day-of view.
+ *
+ * TD-3 gave the web a matching `DayNav.vue`, and brought back the one idea
+ * this control was missing: while the selected day is not today, the pill
+ * takes a visible tint and grows a Today chip. Being parked on last Tuesday
+ * and reading the numbers as though they were current is a real failure
+ * mode, and one small unstyled label is not enough to prevent it. (The web
+ * additionally tints the whole nav chrome via a `data-day-relation` stamp on
+ * the document; there is no equivalent hook into the Compose shell from
+ * here, so that half is web-only for now.)
  */
+/** Amber, matching the web's `--warn`-derived past-day edge. */
+private val OFF_TODAY_TINT = androidx.compose.ui.graphics.Color(0xFFEAB308)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DayNav(
@@ -55,7 +71,16 @@ fun DayNav(
     var showPicker by remember { mutableStateOf(false) }
 
     Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .then(
+                if (isToday) Modifier
+                else Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .border(1.dp, OFF_TODAY_TINT.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
+                    .background(OFF_TODAY_TINT.copy(alpha = 0.06f)),
+            ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -83,6 +108,19 @@ fun DayNav(
                 contentDescription = "Next day",
                 tint = if (isToday) MV.OnSurfaceDim else MV.OnSurface,
             )
+        }
+        // One tap back to now, and a standing reminder that you are not
+        // there. Mirrors the web control's Today chip.
+        if (!isToday && showTodayShortcut) {
+            TextButton(onClick = { onSelectedChange(today) }) {
+                Text(
+                    "TODAY",
+                    color = OFF_TODAY_TINT,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp,
+                )
+            }
         }
     }
 

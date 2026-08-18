@@ -13,6 +13,7 @@ import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import RangeTabs from "@/components/RangeTabs.vue";
+import DayNav from "@/components/DayNav.vue";
 import StatCard from "@/components/StatCard.vue";
 import LoadState from "@/components/LoadState.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
@@ -40,6 +41,28 @@ const RANGES: Array<{ key: RangeKey; label: string; days: number }> = [
 const range = ref<RangeKey>("7d");
 const cur = computed(() => RANGES.find((r) => r.key === range.value)!);
 
+// TD-3 — the 24h trace is anchored to a chosen day rather than always to the
+// last 24 hours. The phone's HrDetailScreen has worked this way since it was
+// written; the web had no way to look at yesterday's heart rate at all.
+function todayLocalISO(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+const selectedDay = ref<string>(todayLocalISO());
+const dayIsToday = computed(() => selectedDay.value === todayLocalISO());
+/** Local midnight of the selected day, and the end of its window — now when
+ *  it is today, next midnight otherwise. Built from local getters, never
+ *  from an ISO slice, so the window does not slide a day west of UTC. */
+const dayWindow = computed(() => {
+  const [y, m, d] = selectedDay.value.split("-").map(Number);
+  const start = new Date(y, m - 1, d, 0, 0, 0, 0);
+  const end = dayIsToday.value
+    ? new Date()
+    : new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+  return { start, end };
+});
+
 const hr24 = ref<HeartRateSeries | null>(null);
 const hrv24 = ref<HrvSeries | null>(null);
 // Journal annotations in the 24h window (LOG-4). Surfaced as emoji
@@ -65,16 +88,17 @@ const error = ref<string | null>(null);
 async function loadTrace() {
   if (traceLoaded.value) return;
   try {
-    const since = new Date(Date.now() - 24 * 3600 * 1000);
+    const { start: since, end: until } = dayWindow.value;
     const sinceMs = since.getTime();
+    const untilMs = until.getTime();
     const [liveHr, liveHrv, acts, sleep, swo, sbHist, anns] = await Promise.all([
-      api.heartRate({ since }),
-      api.hrv({ since }),
+      api.heartRate({ since, until }),
+      api.hrv({ since, until }),
       api.activities({ since, limit: 30 }),
       api.lastSleep().catch(() => null),
       api.strengthWorkouts({ limit: 5 }).catch(() => ({ count: 0, workouts: [] })),
       api.soberHistory(50).catch(() => []),
-      api.listAnnotations({ since, limit: 50 }).catch(() => [] as Annotation[]),
+      api.listAnnotations({ since, until, limit: 50 }).catch(() => [] as Annotation[]),
     ]);
     hr24.value = liveHr;
     hrv24.value = liveHrv;
@@ -100,9 +124,15 @@ async function loadTrace() {
           suffer_score: null, polyline: null,
         } as Activity;
       })
-      .filter((a) => new Date(a.start_at).getTime() >= sinceMs);
+      .filter((a) => {
+        const t = new Date(a.start_at).getTime();
+        return t >= sinceMs && t <= untilMs;
+      });
     activities24.value = [...acts, ...strengthAsActivity]
-      .filter((a) => new Date(a.start_at).getTime() >= sinceMs);
+      .filter((a) => {
+        const t = new Date(a.start_at).getTime();
+        return t >= sinceMs && t <= untilMs;
+      });
 
     // Sober resets in window — same 1st-row drop convention as Today.vue
     // (the chronological first row is the start-of-tracking, not a reset).
@@ -168,10 +198,22 @@ onMounted(() => {
   loadTrace();
 });
 useVisibilityRefresh(() => { loadHistory(); loadTrace(); });
-watch(range, loadHistory);
+watch(range, (r) => {
+  loadHistory();
+  // Leaving the day view resets the anchor. Coming back to 24h and silently
+  // still being on last Tuesday is the confusion the tint exists to prevent;
+  // better not to create it in the first place.
+  if (r !== "24h" && !dayIsToday.value) selectedDay.value = todayLocalISO();
+});
+watch(selectedDay, () => {
+  traceLoaded.value = false;
+  loadTrace();
+});
 
-const dayMs = 24 * 3600 * 1000;
-const xWindow24 = computed(() => ({ min: Date.now() - dayMs, max: Date.now() }));
+const xWindow24 = computed(() => ({
+  min: dayWindow.value.start.getTime(),
+  max: dayWindow.value.end.getTime(),
+}));
 
 // Under the Vitality Neon skin the HR line/zones move to the neon cyan
 // palette; every other theme keeps the chartTheme red/zone colors
@@ -669,6 +711,9 @@ const minHrInWindow = computed(() => hr24.value?.min_bpm ?? null);
       <RangeTabs v-model="range" :options="RANGES" aria-label="Heart-rate time range">
         <template #before>
           <PatternsLink metric="resting_hr" label="resting HR"/>
+        </template>
+        <template #after>
+          <DayNav v-if="range === '24h'" v-model="selectedDay"/>
         </template>
       </RangeTabs>
     </PageHeader>

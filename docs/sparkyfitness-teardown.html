@@ -239,13 +239,13 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
 <div class="prog">
   <h4>Build progress</h4>
   <p style="margin-bottom:0">The ranked shortlist is tracked as tasks <code>TD-1</code>–<code>TD-10</code>. The full option menu below is the durable backlog — nothing is pruned from it, including the items declined and the reasons why.</p>
-  <div class="bar" role="img" aria-label="2 of 10 shortlist items shipped"><i class="b-done" style="width:20%"></i><i class="b-wip" style="width:0%"></i></div>
+  <div class="bar" role="img" aria-label="3 of 10 shortlist items shipped"><i class="b-done" style="width:30%"></i><i class="b-wip" style="width:0%"></i></div>
   <div class="legend">
-    <span><b style="background:var(--good)"></b> shipped &nbsp;2</span>
+    <span><b style="background:var(--good)"></b> shipped &nbsp;3</span>
     <span><b style="background:var(--sp)"></b> in progress &nbsp;0</span>
-    <span><b style="background:var(--rule)"></b> not started &nbsp;8</span>
+    <span><b style="background:var(--rule)"></b> not started &nbsp;7</span>
     <span>·</span>
-    <span>full menu: 40 options, 2 shipped, 1 declined</span>
+    <span>full menu: 40 options, 3 shipped, 1 declined</span>
   </div>
 </div>
 
@@ -255,6 +255,11 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
   <div class="scroll"><table>
     <thead><tr><th>Option</th><th>Status</th><th>What changed</th></tr></thead>
     <tbody>
+      <tr>
+        <td><strong>TD-3</strong> — day-scoped summary + DayNav</td>
+        <td><span class="chip c-done">shipped</span></td>
+        <td><code>/summary/tiles</code>, <code>/summary/events</code> and <code>/summary/readiness</code> take an optional <code>date</code>. The analytics underneath — <code>tile_stats(db, day, …)</code> and <code>day_events(db, day, tz)</code> — were already day-parameterised; only the routes hardcoded today. A shared <code>resolve_day()</code> replaces the four copies of the timezone block and returns <code>is_today</code> alongside the date, which is load-bearing: <code>/tiles</code> and <code>/readiness</code> repair a stale <code>daily_summary</code> row and splice in a live step count, and doing either for a past day would rebuild finished history out of today's samples. The AST guard in <code>test_local_day_boundary.py</code> was widened to catch <code>date.today()</code> — which reads the container clock, and the container runs <code>TZ=UTC</code> — and immediately found a live instance in <code>today_snapshot</code>. That is the same bug for the fourth time. New <code>frontend/src/components/DayNav.vue</code> mirrors <code>DayNav.kt</code>, and <code>HeartRate.vue</code>'s 24-hour trace now anchors to a chosen day instead of always the last 24 hours. SparkyFitness's off-today ambient tint came across in both halves: the web stamps <code>data-day-relation</code> on <code>&lt;html&gt;</code> so the whole nav chrome takes a coloured edge and a faint wash, and the phone's pill gained the matching tint plus a Today chip. Two unregistered parity pairs added to the gate. Backend 360 green, web type-check clean, phone compiles.</td>
+      </tr>
       <tr>
         <td><strong>TD-2</strong> — HR zones as an API</td>
         <td><span class="chip c-done">shipped</span></td>
@@ -523,7 +528,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     </div>
     <div class="rk">
       <div class="n">3</div><div class="t">Day-scope the summary API and ship DayNav to the web</div>
-      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
+      <div class="m"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
       <div class="d"><code>tile_stats</code> and <code>day_events</code> already take a day; only the routes hardcode today. Copy the off-today ambient tint verbatim. Two cautions: <code>/summary/tiles</code> currently repairs today's stale <code>daily_summary</code> row on every call and must not for a past date, and the AST guard in <code>test_local_day_boundary.py</code> misses a bare <code>date.today()</code> — widen it in the same change.</div>
     </div>
     <div class="rk">
@@ -645,7 +650,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     <summary><span>UI &amp; platform — 7 options</span></summary>
     <div class="dbody">
       <div class="opts">
-        <div class="opt"><div class="h">Day-scope the summary API and ship DayNav to the web</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #3.</p></div>
+        <div class="opt"><div class="h">Day-scope the summary API and ship DayNav to the web</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #3.</p></div>
         <div class="opt"><div class="h">Real in-page navigation for web Settings</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #7.</p></div>
         <div class="opt"><div class="h">An editor for the tile order preference both clients already read</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div><p class="b"><code>user_profile.extra.vitals_order</code> has three readers and no writer. Sparky's <code>reconcileLayouts</code> is the pattern to copy — reconcile the saved order against the current key set on every load so a new tile appends rather than corrupting the layout.</p></div>
         <div class="opt"><div class="h">Server-persist display preferences, and give the phone units at all</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">The web has a units preference; the phone hardcodes <code>/1609.34</code> in twelve places across seven Kotlin files with no preference at all. A <code>display</code> block in <code>user_profile.extra</code> needs no migration.</p></div>

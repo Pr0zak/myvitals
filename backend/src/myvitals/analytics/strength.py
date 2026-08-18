@@ -29,6 +29,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import models
+from . import taxonomy
+from .taxonomy import MUSCLE_VOLUME_TARGETS  # noqa: F401  (re-exported)
 
 # ------------------------------------------------------------------
 # Catalog (in-memory, loaded once)
@@ -67,6 +69,12 @@ SUPERSEDED_EXERCISE_IDS: dict[str, str] = {
     # face down... hands about 36 inches apart"), not a decline; the
     # supplement entry correctly elevates the feet on a bench.
     "Decline_Push-Up": "Decline_Push_Up",
+    # TD-1: the same crosswise-bench pullover as the Bent-Arm row, down to
+    # pointing `image_front` / `image_side` at that row's own directory. It
+    # also contradicts itself -- `mechanic: isolation` against
+    # `is_compound: true` -- and it was the only carrier of the orphaned
+    # `chest_isolation` pattern.
+    "Dumbbell_Pullover": "Bent-Arm_Dumbbell_Pullover",
 }
 
 # The pool the generator picks from. CATALOG stays complete for history.
@@ -98,10 +106,26 @@ _CATALOG_OVERRIDES: dict[str, dict[str, Any]] = {
     # Re-rate so the skill-gated level logic keeps it away from non-
     # advanced users instead of prescribing 4×8 of it to an intermediate.
     "Single-Arm_Push-Up": {"level": "advanced"},
+    # Same reasoning as the two pullovers above. It is superseded for
+    # selection, but sets already logged against it must credit lats like
+    # its siblings rather than chest.
+    "Dumbbell_Pullover": {
+        "primary_muscle": "lats",
+        "secondary_muscles": ["chest", "shoulders", "triceps"],
+    },
 }
 for _eid, _patch in _CATALOG_OVERRIDES.items():
     if _eid in CATALOG_BY_ID:
         CATALOG_BY_ID[_eid].update(_patch)
+
+# TD-1 -- fold the catalog's muscle and movement-pattern vocabulary onto the
+# canonical set before anything reads it. The two source files disagree on
+# spelling ("quads" vs "quadriceps", "abs" vs "abdominals") and on how finely
+# to name a pattern ("tricep_isolation" vs "isolation_arm"), and every
+# consumer downstream of here matches by exact equality. Runs after the
+# overrides so patched values are folded too, and mutates the row dicts that
+# CATALOG, CATALOG_BY_ID and CATALOG_SELECTABLE all share.
+taxonomy.normalise_catalog(CATALOG)
 
 
 # ------------------------------------------------------------------
@@ -1871,22 +1895,9 @@ async def recent_ratings_by_exercise(
 # halved relative to a direct-only count. Neck dropped — no PPL/UL/FB
 # template trains it directly and few home gyms have neck-specific
 # equipment; report a permanent "untrained" was noise, not signal.
-MUSCLE_VOLUME_TARGETS: dict[str, tuple[int, int]] = {
-    "chest":       (10, 20),
-    "back":        (10, 20),
-    "lats":        (10, 20),
-    "shoulders":   (8,  16),
-    "biceps":      (8,  16),
-    "triceps":     (6,  14),
-    "quadriceps":  (10, 18),
-    "hamstrings":  (8,  16),
-    "glutes":      (10, 18),
-    "calves":      (8,  14),
-    "abdominals":  (8,  16),
-    "forearms":    (2,  8),
-    "traps":       (2,  8),
-    "lower_back":  (2,  8),
-}
+# MUSCLE_VOLUME_TARGETS moved to analytics/taxonomy.py in TD-1 so the
+# landmarks and the vocabulary that feeds them cannot drift apart. It is
+# re-exported at the top of this module for existing importers.
 
 
 async def weekly_muscle_volume(
@@ -1934,16 +1945,36 @@ async def weekly_muscle_volume(
     # hamstrings/lower-back at 0 despite obvious training stress.
     SECONDARY_WEIGHT = 0.5
     sets_by_muscle: dict[str, float] = {}
+    # TD-1 — every token folds through taxonomy.credits_volume rather than
+    # being used as a dict key raw. The catalog is already normalised at
+    # import, so for bundled exercises this is a no-op; it matters for rows
+    # logged against ids that never went through that path, such as the
+    # `import_*` slugs the Strong / Hevy CSV importer mints.
+    unmatched_ids: list[str] = []
+    unmatched_sets = 0
     for ex_id, n_sets in rows:
         info = CATALOG_BY_ID.get(ex_id)
-        if info is None:
-            continue
         n = int(n_sets)
-        primary = info.get("primary_muscle")
+        if info is None:
+            unmatched_ids.append(ex_id)
+            unmatched_sets += n
+            continue
+        primary = taxonomy.credits_volume(info.get("primary_muscle"))
         if primary:
             sets_by_muscle[primary] = sets_by_muscle.get(primary, 0.0) + n
         for sec in info.get("secondary_muscles") or []:
-            sets_by_muscle[sec] = sets_by_muscle.get(sec, 0.0) + n * SECONDARY_WEIGHT
+            canon = taxonomy.credits_volume(sec)
+            if canon and canon != primary:
+                sets_by_muscle[canon] = sets_by_muscle.get(canon, 0.0) + n * SECONDARY_WEIGHT
+    if unmatched_ids:
+        # Not silent: an exercise the catalog cannot resolve contributes
+        # nothing to the app's flagship strength analytic, and the user has
+        # no other way to discover that their imported history is missing.
+        log.warning(
+            "weekly_muscle_volume: %d set(s) across %d unmatched exercise id(s) "
+            "credited no muscle volume: %s",
+            unmatched_sets, len(unmatched_ids), ", ".join(sorted(unmatched_ids)[:10]),
+        )
 
     out: dict[str, dict[str, Any]] = {}
     for muscle in MUSCLE_VOLUME_TARGETS:

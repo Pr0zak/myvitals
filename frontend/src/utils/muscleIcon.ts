@@ -9,6 +9,16 @@
  * collapses synonyms onto the 11 buckets we actually have icons for.
  * Returns null when no icon is appropriate (e.g. "flexibility" on yoga
  * rows — those use YogaPoseIcon / image_front instead).
+ *
+ * TD-1 note: the backend now folds the catalog's muscle vocabulary onto a
+ * canonical set at import (backend analytics/taxonomy.py), so bundled
+ * exercises arrive here already spelled canonically and most of the aliases
+ * below never fire. They are kept deliberately as defence for anything that
+ * did not come through that path — an imported CSV exercise, or a catalog
+ * row served by an older backend than the one this build was written for.
+ * Do not treat this map as the source of truth for anything but the picture:
+ * where the work is *credited* is decided server-side, and this map's
+ * neck→shoulders entry intentionally disagrees with the server's neck→traps.
  */
 
 const MUSCLE_ALIAS: Record<string, string> = {

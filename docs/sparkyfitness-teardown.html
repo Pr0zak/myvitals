@@ -1,0 +1,694 @@
+<title>SparkyFitness Teardown</title>
+<style>
+:root{
+  --paper:#F1F3F2;
+  --surface:#FBFCFB;
+  --surface-2:#E7EBE9;
+  --ink:#151A19;
+  --ink-2:#4A5553;
+  --ink-3:#77817F;
+  --rule:#D2D8D6;
+  --rule-soft:#E2E7E5;
+  --mv:#1C5A62;          /* myvitals side */
+  --mv-soft:#1c5a621a;
+  --sp:#9C5F19;          /* SparkyFitness side */
+  --sp-soft:#9c5f191a;
+  --good:#2C6449;
+  --good-soft:#2c64491a;
+  --warn:#8E6A16;
+  --crit:#9B3529;
+  --crit-soft:#9b35291a;
+  --shadow:0 1px 2px #151a190d, 0 6px 18px -12px #151a1926;
+  --serif:'Iowan Old Style','Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif;
+  --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
+  --mono:ui-monospace,'SF Mono','Cascadia Code','Roboto Mono',Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#0E1211;
+    --surface:#161B1A;
+    --surface-2:#1E2523;
+    --ink:#E3E9E7;
+    --ink-2:#A8B3B0;
+    --ink-3:#7C8886;
+    --rule:#2A3331;
+    --rule-soft:#212927;
+    --mv:#5FADB5;
+    --mv-soft:#5fadb521;
+    --sp:#D19A55;
+    --sp-soft:#d19a5521;
+    --good:#6FB58E;
+    --good-soft:#6fb58e21;
+    --warn:#CBA24E;
+    --crit:#D9725F;
+    --crit-soft:#d9725f21;
+    --shadow:0 1px 2px #0000004d, 0 8px 22px -14px #00000080;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0E1211;
+  --surface:#161B1A;
+  --surface-2:#1E2523;
+  --ink:#E3E9E7;
+  --ink-2:#A8B3B0;
+  --ink-3:#7C8886;
+  --rule:#2A3331;
+  --rule-soft:#212927;
+  --mv:#5FADB5;
+  --mv-soft:#5fadb521;
+  --sp:#D19A55;
+  --sp-soft:#d19a5521;
+  --good:#6FB58E;
+  --warn:#CBA24E;
+  --crit:#D9725F;
+  --crit-soft:#d9725f21;
+  --shadow:0 1px 2px #0000004d, 0 8px 22px -14px #00000080;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:16px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px;margin:0 auto;padding:0 28px 120px}
+@media(max-width:640px){.wrap{padding:0 18px 80px}}
+
+/* ---------- masthead ---------- */
+.mast{padding:72px 0 0;border-bottom:1px solid var(--rule);margin-bottom:44px;padding-bottom:40px}
+.eyebrow{
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:22px;
+}
+.eyebrow b{color:var(--sp);font-weight:600}
+.eyebrow i{color:var(--mv);font-style:normal;font-weight:600}
+h1{
+  font-family:var(--serif);font-weight:600;font-size:clamp(38px,6vw,60px);
+  line-height:1.04;letter-spacing:-.018em;margin:0 0 18px;text-wrap:balance;
+}
+.dek{font-size:19px;line-height:1.55;color:var(--ink-2);max-width:63ch;margin:0}
+.dek strong{color:var(--ink);font-weight:600}
+
+/* ---------- structure ---------- */
+section{margin:0 0 68px;scroll-margin-top:24px}
+h2{
+  font-family:var(--serif);font-size:29px;font-weight:600;letter-spacing:-.012em;
+  line-height:1.2;margin:0 0 6px;text-wrap:balance;
+}
+h2 .q{color:var(--ink-3);font-family:var(--mono);font-size:12px;letter-spacing:.12em;
+  text-transform:uppercase;display:block;margin-bottom:12px;font-weight:500}
+h3{font-family:var(--sans);font-size:15.5px;font-weight:650;letter-spacing:.005em;margin:34px 0 10px}
+h4{font-family:var(--mono);font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:600;margin:26px 0 10px}
+p{margin:0 0 15px;max-width:70ch}
+a{color:var(--mv);text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--mv);outline-offset:3px;border-radius:3px}
+code{font-family:var(--mono);font-size:.855em;background:var(--surface-2);
+  padding:.14em .38em;border-radius:3px;word-break:break-word}
+strong{font-weight:650}
+ul{margin:0 0 15px;padding-left:20px;max-width:70ch}
+li{margin-bottom:7px}
+hr{border:0;border-top:1px solid var(--rule-soft);margin:38px 0}
+
+/* ---------- verdict ---------- */
+.verdict{
+  background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--mv);
+  border-radius:2px;padding:22px 24px;box-shadow:var(--shadow);margin:0 0 52px;
+}
+.verdict p:last-child{margin-bottom:0}
+.verdict h4{margin-top:0}
+
+/* ---------- tables ---------- */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 20px;
+  border:1px solid var(--rule);border-radius:2px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:560px}
+th{
+  text-align:left;font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:600;
+  padding:12px 16px;border-bottom:1px solid var(--rule);vertical-align:bottom;white-space:nowrap;
+}
+td{padding:12px 16px;border-bottom:1px solid var(--rule-soft);vertical-align:top;line-height:1.5}
+tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:13px;white-space:nowrap}
+td code{font-size:12.5px}
+.t-sp{color:var(--sp);font-weight:600}
+.t-mv{color:var(--mv);font-weight:600}
+
+/* ---------- chips ---------- */
+.chip{
+  display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;
+  text-transform:uppercase;font-weight:600;padding:2px 7px;border-radius:2px;
+  border:1px solid currentColor;white-space:nowrap;line-height:1.5;
+}
+.c-hi{color:var(--crit);background:var(--crit-soft)}
+.c-md{color:var(--warn)}
+.c-lo{color:var(--ink-3)}
+.c-eff{color:var(--ink-2);border-color:var(--rule)}
+.c-mv{color:var(--mv);background:var(--mv-soft)}
+.c-sp{color:var(--sp);background:var(--sp-soft)}
+.c-bug{color:var(--crit);background:var(--crit-soft)}
+.c-done{color:var(--good);background:var(--good-soft);border-color:var(--good)}
+.c-wip{color:var(--sp);background:var(--sp-soft);border-color:var(--sp)}
+.c-todo{color:var(--ink-3);border-color:var(--rule)}
+.c-cut{color:var(--ink-3);border-style:dashed}
+
+/* ---------- progress ---------- */
+.prog{background:var(--surface);border:1px solid var(--rule);border-radius:2px;
+  padding:20px 24px;margin:0 0 52px;box-shadow:var(--shadow)}
+.prog h4{margin-top:0}
+.bar{display:flex;height:8px;border-radius:2px;overflow:hidden;background:var(--surface-2);margin:14px 0 12px}
+.bar i{display:block;height:100%}
+.bar .b-done{background:var(--good)}
+.bar .b-wip{background:var(--sp)}
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;font-family:var(--mono);font-size:11px;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend b{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+/* ---------- option cards ---------- */
+.opts{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:2px}
+.opt{background:var(--surface);padding:18px 20px;display:grid;
+  grid-template-columns:1fr auto;gap:6px 18px;align-items:start}
+.opt .h{font-weight:650;font-size:15.5px;line-height:1.35;grid-column:1}
+.opt .meta{grid-column:2;display:flex;gap:6px;align-items:center;padding-top:2px}
+.opt .b{grid-column:1/-1;color:var(--ink-2);font-size:14.5px;line-height:1.55;margin:0;max-width:none}
+.opt .b code{font-size:12.5px}
+@media(max-width:640px){
+  .opt{grid-template-columns:1fr}
+  .opt .meta{grid-column:1;padding-top:4px}
+}
+
+/* ---------- rank list ---------- */
+.rank{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:2px}
+.rk{background:var(--surface);padding:16px 20px;display:grid;
+  grid-template-columns:34px 1fr auto;gap:4px 16px;align-items:baseline}
+.rk .n{font-family:var(--mono);font-size:19px;font-weight:600;color:var(--mv);
+  font-variant-numeric:tabular-nums;line-height:1.2}
+.rk .t{font-weight:650;font-size:15.5px;line-height:1.35}
+.rk .m{display:flex;gap:6px;align-items:center}
+.rk .d{grid-column:2/-1;color:var(--ink-2);font-size:14.5px;line-height:1.55}
+@media(max-width:640px){
+  .rk{grid-template-columns:30px 1fr}
+  .rk .m{grid-column:2;margin-top:2px}
+  .rk .d{grid-column:1/-1}
+}
+
+/* ---------- callouts ---------- */
+.note{border-left:2px solid var(--rule);padding:2px 0 2px 18px;color:var(--ink-2);
+  font-size:14.5px;margin:0 0 18px;max-width:68ch}
+.note.bug{border-left-color:var(--crit)}
+.note.win{border-left-color:var(--good)}
+.note b{color:var(--ink)}
+
+details{border:1px solid var(--rule);border-radius:2px;background:var(--surface);
+  padding:0;margin:0 0 14px}
+summary{cursor:pointer;padding:13px 18px;font-weight:600;font-size:14.5px;list-style:none;
+  display:flex;justify-content:space-between;gap:14px;align-items:center}
+summary::-webkit-details-marker{display:none}
+summary::after{content:'+';font-family:var(--mono);color:var(--ink-3);font-size:16px}
+details[open] summary::after{content:'–'}
+details[open] summary{border-bottom:1px solid var(--rule-soft)}
+.dbody{padding:16px 18px 4px}
+.dbody p,.dbody ul{max-width:none;font-size:14.5px}
+
+.foot{border-top:1px solid var(--rule);padding-top:22px;margin-top:70px;
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;color:var(--ink-3);line-height:1.9}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="eyebrow">
+    <span>Teardown</span><span>·</span>
+    <b>SparkyFitness</b><span>→</span><i>myvitals</i><span>·</span>
+    <span>Aug 2026</span>
+  </div>
+  <h1>SparkyFitness Teardown</h1>
+  <p class="dek">Read of <strong>CodeWithCJ/SparkyFitness</strong> at HEAD — Node/TS server, React web, Expo mobile, Python Garmin sidecar — against the myvitals source, subsystem by subsystem. It is a <strong>breadth machine</strong>: 22 integrations, 33 locales, nutrition·cycle·meds·pregnancy. myvitals is a depth machine. Almost nothing here is worth copying as an implementation; several things are worth copying as a <strong>shape</strong>.</p>
+</header>
+
+<div class="verdict">
+  <h4>The one finding that changes plans</h4>
+  <p>SparkyFitness integrates the <strong>Google Health API v4</strong> — <code>https://health.googleapis.com/v4/users/me/dataTypes</code> — a server-to-server REST API with its own OAuth scopes. It pulls Pixel Watch data <strong>without a phone app in the loop at all</strong>, and its data-type list includes <code>oxygen-saturation</code> and <code>daily-sleep-temperature-derivations</code>: the exact two streams that are currently dead on your PW3/PW4 through Health Connect. Everything else in this document is an improvement. This one is a second, independent path to your own watch data.</p>
+</div>
+
+<div class="prog">
+  <h4>Build progress</h4>
+  <p style="margin-bottom:0">The ranked shortlist is tracked as tasks <code>TD-1</code>–<code>TD-10</code>. The full option menu below is the durable backlog — nothing is pruned from it, including the items declined and the reasons why.</p>
+  <div class="bar" role="img" aria-label="1 of 10 shortlist items shipped">
+    <i class="b-done" style="width:10%"></i>
+  </div>
+  <div class="legend">
+    <span><b style="background:var(--good)"></b> shipped &nbsp;1</span>
+    <span><b style="background:var(--sp)"></b> in progress &nbsp;0</span>
+    <span><b style="background:var(--rule)"></b> not started &nbsp;9</span>
+    <span>·</span>
+    <span>full menu: 40 options, 1 declined</span>
+  </div>
+</div>
+
+<section>
+  <h2>Changelog</h2>
+  <p>What has actually landed, newest first. Each entry names the option it closes so the shortlist and the code stay in step.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Option</th><th>Status</th><th>What changed</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>TD-1</strong> — canonical muscle + movement vocabulary</td>
+        <td><span class="chip c-done">shipped</span></td>
+        <td>New <code>backend/src/myvitals/analytics/taxonomy.py</code> owns the vocabulary and the MEV/MAV landmarks, which moved out of <code>strength.py</code> so the two cannot drift apart. The catalog is folded once at import, after the existing overrides. Five leg exercises tagged <code>quads</code> and six Pilates rows tagged <code>core</code> now credit volume; ~40 secondary tokens (<code>hips</code>, <code>hip_flexors</code>, <code>adductors</code>, <code>spine</code>, <code>rear_delts</code>, <code>serratus</code>, <code>brachialis</code>, <code>upper_back</code>, <code>obliques</code>, <code>groin</code>, <code>abs</code>, <code>neck</code>) resolve instead of evaporating. Ten rows carrying <code>tricep_isolation</code> / <code>bicep_isolation</code> / <code>chest_isolation</code> / <code>lateral_squat</code> became selectable — the legs squat slot went from 6 candidates to 8 and the lunge slot from 8 to 11. <code>Dumbbell_Pullover</code> was superseded (identical movement to <code>Bent-Arm_Dumbbell_Pullover</code>, down to borrowing its images) and re-tagged to lats like its two siblings. <code>weekly_muscle_volume</code> now logs a count of unmatched exercise ids instead of dropping them silently. <code>backend/tests/test_catalog_taxonomy.py</code> — 20 tests — fails the build on the next drifted token. Full suite green at 339.</td>
+      </tr>
+    </tbody>
+  </table></div>
+  <p class="note"><b>Expect the audit numbers to move.</b> Abdominal and quadriceps volume will read higher than before, because work that was being performed and discarded is now counted. That number also feeds <code>muscle_need()</code>, so adaptive split selection and the finisher gap ranking will make different — better-informed — choices than they did last week.</p>
+</section>
+
+<!-- ========================= ORIENTATION ========================= -->
+<section>
+  <h2>What it actually is</h2>
+  <p>A self-hosted MyFitnessPal replacement, source-available under a non-commercial licence. Nutrition-first: the web app's home route is a food <em>diary</em>, not a dashboard. Wearable data is a supporting cast member, which is the opposite of myvitals' weighting.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Layer</th><th>SparkyFitness</th><th>myvitals</th></tr></thead>
+    <tbody>
+      <tr><td>Server</td><td>Node + TypeScript, Express, Postgres + RLS</td><td>FastAPI + TimescaleDB</td></tr>
+      <tr><td>Web</td><td>React 19, Vite, Tailwind v4, shadcn/Radix, TanStack Query, <strong>recharts</strong></td><td>Vue 3, Vite, <strong>ECharts</strong></td></tr>
+      <tr><td>Phone</td><td>Expo / React Native (iOS + Android, one codebase)</td><td>Native Kotlin + Compose (Android only)</td></tr>
+      <tr><td>Sidecar</td><td>Python FastAPI wrapping <code>garth</code> for Garmin</td><td>—</td></tr>
+      <tr><td>Users</td><td>Multi-user, family sharing, 7 granular permissions, OIDC/TOTP/passkey</td><td>Single user</td></tr>
+      <tr><td>Scope</td><td>Nutrition, exercise, sleep, fasting, mood, meds, cycle, pregnancy, hydration</td><td>Vitals, sleep, strength, cardio, fasting, sobriety, goals</td></tr>
+      <tr><td>Integrations</td><td class="num">22 providers</td><td class="num">4 (Strava, Concept2, HA, trails)</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ========================= Q1 WORKOUTS ========================= -->
+<section>
+  <h2><span class="q">Question 1</span>How it handles workouts, and what data it pulls in</h2>
+
+  <p>The model is a <strong>denormalised ~80-column <code>exercise_entries</code> table</strong> with a normalised <code>exercise_entry_sets</code> child. A "workout" is not an entity — it is an <code>exercise_preset_entries</code> session-header row that child entries point at, hung on a bare <code>entry_date</code>. There is no start timestamp, no status machine, no seed, no recovery context.</p>
+
+  <h4>What it does not have, at all</h4>
+  <p>No generation. No progression. No autoregulation. Grepping the whole repo for deload/progression turns up a nutrition coaching prompt and nothing else. <code>workout_plan_templates</code> is a literal weekly calendar that, on activation, <strong>eagerly materialises ~260 diary sessions</strong> — thousands of INSERTs — synchronously inside one HTTP request. Nothing reads HRV, sleep or readiness before prescribing anything. It stores <code>training_load</code>, <code>tss_score</code> and <code>aerobic_training_effect</code> as inert provider telemetry and never consumes them.</p>
+
+  <p>Set against <code>analytics/strength.py:generate_plan()</code>, adaptive split selection, MEV/MAV auditing, micro-loader rounding and six AI coach surfaces, myvitals is not in the same category. <strong>Do not port anything from their planner.</strong></p>
+
+  <h4>The three things it genuinely has that myvitals does not</h4>
+
+  <p><strong>1 — Energy cost of lifting exists.</strong> <code>CalorieCalculationService.ts</code> is crude (a 7×3 MET table, a bare <code>×0.9</code> for female, <code>−0.5%/5yrs</code> over 30, all flagged as unscientific in its own comments) but it produces a number. myvitals produces none: there is no <code>kcal</code>, <code>calorie</code> or <code>MET</code> string anywhere in <code>api/workout/strength.py</code> or <code>analytics/strength.py</code>, and <code>Activities.vue</code> emits <code>kcal: null</code> for every synthesised strength row. Every lifting session is invisible in your daily energy story.</p>
+
+  <div class="note win"><b>myvitals can beat their approach outright here.</b> They guess from a MET lookup because they have no HR stream. You own a continuous per-minute HR series across exactly the session window and can integrate Keytel over it. Return <code>kcal_method ∈ {hr, met, none}</code> to the UI and <code>null</code> rather than inventing a 70 kg default — the fabricated default is precisely their failure mode.</div>
+
+  <p><strong>2 — Free-form logging is the default.</strong> A session with <code>workout_preset_id = NULL</code> is a first-class citizen. myvitals has no route that adds an exercise to a session: there is <code>POST /workout-exercises/{id}/swap</code> (1:1, 409s once a set exists), <code>DELETE /workouts/{id}</code> and <code>DELETE /sets/{id}</code> — and nothing else. Three extra sets of curls done in the moment have nowhere to go, so they never reach tonnage, the volume audit, PR detection or any AI payload.</p>
+
+  <p><strong>3 — Activity telemetry is modelled properly.</strong> <code>exercise_entries</code> carries normalized power, TSS, intensity factor, HR recovery at 1 min, ground contact time, vertical oscillation, stride length, elevation gain/loss, weather, gear — plus side tables <code>exercise_entry_hr_zones</code>, <code>exercise_entry_laps</code>, <code>exercise_entry_gps_points</code>, and a per-provider raw JSONB blob. And <code>daily_health_metrics</code> holds <code>acute_training_load</code>, <code>chronic_training_load</code>, <code>acwr_ratio</code>, <code>training_readiness_score</code>, <code>recovery_time_hours</code> and race predictions.</p>
+
+  <div class="note"><b>One transferable idea, and it is a good one.</b> <code>resolveAssumedSetValues</code>: a three-tier per-field placeholder cascade — previous session's same-index set, then the plan captured at live-start, then the row above — tiered separately for warm-up vs working so a light warm-up can never seed a working target. Sets are created <em>empty</em> and the plan is a grey suggestion that becomes data only when performed. myvitals' two clients currently disagree on exactly this: <code>StrengthToday.vue</code> seeds from the flat slot target with <code>rating null</code>, while <code>StrengthTodayScreen.kt</code> inherits the last logged set and pre-selects rating 4.</div>
+</section>
+
+<!-- ========================= Q2 STRAVA ========================= -->
+<section>
+  <h2><span class="q">Question 2</span>How it pulls data from Strava</h2>
+
+  <p><strong>Bring-your-own-app OAuth, polled hourly.</strong> The user pastes their own Strava Client ID and Secret into <code>external_data_providers.app_id/app_key</code> (AES-256-GCM encrypted per row). The server builds the authorize URL with scope <code>read,activity:read_all,profile:read_all</code>, exchanges the code, stores the rotated refresh token and an <code>expires_at</code>, and <code>getValidAccessToken</code> refreshes lazily at a 5-minute margin.</p>
+
+  <h4>The generic provider framework underneath it</h4>
+  <p>This is the part worth studying. One table holds every credential for all 22 providers, with an encrypted triple (<code>ciphertext</code>, <code>iv</code>, <code>tag</code>) per secret and columns for <code>token_expires_at</code>, <code>last_sync_at</code>, <code>sync_frequency</code>, <code>external_user_id</code>, <code>oauth_state</code>. A companion lookup table <code>external_provider_types</code> stores each provider's <code>required_fields[]</code>, <code>field_labels</code> jsonb, <code>categories[]</code> and an <code>is_strictly_private</code> flag — and the settings UI renders its credential form and its validation <em>from that data</em>. Registering a new provider's config surface is one INSERT.</p>
+
+  <div class="note"><b><code>is_strictly_private</code> sits on the provider <em>type</em>, not the row.</b> One boolean excludes every wearable from family sharing, enforced identically in the repository WHERE clauses and in the Postgres RLS policy. Food providers stay shareable; anything holding an OAuth token never is.</div>
+
+  <h4>Where their Strava is worse than yours</h4>
+  <ul>
+    <li><strong>No webhooks anywhere</strong> in the repo. Strava's push Events API is unused; a finished ride takes up to an hour.</li>
+    <li><strong>The scheduled window is <em>today only</em></strong> while the manual button defaults to 7 days — an activity uploaded after local midnight for the previous day is never picked up by cron. Silent data loss.</li>
+    <li><strong><code>sync_frequency='daily'</code> is a lie</strong>: every cron block is <code>'0 * * * *'</code>, gated only on <code>!== 'manual'</code>.</li>
+    <li><strong>No 429 handling.</strong> Fixed 500 ms sleeps, no header inspection, no backoff. Strava's 100-per-15-min limit is hit around 200 activities and the failures are swallowed.</li>
+    <li><strong>No persisted auth-failure state.</strong> No <code>last_error</code> column; a week of failing syncs only <code>console.error</code>s and the sole user-visible signal is a "Last Sync" timestamp that stopped advancing. <em>This is the exact bug myvitals already fixed in v0.7.319.</em></li>
+    <li><strong>The CSRF <code>state</code> round-trip is decorative</strong> — <code>state = userId</code> and the callback destructures only <code>{code}</code>.</li>
+  </ul>
+
+  <div class="note bug"><b>What this comparison actually surfaced in myvitals.</b> Their sync is one funnel; yours is not. <code>maybe_complete_cardio_day</code> is called from <code>integrations/strava.py:262</code> (the <em>retired</em> OAuth path) and from Concept2 — but <strong>not</strong> from <code>strava_web.upsert_activity_from_fit</code>, which is the only Strava path that actually runs. Cardio-day auto-completion is dead for every ride you sync. Separately, <code>_link_activity_to_trail</code> has exactly one caller (the manual <code>POST /trails/link-activities</code>), and <code>upsert_activity_from_fit</code>'s <code>ON CONFLICT DO UPDATE</code> writes <code>avg_hr</code>, <code>max_hr</code> and <code>polyline</code> unconditionally — so a re-sync where FIT parsing fails silently nulls good HR and GPS on an existing row.</div>
+
+  <h4>The Garmin sidecar pattern</h4>
+  <p>Garmin auth is hostile (unofficial, MFA), so it lives in a <strong>separate Python FastAPI service</strong> wrapping <code>garth</code> — with a genuinely elegant custody rule: <strong>the sidecar never persists a token.</strong> Node passes the decrypted session dump on every request and re-encrypts any <code>new_tokens</code> handed back mid-sync, so the sidecar can be restarted or run untrusted. Backfills are chunked at ≤7 days with a token refresh per chunk, so a long import cannot be killed by an expiry halfway through. myvitals' backend is already Python, so you would not need the sidecar — but the ≤7-day chunk-with-refresh pattern is directly applicable to Strava bulk backfill.</p>
+</section>
+
+<!-- ========================= Q3 WEARABLE ========================= -->
+<section>
+  <h2><span class="q">Question 3</span>How it syncs with Google for Pixel Watch data</h2>
+
+  <p><strong>Two completely independent paths.</strong> Understanding that they are separate is the whole answer.</p>
+
+  <h3>Path A — Health Connect via the phone (same shape as yours)</h3>
+  <p>An Expo/React-Native app using <code>react-native-health-connect</code>. A single registry (<code>src/HealthMetrics.ts</code>) declares ~50 metrics with <code>recordType</code>, <code>permissions[]</code>, <code>readKind</code> (<code>cumulative-day</code> | <code>min-max-avg-day</code> | <code>raw</code>), aggregation strategy and background frequency; one platform-neutral engine drives Android and iOS behind a <code>HealthReadProvider</code> interface.</p>
+
+  <p>Three ideas here are better than myvitals':</p>
+  <ul>
+    <li><strong>Cross-source dedupe is delegated to the OS.</strong> Cumulative metrics go through <code>aggregateGroupByPeriod</code> with <em>no</em> <code>dataOriginFilter</code>, so Health Connect applies the user's own app-priority list and the totals match what the HC UI shows. A test asserts the filter is absent. This is strictly better than reimplementing source selection — <em>provided</em> the priority list is trustworthy, which is the caveat that keeps <code>pick_canonical_steps_source</code> justified.</li>
+    <li><strong>Timezone-change day attribution.</strong> Two <code>pageSize:1</code> edge probes read each record's <code>startZoneOffset</code>; when they diverge from the device zone it binary-searches the transition day and re-buckets anchored at the <em>records'</em> midnights. Guarded against dateline jumps and UTC-stamping exporters. Given how many times the local-day bug has recurred in myvitals, this is the mature version of that problem.</li>
+    <li><strong>Resumable, checkpointed history backfill.</strong> A per-metric earliest-sample probe from the 1970 epoch finds the true floor rather than guessing "1 year". The checkpoint freezes the metric set so a resume is coherent, the cursor rounds <em>up</em> so the seam day is re-imported rather than skipped, and every abnormal stop (<code>quota</code>, <code>device-locked</code>, <code>app-inactive</code>, <code>server-changed</code>) is a named resumable outcome with user-facing copy and a pace-based ETA.</li>
+  </ul>
+
+  <p>Their weaknesses are instructive too: <strong>no offline write buffer at all</strong> (myvitals' Room buffer is better), steps stored as one <code>GREATEST()</code>-merged integer with no source column so an inflated day can never be corrected downward, and most vitals — HRV, SpO2, VO2max, resting HR — dumped into a generic <code>custom_measurements</code> catch-all as TEXT.</p>
+
+  <h3>Path B — the Google Health API, server-to-server, no phone</h3>
+  <p>This is the find. <code>SparkyFitnessServer/integrations/googlehealth/</code> does OAuth against Google directly and reads from <code>https://health.googleapis.com/v4/users/me/dataTypes</code>, with per-domain scopes:</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Scope</th><th>Covers</th></tr></thead>
+    <tbody>
+      <tr><td><code>googlehealth.activity_and_fitness.readonly</code></td><td>steps, distance, floors, exercise, activity-level, active-zone-minutes, total-calories</td></tr>
+      <tr><td><code>googlehealth.health_metrics_and_measurements.readonly</code></td><td>heart-rate, daily-resting-heart-rate, daily-heart-rate-variability, <strong>oxygen-saturation</strong>, daily-respiratory-rate, daily-vo2-max, core-body-temperature, weight, body-fat, height</td></tr>
+      <tr><td><code>googlehealth.sleep.readonly</code></td><td>sleep, <strong>daily-sleep-temperature-derivations</strong></td></tr>
+      <tr><td><code>googlehealth.profile.readonly</code> · <code>settings.readonly</code> · <code>nutrition.readonly</code></td><td>profile, settings, hydration-log</td></tr>
+    </tbody>
+  </table></div>
+  <p>Reads come in three shapes: a date-filtered <code>dataPoints</code> range query for instantaneous types, an unfiltered paged list for static types like height, and a <code>dataPoints:dailyRollUp</code> call for daily aggregates. Daily-aggregate types are filtered client-side because the API will not filter them server-side.</p>
+
+  <div class="note bug"><b>Why this matters more than anything else here.</b> Your CLAUDE.md records two live upstream defects: the PW3/PW4 firmware bug where the watch reports "no app is requesting permissions" for SpO2 and skin temperature, and the removal of minute-level skin temperature from Google Health exports. Both are <em>Health Connect on-device</em> problems. The cloud API exposes <code>oxygen-saturation</code> and <code>daily-sleep-temperature-derivations</code> as first-class data types. It is also a full redundancy path: today the phone is a single point of failure for every stream you own, and this needs no phone, no HC grant, and no app upgrade to survive.</div>
+  <p class="note"><b>Caveat, stated plainly:</b> I read their client code, not Google's terms. Verify the API's availability in your region, its quota, and whether Fitbit-sourced Pixel Watch data actually populates those types for your account before building on it. That verification is the first task, not an afterthought.</p>
+</section>
+
+<!-- ========================= Q4 CHARTS ========================= -->
+<section>
+  <h2><span class="q">Question 4</span>How it handles charts and reports</h2>
+
+  <p>One page — <code>pages/Reports/Reports.tsx</code> — with eight pill tabs: Nutrients, Measurements, Fasting, Exercise, Sleep, Stress, Medications, Table. <strong>recharts</strong> pinned at 3.8.0, plus <code>react-grid-layout</code> for a drag-resize widget grid and <code>leaflet</code> for GPS maps. Tab, <code>startDate</code> and <code>endDate</code> all live in URL search params, so any report view is bookmarkable. Default range is 14 days; presets are 7/14/30/90/180/365 plus a calendar range.</p>
+
+  <h4>Worth taking</h4>
+  <ul>
+    <li><strong>URL-addressable report state.</strong> Cheap, and it makes every "go look at X" link in the app land on the right view.</li>
+    <li><strong>Comparison periods</strong> — <code>previous-period</code> and <code>last-year</code>, rendered as a 0.6-opacity second series behind the primary.</li>
+    <li><strong>Goal overlays as dashed <code>${key}_goal</code> lines</strong> merged per-date, plus HRV mean±1SD as a <code>ReferenceArea</code>.</li>
+    <li><strong>Evenly-spaced SQL downsampling in pure window functions</strong> — <code>row_number()</code> and <code>count() OVER ()</code>, then modulo — guaranteeing ≤ maxPoints while always keeping the first row. It has a unit test that asserts the SQL text.</li>
+    <li><strong>Refusing to fabricate.</strong> HR-zone seconds come only from recorded rows; empty zones stay 0, with the reasoning in-code: "a zero reads as nothing recorded, an estimate is indistinguishable from a real reading."</li>
+    <li><strong><code>DISTINCT ON (exercise_name) ORDER BY … estimated_one_rm DESC, entry_date ASC</code></strong> for PRs, with a comment explaining that independent <code>MAX()</code> aggregates report a set that was never actually performed.</li>
+    <li><strong>Per-tab error boundaries</strong>, and a grid error boundary that degrades to a stacked view <em>without deleting the saved layout</em>.</li>
+  </ul>
+
+  <h4>Where it falls apart — and where myvitals already wins</h4>
+  <p>Aggregation is hybrid and inconsistent. <code>aggregationLevel</code> (daily/weekly/monthly) is sent as a query param and <strong>never read server-side</strong> — the browser downloads every daily row and buckets it. <code>GET /reports</code> is one monolithic payload fetched regardless of which tab is open, and the whole page blocks on a single boolean ANDing six queries. Both comparison modes produce a disjoint date window while the client matches on identical <code>entry_date</code>, so the comparison bars are essentially always zero. Export is client-side CSV Blobs of whatever the open tab happened to fetch; the only "PDF" is <code>window.print()</code>.</p>
+  <p>And <strong>mobile chart parity is close to nil</strong>: three chart components total, a different stack (victory-native + Skia), no Reports screen at all. myvitals' enforced parity plus server-side analytics is the better architecture by a wide margin — the lesson is what to add, not how to build it.</p>
+
+  <div class="note bug"><b>What this surfaced in myvitals.</b> <code>analytics/cardio.py:time_in_zone_for_activity</code> and <code>cardio_summary</code> are complete, correct, time-weighted with a 30 s gap cap — and reachable only from <code>integrations/claude.py</code>. They have <strong>no HTTP route</strong>. Meanwhile <code>ActivityDetail.vue</code> defines its own <code>zoneFor()</code> and counts <em>samples</em> per zone rather than seconds, so an activity with irregular HR sampling shows a distribution that disagrees with the number the AI cardio coach quotes back. The phone shows no zones at all.</div>
+</section>
+
+<!-- ========================= Q5 AI ========================= -->
+<section>
+  <h2><span class="q">Question 5</span>How it uses AI</h2>
+
+  <p>Fundamentally different philosophy from myvitals. <strong>Sparky is an agent that writes to your database; the myvitals Coach is a narrator that never does.</strong> Roughly 35 tools across 9 categories — log/edit/delete food, water, meals, exercises with sets, biometrics, mood, sleep, fasting, habits, medications, goals, profile — with an agentic loop capped at 15 steps and prompts that push hard for autonomy: <em>"treat these as direct commands to log/track … Do not respond conversationally first asking if they want to log it."</em></p>
+
+  <div class="scroll"><table>
+    <thead><tr><th>Dimension</th><th class="t-sp">SparkyFitness</th><th class="t-mv">myvitals</th></tr></thead>
+    <tbody>
+      <tr><td>Providers</td><td>11 types → 4 families (OpenAI-compatible, Anthropic, Google, Ollama)</td><td>Anthropic only, no seam</td></tr>
+      <tr><td>Interaction</td><td>Conversational agent, writes data</td><td>Structured cards, read-only</td></tr>
+      <tr><td>Payload</td><td>Raw diary rows, capped at 8000 chars <em>after the fact</em></td><td>Bounded pre-aggregated facts</td></tr>
+      <tr><td>Caching</td><td><span class="chip c-bug">none</span> every turn re-bills</td><td>Payload-hash cache + prompt caching</td></tr>
+      <tr><td>Quota</td><td><span class="chip c-bug">none</span> no limit, no spend cap, no token table</td><td><code>daily_call_limit</code> default 30</td></tr>
+      <tr><td>Vision</td><td>Food photos → structured macro estimate; HEIC transcoded server-side by byte sniffing</td><td>—</td></tr>
+      <tr><td>MCP</td><td>Same tool registry re-published at <code>POST /mcp</code></td><td>—</td></tr>
+      <tr><td>Prompts</td><td>Markdown files on disk, composed per turn</td><td>Python builders in <code>claude.py</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <h4>Five ideas worth stealing</h4>
+  <ul>
+    <li><strong>The MCP server.</strong> One tool registry, two transports — in-process chatbot and <code>POST /mcp</code> with a Bearer API key, scoped by Postgres RLS. It turns Claude Desktop or Claude Code into a client of your own health data with no chat UI to build. For a single-user self-hosted app this is a remarkably high ratio of capability to code.</li>
+    <li><strong><code>chat_tool_profile ∈ {full, core}</code>.</strong> One column shrinks the tool surface (15 agentic steps → 8) so small local models can cope. Exactly the seam you need if you ever run Ollama.</li>
+    <li><strong>Small-model salvage as a first-class layer:</strong> <code>z.preprocess(stripNullValues)</code> on every schema, field-presence action inference, date-keyword coercion restricted to keys containing "date", and record-boundary JSON truncation so a weak model never sees malformed JSON.</li>
+    <li><strong>Prompt-cache stability as a commented invariant.</strong> A block comment forbids embedding timestamps or live totals in the system prompt, and the cache breakpoint is pinned to the last-composed tool — with a unit test asserting its position so a reorder cannot silently kill caching.</li>
+    <li><strong>Historical images stripped, historical tool calls replayed as prose</strong> (<code>[Earlier this conversation you called X(args) and it returned: …]</code>, capped at 600 chars). Solves both context-cost problems without breaking transcript validity.</li>
+  </ul>
+
+  <div class="note bug"><b>What this surfaced in myvitals.</b> The AI cache key omits tone. <code>api/ai.py:241</code> hashes <code>{"topic": topic, **payload}</code> while <code>claude.py:533</code> builds the request with <code>structured_system(cfg.tone)</code>. The five <code>/coach/*</code> sites correctly hash <code>{"kind":…, "tone": cfg.tone, "p": payload}</code>; the seven older sites — <code>/explain</code>, <code>/verdict</code>, <code>/summary</code> and the four <code>/strength/*</code> surfaces — do not. Switching Supportive → Blunt returns the stale Supportive card.</div>
+</section>
+
+<!-- ========================= Q6 FREE EXERCISE DB ========================= -->
+<section>
+  <h2><span class="q">Question 6</span>How it uses Free Exercise DB</h2>
+
+  <p><strong>Nothing is bundled.</strong> The catalog is fetched live from GitHub at request time, across three upstreams: search hits <code>api.github.com/repos/yuhonas/free-exercise-db/contents/dist/exercises.json</code> and re-downloads the entire ~1.5 MB array on every cache miss; detail hits <code>raw.githubusercontent.com/…/exercises/&lt;Id&gt;.json</code>; images resolve to raw GitHub URLs. A fourth call goes <em>straight from the browser</em> to the dataset's <code>schema.json</code>.</p>
+
+  <p>Caching is one <code>NodeCache</code> at 1 hour, keyed on query + filters + limit + <em>offset</em> — so paging re-downloads the whole array. Unauthenticated GitHub REST is 60 requests/hour/IP, and a 403 is caught and returned as <code>{exercises: [], totalCount: 0}</code>, i.e. <strong>rate-limited renders as "no results"</strong>. No timeout, no ETag, no backoff, no offline fallback. myvitals bundling the JSON plus ~24 MB of images is unambiguously the better call.</p>
+
+  <div class="note win"><b>The one idea here that is better than yours, and it is important.</b> They adopt the dataset's <code>schema.json</code> enums as the app's <em>canonical internal taxonomy</em>, then translate every other provider into it. <code>wgerNameMapping.ts</code> is commented "Maps SparkyFitness muscle names to wger muscle names" — the keys are literally free-exercise-db's <code>primaryMuscles</code> enum. <code>garminExerciseMapper.ts</code> spells out the reasoning: Garmin's category enum has no muscle field, so it is hand-mapped to FEDB names "so Garmin-created exercises render on the body map and filter correctly alongside everything else." One vocabulary, one body map, one filter. The filter chips are read from <code>schema.json</code> at runtime so they can never drift from the data.</div>
+
+  <div class="note bug"><b>Why that matters for myvitals right now — verified counts.</b> The catalog is 201 + 74 = 275 rows. <code>MUSCLE_VOLUME_TARGETS</code> has 14 keys and contains <em>none</em> of <code>quads</code> (5 rows), <code>core</code> (6), <code>neck</code> (2) or <code>flexibility</code> (15). <code>weekly_muscle_volume</code> keys on the raw catalog string and emits only keys present in the targets dict — so Cossack Squat, Lateral Lunge, Walking Lunge, Dumbbell Step-Up, Dumbbell Sumo Squat and all six Pilates rows credit <strong>exactly zero sets</strong>, while ~40 secondary-credit tokens (<code>hips</code>, <code>hip_flexors</code>, <code>adductors</code>, <code>groin</code>, <code>spine</code>, <code>upper_back</code>, <code>rear_delts</code>, <code>serratus</code>, <code>brachialis</code>) evaporate through the same path. Separately, <code>SPLIT_SLOTS</code> and <code>FINISHER_PATTERNS</code> between them name 11 movement patterns, so the 10 rows tagged <code>tricep_isolation</code> / <code>bicep_isolation</code> / <code>chest_isolation</code> / <code>lateral_squat</code> can never be selected by the generator at all. An alias map already exists <em>twice</em> — on both clients, for icons only. Display normalises; the maths does not. That wrong number is on the audit card <em>and</em> feeds <code>muscle_need()</code> for adaptive split selection.</div>
+
+  <p>Two smaller things they get right: an <strong>SSRF-hardened image downloader</strong> (redirect cap of 5 with the guard re-run per hop, content-type allowlist, 10 MB streaming limit that unlinks the partial file, <code>md5(url)</code> in the filename), and a <strong>self-healing image route</strong> that treats the local uploads directory as a cache and re-derives from upstream on a miss, so wiping the volume is non-destructive. Attribution, though, is prose-only — the Unlicense is never named anywhere, which is worth noting since myvitals ships the same dataset.</p>
+</section>
+
+<!-- ========================= Q7 UI ========================= -->
+<section>
+  <h2><span class="q">Question 7</span>Its UI, and what myvitals could take</h2>
+
+  <p>Two clients with <em>different</em> information architectures and nothing enforcing parity: web home is the Diary, mobile home is a Dashboard. Web customisation is a server-persisted drag-resize grid; mobile customisation is five booleans in local AsyncStorage. myvitals' <code>scripts/parity_check.py</code> has no counterpart here — that gate is a real advantage you already hold.</p>
+
+  <h4>Day navigation — the single strongest UI idea in the codebase</h4>
+  <p><code>DayNavigator</code> is a pill <code>[‹][📅 date][›]</code> with a "Today" chip that appears only when off-today and <code>?date=</code> URL sync. The part worth copying verbatim is that <code>getDateRelationToToday()</code> returns <code>past | today | future</code>, and that value tints <strong>the entire nav chrome</strong> — desktop tab strip and mobile bottom bar both get a coloured border plus a 10%-opacity overlay from <code>--date-past</code> / <code>--date-future</code> tokens. You cannot forget you are looking at a different day. Mobile mirrors it with fling gestures and tab-re-tap to return to today.</p>
+
+  <div class="note bug"><b>Directly relevant to a recurring myvitals bug class.</b> Your CLAUDE.md records the UTC-vs-local day bug landing three separate times — <code>/summary/today</code>, then <code>/summary/readiness</code> in v0.7.369. Making "you are not looking at today" impossible to miss is worth more in myvitals than it is in Sparky. And the foundation is already built: <code>analytics/tiles.py:tile_stats(db, day, …)</code> and <code>analytics/events.py:day_events(db, day, tz)</code> are both fully day-parameterised while <code>/summary/tiles</code> takes no parameter at all. Meanwhile <code>DayNav.kt</code> exists on four phone screens and grepping <code>frontend/src</code> for <code>DayNav|selectedDate|prevDay</code> returns nothing — an unregistered parity break.</div>
+
+  <h4>The widget grid</h4>
+  <p>One generic <code>WidgetGrid</code> (react-grid-layout) over a <code>page_key</code>-keyed jsonb table <code>user_dashboard_layouts(layout, hidden)</code>, with a server-side allow-list of valid page keys. The piece most home-grown dashboards get wrong and this one gets right is <code>reconcileLayouts(saved, currentKeys, defaults)</code>: widget keys are derived from user entities, so the saved layout is reconciled against the <em>current</em> key set on every load — stale entries dropped, new widgets appended at <code>maxY</code>, existing placements preserved. Creating or deleting an entity never corrupts the grid.</p>
+
+  <h4>Other patterns worth lifting</h4>
+  <ul>
+    <li><strong>Deep-linkable settings</strong> — <code>?tab=</code> selects the pill group, <code>?section=</code> also pre-expands the accordion item, so any "go configure X" link lands on the exact open panel.</li>
+    <li><strong>Permission tooltips that describe the negative space</strong> — each family-access checkbox states what is <em>blocked</em>. That is what makes a permission model trustworthy.</li>
+    <li><strong><code>lazyWithChunkRecovery</code></strong> — catches stale-chunk import failures after a deploy, reloads once behind a 30 s sessionStorage guard, and returns a never-resolving promise so React renders "Updating…" instead of a stack trace.</li>
+    <li><strong>Onboarding pacing</strong> — 250 ms auto-advance after a single-choice tap, a deliberate 1000 ms "Preparing your personalised plan…" beat, and a conditional step whose inclusion is <em>latched</em> on first resolve so Back cannot skip a step you just filled.</li>
+    <li><strong>Fail-closed privacy</strong> — <code>discreetMode = isLoading || isError || settings?.discreet_mode</code>, so a sensitive label can never flash during load or on a failed fetch.</li>
+    <li><strong>Headless reconcilers mounted outside visibility gates</strong>, so hiding a card never silently disables its notifications.</li>
+  </ul>
+
+  <div class="note bug"><b>And a shipped dead end this comparison found in myvitals.</b> <code>Settings.vue</code>'s <code>activeTab</code> is assigned exactly once, from <code>?tab=</code> — there is no in-page tab bar. Under the classic shell <code>SideNav.vue</code> supplies the twelve links, but <code>theme.ts</code> defaults <code>themeChoice</code> to <code>'neon'</code>, and under neon <code>App.vue</code> renders <code>NeonNav</code> instead, so <code>SideNav</code> never mounts. <code>You.vue</code> then offers exactly four settings pills. <strong>Eight of twelve panes — access, ai, tools, imports, trails, fasting, ha, concept2 — are reachable only by typing a URL</strong>, so on the default theme a fresh visitor cannot reach AI configuration, historical imports, or Home Assistant setup at all.</div>
+</section>
+
+<!-- ========================= BONUS: SLEEP SCIENCE ========================= -->
+<section>
+  <h2><span class="q">Not in their docs</span>The sleep-science engine</h2>
+  <p>Undocumented, unmentioned in the README, and the most sophisticated deterministic analytics in the repo. <code>services/sleepScienceService.ts</code> (887 lines) exposes seven endpoints: <code>/sleep-debt</code>, <code>/chronotype</code>, <code>/mctq-stats</code>, <code>/daily-need</code>, <code>/energy-curve</code>, <code>/calculate-baseline</code>, <code>/data-sufficiency</code>.</p>
+  <ul>
+    <li><strong>It derives your sleep need instead of asking you to type it.</strong> MCTQ over a 90-day window, requiring ≥8 free days and ≥20 work days, clamped to 6.0–10.0 h with a 0.15 strain factor. Work-vs-free days are classified automatically and cached in <code>day_classification_cache</code>.</li>
+    <li><strong>Chronotype from a circular median of mid-sleep on free days</strong> — clock times treated as points on a 24 h circle via <code>atan2</code> of summed sines and cosines, then unwrapped. Early &lt; 6:00, late &gt; 8:00. Social jetlag falls out of the same numbers.</li>
+    <li><strong>Sleep debt with exponential decay</strong> — <code>exp(−0.5 × dayIndex)</code> over 14 days, capped at 20 h, bucketed low/moderate/high/critical, plus a payback-nights estimate.</li>
+  </ul>
+  <div class="note"><b>Against myvitals:</b> <code>analytics/advanced.py:sleep_debt_hours</code> is a flat 7-day sum of <code>(user-typed target_h − actual)</code> with no decay and no derived need; <code>sleep_consistency_score</code> is circular standard deviation only. Porting the derived-need idea needs no new ingest, is fully deterministic and server-side, and feeds the existing sleep coach and readiness score. It is the highest-value idea in this document that costs nothing but arithmetic.</div>
+</section>
+
+<!-- ========================= BUGS ========================= -->
+<section>
+  <h2>Defects this comparison found in myvitals</h2>
+  <p>Reading their code against yours surfaced these. Each was verified against the myvitals source, not inferred.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>What</th><th>Effect</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td>Muscle vocabulary drift</td><td>11 exercises credit 0 sets in the MEV/MAV audit; ~40 secondary tokens dropped; 10 exercises unreachable by the generator</td><td><code>MUSCLE_VOLUME_TARGETS</code>, <code>SPLIT_SLOTS</code>, <code>FINISHER_PATTERNS</code></td></tr>
+      <tr><td>Cardio-day completion is dead</td><td><code>maybe_complete_cardio_day</code> is never called on the live Strava path</td><td><code>strava_web.upsert_activity_from_fit</code></td></tr>
+      <tr><td>Re-sync nulls good data</td><td><code>ON CONFLICT DO UPDATE</code> writes <code>avg_hr</code>/<code>max_hr</code>/<code>polyline</code> unconditionally; a failed FIT parse wipes them</td><td><code>strava_web.py:628-640</code></td></tr>
+      <tr><td>Tone missing from AI cache key</td><td>Supportive → Blunt returns the stale card on 7 surfaces</td><td><code>api/ai.py:241</code>, <code>:169</code>, <code>:307</code>, <code>:975+</code></td></tr>
+      <tr><td>8/12 Settings panes unreachable</td><td>No in-page tab bar; <code>SideNav</code> never mounts under the default neon theme</td><td><code>Settings.vue</code>, <code>theme.ts</code>, <code>You.vue</code></td></tr>
+      <tr><td>HR zones computed wrong on web</td><td>Web counts samples per zone; the server's correct time-weighted function has no HTTP route</td><td><code>ActivityDetail.vue:431</code> vs <code>analytics/cardio.py</code></td></tr>
+      <tr><td>Fabricated goal progress</td><td><code>goalPct</code> returns <code>55 + (seed % 40)</code> and renders as a progress bar; the real <code>progress_pct</code> already exists server-side</td><td><code>You.vue:76</code> vs <code>api/ai.py:825</code></td></tr>
+      <tr><td>Latent <code>NameError</code></td><td><code>csv.Error</code> referenced with no <code>import csv</code> in the module</td><td><code>api/imports.py:525</code></td></tr>
+      <tr><td>Silent 90-day export cap</td><td>Export defaults to <code>end−90d</code> and the UI sends no range, so "export my heart rate" cannot return more than a quarter-year and says nothing</td><td><code>api/export.py:59</code>, <code>Settings.vue:910</code></td></tr>
+      <tr><td>No automated database backup</td><td><code>pg_dump</code> appears only as a manual command in <code>docs/operations.md</code>. Years of irreplaceable health data on one LXC that has already had a disk-pressure incident.</td><td><code>deploy/</code>, <code>docs/operations.md:93-98</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ========================= RANKED ========================= -->
+<section>
+  <h2>Ranked shortlist</h2>
+  <p>Ten options across all seven subsystems, ranked for a single-user self-hosted app whose owner values web/phone parity, deterministic server-side analytics, bounded AI cost and strength-training depth. Every one lands as <em>deleting client maths plus a small server addition</em>.</p>
+
+  <div class="rank">
+    <div class="rk">
+      <div class="n">1</div><div class="t">Canonicalise the muscle and movement vocabulary server-side</div>
+      <div class="m"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
+      <div class="d">One taxonomy module applied at catalog load, so the MEV/MAV audit stops silently zeroing 11 exercises and the generator stops being unable to reach 10 more. Add a test asserting every primary and secondary token exists in the targets dict — it converts a whole class of silent drift into a build failure. No migration needed.</div>
+    </div>
+    <div class="rk">
+      <div class="n">2</div><div class="t">Give HR-zone analytics an HTTP route</div>
+      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
+      <div class="d"><code>cardio_summary</code> and <code>time_in_zone_for_activity</code> are already correct and already written — they just have no door. Bind both clients to the route and delete <code>zoneFor</code>/<code>zoneBreakdown</code> from the web. Carry <code>max_hr_source</code> (profile vs Tanaka estimate) so a zone chart built on a guess says so.</div>
+    </div>
+    <div class="rk">
+      <div class="n">3</div><div class="t">Day-scope the summary API and ship DayNav to the web</div>
+      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
+      <div class="d"><code>tile_stats</code> and <code>day_events</code> already take a day; only the routes hardcode today. Copy the off-today ambient tint verbatim. Two cautions: <code>/summary/tiles</code> currently repairs today's stale <code>daily_summary</code> row on every call and must not for a past date, and the AST guard in <code>test_local_day_boundary.py</code> misses a bare <code>date.today()</code> — widen it in the same change.</div>
+    </div>
+    <div class="rk">
+      <div class="n">4</div><div class="t">Server-computed session summary: net duration, tonnage, HR-derived energy</div>
+      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
+      <div class="d">Lifting contributes zero to the energy picture, and the activities feed already disagrees with the training-load model about how long the same session was — the feed uses gross elapsed, <code>_strength_training_stress</code> nets out <code>total_paused_s</code>. Integrate Keytel over the real HR window. Return <code>null</code>, never a fabricated 70 kg default. Watch double-counting against a Health Connect workout over the same window.</div>
+    </div>
+    <div class="rk">
+      <div class="n">5</div><div class="t">Funnel every Activity write through one ingest sink</div>
+      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
+      <div class="d">Fixes three defects at once: dead cardio-day completion, no trail linking on ingest, and the destructive unconditional overwrite of HR and GPS. Skip <code>None</code> only for provider-derived columns — notes and tags are user-owned, where <code>None</code> legitimately means clear — and fire the trail linker only when <code>trail_id IS NULL</code> so a manual unlink survives.</div>
+    </div>
+    <div class="rk">
+      <div class="n">6</div><div class="t">Per-set prescription — one target per set, not per slot</div>
+      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div>
+      <div class="d">Unlocks prescribed warm-up ramps, AMRAP last sets as rows rather than a badge string, and back-off schemes — and kills the live prefill divergence between web and phone. <strong>Do not materialise planned sets as rows:</strong> <code>log_set</code> is idempotent on <code>(workout_exercise_id, set_number)</code> <em>because</em> sets are created lazily, and SKIP-1 already documents why fabricated rows poison the mobility fail counter and the deload payload.</div>
+    </div>
+    <div class="rk">
+      <div class="n">7</div><div class="t">Real in-page navigation for web Settings</div>
+      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
+      <div class="d">Eight of twelve panes are unreachable by any click under the default theme. Derive the rail from the existing <code>SECTION_KEYS</code> rather than hand-maintaining a map. Also worth noting: <code>Settings.vue</code> sits in <code>parity_check.py</code>'s <code>WEB_ONLY_OK</code> despite <code>SettingsScreen.kt</code> existing, so the gate has been structurally blind to this pair.</div>
+    </div>
+    <div class="rk">
+      <div class="n">8</div><div class="t">LLM provider seam: Anthropic plus OpenAI-compatible / Ollama</div>
+      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div>
+      <div class="d">Already on the roadmap under COACH-BATCH3. It is genuinely a seam, not a rewrite: <code>hash_payload</code>, <code>ai_summaries</code> caching and <code>_check_and_bump_quota</code> all sit <em>above</em> the provider boundary. Price three risks honestly — small models emit far worse structured output so a salvage layer is load-bearing, prompt caching is Anthropic-only so the cost model changes silently, and a user-supplied <code>base_url</code> on a CT that can reach the whole Proxmox cluster is an SSRF surface.</div>
+    </div>
+    <div class="rk">
+      <div class="n">9</div><div class="t">Standing instructions, plus the tone cache-key fix</div>
+      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div>
+      <div class="d">Best value per hour on the list. Today the entire user model handed to the AI is a three-value tone enum — there is no way to say "rehabbing a left shoulder, never suggest overhead pressing" or "I fast for religious reasons, don't read low HRV as overtraining." It lives inside the prompt prefix that is already cache-controlled, and both clients inherit it with zero Kotlin or Vue changes. Cap the length, append under a fixed heading, and warn that saving invalidates every cached summary at once.</div>
+    </div>
+    <div class="rk">
+      <div class="n">10</div><div class="t">Ad-hoc exercise slots</div>
+      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div>
+      <div class="d">Off-plan work is currently unrecordable, so it never reaches tonnage, the volume audit, PRs, rotation pressure or the AI reviewer. Reuse the swap handler's prescribe chain so the weight stays server-computed; add an <code>added_ad_hoc</code> flag so the reviewer can tell a chosen slot from a generated one. Do <em>not</em> buffer it offline — the prescription needs server compute, and a client-guessed weight would disagree on replay.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ========================= FULL MENU ========================= -->
+<section>
+  <h2>Full option menu</h2>
+  <p>Everything the research produced, by subsystem, including the items that did not make the shortlist. Effort is S / M / L / XL; value is the honest read, not the pitch.</p>
+
+  <details>
+    <summary><span>Wearable ingest — 5 options</span></summary>
+    <div class="dbody">
+      <div class="opts">
+        <div class="opt"><div class="h">Google Health API as a second, phone-free ingest path</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Server-side OAuth against Google, reading <code>oxygen-saturation</code> and <code>daily-sleep-temperature-derivations</code> among ~20 types. Recovers the two streams the PW3/PW4 firmware bug killed and removes the phone as a single point of failure. <strong>Verify regional availability, quota and whether your account's Fitbit-sourced data populates those types before committing.</strong></p></div>
+        <div class="opt"><div class="h">Resumable windowed Health Connect history backfill</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Replace <code>MainActivity.onBackfill(days)</code>, which just rewinds <code>lastSyncEpochSeconds</code>, with a checkpointed <code>HistoryBackfillWorker</code>: probe the true earliest sample, window forward, freeze the metric set, round the cursor up on resume, name every abnormal stop.</p></div>
+        <div class="opt"><div class="h">Server-computed sync-health report, per stream, on both surfaces</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">The phone already posts per-type sizes and errors in its heartbeat; nothing surfaces them. <code>/query/last-sync</code> looks at 4 of 10 tables, one of which (<code>vitals_spo2</code>) is permanently empty by construction — quietly degrading the freshness signal.</p></div>
+        <div class="opt"><div class="h">Promote Health Connect exercise sessions into the activities feed</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b"><code>models.Workout</code> is written every 15 minutes by ingest and read only by the CSV exporter. Every non-Strava, non-Concept2 workout you do is invisible in the feed.</p></div>
+        <div class="opt"><div class="h">Ingest SpO2 and resting HR — permissions already granted for nothing</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-md">medium</span></div><p class="b"><code>OxygenSaturationRecord</code> sits in <code>requiredPermissions</code> with no reader; <code>models.Spo2</code> is a hypertable with no writer; <code>READ_RESTING_HEART_RATE</code> is in the manifest and never requested. Worth doing regardless of the firmware bug, so the pipe is ready when Google ships the fix.</p></div>
+      </div>
+    </div>
+  </details>
+
+  <details>
+    <summary><span>Strava &amp; integrations — 5 options</span></summary>
+    <div class="dbody">
+      <div class="opts">
+        <div class="opt"><div class="h">One Activity ingest sink</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #5. Three defects, one fix.</p></div>
+        <div class="opt"><div class="h">Persist per-integration sync health as one endpoint</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Exactly one integration has a <code>last_error</code> — <code>strava_cookie_creds</code>, added in v0.7.319 after a dead cookie masqueraded as "up to date" for six weeks. Concept2, Home Assistant and RainoutLine failures still vanish into <code>log.warning</code>. The lesson was learned once and never generalised.</p></div>
+        <div class="opt"><div class="h">Schedule the cookie-mode Strava sync with backoff and a hard stop</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Adds <code>poll_enabled</code> / <code>poll_interval_min</code> and registers a job that reuses the existing <code>_run_cookie_sync</code>, stopping cleanly on repeated auth failure rather than hammering a dead cookie.</p></div>
+        <div class="opt"><div class="h">Extract the FIT telemetry the cookie path discards</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b"><code>elevation_gain_m</code>, <code>avg_power_w</code>, <code>kcal</code>, cadence and normalized power are columns on <code>models.Activity</code>, populated by the retired OAuth path and left permanently null by the live one. Natural follow-on once the sink exists.</p></div>
+        <div class="opt"><div class="h">Bulk backfill as a tracked job with a range picker</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-md">medium</span></div><p class="b">Follows the pattern <code>api/imports.py</code> already uses — <code>ImportJob</code> row, <code>202 {job_id}</code>, progress counts. Borrow Garmin's ≤7-day chunk-with-token-refresh so a long import cannot die at an expiry.</p></div>
+      </div>
+      <p class="note">Cut from this list: moving the headless browser into a sidecar container. Pure infrastructure, zero user-visible output, and a bet on a future Strava account change — the account is Google/OTC-only with no password, so that path is unusable today regardless.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span>Workouts &amp; catalog — 8 options</span></summary>
+    <div class="dbody">
+      <div class="opts">
+        <div class="opt"><div class="h">Canonical muscle + movement taxonomy</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #1.</p></div>
+        <div class="opt"><div class="h">Session summary with HR-derived energy</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #4.</p></div>
+        <div class="opt"><div class="h">Per-set prescription</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Ranked #6.</p></div>
+        <div class="opt"><div class="h">Ad-hoc exercise slots</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div><p class="b">Ranked #10.</p></div>
+        <div class="opt"><div class="h">Gate the AI variety-nudge and swap on equipment and prefs</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div><p class="b">Those call sites pass the raw <code>CATALOG_BY_ID</code>, so the model can propose swaps to equipment you do not own or exercises you explicitly disabled. Pass <code>filter_catalog_for_equipment</code> with disabled rows removed instead of an arbitrary <code>[:60]</code> slice.</p></div>
+        <div class="opt"><div class="h">Bodyweight and rep-based personal records</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div><p class="b"><code>_detect_pr</code> short-circuits when <code>actual_weight_lb</code> is null, and 101 of 275 catalog entries are bodyweight-only — so no bodyweight lift can ever set a record. Carries a genuine product ambiguity (12 push-ups at 200 lb vs 12 at 180 lb) and needs a rate limit, or the badge becomes noise.</p></div>
+        <div class="opt"><div class="h">Adopt unmatched imported exercises into a user catalog overlay</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-md">medium</span></div><p class="b">Strong/Hevy CSV rows that resolve to <code>import_*</code> slugs are skipped by <code>weekly_muscle_volume</code> without a count. A <code>custom_exercises</code> block in <code>user_equipment.payload</code> needs no migration, matching the convention <code>TrainingPreferences</code> already follows.</p></div>
+        <div class="opt"><div class="h">Fix borrowed catalog photos and ship the icons already in the repo</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-md">medium</span></div><p class="b">Exactly 50 rows display another exercise's photo — often a different implement entirely — and 45 of those have a correct, unreferenced own-slug image sitting in <code>data/img/</code>.</p></div>
+      </div>
+      <p class="note">Cut: opening the equipment universe beyond <code>{dumbbell, bench, bodyweight}</code>. XL effort, roughly doubles a <code>data/img/</code> directory already at 29 MB inside the GHCR image on a CT that has had a disk-pressure incident, and needs a whole new loading model in <code>round_weight</code> (plate maths, kettlebell ladders) because the micro-loader rounder is dumbbell-pair-shaped by design. The payoff is conditional on buying equipment you do not own.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span>Charts, reports &amp; exports — 6 options</span></summary>
+    <div class="dbody">
+      <div class="opts">
+        <div class="opt"><div class="h">HR zones as an API, rendered on both surfaces</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #2.</p></div>
+        <div class="opt"><div class="h">Server-side period comparison endpoint</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Generalise <code>claude.py:_wow_deltas</code> — currently hardcoded to 7d-vs-prior-7d and reachable only from AI payload builders — into <code>GET /summary/compare?days=N&amp;vs=previous|last_year</code>. Four clients hand-roll "same point last year" independently today.</p></div>
+        <div class="opt"><div class="h">Date-ranged multi-table export plus a printable summary</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Fixes the silent 90-day truncation, adds a zipped multi-CSV bundle and a printable HTML health summary. Sparky's "PDF export" is literally <code>window.print()</code> — that is a fine answer, and a printable server-rendered page beats a client Blob of whatever the open tab fetched.</p></div>
+        <div class="opt"><div class="h">Training consistency — streaks and true frequency, server-computed</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-md">medium</span></div><p class="b">Current streak, longest streak, real sessions-per-week and days-since-by-muscle. Note their bug and avoid it: computing streaks only within the selected range truncates a streak that began before <code>startDate</code>, and frequency derived as <code>days / range × 7</code> changes purely with the picker.</p></div>
+        <div class="opt"><div class="h">Server-side goal projection</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-md">medium</span></div><p class="b">Smaller than it looks — <code>api/ai.py</code> already returns real <code>progress_pct</code> and the phone already reads it. The web work is mostly deletion. The genuine addition is an OLS projection with a confidence tier; borrow Sparky's <code>{confidence, isFallback, fallbackReason}</code> shape, discard the nutrition it was built for.</p></div>
+        <div class="opt"><div class="h">Custom start/end date range, URL-addressable</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-lo">low</span></div><p class="b">Thin as a standalone — every backend endpoint already accepts <code>since</code>/<code>until</code>, so this is pure client plumbing across ~12 Vue and 8 Kotlin files, and it collides with the day-scope and export work. Fold the shared range resolver into whichever of those ships first.</p></div>
+      </div>
+    </div>
+  </details>
+
+  <details>
+    <summary><span>AI — 5 options</span></summary>
+    <div class="dbody">
+      <div class="opts">
+        <div class="opt"><div class="h">Standing instructions + tone cache-key fix</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div><p class="b">Ranked #9.</p></div>
+        <div class="opt"><div class="h">Provider seam: Anthropic plus OpenAI-compatible / Ollama</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Ranked #8.</p></div>
+        <div class="opt"><div class="h">Structure and cache <code>/ai/ask</code>, then ship it to the phone</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">The one AI surface still returning free prose, uncached and web-only. Forced tool-use with a <code>give_answer</code> schema brings it in line with every other card and stops it re-billing identical questions.</p></div>
+        <div class="opt"><div class="h">An MCP server over the existing read helpers</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b"><em>Not in the researchers' list — added from reading their <code>ai/mcp/mcpAdapter.ts</code>.</em> Publish the bounded payload builders that already exist as MCP tools behind the ingest token. Claude Code and Claude Desktop become clients of your own health data with no chat UI to build, no write path, no agent loop, and no quota risk — reads only. The highest capability-per-line item in this document after the taxonomy fix.</p></div>
+        <div class="opt"><div class="h">Conversational coach that can write data</div><div class="meta"><span class="chip c-cut">declined</span><span class="chip c-eff">XL</span><span class="chip c-lo">not advised</span></div><p class="b">Argues against three of your four stated values simultaneously. An agent loop multiplies provider calls per turn so <code>daily_call_limit</code> stops meaning what it says; it puts an LLM adjacent to the write path, mitigated only by a confirm dance that is two taps where the manual form is one; and it is the first place raw user prose lands in the DB, reopening exactly the leak class <code>test_ai_privacy.py</code> exists to catch. The useful 10% is the structured-ask option above.</p></div>
+      </div>
+      <p class="note">Also cut: camera capture → proposed reading. An image is the largest payload myvitals would ever send and is unauditable, so <code>/ai/preview-payload</code> — the feature that lets you read exactly what leaves the box — has no analogue. Hashing image bytes gives a near-zero cache hit rate, defeating the payload-hash economics too.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span>UI &amp; platform — 7 options</span></summary>
+    <div class="dbody">
+      <div class="opts">
+        <div class="opt"><div class="h">Day-scope the summary API and ship DayNav to the web</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #3.</p></div>
+        <div class="opt"><div class="h">Real in-page navigation for web Settings</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #7.</p></div>
+        <div class="opt"><div class="h">An editor for the tile order preference both clients already read</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div><p class="b"><code>user_profile.extra.vitals_order</code> has three readers and no writer. Sparky's <code>reconcileLayouts</code> is the pattern to copy — reconcile the saved order against the current key set on every load so a new tile appends rather than corrupting the layout.</p></div>
+        <div class="opt"><div class="h">Server-persist display preferences, and give the phone units at all</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">The web has a units preference; the phone hardcodes <code>/1609.34</code> in twelve places across seven Kotlin files with no preference at all. A <code>display</code> block in <code>user_profile.extra</code> needs no migration.</p></div>
+        <div class="opt"><div class="h">First-run onboarding on both surfaces</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Zero onboarding hits in either client today. Borrow the pacing tricks: latch conditional steps on first resolve so Back cannot skip a step just filled, and prefill from existing profile data.</p></div>
+        <div class="opt"><div class="h">A unified day view at <code>/day/:date</code></div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-md">medium</span></div><p class="b">The day-parameterised twin of <code>/summary/today/snapshot</code>, reusing its <code>asyncio.gather</code> + per-section <code>safe()</code> shape so one broken subsystem lands as null rather than failing the page. Should follow the day-scope work, not precede it.</p></div>
+        <div class="opt"><div class="h">Automated database backup</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div><p class="b"><em>Not a Sparky feature to admire — an operational hole their <code>backupService.ts</code> made visible.</em> They run <code>pg_dump</code> via <code>execFile</code>, gzip through a stream pipeline, on a cron schedule with a retention policy. myvitals has nothing scheduled: <code>pg_dump</code> appears once, as a manual command in a doc, next to the sentence "For real backups, schedule a periodic pg_dump."</p></div>
+      </div>
+    </div>
+  </details>
+
+  <details>
+    <summary><span>Analytics not covered by the questions — 4 options</span></summary>
+    <div class="dbody">
+      <div class="opts">
+        <div class="opt"><div class="h">Derived sleep need, chronotype and decayed sleep debt</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Port the MCTQ approach: derive the target from your own free-day sleep instead of asking you to type 8. Deterministic, server-side, no new ingest, and it feeds the existing sleep coach and readiness score. Their constants are a reasonable starting point — 90-day window, ≥8 free days, clamp 6–10 h, decay λ=0.5 over 14 days.</p></div>
+        <div class="opt"><div class="h">Structured mood and symptom logging</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">myvitals folds all subjective logging into <code>annotations.payload</code> — a bare JSON blob with a <code>String(32)</code> type and a free-text note, no schema, no vocabulary, no per-type UI. <code>/analytics/correlate</code> already supports 22 metrics with ±30d lag, so structured mood and symptom rows are the highest-value missing correlation <em>input</em> the app could have, and they need no new hardware.</p></div>
+        <div class="opt"><div class="h">Day-of-week-varying goals</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div><p class="b">Their <code>weekly_goal_plans</code> supplies different targets per weekday with one plan active at a time. Every myvitals goal — steps, sleep, weight, fasting hours — is a single flat number. A training-day step goal that differs from a rest-day one is a real want on a 4-day split, and it is a pure-backend change.</p></div>
+        <div class="opt"><div class="h">Progress photos</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-lo">low</span></div><p class="b">Date-keyed and typed front/side/back, under a configurable uploads root with a path-traversal guard. Body-metrics adjacent; needs a gitignored volume and must never touch the public repo.</p></div>
+      </div>
+    </div>
+  </details>
+</section>
+
+<!-- ========================= THEMES ========================= -->
+<section>
+  <h2>The pattern underneath all of it</h2>
+
+  <h3>The analytic exists; the route does not</h3>
+  <p>The single most repeated finding, across six of seven subsystems. <code>cardio_summary</code> and <code>time_in_zone_for_activity</code> are complete and reachable only from <code>claude.py</code>. <code>tile_stats(db, day, …)</code> and <code>day_events(db, day, tz)</code> are fully day-parameterised while their routes take no date. <code>_wow_deltas</code> computes exactly the period comparison four clients hand-roll. <code>api/ai.py</code> returns real goal progress the web throws away. Server-side work got written for the AI layer or one internal caller, was never given an HTTP surface, and a client then re-derived it — usually wrong. <strong>Auditing for "server functions with exactly one non-HTTP caller" would find more than any single subsystem review did.</strong></p>
+
+  <h3>Client-side re-derivation is where the parity rule is actually breaking</h3>
+  <p>And <code>parity_check.py</code> cannot see it, because both files exist and both moved. Every verified divergence is a <em>number</em> computed in TypeScript or Kotlin: set prefill, HR zones, same-point-last-year, goal progress, units, session duration. The gate checks that paired files change together; it cannot check that they compute the same answer. In almost every case the structural fix is to <strong>delete client maths, not add a parity row</strong>.</p>
+
+  <h3>Vocabulary drift between data and the code that consumes it</h3>
+  <p>Verified four times over in the catalog alone: <code>primary_muscle</code> emits tokens <code>MUSCLE_VOLUME_TARGETS</code> does not contain; <code>movement_pattern</code> emits patterns no slot table names; <code>mechanic</code> disagrees with <code>is_compound</code> on 44 of 275 rows; <code>force</code> is on the wire and read by no Python. An alias map already exists twice — on the clients, for icons only. Display normalises; the maths does not. This is the one place SparkyFitness's actual mechanism, rather than just its shape, is worth copying.</p>
+
+  <h3>Things granted, declared or shipped for nothing</h3>
+  <p>The SpO2 permission is requested and its table has no writer. <code>READ_RESTING_HEART_RATE</code> is in the manifest and never requested. <code>models.Workout</code> is written every 15 minutes and read only by the CSV exporter. Equipment checkboxes for barbell, cable, kettlebell and bands gate a catalog slice that is empty. 45 correct exercise icons ship and are never referenced while 50 rows show another exercise's photo. <code>createStrengthWorkout</code> sits in <code>client.ts</code> with no caller. <code>vitals_order</code> has three readers and no writer. Individually each looks like an oversight; together they suggest a <strong>"declared but unconsumed" sweep</strong> would pay better than any single new feature.</p>
+
+  <h3>Silent truncation at defaults nobody can see</h3>
+  <p>Export defaults to <code>end−90d</code> and the UI sends no range. <code>HealthConnectGateway</code> caps at 100 pages × 5000 records. <code>/query/last-sync</code> looks at 4 of 10 tables. <code>weekly_muscle_volume</code>'s <code>if info is None: continue</code> drops every imported exercise from the app's flagship analytic without a count. In each case the honest fix — surface the bound, or count what was dropped — is small, and much cheaper than the features built on top.</p>
+</section>
+
+<footer class="foot">
+  Sources read at HEAD: SparkyFitnessServer (routes, services, integrations, ai, prompts, db_schema_backup.sql) · SparkyFitnessFrontend · SparkyFitnessMobile · SparkyFitnessGarmin · docs/content — against the myvitals backend, frontend and android trees.<br>
+  Findings were produced by seven parallel readers and independently fact-checked; claims marked with file paths and line numbers were verified against source. Claims about Google's API terms, quotas and regional availability were <em>not</em> verified and are flagged as such in the text.
+</footer>
+
+</div>

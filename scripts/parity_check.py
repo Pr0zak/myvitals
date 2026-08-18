@@ -143,6 +143,16 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/utils/muscleIcon.ts",
      "android/app/src/main/kotlin/app/myvitals/ui/strength/MuscleIcon.kt",
      "Muscle anatomy chip resolver"),
+    # TD-7 moved Settings out of WEB_ONLY_OK. The pairing is STRUCTURAL, not
+    # line-for-line: the phone owns Health Connect permissions and APK
+    # install, the web owns historical imports, AI configuration and the
+    # Strava cookie paste, and neither of those belongs on the other surface.
+    # What must stay in step is the set of things a user can reach and
+    # change at all -- the gate was blind to this pair while eight of the
+    # web's twelve panes were unreachable by any click.
+    ("frontend/src/views/Settings.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/SettingsScreen.kt",
+     "Settings (structural pair — surface-specific panes are expected)"),
     ("frontend/src/views/Journal.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/JournalScreen.kt",
      "Journal / annotation entry surface (#LOG family)"),
@@ -153,7 +163,6 @@ PAIRS: list[tuple[str, str, str]] = [
 WEB_ONLY_OK = {
     "frontend/src/views/YogaIconSamples.vue",  # internal QA / icon audit
     "frontend/src/views/Logs.vue",
-    "frontend/src/views/Settings.vue",
     "frontend/src/views/Goals.vue",
     "frontend/src/views/Trends.vue",
     "frontend/src/views/Calendar.vue",

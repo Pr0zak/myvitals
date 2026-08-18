@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import {
   Eye, EyeOff, Check, X as XIcon,
   Download, RefreshCw, ExternalLink, AlertCircle,
@@ -33,7 +33,46 @@ const SECTION_KEYS: readonly SectionKey[] = [
   "strava", "concept2", "fasting", "ha", "imports", "tools",
 ];
 
+// TD-7 — the rail this page never had.
+//
+// activeTab was assigned exactly once, from ?tab=, and there was no in-page
+// tab bar. Under the classic shell SideNav supplied the twelve links, but
+// theme.ts defaults themeChoice to 'neon', and under neon App.vue renders
+// NeonNav instead — so SideNav never mounts, and You.vue offers only four
+// settings pills. That left access, ai, tools, imports, trails, fasting, ha
+// and concept2 reachable *only* by typing a URL: on the default theme a
+// fresh visitor could not get to AI configuration, historical imports, or
+// the Home Assistant and Concept2 setup at all.
+//
+// The labels are derived from SECTION_KEYS rather than kept as a parallel
+// list, so adding a section cannot silently omit it from the rail.
+// SparkyFitness's own notes flag their hand-maintained 17-entry
+// section→tab map as fragile for exactly this reason.
+const SECTION_LABELS: Record<SectionKey, string> = {
+  updates: "Updates",
+  access: "Access",
+  display: "Display",
+  profile: "Profile",
+  ai: "AI",
+  trails: "Trails",
+  strava: "Strava",
+  concept2: "Concept2",
+  fasting: "Fasting",
+  ha: "Home Assistant",
+  imports: "Imports",
+  tools: "Tools",
+};
+
 const route = useRoute();
+const router = useRouter();
+
+/** Select a pane and record it in the URL, so the rail and any deep link
+ *  agree and the browser Back button steps between panes. */
+function selectTab(key: SectionKey) {
+  activeTab.value = key;
+  router.replace({ query: { ...route.query, tab: key } });
+}
+
 function tabFromQuery(q: unknown): SectionKey {
   const v = Array.isArray(q) ? q[0] : q;
   if (typeof v === "string" && (SECTION_KEYS as readonly string[]).includes(v)) {
@@ -1223,6 +1262,18 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
 <template>
   <div class="settings">
     <h1>Settings</h1>
+
+    <nav class="settings-rail" aria-label="Settings sections">
+      <button
+        v-for="key in SECTION_KEYS"
+        :key="key"
+        type="button"
+        class="rail-pill"
+        :class="{ active: key === activeTab }"
+        :aria-current="key === activeTab ? 'page' : undefined"
+        @click="selectTab(key)"
+      >{{ SECTION_LABELS[key] }}</button>
+    </nav>
 
     <section v-show="activeTab === 'updates'" class="settings-pane">
         <h2>
@@ -2680,4 +2731,36 @@ html[data-theme="neon"] .settings .apply-dot.phase-failed {
 html[data-theme="neon"] .settings .apply-steps li.done::before { color: var(--rn-lime); }
 html[data-theme="neon"] .settings .apply-steps li.current,
 html[data-theme="neon"] .settings .apply-steps li.current::before { color: var(--rn-cyan); }
+
+/* TD-7 — settings section rail. Horizontal and scrollable rather than a
+   second vertical column, because the panes below are already wide forms and
+   this page is reached on a phone as often as on a desktop. */
+.settings-rail {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0 10px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: thin;
+}
+.rail-pill {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rail-pill:hover { color: var(--text); }
+.rail-pill.active {
+  color: var(--accent-text, #0b1018);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.rail-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 </style>

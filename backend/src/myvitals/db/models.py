@@ -529,6 +529,14 @@ class StrengthWorkoutExercise(Base):
     skipped: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False,
     )
+    # The user appended this slot mid-session rather than the generator
+    # prescribing it. Mirrors the SKIP-1 distinction between a declined
+    # exercise and a forgotten one: explain_workout must not claim to have
+    # reasoned its way to a lift the user chose, and the AI reviewer reads a
+    # self-added accessory differently from a planned one.
+    added_ad_hoc: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
 
 
 class StrengthSet(Base):

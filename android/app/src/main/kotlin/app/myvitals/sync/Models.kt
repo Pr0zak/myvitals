@@ -245,7 +245,22 @@ data class StrengthWorkoutExerciseRow(
     // Undo affordance instead of a live logging table. False-by-default so a
     // cached plan from before the field existed reads as "not declined".
     val skipped: Boolean = false,
+    // TD-10: the user appended this slot themselves; the generator did not
+    // prescribe it. False-by-default so a cached plan from before the field
+    // existed reads as "planned" rather than claiming the user added it.
+    @Json(name = "added_ad_hoc") val addedAdHoc: Boolean = false,
     val sets: List<StrengthSetRow> = emptyList(),
+)
+
+/** POST /workout/strength/workouts/{id}/exercises — append an off-plan lift.
+ *  target_sets omitted means "whatever the planner would prescribe for an
+ *  accessory", which is the right default: the point of this feature is
+ *  choosing the movement, not re-deriving the prescription. */
+@JsonClass(generateAdapter = true)
+data class AddExerciseBody(
+    @Json(name = "exercise_id") val exerciseId: String,
+    @Json(name = "target_sets") val targetSets: Int? = null,
+    val position: Int? = null,
 )
 
 @JsonClass(generateAdapter = true)

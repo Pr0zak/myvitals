@@ -84,6 +84,76 @@ const swapAlternatives = computed<StrengthExercise[]>(() => {
     .slice(0, 12);
 });
 
+// TD-10 — append an off-plan exercise.
+//
+// There was no route that added an exercise to a session at all: swap is
+// strictly 1:1 and refuses once a set is logged, so three extra sets of curls
+// done in the moment had nowhere to go. That meant they were missing from
+// tonnage, the weekly volume audit, personal records, the four-week rotation
+// map and every AI payload — the work happened and the app never knew.
+const addOpen = ref(false);
+const addBusy = ref(false);
+const addError = ref("");
+const addQuery = ref("");
+
+function openAdd() {
+  addError.value = "";
+  addQuery.value = "";
+  addOpen.value = true;
+}
+function closeAdd() { addOpen.value = false; }
+
+const addCandidates = computed<StrengthExercise[]>(() => {
+  if (!workout.value) return [];
+  const inWorkout = new Set(workout.value.exercises.map((x) => x.exercise_id));
+  const q = addQuery.value.trim().toLowerCase();
+  return Object.values(catalogById.value)
+    .filter((e) => !inWorkout.has(e.id))
+    .filter((e) => !q
+      || e.name.toLowerCase().includes(q)
+      || (e.primary_muscle ?? "").toLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, 20);
+});
+
+async function addExercise(exerciseId: string) {
+  if (!workout.value) return;
+  addBusy.value = true;
+  addError.value = "";
+  try {
+    // The server prescribes the weight from history — never guess it here.
+    // A client-side number would disagree with the server on the next load.
+    await api.addStrengthExercise(workout.value.id, exerciseId);
+    await loadAll();
+    closeAdd();
+  } catch (e: unknown) {
+    if (e && typeof e === "object" && "response" in e) {
+      const resp = (e as { response?: { status?: number; data?: { detail?: string } } }).response;
+      addError.value = resp?.data?.detail ?? `HTTP ${resp?.status}`;
+    } else {
+      addError.value = e instanceof Error ? e.message : String(e);
+    }
+  } finally {
+    addBusy.value = false;
+  }
+}
+
+async function removeExercise(wexId: number) {
+  addError.value = "";
+  try {
+    await api.deleteStrengthExercise(wexId);
+    await loadAll();
+  } catch (e: unknown) {
+    // The 409 body explains itself ("skip it instead") — surface it verbatim
+    // rather than inventing a generic failure message.
+    const resp = (e && typeof e === "object" && "response" in e)
+      ? (e as { response?: { data?: { detail?: string } } }).response
+      : null;
+    addError.value = resp?.data?.detail
+      ?? (e instanceof Error ? e.message : String(e));
+  }
+}
+
 async function applySwap(newExId: string) {
   if (swapWexId.value === null) return;
   swapBusy.value = true;
@@ -1411,6 +1481,13 @@ useVisibilityRefresh(loadAll);
         <header>
           <h3>
             {{ idx + 1 }}. {{ exName(wex.exercise_id) }}
+            <!-- TD-10: keep the plan and its improvisations distinguishable
+                 after the fact. The AI reviewer makes the same distinction. -->
+            <span v-if="wex.added_ad_hoc" class="adhoc-tag"
+                  title="You added this — the planner didn't prescribe it">added</span>
+            <button v-if="wex.added_ad_hoc && !isSlotClosed(wex) && wex.sets.length === 0"
+                    class="ghost tiny" title="Remove this exercise"
+                    @click="removeExercise(wex.id)">remove</button>
           </h3>
           <span class="prescription">
             {{ wex.target_sets }} ×
@@ -1677,6 +1754,42 @@ useVisibilityRefresh(loadAll);
           <ul v-else class="alts">
             <li v-for="alt in swapAlternatives" :key="alt.id"
                 :class="{ disabled: swapBusy }" @click="applySwap(alt.id)">
+              <strong>{{ alt.name }}</strong>
+              <span class="tags">{{ alt.movement_pattern.replace('_', ' ') }} · {{ alt.primary_muscle }}</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- TD-10 — add an off-plan exercise. Only offered while the session is
+           still open: appending to a finished workout would rewrite what was
+           performed rather than record it. -->
+      <div v-if="workout.status !== 'completed' && workout.status !== 'skipped'"
+           class="add-exercise-row">
+        <button class="ghost" @click="openAdd">+ Add exercise</button>
+        <span v-if="addError" class="err">{{ addError }}</span>
+      </div>
+
+      <div v-if="addOpen" class="overlay" @click.self="closeAdd">
+        <div class="drawer swap-drawer">
+          <header>
+            <h2>Add exercise</h2>
+            <button class="close" @click="closeAdd">✕</button>
+          </header>
+          <p class="hint">
+            The weight is prescribed from your history, the same way the
+            planner does it — you pick the movement.
+          </p>
+          <input v-model="addQuery" class="add-search" type="search"
+                 placeholder="Search by name or muscle…" aria-label="Search exercises"/>
+          <p v-if="addError" class="err">{{ addError }}</p>
+          <p v-if="addCandidates.length === 0" class="hint">
+            Nothing matches — every exercise in your equipment is either
+            already in today's session or filtered out.
+          </p>
+          <ul v-else class="alts">
+            <li v-for="alt in addCandidates" :key="alt.id"
+                :class="{ disabled: addBusy }" @click="addExercise(alt.id)">
               <strong>{{ alt.name }}</strong>
               <span class="tags">{{ alt.movement_pattern.replace('_', ' ') }} · {{ alt.primary_muscle }}</span>
             </li>
@@ -2813,4 +2926,37 @@ html[data-theme="neon"] .hint.subtle,
 html[data-theme="neon"] .ctx-meta,
 html[data-theme="neon"] .dim { color: var(--rn-mut); }
 html[data-theme="neon"] .big { color: var(--rn-ink); }
+
+/* TD-10 — add-an-exercise affordance and the marker for slots the user
+   added rather than the planner. */
+.add-exercise-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 4px;
+  flex-wrap: wrap;
+}
+.add-search {
+  width: 100%;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 7px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+.adhoc-tag {
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
 </style>

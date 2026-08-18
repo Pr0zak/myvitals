@@ -1042,6 +1042,30 @@ export const api = {
     return data;
   },
 
+  /** TD-10 — append an off-plan exercise to today's session.
+   *  Returns the whole rehydrated workout, so the caller picks up the
+   *  recomputed progress counters and session summary in one round trip. */
+  async addStrengthExercise(
+    workoutId: number, exerciseId: string, opts: { targetSets?: number } = {},
+  ): Promise<import("./types").StrengthWorkoutDetail> {
+    const { data } = await http.post(
+      `/workout/strength/workouts/${workoutId}/exercises`,
+      { exercise_id: exerciseId, target_sets: opts.targetSets ?? null },
+    );
+    return data;
+  },
+
+  /** Remove a slot. 409s when real sets are logged against it — skip it
+   *  instead, which keeps the record of what was actually performed. */
+  async deleteStrengthExercise(
+    workoutExerciseId: number,
+  ): Promise<import("./types").StrengthWorkoutDetail> {
+    const { data } = await http.delete(
+      `/workout/strength/workout-exercises/${workoutExerciseId}`,
+    );
+    return data;
+  },
+
   async strengthUpcoming(days = 7, perDayCount = 4): Promise<{
     count: number;
     upcoming: Array<{

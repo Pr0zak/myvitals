@@ -313,6 +313,10 @@ export interface StrengthWorkoutExercise {
   // `sets` array, which means "never touched" — render collapsed with an
   // Undo instead of a live logging table.
   skipped?: boolean;
+  // TD-10: the user appended this slot themselves; the generator did not
+  // prescribe it. Rendered with a small marker so a session's plan and its
+  // improvisations stay distinguishable after the fact.
+  added_ad_hoc?: boolean;
   sets: StrengthSet[];
 }
 

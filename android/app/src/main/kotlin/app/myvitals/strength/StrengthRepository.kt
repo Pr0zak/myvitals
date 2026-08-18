@@ -373,6 +373,33 @@ class StrengthRepository(
         }
     }
 
+    /**
+     * TD-10 — append an off-plan exercise to an open session.
+     *
+     * Deliberately NOT buffered offline alongside set logs. The prescription
+     * is server compute — last target weight from history, progressed by the
+     * trailing rating, rounded against the user's actual dumbbell pairs and
+     * micro-loaders — so an optimistic client-guessed weight would both
+     * violate the architecture rule and then disagree with the server when
+     * the buffered write eventually replayed. Same reasoning as regenerate,
+     * custom-workout and swap: these need the network, and say so.
+     */
+    suspend fun addExercise(
+        workoutId: Long, exerciseId: String, targetSets: Int? = null,
+    ): app.myvitals.sync.StrengthWorkoutDetail = withContext(Dispatchers.IO) {
+        api().addStrengthExercise(
+            workoutId, app.myvitals.sync.AddExerciseBody(exerciseId, targetSets),
+        )
+    }
+
+    /** Remove a slot. Throws on 409 when real sets exist — the caller shows
+     *  the server's message, which explains that skipping is the right move. */
+    suspend fun deleteExercise(
+        wexId: Long,
+    ): app.myvitals.sync.StrengthWorkoutDetail = withContext(Dispatchers.IO) {
+        api().deleteStrengthWorkoutExercise(wexId)
+    }
+
     suspend fun swapExercise(
         wexId: Long, newExerciseId: String,
     ): app.myvitals.sync.StrengthWorkoutExerciseRow = withContext(Dispatchers.IO) {

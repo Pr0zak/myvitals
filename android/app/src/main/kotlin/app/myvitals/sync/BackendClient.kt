@@ -189,6 +189,21 @@ interface BackendApi {
         @Path("id") exerciseId: String, @Body body: ExercisePrefBody,
     ): Map<String, String>
 
+    /** TD-10 — append an off-plan exercise. Responds with the whole
+     *  rehydrated workout so the caller picks up the recomputed progress
+     *  counters and session summary in one round trip. */
+    @POST("workout/strength/workouts/{workoutId}/exercises")
+    suspend fun addStrengthExercise(
+        @Path("workoutId") workoutId: Long, @Body body: AddExerciseBody,
+    ): StrengthWorkoutDetail
+
+    /** Remove a slot. 409 when real sets are logged against it — skipping is
+     *  the right move there, so the record of performed work survives. */
+    @retrofit2.http.DELETE("workout/strength/workout-exercises/{wexId}")
+    suspend fun deleteStrengthWorkoutExercise(
+        @Path("wexId") wexId: Long,
+    ): StrengthWorkoutDetail
+
     @POST("workout/strength/workout-exercises/{wexId}/swap")
     suspend fun swapStrengthExercise(
         @Path("wexId") wexId: Long, @Body body: SwapBody,

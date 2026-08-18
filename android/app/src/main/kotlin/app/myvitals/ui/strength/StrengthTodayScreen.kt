@@ -213,6 +213,13 @@ fun StrengthTodayScreen(
     var deferring by remember { mutableStateOf(false) }
     var swapWexId by remember { mutableStateOf<Long?>(null) }
     var swapping by remember { mutableStateOf(false) }
+    // TD-10 — appending an off-plan exercise. Until this there was no route
+    // that added an exercise to a session at all, so three extra sets of
+    // curls done in the moment had nowhere to go and were invisible to
+    // tonnage, the volume audit, PRs and every AI payload.
+    var addSheetOpen by remember { mutableStateOf(false) }
+    var addQuery by remember { mutableStateOf("") }
+    var adding by remember { mutableStateOf(false) }
     var customSheetOpen by remember { mutableStateOf(false) }
     var customGenerating by remember { mutableStateOf(false) }
     // Cardio-day "Log this workout" flow — see the dialog at the bottom
@@ -1286,6 +1293,23 @@ fun StrengthTodayScreen(
                     backendBaseUrl = settings.backendUrl.trimEnd('/'),
                 )
             }
+            // TD-10 — add an off-plan exercise. Offered only while the
+            // session is still open: appending to a finished workout would
+            // rewrite what was performed rather than record it.
+            if (plan.status != "completed" && plan.status != "skipped") {
+                item {
+                    androidx.compose.material3.TextButton(
+                        onClick = { addSheetOpen = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            "+ Add exercise",
+                            color = pal.muted, fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
             item {
                 if (plan.status != "completed" && plan.status != "skipped") {
                     // Cardio-day (no exercises) gets a dialog flow so the
@@ -1492,6 +1516,88 @@ fun StrengthTodayScreen(
                     }
                     Spacer(Modifier.height(16.dp))
                 }
+            }
+        }
+    }
+
+    // ── Add-exercise sheet (TD-10) ──────────────────────────────
+    if (addSheetOpen && workout != null) {
+        val inWorkout = workout!!.exercises.map { it.exerciseId }.toSet()
+        val q = addQuery.trim().lowercase()
+        val candidates = catalog.values
+            .filter { it.id !in inWorkout }
+            .filter {
+                q.isEmpty() ||
+                    it.name.lowercase().contains(q) ||
+                    it.primaryMuscle.lowercase().contains(q)
+            }
+            .sortedBy { it.name }
+            .take(20)
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { addSheetOpen = false },
+            containerColor = pal.card,
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(
+                    "Add exercise",
+                    color = pal.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "The weight comes from your history, the same way the planner " +
+                        "does it — you pick the movement.",
+                    color = pal.muted, fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = addQuery,
+                    onValueChange = { addQuery = it },
+                    singleLine = true,
+                    label = { Text("Search by name or muscle") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                )
+                if (candidates.isEmpty()) {
+                    Text(
+                        "Nothing matches — every exercise in your equipment is " +
+                            "either already in today's session or filtered out.",
+                        color = pal.muted, fontSize = 13.sp,
+                    )
+                } else {
+                    candidates.forEach { alt ->
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = pal.cardLow),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable(enabled = !adding) {
+                                    scope.launch {
+                                        adding = true
+                                        try {
+                                            repo.addExercise(workout!!.id, alt.id)
+                                            reload()
+                                            addSheetOpen = false
+                                            addQuery = ""
+                                        } catch (e: Exception) {
+                                            // This one genuinely needs the
+                                            // network: the prescription is
+                                            // server compute, so there is
+                                            // nothing honest to buffer.
+                                            error = e.message?.take(160)
+                                        } finally { adding = false }
+                                    }
+                                },
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(alt.name, color = pal.ink, fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "${alt.movementPattern.replace('_', ' ')} · ${alt.primaryMuscle}",
+                                    color = pal.muted, fontSize = 11.sp,
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
             }
         }
     }
@@ -2807,6 +2913,17 @@ private fun ExerciseCard(
                         "${wex.orderIndex + 1}. $name",
                         color = pal.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                     )
+                    // TD-10: keep the plan and its improvisations
+                    // distinguishable after the fact. explain_workout and the
+                    // AI reviewer make the same distinction, so the UI
+                    // should not be the one place that blurs it.
+                    if (wex.addedAdHoc) {
+                        Text(
+                            "ADDED BY YOU",
+                            color = pal.accent, fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
+                        )
+                    }
                     val rep = if (wex.targetRepsLow == wex.targetRepsHigh)
                         "${wex.targetRepsLow}" else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
                     val w = wex.targetWeightLb?.let { " @ ${it}lb" } ?: ""

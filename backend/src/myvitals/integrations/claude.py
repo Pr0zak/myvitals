@@ -1026,6 +1026,12 @@ user — not forgotten, and not a failure. Do not treat it as missed work or
 as a sign of poor adherence. Only `missed_sets` represents prescribed work
 that went unaccounted for. Skipped cool-down or mobility slots in particular
 are a scheduling choice and rarely worth a concern bullet.
+
+An exercise with `added_ad_hoc: true` was appended by the user mid-session
+and was not part of the generated plan. Treat it as extra work they chose to
+do, not as a deviation to correct. It is worth a highlight when it filled a
+real gap and worth a concern only if it pushed a muscle group well past its
+weekly target.
 """
 
 
@@ -1097,6 +1103,10 @@ async def build_strength_review_payload(
             # prescription. `missed_sets` is now genuinely "prescribed work
             # that went unaccounted for".
             "skipped_exercise": bool(getattr(wex, "skipped", False)),
+            # TD-10: the user appended this one themselves. Reading it as a
+            # deviation from the plan would be exactly backwards — it is
+            # extra work they chose to do.
+            "added_ad_hoc": bool(getattr(wex, "added_ad_hoc", False)),
             "missed_sets": (
                 0 if getattr(wex, "skipped", False)
                 else wex.target_sets - len(logged) - sum(1 for s in sets if s.skipped)

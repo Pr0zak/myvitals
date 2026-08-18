@@ -239,13 +239,13 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
 <div class="prog">
   <h4>Build progress</h4>
   <p style="margin-bottom:0">The ranked shortlist is tracked as tasks <code>TD-1</code>–<code>TD-10</code>. The full option menu below is the durable backlog — nothing is pruned from it, including the items declined and the reasons why.</p>
-  <div class="bar" role="img" aria-label="7 of 10 shortlist items shipped"><i class="b-done" style="width:70%"></i><i class="b-wip" style="width:0%"></i></div>
+  <div class="bar" role="img" aria-label="8 of 10 shortlist items shipped"><i class="b-done" style="width:80%"></i><i class="b-wip" style="width:0%"></i></div>
   <div class="legend">
-    <span><b style="background:var(--good)"></b> shipped &nbsp;7</span>
+    <span><b style="background:var(--good)"></b> shipped &nbsp;8</span>
     <span><b style="background:var(--sp)"></b> in progress &nbsp;0</span>
-    <span><b style="background:var(--rule)"></b> not started &nbsp;3</span>
+    <span><b style="background:var(--rule)"></b> not started &nbsp;2</span>
     <span>·</span>
-    <span>full menu: 40 options, 7 shipped, 1 declined</span>
+    <span>full menu: 40 options, 8 shipped, 1 declined</span>
   </div>
 </div>
 
@@ -255,6 +255,11 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
   <div class="scroll"><table>
     <thead><tr><th>Option</th><th>Status</th><th>What changed</th></tr></thead>
     <tbody>
+      <tr>
+        <td><strong>TD-10</strong> — ad-hoc exercise slots</td>
+        <td><span class="chip c-done">shipped</span></td>
+        <td><code>POST /workout/strength/workouts/{id}/exercises</code> and <code>DELETE /workout/strength/workout-exercises/{id}</code>. Before this, enumerating every route turned up swap (strictly 1:1, refusing once a set is logged) and two deletes — and nothing that added an exercise. <code>POST /workouts</code> existed but no client had ever called it, so the generator was the only way a session came into being, and three extra sets of curls done in the moment were invisible to tonnage, the volume audit, <code>/records</code>, rotation pressure and every AI payload. The prescription reuses the generator's own chain — <code>last_target_weight_for_exercise</code> → <code>progress_from_rating</code> / <code>starting_weight_lb</code> → <code>round_weight</code>, then <code>prescribe_slot</code> for reps and rest, which also gets <code>is_timed</code> handling free so an added plank prescribes seconds. Both routes return the whole rehydrated <code>WorkoutOut</code>, matching the SKIP-1 convention. Delete 409s when real sets exist (skip instead — the actuals are a record of work performed); add 409s on a closed session. New <code>added_ad_hoc</code> flag (migration 0050) keeps the plan and its improvisations distinguishable: <code>explain_workout</code> no longer claims to have reasoned its way to a lift the user picked, and the AI reviewer is told to read a self-added accessory as extra work chosen rather than a deviation to correct. Deliberately <strong>not</strong> buffered offline on the phone — the prescription is server compute, and an optimistic client-guessed weight would disagree on replay. <code>backend/tests/test_ad_hoc_exercise.py</code> — 10 tests. Backend 408 green, web type-check clean, phone compiles.</td>
+      </tr>
       <tr>
         <td><strong>TD-9</strong> — standing instructions + tone cache-key fix</td>
         <td><span class="chip c-done">shipped</span></td>
@@ -583,7 +588,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     </div>
     <div class="rk">
       <div class="n">10</div><div class="t">Ad-hoc exercise slots</div>
-      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div>
+      <div class="m"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div>
       <div class="d">Off-plan work is currently unrecordable, so it never reaches tonnage, the volume audit, PRs, rotation pressure or the AI reviewer. Reuse the swap handler's prescribe chain so the weight stays server-computed; add an <code>added_ad_hoc</code> flag so the reviewer can tell a chosen slot from a generated one. Do <em>not</em> buffer it offline — the prescription needs server compute, and a client-guessed weight would disagree on replay.</div>
     </div>
   </div>
@@ -628,7 +633,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
         <div class="opt"><div class="h">Canonical muscle + movement taxonomy</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #1.</p></div>
         <div class="opt"><div class="h">Session summary with HR-derived energy</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #4.</p></div>
         <div class="opt"><div class="h">Per-set prescription</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Ranked #6.</p></div>
-        <div class="opt"><div class="h">Ad-hoc exercise slots</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div><p class="b">Ranked #10.</p></div>
+        <div class="opt"><div class="h">Ad-hoc exercise slots</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div><p class="b">Ranked #10.</p></div>
         <div class="opt"><div class="h">Gate the AI variety-nudge and swap on equipment and prefs</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div><p class="b">Those call sites pass the raw <code>CATALOG_BY_ID</code>, so the model can propose swaps to equipment you do not own or exercises you explicitly disabled. Pass <code>filter_catalog_for_equipment</code> with disabled rows removed instead of an arbitrary <code>[:60]</code> slice.</p></div>
         <div class="opt"><div class="h">Bodyweight and rep-based personal records</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div><p class="b"><code>_detect_pr</code> short-circuits when <code>actual_weight_lb</code> is null, and 101 of 275 catalog entries are bodyweight-only — so no bodyweight lift can ever set a record. Carries a genuine product ambiguity (12 push-ups at 200 lb vs 12 at 180 lb) and needs a rate limit, or the badge becomes noise.</p></div>
         <div class="opt"><div class="h">Adopt unmatched imported exercises into a user catalog overlay</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-md">medium</span></div><p class="b">Strong/Hevy CSV rows that resolve to <code>import_*</code> slugs are skipped by <code>weekly_muscle_volume</code> without a count. A <code>custom_exercises</code> block in <code>user_equipment.payload</code> needs no migration, matching the convention <code>TrainingPreferences</code> already follows.</p></div>

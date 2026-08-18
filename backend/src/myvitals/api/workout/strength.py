@@ -652,6 +652,12 @@ class WorkoutExerciseOut(BaseModel):
     # which means "never touched" — the AI reviewer consumes the
     # difference (deliberate skip vs forgotten exercise).
     skipped: bool = False
+    # TD-10 — the user appended this slot mid-session; the generator did not
+    # prescribe it. Mirrors the skipped/never-touched distinction above:
+    # explain_workout must not claim to have reasoned its way to a lift the
+    # user chose, and the AI reviewer reads a self-added accessory
+    # differently from a planned one.
+    added_ad_hoc: bool = False
     sets: list[SetOut] = []
 
 
@@ -894,6 +900,7 @@ def _wex_to_out(
         program_scheme=_program_badge(prog) if prog else None,
         last_sets=last_sets or [],
         skipped=bool(wex.skipped),
+        added_ad_hoc=bool(getattr(wex, "added_ad_hoc", False)),
         sets=[_set_to_out(s) for s in sorted(sets, key=lambda x: x.set_number)],
     )
 
@@ -1851,6 +1858,173 @@ async def patch_workout_exercise(
     return await _hydrate_workout(db, w)
 
 
+class AddExerciseBody(BaseModel):
+    """Append an off-plan exercise to today's session."""
+    exercise_id: str
+    # Omitted means "same as the generator would prescribe for an accessory".
+    target_sets: int | None = None
+    # Where to insert. Omitted appends to the end, which is almost always
+    # right: an accessory added mid-session belongs after the planned work,
+    # not spliced into the middle of a superset.
+    position: int | None = None
+
+
+@router.post("/workouts/{workout_id}/exercises", response_model=WorkoutOut)
+async def add_exercise(
+    workout_id: int, body: AddExerciseBody,
+    db: AsyncSession = Depends(get_session),
+) -> WorkoutOut:
+    """Append an exercise the generator did not prescribe.
+
+    Until TD-10 there was no route that added an exercise to a session. The
+    API had `POST /workout-exercises/{id}/swap` (strictly 1:1, and refusing
+    once a set is logged), `DELETE /workouts/{id}` and `DELETE /sets/{id}`,
+    and nothing else -- `POST /workouts` exists but no client has ever called
+    it. So three extra sets of curls done in the moment had nowhere to go,
+    which meant they were missing from tonnage, `weekly_muscle_volume`,
+    `/records`, the four-week rotation-pressure map, and every AI payload.
+
+    The prescription is server-computed, reusing the same chain `swap_exercise`
+    uses: last target weight from history, progressed by the trailing rating,
+    falling back to the starting-weight table, then rounded against the
+    user's actual dumbbell pairs and micro-loaders. A client-guessed weight
+    would violate the architecture rule and then disagree with the server on
+    the next reload.
+
+    Returns the whole rehydrated workout, matching the SKIP-1 PATCH
+    convention, so the caller picks up the recomputed progress counters and
+    session summary in one round trip.
+    """
+    if body.exercise_id not in _CATALOG_BY_ID:
+        raise HTTPException(status_code=404, detail="exercise not found")
+
+    w = await db.get(models.StrengthWorkout, workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="workout not found")
+    if w.status in ("completed", "skipped", "regenerated"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"cannot add to a {w.status} workout",
+        )
+
+    new_ex = _CATALOG_BY_ID[body.exercise_id]
+    equip = await _equipment_payload(db)
+    level = (equip.get("training") or {}).get("level", "intermediate")
+    pairs = (equip.get("dumbbells") or {}).get("pairs_lb") or []
+    wrist = equip.get("wrist_weights_lb") or []
+    goal = (equip.get("training") or {}).get("goal", "general")
+
+    # Same weight chain as swap_exercise — one prescription policy.
+    avg_rating, avg_weight, _avg_reps = await strength_algo.last_target_weight_for_exercise(
+        db, body.exercise_id,
+    )
+    if avg_rating is not None and avg_weight is not None:
+        target = strength_algo.progress_from_rating(
+            avg_weight, avg_rating, new_ex["is_compound"],
+        )
+    else:
+        target = strength_algo.starting_weight_lb(new_ex["movement_pattern"], level)
+    if target is not None and "dumbbell" in new_ex["equipment"]:
+        target = strength_algo.round_weight(target, pairs, wrist)
+    if "dumbbell" not in new_ex["equipment"]:
+        target = None
+
+    # Reuse the generator's own prescription rather than inventing a second
+    # policy. slot_role="isolation" is the honest description of an appended
+    # accessory, and going through prescribe_slot also gets the is_timed
+    # handling for free -- adding a plank should prescribe seconds, not reps.
+    weight_kg, age, _sex = await _energy_inputs(db)
+    bodyweight_lb = (weight_kg * 2.20462) if weight_kg else None
+    sets_n, reps_low, reps_high, rest_s = strength_algo.prescribe_slot(
+        new_ex, "isolation", goal, age=age, bodyweight_lb=bodyweight_lb,
+    )
+
+    existing = (await db.execute(
+        select(models.StrengthWorkoutExercise)
+        .where(models.StrengthWorkoutExercise.workout_id == workout_id)
+        .order_by(models.StrengthWorkoutExercise.order_index)
+    )).scalars().all()
+
+    if body.position is None or body.position >= len(existing):
+        order_index = (existing[-1].order_index + 1) if existing else 0
+    else:
+        order_index = max(0, body.position)
+        # Shift everything at or after the insertion point down one.
+        for row in existing:
+            if row.order_index >= order_index:
+                row.order_index += 1
+
+    wex = models.StrengthWorkoutExercise(
+        workout_id=workout_id,
+        exercise_id=body.exercise_id,
+        order_index=order_index,
+        # Never joined into a superset: the pairing in SPLIT_SLOTS is
+        # deliberate and an appended accessory has no partner.
+        superset_id=None,
+        target_sets=max(1, min(10, body.target_sets or sets_n)),
+        target_reps_low=reps_low,
+        target_reps_high=reps_high,
+        target_weight_lb=target,
+        target_rest_s=rest_s,
+        added_ad_hoc=True,
+    )
+    db.add(wex)
+    await db.commit()
+
+    log.info(
+        "ad-hoc exercise added: workout=%s exercise=%s target=%s",
+        workout_id, body.exercise_id,
+        f"{target:.1f}lb" if target is not None else "bodyweight",
+    )
+    await db.refresh(w)
+    return await _hydrate_workout(db, w)
+
+
+@router.delete("/workout-exercises/{wex_id}", response_model=WorkoutOut)
+async def delete_exercise(
+    wex_id: int, db: AsyncSession = Depends(get_session),
+) -> WorkoutOut:
+    """Remove an exercise slot from a session.
+
+    Refuses (409) when real sets are logged against it, matching
+    `swap_exercise`'s contract: the actuals are a record of work that was
+    performed, and deleting the slot would silently erase it. Skipping the
+    slot is the right move for "I'm not doing the rest of this"; deleting is
+    for "this should not be here at all".
+    """
+    wex = await db.get(models.StrengthWorkoutExercise, wex_id)
+    if wex is None:
+        raise HTTPException(status_code=404, detail="workout_exercise not found")
+
+    logged = (await db.execute(
+        select(models.StrengthSet.id)
+        .where(models.StrengthSet.workout_exercise_id == wex_id)
+        .where(models.StrengthSet.skipped.is_(False))
+        .where(models.StrengthSet.actual_reps.is_not(None))
+    )).scalars().all()
+    if logged:
+        raise HTTPException(
+            status_code=409,
+            detail="cannot delete — sets already logged for this slot. "
+                   "Skip it instead, or delete the logged sets first.",
+        )
+
+    w = await db.get(models.StrengthWorkout, wex.workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="workout not found")
+
+    # Drop any skipped placeholder sets along with the slot; they exist only
+    # to describe this slot and become orphans otherwise.
+    await db.execute(
+        delete(models.StrengthSet)
+        .where(models.StrengthSet.workout_exercise_id == wex_id)
+    )
+    await db.delete(wex)
+    await db.commit()
+    await db.refresh(w)
+    return await _hydrate_workout(db, w)
+
+
 @router.post("/workout-exercises/{wex_id}/swap", response_model=WorkoutExerciseOut)
 async def swap_exercise(
     wex_id: int, body: SwapBody,
@@ -2245,13 +2419,35 @@ async def explain_workout(
         strength_algo.CATALOG_BY_ID.get(
             e.exercise_id, {}).get("name", e.exercise_id) for e in exercises
     ]
+    # TD-10 — the generator did not choose the ad-hoc slots, so it must not
+    # take credit for them. Claiming to have reasoned its way to an exercise
+    # the user added themselves is the sort of small dishonesty that makes
+    # the whole explanation less trustworthy.
+    generated = [
+        e for e in exercises if not getattr(e, "added_ad_hoc", False)
+    ]
+    ad_hoc_names = [
+        strength_algo.CATALOG_BY_ID.get(e.exercise_id, {}).get("name", e.exercise_id)
+        for e in exercises if getattr(e, "added_ad_hoc", False)
+    ]
+    generated_names = [
+        strength_algo.CATALOG_BY_ID.get(e.exercise_id, {}).get("name", e.exercise_id)
+        for e in generated
+    ]
     why_exercises = (
-        f"Today's {len(exercise_names)} exercises: "
-        + ", ".join(exercise_names[:5])
-        + (f" + {len(exercise_names) - 5} more" if len(exercise_names) > 5 else "")
+        f"Today's {len(generated_names)} planned exercises: "
+        + ", ".join(generated_names[:5])
+        + (f" + {len(generated_names) - 5} more" if len(generated_names) > 5 else "")
         + ". Picked from your equipment + favorites; sets 2 weeks of variety "
         "so you're not repeating the same lifts every session."
     )
+    if ad_hoc_names:
+        why_exercises += (
+            " You added "
+            + ", ".join(ad_hoc_names)
+            + " yourself — the weight came from your history, but the choice "
+            "was yours, not the planner's."
+        )
 
     # Why these targets? Pull last sets for these exercises; describe RPE-driven progression.
     last_top_set: dict[str, dict[str, Any]] = {}

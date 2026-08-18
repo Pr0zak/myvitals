@@ -245,7 +245,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     <span><b style="background:var(--sp)"></b> in progress &nbsp;0</span>
     <span><b style="background:var(--rule)"></b> not started &nbsp;0</span>
     <span>·</span>
-    <span>full menu: 40 options, 12 shipped, 1 declined</span>
+    <span>full menu: 40 options, 13 shipped, 1 declined</span>
   </div>
 </div>
 
@@ -255,6 +255,11 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
   <div class="scroll"><table>
     <thead><tr><th>Option</th><th>Status</th><th>What changed</th></tr></thead>
     <tbody>
+      <tr>
+        <td><strong>v0.8.4</strong> — Google Health, a phone-free ingest path</td>
+        <td><span class="chip c-done">shipped</span></td>
+        <td>The headline finding of the teardown, built after the gate was checked rather than before: <strong>no allowlist, no approval process, and verification only applies above 100 users</strong>, so a single-user self-hosted install stays in the unverified tier indefinitely. <code>oxygen-saturation</code> and <code>daily-sleep-temperature-derivations</code> are both documented types — the two streams currently dead on the PW3/PW4, one of which (<code>vitals_spo2</code>) has never had a writer at all. New <code>integrations/google_health.py</code> + <code>api/google_health.py</code> + migration 0052: bring-your-own OAuth app (as with Strava, so nothing depends on this project holding a registration), read-only scopes throughout, CSRF <code>state</code> minted and burned once because Google redirects a browser to a callback that cannot carry our auth token, and a refresh-token check that fails loudly with the recovery step rather than working for exactly one hour. <strong>The ingest surface is deliberately narrow.</strong> Only SpO2 and skin temperature are wired, because they are the two with no competing writer: <code>vitals_hrv</code>, <code>vitals_spo2</code> and <code>vitals_skin_temp</code> key on <code>time</code> alone with no source column, and Google's HRV is a <em>daily aggregate</em> that written into a per-sample table would be actively wrong. <strong><code>POST /google-health/probe</code> is the centrepiece</strong> — it answers in one click the only question the documentation could not: whether this account's Fitbit-sourced Pixel Watch data actually reaches the API, and for which types, distinguishing "no readings" from "scope not granted". Hourly poll is off by default and gated separately from connecting. Failures persist to <code>last_error</code> and surface in Settings, because the Strava cookie already taught what silent failure costs. <code>backend/tests/test_google_health.py</code> — 28 tests. Backend 489 green.</td>
+      </tr>
       <tr>
         <td><strong>v0.8.3</strong> — two catalog/AI bugs from the backlog</td>
         <td><span class="chip c-done">shipped</span></td>
@@ -623,7 +628,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     <summary><span>Wearable ingest — 5 options</span></summary>
     <div class="dbody">
       <div class="opts">
-        <div class="opt"><div class="h">Google Health API as a second, phone-free ingest path</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Server-side OAuth against Google, reading <code>oxygen-saturation</code> and <code>daily-sleep-temperature-derivations</code> among ~20 types. Recovers the two streams the PW3/PW4 firmware bug killed and removes the phone as a single point of failure. <strong>Verify regional availability, quota and whether your account's Fitbit-sourced data populates those types before committing.</strong></p></div>
+        <div class="opt"><div class="h">Google Health API as a second, phone-free ingest path</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Server-side OAuth against Google, reading <code>oxygen-saturation</code> and <code>daily-sleep-temperature-derivations</code> among ~20 types. Recovers the two streams the PW3/PW4 firmware bug killed and removes the phone as a single point of failure. <strong>Verify regional availability, quota and whether your account's Fitbit-sourced data populates those types before committing.</strong></p></div>
         <div class="opt"><div class="h">Resumable windowed Health Connect history backfill</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Replace <code>MainActivity.onBackfill(days)</code>, which just rewinds <code>lastSyncEpochSeconds</code>, with a checkpointed <code>HistoryBackfillWorker</code>: probe the true earliest sample, window forward, freeze the metric set, round the cursor up on resume, name every abnormal stop.</p></div>
         <div class="opt"><div class="h">Server-computed sync-health report, per stream, on both surfaces</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">The phone already posts per-type sizes and errors in its heartbeat; nothing surfaces them. <code>/query/last-sync</code> looks at 4 of 10 tables, one of which (<code>vitals_spo2</code>) is permanently empty by construction — quietly degrading the freshness signal.</p></div>
         <div class="opt"><div class="h">Promote Health Connect exercise sessions into the activities feed</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b"><code>models.Workout</code> is written every 15 minutes by ingest and read only by the CSV exporter. Every non-Strava, non-Concept2 workout you do is invisible in the feed.</p></div>

@@ -174,6 +174,37 @@ async def _concept2_tick() -> None:
         log.warning("Concept2 poll failed: %s", e)
 
 
+async def _google_health_tick() -> None:
+    """Pull recent Google Health data. No-op unless connected AND enabled.
+
+    Two gates rather than one. `poll_enabled` is off by default because this
+    reaches out to a third party on a timer, and that should be a decision
+    the user makes rather than a side effect of connecting once to see what
+    the probe returns.
+
+    A failure is recorded on the credentials row by `ingest_range` and
+    surfaced by /google-health/status, so a stream that has been erroring for
+    a week cannot masquerade as a quiet week — the lesson the Strava cookie
+    taught the hard way.
+    """
+    try:
+        from datetime import date as _date
+        from ..db import models, session
+        from ..integrations import google_health
+        async with session.SessionLocal() as db:
+            creds = await db.get(models.GoogleHealthCredentials, 1)
+            if creds is None or not creds.refresh_token or not creds.poll_enabled:
+                return
+            # A short trailing window, re-pulled every time. These upserts key
+            # on `time`, so re-reading yesterday is idempotent and it catches
+            # readings the watch uploaded late — which is the normal case for
+            # overnight SpO2 and skin temperature.
+            until = _date.today() + timedelta(days=1)
+            await google_health.ingest_range(db, until - timedelta(days=3), until)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Google Health poll failed: %s", e)
+
+
 # ── Registration ─────────────────────────────────────────────────
 
 def register_jobs(scheduler: AsyncIOScheduler) -> None:
@@ -240,3 +271,13 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
     )
     log.info("Concept2 poll scheduled every 30 min (no-op until connected)")
+
+    # Google Health incremental poll — hourly, no-op until connected AND
+    # the user has explicitly enabled polling.
+    scheduler.add_job(
+        _google_health_tick,
+        trigger="interval", minutes=60,
+        id="google_health_poll", replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
+    )
+    log.info("Google Health poll scheduled hourly (no-op until connected + enabled)")

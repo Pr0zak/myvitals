@@ -27,10 +27,10 @@ const errorMsg = ref<string>("");
 type SectionKey =
   | "updates" | "access" | "display" | "profile" | "ai"
   | "tools" | "imports" | "trails" | "strava" | "fasting"
-  | "ha" | "concept2";
+  | "ha" | "concept2" | "google";
 const SECTION_KEYS: readonly SectionKey[] = [
   "updates", "access", "display", "profile", "ai", "trails",
-  "strava", "concept2", "fasting", "ha", "imports", "tools",
+  "strava", "google", "concept2", "fasting", "ha", "imports", "tools",
 ];
 
 // TD-7 — the rail this page never had.
@@ -57,6 +57,7 @@ const SECTION_LABELS: Record<SectionKey, string> = {
   trails: "Trails",
   strava: "Strava",
   concept2: "Concept2",
+  google: "Google Health",
   fasting: "Fasting",
   ha: "Home Assistant",
   imports: "Imports",
@@ -614,6 +615,93 @@ async function aiSaveProvider() {
   } finally {
     aiProviderSaving.value = false;
   }
+}
+
+// ── Google Health (GH-1) ──────────────────────────────────────────
+//
+// A second, phone-independent route to the same watch data. The phone is
+// currently the only path in for every stream, and two of them — SpO2 and
+// skin temperature — have been dead since a Pixel Watch firmware update.
+// Google's API serves both.
+const ghStatus = ref<Awaited<ReturnType<typeof api.googleHealthStatus>> | null>(null);
+const ghCfg = ref<Awaited<ReturnType<typeof api.googleHealthConfig>> | null>(null);
+const ghClientId = ref("");
+const ghClientSecret = ref("");
+const ghCallback = ref("");
+const ghBusy = ref(false);
+const ghError = ref("");
+const ghResult = ref("");
+const ghProbe = ref<Awaited<ReturnType<typeof api.googleHealthProbe>> | null>(null);
+
+async function loadGoogleHealth() {
+  if (!queryToken.value) return;
+  try {
+    ghCfg.value = await api.googleHealthConfig();
+    ghStatus.value = await api.googleHealthStatus();
+    if (ghCfg.value.client_id && !ghClientId.value) ghClientId.value = ghCfg.value.client_id;
+    if (ghCfg.value.callback_url && !ghCallback.value) ghCallback.value = ghCfg.value.callback_url;
+    if (!ghCallback.value) {
+      // The redirect URI must match what is registered in the Google Cloud
+      // console byte for byte, so offer the right one rather than making the
+      // user reconstruct it.
+      ghCallback.value = `${window.location.origin}/api/auth/google-health/callback`;
+    }
+  } catch { /* ignore */ }
+}
+
+function ghFail(e: unknown) {
+  const resp = (e && typeof e === "object" && "response" in e)
+    ? (e as { response?: { data?: { detail?: string } } }).response
+    : null;
+  ghError.value = resp?.data?.detail ?? (e instanceof Error ? e.message : String(e));
+}
+
+async function ghSaveConfig() {
+  ghBusy.value = true; ghError.value = ""; ghResult.value = "";
+  try {
+    await api.googleHealthSetConfig({
+      client_id: ghClientId.value.trim(),
+      client_secret: ghClientSecret.value.trim(),
+      callback_url: ghCallback.value.trim(),
+    });
+    ghClientSecret.value = "";   // never keep it in the DOM after saving
+    ghResult.value = "Saved. Now press Connect.";
+    await loadGoogleHealth();
+  } catch (e) { ghFail(e); } finally { ghBusy.value = false; }
+}
+
+function ghConnect() {
+  // Full page navigation, not fetch: this is an OAuth consent redirect.
+  window.location.href = `/api/auth/google-health/login?token=${encodeURIComponent(queryToken.value)}`;
+}
+
+async function ghRunProbe() {
+  ghBusy.value = true; ghError.value = ""; ghResult.value = ""; ghProbe.value = null;
+  try {
+    ghProbe.value = await api.googleHealthProbe(7);
+  } catch (e) { ghFail(e); } finally { ghBusy.value = false; }
+}
+
+async function ghSync(days: number) {
+  ghBusy.value = true; ghError.value = ""; ghResult.value = "";
+  try {
+    const r = await api.googleHealthSync(days);
+    const total = Object.values(r.written).reduce((a, b) => a + b, 0);
+    ghResult.value = total
+      ? `Wrote ${Object.entries(r.written).map(([k, v]) => `${v} ${k}`).join(", ")}.`
+      : "Connected fine, but Google returned no readings for that window.";
+    await loadGoogleHealth();
+  } catch (e) { ghFail(e); } finally { ghBusy.value = false; }
+}
+
+async function ghTogglePoll(enabled: boolean) {
+  try { await api.googleHealthSetPoll(enabled); await loadGoogleHealth(); }
+  catch (e) { ghFail(e); }
+}
+
+async function ghDisconnect() {
+  try { await api.googleHealthDisconnect(); ghProbe.value = null; await loadGoogleHealth(); }
+  catch (e) { ghFail(e); }
 }
 
 async function aiUpdateTone(tone: string) {
@@ -1312,6 +1400,7 @@ onMounted(() => {
   loadStrava();
   loadCookieStatus();
   loadConcept2();
+  loadGoogleHealth();
   loadTrailCfg();
   loadProfile();
   loadAiCfg();
@@ -2361,6 +2450,97 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
     </section>
 
     <!-- ── Concept2 ── -->
+    <section v-show="activeTab === 'google'" class="settings-pane">
+      <h2>
+        Google Health
+        <span v-if="ghStatus?.connected" class="badge-ok">connected</span>
+      </h2>
+      <p class="hint">
+        A second route to your watch data that doesn't go through the phone.
+        Right now the phone is the only path in for every stream, and two of
+        them — SpO2 and skin temperature — have been dead since a Pixel Watch
+        firmware update. Google's API serves both.
+      </p>
+      <p class="hint">
+        Bring your own OAuth app, the same as Strava: create a project at
+        <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a>,
+        enable the Google Health API, create an OAuth client of type "Web
+        application", and add yourself as a test user. No verification is
+        needed — that only applies above 100 users.
+      </p>
+
+      <label class="ai-instructions">
+        <span>Redirect URI (paste this into the Google console, exactly)</span>
+        <input v-model="ghCallback" class="add-search" type="url"/>
+      </label>
+      <label class="ai-instructions">
+        <span>Client ID</span>
+        <input v-model="ghClientId" class="add-search" type="text"
+               placeholder="…apps.googleusercontent.com"/>
+      </label>
+      <label class="ai-instructions">
+        <span>Client secret <em class="opt" v-if="ghCfg?.client_secret_set">(saved — leave blank to keep)</em></span>
+        <input v-model="ghClientSecret" class="add-search" type="password"
+               autocomplete="off" placeholder="GOCSPX-…"/>
+      </label>
+
+      <div class="actions">
+        <button class="ghost" :disabled="ghBusy" @click="ghSaveConfig">Save app credentials</button>
+        <button class="primary" :disabled="ghBusy || !ghCfg?.configured" @click="ghConnect">
+          {{ ghStatus?.connected ? "Reconnect" : "Connect" }}
+        </button>
+        <button class="ghost" :disabled="ghBusy || !ghStatus?.connected" @click="ghRunProbe">
+          {{ ghBusy ? "Working…" : "What data is available?" }}
+        </button>
+        <button class="ghost" :disabled="ghBusy || !ghStatus?.connected" @click="ghSync(7)">Sync 7 days</button>
+        <button class="ghost" :disabled="ghBusy || !ghStatus?.connected" @click="ghSync(90)">Backfill 90 days</button>
+        <button class="ghost danger" v-if="ghStatus?.connected" @click="ghDisconnect">Disconnect</button>
+      </div>
+
+      <p v-if="ghError" class="err">{{ ghError }}</p>
+      <p v-if="ghResult" class="hint">{{ ghResult }}</p>
+      <p v-if="ghStatus?.last_error" class="err">Last sync error: {{ ghStatus.last_error }}</p>
+
+      <div v-if="ghStatus?.connected" class="kv">
+        <span class="kv-label">Last sync</span>
+        <span class="kv-value">{{ ghStatus.last_sync_at ?? "never" }}</span>
+      </div>
+      <label v-if="ghStatus?.connected" class="ai-toggle">
+        <input type="checkbox" :checked="ghStatus.poll_enabled"
+               @change="ghTogglePoll(($event.target as HTMLInputElement).checked)"/>
+        <span>Pull automatically every hour</span>
+      </label>
+
+      <!-- The probe is the honest answer to the one thing the docs can't
+           tell us: whether YOUR account's Fitbit-sourced watch data actually
+           reaches this API, and for which types. -->
+      <div v-if="ghProbe" class="scroll-x">
+        <table class="probe-table">
+          <thead><tr><th>Data type</th><th>Last 7d</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr v-for="t in ghProbe.types" :key="t.type">
+              <td>
+                <code>{{ t.type }}</code>
+                <span v-if="t.ingested" class="adhoc-tag">ingested</span>
+              </td>
+              <td>{{ t.ok ? (t.points ?? 0) : "—" }}</td>
+              <td>
+                <span v-if="!t.ok" class="err">{{ t.error }}</span>
+                <span v-else-if="(t.points ?? 0) > 0" class="ok">available</span>
+                <span v-else class="muted">no data</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-if="ghProbe" class="hint">
+        "no data" means Google served the type but your account has none in
+        that window — for an overnight metric that usually just means the
+        watch wasn't worn. An error here is the interesting case: it normally
+        means the scope wasn't granted.
+      </p>
+    </section>
+
     <section v-show="activeTab === 'concept2'" class="settings-pane">
       <h2>Concept2 (rower)</h2>
       <div v-if="concept2Error" class="err">{{ concept2Error }}</div>
@@ -2916,4 +3096,14 @@ html[data-theme="neon"] .settings .apply-steps li.current::before { color: var(-
   font-size: 0.72rem;
 }
 .ai-instructions-foot .muted:last-of-type { flex: 1 1 18rem; }
+
+/* GH-1 — the probe result table. */
+.scroll-x { overflow-x: auto; margin: 10px 0; }
+.probe-table { border-collapse: collapse; width: 100%; font-size: 0.78rem; }
+.probe-table th {
+  text-align: left; color: var(--muted); font-weight: 600;
+  padding: 4px 10px 4px 0; border-bottom: 1px solid var(--border);
+}
+.probe-table td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+.probe-table .ok { color: var(--good); }
 </style>

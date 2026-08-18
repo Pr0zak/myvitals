@@ -248,6 +248,40 @@ class UserProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class GoogleHealthConfig(Base):
+    """The OAuth app the user registers in their own Google Cloud project.
+
+    Bring-your-own-app, exactly as the Strava integration works: there is no
+    shared client to leak, the quota is the user's own, and nothing here
+    depends on this project maintaining a registration.
+    """
+    __tablename__ = "google_health_config"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    client_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    client_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    callback_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class GoogleHealthCredentials(Base):
+    """Tokens from authorising the app above. Single row, id=1."""
+    __tablename__ = "google_health_credentials"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scope: Mapped[str | None] = mapped_column(Text, nullable=True)
+    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Persisted, not just logged. The Strava cookie failed silently for six
+    # weeks before anyone noticed; every integration added since carries a
+    # user-visible failure state for that reason.
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    poll_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
+
+
 class StravaCredentials(Base):
     """Single-row table (id=1) holding the user's Strava OAuth tokens."""
     __tablename__ = "strava_credentials"

@@ -25,6 +25,7 @@ from .api import (
     profile,
     query,
     sober,
+    google_health,
     strava,
     summary,
     trails,
@@ -198,6 +199,7 @@ app.include_router(summary.router, prefix="/summary", tags=["summary"])
 app.include_router(annotations.router, tags=["log"])
 app.include_router(debug.router, tags=["debug"])
 app.include_router(strava.router, tags=["strava"])
+app.include_router(google_health.router, tags=["google-health"])
 app.include_router(analytics.router, tags=["analytics"])
 app.include_router(export.router, tags=["export"])
 app.include_router(imports.router, tags=["import"])

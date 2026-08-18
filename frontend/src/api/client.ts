@@ -608,6 +608,73 @@ export const api = {
     return data;
   },
 
+  // ── Google Health (GH-1) ────────────────────────────────────────
+  // A phone-independent route to the same watch data. Bring-your-own OAuth
+  // app, exactly like Strava — nothing here depends on this project holding
+  // a shared registration.
+
+  async googleHealthConfig(): Promise<{
+    configured: boolean;
+    client_id: string | null;
+    client_secret_set: boolean;
+    callback_url: string | null;
+  }> {
+    const { data } = await http.get("/google-health/config");
+    return data;
+  },
+
+  async googleHealthSetConfig(body: {
+    client_id: string; client_secret: string; callback_url: string;
+  }): Promise<unknown> {
+    const { data } = await http.post("/google-health/config", body);
+    return data;
+  },
+
+  async googleHealthStatus(): Promise<{
+    configured: boolean;
+    connected: boolean;
+    scope: string | null;
+    connected_at: string | null;
+    last_sync_at: string | null;
+    /** Persisted, not just logged — a stream erroring for a week must not
+     *  look like a quiet week. */
+    last_error: string | null;
+    poll_enabled: boolean;
+    ingested_types: string[];
+  }> {
+    const { data } = await http.get("/google-health/status");
+    return data;
+  },
+
+  /** What does this account actually serve? The one question the docs could
+   *  not answer — run it before trusting anything else here. */
+  async googleHealthProbe(days = 7): Promise<{
+    days: number;
+    types: Array<{
+      type: string; ingested: boolean; ok: boolean;
+      points?: number; error?: string; sample_keys?: string[];
+    }>;
+  }> {
+    const { data } = await http.post("/google-health/probe", null, { params: { days } });
+    return data;
+  },
+
+  async googleHealthSync(days = 7): Promise<{
+    since: string; until: string; written: Record<string, number>;
+  }> {
+    const { data } = await http.post("/google-health/sync", null, { params: { days } });
+    return data;
+  },
+
+  async googleHealthSetPoll(enabled: boolean): Promise<unknown> {
+    const { data } = await http.post("/google-health/poll", { enabled });
+    return data;
+  },
+
+  async googleHealthDisconnect(): Promise<void> {
+    await http.delete("/google-health");
+  },
+
   async concept2Status(): Promise<{
     connected: boolean;
     user_id?: number | null;

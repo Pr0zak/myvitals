@@ -644,6 +644,30 @@ private fun StrengthListRow(
                     color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant,
                     fontSize = 11.sp, maxLines = 1,
                 )
+                // TD-4 — what the session actually cost. Lifting used to
+                // contribute nothing to the energy picture on either surface,
+                // and the duration shown in feeds was gross elapsed time
+                // rather than the net figure the training-load model uses.
+                w.sessionSummary?.let { sm ->
+                    val parts = buildList {
+                        sm.netDurationS?.takeIf { it > 0 }?.let { add(fmtDurationHm(it)) }
+                        if (sm.workingSets > 0) add("${sm.workingSets} sets")
+                        if (sm.totalVolumeLb > 0) add("%,.0f lb".format(sm.totalVolumeLb))
+                        sm.kcalEst?.let {
+                            // Name the input rather than just hedging with
+                            // "est" — it tells the user how much to trust it.
+                            val how = if (sm.kcalMethod == "hr") "from HR" else "estimated"
+                            add("~%.0f kcal (%s)".format(it, how))
+                        }
+                    }
+                    if (parts.isNotEmpty()) {
+                        Text(
+                            parts.joinToString("  ·  "),
+                            color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant,
+                            fontSize = 11.sp, maxLines = 1,
+                        )
+                    }
+                }
             }
             Text(
                 statusLabel, color = statusColor, fontSize = 10.sp,
@@ -801,17 +825,11 @@ private fun YtdYoyCard(
                 else -> null
             } ?: continue
             target.n += 1
-            // started_at + completed_at gives a duration; fall back to 0
-            val started = w.startedAt
-            val completed = w.completedAt
-            if (started != null && completed != null) {
-                target.duration += runCatching {
-                    java.time.Duration.between(
-                        java.time.OffsetDateTime.parse(started).toInstant(),
-                        java.time.OffsetDateTime.parse(completed).toInstant(),
-                    ).seconds
-                }.getOrDefault(0L)
-            }
+            // TD-4 — the server's net duration, which subtracts accumulated
+            // pause. This used to parse the two timestamps and take the gross
+            // elapsed time, so a session left open on the rack inflated the
+            // year-over-year comparison.
+            target.duration += (w.sessionSummary?.netDurationS ?: 0).toLong()
         }
         a to b
     }

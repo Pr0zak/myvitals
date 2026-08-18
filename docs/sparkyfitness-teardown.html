@@ -239,13 +239,13 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
 <div class="prog">
   <h4>Build progress</h4>
   <p style="margin-bottom:0">The ranked shortlist is tracked as tasks <code>TD-1</code>–<code>TD-10</code>. The full option menu below is the durable backlog — nothing is pruned from it, including the items declined and the reasons why.</p>
-  <div class="bar" role="img" aria-label="3 of 10 shortlist items shipped"><i class="b-done" style="width:30%"></i><i class="b-wip" style="width:0%"></i></div>
+  <div class="bar" role="img" aria-label="4 of 10 shortlist items shipped"><i class="b-done" style="width:40%"></i><i class="b-wip" style="width:0%"></i></div>
   <div class="legend">
-    <span><b style="background:var(--good)"></b> shipped &nbsp;3</span>
+    <span><b style="background:var(--good)"></b> shipped &nbsp;4</span>
     <span><b style="background:var(--sp)"></b> in progress &nbsp;0</span>
-    <span><b style="background:var(--rule)"></b> not started &nbsp;7</span>
+    <span><b style="background:var(--rule)"></b> not started &nbsp;6</span>
     <span>·</span>
-    <span>full menu: 40 options, 3 shipped, 1 declined</span>
+    <span>full menu: 40 options, 4 shipped, 1 declined</span>
   </div>
 </div>
 
@@ -255,6 +255,11 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
   <div class="scroll"><table>
     <thead><tr><th>Option</th><th>Status</th><th>What changed</th></tr></thead>
     <tbody>
+      <tr>
+        <td><strong>TD-4</strong> — server-computed session summary</td>
+        <td><span class="chip c-done">shipped</span></td>
+        <td>New <code>backend/src/myvitals/analytics/energy.py</code>. Lifting now contributes to the energy picture for the first time — <code>Activities.vue</code> emitted a hard-coded <code>kcal: null</code> for every strength row, and there was no <code>kcal</code>, <code>calorie</code> or <code>MET</code> term anywhere in the strength API. myvitals beats SparkyFitness's approach on merit here: they guess from a 7×3 MET table because they have no HR stream, while this integrates <strong>Keytel (2005)</strong> over the real per-minute series covering the session window. Three outcomes, and the client renders which one it got: <code>hr</code>, <code>met</code> (weight only, no series), or <code>none</code> — null rather than inventing a 70&nbsp;kg thirty-year-old, which is precisely their documented failure mode. Two honest limitations are recorded in the module: the figures are gross expenditure, not above-rest, and Keytel is fitted on continuous exercise so it reads high for intermittent lifting. No correction factor was applied, because any coefficient chosen here would be invented. <code>net_duration_s</code> is now one definition: both clients derived gross <code>completed_at − started_at</code> while <code>_strength_training_stress</code> subtracted the accumulated pause, so the feed and the CTL/ATL model disagreed about the same workout — the phone's year-over-year comparison had the same bug. The list endpoint's per-workout HR query (a genuine N+1) became one bucketed scan, and its set count now excludes warm-ups to match the volume audit's SETTYPE-1 rule. <code>backend/tests/test_session_energy.py</code> — 14 tests — pins the refusal to fabricate as hard as it pins the arithmetic. Backend 374 green, web type-check clean, phone compiles.</td>
+      </tr>
       <tr>
         <td><strong>TD-3</strong> — day-scoped summary + DayNav</td>
         <td><span class="chip c-done">shipped</span></td>
@@ -533,7 +538,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     </div>
     <div class="rk">
       <div class="n">4</div><div class="t">Server-computed session summary: net duration, tonnage, HR-derived energy</div>
-      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
+      <div class="m"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
       <div class="d">Lifting contributes zero to the energy picture, and the activities feed already disagrees with the training-load model about how long the same session was — the feed uses gross elapsed, <code>_strength_training_stress</code> nets out <code>total_paused_s</code>. Integrate Keytel over the real HR window. Return <code>null</code>, never a fabricated 70 kg default. Watch double-counting against a Health Connect workout over the same window.</div>
     </div>
     <div class="rk">
@@ -606,7 +611,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     <div class="dbody">
       <div class="opts">
         <div class="opt"><div class="h">Canonical muscle + movement taxonomy</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #1.</p></div>
-        <div class="opt"><div class="h">Session summary with HR-derived energy</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #4.</p></div>
+        <div class="opt"><div class="h">Session summary with HR-derived energy</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #4.</p></div>
         <div class="opt"><div class="h">Per-set prescription</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Ranked #6.</p></div>
         <div class="opt"><div class="h">Ad-hoc exercise slots</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div><p class="b">Ranked #10.</p></div>
         <div class="opt"><div class="h">Gate the AI variety-nudge and swap on equipment and prefs</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div><p class="b">Those call sites pass the raw <code>CATALOG_BY_ID</code>, so the model can propose swaps to equipment you do not own or exercises you explicitly disabled. Pass <code>filter_catalog_for_equipment</code> with disabled rows removed instead of an arbitrary <code>[:60]</code> slice.</p></div>

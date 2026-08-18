@@ -870,6 +870,9 @@ export const api = {
       rpe_avg?: number | null;
       avg_hr?: number | null;
       max_hr?: number | null;
+      /** TD-4 — net duration, tonnage and energy cost, computed server-side.
+       *  Null until the session is completed. */
+      session_summary?: import("./types").SessionSummary | null;
     }>;
   }> {
     const { data } = await http.get("/workout/strength/workouts", { params: opts });

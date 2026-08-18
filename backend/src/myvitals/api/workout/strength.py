@@ -22,6 +22,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...analytics import energy
 from ...analytics import strength as strength_algo
 from ...auth import require_any
 from ...config import settings
@@ -665,6 +666,35 @@ class WorkoutIn(BaseModel):
     notes: str | None = None
 
 
+class SessionSummary(BaseModel):
+    """What one finished session actually cost, computed once, server-side.
+
+    Every field here was previously either absent or derived independently by
+    each client. `net_duration_s` is the clearest example: both clients
+    synthesised the activities-feed row with gross `completed_at - started_at`
+    while `analytics/advanced.py:_strength_training_stress` subtracted the
+    accumulated pause, so the feed and the CTL/ATL model already reported
+    different durations for the same workout, and a session left open on the
+    rack during a phone call read as a multi-hour effort in one of them.
+
+    `kcal_method` is not decoration. It says whether the energy figure came
+    from integrating the real heart-rate series over the session (`hr`), from
+    a compendium MET value scaled by body weight (`met`), or whether there
+    was not enough profile data to estimate honestly (`none`, with
+    `kcal_est` null). An estimate rendered as a bare number is
+    indistinguishable from a measurement, which is the specific failure this
+    field exists to prevent.
+    """
+    net_duration_s: int | None = None
+    working_sets: int = 0
+    total_reps: int = 0
+    total_volume_lb: float = 0.0
+    avg_hr: float | None = None
+    max_hr: float | None = None
+    kcal_est: float | None = None
+    kcal_method: Literal["hr", "met", "none"] = "none"
+
+
 class WorkoutOut(BaseModel):
     id: int
     date: date
@@ -709,6 +739,10 @@ class WorkoutOut(BaseModel):
     exercises_total: int = 0
     sets_done: int = 0
     sets_total: int = 0
+    # TD-4 — net duration, tonnage and energy cost, all server-computed.
+    # Null until the session is finished; there is nothing to summarise about
+    # a workout that has not happened yet.
+    session_summary: SessionSummary | None = None
     exercises: list[WorkoutExerciseOut] = []
 
 
@@ -864,6 +898,134 @@ def _wex_to_out(
     )
 
 
+def _summary_from_parts(
+    w: models.StrengthWorkout,
+    set_stats: dict[str, Any],
+    hr_stats: dict[str, Any],
+    weight_kg: float | None,
+    age: int | None,
+    sex: str | None,
+) -> SessionSummary | None:
+    """Assemble a SessionSummary from figures already in hand.
+
+    Pure and synchronous on purpose: the list endpoint batches its set and
+    heart-rate aggregates across the whole page and then calls this once per
+    row, so building the summary costs no extra queries. The detail endpoint
+    fetches the same two aggregates for a single workout and calls the same
+    function, which is what keeps the feed and the detail view from drifting
+    apart the way the duration figures already had.
+    """
+    if w.status != "completed":
+        return None
+    net_s = energy.net_duration_s(w.started_at, w.completed_at, w.total_paused_s)
+    kcal, method = energy.estimate_session_kcal(
+        net_minutes=(net_s or 0) / 60.0,
+        avg_hr=hr_stats.get("avg_hr"),
+        weight_kg=weight_kg,
+        age=age,
+        sex=sex,
+        split_focus=w.split_focus,
+    )
+    return SessionSummary(
+        net_duration_s=net_s,
+        working_sets=int(set_stats.get("set_count") or 0),
+        total_reps=int(set_stats.get("total_reps") or 0),
+        total_volume_lb=float(set_stats.get("total_volume_lb") or 0.0),
+        avg_hr=hr_stats.get("avg_hr"),
+        max_hr=hr_stats.get("max_hr"),
+        kcal_est=kcal,
+        kcal_method=method,
+    )
+
+
+async def _energy_inputs(
+    db: AsyncSession,
+) -> tuple[float | None, int | None, str | None]:
+    """The body data the energy estimators need: `(weight_kg, age, sex)`.
+
+    Any of the three may be None, and the estimator treats that as a reason
+    to fall back or to decline rather than to substitute a default. Hoisted
+    out of the per-workout path so the list endpoint fetches it once for the
+    whole page instead of once per row.
+    """
+    profile = await db.get(models.UserProfile, 1)
+    age: int | None = None
+    if profile is not None and profile.birth_date is not None:
+        age = (datetime.now(timezone.utc).date() - profile.birth_date).days // 365
+    latest_bw = (await db.execute(
+        select(models.BodyMetric.weight_kg)
+        .where(models.BodyMetric.weight_kg.is_not(None))
+        .order_by(models.BodyMetric.time.desc())
+        .limit(1)
+    )).scalar()
+    return (
+        float(latest_bw) if latest_bw else None,
+        age,
+        profile.sex if profile else None,
+    )
+
+
+async def _session_summary(
+    db: AsyncSession,
+    w: models.StrengthWorkout,
+    *,
+    set_stats: dict[str, Any] | None = None,
+    hr_stats: dict[str, Any] | None = None,
+) -> SessionSummary | None:
+    """Assemble the finished-session summary for one workout.
+
+    Returns None for anything not yet finished — an in-progress session has
+    no total to report, and reporting a partial one as though it were final
+    is how a feed ends up disagreeing with itself.
+
+    `set_stats` and `hr_stats` let the list endpoint pass in figures it has
+    already batched across every workout in the page, so this does not
+    reintroduce the per-row query it was written to remove.
+    """
+    if w.status != "completed":
+        return None
+
+    if set_stats is None:
+        agg = (await db.execute(
+            select(
+                func.count(models.StrengthSet.id),
+                func.coalesce(func.sum(models.StrengthSet.actual_reps), 0),
+                func.coalesce(func.sum(
+                    models.StrengthSet.actual_weight_lb * models.StrengthSet.actual_reps
+                ), 0.0),
+            )
+            .join(models.StrengthWorkoutExercise,
+                  models.StrengthSet.workout_exercise_id ==
+                  models.StrengthWorkoutExercise.id)
+            .where(models.StrengthWorkoutExercise.workout_id == w.id)
+            .where(models.StrengthSet.actual_reps.is_not(None))
+            .where(models.StrengthSet.skipped.is_(False))
+            .where(models.StrengthSet.set_type != "warmup")
+        )).first()
+        set_stats = {
+            "set_count": int(agg[0] or 0),
+            "total_reps": int(agg[1] or 0),
+            "total_volume_lb": round(float(agg[2] or 0.0), 1),
+        }
+
+    if hr_stats is None:
+        hr_stats = {}
+        if w.started_at and w.completed_at:
+            row = (await db.execute(
+                select(func.avg(models.HeartRate.bpm), func.max(models.HeartRate.bpm))
+                .where(models.HeartRate.time >= w.started_at)
+                .where(models.HeartRate.time <= w.completed_at)
+            )).first()
+            if row and row[0] is not None:
+                hr_stats = {
+                    "avg_hr": round(float(row[0]), 1),
+                    "max_hr": round(float(row[1]), 1) if row[1] is not None else None,
+                }
+
+    weight_kg, age, sex = await _energy_inputs(db)
+    return _summary_from_parts(w, set_stats, hr_stats, weight_kg, age, sex)
+
+
 async def _hydrate_workout(
     db: AsyncSession, w: models.StrengthWorkout
 ) -> WorkoutOut:
@@ -996,6 +1158,7 @@ async def _hydrate_workout(
         exercises_total=len(ex_out),
         sets_done=sum(_accounted_sets(e) for e in ex_out),
         sets_total=sum(e.target_sets for e in ex_out),
+        session_summary=await _session_summary(db, w),
         exercises=ex_out,
     )
 
@@ -1045,6 +1208,11 @@ async def list_workouts(
             .where(models.StrengthWorkoutExercise.workout_id.in_(workout_ids))
             .where(models.StrengthSet.actual_reps.is_not(None))
             .where(models.StrengthSet.skipped.is_(False))
+            # TD-4 — warm-ups excluded, matching weekly_muscle_volume's
+            # SETTYPE-1 rule. A warm-up single is not a working set, and the
+            # feed counting it while the volume audit did not was one more
+            # instance of the same number meaning two things.
+            .where(models.StrengthSet.set_type != "warmup")
             .group_by(models.StrengthWorkoutExercise.workout_id)
         )
         for wid, sets, reps, vol, rpe in agg.all():
@@ -1055,25 +1223,41 @@ async def list_workouts(
                 "rpe_avg": round(float(rpe), 2) if rpe is not None else None,
             }
 
-    # HR window per workout (only when both started_at + completed_at present)
+    # HR window per workout (only when both started_at + completed_at present).
+    #
+    # TD-4 — this used to issue one aggregate query per workout in the page.
+    # It is now a single scan bucketed by session window: the windows are
+    # disjoint in practice (you cannot be in two workouts at once), so one
+    # CASE-free pass with a per-row Python bucket is both simpler and cheaper
+    # than N round trips.
     hr_stats: dict[int, dict[str, Any]] = {}
-    for w in rows:
-        if w.status != "completed" or w.started_at is None or w.completed_at is None:
-            continue
-        hr_q = await db.execute(
-            select(
-                func.avg(models.HeartRate.bpm).label("avg"),
-                func.max(models.HeartRate.bpm).label("max"),
-            )
-            .where(models.HeartRate.time >= w.started_at)
-            .where(models.HeartRate.time <= w.completed_at)
-        )
-        row = hr_q.first()
-        if row and row[0] is not None:
-            hr_stats[w.id] = {
-                "avg_hr": round(float(row[0]), 1),
-                "max_hr": round(float(row[1]), 1) if row[1] is not None else None,
-            }
+    windows = [
+        (w.id, w.started_at, w.completed_at) for w in rows
+        if w.status == "completed" and w.started_at and w.completed_at
+    ]
+    if windows:
+        span_start = min(s for _i, s, _e in windows)
+        span_end = max(e for _i, _s, e in windows)
+        samples = (await db.execute(
+            select(models.HeartRate.time, models.HeartRate.bpm)
+            .where(models.HeartRate.time >= span_start)
+            .where(models.HeartRate.time <= span_end)
+            .order_by(models.HeartRate.time)
+        )).all()
+        acc: dict[int, list[float]] = {}
+        for ts, bpm in samples:
+            for wid, w_start, w_end in windows:
+                if w_start <= ts <= w_end:
+                    acc.setdefault(wid, []).append(float(bpm))
+                    break
+        for wid, vals in acc.items():
+            if vals:
+                hr_stats[wid] = {
+                    "avg_hr": round(sum(vals) / len(vals), 1),
+                    "max_hr": round(max(vals), 1),
+                }
+
+    weight_kg, age, sex = await _energy_inputs(db)
 
     return {
         "count": len(rows),
@@ -1090,6 +1274,12 @@ async def list_workouts(
                 "completed_by_activity_source_id": w.completed_by_activity_source_id,
                 **set_stats.get(w.id, {}),
                 **hr_stats.get(w.id, {}),
+                # TD-4 — the same summary object the detail endpoint returns,
+                # so the feed stops deriving net duration and energy itself.
+                "session_summary": _summary_from_parts(
+                    w, set_stats.get(w.id, {}), hr_stats.get(w.id, {}),
+                    weight_kg, age, sex,
+                ),
             }
             for w in rows
         ],

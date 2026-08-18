@@ -408,6 +408,35 @@ data class StrengthWorkoutSummary(
     val completedByActivitySource: String? = null,
     @Json(name = "completed_by_activity_source_id")
     val completedByActivitySourceId: String? = null,
+    /** TD-4 — net duration, tonnage and energy cost, computed server-side.
+     *  Null until the session is completed. */
+    @Json(name = "session_summary") val sessionSummary: SessionSummary? = null,
+)
+
+/**
+ * What one finished strength session cost — TD-4.
+ *
+ * Every field is computed on the server. [netDurationS] in particular
+ * replaces the gross `completedAt - startedAt` arithmetic both clients used
+ * to do, which disagreed with the training-load model about the same
+ * workout because that model subtracts the accumulated pause.
+ *
+ * [kcalMethod] must reach the UI. An estimate rendered as a bare number is
+ * indistinguishable from a measurement, and "none" with a null [kcalEst] is
+ * a real answer — the profile lacks the body data to estimate honestly —
+ * rather than an error to hide.
+ */
+@JsonClass(generateAdapter = true)
+data class SessionSummary(
+    @Json(name = "net_duration_s") val netDurationS: Int? = null,
+    @Json(name = "working_sets") val workingSets: Int = 0,
+    @Json(name = "total_reps") val totalReps: Int = 0,
+    @Json(name = "total_volume_lb") val totalVolumeLb: Double = 0.0,
+    @Json(name = "avg_hr") val avgHr: Double? = null,
+    @Json(name = "max_hr") val maxHr: Double? = null,
+    @Json(name = "kcal_est") val kcalEst: Double? = null,
+    /** "hr" | "met" | "none" */
+    @Json(name = "kcal_method") val kcalMethod: String = "none",
 )
 
 @JsonClass(generateAdapter = true)

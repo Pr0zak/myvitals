@@ -493,3 +493,25 @@ export interface CardioZones {
   bounds: Omit<HrZone, "seconds" | "pct">[];
   zone_labels: Record<string, string>;
 }
+
+
+/** What one finished strength session cost — TD-4.
+ *
+ *  Every field is computed once, on the server. `net_duration_s` in
+ *  particular replaces two client derivations that used gross elapsed time
+ *  and so disagreed with the training-load model about the same workout. */
+export interface SessionSummary {
+  /** Elapsed minus accumulated pause. Null until the session is finished. */
+  net_duration_s: number | null;
+  working_sets: number;
+  total_reps: number;
+  total_volume_lb: number;
+  avg_hr: number | null;
+  max_hr: number | null;
+  kcal_est: number | null;
+  /** How kcal_est was reached: integrated from the real heart-rate series,
+   *  from a compendium MET value scaled by body weight, or not at all
+   *  because the profile lacks the inputs. Render it — an estimate shown as
+   *  a bare number is indistinguishable from a measurement. */
+  kcal_method: "hr" | "met" | "none";
+}

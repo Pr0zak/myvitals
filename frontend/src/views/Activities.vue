@@ -163,19 +163,29 @@ async function load() {
       .filter((w) => new Date(w.date + "T00:00:00") >= sinceDate)
       .map((w) => {
         const start = w.started_at ?? `${w.date}T17:00:00Z`;
-        const end = w.completed_at ?? null;
-        const duration = end
-          ? Math.max(0, Math.round((+new Date(end) - +new Date(start)) / 1000))
-          : 0;
+        // TD-4 — duration comes from the server's session summary, which
+        // nets out the accumulated pause. Deriving it here from gross
+        // elapsed time meant a session left open on the rack read as a
+        // multi-hour effort in this feed while the CTL/ATL model, which
+        // subtracts the pause, saw a realistic one.
+        const summary = w.session_summary ?? null;
+        const duration = summary?.net_duration_s ?? 0;
         // Stuff a one-line stats summary into `notes` so the row
         // shows useful info even when the table doesn't have a sets
         // column.
         const noteParts: string[] = [];
-        if (w.set_count) noteParts.push(`${w.set_count} sets`);
+        if (w.set_count) noteParts.push(`${w.set_count} working sets`);
         if (w.total_reps) noteParts.push(`${w.total_reps} reps`);
         if (w.total_volume_lb)
           noteParts.push(`${Math.round(w.total_volume_lb).toLocaleString()} lb`);
         if (w.rpe_avg) noteParts.push(`RPE ${w.rpe_avg.toFixed(1)}`);
+        if (summary?.kcal_est != null) {
+          // Say where the number came from. "est" alone would read as a
+          // hedge; naming the input tells the user how much to trust it.
+          noteParts.push(
+            `~${Math.round(summary.kcal_est)} kcal (${summary.kcal_method === "hr" ? "from HR" : "estimated"})`,
+          );
+        }
         return {
           source: "strength",
           source_id: String(w.id),
@@ -200,7 +210,11 @@ async function load() {
           avg_hr: w.avg_hr ?? null,
           max_hr: w.max_hr ?? null,
           avg_power_w: null, max_power_w: null,
-          kcal: null, suffer_score: null, polyline: null,
+          // Lifting used to contribute nothing to the energy picture: this
+          // was a hard-coded null, so every strength session was invisible
+          // in the day's totals.
+          kcal: summary?.kcal_est ?? null,
+          suffer_score: null, polyline: null,
           notes: noteParts.length ? noteParts.join(" · ") : null,
           // Backing data for the link target (clicking should open
           // the strength day-view, not /activity/...).

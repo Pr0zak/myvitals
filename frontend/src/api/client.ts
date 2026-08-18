@@ -664,6 +664,18 @@ export const api = {
     return data;
   },
 
+  async activityZones(source: string, sourceId: string, buckets = 50): Promise<import("./types").ActivityZones> {
+    const { data } = await http.get<import("./types").ActivityZones>(
+      `/activities/${source}/${sourceId}/zones`, { params: { buckets } },
+    );
+    return data;
+  },
+
+  async cardioZones(days = 30): Promise<import("./types").CardioZones> {
+    const { data } = await http.get<import("./types").CardioZones>("/activities/zones", { params: { days } });
+    return data;
+  },
+
   async activitiesStats(days = 30): Promise<import("./types").ActivityStats> {
     const { data } = await http.get<import("./types").ActivityStats>("/activities/stats", { params: { days } });
     return data;
@@ -696,10 +708,13 @@ export const api = {
   getProfile(): Promise<{
     id: number; birth_date: string | null; sex: string | null;
     height_cm: number | null; weight_goal_kg: number | null;
-    resting_hr_baseline: number | null; activity_level: string | null;
+    resting_hr_baseline: number | null; max_hr: number | null;
+    activity_level: string | null;
     extra: Record<string, unknown> | null; updated_at: string | null;
     home_latitude: number | null; home_longitude: number | null;
     derived: { age?: number; max_hr_estimated?: number; bmi_at_goal?: number;
+               /** The max HR actually in use for zones, and where it came from. */
+               max_hr_effective?: number; max_hr_source?: "profile" | "estimated";
                resting_hr_baseline_auto?: number | null;
                hr_zones?: { zone: number; label: string; low: number; high: number }[] };
   }> {
@@ -722,7 +737,7 @@ export const api = {
   async putProfile(body: {
     birth_date?: string | null; sex?: string | null; height_cm?: number | null;
     weight_goal_kg?: number | null; resting_hr_baseline?: number | null;
-    activity_level?: string | null; extra?: Record<string, unknown> | null;
+    max_hr?: number | null; activity_level?: string | null; extra?: Record<string, unknown> | null;
     home_latitude?: number | null; home_longitude?: number | null;
   }): Promise<unknown> {
     const { data } = await http.put("/profile", body);

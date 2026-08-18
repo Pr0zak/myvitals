@@ -446,3 +446,50 @@ export interface TrainingLoad {
   atl: number | null;
   daily: Array<{ date: string; load: number }>;
 }
+
+
+/** One HR zone as the server defines it. Boundaries are absolute bpm derived
+ *  from the user's max HR, so no client needs its own percentage table. */
+export interface HrZone {
+  zone: string;          // "Z1".."Z5"
+  label: string;         // "Recovery".."VO2 Max"
+  lo_pct: number;
+  hi_pct: number | null; // null on the open-ended top zone
+  lo_bpm: number;
+  hi_bpm: number | null;
+  seconds: number;
+  pct: number;
+}
+
+/** GET /activities/{source}/{source_id}/zones */
+export interface ActivityZones {
+  source: string;
+  source_id: string;
+  max_hr: number;
+  /** Where max_hr came from: a measured profile value, a Tanaka estimate
+   *  from the birth date, or the age-40 default when neither exists. The UI
+   *  says so, because a zone chart is only as good as its denominator. */
+  max_hr_source: "profile" | "estimated" | "default";
+  age_used: number | null;
+  /** False when there was no HR series and the whole session was attributed
+   *  to a single zone from avg_hr. A flat bar then means "coarse", not "even". */
+  sampled: boolean;
+  total_seconds: number;
+  zones: HrZone[];
+  series: Array<{ minute: number } & Record<string, number>>;
+}
+
+/** GET /activities/zones — rolling time-in-zone across recent cardio. */
+export interface CardioZones {
+  max_hr: number;
+  max_hr_source: "profile" | "estimated" | "default";
+  age_used: number | null;
+  days: number;
+  sessions: number;
+  zone_minutes: Record<string, number>;
+  polarized_ratio: number | null;
+  weekly_zone_minutes: Array<{ week: string } & Record<string, number>>;
+  by_type: Record<string, { sessions: number; total_min: number; avg_hr_pct_max: number | null }>;
+  bounds: Omit<HrZone, "seconds" | "pct">[];
+  zone_labels: Record<string, string>;
+}

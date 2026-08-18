@@ -224,6 +224,12 @@ class UserProfile(Base):
     height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     weight_goal_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     resting_hr_baseline: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Measured maximum heart rate, when the user has one. Null means "derive
+    # it from birth_date with Tanaka" -- which is the default and is fine, but
+    # every zone boundary in the app hangs off this number, so the difference
+    # between a measured value and an age estimate is worth being explicit
+    # about rather than hiding behind a single figure.
+    max_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
     activity_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     sleep_target_h: Mapped[float | None] = mapped_column(Float, nullable=True, default=8)
     # FAST-17: weekly fasting-hours target — auto-syncs with the

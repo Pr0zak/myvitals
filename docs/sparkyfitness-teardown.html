@@ -239,15 +239,13 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
 <div class="prog">
   <h4>Build progress</h4>
   <p style="margin-bottom:0">The ranked shortlist is tracked as tasks <code>TD-1</code>–<code>TD-10</code>. The full option menu below is the durable backlog — nothing is pruned from it, including the items declined and the reasons why.</p>
-  <div class="bar" role="img" aria-label="1 of 10 shortlist items shipped">
-    <i class="b-done" style="width:10%"></i>
-  </div>
+  <div class="bar" role="img" aria-label="2 of 10 shortlist items shipped"><i class="b-done" style="width:20%"></i><i class="b-wip" style="width:0%"></i></div>
   <div class="legend">
-    <span><b style="background:var(--good)"></b> shipped &nbsp;1</span>
+    <span><b style="background:var(--good)"></b> shipped &nbsp;2</span>
     <span><b style="background:var(--sp)"></b> in progress &nbsp;0</span>
-    <span><b style="background:var(--rule)"></b> not started &nbsp;9</span>
+    <span><b style="background:var(--rule)"></b> not started &nbsp;8</span>
     <span>·</span>
-    <span>full menu: 40 options, 1 declined</span>
+    <span>full menu: 40 options, 2 shipped, 1 declined</span>
   </div>
 </div>
 
@@ -257,6 +255,11 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
   <div class="scroll"><table>
     <thead><tr><th>Option</th><th>Status</th><th>What changed</th></tr></thead>
     <tbody>
+      <tr>
+        <td><strong>TD-2</strong> — HR zones as an API</td>
+        <td><span class="chip c-done">shipped</span></td>
+        <td><code>GET /activities/{source}/{source_id}/zones</code> and <code>GET /activities/zones?days=N</code> now expose <code>time_in_zone_for_activity</code> and <code>cardio_summary</code>, which were correct all along and reachable only from <code>integrations/claude.py</code>. Both live on the activities router rather than the analytics one, because that router is query-token-only and the phone authenticates with the ingest token. The web deleted three separate local zone computations that disagreed with each other: the streamgraph and the donut counted HR <em>samples</em> per zone rather than seconds, and the zone-table divided by <code>activity.max_hr</code> — the session's own observed peak — so an easy ride topping out at 140&nbsp;bpm reported time in Z4 and Z5. The phone showed no zones at all and now renders the same bars. <code>user_profile.max_hr</code> (migration 0048) lets a measured maximum override the Tanaka estimate, and every response carries <code>max_hr_source</code> ∈ {<code>profile</code>, <code>estimated</code>, <code>default</code>} plus a <code>sampled</code> flag, so a chart built on a guessed maximum or on a single <code>avg_hr</code> fallback says so rather than presenting itself as measured. <code>api/profile.py</code>'s second, disagreeing zone table (it started Z1 at 50% where the analytics start it at 0%) now derives from the shared bounds. The <code>ActivityDetail.vue</code> ↔ <code>ActivityDetailScreen.kt</code> pair was unregistered in <code>parity_check.py</code>, which is why the two surfaces were free to diverge this long; it has a row now. <code>backend/tests/test_hr_zones.py</code> — 18 tests — pins the seconds-not-samples weighting, the 30-second gap cap, and the max-HR provenance. Backend 357 green, web type-check clean, phone compiles.</td>
+      </tr>
       <tr>
         <td><strong>TD-1</strong> — canonical muscle + movement vocabulary</td>
         <td><span class="chip c-done">shipped</span></td>
@@ -515,7 +518,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     </div>
     <div class="rk">
       <div class="n">2</div><div class="t">Give HR-zone analytics an HTTP route</div>
-      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
+      <div class="m"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
       <div class="d"><code>cardio_summary</code> and <code>time_in_zone_for_activity</code> are already correct and already written — they just have no door. Bind both clients to the route and delete <code>zoneFor</code>/<code>zoneBreakdown</code> from the web. Carry <code>max_hr_source</code> (profile vs Tanaka estimate) so a zone chart built on a guess says so.</div>
     </div>
     <div class="rk">
@@ -614,7 +617,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     <summary><span>Charts, reports &amp; exports — 6 options</span></summary>
     <div class="dbody">
       <div class="opts">
-        <div class="opt"><div class="h">HR zones as an API, rendered on both surfaces</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #2.</p></div>
+        <div class="opt"><div class="h">HR zones as an API, rendered on both surfaces</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #2.</p></div>
         <div class="opt"><div class="h">Server-side period comparison endpoint</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Generalise <code>claude.py:_wow_deltas</code> — currently hardcoded to 7d-vs-prior-7d and reachable only from AI payload builders — into <code>GET /summary/compare?days=N&amp;vs=previous|last_year</code>. Four clients hand-roll "same point last year" independently today.</p></div>
         <div class="opt"><div class="h">Date-ranged multi-table export plus a printable summary</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Fixes the silent 90-day truncation, adds a zipped multi-CSV bundle and a printable HTML health summary. Sparky's "PDF export" is literally <code>window.print()</code> — that is a fine answer, and a printable server-rendered page beats a client Blob of whatever the open tab fetched.</p></div>
         <div class="opt"><div class="h">Training consistency — streaks and true frequency, server-computed</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-md">medium</span></div><p class="b">Current streak, longest streak, real sessions-per-week and days-since-by-muscle. Note their bug and avoid it: computing streaks only within the selected range truncates a streak that began before <code>startDate</code>, and frequency derived as <code>days / range × 7</code> changes purely with the picker.</p></div>

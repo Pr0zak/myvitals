@@ -754,6 +754,7 @@ async function saveFastingPrefs() {
       height_cm: profile.value.height_cm,
       weight_goal_kg: profile.value.weight_goal_kg,
       resting_hr_baseline: profile.value.resting_hr_baseline,
+      max_hr: profile.value.max_hr,
       activity_level: profile.value.activity_level,
       extra,
       home_latitude: profile.value.home_latitude,
@@ -787,6 +788,7 @@ async function saveProfile() {
       height_cm: profile.value.height_cm,
       weight_goal_kg: profile.value.weight_goal_kg,
       resting_hr_baseline: profile.value.resting_hr_baseline,
+      max_hr: profile.value.max_hr,
       activity_level: profile.value.activity_level,
       extra: Object.keys(extra).length ? extra : null,
       home_latitude: profile.value.home_latitude,
@@ -1437,6 +1439,21 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           <input type="number" v-model.number="profile.resting_hr_baseline"
                  :placeholder="profile.derived?.resting_hr_baseline_auto?.toFixed(0) ?? 'auto-derived if blank'"
                  min="30" max="120"/>
+        </label>
+        <label>
+          <span>Max heart rate (bpm)
+            <em class="opt" v-if="profile.derived?.max_hr_estimated">
+              (estimated {{ profile.derived.max_hr_estimated }} from your age)
+            </em>
+          </span>
+          <input type="number" v-model.number="profile.max_hr"
+                 :placeholder="profile.derived?.max_hr_estimated?.toString() ?? 'estimated from age if blank'"
+                 min="120" max="230"/>
+          <em class="opt">
+            Every heart-rate zone in the app is a percentage of this number, so
+            a measured value from a ramp test or a hard race gives sharper
+            zones than the age formula. Leave blank to keep the estimate.
+          </em>
         </label>
         <label>
           <span>Activity level</span>

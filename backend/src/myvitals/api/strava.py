@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import polyline as _polyline_lib
 
-from ..analytics import geo
+from ..analytics import cardio, geo
 from ..auth import require_any, require_query
 from ..db import models
 from ..db.session import get_session
@@ -336,6 +336,31 @@ class ActivityMapOut(BaseModel):
     simplified_points: int
 
 
+@router.get("/activities/zones", dependencies=[Depends(require_any)])
+async def get_cardio_zones(
+    days: int = Query(30, ge=1, le=365),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Rolling time-in-zone across recent cardio, with zone boundaries.
+
+    Wraps analytics/cardio.py:cardio_summary, which was previously reachable
+    only from the AI coach payload builder -- so the coach could tell the
+    user their week was 62% Z2 while no screen in either client could show
+    them the same breakdown.
+
+    Lives on the activities router rather than the analytics one because
+    that router is query-token-only, and the phone authenticates with the
+    ingest token.
+    """
+    summary = await cardio.cardio_summary(db, days=days)
+    max_hr, source, age = await cardio.resolve_max_hr(db)
+    summary["max_hr_source"] = source
+    summary["age_used"] = age
+    summary["bounds"] = cardio.zone_bounds(max_hr)
+    summary["zone_labels"] = cardio.ZONE_LABELS
+    return summary
+
+
 @router.get("/activities/map", response_model=ActivityMapOut,
             dependencies=[Depends(require_any)])
 async def activities_map(
@@ -480,6 +505,37 @@ async def get_activity(
         if t is not None:
             trail_name = t.name
     return _activity_to_out(a, trail_name=trail_name)
+
+
+@router.get("/activities/{source}/{source_id}/zones",
+            dependencies=[Depends(require_any)])
+async def get_activity_zones(
+    source: str,
+    source_id: str,
+    buckets: int = Query(50, ge=0, le=200),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Time-in-zone for one activity, computed server-side.
+
+    analytics/cardio.py has had a correct, time-weighted implementation of
+    this since the cardio coach shipped, but it was only ever reachable from
+    integrations/claude.py -- it had no HTTP surface. So both clients grew
+    their own, and both got it wrong in different ways: they counted HR
+    *samples* per zone rather than seconds (which skews any session where the
+    watch sampled irregularly), and the web's zone-breakdown card divided by
+    the activity's own peak HR instead of the user's maximum, so every ride
+    reported time in the top zones no matter how easy it was.
+
+    Set buckets=0 to skip the time series when only the totals are needed.
+    """
+    a = (await db.execute(
+        select(models.Activity)
+        .where(models.Activity.source == source)
+        .where(models.Activity.source_id == source_id)
+    )).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(404, "activity not found")
+    return await cardio.activity_zone_detail(db, a, buckets=buckets)
 
 
 @router.post("/activities/{source}/{source_id}/link-trail",

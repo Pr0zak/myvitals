@@ -324,6 +324,16 @@ interface BackendApi {
         @Path("sourceId") sourceId: String,
     ): ActivityRow
 
+    /** TD-2 — time-in-zone for one activity, computed server-side. The phone
+     *  showed a bare HR line and no zones at all before this; the web computed
+     *  its own and got them wrong. Neither client derives a zone now. */
+    @GET("activities/{source}/{sourceId}/zones")
+    suspend fun activityZones(
+        @Path("source") source: String,
+        @Path("sourceId") sourceId: String,
+        @retrofit2.http.Query("buckets") buckets: Int = 0,
+    ): ActivityZones
+
     @GET("activities")
     suspend fun activities(
         @retrofit2.http.Query("type") type: String? = null,

@@ -165,15 +165,47 @@ onUnmounted(() => {
   if (map) { map.remove(); map = null; }
 });
 
-// Profile-driven max HR for zone bucketing (fallback 220 - 30 = 190 if unset).
-const maxHr = ref<number>(190);
-async function loadMaxHr() {
+// TD-2 — HR zones come from the server, whole.
+//
+// This screen used to compute them three separate times and disagree with
+// itself: the streamgraph and the pie bucketed by percentage of a profile-
+// derived max and counted *samples*, while the zone-breakdown card divided
+// by `activity.max_hr` — the session's own observed peak — so an easy ride
+// that topped out at 140 bpm reported time in Z4 and Z5. None of the three
+// matched the time-weighted figures the cardio coach was quoting back to
+// the user from the same data.
+//
+// Now there is one number, computed once, in analytics/cardio.py.
+const zoneData = ref<import("../api/types").ActivityZones | null>(null);
+async function loadZones() {
+  const src = route.params.source as string;
+  const sid = route.params.source_id as string;
   try {
-    const p = await api.getProfile();
-    if (p.derived?.max_hr_estimated) maxHr.value = p.derived.max_hr_estimated;
-  } catch { /* ignore */ }
+    zoneData.value = await api.activityZones(src, sid);
+  } catch { /* leave null — the zone cards stay hidden */ }
 }
-onMounted(loadMaxHr);
+onMounted(loadZones);
+
+/** 0-indexed zone for a bpm reading, looked up against the *server's*
+ *  boundaries. Used only to colour things (the map heat overlay), never to
+ *  produce a duration or a percentage — those come down already computed. */
+function zoneIndexFor(bpm: number): number {
+  const zones = zoneData.value?.zones;
+  if (!zones) return 0;
+  for (let i = zones.length - 1; i >= 0; i--) {
+    if (bpm >= zones[i].lo_bpm) return i;
+  }
+  return 0;
+}
+
+const maxHrNote = computed<string | null>(() => {
+  const z = zoneData.value;
+  if (!z) return null;
+  if (z.max_hr_source === "profile") return `Zones from your max HR of ${z.max_hr} bpm.`;
+  if (z.max_hr_source === "estimated")
+    return `Zones from an estimated max HR of ${z.max_hr} bpm (Tanaka, age ${z.age_used}). Set a measured max in Settings → Profile for accurate zones.`;
+  return `Zones from a default max HR of ${z.max_hr} bpm — no birth date or measured max on file, so these boundaries are a guess.`;
+});
 
 const ZONE_COLORS = computed<string[]>(() =>
   isNeon.value
@@ -216,7 +248,7 @@ function applyMapMode() {
       const d = Math.abs(new Date(p.time).getTime() - tMs);
       if (d < nearestDelta) { nearest = p; nearestDelta = d; }
     }
-    const z = zoneFor(nearest.value) - 1;
+    const z = zoneIndexFor(nearest.value);
     const seg = L.polyline([polylineCoords[i], polylineCoords[i + 1]], {
       color: ZONE_COLORS.value[z], weight: 4, opacity: 0.9,
     }).addTo(map);
@@ -373,72 +405,50 @@ watch(cursorOffsetS, (offsetS) => {
   }
 });
 
-function zoneFor(bpm: number): number {
-  // 1-indexed Z1..Z5; clamp at 1 below 50% and 5 above 100%.
-  const pct = bpm / maxHr.value;
-  if (pct < 0.60) return 1;
-  if (pct < 0.70) return 2;
-  if (pct < 0.80) return 3;
-  if (pct < 0.90) return 4;
-  return 5;
-}
-
-// Stacked-area streamgraph: time spent in each zone over the activity,
-// bucketed into ~50 buckets across the duration so the curves smooth out.
+// Stacked-area streamgraph of the server's per-bucket zone seconds.
+// The backend buckets the activity and applies the same 30s gap cap it uses
+// for the totals, so this chart and the distribution below always sum to the
+// same session rather than telling two stories.
 const hrZoneStreamOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
-  if (!hr.value || hr.value.points.length < 5 || !activity.value) return null;
-  const start = new Date(activity.value.start_at).getTime();
-  const dur = activity.value.duration_s * 1000;
-  const N = 50;
-  const buckets: number[][] = Array.from({ length: 5 }, () => Array(N).fill(0));
-  for (const p of hr.value.points) {
-    const t_ms = new Date(p.time).getTime();
-    // Drop samples outside the activity window — otherwise pre/post HR
-    // collapses into bucket 0 / N-1 and shows up as a phantom spike.
-    if (t_ms < start || t_ms > start + dur) continue;
-    const idx = Math.max(0, Math.min(N - 1, Math.floor(((t_ms - start) / dur) * N)));
-    const z = zoneFor(p.value) - 1;  // 0-indexed
-    buckets[z][idx] += 1;
-  }
-  const xs = Array.from({ length: N }, (_, i) =>
-    Math.round((i / N) * activity.value!.duration_s / 60));
+  const z = zoneData.value;
+  if (!z || z.series.length === 0) return null;
+  const xs = z.series.map((b) => Math.round(b.minute));
   return {
     grid: { left: 40, right: 12, top: 30, bottom: 28 },
     legend: { textStyle: t.axisLabel, top: 4 },
     tooltip: { trigger: "axis", ...t.tooltip },
     xAxis: { type: "category", data: xs, name: "min", axisLabel: t.axisLabel },
-    yAxis: { type: "value", name: "samples", axisLabel: t.axisLabel, splitLine: t.splitLine },
-    series: buckets.map((data, i) => ({
-      name: ZONE_LABELS[i], type: "line", stack: "z", areaStyle: { color: ZONE_COLORS.value[i], opacity: 0.7 },
-      symbol: "none", smooth: true, lineStyle: { width: 0 }, data,
+    yAxis: { type: "value", name: "sec", axisLabel: t.axisLabel, splitLine: t.splitLine },
+    series: z.zones.map((zone, i) => ({
+      name: ZONE_LABELS[i], type: "line", stack: "z",
+      areaStyle: { color: ZONE_COLORS.value[i], opacity: 0.7 },
+      symbol: "none", smooth: true, lineStyle: { width: 0 },
+      data: z.series.map((b) => b[zone.zone] ?? 0),
     })),
   };
 });
 
-// Pie of total time in zone — quick "polarized vs sweet-spot" read.
+// Donut of total time in zone. The value is seconds of work, which is what
+// "time in zone" has always meant — the previous version plotted the number
+// of HR samples that landed in each zone, so a session where the watch
+// sampled irregularly reported a distribution that was simply not the one
+// the user had trained.
 const hrZonePieOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
-  if (!hr.value || hr.value.points.length < 5 || !activity.value) return null;
-  const start = new Date(activity.value.start_at).getTime();
-  const end = start + activity.value.duration_s * 1000;
-  const counts = [0, 0, 0, 0, 0];
-  for (const p of hr.value.points) {
-    const t_ms = new Date(p.time).getTime();
-    if (t_ms < start || t_ms > end) continue;
-    counts[zoneFor(p.value) - 1] += 1;
-  }
-  const total = counts.reduce((a, b) => a + b, 0) || 1;
+  const z = zoneData.value;
+  if (!z || z.total_seconds === 0) return null;
   return {
     tooltip: { ...t.tooltip, formatter: (p: any) =>
-      `${p.name}: ${p.value} samples (${(p.value / total * 100).toFixed(0)}%)` },
+      `${p.name}: ${fmtDur(p.value)} (${p.percent.toFixed(0)}%)` },
     series: [{
       type: "pie", radius: ["45%", "75%"],
       label: { color: t.axisLabel.color, formatter: "{b}\n{d}%" },
-      data: counts.map((v, i) => ({
-        value: v, name: ZONE_LABELS[i], itemStyle: { color: ZONE_COLORS.value[i] },
+      data: z.zones.map((zone, i) => ({
+        value: zone.seconds, name: ZONE_LABELS[i],
+        itemStyle: { color: ZONE_COLORS.value[i] },
       })),
     }],
   };
@@ -469,30 +479,17 @@ const hrChartOption = computed(() => {
   };
 });
 
-// HR zones (basic Karvonen-ish breakdown using max HR estimate)
+// The zone table. Every field here is server-computed: the bpm boundaries,
+// the seconds, and the percentage. The client's only contribution is colour.
 const zoneBreakdown = computed(() => {
-  if (!activity.value || !hr.value) return null;
-  const maxHr = activity.value.max_hr ?? 190;
-  const zc = isNeon.value
-    ? ["#6f7bff", "#28e6ff", "#5dff3b", "#ffb52e", "#ff5d7a"]
-    : ["#94a3b8", "#22c55e", "#38bdf8", "#eab308", "#ef4444"];
-  const zones = [
-    { name: "Z1 (rest)", lo: 0, hi: 0.6 * maxHr, color: zc[0] },
-    { name: "Z2 (fat burn)", lo: 0.6 * maxHr, hi: 0.7 * maxHr, color: zc[1] },
-    { name: "Z3 (aerobic)", lo: 0.7 * maxHr, hi: 0.8 * maxHr, color: zc[2] },
-    { name: "Z4 (threshold)", lo: 0.8 * maxHr, hi: 0.9 * maxHr, color: zc[3] },
-    { name: "Z5 (anaerobic)", lo: 0.9 * maxHr, hi: 999, color: zc[4] },
-  ];
-  const start = new Date(activity.value.start_at).getTime();
-  const end = start + activity.value.duration_s * 1000;
-  const inWindow = hr.value.points.filter((p) => {
-    const t = new Date(p.time).getTime();
-    return t >= start && t <= end;
-  });
-  return zones.map((z) => ({
-    ...z,
-    count: inWindow.filter((p) => p.value >= z.lo && p.value < z.hi).length,
-    pct: inWindow.length === 0 ? 0 : 100 * inWindow.filter((p) => p.value >= z.lo && p.value < z.hi).length / inWindow.length,
+  const z = zoneData.value;
+  if (!z || z.total_seconds === 0) return null;
+  return z.zones.map((zone, i) => ({
+    name: `${zone.zone} ${zone.label}`,
+    range: zone.hi_bpm === null ? `${zone.lo_bpm}+ bpm` : `${zone.lo_bpm}–${zone.hi_bpm} bpm`,
+    seconds: zone.seconds,
+    pct: zone.pct,
+    color: ZONE_COLORS.value[i],
   }));
 });
 
@@ -756,11 +753,17 @@ async function submitEdit() {
         <Card v-if="zoneBreakdown" title="HR zones">
           <div class="zones">
             <div v-for="z in zoneBreakdown" :key="z.name" class="zone">
-              <div class="zone-label">{{ z.name }}</div>
+              <div class="zone-label">{{ z.name }} <span class="zone-range">{{ z.range }}</span></div>
               <div class="zone-bar"><div class="zone-fill" :style="{ width: z.pct + '%', background: z.color }"></div></div>
-              <div class="zone-pct">{{ z.pct.toFixed(0) }}%</div>
+              <div class="zone-pct">{{ fmtDur(z.seconds) }} · {{ z.pct.toFixed(0) }}%</div>
             </div>
           </div>
+          <p v-if="zoneData && !zoneData.sampled" class="hint">
+            No heart-rate series was recorded for this session, so the whole
+            duration is attributed to the zone its average heart rate falls in.
+            Treat the split as coarse.
+          </p>
+          <p v-if="maxHrNote" class="hint">{{ maxHrNote }}</p>
         </Card>
 
         <Card title="Trail">
@@ -937,6 +940,7 @@ dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
 .zone-label { color: var(--text); }
 .zone-bar { height: 12px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
 .zone-fill { height: 100%; transition: width 0.3s; }
+.zone-range { color: var(--muted-2); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
 .zone-pct { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
 
 .empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }

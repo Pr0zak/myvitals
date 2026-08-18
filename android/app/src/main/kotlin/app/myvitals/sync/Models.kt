@@ -1010,6 +1010,39 @@ data class ActivityMapResponse(
     val returned: Int = 0,
 )
 
+// ── HR zones (TD-2) ───────────────────────────────────────────────
+//
+// Boundaries, seconds and percentages all arrive already computed. The phone
+// renders them and does not reconstruct a zone from a bpm reading, because
+// the moment two surfaces each own a percentage table they drift — which is
+// exactly what happened on the web before this endpoint existed.
+
+@JsonClass(generateAdapter = true)
+data class HrZone(
+    val zone: String,
+    val label: String,
+    @Json(name = "lo_bpm") val loBpm: Int,
+    /** Null on the open-ended top zone. */
+    @Json(name = "hi_bpm") val hiBpm: Int? = null,
+    val seconds: Int = 0,
+    val pct: Double = 0.0,
+)
+
+@JsonClass(generateAdapter = true)
+data class ActivityZones(
+    @Json(name = "max_hr") val maxHr: Int = 0,
+    /** "profile" | "estimated" | "default" — a chart built on a guessed
+     *  maximum should say so rather than presenting itself as measured. */
+    @Json(name = "max_hr_source") val maxHrSource: String = "default",
+    @Json(name = "age_used") val ageUsed: Int? = null,
+    /** False when no HR series survived and the whole session was attributed
+     *  to one zone from its average. Defaults false so absence reads as
+     *  "coarse" rather than silently claiming sampled detail. */
+    val sampled: Boolean = false,
+    @Json(name = "total_seconds") val totalSeconds: Int = 0,
+    val zones: List<HrZone> = emptyList(),
+)
+
 // ── Trail → linked activities ─────────────────────────────────────
 
 @JsonClass(generateAdapter = true)
@@ -1172,6 +1205,10 @@ data class ProfilePutBody(
     @Json(name = "height_cm") val heightCm: Double? = null,
     @Json(name = "weight_goal_kg") val weightGoalKg: Double? = null,
     @Json(name = "resting_hr_baseline") val restingHrBaseline: Double? = null,
+    // PUT /profile replaces the whole row, so every caller must echo back
+    // the fields it is not editing. Omitting this one would let the phone's
+    // workout-reminder save silently erase a measured max HR set on the web.
+    @Json(name = "max_hr") val maxHr: Double? = null,
     @Json(name = "activity_level") val activityLevel: String? = null,
     val extra: Map<String, Any>? = null,
 )
@@ -1183,14 +1220,18 @@ data class ProfileResponse(
     @Json(name = "height_cm") val heightCm: Double? = null,
     @Json(name = "weight_goal_kg") val weightGoalKg: Double? = null,
     @Json(name = "resting_hr_baseline") val restingHrBaseline: Double? = null,
+    @Json(name = "max_hr") val maxHr: Double? = null,
     @Json(name = "activity_level") val activityLevel: String? = null,
     val extra: ProfileExtra? = null,
     val derived: ProfileDerived? = null,
 ) {
     fun stepsGoal(): Int = extra?.stepsGoal ?: 10_000
     fun sleepGoalH(): Double = extra?.sleepGoalH ?: 8.0
-    /** Max HR for zone bucketing; fallback assumes age ~30 (Tanaka). */
-    fun maxHr(): Int = derived?.maxHrEstimated ?: 187
+    /** Max HR for chart scaling. A measured value wins over the Tanaka
+     *  estimate, which in turn beats the age-30 fallback. Zone *boundaries*
+     *  no longer come from here — the server owns those (TD-2) — but the HR
+     *  chart still scales its axis against this. */
+    fun maxHr(): Int = maxHr?.toInt() ?: derived?.maxHrEstimated ?: 187
 }
 
 @JsonClass(generateAdapter = true)

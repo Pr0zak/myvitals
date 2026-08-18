@@ -29,6 +29,17 @@ ZONE_BOUNDS_PCT: list[tuple[str, float, float]] = [
     ("Z5", 0.90, 2.0),   # 2.0 as upper sentinel
 ]
 
+# Human labels for the five zones. Kept next to the bounds so the two cannot
+# drift, and exported so no client has to carry its own copy -- both surfaces
+# used to hard-code their own list, and they did not agree on the wording.
+ZONE_LABELS: dict[str, str] = {
+    "Z1": "Recovery",
+    "Z2": "Endurance",
+    "Z3": "Tempo",
+    "Z4": "Threshold",
+    "Z5": "VO2 Max",
+}
+
 CARDIO_TYPES = {
     # Case-insensitive match — see _is_cardio. Strava-import path
     # writes lowercase slugs; older paths use TitleCase.
@@ -53,16 +64,63 @@ def _estimated_max_hr(age: int | None) -> float:
     return 208.0 - 0.7 * a
 
 
-async def user_max_hr(db: AsyncSession) -> float:
-    """Try profile.max_hr → age-estimate. Used by zone math."""
+async def resolve_max_hr(db: AsyncSession) -> tuple[float, str, int | None]:
+    """The max HR to build zones from, plus where it came from.
+
+    Returns ``(max_hr, source, age)`` where source is one of:
+
+    ``profile``
+        The user entered a measured maximum. Trust it.
+    ``estimated``
+        Tanaka (208 - 0.7 x age) from their birth date.
+    ``default``
+        No birth date either, so the age-40 fallback inside
+        :func:`_estimated_max_hr` is doing the work. Every zone boundary
+        downstream is then a guess built on a guess, which is worth saying
+        out loud rather than presenting a chart as though it were measured.
+
+    The provenance is not decoration. A zone distribution is only as
+    meaningful as the maximum it is a percentage of, and the difference
+    between a ramp-tested 186 and an assumed 180 moves the Z4/Z5 boundary by
+    five beats -- enough to reclassify a whole session.
+    """
     prof = await db.get(models.UserProfile, 1)
     if prof is None:
-        return _estimated_max_hr(None)
-    # max_hr isn't on user_profile; estimate from birth_date.
+        return _estimated_max_hr(None), "default", None
+    if prof.max_hr:
+        return float(prof.max_hr), "profile", None
     age: int | None = None
     if prof.birth_date is not None:
         age = (datetime.now(timezone.utc).date() - prof.birth_date).days // 365
-    return _estimated_max_hr(age)
+    return _estimated_max_hr(age), ("estimated" if age is not None else "default"), age
+
+
+async def user_max_hr(db: AsyncSession) -> float:
+    """Back-compat wrapper for callers that do not care about provenance."""
+    value, _source, _age = await resolve_max_hr(db)
+    return value
+
+
+def zone_bounds(max_hr: float) -> list[dict[str, Any]]:
+    """The five zones as absolute bpm ranges for a given maximum.
+
+    This is the single definition of a zone boundary in the app. Both
+    clients previously derived their own -- and disagreed with each other and
+    with the server, because one of them was dividing by the *session's*
+    observed peak HR rather than the user's physiological maximum, which
+    makes an easy ride look like it was spent in Z4.
+    """
+    out: list[dict[str, Any]] = []
+    for label, lo_pct, hi_pct in ZONE_BOUNDS_PCT:
+        out.append({
+            "zone": label,
+            "label": ZONE_LABELS[label],
+            "lo_pct": lo_pct,
+            "hi_pct": None if hi_pct >= 2.0 else hi_pct,
+            "lo_bpm": round(max_hr * lo_pct),
+            "hi_bpm": None if hi_pct >= 2.0 else round(max_hr * hi_pct),
+        })
+    return out
 
 
 def zone_for(bpm: float, max_hr: float) -> str:
@@ -103,6 +161,82 @@ async def time_in_zone_for_activity(
         counts[z] = counts[z] + dt
         prev_ts = ts
     return counts
+
+
+async def activity_zone_detail(
+    db: AsyncSession, activity: models.Activity, buckets: int = 50,
+) -> dict[str, Any]:
+    """Everything a client needs to render HR zones for one activity.
+
+    Time-weighted seconds per zone from :func:`time_in_zone_for_activity`,
+    the absolute bpm boundaries those zones correspond to, the provenance of
+    the maximum they were derived from, and an optional bucketed series so a
+    stacked area chart can show how the session moved between zones without
+    the client classifying a single sample itself.
+
+    ``sampled`` distinguishes the two very different cases that both produce
+    numbers: a real per-second HR series, versus the coarse fallback where
+    only ``avg_hr`` survived and the whole session is attributed to one zone.
+    A client that cannot tell them apart will present a flat bar as though it
+    were measured detail.
+    """
+    max_hr, source, age = await resolve_max_hr(db)
+    tiz = await time_in_zone_for_activity(db, activity, max_hr)
+    sampled = any(tiz.values())
+
+    if not sampled and activity.avg_hr is not None:
+        # Same fallback cardio_summary uses, so the per-activity view and the
+        # rolling aggregate never disagree about a session with no series.
+        tiz[zone_for(activity.avg_hr, max_hr)] = activity.duration_s
+
+    total = sum(tiz.values())
+    zones = []
+    for spec in zone_bounds(max_hr):
+        seconds = tiz.get(spec["zone"], 0)
+        zones.append({
+            **spec,
+            "seconds": seconds,
+            "pct": round(100.0 * seconds / total, 1) if total else 0.0,
+        })
+
+    series: list[dict[str, Any]] = []
+    if sampled and buckets > 0 and activity.duration_s > 0:
+        end_at = activity.start_at + timedelta(seconds=activity.duration_s)
+        rows = (await db.execute(
+            select(models.HeartRate.time, models.HeartRate.bpm)
+            .where(models.HeartRate.time >= activity.start_at)
+            .where(models.HeartRate.time <= end_at)
+            .order_by(models.HeartRate.time)
+        )).all()
+        width_s = activity.duration_s / buckets
+        grid = [{z: 0 for z, _, _ in ZONE_BOUNDS_PCT} for _ in range(buckets)]
+        prev_ts = activity.start_at
+        for ts, bpm in rows:
+            # Same 30s gap cap as the totals, so the series sums back to the
+            # zone seconds above rather than telling a second story.
+            dt = min(max(0, int((ts - prev_ts).total_seconds())), 30)
+            prev_ts = ts
+            if dt == 0:
+                continue
+            offset = (ts - activity.start_at).total_seconds()
+            idx = min(buckets - 1, max(0, int(offset / width_s)))
+            grid[idx][zone_for(bpm, max_hr)] += dt
+        series = [
+            {"minute": round(i * width_s / 60, 1), **counts}
+            for i, counts in enumerate(grid)
+        ]
+
+    return {
+        "source": activity.source,
+        "source_id": activity.source_id,
+        "max_hr": round(max_hr),
+        "max_hr_source": source,
+        "age_used": age,
+        "sampled": sampled,
+        "total_seconds": total,
+        "zones": zones,
+        "series": series,
+    }
 
 
 async def cardio_summary(

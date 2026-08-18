@@ -65,6 +65,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Box
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,6 +95,7 @@ fun ActivityDetailScreen(
         mutableStateOf<List<app.myvitals.sync.TimePoint>>(emptyList())
     }
     var maxHr by remember { mutableStateOf(190) }
+    var zones by remember { mutableStateOf<app.myvitals.sync.ActivityZones?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var showPicker by remember { mutableStateOf(false) }
@@ -125,6 +130,11 @@ fun ActivityDetailScreen(
             runCatching {
                 withContext(Dispatchers.IO) { api.profile() }
             }.getOrNull()?.let { maxHr = it.maxHr() }
+            // TD-2 — zones are server-computed. buckets=0 skips the time
+            // series the web streamgraph needs and the phone does not.
+            zones = runCatching {
+                withContext(Dispatchers.IO) { api.activityZones(source, sourceId, buckets = 0) }
+            }.getOrNull()
             trails = ts.trails.sortedBy { it.name }
             error = null
             Timber.i(
@@ -225,6 +235,9 @@ fun ActivityDetailScreen(
                     }
                     if (hrPoints.isNotEmpty()) {
                         item { ActivityHrChart(hrPoints, maxHr = maxHr) }
+                    }
+                    zones?.takeIf { it.totalSeconds > 0 }?.let { z ->
+                        item { HrZonesCard(z, neon) }
                     }
                     item { TrailLinkCard(a, trails, neon, onPick = { showPicker = true }) }
                     if (!a.notes.isNullOrBlank()) {
@@ -515,6 +528,94 @@ private fun StatsCard(a: ActivityRow, neon: Boolean) {
                 }
             }
         }
+    }
+}
+
+/**
+ * TD-2 — time-in-zone for the session, rendered from the server's numbers.
+ *
+ * Everything shown here (the bpm boundaries, the seconds, the percentage)
+ * is computed in analytics/cardio.py. The phone deliberately owns no zone
+ * model of its own: the web used to, and it counted HR samples rather than
+ * seconds and divided by the session's own peak heart rate, so the same
+ * ride reported a different distribution on each surface and neither matched
+ * what the cardio coach was telling the user.
+ */
+@Composable
+private fun HrZonesCard(z: app.myvitals.sync.ActivityZones, neon: Boolean) {
+    // Cool to hot, matching the web palette so a screenshot from either
+    // surface reads the same way.
+    val zoneColors = if (neon) {
+        listOf(Color(0xFF6F7BFF), Color(0xFF28E6FF), Color(0xFF5DFF3B),
+               Color(0xFFFFB52E), Color(0xFFFF5D7A))
+    } else {
+        listOf(Color(0xFF38BDF8), Color(0xFF22C55E), Color(0xFFEAB308),
+               Color(0xFFF97316), Color(0xFFEF4444))
+    }
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val track = if (neon) NeonMV.Periwinkle.copy(alpha = 0.12f)
+                else MV.OnSurface.copy(alpha = 0.08f)
+
+    val body: @Composable () -> Unit = {
+        Column(Modifier.padding(14.dp)) {
+            Text("HR ZONES", color = muted,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(10.dp))
+            z.zones.forEachIndexed { i, zone ->
+                val range = zone.hiBpm?.let { "${zone.loBpm}–$it bpm" } ?: "${zone.loBpm}+ bpm"
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${zone.zone} ${zone.label}", color = ink, fontSize = 12.sp,
+                        modifier = Modifier.width(104.dp))
+                    Box(
+                        Modifier.weight(1f).height(8.dp)
+                            .clip(RoundedCornerShape(4.dp)).background(track),
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth((zone.pct / 100.0).toFloat().coerceIn(0f, 1f))
+                                .fillMaxHeight()
+                                .background(zoneColors.getOrElse(i) { zoneColors.last() }),
+                        )
+                    }
+                    Text("%.0f%%".format(zone.pct), color = muted, fontSize = 11.sp,
+                        modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
+                }
+                Text("$range · ${fmtDurationHm(zone.seconds)}", color = muted, fontSize = 10.sp,
+                    modifier = Modifier.padding(start = 104.dp, bottom = 6.dp))
+            }
+            if (!z.sampled) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "No heart-rate series was recorded, so the whole session is " +
+                        "attributed to the zone its average falls in. Treat the split as coarse.",
+                    color = muted, fontSize = 10.sp,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                when (z.maxHrSource) {
+                    "profile" -> "Zones from your max HR of ${z.maxHr} bpm."
+                    "estimated" ->
+                        "Zones from an estimated max HR of ${z.maxHr} bpm " +
+                            "(Tanaka, age ${z.ageUsed}). Set a measured max in Settings → Profile."
+                    else ->
+                        "Zones from a default max HR of ${z.maxHr} bpm — no birth date or " +
+                            "measured max on file, so these boundaries are a guess."
+                },
+                color = muted, fontSize = 10.sp,
+            )
+        }
+    }
+
+    if (neon) {
+        Column(
+            Modifier.fillMaxWidth().clip(NeonCardShape).background(card)
+                .border(1.dp, NeonMV.Periwinkle.copy(alpha = 0.16f), NeonCardShape),
+        ) { body() }
+    } else {
+        Card(colors = CardDefaults.cardColors(containerColor = card)) { body() }
     }
 }
 

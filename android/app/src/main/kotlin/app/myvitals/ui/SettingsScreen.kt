@@ -187,6 +187,7 @@ fun SettingsScreen(
                     heightCm = profile?.heightCm,
                     weightGoalKg = profile?.weightGoalKg,
                     restingHrBaseline = profile?.restingHrBaseline,
+                    maxHr = profile?.maxHr,
                     activityLevel = profile?.activityLevel,
                     extra = newExtra,
                 ))

@@ -110,6 +110,13 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/views/Activities.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/activities/ActivitiesScreen.kt",
      "Activities list"),
+    # TD-2 added this row. The pair had been unregistered since both files
+    # were written, which is why the two surfaces were free to diverge on HR
+    # zones for as long as they did — the web grew three different local zone
+    # computations and the phone grew none, and nothing flagged it.
+    ("frontend/src/views/ActivityDetail.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/activities/ActivityDetailScreen.kt",
+     "Single activity detail (stats, map, HR series, HR zones, trail link)"),
     # Web keeps the activity type→icon resolver in a shared component;
     # phone keeps it inline in ActivitiesScreen.kt (iconForType).
     ("frontend/src/components/ActivityIcon.vue",

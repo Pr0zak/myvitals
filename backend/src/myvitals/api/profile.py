@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..analytics import cardio
 from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
@@ -23,6 +24,7 @@ class ProfileIn(BaseModel):
     weight_goal_kg: float | None = None
     fasting_target_hours_per_week: float | None = None
     resting_hr_baseline: float | None = None
+    max_hr: float | None = None
     activity_level: str | None = None  # "sedentary"|"light"|"moderate"|"active"|"athlete"
     extra: dict[str, Any] | None = None
     home_latitude: float | None = None
@@ -37,13 +39,21 @@ def _age_years(birth: date | None) -> int | None:
 
 
 def _hr_zones(max_hr: float) -> list[dict[str, Any]]:
-    """Karvonen-ish 5-zone split as a fraction of max HR."""
+    """The 5-zone split, derived from the shared bounds in analytics/cardio.
+
+    This used to be a second hand-written table, and it disagreed with the
+    one the zone analytics use: it started Z1 at 50% of max where cardio.py
+    starts it at 0%, so the profile screen and every zone chart in the app
+    were describing different zones under the same names.
+    """
     return [
-        {"zone": 1, "label": "Recovery",   "low": round(max_hr * 0.50), "high": round(max_hr * 0.60)},
-        {"zone": 2, "label": "Endurance",  "low": round(max_hr * 0.60), "high": round(max_hr * 0.70)},
-        {"zone": 3, "label": "Tempo",      "low": round(max_hr * 0.70), "high": round(max_hr * 0.80)},
-        {"zone": 4, "label": "Threshold",  "low": round(max_hr * 0.80), "high": round(max_hr * 0.90)},
-        {"zone": 5, "label": "VO2 Max",    "low": round(max_hr * 0.90), "high": round(max_hr * 1.00)},
+        {
+            "zone": i + 1,
+            "label": spec["label"],
+            "low": spec["lo_bpm"],
+            "high": spec["hi_bpm"] if spec["hi_bpm"] is not None else round(max_hr),
+        }
+        for i, spec in enumerate(cardio.zone_bounds(max_hr))
     ]
 
 
@@ -79,7 +89,7 @@ async def _profile_dict(
     if p is None:
         return {
             "id": 1, "birth_date": None, "sex": None, "height_cm": None,
-            "weight_goal_kg": None, "resting_hr_baseline": None,
+            "weight_goal_kg": None, "resting_hr_baseline": None, "max_hr": None,
             "activity_level": None, "extra": None,
             "home_latitude": None, "home_longitude": None,
             "updated_at": None,
@@ -89,9 +99,15 @@ async def _profile_dict(
     derived: dict[str, Any] = {"age": age, "resting_hr_baseline_auto": auto_rhr}
     if age is not None:
         # Tanaka 2001: max HR ≈ 208 - 0.7 × age (more accurate than 220-age).
-        max_hr = 208 - 0.7 * age
-        derived["max_hr_estimated"] = round(max_hr)
-        derived["hr_zones"] = _hr_zones(max_hr)
+        derived["max_hr_estimated"] = round(208 - 0.7 * age)
+    # An explicitly measured maximum always wins over the age estimate, and
+    # the zones follow whichever one is actually in use -- otherwise the
+    # profile screen shows boundaries that no chart in the app agrees with.
+    effective = p.max_hr or derived.get("max_hr_estimated")
+    if effective:
+        derived["max_hr_effective"] = round(effective)
+        derived["max_hr_source"] = "profile" if p.max_hr else "estimated"
+        derived["hr_zones"] = _hr_zones(float(effective))
     if p.height_cm and p.weight_goal_kg:
         h_m = p.height_cm / 100
         derived["bmi_at_goal"] = round(p.weight_goal_kg / (h_m * h_m), 1)
@@ -104,6 +120,7 @@ async def _profile_dict(
         "sleep_target_h": p.sleep_target_h,
         "fasting_target_hours_per_week": p.fasting_target_hours_per_week,
         "resting_hr_baseline": p.resting_hr_baseline,
+        "max_hr": p.max_hr,
         "activity_level": p.activity_level,
         "extra": p.extra,
         "home_latitude": p.home_latitude,
@@ -153,6 +170,7 @@ async def put_profile(
     p.weight_goal_kg = body.weight_goal_kg
     p.fasting_target_hours_per_week = body.fasting_target_hours_per_week
     p.resting_hr_baseline = body.resting_hr_baseline
+    p.max_hr = body.max_hr
     p.activity_level = body.activity_level
     p.extra = body.extra
     p.home_latitude = body.home_latitude

@@ -249,7 +249,40 @@ data class StrengthWorkoutExerciseRow(
     // prescribe it. False-by-default so a cached plan from before the field
     // existed reads as "planned" rather than claiming the user added it.
     @Json(name = "added_ad_hoc") val addedAdHoc: Boolean = false,
+    // TD-6: one row per prescribed set, with the prefill resolved
+    // server-side. Render these — do NOT derive starting values here. This
+    // screen and StrengthToday.vue used to seed the inputs from different
+    // rules for the same workout.
+    @Json(name = "planned_sets") val plannedSets: List<PlannedSet> = emptyList(),
     val sets: List<StrengthSetRow> = emptyList(),
+)
+
+/**
+ * One prescribed set, with the prefill the client should show — TD-6.
+ *
+ * The cascade behind [prefillWeightLb] / [prefillReps] lives in
+ * `_planned_sets` server-side: this session's most recent logged set of the
+ * same exercise, then the previous session's same-index set, then the slot
+ * prescription — tiered separately for warm-up and working, so a light
+ * warm-up can never seed a working target.
+ *
+ * [prefillRating] is null for an unlogged set, on purpose. This screen used
+ * to pre-select "Good" to save a tap, but the rating is the input to next
+ * session's weight selection, so a default manufactures progression data
+ * from a user who tapped through without thinking.
+ */
+@JsonClass(generateAdapter = true)
+data class PlannedSet(
+    @Json(name = "set_number") val setNumber: Int,
+    @Json(name = "set_type") val setType: String = "working",
+    @Json(name = "target_weight_lb") val targetWeightLb: Double? = null,
+    @Json(name = "target_reps") val targetReps: Int = 0,
+    @Json(name = "rest_s") val restS: Int = 90,
+    /** PROG-1 Greyskull: the last set is as many reps as possible. */
+    @Json(name = "is_amrap") val isAmrap: Boolean = false,
+    @Json(name = "prefill_weight_lb") val prefillWeightLb: Double? = null,
+    @Json(name = "prefill_reps") val prefillReps: Int = 0,
+    @Json(name = "prefill_rating") val prefillRating: Int? = null,
 )
 
 /** POST /workout/strength/workouts/{id}/exercises — append an off-plan lift.

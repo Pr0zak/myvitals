@@ -476,7 +476,7 @@ function startTimer(wex: StrengthWorkoutExercise, n: number) {
             chime();
             try { navigator.vibrate?.(200); } catch { /* no-op */ }
             // Auto-log: full hold completed, no weight, rating=4 (smooth).
-            const e = entry(wexId, setN, targetWex.target_reps_low, null);
+            const e = entry(targetWex, setN);
             e.weight = "";
             e.reps = String(targetWex.target_reps_low);
             e.rating = 4;
@@ -554,7 +554,7 @@ async function finishTimedNow(wex: StrengthWorkoutExercise, setNum: number) {
   const remaining = timerRemaining(wex.id, setNum) ?? 0;
   const elapsed = Math.max(1, total - remaining);
   chime();
-  const e = entry(wex.id, setNum, wex.target_reps_low, null);
+  const e = entry(wex, setNum);
   e.weight = "";
   e.reps = String(elapsed);
   e.rating = 4;
@@ -715,14 +715,29 @@ function ratingLabel(r: number | null): string {
 }
 
 function entryKey(wexId: number, setNum: number) { return `${wexId}-${setNum}`; }
-function entry(wexId: number, setNum: number, target: number, targetWeight: number | null): SetEntry {
-  const key = entryKey(wexId, setNum);
+
+/** The server's prescription for one set, or null if it did not send one.
+ *
+ *  TD-6 — this view used to seed every input from the flat slot target with
+ *  no rating, while the phone inherited from the most recently logged set of
+ *  the same exercise and pre-selected a rating of 4. Same workout, same
+ *  screen, two different starting values. The cascade now lives in
+ *  `_planned_sets` server-side and both surfaces render its answer. */
+function plannedSet(wex: StrengthWorkoutExercise, setNum: number) {
+  return wex.planned_sets?.find((ps) => ps.set_number === setNum) ?? null;
+}
+
+function entry(wex: StrengthWorkoutExercise, setNum: number): SetEntry {
+  const key = entryKey(wex.id, setNum);
   if (!setEntries.value[key]) {
+    const ps = plannedSet(wex, setNum);
     setEntries.value[key] = {
-      weight: targetWeight?.toString() ?? "",
-      reps: target.toString(),
-      rating: null,
-      setType: "working",
+      // Fall back to the flat target only when talking to a backend older
+      // than this release; the seeded values are the server's job.
+      weight: (ps?.prefill_weight_lb ?? wex.target_weight_lb)?.toString() ?? "",
+      reps: (ps?.prefill_reps ?? wex.target_reps_low).toString(),
+      rating: ps?.prefill_rating ?? null,
+      setType: ps?.set_type ?? "working",
     };
   }
   return setEntries.value[key];
@@ -924,7 +939,7 @@ async function logFailed(wex: StrengthWorkoutExercise, setNum: number): Promise<
   // -7.5% deload on next session. Returns false if the user cancels the
   // confirm so callers (e.g. the timed-hold overlay) can keep the timer
   // running instead of closing on a no-op.
-  const e = entry(wex.id, setNum, wex.target_reps_low, wex.target_weight_lb);
+  const e = entry(wex, setNum);
   if (!confirm("Mark set " + setNum + " as failed? Next session's weight will drop ~7.5%.")) return false;
   e.rating = 1;
   await logSet(wex, setNum);
@@ -933,7 +948,7 @@ async function logFailed(wex: StrengthWorkoutExercise, setNum: number): Promise<
 
 async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = false) {
   if (isPaused.value) return;  // WP-14: resume before logging
-  const e = entry(wex.id, setNum, wex.target_reps_low, wex.target_weight_lb);
+  const e = entry(wex, setNum);
   busy.value = `set-${wex.id}-${setNum}`;
   try {
     const res = await api.logStrengthSet({
@@ -1599,7 +1614,7 @@ useVisibilityRefresh(loadAll);
             <table>
               <thead>
                 <tr v-if="!isTimedExercise(wex)">
-                  <th>#</th><th>Weight (lb)</th><th>Reps</th><th>Rating</th><th></th>
+                  <th>#</th><th>Weight (lb)</th><th>Reps</th><th>Type</th><th>Rating</th><th></th>
                 </tr>
                 <tr v-else>
                   <th>#</th><th colspan="3">Hold</th><th></th>
@@ -1617,23 +1632,42 @@ useVisibilityRefresh(loadAll);
                     <input
                       type="number" step="0.5" inputmode="decimal"
                       :placeholder="wex.target_weight_lb?.toString() ?? '—'"
-                      v-model="entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).weight"
+                      v-model="entry(wex, n).weight"
                       :disabled="isSetLogged(wex, n)"
                     />
                   </td>
                   <td>
                     <input
                       type="number" inputmode="numeric"
-                      :placeholder="wex.target_reps_low.toString()"
-                      v-model="entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).reps"
+                      :placeholder="plannedSet(wex, n)?.target_reps?.toString() ?? wex.target_reps_low.toString()"
+                      v-model="entry(wex, n).reps"
                       :disabled="isSetLogged(wex, n)"
                     />
+                    <!-- PROG-1 Greyskull: the last set is as-many-reps-as-
+                         possible. Labelling the input beats a badge the user
+                         has to read and then remember which set it meant. -->
+                    <span v-if="plannedSet(wex, n)?.is_amrap" class="amrap-tag"
+                          title="As many reps as possible — this is the set that drives the next weight jump">AMRAP</span>
+                  </td>
+                  <!-- TD-6: the phone has had a set-type picker since
+                       SETTYPE-1 shipped; the web hard-coded "working" with
+                       no way to record a warm-up. A warm-up counted as a
+                       working set skewed the volume audit and the ghost
+                       line for the next session. -->
+                  <td class="settype-cell">
+                    <select v-model="entry(wex, n).setType"
+                            :disabled="isSetLogged(wex, n)"
+                            aria-label="Set type">
+                      <option value="working">work</option>
+                      <option value="warmup">warm</option>
+                      <option value="drop">drop</option>
+                    </select>
                   </td>
                   <td class="rating-cell">
                     <button
                       v-for="opt in RATING_CHOICES" :key="opt.v"
                       class="rating" :data-r="opt.v"
-                      :class="{ on: entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).rating === opt.v }"
+                      :class="{ on: entry(wex, n).rating === opt.v }"
                       :disabled="isSetLogged(wex, n)"
                       :title="opt.title"
                       @click="setRating(wex.id, n, opt.v)"
@@ -1644,7 +1678,7 @@ useVisibilityRefresh(loadAll);
                   <td>
                     <div v-if="!isSetLogged(wex, n)" class="row-actions">
                       <button class="primary small"
-                              :disabled="busy === `set-${wex.id}-${n}` || entry(wex.id, n, wex.target_reps_low, wex.target_weight_lb).rating === null"
+                              :disabled="busy === `set-${wex.id}-${n}` || entry(wex, n).rating === null"
                               @click="logSet(wex, n)">
                         Log
                       </button>
@@ -2958,5 +2992,28 @@ html[data-theme="neon"] .big { color: var(--rn-ink); }
   padding: 1px 6px;
   margin-left: 6px;
   vertical-align: middle;
+}
+
+/* TD-6 — per-set prescription markers. */
+.amrap-tag {
+  display: inline-block;
+  margin-left: 5px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--warn, #eab308);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 3px;
+  vertical-align: middle;
+}
+.settype-cell select {
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
 }
 </style>

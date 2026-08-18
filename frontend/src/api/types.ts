@@ -292,6 +292,22 @@ export interface StrengthSet {
   set_type?: string;
 }
 
+/** One prescribed set, with the prefill the client should show. */
+export interface PlannedSet {
+  set_number: number;
+  set_type: "warmup" | "working";
+  target_weight_lb: number | null;
+  target_reps: number;
+  rest_s: number;
+  /** PROG-1 Greyskull: the last set is as-many-reps-as-possible. */
+  is_amrap: boolean;
+  prefill_weight_lb: number | null;
+  prefill_reps: number;
+  /** Always null for an unlogged set. The rating drives next session's
+   *  weight, so defaulting it would manufacture progression data. */
+  prefill_rating: number | null;
+}
+
 export interface StrengthWorkoutExercise {
   id: number;
   workout_id: number;
@@ -317,6 +333,10 @@ export interface StrengthWorkoutExercise {
   // prescribe it. Rendered with a small marker so a session's plan and its
   // improvisations stay distinguishable after the fact.
   added_ad_hoc?: boolean;
+  // TD-6: one row per prescribed set, with the prefill resolved server-side.
+  // Render these — do NOT derive starting values locally. The two surfaces
+  // used to seed the inputs differently for the same workout.
+  planned_sets?: PlannedSet[];
   sets: StrengthSet[];
 }
 

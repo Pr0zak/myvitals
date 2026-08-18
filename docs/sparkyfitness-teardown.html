@@ -238,14 +238,14 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
 
 <div class="prog">
   <h4>Build progress</h4>
-  <p style="margin-bottom:0">The ranked shortlist is tracked as tasks <code>TD-1</code>–<code>TD-10</code>. The full option menu below is the durable backlog — nothing is pruned from it, including the items declined and the reasons why.</p>
-  <div class="bar" role="img" aria-label="9 of 10 shortlist items shipped"><i class="b-done" style="width:90%"></i><i class="b-wip" style="width:0%"></i></div>
+  <p style="margin-bottom:0"><strong>All ten shortlist items have shipped.</strong> They are tracked as tasks <code>TD-1</code>–<code>TD-10</code>; the changelog below records what each one changed. The full option menu further down is the durable backlog — nothing is pruned from it, including the items declined and the reasons why, so any of them can be picked up later.</p>
+  <div class="bar" role="img" aria-label="10 of 10 shortlist items shipped"><i class="b-done" style="width:100%"></i><i class="b-wip" style="width:0%"></i></div>
   <div class="legend">
-    <span><b style="background:var(--good)"></b> shipped &nbsp;9</span>
+    <span><b style="background:var(--good)"></b> shipped &nbsp;10</span>
     <span><b style="background:var(--sp)"></b> in progress &nbsp;0</span>
-    <span><b style="background:var(--rule)"></b> not started &nbsp;1</span>
+    <span><b style="background:var(--rule)"></b> not started &nbsp;0</span>
     <span>·</span>
-    <span>full menu: 40 options, 9 shipped, 1 declined</span>
+    <span>full menu: 40 options, 10 shipped, 1 declined</span>
   </div>
 </div>
 
@@ -255,6 +255,11 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
   <div class="scroll"><table>
     <thead><tr><th>Option</th><th>Status</th><th>What changed</th></tr></thead>
     <tbody>
+      <tr>
+        <td><strong>TD-6</strong> — per-set prescription</td>
+        <td><span class="chip c-done">shipped</span></td>
+        <td><code>WorkoutExerciseOut.planned_sets</code> carries one row per prescribed set with the prefill resolved server-side, using the three-tier cascade borrowed from SparkyFitness's <code>resolveAssumedSetValues</code>: this session's most recent logged set of the same exercise, then last session's same-index set, then the slot prescription — <strong>tiered separately for warm-up and working</strong>, so a light warm-up can never seed a working target. That closes a live divergence on the app's most-used screen: <code>StrengthToday.vue</code> seeded every set from the flat slot target with no rating while <code>StrengthTodayScreen.kt</code> inherited from the last logged set and pre-selected rating 4. Same workout, two starting values, invisible to <code>parity_check.py</code> because both files existed and both kept changing. <strong>The rating is no longer pre-selected on either surface.</strong> It is the input to next session's weight choice, so defaulting it manufactured progression data from a user tapping through without thinking — that costs a tap and buys honest history. Greyskull's AMRAP set is now a flag on the row (<code>is_amrap</code>) and labelled on the input, rather than living only inside a badge string the user had to read and then remember which set it meant. The web gained the set-type picker the phone has had since SETTYPE-1; before this a warm-up logged on the web counted as a working set in the volume audit. <strong>Planned sets are derived, never materialised</strong> — <code>log_set</code> is idempotent on <code>(workout_exercise_id, set_number)</code> <em>because</em> sets are created lazily, which the phone's offline replay depends on, and SKIP-1 already documents why fabricated rows poison the mobility fail counter and the deload payload. Warm-up ramps are deliberately <em>not</em> prescribed yet: the field exists so they can be added without another client change, but doing it now would change what <code>sets_total</code> means and force the SKIP-1 counters to learn to exclude them. <code>backend/tests/test_planned_sets.py</code> — 15 tests — includes structural guards that fail the build if either client starts deriving its own prefill again. Backend 440 green, web type-check clean, phone compiles.</td>
+      </tr>
       <tr>
         <td><strong>TD-8</strong> — LLM provider seam</td>
         <td><span class="chip c-done">shipped</span></td>
@@ -573,7 +578,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     </div>
     <div class="rk">
       <div class="n">6</div><div class="t">Per-set prescription — one target per set, not per slot</div>
-      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div>
+      <div class="m"><span class="chip c-done">shipped</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div>
       <div class="d">Unlocks prescribed warm-up ramps, AMRAP last sets as rows rather than a badge string, and back-off schemes — and kills the live prefill divergence between web and phone. <strong>Do not materialise planned sets as rows:</strong> <code>log_set</code> is idempotent on <code>(workout_exercise_id, set_number)</code> <em>because</em> sets are created lazily, and SKIP-1 already documents why fabricated rows poison the mobility fail counter and the deload payload.</div>
     </div>
     <div class="rk">
@@ -637,7 +642,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
       <div class="opts">
         <div class="opt"><div class="h">Canonical muscle + movement taxonomy</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #1.</p></div>
         <div class="opt"><div class="h">Session summary with HR-derived energy</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #4.</p></div>
-        <div class="opt"><div class="h">Per-set prescription</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Ranked #6.</p></div>
+        <div class="opt"><div class="h">Per-set prescription</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Ranked #6.</p></div>
         <div class="opt"><div class="h">Ad-hoc exercise slots</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div><p class="b">Ranked #10.</p></div>
         <div class="opt"><div class="h">Gate the AI variety-nudge and swap on equipment and prefs</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div><p class="b">Those call sites pass the raw <code>CATALOG_BY_ID</code>, so the model can propose swaps to equipment you do not own or exercises you explicitly disabled. Pass <code>filter_catalog_for_equipment</code> with disabled rows removed instead of an arbitrary <code>[:60]</code> slice.</p></div>
         <div class="opt"><div class="h">Bodyweight and rep-based personal records</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div><p class="b"><code>_detect_pr</code> short-circuits when <code>actual_weight_lb</code> is null, and 101 of 275 catalog entries are bodyweight-only — so no bodyweight lift can ever set a record. Carries a genuine product ambiguity (12 push-ups at 200 lb vs 12 at 180 lb) and needs a rate limit, or the badge becomes noise.</p></div>

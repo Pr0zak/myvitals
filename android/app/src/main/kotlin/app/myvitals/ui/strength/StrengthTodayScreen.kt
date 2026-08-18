@@ -3089,21 +3089,31 @@ private fun ExerciseCard(
                     // partial work stays visible, but the session is over (or
                     // this slot is settled) so there's nothing to log into.
                 } else if (n == nextSet && !closed) {
-                    // Inherit weight/reps from the most recently logged
-                    // set of THIS exercise so an edit on set 1 carries
-                    // forward to sets 2…N. Fall back to the planned
-                    // target on the very first set.
-                    val priorLogged = wex.sets
-                        .filter { it.actualReps != null }
-                        .maxByOrNull { it.setNumber }
+                    // TD-6 — the prefill comes from the server.
+                    //
+                    // This screen used to inherit weight and reps from the
+                    // most recently logged set of this exercise and
+                    // pre-select a rating of 4, while StrengthToday.vue
+                    // seeded every set from the flat slot target with no
+                    // rating. Same workout, two different starting values,
+                    // on the app's most-used surface — and invisible to
+                    // parity_check.py, because both files exist and both
+                    // kept changing. The cascade now lives in _planned_sets
+                    // and both surfaces render its answer.
+                    //
+                    // The rating is deliberately no longer pre-selected. It
+                    // is the input to next session's weight choice, so
+                    // defaulting it manufactured progression data from a
+                    // user tapping through without thinking. That costs a
+                    // tap; it buys honest history.
+                    val planned = wex.plannedSets.firstOrNull { it.setNumber == n }
                     val input = inputs.getOrPut(key) { SetInput(
-                        weight = priorLogged?.actualWeightLb?.toString()
-                            ?: wex.targetWeightLb?.toString().orEmpty(),
-                        reps = (priorLogged?.actualReps
+                        weight = (planned?.prefillWeightLb ?: wex.targetWeightLb)
+                            ?.toString().orEmpty(),
+                        reps = (planned?.prefillReps?.takeIf { it > 0 }
                             ?: wex.targetRepsLow).toString(),
-                        // Pre-select Good so the common case is one ✓ tap;
-                        // Hard / Easy / Fail are a single tap away.
-                        rating = 4,
+                        rating = planned?.prefillRating,
+                        setType = planned?.setType ?: "working",
                     ) }
                     SetEntryRow(
                         n = n, input = input,
@@ -3135,7 +3145,15 @@ private fun ExerciseCard(
                         },
                         sideLabel = bilateralSideLabel(n, wex.targetSets, info),
                         targetWeightLb = wex.targetWeightLb,
-                        targetReps = repsRange(wex.targetRepsLow, wex.targetRepsHigh),
+                        // TD-6 — an AMRAP set says so on the row itself.
+                        // PROG-1 carried it only inside the program badge
+                        // string, which meant reading a badge and then
+                        // remembering which set it referred to.
+                        targetReps = if (planned?.isAmrap == true) {
+                            "${wex.targetRepsLow}+ (AMRAP)"
+                        } else {
+                            repsRange(wex.targetRepsLow, wex.targetRepsHigh)
+                        },
                         isCurrent = isCurrentExercise,
                     )
                 } else {

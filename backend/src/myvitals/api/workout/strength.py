@@ -609,6 +609,53 @@ class LastSetOut(BaseModel):
     reps: int | None = None
 
 
+class PlannedSetOut(BaseModel):
+    """One prescribed set, with the prefill the clients should use.
+
+    Before TD-6 the prescription was a single flat target on the slot, and
+    each client turned it into per-set input values with its own rule.
+    They disagreed. `StrengthToday.vue` seeded every set from the slot target
+    with no rating; `StrengthTodayScreen.kt` inherited weight and reps from
+    the most recently logged set of the same exercise and pre-selected a
+    rating of 4. Same workout, same screen, two different starting values --
+    the exact class of divergence the architecture rule exists to prevent,
+    and invisible to `scripts/parity_check.py` because both files exist and
+    both keep changing.
+
+    The prefill is resolved here, through a three-tier cascade borrowed from
+    SparkyFitness's `resolveAssumedSetValues` (the single most transferable
+    idea in that codebase):
+
+    1. The most recently logged set of this exercise **in this session**, so
+       correcting the weight on set 1 carries forward to sets 2..N.
+    2. The same-index set from the previous session, which is what
+       `last_sets` already carries.
+    3. The slot prescription.
+
+    Warm-up and working sets are tiered separately, so a light warm-up can
+    never seed a working target.
+
+    `prefill_rating` is deliberately null. The rating is the input to next
+    session's weight selection, so defaulting it means a user who taps
+    through without thinking records an assessment they never made. The
+    phone used to pre-select "Good" to save a tap; that convenience was
+    quietly manufacturing progression data.
+    """
+    set_number: int
+    set_type: Literal["warmup", "working"] = "working"
+    target_weight_lb: float | None = None
+    target_reps: int
+    rest_s: int
+    # PROG-1 Greyskull: the last set is "as many reps as possible". Carried
+    # as a flag on the row rather than only inside the program badge string,
+    # so the client can label the input instead of the user having to read
+    # a badge and remember which set it referred to.
+    is_amrap: bool = False
+    prefill_weight_lb: float | None = None
+    prefill_reps: int
+    prefill_rating: int | None = None
+
+
 class WorkoutExerciseOut(BaseModel):
     id: int
     workout_id: int
@@ -658,6 +705,9 @@ class WorkoutExerciseOut(BaseModel):
     # user chose, and the AI reviewer reads a self-added accessory
     # differently from a planned one.
     added_ad_hoc: bool = False
+    # TD-6 — the per-set prescription, with server-resolved prefills. Clients
+    # render these verbatim; they must not derive their own starting values.
+    planned_sets: list[PlannedSetOut] = []
     sets: list[SetOut] = []
 
 
@@ -872,6 +922,80 @@ def _exercise_done(wex_out: WorkoutExerciseOut) -> bool:
     return wex_out.skipped or _accounted_sets(wex_out) >= wex_out.target_sets
 
 
+def _planned_sets(
+    wex: models.StrengthWorkoutExercise,
+    sets: list[models.StrengthSet],
+    last_sets: list[LastSetOut] | None,
+    program: dict | None,
+) -> list[PlannedSetOut]:
+    """Expand a slot's flat prescription into one row per set.
+
+    Deliberately derived, never materialised. `log_set` is idempotent on
+    `(workout_exercise_id, set_number)` *because* sets are created lazily on
+    log, and the SKIP-1 note already records why fabricated rows are
+    poisonous: `recent_mobility_history` counts a skipped set as a failed one
+    and lowers the next hold prescription, and the deload payload folds
+    skipped sets into `missed_or_skipped_sets`, which the coach reads as
+    accumulating fatigue. Writing placeholder rows here would reintroduce
+    both, plus break the idempotency the offline replay path depends on.
+    """
+    logged_by_number = {
+        s.set_number: s for s in sets
+        if s.actual_reps is not None and not s.skipped
+    }
+    # Tier 1: the most recent real set in THIS session. An edit on set 1
+    # should carry forward, which is the phone's rule and the correct one.
+    most_recent = (
+        logged_by_number[max(logged_by_number)] if logged_by_number else None
+    )
+    # Tier 2: the same-index set from last session.
+    last_by_number = {ls.set_number: ls for ls in (last_sets or [])}
+
+    amrap_last = bool((program or {}).get("amrap_last_set")) and \
+        (program or {}).get("scheme") == "greyskull"
+
+    out: list[PlannedSetOut] = []
+    for n in range(1, max(1, wex.target_sets) + 1):
+        # Working sets only for now. The set_type field exists so a warm-up
+        # ramp can be added without another client change, but prescribing
+        # warm-ups today would change what sets_total means and the SKIP-1
+        # counters would need to learn to exclude them -- a separate,
+        # riskier change that should not ride along with a prefill fix.
+        set_type = "working"
+
+        prefill_weight = wex.target_weight_lb
+        prefill_reps = wex.target_reps_low
+        prior = logged_by_number.get(n)
+        if prior is not None:
+            # Already logged: show what was actually done, so an edit starts
+            # from the truth rather than from the plan.
+            prefill_weight = prior.actual_weight_lb
+            prefill_reps = prior.actual_reps or wex.target_reps_low
+        elif most_recent is not None and most_recent.set_type == set_type:
+            # Same tier only. A light warm-up must never seed a working set.
+            prefill_weight = most_recent.actual_weight_lb
+            prefill_reps = most_recent.actual_reps or wex.target_reps_low
+        elif n in last_by_number:
+            ls = last_by_number[n]
+            prefill_weight = ls.weight_lb if ls.weight_lb is not None else prefill_weight
+            prefill_reps = ls.reps if ls.reps is not None else prefill_reps
+
+        out.append(PlannedSetOut(
+            set_number=n,
+            set_type=set_type,
+            target_weight_lb=wex.target_weight_lb,
+            target_reps=wex.target_reps_low,
+            rest_s=wex.target_rest_s,
+            is_amrap=amrap_last and n == wex.target_sets,
+            prefill_weight_lb=prefill_weight,
+            prefill_reps=prefill_reps,
+            # Never defaulted. See PlannedSetOut's docstring: a pre-selected
+            # rating is a fabricated input to next session's weight choice.
+            prefill_rating=(prior.rating if prior is not None else None),
+        ))
+    return out
+
+
 def _wex_to_out(
     wex: models.StrengthWorkoutExercise,
     sets: list[models.StrengthSet],
@@ -901,6 +1025,7 @@ def _wex_to_out(
         last_sets=last_sets or [],
         skipped=bool(wex.skipped),
         added_ad_hoc=bool(getattr(wex, "added_ad_hoc", False)),
+        planned_sets=_planned_sets(wex, sets, last_sets, prog),
         sets=[_set_to_out(s) for s in sorted(sets, key=lambda x: x.set_number)],
     )
 

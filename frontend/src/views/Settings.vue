@@ -506,10 +506,14 @@ async function loadAiCfg() {
   if (!queryToken.value) return;
   try {
     aiCfg.value = await api.aiConfig();
-    // Seed the editor from the server only when the user has not started
+    // Seed the editors from the server only when the user has not started
     // typing, so a background refresh cannot discard an unsaved draft.
     if (!aiInstructionsDirty.value || aiInstructions.value === "") {
       aiInstructions.value = aiCfg.value.custom_instructions ?? "";
+    }
+    if (!aiProviderDirty.value) {
+      aiProvider.value = aiCfg.value.provider ?? "anthropic";
+      aiBaseUrl.value = aiCfg.value.base_url ?? "";
     }
   } catch { /* ignore */ }
 }
@@ -572,6 +576,43 @@ async function aiSaveInstructions() {
     aiInstructionsSaved.value = true;
   } finally {
     aiInstructionsSaving.value = false;
+  }
+}
+
+// TD-8 — which backend answers.
+//
+// Everything else in this app is self-hosted; the AI layer was the one part
+// that required an external account and a credit card. An OpenAI-compatible
+// endpoint pointed at Ollama on the LAN takes the running cost to zero and
+// keeps every byte inside the house.
+const aiProvider = ref<"anthropic" | "openai_compatible" | "ollama">("anthropic");
+const aiBaseUrl = ref("");
+const aiProviderSaving = ref(false);
+const aiProviderError = ref("");
+const aiProviderDirty = computed(
+  () => aiProvider.value !== (aiCfg.value?.provider ?? "anthropic")
+    || aiBaseUrl.value.trim() !== (aiCfg.value?.base_url ?? ""),
+);
+
+async function aiSaveProvider() {
+  aiProviderSaving.value = true;
+  aiProviderError.value = "";
+  try {
+    await api.aiUpdateConfig({
+      provider: aiProvider.value,
+      base_url: aiBaseUrl.value.trim(),
+    });
+    await loadAiCfg();
+  } catch (e: unknown) {
+    // The server validates the URL on write precisely so the message lands
+    // here, next to the field, rather than surfacing later as a failed card.
+    const resp = (e && typeof e === "object" && "response" in e)
+      ? (e as { response?: { data?: { detail?: string } } }).response
+      : null;
+    aiProviderError.value = resp?.data?.detail
+      ?? (e instanceof Error ? e.message : String(e));
+  } finally {
+    aiProviderSaving.value = false;
   }
 }
 
@@ -1681,6 +1722,34 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
             <option value="data-only">Data-only</option>
           </select>
         </label>
+        <label class="ai-toggle">
+          <span>Provider:</span>
+          <select v-model="aiProvider">
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="openai_compatible">OpenAI-compatible</option>
+            <option value="ollama">Ollama (local)</option>
+          </select>
+        </label>
+        <label v-if="aiProvider !== 'anthropic'" class="ai-instructions">
+          <span>Base URL</span>
+          <input v-model="aiBaseUrl" type="url" class="add-search"
+                 placeholder="http://10.0.0.5:11434/v1"/>
+          <div class="ai-instructions-foot">
+            <span class="muted">
+              Anthropic is the only provider with prompt caching, so switching
+              away means every call pays full input rate — cheaper per token,
+              more tokens billed. Small local models also produce noticeably
+              worse structured output, which shows up as a card that renders
+              thin or empty rather than as an error.
+            </span>
+          </div>
+        </label>
+        <div v-if="aiProviderDirty || aiProviderError" class="actions">
+          <button class="ghost" :disabled="aiProviderSaving" @click="aiSaveProvider">
+            {{ aiProviderSaving ? 'Saving…' : 'Save provider' }}
+          </button>
+          <span v-if="aiProviderError" class="err">{{ aiProviderError }}</span>
+        </div>
         <label class="ai-instructions">
           <span>Standing instructions</span>
           <textarea

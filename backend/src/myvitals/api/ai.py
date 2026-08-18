@@ -13,6 +13,7 @@ from ..analytics.trends import compute_badges
 from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
+from ..integrations.llm import LlmError, validate_base_url
 from ..integrations.claude import (
     ask,
     build_cardio_coach_payload,
@@ -101,6 +102,8 @@ async def get_config(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
         "calls_today": cfg.calls_today if cfg.calls_today_date == date.today() else 0,
         "weekly_digest_enabled": cfg.weekly_digest_enabled,
         "tone": cfg.tone,
+        "provider": cfg.provider or "anthropic",
+        "base_url": cfg.base_url or "",
         "custom_instructions": cfg.custom_instructions or "",
         "custom_instructions_max": MAX_CUSTOM_INSTRUCTIONS,
     }
@@ -118,6 +121,10 @@ class ConfigUpdate(BaseModel):
     # them; null (the default) leaves them alone, so a partial update from
     # one client cannot wipe what another set.
     custom_instructions: str | None = None
+    # TD-8 — which backend answers. "anthropic" (the default),
+    # "openai_compatible" or "ollama"; the latter two need base_url.
+    provider: str | None = None
+    base_url: str | None = None
 
 
 @router.post("/config")
@@ -139,6 +146,35 @@ async def update_config(
         cfg.weekly_digest_enabled = body.weekly_digest_enabled
     if body.tone is not None and body.tone in ("supportive", "blunt", "data-only"):
         cfg.tone = body.tone
+    if body.provider is not None:
+        if body.provider not in ("anthropic", "openai_compatible", "ollama"):
+            raise HTTPException(
+                status_code=400,
+                detail="provider must be anthropic, openai_compatible or ollama",
+            )
+        cfg.provider = body.provider
+    if body.base_url is not None:
+        trimmed = body.base_url.strip()
+        if trimmed:
+            # Validate on write rather than on use. A bad URL discovered at
+            # call time renders as a failed AI card with an opaque message;
+            # discovered here it is a 400 next to the field that caused it.
+            try:
+                cfg.base_url = validate_base_url(trimmed)
+            except LlmError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
+        else:
+            cfg.base_url = None
+    # A non-Anthropic provider without a base URL cannot answer, and finding
+    # that out on the first coach tap is a worse experience than being told
+    # while saving.
+    effective_provider = cfg.provider or "anthropic"
+    if effective_provider != "anthropic" and not cfg.base_url:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{effective_provider} needs a base URL "
+                   "(e.g. http://10.0.0.5:11434/v1 for Ollama)",
+        )
     if body.custom_instructions is not None:
         # Truncate rather than reject: silently losing the tail is worse than
         # a hard error, so the UI enforces the same limit and shows a counter,

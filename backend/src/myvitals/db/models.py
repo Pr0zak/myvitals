@@ -380,6 +380,14 @@ class AiConfig(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     anthropic_api_key: Mapped[str | None] = mapped_column(String(256), nullable=True)
     model: Mapped[str] = mapped_column(String(64), default="claude-haiku-4-5-20251001")
+    # TD-8 — which backend answers. Null means Anthropic, which is every
+    # existing row: the columns are additive and nothing is migrated, so an
+    # instance that never opens the setting behaves exactly as before.
+    # "openai_compatible" / "ollama" route through integrations/llm and need
+    # base_url; the API key field is reused as the bearer token (Ollama
+    # ignores it entirely).
+    provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     daily_call_limit: Mapped[int] = mapped_column(Integer, default=30)
     calls_today: Mapped[int] = mapped_column(Integer, default=0)
     calls_today_date: Mapped[date | None] = mapped_column(Date, nullable=True)

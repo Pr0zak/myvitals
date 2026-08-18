@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from anthropic import AsyncAnthropic
+from .llm import get_provider
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -523,7 +523,7 @@ async def explain_legacy(db: AsyncSession, range_kind: str, cfg: models.AiConfig
         f"Range: last {payload['window_days']} days as of {payload['today']}.\n\n"
         f"{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
@@ -570,7 +570,7 @@ async def explain_topic(
         f"Topic: {topic_intent}\n\n"
         f"Aggregate data:\n{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
@@ -620,7 +620,7 @@ async def verdict(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
         raise RuntimeError("AI is disabled or no API key configured")
     payload = await build_verdict_payload(db)
     user_text = f"Aggregate snapshot:\n{json.dumps(payload, indent=2, default=str)}\n"
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=80,
@@ -649,7 +649,7 @@ async def ask(db: AsyncSession, cfg: models.AiConfig, question: str) -> AiResult
         f"Aggregate context (last 7 days + correlations + sober):\n"
         f"{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=400,
@@ -694,7 +694,7 @@ async def explain_discovery(
         f"means in their day-to-day. Cite the direction (negative r = more X "
         f"means less Y). Suggest one practical takeaway."
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=300,
@@ -729,7 +729,7 @@ async def pre_workout(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
         f"one-sentence justification citing the most important number. "
         f"≤ 25 words total. No markdown."
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=80,
@@ -780,7 +780,7 @@ async def activity_summary(
         f"effort) using the data. Sentence 2: what to expect or do "
         f"tomorrow (HRV impact, recovery focus). ≤ 50 words total."
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=200,
@@ -853,7 +853,7 @@ async def goal_check(
         f"the most useful next-step lever, and an honest ETA if the data "
         f"supports one. No false optimism."
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=300,
@@ -910,7 +910,7 @@ async def explain_all(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
         "give_all_topics tool — one call, all topics.\n\n"
         f"Aggregate data:\n{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=1500,
@@ -1347,7 +1347,7 @@ async def strength_nudge(
         f"Today's plan and the user's recent strength history:\n\n"
         f"{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=400,
@@ -1383,7 +1383,7 @@ async def strength_review(
         f"the trailing 4 weeks of the user's history.\n\n"
         f"Aggregate data:\n{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
@@ -1573,7 +1573,7 @@ async def deload_check(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
         f"performance:\n\n"
         f"{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=500,
@@ -1759,7 +1759,7 @@ async def strength_focus_cue(
         f"focus cue tied to today's exercises + recent history.\n\n"
         f"{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=300,
@@ -1796,7 +1796,7 @@ async def phrase_anomaly(cfg: models.AiConfig, anomaly: dict[str, Any]) -> str:
         f"English. Mention the metric, the magnitude, and a one-word read "
         f"(spike / dip / etc). No emoji."
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=60,
@@ -2054,7 +2054,7 @@ async def cardio_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
         f"return structured advice via the `give_cardio_coach` tool:\n\n"
         f"{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=500,
@@ -2370,7 +2370,7 @@ async def sleep_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
         f"return a structured verdict via the `give_sleep_coach` tool:\n\n"
         f"{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
@@ -2569,7 +2569,7 @@ async def recovery_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
         f"structured trend verdict via the `give_recovery_coach` tool:\n\n"
         f"{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
@@ -2831,7 +2831,7 @@ async def fasting_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
         f"tool:\n\n"
         f"{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
@@ -2909,7 +2909,7 @@ async def workout_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
         f"`give_workout_coach` tool:\n\n"
         f"{json.dumps(payload, indent=2, default=str)}\n"
     )
-    client = AsyncAnthropic(api_key=cfg.anthropic_api_key)
+    client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,

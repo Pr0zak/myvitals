@@ -239,13 +239,13 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
 <div class="prog">
   <h4>Build progress</h4>
   <p style="margin-bottom:0">The ranked shortlist is tracked as tasks <code>TD-1</code>–<code>TD-10</code>. The full option menu below is the durable backlog — nothing is pruned from it, including the items declined and the reasons why.</p>
-  <div class="bar" role="img" aria-label="8 of 10 shortlist items shipped"><i class="b-done" style="width:80%"></i><i class="b-wip" style="width:0%"></i></div>
+  <div class="bar" role="img" aria-label="9 of 10 shortlist items shipped"><i class="b-done" style="width:90%"></i><i class="b-wip" style="width:0%"></i></div>
   <div class="legend">
-    <span><b style="background:var(--good)"></b> shipped &nbsp;8</span>
+    <span><b style="background:var(--good)"></b> shipped &nbsp;9</span>
     <span><b style="background:var(--sp)"></b> in progress &nbsp;0</span>
-    <span><b style="background:var(--rule)"></b> not started &nbsp;2</span>
+    <span><b style="background:var(--rule)"></b> not started &nbsp;1</span>
     <span>·</span>
-    <span>full menu: 40 options, 8 shipped, 1 declined</span>
+    <span>full menu: 40 options, 9 shipped, 1 declined</span>
   </div>
 </div>
 
@@ -255,6 +255,11 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
   <div class="scroll"><table>
     <thead><tr><th>Option</th><th>Status</th><th>What changed</th></tr></thead>
     <tbody>
+      <tr>
+        <td><strong>TD-8</strong> — LLM provider seam</td>
+        <td><span class="chip c-done">shipped</span></td>
+        <td>New <code>backend/src/myvitals/integrations/llm/</code> with an Anthropic provider and an OpenAI-compatible one covering Ollama, llama.cpp, LM Studio and vLLM. It is genuinely a seam rather than a rewrite: <code>hash_payload</code>/<code>ai_summaries</code> caching, <code>_check_and_bump_quota</code> and the bounded payload builders all sit <em>above</em> it and are untouched, so swapping providers changes who answers — not what is asked or how often. A test asserts the quota check and cache key never learn what a provider is. The contract is deliberately Anthropic-shaped, because all 19 call sites already read <code>resp.content</code> blocks plus <code>resp.usage.*_tokens</code>; presenting that shape kept each site to a two-line change instead of rewriting every extraction path in a 3000-line module. Four asymmetries are named rather than papered over: system blocks flatten and <code>cache_control</code> is dropped (prompt caching really is Anthropic-only, and the Settings copy says so), forced tool choice remaps, tool arguments arrive as a JSON <em>string</em> and parse to <code>{}</code> on malformed output — the same signal the call sites already handle for "no tool call happened", which matters because weak local models emit invalid JSON often — and usage keys are renamed so quota accounting survives. <code>validate_base_url</code> rejects non-HTTP schemes and embedded credentials but deliberately allows RFC1918: pointing at Ollama on the LAN is the whole point, and blocking it would defeat the feature. Validation runs on write so a bad URL is a 400 next to the field, not a mysterious empty card later. Columns are nullable with no backfill, so a null provider means Anthropic and every existing install behaves exactly as before. Closes the local-LLM item under COACH-BATCH3 in TODO.md. <code>backend/tests/test_llm_provider_seam.py</code> — 17 tests. Backend 425 green.</td>
+      </tr>
       <tr>
         <td><strong>TD-10</strong> — ad-hoc exercise slots</td>
         <td><span class="chip c-done">shipped</span></td>
@@ -578,7 +583,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     </div>
     <div class="rk">
       <div class="n">8</div><div class="t">LLM provider seam: Anthropic plus OpenAI-compatible / Ollama</div>
-      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div>
+      <div class="m"><span class="chip c-done">shipped</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div>
       <div class="d">Already on the roadmap under COACH-BATCH3. It is genuinely a seam, not a rewrite: <code>hash_payload</code>, <code>ai_summaries</code> caching and <code>_check_and_bump_quota</code> all sit <em>above</em> the provider boundary. Price three risks honestly — small models emit far worse structured output so a salvage layer is load-bearing, prompt caching is Anthropic-only so the cost model changes silently, and a user-supplied <code>base_url</code> on a CT that can reach the whole Proxmox cluster is an SSRF surface.</div>
     </div>
     <div class="rk">
@@ -662,7 +667,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     <div class="dbody">
       <div class="opts">
         <div class="opt"><div class="h">Standing instructions + tone cache-key fix</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div><p class="b">Ranked #9.</p></div>
-        <div class="opt"><div class="h">Provider seam: Anthropic plus OpenAI-compatible / Ollama</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Ranked #8.</p></div>
+        <div class="opt"><div class="h">Provider seam: Anthropic plus OpenAI-compatible / Ollama</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Ranked #8.</p></div>
         <div class="opt"><div class="h">Structure and cache <code>/ai/ask</code>, then ship it to the phone</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">The one AI surface still returning free prose, uncached and web-only. Forced tool-use with a <code>give_answer</code> schema brings it in line with every other card and stops it re-billing identical questions.</p></div>
         <div class="opt"><div class="h">An MCP server over the existing read helpers</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b"><em>Not in the researchers' list — added from reading their <code>ai/mcp/mcpAdapter.ts</code>.</em> Publish the bounded payload builders that already exist as MCP tools behind the ingest token. Claude Code and Claude Desktop become clients of your own health data with no chat UI to build, no write path, no agent loop, and no quota risk — reads only. The highest capability-per-line item in this document after the taxonomy fix.</p></div>
         <div class="opt"><div class="h">Conversational coach that can write data</div><div class="meta"><span class="chip c-cut">declined</span><span class="chip c-eff">XL</span><span class="chip c-lo">not advised</span></div><p class="b">Argues against three of your four stated values simultaneously. An agent loop multiplies provider calls per turn so <code>daily_call_limit</code> stops meaning what it says; it puts an LLM adjacent to the write path, mitigated only by a confirm dance that is two taps where the manual form is one; and it is the first place raw user prose lands in the DB, reopening exactly the leak class <code>test_ai_privacy.py</code> exists to catch. The useful 10% is the structured-ask option above.</p></div>

@@ -76,7 +76,9 @@ async def test_sober_status_never_sends_addiction_or_real_name():
 
 
 class _FakeAnthropic:
-    """Captures the kwargs passed to messages.create so the test can inspect
+    """Stands in for whichever provider get_provider would have returned.
+
+    Captures the kwargs passed to messages.create so the test can inspect
     exactly what bytes would have left the box."""
 
     captured: list = []
@@ -97,7 +99,12 @@ class _FakeAnthropic:
 
 
 async def test_activity_summary_never_sends_strava_title(monkeypatch):
-    monkeypatch.setattr(claude, "AsyncAnthropic", _FakeAnthropic)
+    # TD-8 put a provider seam under the AI layer, so the patch point moved
+    # from the Anthropic SDK class to the factory that chooses a provider.
+    # The privacy contract this test enforces is unchanged and applies to
+    # every provider — arguably more urgently to a third-party
+    # OpenAI-compatible endpoint than to Anthropic.
+    monkeypatch.setattr(claude, "get_provider", lambda cfg: _FakeAnthropic(api_key=None))
     _FakeAnthropic.captured.clear()
 
     db = _FakeDB([_Result(many=[])])  # _daily_rows → no summaries

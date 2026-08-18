@@ -106,8 +106,10 @@ which reference element before touching fonts.
   schedule. User declined 2026-07-22 (fragile + needs IMAP setup), but
   it's the only free way to make cookie mode self-heal. Not started.
 - **COACH-BATCH3** — future Coach sub-cards: week-vs-week diff view,
-  clickable source citations, smart cache invalidation, local-LLM
-  (Ollama) provider, voice Q&A. Each follows the "Adding a new card"
+  clickable source citations, smart cache invalidation, ~~local-LLM
+  (Ollama) provider~~ (shipped as TD-8: `integrations/llm/` provider seam,
+  Anthropic default plus any OpenAI-compatible endpoint), voice Q&A.
+  Each follows the "Adding a new card"
   pattern in CLAUDE.md.
 - **MULTI-USER** — single-user assumed throughout; no `user_id` on
   most tables. Big schema+auth+client refactor. No demand yet.

@@ -320,6 +320,10 @@ export const api = {
     calls_today: number;
     weekly_digest_enabled: boolean;
     tone: "supportive" | "blunt" | "data-only";
+    /** Which backend answers. "anthropic" is the default and the only one
+     *  that supports prompt caching. */
+    provider: "anthropic" | "openai_compatible" | "ollama";
+    base_url: string;
     /** Standing instructions appended to every AI system prompt. */
     custom_instructions: string;
     custom_instructions_max: number;
@@ -338,6 +342,8 @@ export const api = {
     tone?: "supportive" | "blunt" | "data-only";
     /** Empty string clears; omit to leave unchanged. */
     custom_instructions?: string;
+    provider?: "anthropic" | "openai_compatible" | "ollama";
+    base_url?: string;
   }) {
     const { data } = await http.post("/ai/config", body);
     return data;

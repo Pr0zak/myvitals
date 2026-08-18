@@ -18,8 +18,10 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import BigInteger, DateTime, and_, delete, func, select
+from sqlalchemy import column as sa_column
 from sqlalchemy import update as sa_update
+from sqlalchemy import values as sa_values
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...analytics import energy
@@ -1357,36 +1359,54 @@ async def list_workouts(
 
     # HR window per workout (only when both started_at + completed_at present).
     #
-    # TD-4 — this used to issue one aggregate query per workout in the page.
-    # It is now a single scan bucketed by session window: the windows are
-    # disjoint in practice (you cannot be in two workouts at once), so one
-    # CASE-free pass with a per-row Python bucket is both simpler and cheaper
-    # than N round trips.
+    # TD-4, corrected in v0.8.1 — one round trip, aggregated by Postgres.
+    #
+    # The first version of this replaced an N+1 with something far worse: it
+    # took the min start and max end across the whole page and pulled EVERY
+    # heart-rate sample in that span into Python to bucket by hand. For a page
+    # covering weeks that is hundreds of thousands of rows to compute a
+    # handful of averages, and it took /workout/strength/workouts from
+    # milliseconds to 5.5 seconds for five workouts and 17 seconds for two
+    # hundred — slow enough that the phone's client timed out and reported it
+    # as "can't reach server".
+    #
+    # A session window is a few thousand samples; the span between the first
+    # and last session in a page is not. Joining the windows as a VALUES list
+    # keeps it to one query while letting the index do the work and the
+    # database do the aggregation, which is what "batched" should have meant.
     hr_stats: dict[int, dict[str, Any]] = {}
     windows = [
         (w.id, w.started_at, w.completed_at) for w in rows
         if w.status == "completed" and w.started_at and w.completed_at
     ]
     if windows:
-        span_start = min(s for _i, s, _e in windows)
-        span_end = max(e for _i, _s, e in windows)
-        samples = (await db.execute(
-            select(models.HeartRate.time, models.HeartRate.bpm)
-            .where(models.HeartRate.time >= span_start)
-            .where(models.HeartRate.time <= span_end)
-            .order_by(models.HeartRate.time)
+        win = sa_values(
+            sa_column("wid", BigInteger),
+            sa_column("w_start", DateTime(timezone=True)),
+            sa_column("w_end", DateTime(timezone=True)),
+            name="win",
+        ).data(windows)
+        hr_rows = (await db.execute(
+            select(
+                win.c.wid,
+                func.avg(models.HeartRate.bpm),
+                func.max(models.HeartRate.bpm),
+            )
+            .select_from(win)
+            .join(
+                models.HeartRate,
+                and_(
+                    models.HeartRate.time >= win.c.w_start,
+                    models.HeartRate.time <= win.c.w_end,
+                ),
+            )
+            .group_by(win.c.wid)
         )).all()
-        acc: dict[int, list[float]] = {}
-        for ts, bpm in samples:
-            for wid, w_start, w_end in windows:
-                if w_start <= ts <= w_end:
-                    acc.setdefault(wid, []).append(float(bpm))
-                    break
-        for wid, vals in acc.items():
-            if vals:
-                hr_stats[wid] = {
-                    "avg_hr": round(sum(vals) / len(vals), 1),
-                    "max_hr": round(max(vals), 1),
+        for wid, avg_bpm, max_bpm in hr_rows:
+            if avg_bpm is not None:
+                hr_stats[int(wid)] = {
+                    "avg_hr": round(float(avg_bpm), 1),
+                    "max_hr": round(float(max_bpm), 1) if max_bpm is not None else None,
                 }
 
     weight_kg, age, sex = await _energy_inputs(db)

@@ -320,6 +320,9 @@ export const api = {
     calls_today: number;
     weekly_digest_enabled: boolean;
     tone: "supportive" | "blunt" | "data-only";
+    /** Standing instructions appended to every AI system prompt. */
+    custom_instructions: string;
+    custom_instructions_max: number;
   }> {
     const { data } = await http.get("/ai/config");
     return data;
@@ -333,6 +336,8 @@ export const api = {
     daily_call_limit?: number;
     weekly_digest_enabled?: boolean;
     tone?: "supportive" | "blunt" | "data-only";
+    /** Empty string clears; omit to leave unchanged. */
+    custom_instructions?: string;
   }) {
     const { data } = await http.post("/ai/config", body);
     return data;

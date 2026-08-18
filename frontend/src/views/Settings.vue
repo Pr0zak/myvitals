@@ -504,7 +504,14 @@ const aiResult = ref<string>("");
 
 async function loadAiCfg() {
   if (!queryToken.value) return;
-  try { aiCfg.value = await api.aiConfig(); } catch { /* ignore */ }
+  try {
+    aiCfg.value = await api.aiConfig();
+    // Seed the editor from the server only when the user has not started
+    // typing, so a background refresh cannot discard an unsaved draft.
+    if (!aiInstructionsDirty.value || aiInstructions.value === "") {
+      aiInstructions.value = aiCfg.value.custom_instructions ?? "";
+    }
+  } catch { /* ignore */ }
 }
 async function aiSaveKey() {
   if (!aiKeyInput.value.trim()) return;
@@ -539,6 +546,35 @@ async function aiUpdateModel(model: string) {
   try { await api.aiUpdateConfig({ model }); await loadAiCfg(); }
   catch { /* swallow */ }
 }
+// TD-9 — standing instructions handed to every AI surface.
+//
+// Before this the entire user model the coach had was a three-value tone
+// enum: there was no way to say "rehabbing a left shoulder, never suggest
+// overhead pressing" or "my fasts are religious, don't read a low HRV as
+// overtraining". The text is appended to every system prompt under a fixed
+// heading, inside the prefix that already carries the prompt-cache
+// breakpoint, so it costs nothing per call once cached.
+const aiInstructions = ref("");
+const aiInstructionsSaving = ref(false);
+const aiInstructionsSaved = ref(false);
+const aiInstructionsMax = computed(() => aiCfg.value?.custom_instructions_max ?? 1000);
+const aiInstructionsDirty = computed(
+  () => aiInstructions.value !== (aiCfg.value?.custom_instructions ?? ""),
+);
+
+async function aiSaveInstructions() {
+  aiInstructionsSaving.value = true;
+  aiInstructionsSaved.value = false;
+  try {
+    await api.aiUpdateConfig({ custom_instructions: aiInstructions.value.trim() });
+    await loadAiCfg();
+    aiInstructions.value = aiCfg.value?.custom_instructions ?? "";
+    aiInstructionsSaved.value = true;
+  } finally {
+    aiInstructionsSaving.value = false;
+  }
+}
+
 async function aiUpdateTone(tone: string) {
   if (tone !== "supportive" && tone !== "blunt" && tone !== "data-only") return;
   try { await api.aiUpdateConfig({ tone }); await loadAiCfg(); }
@@ -1644,6 +1680,29 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
             <option value="blunt">Blunt</option>
             <option value="data-only">Data-only</option>
           </select>
+        </label>
+        <label class="ai-instructions">
+          <span>Standing instructions</span>
+          <textarea
+            v-model="aiInstructions"
+            :maxlength="aiInstructionsMax"
+            rows="4"
+            placeholder="e.g. Rehabbing a left shoulder — never suggest overhead pressing. My fasts are religious; don't read a compressed HRV during one as overtraining."
+          ></textarea>
+          <div class="ai-instructions-foot">
+            <span class="muted">
+              {{ aiInstructions.length }}/{{ aiInstructionsMax }}
+            </span>
+            <span class="muted">
+              Added to every AI card. Saving invalidates every cached
+              summary, so expect one burst of re-billing.
+            </span>
+            <button class="ghost" :disabled="!aiInstructionsDirty || aiInstructionsSaving"
+                    @click="aiSaveInstructions">
+              {{ aiInstructionsSaving ? 'Saving…' : 'Save' }}
+            </button>
+            <span v-if="aiInstructionsSaved && !aiInstructionsDirty" class="saved">saved</span>
+          </div>
         </label>
         <label class="ai-toggle">
           <span>Daily call limit:</span>
@@ -2763,4 +2822,29 @@ html[data-theme="neon"] .settings .apply-steps li.current::before { color: var(-
   border-color: var(--accent);
 }
 .rail-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* TD-9 — standing instructions editor. Full-width rather than the inline
+   .ai-toggle row, because this is prose the user needs to read back before
+   saving: it goes into every prompt and it is a prompt-injection surface. */
+.ai-instructions { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.ai-instructions textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  resize: vertical;
+}
+.ai-instructions-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.72rem;
+}
+.ai-instructions-foot .muted:last-of-type { flex: 1 1 18rem; }
 </style>

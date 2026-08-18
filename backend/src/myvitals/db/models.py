@@ -385,6 +385,13 @@ class AiConfig(Base):
     calls_today_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     weekly_digest_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     tone: Mapped[str] = mapped_column(String(16), default="supportive")
+    # Standing instructions appended verbatim to every system prompt under a
+    # fixed heading. The tone enum was the entire user model the AI had; this
+    # is where "rehabbing a left shoulder, never suggest overhead pressing"
+    # or "my fasts are religious, don't read a low HRV as overtraining"
+    # lives. Length-capped in the API layer -- it is a prompt-injection
+    # surface aimed at the model's own guardrails.
+    custom_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

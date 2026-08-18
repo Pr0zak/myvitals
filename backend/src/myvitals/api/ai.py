@@ -27,6 +27,7 @@ from ..integrations.claude import (
     explain_legacy,
     explain_topic,
     fasting_coach,
+    MAX_CUSTOM_INSTRUCTIONS,
     hash_payload,
     pre_workout,
     recovery_coach,
@@ -58,6 +59,36 @@ async def _get_config(db: AsyncSession) -> models.AiConfig:
 
 # ─────────────── Config ───────────────
 
+def _ai_cache_key(
+    cfg: models.AiConfig, kind: str, payload: dict[str, Any],
+) -> str:
+    """The cache key for one AI surface — payload plus everything that
+    changes the answer for the same payload.
+
+    Tone and standing instructions are inputs to the response, not
+    decoration: switching Supportive to Blunt rewrites the prose, and a
+    standing instruction can change the recommendation itself. Leaving them
+    out of the key meant `ai_summaries` returned the old card.
+
+    That is not hypothetical. Before TD-9, the five /coach/* sites hashed
+    {"kind", "tone", "p"} correctly while the seven older ones -- /explain,
+    /verdict, /summary and the four /strength/* surfaces -- hashed the bare
+    payload. Switching tone returned the stale Supportive card on all seven.
+    The author clearly knew the rule and missed the earlier call sites, which
+    is exactly the argument for there being one function instead of a
+    convention.
+
+    `kind` is part of the key so two surfaces built from the same aggregate
+    cannot collide.
+    """
+    return hash_payload({
+        "kind": kind,
+        "tone": cfg.tone,
+        "instructions": (getattr(cfg, "custom_instructions", None) or "").strip(),
+        "p": payload,
+    })
+
+
 @router.get("/config")
 async def get_config(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     cfg = await _get_config(db)
@@ -70,6 +101,8 @@ async def get_config(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
         "calls_today": cfg.calls_today if cfg.calls_today_date == date.today() else 0,
         "weekly_digest_enabled": cfg.weekly_digest_enabled,
         "tone": cfg.tone,
+        "custom_instructions": cfg.custom_instructions or "",
+        "custom_instructions_max": MAX_CUSTOM_INSTRUCTIONS,
     }
 
 
@@ -81,6 +114,10 @@ class ConfigUpdate(BaseModel):
     daily_call_limit: int | None = None
     weekly_digest_enabled: bool | None = None
     tone: str | None = None
+    # Standing instructions handed to every AI surface. Empty string clears
+    # them; null (the default) leaves them alone, so a partial update from
+    # one client cannot wipe what another set.
+    custom_instructions: str | None = None
 
 
 @router.post("/config")
@@ -102,6 +139,12 @@ async def update_config(
         cfg.weekly_digest_enabled = body.weekly_digest_enabled
     if body.tone is not None and body.tone in ("supportive", "blunt", "data-only"):
         cfg.tone = body.tone
+    if body.custom_instructions is not None:
+        # Truncate rather than reject: silently losing the tail is worse than
+        # a hard error, so the UI enforces the same limit and shows a counter,
+        # and this is the backstop for anything that bypasses it.
+        trimmed = body.custom_instructions.strip()[:MAX_CUSTOM_INSTRUCTIONS]
+        cfg.custom_instructions = trimmed or None
     cfg.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return await get_config(db)
@@ -166,7 +209,7 @@ async def explain_endpoint(
     await _check_and_bump_quota(db, cfg)
 
     payload = await build_summary_payload(db, range)
-    payload_hash = hash_payload(payload)
+    payload_hash = _ai_cache_key(cfg, range, payload)
     cached = (await db.execute(
         select(models.AiSummary)
         .where(models.AiSummary.range_kind == range)
@@ -238,7 +281,7 @@ async def explain_topic_endpoint(
         payload = await build_summary_payload(db, topic)
     else:
         payload = await build_topic_payload(db, topic, days=14)
-    payload_hash = hash_payload({"topic": topic, **payload})
+    payload_hash = _ai_cache_key(cfg, f"topic:{topic}", payload)
 
     cached = (await db.execute(
         select(models.AiSummary)
@@ -304,7 +347,7 @@ async def verdict_endpoint(db: AsyncSession = Depends(get_session)) -> dict[str,
     # Build the real payload to compute hash
     from ..integrations.claude import build_verdict_payload as _bvp
     real = await _bvp(db)
-    payload_hash = hash_payload({**payload, "snapshot": real})
+    payload_hash = _ai_cache_key(cfg, "verdict", {**payload, "snapshot": real})
 
     cached = (await db.execute(
         select(models.AiSummary)
@@ -972,7 +1015,7 @@ async def strength_review_endpoint(
         build_strength_review_payload, strength_review,
     )
     payload = await build_strength_review_payload(db, workout_id)
-    payload_hash = hash_payload(payload)
+    payload_hash = _ai_cache_key(cfg, f"strength_review:{workout_id}", payload)
     range_kind = f"strength_review:{workout_id}"
     cached = (await db.execute(
         select(models.AiSummary)
@@ -1035,7 +1078,7 @@ async def strength_nudge_endpoint(
     catalog_by_id = strength_algo.CATALOG_BY_ID
 
     payload = await build_strength_nudge_payload(db, workout_id, catalog_by_id)
-    payload_hash = hash_payload(payload)
+    payload_hash = _ai_cache_key(cfg, f"strength_nudge:{workout_id}", payload)
     range_kind = f"strength_nudge:{workout_id}"
     cached = (await db.execute(
         select(models.AiSummary)
@@ -1098,7 +1141,7 @@ async def strength_focus_cue_endpoint(
     catalog_by_id = strength_algo.CATALOG_BY_ID
 
     payload = await build_focus_cue_payload(db, workout_id, catalog_by_id)
-    payload_hash = hash_payload(payload)
+    payload_hash = _ai_cache_key(cfg, f"strength_focus_cue:{workout_id}", payload)
     range_kind = f"strength_focus_cue:{workout_id}"
     cached = (await db.execute(
         select(models.AiSummary)
@@ -1155,7 +1198,7 @@ async def strength_deload_check_endpoint(
     from ..integrations.claude import build_deload_payload, deload_check
 
     payload = await build_deload_payload(db)
-    payload_hash = hash_payload(payload)
+    payload_hash = _ai_cache_key(cfg, "strength_deload", payload)
     range_kind = "strength_deload"
     cached = (await db.execute(
         select(models.AiSummary)
@@ -1308,7 +1351,7 @@ async def coach_cardio_endpoint(
     cfg = await _get_config(db)
     await _check_and_bump_quota(db, cfg)
     payload = await build_cardio_coach_payload(db)
-    payload_hash = hash_payload({"kind": "coach_cardio", "tone": cfg.tone, "p": payload})
+    payload_hash = _ai_cache_key(cfg, "coach_cardio", payload)
     cached = await _coach_cached(db, "coach_cardio", payload_hash)
     if cached is not None:
         return cached
@@ -1352,7 +1395,7 @@ async def coach_workout_endpoint(
     cfg = await _get_config(db)
     await _check_and_bump_quota(db, cfg)
     payload = await build_workout_coach_payload(db)
-    payload_hash = hash_payload({"kind": "coach_workout", "tone": cfg.tone, "p": payload})
+    payload_hash = _ai_cache_key(cfg, "coach_workout", payload)
     cached = await _coach_cached(db, "coach_workout", payload_hash)
     if cached is not None:
         return cached
@@ -1396,7 +1439,7 @@ async def coach_sleep_endpoint(
     cfg = await _get_config(db)
     await _check_and_bump_quota(db, cfg)
     payload = await build_sleep_coach_payload(db)
-    payload_hash = hash_payload({"kind": "coach_sleep", "tone": cfg.tone, "p": payload})
+    payload_hash = _ai_cache_key(cfg, "coach_sleep", payload)
     cached = await _coach_cached(db, "coach_sleep", payload_hash)
     if cached is not None:
         return cached
@@ -1440,7 +1483,7 @@ async def coach_recovery_endpoint(
     cfg = await _get_config(db)
     await _check_and_bump_quota(db, cfg)
     payload = await build_recovery_coach_payload(db)
-    payload_hash = hash_payload({"kind": "coach_recovery", "tone": cfg.tone, "p": payload})
+    payload_hash = _ai_cache_key(cfg, "coach_recovery", payload)
     cached = await _coach_cached(db, "coach_recovery", payload_hash)
     if cached is not None:
         return cached
@@ -1484,7 +1527,7 @@ async def coach_fasting_endpoint(
     cfg = await _get_config(db)
     await _check_and_bump_quota(db, cfg)
     payload = await build_fasting_coach_payload(db)
-    payload_hash = hash_payload({"kind": "coach_fasting", "tone": cfg.tone, "p": payload})
+    payload_hash = _ai_cache_key(cfg, "coach_fasting", payload)
     cached = await _coach_cached(db, "coach_fasting", payload_hash)
     if cached is not None:
         return cached

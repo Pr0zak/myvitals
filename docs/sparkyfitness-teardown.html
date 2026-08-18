@@ -239,13 +239,13 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
 <div class="prog">
   <h4>Build progress</h4>
   <p style="margin-bottom:0">The ranked shortlist is tracked as tasks <code>TD-1</code>–<code>TD-10</code>. The full option menu below is the durable backlog — nothing is pruned from it, including the items declined and the reasons why.</p>
-  <div class="bar" role="img" aria-label="6 of 10 shortlist items shipped"><i class="b-done" style="width:60%"></i><i class="b-wip" style="width:0%"></i></div>
+  <div class="bar" role="img" aria-label="7 of 10 shortlist items shipped"><i class="b-done" style="width:70%"></i><i class="b-wip" style="width:0%"></i></div>
   <div class="legend">
-    <span><b style="background:var(--good)"></b> shipped &nbsp;6</span>
+    <span><b style="background:var(--good)"></b> shipped &nbsp;7</span>
     <span><b style="background:var(--sp)"></b> in progress &nbsp;0</span>
-    <span><b style="background:var(--rule)"></b> not started &nbsp;4</span>
+    <span><b style="background:var(--rule)"></b> not started &nbsp;3</span>
     <span>·</span>
-    <span>full menu: 40 options, 6 shipped, 1 declined</span>
+    <span>full menu: 40 options, 7 shipped, 1 declined</span>
   </div>
 </div>
 
@@ -255,6 +255,11 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
   <div class="scroll"><table>
     <thead><tr><th>Option</th><th>Status</th><th>What changed</th></tr></thead>
     <tbody>
+      <tr>
+        <td><strong>TD-9</strong> — standing instructions + tone cache-key fix</td>
+        <td><span class="chip c-done">shipped</span></td>
+        <td><strong>The bug, verified and fixed.</strong> Five <code>/coach/*</code> endpoints hashed <code>{"kind", "tone", "p"}</code> correctly while seven older ones — <code>/explain</code>, <code>/verdict</code>, <code>/summary</code> and the four <code>/strength/*</code> surfaces — hashed the bare payload, so switching Supportive → Blunt returned the stale Supportive card on all seven. All twelve now route through one <code>_ai_cache_key(cfg, kind, payload)</code>, which is the point: the author clearly knew the rule and missed the earlier call sites, so a convention was never going to hold. <strong>The feature.</strong> <code>ai_config.custom_instructions</code> (migration 0049) is appended verbatim to every system prompt under a fixed heading — appended, never prepended, so it augments the base rules rather than replacing them. Threaded through a single chokepoint: <code>_cached_system(text, cfg)</code>, called at all 19 prompt sites, so a twentieth cannot silently drop it. It lives inside the prefix that already carries the <code>cache_control</code> breakpoint, so it costs nothing per call once cached. Until now the entire user model handed to the AI was a three-value tone enum, with no way to say "rehabbing a left shoulder, never suggest overhead pressing" or "my fasts are religious — don't read a compressed HRV as overtraining". Capped at 1000 characters: this is a prompt-injection surface aimed at the model's own guardrails, and unbounded text in the cached prefix inflates every request. Both <code>personalise()</code> and the cache key use <code>getattr</code>, so an app running briefly against a pre-0049 database degrades to "no instructions" rather than 500-ing every AI surface. The editor is web-only, consistent with all AI configuration; the <em>effect</em> reaches both surfaces through the same endpoints. <code>backend/tests/test_ai_cache_key.py</code> — 11 tests — includes two structural guards that fail the build on a bare <code>hash_payload(payload)</code> or a <code>_cached_system</code> call without <code>cfg</code>. Backend 398 green.</td>
+      </tr>
       <tr>
         <td><strong>TD-7</strong> — real navigation for web Settings</td>
         <td><span class="chip c-done">shipped</span></td>
@@ -573,7 +578,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     </div>
     <div class="rk">
       <div class="n">9</div><div class="t">Standing instructions, plus the tone cache-key fix</div>
-      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div>
+      <div class="m"><span class="chip c-done">shipped</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div>
       <div class="d">Best value per hour on the list. Today the entire user model handed to the AI is a three-value tone enum — there is no way to say "rehabbing a left shoulder, never suggest overhead pressing" or "I fast for religious reasons, don't read low HRV as overtraining." It lives inside the prompt prefix that is already cache-controlled, and both clients inherit it with zero Kotlin or Vue changes. Cap the length, append under a fixed heading, and warn that saving invalidates every cached summary at once.</div>
     </div>
     <div class="rk">
@@ -651,7 +656,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     <summary><span>AI — 5 options</span></summary>
     <div class="dbody">
       <div class="opts">
-        <div class="opt"><div class="h">Standing instructions + tone cache-key fix</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div><p class="b">Ranked #9.</p></div>
+        <div class="opt"><div class="h">Standing instructions + tone cache-key fix</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">S</span><span class="chip c-hi">high</span></div><p class="b">Ranked #9.</p></div>
         <div class="opt"><div class="h">Provider seam: Anthropic plus OpenAI-compatible / Ollama</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-hi">high</span></div><p class="b">Ranked #8.</p></div>
         <div class="opt"><div class="h">Structure and cache <code>/ai/ask</code>, then ship it to the phone</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">The one AI surface still returning free prose, uncached and web-only. Forced tool-use with a <code>give_answer</code> schema brings it in line with every other card and stops it re-billing identical questions.</p></div>
         <div class="opt"><div class="h">An MCP server over the existing read helpers</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b"><em>Not in the researchers' list — added from reading their <code>ai/mcp/mcpAdapter.ts</code>.</em> Publish the bounded payload builders that already exist as MCP tools behind the ingest token. Claude Code and Claude Desktop become clients of your own health data with no chat UI to build, no write path, no agent loop, and no quota risk — reads only. The highest capability-per-line item in this document after the taxonomy fix.</p></div>

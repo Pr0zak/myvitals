@@ -463,11 +463,55 @@ def hash_payload(payload: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _cached_system(text: str) -> list[dict]:
+# Hard cap on standing instructions. Long enough for a few real constraints,
+# short enough that it cannot quietly inflate the cached prefix of every
+# request -- and short enough to read before saving, which matters because
+# this text is aimed at the model's own guardrails.
+MAX_CUSTOM_INSTRUCTIONS = 1000
+
+
+def personalise(text: str, cfg: "models.AiConfig | None") -> str:
+    """Append the user's standing instructions to a system prompt.
+
+    Appended, never prepended, and under a fixed heading: these instructions
+    augment the base rules rather than replacing them, and putting them last
+    means a prompt cannot be made to look like it starts with user text.
+
+    Every system prompt in this module goes through here, which is the point.
+    The tone flavour is threaded into twelve separate prompt builders and the
+    thirteenth would have been forgotten; one chokepoint is how the same
+    thing does not happen to this.
+    """
+    if cfg is None:
+        return text
+    # getattr rather than attribute access: during a rolling deploy the app
+    # can briefly run against a database that has not taken migration 0049
+    # yet, and a missing column must degrade to "no extra instructions"
+    # rather than 500 every AI surface at once.
+    extra = (getattr(cfg, "custom_instructions", None) or "").strip()
+    if not extra:
+        return text
+    return (
+        f"{text}\n\n## Additional instructions from the user\n"
+        f"{extra[:MAX_CUSTOM_INSTRUCTIONS]}\n"
+    )
+
+
+def _cached_system(text: str, cfg: "models.AiConfig | None" = None) -> list[dict]:
     """Wrap the system prompt for Anthropic's prompt cache so the fixed
     template doesn't get re-billed at full input rate on every call.
-    Saves ~50% on repeated topical reads."""
-    return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+    Saves ~50% on repeated topical reads.
+
+    `cfg` carries the user's standing instructions. They sit inside the
+    cached prefix deliberately: the text is fixed between edits, so it is
+    billed once per cache window rather than per call. Editing it invalidates
+    the cache — and every stored summary — which is why the UI warns before
+    saving."""
+    return [{
+        "type": "text",
+        "text": personalise(text, cfg),
+        "cache_control": {"type": "ephemeral"},
+    }]
 
 
 async def explain_legacy(db: AsyncSession, range_kind: str, cfg: models.AiConfig) -> AiResult:
@@ -483,7 +527,7 @@ async def explain_legacy(db: AsyncSession, range_kind: str, cfg: models.AiConfig
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
-        system=_cached_system(system_prompt(cfg.tone)),
+        system=_cached_system(system_prompt(cfg.tone), cfg),
         messages=[{"role": "user", "content": user_text}],
     )
     text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
@@ -530,7 +574,7 @@ async def explain_topic(
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
-        system=_cached_system(structured_system(cfg.tone)),
+        system=_cached_system(structured_system(cfg.tone), cfg),
         tools=[ANALYSIS_TOOL],
         tool_choice={"type": "tool", "name": "give_analysis"},
         messages=[{"role": "user", "content": user_text}],
@@ -580,7 +624,7 @@ async def verdict(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=80,
-        system=_cached_system(VERDICT_SYSTEM),
+        system=_cached_system(VERDICT_SYSTEM, cfg),
         messages=[{"role": "user", "content": user_text}],
     )
     text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
@@ -609,7 +653,7 @@ async def ask(db: AsyncSession, cfg: models.AiConfig, question: str) -> AiResult
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=400,
-        system=_cached_system(ASK_SYSTEM),
+        system=_cached_system(ASK_SYSTEM, cfg),
         messages=[{"role": "user", "content": user_text}],
     )
     text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
@@ -654,7 +698,7 @@ async def explain_discovery(
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=300,
-        system=_cached_system(ASK_SYSTEM),
+        system=_cached_system(ASK_SYSTEM, cfg),
         messages=[{"role": "user", "content": user_text}],
     )
     text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
@@ -689,7 +733,7 @@ async def pre_workout(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=80,
-        system=_cached_system(VERDICT_SYSTEM),
+        system=_cached_system(VERDICT_SYSTEM, cfg),
         messages=[{"role": "user", "content": user_text}],
     )
     text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
@@ -740,7 +784,7 @@ async def activity_summary(
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=200,
-        system=_cached_system(ASK_SYSTEM),
+        system=_cached_system(ASK_SYSTEM, cfg),
         messages=[{"role": "user", "content": user_text}],
     )
     text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
@@ -813,7 +857,7 @@ async def goal_check(
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=300,
-        system=_cached_system(ASK_SYSTEM),
+        system=_cached_system(ASK_SYSTEM, cfg),
         messages=[{"role": "user", "content": user_text}],
     )
     text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
@@ -870,7 +914,7 @@ async def explain_all(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=1500,
-        system=_cached_system(structured_system(cfg.tone)),
+        system=_cached_system(structured_system(cfg.tone), cfg),
         tools=[ALL_TOPICS_TOOL],
         tool_choice={"type": "tool", "name": "give_all_topics"},
         messages=[{"role": "user", "content": user_text}],
@@ -1297,7 +1341,7 @@ async def strength_nudge(
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=400,
-        system=_cached_system(_strength_nudge_system(cfg.tone)),
+        system=_cached_system(_strength_nudge_system(cfg.tone), cfg),
         tools=[STRENGTH_NUDGE_TOOL],
         tool_choice={"type": "tool", "name": "give_variety_nudge"},
         messages=[{"role": "user", "content": user_text}],
@@ -1333,7 +1377,7 @@ async def strength_review(
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
-        system=_cached_system(_strength_review_system(cfg.tone)),
+        system=_cached_system(_strength_review_system(cfg.tone), cfg),
         tools=[STRENGTH_REVIEW_TOOL],
         tool_choice={"type": "tool", "name": "give_strength_review"},
         messages=[{"role": "user", "content": user_text}],
@@ -1523,7 +1567,7 @@ async def deload_check(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=500,
-        system=_cached_system(_deload_system(cfg.tone)),
+        system=_cached_system(_deload_system(cfg.tone), cfg),
         tools=[DELOAD_TOOL],
         tool_choice={"type": "tool", "name": "give_deload_judgment"},
         messages=[{"role": "user", "content": user_text}],
@@ -1709,7 +1753,7 @@ async def strength_focus_cue(
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=300,
-        system=_cached_system(_focus_cue_system(cfg.tone)),
+        system=_cached_system(_focus_cue_system(cfg.tone), cfg),
         tools=[FOCUS_CUE_TOOL],
         tool_choice={"type": "tool", "name": "give_focus_cue"},
         messages=[{"role": "user", "content": user_text}],
@@ -1746,7 +1790,7 @@ async def phrase_anomaly(cfg: models.AiConfig, anomaly: dict[str, Any]) -> str:
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=60,
-        system=_cached_system(VERDICT_SYSTEM),
+        system=_cached_system(VERDICT_SYSTEM, cfg),
         messages=[{"role": "user", "content": user_text}],
     )
     text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
@@ -2004,7 +2048,7 @@ async def cardio_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=500,
-        system=_cached_system(_cardio_coach_system(cfg.tone)),
+        system=_cached_system(_cardio_coach_system(cfg.tone), cfg),
         tools=[CARDIO_COACH_TOOL],
         tool_choice={"type": "tool", "name": "give_cardio_coach"},
         messages=[{"role": "user", "content": user_text}],
@@ -2320,7 +2364,7 @@ async def sleep_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
-        system=_cached_system(_sleep_coach_system(cfg.tone)),
+        system=_cached_system(_sleep_coach_system(cfg.tone), cfg),
         tools=[SLEEP_COACH_TOOL],
         tool_choice={"type": "tool", "name": "give_sleep_coach"},
         messages=[{"role": "user", "content": user_text}],
@@ -2519,7 +2563,7 @@ async def recovery_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
-        system=_cached_system(_recovery_coach_system(cfg.tone)),
+        system=_cached_system(_recovery_coach_system(cfg.tone), cfg),
         tools=[RECOVERY_COACH_TOOL],
         tool_choice={"type": "tool", "name": "give_recovery_coach"},
         messages=[{"role": "user", "content": user_text}],
@@ -2781,7 +2825,7 @@ async def fasting_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
-        system=_cached_system(_fasting_coach_system(cfg.tone)),
+        system=_cached_system(_fasting_coach_system(cfg.tone), cfg),
         tools=[FASTING_COACH_TOOL],
         tool_choice={"type": "tool", "name": "give_fasting_coach"},
         messages=[{"role": "user", "content": user_text}],
@@ -2859,7 +2903,7 @@ async def workout_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     resp = await client.messages.create(
         model=cfg.model,
         max_tokens=600,
-        system=_cached_system(_workout_coach_system(cfg.tone)),
+        system=_cached_system(_workout_coach_system(cfg.tone), cfg),
         tools=[WORKOUT_COACH_TOOL],
         tool_choice={"type": "tool", "name": "give_workout_coach"},
         messages=[{"role": "user", "content": user_text}],

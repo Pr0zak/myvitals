@@ -170,26 +170,14 @@ async def concept2_webhook(
         if mapped is None:
             log.info("concept2 webhook %s: unmappable result", event)
             return {"ok": True, "event": event, "action": "ignored"}
-        existing = await db.get(
-            models.Activity, (mapped["source"], mapped["source_id"]),
-        )
-        if existing is None:
-            db.add(models.Activity(**mapped))
-        else:
-            for k, v in mapped.items():
-                if k in ("source", "source_id"):
-                    continue
-                setattr(existing, k, v)
+        # TD-5 — the shared sink, so the webhook and the polling sync take
+        # the same path. This handler previously copied every mapped key onto
+        # an existing row, which let a `result-updated` event with a thinner
+        # payload blank fields the original `result-added` had filled.
+        from ..integrations.activity_sink import upsert_activity
+
+        await upsert_activity(db, mapped)
         await concept2_int.write_interval_hr(db, result, mapped["start_at"])
-        from ..integrations.cardio_completion import maybe_complete_cardio_day
-        await maybe_complete_cardio_day(
-            db,
-            source=mapped["source"],
-            source_id=mapped["source_id"],
-            activity_type=mapped["type"],
-            start_at=mapped["start_at"],
-            duration_s=mapped["duration_s"],
-        )
         await db.commit()
         log.info("concept2 webhook %s: upserted source_id=%s", event, mapped["source_id"])
         return {"ok": True, "event": event, "action": "upserted",

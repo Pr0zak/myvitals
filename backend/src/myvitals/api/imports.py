@@ -111,14 +111,28 @@ async def _upsert_activities_chunk(db: AsyncSession, rows: list[dict[str, Any]])
     if not rows:
         return
     stmt = insert(models.Activity).values(rows)
-    # Never let an activity re-import clobber columns owned by other flows:
-    # notes/tags are user edits, and `polyline` is attached separately by the
-    # FIT/GPS track job — including it here wipes every restored map on the
-    # next activity import (this is what erased the Garmin tracks before).
-    update_cols = {
-        c.name: c for c in stmt.excluded
-        if c.name not in ("source", "source_id", "notes", "tags", "polyline")
-    }
+    # This is the one Activity writer that does NOT go through
+    # integrations/activity_sink.py, deliberately. A historical import is
+    # thousands of rows, and the sink is row-at-a-time because it runs the
+    # ingest side-effects (cardio-day completion, trail auto-linking) per
+    # activity — neither of which you want fired retroactively for a
+    # three-year backfill, and both of which would make the import crawl.
+    #
+    # What it does share is the sink's column allowlist, so "which columns
+    # may a provider write" is decided in exactly one place. On top of that
+    # this path also excludes `polyline`, because activity tracks are
+    # attached separately by the FIT/GPS job and including the column here
+    # wiped every restored map on the next import — that is what erased the
+    # Garmin tracks before.
+    #
+    # The one rule it cannot honour is the sink's skip-None: a single bulk
+    # statement covers many rows, so there is no per-row notion of "this
+    # provider had nothing to say about that field". Import parsers must
+    # therefore emit complete rows.
+    from ..integrations.activity_sink import PROVIDER_COLUMNS
+
+    writable = set(PROVIDER_COLUMNS) - {"polyline"}
+    update_cols = {c.name: c for c in stmt.excluded if c.name in writable}
     stmt = stmt.on_conflict_do_update(index_elements=["source", "source_id"], set_=update_cols)
     await db.execute(stmt)
 

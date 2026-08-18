@@ -603,7 +603,6 @@ async def upsert_activity_from_fit(
     """Upsert an Activity row from the FIT-parsed data and bulk-insert
     the per-second HR samples (source='strava_fit'). Returns True if
     the activity row was new or updated."""
-    from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     start_at = parsed.start_at or stub.start_at
@@ -624,21 +623,24 @@ async def upsert_activity_from_fit(
         "max_hr": parsed.max_hr,
         "polyline": parsed.polyline or None,
     }
-    stmt = pg_insert(models.Activity).values(**values)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["source", "source_id"],
-        set_={
-            "type": values["type"],
-            "name": values["name"],
-            "start_at": values["start_at"],
-            "duration_s": values["duration_s"],
-            "distance_m": values["distance_m"],
-            "avg_hr": values["avg_hr"],
-            "max_hr": values["max_hr"],
-            "polyline": values["polyline"],
-        },
-    )
-    await db.execute(stmt)
+    # TD-5 — one sink for every Activity write.
+    #
+    # This used to be a hand-rolled on_conflict_do_update that wrote avg_hr,
+    # max_hr and polyline unconditionally. parse_fit_bytes returns an empty
+    # ParsedFit and logs a warning rather than raising, so re-syncing an
+    # activity whose FIT file failed to parse silently nulled the heart rate
+    # and GPS already stored against it. The sink skips None on
+    # provider-derived columns, so a poorer sync can no longer erase a
+    # richer one.
+    #
+    # It also carries the two ingest side-effects this path never had:
+    # cardio-day auto-completion (which was wired only to the retired OAuth
+    # sync, so it had been dead for every ride the user actually syncs) and
+    # trail auto-linking (previously only reachable from the manual
+    # /trails/link-activities button).
+    from .activity_sink import upsert_activity
+
+    await upsert_activity(db, values)
 
     # HR samples — chest-strap is canonical for the ride window. The
     # vitals_heartrate PK is `time` alone, so we delete watch samples

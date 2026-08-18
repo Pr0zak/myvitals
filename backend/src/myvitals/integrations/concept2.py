@@ -18,12 +18,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import models
-from .cardio_completion import maybe_complete_cardio_day
 
 LOGBOOK_BASE = "https://log.concept2.com"
 PER_PAGE = 250  # Concept2 max
@@ -246,26 +244,17 @@ async def sync_results(
             mapped = map_result(raw)
             if mapped is None:
                 continue
-            existing = await db.get(
-                models.Activity, (mapped["source"], mapped["source_id"]),
-            )
-            if existing is None:
-                db.add(models.Activity(**mapped))
-            else:
-                for k, v in mapped.items():
-                    if k in ("source", "source_id"):
-                        continue
-                    setattr(existing, k, v)
+            # TD-5 — the shared sink. The loop this replaced copied every
+            # mapped key onto the existing row unconditionally, so a later
+            # sync with a thinner payload could blank a field an earlier one
+            # had filled. Cardio-day completion now happens inside the sink,
+            # alongside trail auto-linking, so an erg session and a Strava
+            # ride get the same treatment.
+            from .activity_sink import upsert_activity
+
+            await upsert_activity(db, mapped)
             upserted += 1
             await write_interval_hr(db, raw, mapped["start_at"])
-            await maybe_complete_cardio_day(
-                db,
-                source=mapped["source"],
-                source_id=mapped["source_id"],
-                activity_type=mapped["type"],
-                start_at=mapped["start_at"],
-                duration_s=mapped["duration_s"],
-            )
 
         meta = body.get("meta") or {}
         pagination = meta.get("pagination") or {}

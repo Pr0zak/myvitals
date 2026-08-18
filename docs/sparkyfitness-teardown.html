@@ -239,13 +239,13 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
 <div class="prog">
   <h4>Build progress</h4>
   <p style="margin-bottom:0">The ranked shortlist is tracked as tasks <code>TD-1</code>–<code>TD-10</code>. The full option menu below is the durable backlog — nothing is pruned from it, including the items declined and the reasons why.</p>
-  <div class="bar" role="img" aria-label="4 of 10 shortlist items shipped"><i class="b-done" style="width:40%"></i><i class="b-wip" style="width:0%"></i></div>
+  <div class="bar" role="img" aria-label="5 of 10 shortlist items shipped"><i class="b-done" style="width:50%"></i><i class="b-wip" style="width:0%"></i></div>
   <div class="legend">
-    <span><b style="background:var(--good)"></b> shipped &nbsp;4</span>
+    <span><b style="background:var(--good)"></b> shipped &nbsp;5</span>
     <span><b style="background:var(--sp)"></b> in progress &nbsp;0</span>
-    <span><b style="background:var(--rule)"></b> not started &nbsp;6</span>
+    <span><b style="background:var(--rule)"></b> not started &nbsp;5</span>
     <span>·</span>
-    <span>full menu: 40 options, 4 shipped, 1 declined</span>
+    <span>full menu: 40 options, 5 shipped, 1 declined</span>
   </div>
 </div>
 
@@ -255,6 +255,11 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
   <div class="scroll"><table>
     <thead><tr><th>Option</th><th>Status</th><th>What changed</th></tr></thead>
     <tbody>
+      <tr>
+        <td><strong>TD-5</strong> — one Activity ingest sink</td>
+        <td><span class="chip c-done">shipped</span></td>
+        <td>New <code>backend/src/myvitals/integrations/activity_sink.py</code>, and all four writers now go through it. Three defects closed at once. <strong>Cardio-day auto-completion was dead</strong> — <code>maybe_complete_cardio_day</code> was wired to the retired Strava OAuth path and to Concept2, but not to <code>strava_web.upsert_activity_from_fit</code>, the only Strava path that runs. <strong>Trail linking only happened on demand</strong> — <code>_link_activity_to_trail</code> had one caller, the manual button. <strong>A re-sync could destroy data</strong> — the FIT upsert wrote <code>avg_hr</code>, <code>max_hr</code> and <code>polyline</code> unconditionally, and <code>parse_fit_bytes</code> returns an empty result rather than raising, so a failed parse nulled good HR and GPS. The sink skips <code>None</code> on provider-derived columns only: <code>notes</code>, <code>tags</code> and <code>trail_id</code> are user-owned, where <code>None</code> legitimately means "clear this", so they are excluded from the projection entirely rather than merely skipped. Trail auto-link fires only when <code>trail_id IS NULL</code>, so a deliberate unlink survives. <code>polyline_simple</code> is invalidated when the track actually changes. Side-effect failures are logged, never fatal — the row is the valuable part. <code>api/imports.py</code> stays a bulk statement by design (a three-year backfill should not fire per-activity side-effects) but now derives its updatable columns from the sink's allowlist, so "may a provider write this column" has one answer. <code>backend/tests/test_activity_sink.py</code> — 9 tests — includes a grep guard that fails the build if a new provider writes <code>Activity</code> rows directly, and a completeness check that a newly added model column must be classified as provider- or user-owned rather than silently ignored. Backend 383 green.</td>
+      </tr>
       <tr>
         <td><strong>TD-4</strong> — server-computed session summary</td>
         <td><span class="chip c-done">shipped</span></td>
@@ -543,7 +548,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     </div>
     <div class="rk">
       <div class="n">5</div><div class="t">Funnel every Activity write through one ingest sink</div>
-      <div class="m"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
+      <div class="m"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div>
       <div class="d">Fixes three defects at once: dead cardio-day completion, no trail linking on ingest, and the destructive unconditional overwrite of HR and GPS. Skip <code>None</code> only for provider-derived columns — notes and tags are user-owned, where <code>None</code> legitimately means clear — and fire the trail linker only when <code>trail_id IS NULL</code> so a manual unlink survives.</div>
     </div>
     <div class="rk">
@@ -596,7 +601,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     <summary><span>Strava &amp; integrations — 5 options</span></summary>
     <div class="dbody">
       <div class="opts">
-        <div class="opt"><div class="h">One Activity ingest sink</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #5. Three defects, one fix.</p></div>
+        <div class="opt"><div class="h">One Activity ingest sink</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #5. Three defects, one fix.</p></div>
         <div class="opt"><div class="h">Persist per-integration sync health as one endpoint</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Exactly one integration has a <code>last_error</code> — <code>strava_cookie_creds</code>, added in v0.7.319 after a dead cookie masqueraded as "up to date" for six weeks. Concept2, Home Assistant and RainoutLine failures still vanish into <code>log.warning</code>. The lesson was learned once and never generalised.</p></div>
         <div class="opt"><div class="h">Schedule the cookie-mode Strava sync with backoff and a hard stop</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Adds <code>poll_enabled</code> / <code>poll_interval_min</code> and registers a job that reuses the existing <code>_run_cookie_sync</code>, stopping cleanly on repeated auth failure rather than hammering a dead cookie.</p></div>
         <div class="opt"><div class="h">Extract the FIT telemetry the cookie path discards</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b"><code>elevation_gain_m</code>, <code>avg_power_w</code>, <code>kcal</code>, cadence and normalized power are columns on <code>models.Activity</code>, populated by the retired OAuth path and left permanently null by the live one. Natural follow-on once the sink exists.</p></div>

@@ -247,26 +247,17 @@ async def upsert_activities(db: AsyncSession, payloads: list[dict[str, Any]]) ->
     if not payloads:
         return 0
     rows = [_activity_row_values(a) for a in payloads]
-    stmt = insert(models.Activity).values(rows)
-    update_cols = {c.name: c for c in stmt.excluded if c.name not in ("source", "source_id")}
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["source", "source_id"],
-        set_=update_cols,
-    )
-    await db.execute(stmt)
-    # Cardio-day auto-complete: fire per row. Helper is idempotent — a
-    # second pass on a row whose cardio workout is already 'completed'
-    # is a no-op.
-    from .cardio_completion import maybe_complete_cardio_day
+    # TD-5 — routed through the shared sink so this path and the live cookie
+    # path cannot drift again. The bulk statement it replaced spread every
+    # column of `excluded` over the update, which meant a row arriving
+    # without a value blanked whatever was stored; the sink skips None on
+    # provider columns and never touches the user-owned ones. Cardio-day
+    # completion and trail linking are the sink's business now rather than
+    # being wired to some ingest paths and not others.
+    from .activity_sink import upsert_activity
+
     for r in rows:
-        await maybe_complete_cardio_day(
-            db,
-            source=r["source"],
-            source_id=r["source_id"],
-            activity_type=r["type"],
-            start_at=r["start_at"],
-            duration_s=r["duration_s"],
-        )
+        await upsert_activity(db, r)
     await db.commit()
     return len(rows)
 

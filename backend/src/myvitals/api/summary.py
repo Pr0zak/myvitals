@@ -315,7 +315,7 @@ async def readiness_detail(
     Derived server-side per the architecture rule — nothing here is
     recomputed in Compose or Vue.
     """
-    from ..analytics.advanced import readiness_band, readiness_breakdown
+    from ..analytics.advanced import readiness_breakdown
 
     today, local_tz, is_today = resolve_day(date_)
     # Stale-row repair, but only for the current day. Without it readiness

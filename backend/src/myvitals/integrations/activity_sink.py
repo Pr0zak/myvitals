@@ -144,15 +144,17 @@ async def promote_health_connect_workouts(
         # a zero-length existing row then only matches an exact start,
         # which is the conservative reading.
         clash = (await db.execute(
-            select(models.Activity.id)
+            select(models.Activity.source_id)
             .where(models.Activity.source != HC_SOURCE)
             .where(models.Activity.start_at < end)
+            # `existing.start + existing.duration > hc_start`, expressed as
+            # a seconds difference rather than by constructing an INTERVAL.
+            # SQLAlchemy's generic `func` takes no keyword arguments, so
+            # `make_interval(secs=…)` does not compile; EXTRACT(EPOCH …) is
+            # the portable form and reads as the same inequality.
             .where(
-                models.Activity.start_at
-                + func.make_interval(
-                    secs=func.coalesce(models.Activity.duration_s, 0),
-                )
-                > start
+                func.extract("epoch", start - models.Activity.start_at)
+                < func.coalesce(models.Activity.duration_s, 0)
             )
             .limit(1)
         )).scalar_one_or_none()

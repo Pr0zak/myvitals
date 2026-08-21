@@ -30,7 +30,7 @@ class TestOverlapRatherThanProximity:
         """
         src = inspect.getsource(activity_sink.promote_health_connect_workouts)
         assert "Activity.start_at < end" in src
-        assert "> start" in src
+        assert 'func.extract("epoch"' in src
 
     def test_null_duration_on_an_existing_row_is_coalesced(self):
         """Older activity rows may have no duration.
@@ -125,3 +125,47 @@ class TestIngestIsNotRisked:
         from myvitals.api import ingest
         src = inspect.getsource(ingest)
         assert "since=earliest" in src
+
+
+class TestTheQueryActuallyCompiles:
+    """The tests above read source text, which is why they all passed
+    while the query referenced `Activity.id` — a column that does not
+    exist, since the table is keyed on (source, source_id).
+
+    Source inspection cannot catch a bad column reference. This compiles
+    the statement, which does.
+    """
+
+    def test_the_overlap_query_compiles_against_the_real_model(self):
+        from datetime import datetime, timedelta, timezone
+
+        from sqlalchemy import func, select
+        from sqlalchemy.dialects import postgresql
+
+        from myvitals.db import models
+        from myvitals.integrations.activity_sink import HC_SOURCE
+
+        start = datetime(2026, 6, 19, tzinfo=timezone.utc)
+        end = start + timedelta(hours=2)
+        stmt = (
+            select(models.Activity.source_id)
+            .where(models.Activity.source != HC_SOURCE)
+            .where(models.Activity.start_at < end)
+            .where(
+                func.extract("epoch", start - models.Activity.start_at)
+                < func.coalesce(models.Activity.duration_s, 0)
+            )
+            .limit(1)
+        )
+        sql = str(stmt.compile(dialect=postgresql.dialect()))
+        assert "activities.source_id" in sql
+        assert "EXTRACT" in sql.upper()
+
+    def test_activity_has_no_id_column(self):
+        """Pins the fact that made the original reference wrong, so the
+        next person reaching for `Activity.id` fails here first."""
+        from myvitals.db import models
+        assert not hasattr(models.Activity, "id")
+        assert models.Activity.__table__.primary_key.columns.keys() == [
+            "source", "source_id",
+        ]

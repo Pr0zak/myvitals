@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..analytics import compare
 from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
@@ -625,6 +626,90 @@ async def summary_range(
         )
         for r in rows
     ]
+
+
+def _as_compare_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    """DailySummary ORM rows → the dict shape analytics.compare expects.
+
+    Matches ``claude.py:_daily_rows`` field-for-field on purpose: the AI
+    payload builders and this endpoint must compute deltas from identical
+    inputs, or the number in a Coach card contradicts the number on the
+    Compare page for the same week.
+    """
+    return [
+        {
+            "date": str(r.date),
+            "rhr": r.resting_hr,
+            "hrv": r.hrv_avg,
+            "recovery": r.recovery_score,
+            "readiness": r.readiness_score,
+            "sleep_h": (r.sleep_duration_s / 3600.0) if r.sleep_duration_s else None,
+            "sleep_score": r.sleep_score,
+            "sleep_consistency": r.sleep_consistency_score,
+            "sleep_debt_h": r.sleep_debt_h,
+            "steps": r.steps_total,
+            "tsb": r.tsb,
+            "ctl": r.ctl,
+            "atl": r.atl,
+            "weight_kg": r.weight_kg,
+            "body_fat_pct": r.body_fat_pct,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/compare")
+async def summary_compare(
+    days: int = Query(7, ge=1, le=365),
+    vs: str = Query("previous", pattern="^(previous|last_year)$"),
+    until: date | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Period-over-period deltas across the daily-summary metrics (CMP-1).
+
+    ``vs=previous`` compares the trailing ``days`` against the block of
+    the same length immediately before it. ``vs=last_year`` compares
+    against the same window shifted back 364 days, so weekdays line up.
+
+    The window ends on the user's LOCAL today unless ``until`` is given.
+    Deriving it from ``datetime.now(timezone.utc).date()`` would roll the
+    window forward at 7pm Central and silently compare a window that
+    includes a day that has barely started.
+    """
+    end, _tz, _is_today = resolve_day(until)
+    since = end - timedelta(days=days - 1)
+    base_since, base_end = compare.baseline_window(since, end, vs)
+
+    # One query spanning both windows, split in Python. Two queries would
+    # be no faster and would open a window where a late-arriving recompute
+    # lands between them.
+    rows = (await db.execute(
+        select(models.DailySummary)
+        .where(models.DailySummary.date >= base_since)
+        .where(models.DailySummary.date <= end)
+        .order_by(models.DailySummary.date)
+    )).scalars().all()
+
+    current_rows = _as_compare_rows([r for r in rows if since <= r.date <= end])
+    baseline_rows = _as_compare_rows(
+        [r for r in rows if base_since <= r.date <= base_end]
+    )
+
+    metrics = compare.compare_windows(
+        current_rows, baseline_rows, window_days=days,
+    )
+
+    return {
+        "days": days,
+        "vs": vs,
+        "current": {"since": since.isoformat(), "until": end.isoformat()},
+        "baseline": {
+            "since": base_since.isoformat(),
+            "until": base_end.isoformat(),
+        },
+        "metrics": metrics,
+        "order": [m.key for m in compare.COMPARE_METRICS],
+    }
 
 
 @router.get("/today/snapshot")

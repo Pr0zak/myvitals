@@ -5,8 +5,10 @@ import type {
   AnnotationCreate,
   HeartRateSeries,
   HrvSeries,
+  PeriodCompare,
   SleepNight,
   StepsSeries,
+  TilePrefs,
   TodaySummary,
 } from "./types";
 
@@ -215,6 +217,24 @@ export const api = {
     };
     if (until) params.until = until instanceof Date ? until.toISOString().slice(0, 10) : until;
     const { data } = await http.get<TodaySummary[]>("/summary/range", { params });
+    return data;
+  },
+
+  /** CMP-1: period-over-period deltas, computed server-side.
+   *
+   * The server owns the direction sense (`better`) as well as the
+   * numbers. Do not re-derive "is this good?" here — that judgement
+   * used to live in Compare.vue and rendered a rising resting heart
+   * rate in the positive colour.
+   */
+  async summaryCompare(
+    days = 7,
+    vs: "previous" | "last_year" = "previous",
+    until?: string,
+  ): Promise<PeriodCompare> {
+    const params: Record<string, string> = { days: String(days), vs };
+    if (until) params.until = until;
+    const { data } = await http.get<PeriodCompare>("/summary/compare", { params });
     return data;
   },
 
@@ -836,6 +856,22 @@ export const api = {
 
   async backfillHrRecovery(): Promise<{ considered: number; computed: number }> {
     const { data } = await http.post("/analytics/hr-recovery-backfill");
+    return data;
+  },
+
+  /** TILE-1: which Key-metrics tiles show and in what order.
+   *
+   * A separate endpoint from putProfile on purpose — that one replaces
+   * `extra` wholesale, so saving any other profile field through it would
+   * wipe a tile preference it does not carry.
+   */
+  async getTilePrefs(): Promise<TilePrefs> {
+    const { data } = await http.get<TilePrefs>("/profile/tile-prefs");
+    return data;
+  },
+
+  async putTilePrefs(order: string[], hidden: string[]): Promise<TilePrefs> {
+    const { data } = await http.put<TilePrefs>("/profile/tile-prefs", { order, hidden });
     return data;
   },
 

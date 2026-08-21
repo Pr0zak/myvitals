@@ -269,6 +269,16 @@ interface BackendApi {
     @retrofit2.http.PUT("profile")
     suspend fun putProfile(@Body body: ProfilePutBody): ProfileResponse
 
+    // TILE-1: scoped read/write of the Key-metrics tile order. Separate
+    // from putProfile because that endpoint replaces `extra` wholesale, so
+    // saving any unrelated profile field through it drops preferences this
+    // build does not know about.
+    @GET("profile/tile-prefs")
+    suspend fun tilePrefs(): TilePrefsOut
+
+    @retrofit2.http.PUT("profile/tile-prefs")
+    suspend fun putTilePrefs(@Body body: TilePrefsIn): TilePrefsOut
+
     @GET("summary/today")
     suspend fun summaryToday(): DailySummary
 

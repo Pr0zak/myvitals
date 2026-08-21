@@ -187,6 +187,27 @@ echo "$LOG_TAG update detected; recreating services"
 echo "$LOG_TAG   backend  $before_backend → $new_backend"
 echo "$LOG_TAG   frontend $before_frontend → $new_frontend"
 
+# ── BK-1: pre-migration dump ─────────────────────────────────────────
+# The backend image's CMD is `alembic upgrade head && fastapi run`, so
+# the recreate below applies schema migrations unattended. Nightly PBS
+# snapshots cover the CT, but the newest restore point can be up to 24h
+# old at this instant and rolling back to it means reverting the whole
+# container — every sample ingested since 01:00 goes with it.
+#
+# Take a logical dump first. By default a failure here BLOCKS the update:
+# the CT stays on its current, working image and cron retries on the next
+# tick, which is the cheap failure. Migrating without a fresh restore
+# point is the expensive one. Override with MYVITALS_BACKUP_REQUIRED=0.
+if [ -x "$(dirname "$0")/backup.sh" ]; then
+    if ! "$(dirname "$0")/backup.sh" --pre-update; then
+        echo "$LOG_TAG update ABORTED — no pre-migration backup (see above)"
+        exit 1
+    fi
+else
+    echo "$LOG_TAG WARNING: deploy/backup.sh missing or not executable"
+    echo "$LOG_TAG   migrating without a pre-update dump"
+fi
+
 # Stash previous digests for rollback.
 cat > "$(dirname "$0")/last-known-good.txt" <<EOF
 # Auto-written by auto-update.sh — DO NOT EDIT MANUALLY.

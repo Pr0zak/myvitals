@@ -86,6 +86,9 @@ fun SettingsScreen(
     onBackfill: (days: Int) -> Unit,
     onOpenLogs: () -> Unit,
     onClearBuffer: () -> Unit,
+    /** TILE-1: opens the Key-metrics order editor. Defaulted so callers
+     *  that predate it still compile. */
+    onOpenTileOrder: () -> Unit = {},
     neonShellEnabled: Boolean = false,
     onToggleNeonShell: (Boolean) -> Unit = {},
 ) {
@@ -550,6 +553,12 @@ fun SettingsScreen(
 
         // ── Workout reminders ──
         item {
+            Section(title = "Display", neon = neon) {
+                Card {
+                    ListLinkRow(label = "Key metrics order", onClick = onOpenTileOrder)
+                }
+            }
+
             Section(title = "Workout reminders", neon = neon) {
                 Card {
                     Row(

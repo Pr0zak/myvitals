@@ -73,6 +73,10 @@ fun BodyScreen(
     val context = LocalContext.current
     var sum by remember { mutableStateOf<DailySummary?>(null) }
     var profile by remember { mutableStateOf<ProfileResponse?>(null) }
+    // TILE-1: the tile order is its own endpoint now. Reading it from
+    // profile.extra meant every client re-implemented the legacy enum
+    // translation, and the two copies disagreed about skin temp.
+    var tilePrefs by remember { mutableStateOf<app.myvitals.sync.TilePrefsOut?>(null) }
     // 14-day daily-summary window powering the inline sparklines on each card.
     var trend by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
     var vitalTiles by remember {
@@ -109,6 +113,11 @@ fun BodyScreen(
                 val profileD = async(Dispatchers.IO) {
                     runCatching { api.profile() }.getOrNull()
                 }
+                // Non-fatal: an older backend without /profile/tile-prefs
+                // simply renders the tiles in their catalog order.
+                val tilePrefsD = async(Dispatchers.IO) {
+                    runCatching { api.tilePrefs() }.getOrNull()
+                }
                 val trendD = async(Dispatchers.IO) {
                     runCatching {
                         api.summaryRange(
@@ -126,6 +135,7 @@ fun BodyScreen(
                     profile = it
                     JsonCache.write(context, BODY_PROFILE_KEY, ProfileResponse::class.java, it)
                 }
+                tilePrefsD.await()?.let { tilePrefs = it }
                 trendD.await()?.let { trend = it }
                 tilesD.await()?.let { r ->
                     if (r.tiles.isNotEmpty()) vitalTiles = r.tiles
@@ -152,8 +162,8 @@ fun BodyScreen(
         app.myvitals.ui.common.KeyMetrics(
             tiles = vitalTiles,
             onOpen = onOpen,
-            order = profile?.extra?.vitalsOrder ?: emptyList(),
-            hidden = profile?.extra?.vitalsHidden?.toSet() ?: emptySet(),
+            order = tilePrefs?.order ?: emptyList(),
+            hidden = tilePrefs?.hidden?.toSet() ?: emptySet(),
             groupOrder = groupOrder,
         )
 

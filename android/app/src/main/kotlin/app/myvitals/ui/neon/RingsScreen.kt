@@ -67,6 +67,10 @@ fun RingsScreen(
 ) {
     var summary by remember { mutableStateOf<DailySummary?>(null) }
     var profile by remember { mutableStateOf<ProfileResponse?>(null) }
+    // TILE-1: the tile order is its own endpoint now. Reading it from
+    // profile.extra meant every client re-implemented the legacy enum
+    // translation, and the two copies disagreed about skin temp.
+    var tilePrefs by remember { mutableStateOf<app.myvitals.sync.TilePrefsOut?>(null) }
     var sober by remember { mutableStateOf<SoberCurrentResponse?>(null) }
     var fasting by remember { mutableStateOf<FastingSession?>(null) }
     var readiness by remember { mutableStateOf<app.myvitals.sync.ReadinessDetail?>(null) }
@@ -108,6 +112,11 @@ fun RingsScreen(
                 val profileD = async(Dispatchers.IO) {
                     runCatching { api.profile() }.getOrNull()
                 }
+                // Non-fatal: an older backend without /profile/tile-prefs
+                // simply renders the tiles in their catalog order.
+                val tilePrefsD = async(Dispatchers.IO) {
+                    runCatching { api.tilePrefs() }.getOrNull()
+                }
                 val soberD = async(Dispatchers.IO) {
                     runCatching { api.soberCurrent() }.getOrNull()
                 }
@@ -138,6 +147,7 @@ fun RingsScreen(
                     error = null
                     summary = s0
                     profile = p0
+                    tilePrefsD.await()?.let { tilePrefs = it }
                     sober = soberD.await()
                     fasting = fastingD.await()
                     readyD.await()?.let { readiness = it }
@@ -212,8 +222,8 @@ fun RingsScreen(
             onOpen = onOpen,
             // The neon home was ignoring the reorder / hide preference the
             // classic home honours, so the same user saw two orders.
-            order = profile?.extra?.vitalsOrder ?: emptyList(),
-            hidden = profile?.extra?.vitalsHidden?.toSet() ?: emptySet(),
+            order = tilePrefs?.order ?: emptyList(),
+            hidden = tilePrefs?.hidden?.toSet() ?: emptySet(),
             groupOrder = groupOrder,
         )
         error?.let {

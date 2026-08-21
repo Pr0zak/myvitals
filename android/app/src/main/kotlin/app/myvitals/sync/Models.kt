@@ -1275,6 +1275,34 @@ data class ProfileExtra(
     @Json(name = "workout_reminder_hour") val workoutReminderHour: Int? = null,
 )
 
+// ── TILE-1: Key-metrics tile order ───────────────────────────────────
+// The server reconciles a saved order against the tiles that actually
+// exist and translates the legacy `Vital` enum names, so `order` is
+// always the complete current key set in the user's sequence. The phone
+// no longer keeps its own VITAL_TO_KEY table — that copy was missing
+// SKIN_TEMP, so a saved order silently sorted skin temp last.
+@JsonClass(generateAdapter = true)
+data class TilePrefOption(
+    val key: String,
+    val label: String,
+    val group: String? = null,
+    val hidden: Boolean = false,
+)
+
+@JsonClass(generateAdapter = true)
+data class TilePrefsOut(
+    val order: List<String> = emptyList(),
+    val hidden: List<String> = emptyList(),
+    val available: List<TilePrefOption> = emptyList(),
+    @Json(name = "group_order") val groupOrder: List<String> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class TilePrefsIn(
+    val order: List<String>,
+    val hidden: List<String> = emptyList(),
+)
+
 @JsonClass(generateAdapter = true)
 data class ProfilePutBody(
     @Json(name = "birth_date") val birthDate: String? = null,

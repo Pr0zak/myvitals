@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..analytics import cardio
+from ..analytics import cardio, tiles
 from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
@@ -195,6 +195,93 @@ async def put_profile(
     await db.commit()
     await db.refresh(p)
     return await _profile_dict(db, p)
+
+
+class TilePrefsIn(BaseModel):
+    """Which Key-metrics tiles show, and in what order.
+
+    Deliberately a separate endpoint from ``PUT /profile`` rather than
+    another field on it. ``put_profile`` assigns ``p.extra = body.extra``
+    wholesale, so any client that PUTs a profile without carrying the tile
+    keys forward erases them — and the phone's Settings screen does
+    exactly that for every field it does not know about. A scoped write
+    that touches only these two keys cannot lose a preference it has never
+    heard of.
+    """
+
+    order: list[str]
+    hidden: list[str] = []
+
+
+def _tile_prefs_payload(order: list[str], hidden: list[str]) -> dict[str, Any]:
+    reconciled_order, reconciled_hidden = tiles.reconcile_tile_prefs(order, hidden)
+    return {
+        "order": reconciled_order,
+        "hidden": reconciled_hidden,
+        # The editor renders from this rather than keeping its own copy of
+        # the label strings — one of the four client-side maps this
+        # endpoint exists to retire.
+        "available": [
+            {
+                "key": k,
+                "label": tiles.TILE_LABELS[k],
+                "group": tiles.TILE_GROUPS.get(k, "Other"),
+                "hidden": k in reconciled_hidden,
+            }
+            for k in reconciled_order
+        ],
+        "group_order": tiles.GROUP_ORDER,
+    }
+
+
+@router.get("/tile-prefs")
+async def get_tile_prefs(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    """Current tile order and visibility, reconciled against today's tiles.
+
+    Always returns the full current key set, so a client can render the
+    editor without knowing which metrics exist.
+    """
+    p = await db.get(models.UserProfile, 1)
+    extra = (p.extra if p and p.extra else {}) or {}
+    return _tile_prefs_payload(
+        list(extra.get("vitals_order") or []),
+        list(extra.get("vitals_hidden") or []),
+    )
+
+
+@router.put("/tile-prefs")
+async def put_tile_prefs(
+    body: TilePrefsIn,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Scoped write — merges into ``extra`` rather than replacing it."""
+    order, hidden = tiles.reconcile_tile_prefs(body.order, body.hidden)
+
+    # Refuse an all-hidden layout. The Key metrics section renders only
+    # when it has something to show, so hiding everything makes the
+    # section vanish along with the Edit button that leads back here —
+    # the user would have no route to undo it.
+    if len(hidden) >= len(order):
+        raise HTTPException(
+            status_code=400,
+            detail="At least one metric must stay visible.",
+        )
+
+    p = await db.get(models.UserProfile, 1)
+    now = datetime.now(timezone.utc)
+    if p is None:
+        p = models.UserProfile(id=1, updated_at=now)
+        db.add(p)
+
+    # Copy-then-reassign: SQLAlchemy does not track in-place mutation of a
+    # JSON column, so mutating p.extra directly would commit nothing.
+    extra = dict(p.extra or {})
+    extra["vitals_order"] = order
+    extra["vitals_hidden"] = hidden
+    p.extra = extra
+    p.updated_at = now
+    await db.commit()
+    return _tile_prefs_payload(order, hidden)
 
 
 class GeocodeIn(BaseModel):

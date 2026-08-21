@@ -83,6 +83,99 @@ TILE_GROUPS: dict[str, str] = {
 }
 GROUP_ORDER = ["Sleep & recovery", "Activity & body"]
 
+# ── TILE-1: the ordering preference ──────────────────────────────────
+#
+# `user_profile.extra.vitals_order` / `.vitals_hidden` had four readers
+# and no writer for most of this app's life: KeyMetrics.vue and the phone
+# both honoured a preference that nothing could set. These constants and
+# `reconcile_tile_prefs` are what the editor writes against.
+#
+# Labels live here rather than only inline in `build_tiles` so the editor
+# can list the metrics without running the (query-heavy) tile build just
+# to learn their names. `test_tile_prefs.py` asserts the two agree.
+TILE_LABELS: dict[str, str] = {
+    "resting_hr": "Resting HR",
+    "hrv": "HRV",
+    "recovery": "Recovery",
+    "sleep_duration": "Sleep",
+    "steps": "Steps",
+    "skin_temp": "Skin temp",
+    "weight": "Weight",
+    "blood_pressure": "Blood pressure",
+}
+
+# The order a user sees before they have expressed any preference.
+DEFAULT_TILE_ORDER: tuple[str, ...] = tuple(TILE_LABELS)
+
+# Preferences written by older builds used the phone's `Vital` enum names
+# rather than tile keys. Both clients still carry a private copy of this
+# map; the server now owns it so a preference saved on one surface is
+# read identically by the other. Note SKIN_TEMP was absent from the web's
+# copy entirely, so a saved order could never mention it and skin temp
+# always sorted to the end.
+LEGACY_VITAL_NAMES: dict[str, str] = {
+    "HR": "resting_hr",
+    "HRV": "hrv",
+    "SLEEP": "sleep_duration",
+    "STEPS": "steps",
+    "WEIGHT": "weight",
+    "BP": "blood_pressure",
+    "RECOVERY": "recovery",
+    "SKIN_TEMP": "skin_temp",
+}
+
+
+def _canonical_tile_key(raw: str) -> str | None:
+    """Accept either a tile key or a legacy Vital enum name."""
+    if raw in TILE_LABELS:
+        return raw
+    return LEGACY_VITAL_NAMES.get(raw.upper())
+
+
+def reconcile_tile_prefs(
+    order: list[str] | None, hidden: list[str] | None,
+) -> tuple[list[str], list[str]]:
+    """Reconcile a saved preference against the tiles that exist NOW.
+
+    Three things go wrong without this, and all three are the kind of bug
+    that only appears after a release rather than in review:
+
+    * **A tile is added.** A saved order that predates it does not mention
+      it, so it sorts last forever — including, in the old client code, to
+      a rank of 1e9 behind everything. A new metric should appear in its
+      natural position, not be silently demoted.
+    * **A tile is removed.** A stale key left in the order is harmless to
+      the sort but shows up in the editor as a row for a metric that no
+      longer exists.
+    * **Duplicates.** A round-trip through a client that appends rather
+      than replaces can double an entry, and the second copy shadows
+      nothing while making the list look corrupted.
+
+    Returns ``(order, hidden)`` where order is exactly the current key set
+    in the user's preferred sequence, and hidden is a subset of it.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in order or []:
+        key = _canonical_tile_key(raw)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(key)
+
+    # Unmentioned tiles append in their default position rather than
+    # being dropped or dumped at the end in arbitrary order.
+    for key in DEFAULT_TILE_ORDER:
+        if key not in seen:
+            out.append(key)
+
+    hidden_out: list[str] = []
+    for raw in hidden or []:
+        key = _canonical_tile_key(raw)
+        if key and key not in hidden_out:
+            hidden_out.append(key)
+
+    return out, hidden_out
+
 # Which metrics each Focus area covers, so its "N tracked" subtitle counts
 # something real rather than being decorative.
 FOCUS_AREAS: dict[str, list[str]] = {

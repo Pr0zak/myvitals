@@ -305,6 +305,13 @@ fun NeonAppShell(
                         onBackfill = onBackfill,
                         onOpenLogs = onOpenLogs,
                         onClearBuffer = onClearBuffer,
+                        onOpenTileOrder = { nav.navigate("settings/tile-order") },
+                    )
+                }
+                composable("settings/tile-order") {
+                    app.myvitals.ui.TileOrderScreen(
+                        settings = settings,
+                        onBack = { nav.popBackStack() },
                     )
                 }
             }

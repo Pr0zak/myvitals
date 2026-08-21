@@ -539,3 +539,51 @@ export interface SessionSummary {
    *  a bare number is indistinguishable from a measurement. */
   kcal_method: "hr" | "met" | "none";
 }
+
+// ── CMP-1: period-over-period comparison ─────────────────────────────
+// Every field here is computed by the backend, including `better` — the
+// sense of which direction is good. Compare.vue used to decide that
+// locally and got it wrong for resting HR, colouring a rise green.
+export interface CompareMetric {
+  label: string;
+  unit: string;
+  better: "higher" | "lower";
+  current: number | null;
+  baseline: number | null;
+  delta: number | null;
+  pct_change: number | null;
+  direction: "improved" | "worse" | "flat" | null;
+  n_current: number;
+  n_baseline: number;
+  /** False when either window covers under half its days. The numbers are
+   *  still returned; render them muted rather than hiding the row. */
+  sufficient: boolean;
+}
+
+export interface PeriodCompare {
+  days: number;
+  vs: "previous" | "last_year";
+  current: { since: string; until: string };
+  baseline: { since: string; until: string };
+  metrics: Record<string, CompareMetric>;
+  /** Server-defined render order, so web and phone agree without sorting. */
+  order: string[];
+}
+
+// ── TILE-1: Key-metrics tile ordering ────────────────────────────────
+export interface TilePrefOption {
+  key: string;
+  label: string;
+  group: string;
+  hidden: boolean;
+}
+
+export interface TilePrefs {
+  /** Every tile that currently exists, in the user's preferred order.
+   *  Already reconciled server-side, so a newly added metric appears in
+   *  its natural position rather than being demoted to the end. */
+  order: string[];
+  hidden: string[];
+  available: TilePrefOption[];
+  group_order: string[];
+}

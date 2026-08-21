@@ -143,6 +143,12 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/utils/muscleIcon.ts",
      "android/app/src/main/kotlin/app/myvitals/ui/strength/MuscleIcon.kt",
      "Muscle anatomy chip resolver"),
+    # TILE-1: the Key-metrics order editor. Both surfaces write the same
+    # scoped endpoint, so a change to one side's control set almost always
+    # needs the other.
+    ("frontend/src/components/TileOrderEditor.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/TileOrderScreen.kt",
+     "Key-metrics tile order editor"),
     # TD-7 moved Settings out of WEB_ONLY_OK. The pairing is STRUCTURAL, not
     # line-for-line: the phone owns Health Connect permissions and APK
     # install, the web owns historical imports, AI configuration and the

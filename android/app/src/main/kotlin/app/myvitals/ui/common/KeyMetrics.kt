@@ -37,12 +37,12 @@ fun KeyMetrics(
     tiles: List<VitalTile>,
     onOpen: (String) -> Unit,
     modifier: Modifier = Modifier,
-    /** The user's saved tile order, as Vital enum names. The classic home
+    /** The user's saved tile order, as tile keys. The classic home
      *  has always let people reorder and hide tiles; that preference has to
      *  survive the redesign rather than be quietly dropped. Empty = the
      *  catalog order. */
     order: List<String> = emptyList(),
-    /** Vital enum names the user has hidden. */
+    /** Tile keys the user has hidden. */
     hidden: Set<String> = emptySet(),
     /** Section headings in display order, from the server. */
     groupOrder: List<String> = emptyList(),
@@ -137,22 +137,24 @@ fun KeyMetrics(
  *  bare axis over blank space. */
 private val INTERMITTENT = setOf("weight", "blood_pressure")
 
-private val VITAL_TO_KEY = mapOf(
-    "HR" to "resting_hr", "HRV" to "hrv", "SLEEP" to "sleep_duration",
-    "STEPS" to "steps", "WEIGHT" to "weight", "BP" to "blood_pressure",
-    "RECOVERY" to "recovery",
-)
-
+/**
+ * TILE-1: `order` and `hidden` now arrive as tile keys from
+ * `GET /profile/tile-prefs`, already reconciled against the tiles that
+ * exist and already translated out of the legacy `Vital` enum names.
+ *
+ * The private VITAL_TO_KEY table this used to carry was missing
+ * SKIN_TEMP, so any saved order sorted skin temp to the very end — and
+ * the web copy of the same table had the identical gap, which is exactly
+ * the class of two-clients-disagree bug the server-owns-it rule exists
+ * to prevent.
+ */
 private fun applyPreference(
     tiles: List<VitalTile>, order: List<String>, hidden: Set<String>,
 ): List<VitalTile> {
-    val hiddenKeys = hidden.mapNotNull { VITAL_TO_KEY[it] }.toSet()
-    val visible = tiles.filter { it.key !in hiddenKeys }
+    val visible = tiles.filter { it.key !in hidden }
     if (order.isEmpty()) return visible
-    val rank = order.mapNotNull { VITAL_TO_KEY[it] }
-        .withIndex().associate { (i, k) -> k to i }
-    // Anything the saved order doesn't mention tail-appends in catalog
-    // order rather than disappearing.
+    val rank = order.withIndex().associate { (i, k) -> k to i }
+    // Defensive only — the server's order covers every current tile.
     return visible.sortedBy { rank[it.key] ?: Int.MAX_VALUE }
 }
 

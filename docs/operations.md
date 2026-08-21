@@ -95,7 +95,107 @@ ssh root@$PVE_HOST "pct exec $CT_ID -- bash -c 'docker compose -f /opt/myvitals/
 ssh root@$PVE_HOST "pct pull $CT_ID /tmp/myvitals-$(date +%F).sql.gz ./myvitals-backup.sql.gz"
 ```
 
-The DB volume (`myvitals_db_data`) lives in the container's LVM-thin pool. For real backups, schedule a periodic `pg_dump` to a CIFS share or to a Proxmox Backup Server.
+### Backups — what covers what
+
+Two layers, with deliberately different jobs. Knowing which one to reach
+for is most of the work during an incident.
+
+| Layer | Covers | Frequency | Lives |
+|---|---|---|---|
+| Proxmox Backup Server | The whole CT — rootfs, docker volumes, config | Nightly 01:00 | Separate physical host |
+| `deploy/backup.sh` | A logical dump of the database alone | Before each auto-update migration | `/var/backups/myvitals` on the CT |
+
+PBS is the disaster-recovery layer and it is already configured; there is
+no cron in this repo duplicating it. Restoring from PBS gives you the
+entire container back as it was at 01:00, which is the right move when
+the CT itself is gone or unbootable.
+
+`deploy/backup.sh` exists for the narrower case PBS handles badly. The
+backend image's `CMD` is `alembic upgrade head && fastapi run …`, so
+migrations apply unattended within ~15 minutes of a tag being pushed. If
+one of them corrupts or drops data, the newest PBS restore point can be
+up to 24 hours old and using it reverts *everything* — including every
+sample ingested since 01:00. So `auto-update.sh` takes a dump in the
+seconds before the recreate that triggers the migration.
+
+A failed pre-update dump **blocks the update** by default. The CT stays
+on its current working image and cron retries on the next tick; that is
+the cheap failure. Set `MYVITALS_BACKUP_REQUIRED=0` to override for a run.
+
+```bash
+# what dumps exist, with the alembic head and app version each expects
+ssh root@$PVE_HOST "pct exec $CT_ID -- /opt/myvitals/deploy/backup.sh --list"
+
+# take one by hand (same retention rules)
+ssh root@$PVE_HOST "pct exec $CT_ID -- /opt/myvitals/deploy/backup.sh --now"
+```
+
+Retention is 3 dumps (`MYVITALS_BACKUP_KEEP`). A real dump of this
+database is ~100 MB and takes ~35 s, so the cap costs about 300 MB.
+Because the dumps sit on the CT rootfs, the nightly PBS run carries them
+off-box too.
+
+### Restoring the database
+
+This procedure is **not** automated and should not be run unattended. A
+TimescaleDB restore must be bracketed by `timescaledb_pre_restore()` and
+`timescaledb_post_restore()`; skipping them does not fail loudly, it
+silently corrupts the hypertable catalog, and you will not find out until
+a query returns wrong results.
+
+Restore into a scratch database first and compare row counts. Never
+restore straight over the live one — if the dump turns out to be bad you
+have then destroyed both copies.
+
+```bash
+ssh root@$PVE_HOST "pct exec $CT_ID -- bash"
+cd /opt/myvitals
+U=$(grep ^POSTGRES_USER= .env | cut -d= -f2)
+D=$(grep ^POSTGRES_DB= .env | cut -d= -f2)
+DUMP=$(ls -1t /var/backups/myvitals/myvitals-*.dump | head -1)
+
+# 1. scratch database
+docker compose exec -T db psql -U $U -d postgres -c "CREATE DATABASE myvitals_restoretest;"
+docker compose exec -T db psql -U $U -d myvitals_restoretest -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+
+# 2. the bracket — this is the step people skip
+docker compose exec -T db psql -U $U -d myvitals_restoretest -tAc "SELECT timescaledb_pre_restore();"
+
+# 3. restore
+cat $DUMP | docker compose exec -T db pg_restore -U $U -d myvitals_restoretest --no-owner
+
+# 4. close the bracket
+docker compose exec -T db psql -U $U -d myvitals_restoretest -tAc "SELECT timescaledb_post_restore();"
+
+# 5. verify before trusting it — counts must match, and all 12
+#    hypertables must be present
+for t in vitals_heartrate vitals_steps sleep_stages workouts strength_sets; do
+  L=$(docker compose exec -T db psql -U $U -d $D -tAc "SELECT count(*) FROM $t;")
+  R=$(docker compose exec -T db psql -U $U -d myvitals_restoretest -tAc "SELECT count(*) FROM $t;")
+  echo "$t live=$L restored=$R"
+done
+docker compose exec -T db psql -U $U -d myvitals_restoretest -tAc \
+  "SELECT count(*) FROM timescaledb_information.hypertables;"   # expect 12
+```
+
+Only once that checks out, promote it. Stop the backend first so nothing
+writes during the swap:
+
+```bash
+docker compose stop backend
+docker compose exec -T db psql -U $U -d postgres -c "ALTER DATABASE $D RENAME TO ${D}_broken;"
+docker compose exec -T db psql -U $U -d postgres -c "ALTER DATABASE myvitals_restoretest RENAME TO $D;"
+docker compose up -d backend
+```
+
+Keep `${D}_broken` until you are satisfied, then drop it. Check the
+dump's `.meta` sidecar before restoring — it records the `alembic_head`
+the dump expects. Restoring a dump at head `0054` into a backend image
+that is already at `0061` means the backend will run those seven
+migrations against restored data on its next start, which may or may not
+be what you want.
+
+The DB volume (`myvitals_db_data`) lives in the container's LVM-thin pool.
 
 ## Common gotchas
 

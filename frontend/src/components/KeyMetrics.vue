@@ -29,13 +29,6 @@ const hidden = ref<string[]>([]);
  *  grids can't disagree about where a metric belongs. */
 const groupOrder = ref<string[]>([]);
 
-/** Vital enum name → tiles key, so a preference written against the old
- *  badge grid still means something. */
-const VITAL_TO_KEY: Record<string, string> = {
-  HR: "resting_hr", HRV: "hrv", SLEEP: "sleep_duration", STEPS: "steps",
-  WEIGHT: "weight", BP: "blood_pressure", RECOVERY: "recovery",
-};
-
 const ROUTE: Record<string, string> = {
   hrv: "/hrv", resting_hr: "/heart-rate", steps: "/steps",
   sleep_duration: "/sleep", blood_pressure: "/blood-pressure",
@@ -62,13 +55,17 @@ const BAR = new Set(["steps"]);
 const INTERMITTENT = new Set(["weight", "blood_pressure"]);
 
 async function load() {
-  const [t, p] = await Promise.allSettled([api.summaryTiles(), api.getProfile()]);
+  // TILE-1: the order comes back already reconciled against the tiles that
+  // currently exist, and already translated out of the legacy `Vital` enum
+  // vocabulary. This component used to read `extra` and map the names
+  // itself with a private table that was missing skin_temp entirely, so a
+  // saved order silently pushed skin temp to the end of the grid.
+  const [t, p] = await Promise.allSettled([api.summaryTiles(), api.getTilePrefs()]);
   tiles.value = t.status === "fulfilled" ? (t.value.tiles ?? []) : [];
   if (t.status === "fulfilled") groupOrder.value = t.value.group_order ?? [];
   if (p.status === "fulfilled") {
-    const extra = (p.value as { extra?: Record<string, unknown> })?.extra ?? {};
-    order.value = (extra.vitals_order as string[]) ?? [];
-    hidden.value = (extra.vitals_hidden as string[]) ?? [];
+    order.value = p.value.order;
+    hidden.value = p.value.hidden;
   }
   loaded.value = true;
 }
@@ -143,15 +140,13 @@ const grouped = computed(() => {
 });
 
 const shown = computed(() => {
-  const hide = new Set(hidden.value.map((v) => VITAL_TO_KEY[v]).filter(Boolean));
+  const hide = new Set(hidden.value);
   const visible = tiles.value.filter((t) => !hide.has(t.key));
   if (!order.value.length) return visible;
-  const rank = new Map(
-    order.value.map((v) => VITAL_TO_KEY[v]).filter(Boolean)
-      .map((k, i) => [k, i] as const),
-  );
-  // Anything the saved order doesn't mention tail-appends rather than
-  // disappearing.
+  const rank = new Map(order.value.map((k, i) => [k, i] as const));
+  // The server's order covers every current tile, so the fallback rank is
+  // defensive only — it would take a tile appearing in /summary/tiles that
+  // TILE_LABELS does not know about.
   return [...visible].sort(
     (a, b) => (rank.get(a.key) ?? 1e9) - (rank.get(b.key) ?? 1e9),
   );

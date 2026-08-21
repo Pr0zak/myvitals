@@ -52,7 +52,16 @@ def _burn_state(state: str) -> bool:
 
 class GoogleHealthAppConfigIn(BaseModel):
     client_id: str
-    client_secret: str
+    # Optional, and an empty value means "keep what is stored".
+    #
+    # The UI never echoes the secret back — it is write-only from the
+    # browser's point of view — and tells the user that leaving the field
+    # blank keeps the saved one. This handler used to overwrite
+    # unconditionally, so the SECOND save (after the field had been cleared
+    # on the first) silently wiped the secret, leaving a config that looked
+    # complete but could not authorise. The promise the UI makes has to be
+    # implemented here, because this is where it can actually be kept.
+    client_secret: str | None = None
     callback_url: str
 
 
@@ -77,7 +86,11 @@ async def set_config(
         cfg = models.GoogleHealthConfig(id=1)
         db.add(cfg)
     cfg.client_id = body.client_id.strip()
-    cfg.client_secret = body.client_secret.strip()
+    secret = (body.client_secret or "").strip()
+    if secret:
+        cfg.client_secret = secret
+    elif not cfg.client_secret:
+        raise HTTPException(400, "A client secret is required the first time.")
     cfg.callback_url = body.callback_url.strip().rstrip("/")
     cfg.updated_at = datetime.now(timezone.utc)
     await db.commit()

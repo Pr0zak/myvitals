@@ -285,3 +285,33 @@ def test_exchange_reuses_the_registered_redirect_uri():
 def test_expired_state_says_how_to_recover():
     src = inspect.getsource(api.exchange)
     assert "15 minutes" in src, "tell the user the window, not just that it closed"
+
+
+# ---------------------------------------------------------------------------
+# Config write semantics
+# ---------------------------------------------------------------------------
+
+def test_a_blank_secret_keeps_the_stored_one():
+    """The UI never echoes the secret back and tells the user that leaving
+    the field blank keeps it. This handler used to overwrite unconditionally,
+    so the SECOND save — after the field had been cleared on the first —
+    silently wiped the secret, leaving a config that reported a client_id and
+    could not authorise. A promise the UI makes has to be kept here."""
+    src = inspect.getsource(api.set_config)
+    assert "if secret:" in src
+    assert "cfg.client_secret = secret" in src
+
+
+def test_the_first_save_still_requires_a_secret():
+    """Blank-keeps-existing must not become blank-is-fine, or the config
+    reports configured with nothing to authorise with."""
+    src = inspect.getsource(api.set_config)
+    assert "elif not cfg.client_secret:" in src
+    assert "required the first time" in src
+
+
+def test_configured_means_both_halves_are_present():
+    """`configured` gates the consent button. If it could be true with only
+    a client id, the button would enable and the flow would fail at Google."""
+    src = inspect.getsource(api.get_config)
+    assert "cfg.client_id and cfg.client_secret" in src

@@ -677,13 +677,23 @@ const ghAuthUrl = ref("");
 
 async function ghConnect() {
   ghBusy.value = true; ghError.value = ""; ghResult.value = "";
+  // Open the tab SYNCHRONOUSLY, inside the click handler, then point it at
+  // the URL once we have it. A window.open() after an await has lost the
+  // user-activation that permits it, so browsers block it as a popup — and
+  // block it silently, which presents as a button that does nothing.
+  const tab = window.open("", "_blank");
   try {
-    // Open the consent screen in a new tab rather than navigating away, so
-    // Settings stays put and the paste field is still here to come back to.
     const { url } = await api.googleHealthAuthorizeUrl();
     ghAuthUrl.value = url;
-    window.open(url, "_blank", "noopener");
-  } catch (e) { ghFail(e); } finally { ghBusy.value = false; }
+    if (tab) {
+      tab.location.href = url;
+    }
+    // The link is rendered either way. If the popup was blocked despite the
+    // above, the user has somewhere to click rather than a dead button.
+  } catch (e) {
+    tab?.close();
+    ghFail(e);
+  } finally { ghBusy.value = false; }
 }
 
 async function ghFinish() {
@@ -2517,7 +2527,8 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
 
       <div class="actions">
         <button class="ghost" :disabled="ghBusy" @click="ghSaveConfig">Save app credentials</button>
-        <button class="primary" :disabled="ghBusy || !ghCfg?.configured" @click="ghConnect">
+        <button class="primary" :disabled="ghBusy || !ghCfg?.configured" @click="ghConnect"
+                :title="ghCfg?.configured ? '' : 'Save a client ID and secret first'">
           {{ ghStatus?.connected ? "Reconnect" : "1. Open Google consent" }}
         </button>
         <button class="ghost" :disabled="ghBusy || !ghStatus?.connected" @click="ghRunProbe">
@@ -2543,13 +2554,24 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           <button class="primary" :disabled="ghBusy || !ghPasteUrl.trim()" @click="ghFinish">
             2. Finish connecting
           </button>
-          <a :href="ghAuthUrl" target="_blank" rel="noopener" class="hint">reopen consent screen</a>
+          <a :href="ghAuthUrl" target="_blank" rel="noopener" class="hint">
+            open the consent screen
+          </a>
         </div>
         <p class="hint">
           The link expires after 15 minutes. If it does, press
           &ldquo;Open Google consent&rdquo; again for a fresh one.
         </p>
       </div>
+
+      <p v-if="ghCfg && !ghCfg.configured" class="hint">
+        <strong>Consent is disabled until a client secret is stored.</strong>
+        <span v-if="ghCfg.client_id">
+          The client ID is saved but the secret is not — paste it above and
+          press Save. Leaving the secret blank on a later save keeps the
+          stored one rather than clearing it.
+        </span>
+      </p>
 
       <p v-if="ghError" class="err">{{ ghError }}</p>
       <p v-if="ghResult" class="hint">{{ ghResult }}</p>

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterable, Iterator
 from datetime import datetime
 from typing import Any
@@ -10,8 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import require_ingest
 from ..db import models
 from ..db.session import get_session
+from ..integrations import activity_sink
 
 router = APIRouter(dependencies=[Depends(require_ingest)])
+log = logging.getLogger(__name__)
 
 # Postgres caps a single statement at 32767 bind parameters. Each row in our
 # widest insert (workouts, 7 cols) takes 7 params, so 4000 rows stays comfortably
@@ -165,6 +168,26 @@ async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) ->
             update_cols=["type", "duration_s", "kcal", "avg_hr", "max_hr", "source", "title"],
         )
         counts["workouts"] = len(batch.workouts)
+        # HC-1: promote these into the activities feed. Health Connect
+        # exercise sessions have always landed in `workouts`, which nothing
+        # user-facing reads, so a session the watch recorded but Strava
+        # never saw was invisible. Bounded to the batch window, and skips
+        # anything a richer provider already covers.
+        try:
+            earliest = min(w.time for w in batch.workouts)
+            promo = await activity_sink.promote_health_connect_workouts(
+                db, since=earliest,
+            )
+            if promo["promoted"]:
+                counts["activities_promoted"] = promo["promoted"]
+                log.info(
+                    "HC-1 promoted %d session(s) to activities (%d already covered)",
+                    promo["promoted"], promo["skipped_overlap"],
+                )
+        except Exception as e:  # noqa: BLE001
+            # Never fail an ingest over the promotion step — the raw
+            # samples are the irreplaceable part and are already written.
+            log.warning("HC-1 promotion failed: %s", e)
 
     if batch.body_metrics:
         await _bulk_upsert(db, models.BodyMetric,

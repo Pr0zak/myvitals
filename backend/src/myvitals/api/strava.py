@@ -17,6 +17,7 @@ from ..auth import require_any, require_query
 from ..config import settings
 from ..db import models
 from ..db.session import get_session
+from ..integrations import activity_sink
 from ..integrations import strava
 from ..integrations import strava_web
 
@@ -723,6 +724,24 @@ async def update_activity_notes(
     a.tags = body.tags or None
     await db.commit()
     return {"status": "saved"}
+
+
+@router.post("/activities/promote-health-connect",
+             dependencies=[Depends(require_any)])
+async def promote_health_connect(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Backfill the activities feed from Health Connect sessions (HC-1).
+
+    New sessions are promoted automatically on ingest. This exists for the
+    history that predates that, and is idempotent — a second run promotes
+    nothing, because a session already in the feed under the
+    `healthconnect` source is upserted rather than duplicated, and one
+    covered by a richer provider is skipped on the overlap test.
+    """
+    result = await activity_sink.promote_health_connect_workouts(db)
+    await db.commit()
+    return result
 
 
 @router.get("/activities", response_model=list[ActivityOut], dependencies=[Depends(require_any)])

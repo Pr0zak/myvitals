@@ -39,9 +39,10 @@ The sink fixes all three by being the only writer. Two rules keep it safe:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,6 +64,134 @@ PROVIDER_COLUMNS: tuple[str, ...] = (
 # Columns the user owns. Listed so the rule is documented in code rather than
 # implied by their absence from the allowlist above.
 USER_OWNED_COLUMNS: tuple[str, ...] = ("notes", "tags", "trail_id")
+
+
+# ── HC-1: Health Connect exercise sessions → the activities feed ─────
+#
+# `ExerciseSessionRecord` has always been read from Health Connect and
+# written to the `workouts` table, which nothing user-facing reads. The
+# Activities feed is built from `activities`, so a session the watch
+# recorded but Strava never saw was invisible.
+#
+# On this database that was 11 of the 22 sessions since June — including a
+# 2h23m ride on 2026-06-19 and a 1h30m ride the following day. Rides that
+# reach Strava were covered; walks and any ride not uploaded were not.
+
+#: Health Connect's exercise type → the label the Activities feed uses.
+#:
+#: The `activities.type` vocabulary is provider-specific and inconsistent
+#: (`walk` and `walking` both exist, alongside
+#: `walking,_2.5_mph,_leisurely_pace_(myfitnesspal)`), which is a
+#: pre-existing taxonomy problem this mapping does not try to solve. It
+#: only picks the spelling already dominant in the table, so promoted rows
+#: get the same icon and match the same filter chips as everything else.
+HC_TYPE_MAP: dict[str, str] = {
+    "biking": "cycling",
+    "walking": "walking",
+    "running": "running",
+    "hiking": "hiking",
+    "swimming": "swimming",
+    "rowing": "indoor_rowing",
+    "strength_training": "strength_training",
+    "other": "workout",
+}
+
+#: A promoted session claims this source so it is distinguishable in the
+#: feed and can be re-promoted idempotently.
+HC_SOURCE = "healthconnect"
+
+
+async def promote_health_connect_workouts(
+    db: AsyncSession, since: datetime | None = None,
+) -> dict[str, int]:
+    """Copy Health Connect exercise sessions into the activities feed.
+
+    Skips any session that OVERLAPS an activity from a different provider.
+    Overlap rather than start-time proximity, because the same ride gets a
+    different start instant from each recorder — Strava starts on the
+    first GPS fix, the watch on the button press — and a fixed ± window
+    either misses real duplicates or merges genuinely separate sessions.
+
+    Providers with GPS are strictly richer: they carry distance, elevation
+    and a polyline that Health Connect's session record does not. So when
+    both have a session, the existing one wins and this does nothing. This
+    fills gaps; it never overwrites.
+
+    Idempotent — re-running promotes nothing new. Safe to call on every
+    ingest and to re-run over history.
+    """
+    stmt = select(models.Workout).order_by(models.Workout.time)
+    if since is not None:
+        stmt = stmt.where(models.Workout.time >= since)
+    sessions = (await db.execute(stmt)).scalars().all()
+
+    promoted = skipped_overlap = skipped_untimed = 0
+
+    for w in sessions:
+        if not w.duration_s or w.duration_s <= 0:
+            # A zero-length session has no interval to compare and nothing
+            # useful to show.
+            skipped_untimed += 1
+            continue
+
+        start = w.time
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        end = start + timedelta(seconds=int(w.duration_s))
+
+        # Any activity from ANOTHER source whose interval overlaps this
+        # one. `duration_s` may be null on older rows, so coalesce to 0 —
+        # a zero-length existing row then only matches an exact start,
+        # which is the conservative reading.
+        clash = (await db.execute(
+            select(models.Activity.id)
+            .where(models.Activity.source != HC_SOURCE)
+            .where(models.Activity.start_at < end)
+            .where(
+                models.Activity.start_at
+                + func.make_interval(
+                    secs=func.coalesce(models.Activity.duration_s, 0),
+                )
+                > start
+            )
+            .limit(1)
+        )).scalar_one_or_none()
+        if clash is not None:
+            skipped_overlap += 1
+            continue
+
+        await upsert_activity(
+            db,
+            {
+                "source": HC_SOURCE,
+                # The workouts PK is `time`, so the ISO instant is a stable
+                # natural key: re-promoting the same session updates its
+                # row rather than creating a second one.
+                "source_id": start.isoformat(),
+                "type": HC_TYPE_MAP.get(
+                    (w.type or "").lower(), (w.type or "workout").lower(),
+                ),
+                "start_at": start,
+                "duration_s": int(w.duration_s),
+                "avg_hr": w.avg_hr,
+                "max_hr": w.max_hr,
+                "kcal": w.kcal,
+                # `name` deliberately omitted. `workouts.title` comes from
+                # whichever app wrote the HC record, and the feed already
+                # renders the type; a borrowed title adds nothing and can
+                # carry a location.
+            },
+            # No GPS on these, so there is no trail to match.
+            link_trail=False,
+        )
+        promoted += 1
+
+    return {
+        "promoted": promoted,
+        "skipped_overlap": skipped_overlap,
+        "skipped_untimed": skipped_untimed,
+        "considered": len(sessions),
+    }
 
 
 async def upsert_activity(

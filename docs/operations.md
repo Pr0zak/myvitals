@@ -197,8 +197,57 @@ be what you want.
 
 The DB volume (`myvitals_db_data`) lives in the container's LVM-thin pool.
 
+## MCP server (read-only)
+
+`POST /mcp` publishes the aggregates this app already computes as MCP
+tools, so your own Claude subscription can read your health data without
+every question billing the app's Anthropic key.
+
+It is **read-only by construction** — there is no write path, and
+`test_mcp_server.py` fails if a tool name so much as looks like a
+mutation. Authentication reuses the existing `QUERY_TOKEN` rather than
+introducing a second secret to generate, store and rotate.
+
+Add to your Claude client's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "myvitals": {
+      "type": "http",
+      "url": "http://<myvitals-host>:8000/mcp",
+      "headers": { "Authorization": "Bearer <QUERY_TOKEN>" }
+    }
+  }
+}
+```
+
+Tools: `get_daily_summary`, `compare_periods`, `get_sleep`,
+`get_activities`, `get_strength_sessions`, `get_consistency`,
+`get_muscle_volume`, `get_goals`.
+
+Protocol notes:
+
+- Speaks the current revision (`2026-07-28`) and the older handshake era
+  (`2025-11-25` and earlier), so it works with clients that have not yet
+  shipped the new one.
+- Request/response only. No SSE, no sessions, no resumable streams —
+  `2026-07-28` removed the mechanisms that needed them, and nothing here
+  changes, so there is nothing to subscribe to. GET and DELETE return 405
+  as the spec directs.
+- Activity titles are deliberately not exposed: Strava names routinely
+  embed home and workplace addresses.
+
 ## Common gotchas
 
+- **Never `docker compose build` on the CT from a partially synced tree.**
+  Syncing only `backend/src` leaves `backend/alembic` stale or absent, and
+  the container then dies on start with `Can't locate revision identified
+  by 'NNNN'` — taking the backend down until an image is pulled back. Deploy
+  by pushing a `v*` tag and letting `auto-update.sh` pull the built image;
+  that path also takes a pre-migration dump first. To recover from a broken
+  local build: `docker compose pull backend && docker compose up -d
+  --force-recreate backend`.
 - **Docker won't start a container** — runc 1.1.x swap may have regressed (e.g. after `apt upgrade`). Re-run the relevant block from `deploy/ct-bootstrap.sh` (the `if grep container=lxc /proc/1/environ` branch) or just `apt-get install --reinstall runc && cp /usr/sbin/runc /usr/bin/runc && systemctl restart docker`.
 - **Frontend can't auth** — `QUERY_TOKEN` not set in dashboard `localStorage`. Open `/settings` and paste the value from `/opt/myvitals/.env`.
 - **`/version` shows old number after upgrade** — `pyproject.toml` `version` wasn't bumped along with the tag. Cosmetic; harmless.

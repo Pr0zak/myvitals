@@ -10,7 +10,9 @@ const route = useRoute();
 // Insights stores days as a number; map the shared "7d"/"30d"/"90d"/"365d"
 // vocabulary back to integer days.
 const RANGE_TO_DAYS: Record<string, number> = {
-  "7d": 7, "30d": 30, "90d": 90, "365d": 365,
+  // "365d" retained as an alias: it was the shell's spelling before
+  // RANGE-1 unified on "1y", and old links still carry it.
+  "7d": 7, "30d": 30, "90d": 90, "1y": 365, "365d": 365,
 };
 function daysFromRoute(fallback: number): number {
   const q = route.query.range;

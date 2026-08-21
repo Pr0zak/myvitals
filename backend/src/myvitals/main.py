@@ -21,6 +21,7 @@ from .api import (
     export,
     fasting,
     imports,
+    mcp,
     ingest,
     profile,
     query,
@@ -217,6 +218,10 @@ app.include_router(trails.router, tags=["trails"])
 app.include_router(devices.router, tags=["devices"])
 app.include_router(fasting.router, tags=["fasting"])
 app.include_router(update_api.router, tags=["update"])
+# MCP-1: read-only MCP endpoint. Publishes the same aggregates the AI
+# surfaces use, so the user's own Claude subscription can read their
+# health data without billing this app's key.
+app.include_router(mcp.router, tags=["mcp"])
 app.include_router(concept2.router)
 app.include_router(concept2._webhook_router)
 

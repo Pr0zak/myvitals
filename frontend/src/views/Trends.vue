@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { normaliseRange } from "@/useDateRange";
 import { toLocalISO } from "@/dates";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
@@ -17,12 +18,13 @@ const route = useRoute();
 
 const _C_TO_F = 1.8;  // ΔF = ΔC × 9/5
 
-type Range = "7d" | "30d" | "90d" | "365d";
+// RANGE-1: canonical vocabulary (was "365d" for the year).
+type Range = "7d" | "30d" | "90d" | "1y";
 const RANGES: { key: Range; label: string; days: number }[] = [
   { key: "7d", label: "7 days", days: 7 },
   { key: "30d", label: "30 days", days: 30 },
   { key: "90d", label: "90 days", days: 90 },
-  { key: "365d", label: "1 year", days: 365 },
+  { key: "1y", label: "1 year", days: 365 },
 ];
 
 type ChartType = "line" | "bar" | "area";
@@ -30,10 +32,11 @@ type ChartType = "line" | "bar" | "area";
 // ANALYTICS-2: range can be driven externally via the Analytics shell's
 // shared selector (writes `?range=…` on the URL). Falls back to the
 // per-page default when absent.
-const VALID_RANGE = new Set(["7d", "30d", "90d", "365d"]);
+const VALID_RANGE = new Set(["7d", "30d", "90d", "1y"]);
 function rangeFromRoute(): Range {
   const q = route.query.range;
-  const v = Array.isArray(q) ? q[0] : q;
+  // Folds the legacy "365d" so bookmarks predating RANGE-1 still resolve.
+  const v = normaliseRange(Array.isArray(q) ? q[0] : q);
   return (v && VALID_RANGE.has(v)) ? (v as Range) : "30d";
 }
 const range = ref<Range>(rangeFromRoute());

@@ -8,6 +8,7 @@
  * recent 24h. Longer ranges (7d / 30d / 90d / 1y) lean on daily
  * aggregates from /summary/range, which is small no matter the span.
  */
+import { useDateRange } from "@/useDateRange";
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
@@ -30,15 +31,11 @@ import {
 import type { SleepNight } from "@/api/types";
 import { normalBandMarkArea } from "@/components/charts/chartHelpers";
 
-type RangeKey = "24h" | "7d" | "30d" | "90d" | "1y";
-const RANGES: Array<{ key: RangeKey; label: string; days: number }> = [
-  { key: "24h", label: "24h", days: 1 },
-  { key: "7d",  label: "7d",  days: 7 },
-  { key: "30d", label: "30d", days: 30 },
-  { key: "90d", label: "90d", days: 90 },
-  { key: "1y",  label: "1 yr", days: 365 },
-];
-const range = ref<RangeKey>("7d");
+// RANGE-1: one vocabulary, and the range in the URL. This view used
+// to declare its own key type and option list; ten views did, and
+// they disagreed — seven spelled a year "1y" and three "365d".
+const { range, options: RANGES, since: rangeSince, days: rangeDays } =
+  useDateRange(["24h", "7d", "30d", "90d", "1y"], "7d");
 const cur = computed(() => RANGES.find((r) => r.key === range.value)!);
 
 // TD-3 — the 24h trace is anchored to a chosen day rather than always to the
@@ -158,12 +155,18 @@ async function loadHistory() {
   loading.value = true;
   error.value = null;
   try {
-    const dailySince = new Date();
-    dailySince.setHours(0, 0, 0, 0);
-    dailySince.setDate(dailySince.getDate() - cur.value.days + 1);
+    // RANGE-1: shared resolver, anchored on local midnight.
+    const dailySince = rangeSince.value ?? new Date(0);
 
+    // The prior window is the same length immediately before this one.
+    // Derived from the two dates rather than from a day count, so it stays
+    // correct for any range the resolver can produce.
+    const spanDays = Math.max(
+      1,
+      Math.round((Date.now() - dailySince.getTime()) / 86_400_000),
+    );
     const priorSince = new Date(dailySince);
-    priorSince.setDate(priorSince.getDate() - cur.value.days);
+    priorSince.setDate(priorSince.getDate() - spanDays);
     const priorUntil = new Date(dailySince);
 
     const yearAgoSince = new Date(dailySince);

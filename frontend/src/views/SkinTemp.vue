@@ -9,6 +9,7 @@
  * weekday-pattern average + 4-stat header. Y-axis is centred on
  * zero so positive (warmer) vs negative (cooler) reads at a glance.
  */
+import { useDateRange } from "@/useDateRange";
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
@@ -20,14 +21,11 @@ import { chartTheme, isNeon } from "@/theme";
 import { timeAxisFormatter } from "@/components/charts/chartHelpers";
 import PatternsLink from "@/components/PatternsLink.vue";
 
-type RangeKey = "7d" | "30d" | "90d" | "1y";
-const RANGES: Array<{ key: RangeKey; label: string; days: number }> = [
-  { key: "7d",  label: "7d",  days: 7 },
-  { key: "30d", label: "30d", days: 30 },
-  { key: "90d", label: "90d", days: 90 },
-  { key: "1y",  label: "1y",  days: 365 },
-];
-const range = ref<RangeKey>("30d");
+// RANGE-1: one vocabulary, and the range in the URL. This view used
+// to declare its own key type and option list; ten views did, and
+// they disagreed — seven spelled a year "1y" and three "365d".
+const { range, options: RANGES, since: rangeSince, days: rangeDays } =
+  useDateRange(["7d", "30d", "90d", "1y"], "30d");
 const cur = computed(() => RANGES.find((r) => r.key === range.value)!);
 
 const live = ref<Array<{ time: string; value: number }>>([]);
@@ -47,8 +45,11 @@ async function loadHistory() {
   loading.value = true;
   error.value = null;
   try {
-    const since = new Date();
-    since.setDate(since.getDate() - cur.value.days + 1);
+    // RANGE-1: the window start comes from the shared resolver, which
+    // anchors on LOCAL midnight. The old form started at whatever
+    // wall-clock time the page happened to be opened, so a "7d" window
+    // silently dropped part of its first day and moved on every reload.
+    const since = rangeSince.value ?? new Date(0);
     dailyRows.value = await api.summaryRange(since);
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Failed to load";

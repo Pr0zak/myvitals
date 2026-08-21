@@ -2,6 +2,7 @@
 // BODY-1: body circumference measurements (waist/chest/arms/hips/thighs/neck/
 // calves), manual entry + per-site trend. Mirrors the Blood Pressure view's
 // manual-entry pattern.
+import { useDateRange } from "@/useDateRange";
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
@@ -13,14 +14,11 @@ import { api } from "@/api/client";
 import { chartTheme, isNeon } from "@/theme";
 import { fmtDateTime } from "@/format";
 
-type Range = "30d" | "90d" | "1y" | "all";
-const RANGES: { key: Range; label: string; days: number | null }[] = [
-  { key: "30d", label: "30d", days: 30 },
-  { key: "90d", label: "90d", days: 90 },
-  { key: "1y", label: "1y", days: 365 },
-  { key: "all", label: "all", days: null },
-];
-const range = ref<Range>("1y");
+// RANGE-1: one vocabulary, and the range in the URL. This view used
+// to declare its own key type and option list; ten views did, and
+// they disagreed — seven spelled a year "1y" and three "365d".
+const { range, options: RANGES, since: rangeSince, days: rangeDays } =
+  useDateRange(["30d", "90d", "1y", "all"], "1y");
 
 const SITES = [
   { key: "waist_cm", label: "Waist" },

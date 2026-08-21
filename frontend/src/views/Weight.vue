@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useDateRange } from "@/useDateRange";
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
@@ -12,15 +13,9 @@ import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import { chartTheme, isNeon } from "@/theme";
 import { weightVal, weightUnit, fmtWeight, isImperial } from "@/units";
 
-type Range = "30d" | "90d" | "1y" | "all";
-const RANGES: { key: Range; label: string; days: number | null }[] = [
-  { key: "30d", label: "30d", days: 30 },
-  { key: "90d", label: "90d", days: 90 },
-  { key: "1y",  label: "1y",  days: 365 },
-  { key: "all", label: "all", days: null },
-];
-
-const range = ref<Range>("90d");
+// RANGE-1: one vocabulary, and the range in the URL.
+const { range, options: RANGES, since: rangeSince } =
+  useDateRange(["30d", "90d", "1y", "all"], "90d");
 const yoy = ref(false);
 
 type Point = {

@@ -18,6 +18,7 @@
  * heavy enough that keeping all four hot would noticeably hurt the
  * first paint of whichever tab was clicked.
  */
+import { normaliseRange } from "@/useDateRange";
 import { computed, defineAsyncComponent, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -30,7 +31,10 @@ const Compare  = defineAsyncComponent(() => import("./Compare.vue"));
 const Coach    = defineAsyncComponent(() => import("./Coach.vue"));
 
 type TabKey = "trends" | "patterns" | "compare" | "coach";
-type RangeKey = "7d" | "30d" | "90d" | "365d";
+// RANGE-1: canonical vocabulary. The shell used to write "365d"
+// while every detail view wrote "1y" for the same window, so a
+// range carried between them meant nothing.
+type RangeKey = "7d" | "30d" | "90d" | "1y";
 
 const TABS: { key: TabKey; label: string; icon: any; help: string }[] = [
   { key: "trends",   label: "Over time",      icon: LineChart,
@@ -47,7 +51,7 @@ const RANGES: { key: RangeKey; label: string }[] = [
   { key: "7d",   label: "7d" },
   { key: "30d",  label: "30d" },
   { key: "90d",  label: "90d" },
-  { key: "365d", label: "1y" },
+  { key: "1y", label: "1y" },
 ];
 
 const VALID = new Set<TabKey>(TABS.map((t) => t.key));
@@ -63,6 +67,12 @@ const tab = computed<TabKey>(() => {
 });
 
 const range = computed<RangeKey>(() => {
+  // normaliseRange folds the legacy "365d" spelling, so a bookmarked URL
+  // from before this change still opens the window it named.
+  const norm = normaliseRange(
+    Array.isArray(route.query.range) ? route.query.range[0] : route.query.range,
+  );
+  if (norm && VALID_RANGE.has(norm as RangeKey)) return norm as RangeKey;
   const q = route.query.range;
   const v = Array.isArray(q) ? q[0] : q;
   return (v && VALID_RANGE.has(v as RangeKey)) ? (v as RangeKey) : "30d";

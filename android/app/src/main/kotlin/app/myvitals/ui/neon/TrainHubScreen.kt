@@ -114,6 +114,10 @@ fun TrainHubScreen(
     }
     // 30-day strength stats — feeds the weekly dashboard + PR/streak cards.
     var stats by remember { mutableStateOf<app.myvitals.sync.StrengthStats?>(null) }
+    // CONS-1: server-computed streak + frequency for the activity feed.
+    var activityStats by remember {
+        mutableStateOf<app.myvitals.sync.ActivityStatsOut?>(null)
+    }
     var loading by remember { mutableStateOf(true) }
     // Selected activity filter — `null` = All. Client-side substring match on
     // ActivityRow.type against the already-loaded list (the screen now loads a
@@ -164,10 +168,16 @@ fun TrainHubScreen(
                 val statsD = async(Dispatchers.IO) {
                     runCatching { api.strengthStats(days = 30) }.getOrNull()
                 }
+                // Non-fatal: a backend without CONS-1 leaves the week pill
+                // at 0 rather than failing the screen.
+                val actStatsD = async(Dispatchers.IO) {
+                    runCatching { api.activitiesStats(days = 30) }.getOrNull()
+                }
                 workout = workoutD.await()
                 activities = actsD.await()
                 upcoming = upcomingD.await()
                 stats = statsD.await()
+                activityStats = actStatsD.await()
                 yearWorkouts = yearWkD.await()
             }
         }.onFailure { Timber.w(it, "train hub load failed") }
@@ -186,12 +196,14 @@ fun TrainHubScreen(
         ?.let { (doneExercises.toFloat() / it).coerceIn(0f, 1f) } ?: 0f
     val ringLabel = if (totalExercises == null) "—" else "$doneExercises/$totalExercises"
 
-    // This-week pill: activities started within the trailing 7 days. Counts
-    // the full (unfiltered) list — the pill is a global stat, not filtered.
-    val weekCount = remember(activities) {
-        val cutoff = LocalDate.now().minusDays(7).toString()
-        activities.count { it.startAt >= cutoff }
-    }
+    // This-week pill.
+    //
+    // CONS-1: the count is the server's. Deriving it here counted only the
+    // activities this screen happened to have loaded, and compared a UTC
+    // `startAt` string against a LOCAL date string — so an evening session
+    // landed on either side of the boundary depending on the hour, and a
+    // truncated list silently undercounted.
+    val weekCount = activityStats?.consistency?.sessionsLast7d ?: 0
 
     // Which filter chips actually have matches in the loaded list — never show
     // a chip that would yield an empty feed. "All" is always present.

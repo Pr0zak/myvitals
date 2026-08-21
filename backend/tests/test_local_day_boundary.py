@@ -23,7 +23,12 @@ API = SRC / "api"
 ANALYTICS = SRC / "analytics"
 
 # Modules whose endpoints resolve a calendar day the user actually sees.
-DAY_FACING_MODULES = ["summary.py"]
+# CONS-1 added strava.py (activity streaks are calendar-day questions) and
+# workout/strength.py (the week-ahead schedule, the stats window, and the
+# training-load week boundary all resolve days). Adding a module here turns
+# the suite red until every offending expression in it is fixed, which is
+# the point — the guard is only worth anything if it is allowed to fail.
+DAY_FACING_MODULES = ["summary.py", "strava.py", "workout/strength.py"]
 
 
 def _utc_today_calls(tree: ast.AST) -> list[int]:

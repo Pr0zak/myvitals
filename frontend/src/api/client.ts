@@ -1,6 +1,7 @@
 import axios from "axios";
 import { apiBase, queryToken } from "@/config";
 import type {
+  AiAskResult,
   Annotation,
   AnnotationCreate,
   HeartRateSeries,
@@ -10,6 +11,7 @@ import type {
   StepsSeries,
   TilePrefs,
   TodaySummary,
+  TrainingConsistency,
 } from "./types";
 
 const http = axios.create({ baseURL: "/api" });
@@ -470,8 +472,18 @@ export const api = {
     return data;
   },
 
-  async aiAsk(question: string): Promise<{ content: string; generated_at: string; model: string; input_tokens: number; output_tokens: number }> {
-    const { data } = await http.post("/ai/ask", { question });
+  /** ASK-1: structured + cached. Was free prose with no cache — the one
+   *  surface a user can fire by hand repeatedly, and the only one with no
+   *  protection against re-billing an identical question. */
+  async aiAsk(question: string): Promise<AiAskResult> {
+    const { data } = await http.post<AiAskResult>("/ai/ask", { question });
+    return data;
+  },
+
+  /** The last answer, without billing a call. Lets the box show something
+   *  on mount instead of an empty state, like every other Coach card. */
+  async aiAskLatest(): Promise<AiAskResult | null> {
+    const { data } = await http.get<AiAskResult | null>("/ai/ask/latest");
     return data;
   },
 
@@ -1044,6 +1056,8 @@ export const api = {
     per_muscle: Array<{ muscle: string; volume_lb: number }>;
     progression: Record<string, Array<{ date: string; top_weight_lb: number }>>;
     progression_names: Record<string, string>;
+    /** CONS-1. Streaks and frequency over full history, not `days`. */
+    consistency?: TrainingConsistency | null;
   }> {
     const { data } = await http.get("/workout/strength/stats", { params: { days } });
     return data;

@@ -24,7 +24,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy import values as sa_values
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...analytics import energy
+from ...analytics import consistency, energy
 from ...analytics import strength as strength_algo
 from ...auth import require_any
 from ...config import settings
@@ -1085,7 +1085,11 @@ async def _energy_inputs(
     profile = await db.get(models.UserProfile, 1)
     age: int | None = None
     if profile is not None and profile.birth_date is not None:
-        age = (datetime.now(timezone.utc).date() - profile.birth_date).days // 365
+        # Local rather than UTC: a birthday begins in the user's own
+        # timezone. The difference is at most a day and rarely changes the
+        # integer year, but there is no reason for this to be the one
+        # calendar-day derivation in the file that reads UTC.
+        age = (_local_today() - profile.birth_date).days // 365
     latest_bw = (await db.execute(
         select(models.BodyMetric.weight_kg)
         .where(models.BodyMetric.weight_kg.is_not(None))
@@ -1858,7 +1862,7 @@ async def upcoming_workouts(
     # Walk forward, advancing the rotation each time we land on a workout day.
     # If the user just trained off-schedule, the day after gets demoted
     # to rest so they don't hit two consecutive workout days.
-    today = _date.today()
+    today = _local_today()
     last_split = await strength_algo.last_split_for_user(db)
 
     # Last completed STRENGTH workout date — drives the "don't schedule
@@ -2316,7 +2320,10 @@ async def strength_stats(
     """Aggregate strength stats over the last `days` days. Used by phone
     + web chart panels. No external deps beyond strength_sets."""
     from datetime import date as _date, timedelta as _td
-    since = _date.today() - _td(days=days)
+    # CONS-1: the user's LOCAL today. Deriving the window from the UTC
+    # date shifts it forward every evening after 7pm Central, so the
+    # "last 90 days" chart silently starts a day late.
+    since = _local_today() - _td(days=days)
 
     # Pull every logged set in window with its parent workout date + exercise id.
     sets_q = await db.execute(
@@ -2401,6 +2408,22 @@ async def strength_stats(
         for ex_id in progression_out
     }
 
+    # CONS-1: streaks and frequency over FULL history, not the selected
+    # window. `workout_dates` above is bounded by `days`, so deriving a
+    # streak from it would report a shorter streak whenever the user
+    # narrowed the chart range — a number that moves with the date picker
+    # is describing the picker.
+    today_local = _local_today()
+    all_dates = set((await db.execute(
+        select(models.StrengthWorkout.date)
+        .where(models.StrengthWorkout.status == "completed")
+    )).scalars().all())
+    streaks = consistency.compute_streaks(all_dates, today_local)
+
+    # Already exists and is already correct — the planner uses it to pick a
+    # focus. Surfacing it rather than re-deriving it in two clients.
+    rested = await strength_algo.days_since_muscle_trained(db, today_local)
+
     return {
         "since": since.isoformat(),
         "days": days,
@@ -2415,6 +2438,25 @@ async def strength_stats(
         ],
         "progression": progression_out,
         "progression_names": progression_names,
+        "consistency": {
+            "current_streak_days": streaks.current_days,
+            "longest_streak_days": streaks.longest_days,
+            "last_active": (
+                streaks.last_active.isoformat() if streaks.last_active else None
+            ),
+            "today_pending": streaks.today_pending,
+            "sessions_per_week_actual": consistency.sessions_per_week(
+                all_dates, today_local, 28,
+            ),
+            "sessions_last_7d": consistency.count_in_window(all_dates, today_local, 7),
+            "sessions_last_28d": consistency.count_in_window(all_dates, today_local, 28),
+            "frequency_window_days": 28,
+            # Days since each muscle last took a working set. 28 means
+            # "not in the lookback window", i.e. maximally rested.
+            "days_since_by_muscle": {
+                k: round(v, 1) for k, v in sorted(rested.items(), key=lambda kv: -kv[1])
+            },
+        },
     }
 
 
@@ -2431,7 +2473,7 @@ async def strength_volume_trend(
     spine is zero-filled so rest weeks show as empty bars."""
     from datetime import date as _date, timedelta as _td
     weeks = max(1, min(52, int(weeks)))
-    today = _date.today()
+    today = _local_today()
     this_monday = today - _td(days=today.weekday())
     since = this_monday - _td(days=(weeks - 1) * 7)
 

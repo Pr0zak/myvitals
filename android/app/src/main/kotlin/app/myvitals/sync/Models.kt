@@ -441,6 +441,49 @@ data class StrengthStats(
     @Json(name = "per_muscle") val perMuscle: List<StrengthMuscleVolume> = emptyList(),
     val progression: Map<String, List<StrengthProgressionPoint>> = emptyMap(),
     @Json(name = "progression_names") val progressionNames: Map<String, String> = emptyMap(),
+    /** CONS-1. Streaks and frequency over full history, so these do NOT
+     *  change when `days` does. Null from a backend older than v0.10.1. */
+    val consistency: TrainingConsistency? = null,
+)
+
+/**
+ * CONS-1 — server-computed streaks and true frequency.
+ *
+ * Every field here used to be derived in the client from whatever slice
+ * of history the screen had loaded, which made the streak a function of
+ * the date picker and bucketed sessions by UTC date rather than local.
+ * See backend/src/myvitals/analytics/consistency.py.
+ */
+@JsonClass(generateAdapter = true)
+data class TrainingConsistency(
+    @Json(name = "current_streak_days") val currentStreakDays: Int = 0,
+    @Json(name = "longest_streak_days") val longestStreakDays: Int = 0,
+    @Json(name = "current_streak_start") val currentStreakStart: String? = null,
+    @Json(name = "longest_streak_start") val longestStreakStart: String? = null,
+    @Json(name = "longest_streak_end") val longestStreakEnd: String? = null,
+    @Json(name = "last_active") val lastActive: String? = null,
+    /** True when the streak rests on yesterday because today is untrained.
+     *  Defaults false so an absent key reads as "banked" rather than
+     *  nagging — the Moshi-default trap called out in CLAUDE.md. */
+    @Json(name = "today_pending") val todayPending: Boolean = false,
+    @Json(name = "sessions_per_week_actual") val sessionsPerWeekActual: Double = 0.0,
+    @Json(name = "sessions_last_7d") val sessionsLast7d: Int = 0,
+    @Json(name = "sessions_last_28d") val sessionsLast28d: Int = 0,
+    @Json(name = "frequency_window_days") val frequencyWindowDays: Int = 28,
+    @Json(name = "days_since_by_muscle") val daysSinceByMuscle: Map<String, Double> = emptyMap(),
+)
+
+@JsonClass(generateAdapter = true)
+data class ActivityStatsOut(
+    @Json(name = "period_label") val periodLabel: String = "",
+    @Json(name = "n_activities") val nActivities: Int = 0,
+    @Json(name = "total_distance_m") val totalDistanceM: Double = 0.0,
+    @Json(name = "total_duration_s") val totalDurationS: Long = 0,
+    @Json(name = "total_elevation_m") val totalElevationM: Double = 0.0,
+    @Json(name = "total_kcal") val totalKcal: Double = 0.0,
+    @Json(name = "by_type") val byType: Map<String, Int> = emptyMap(),
+    @Json(name = "streak_days") val streakDays: Int = 0,
+    val consistency: TrainingConsistency? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -723,6 +766,27 @@ data class CoachCard(
     @Json(name = "generated_at") val generatedAt: String,
     val model: String,
     val cached: Boolean,
+)
+
+// ── ASK-1: structured free-form Q&A ──────────────────────────────────
+@JsonClass(generateAdapter = true)
+data class AiAnswer(
+    val headline: String = "",
+    @Json(name = "answer_bullets") val answerBullets: List<String> = emptyList(),
+    /** What the answer cannot tell you. Required by the tool schema so the
+     *  model has to decide there is none rather than quietly omit it. */
+    val caveat: String = "",
+    val confidence: String = "medium",
+)
+
+@JsonClass(generateAdapter = true)
+data class AiAskResult(
+    val analysis: AiAnswer = AiAnswer(),
+    @Json(name = "generated_at") val generatedAt: String = "",
+    val model: String = "",
+    val cached: Boolean = false,
+    /** Echoed back so a cached answer renders against its own question. */
+    val question: String? = null,
 )
 
 

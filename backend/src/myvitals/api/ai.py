@@ -15,6 +15,7 @@ from ..db import models
 from ..db.session import get_session
 from ..integrations.llm import LlmError, validate_base_url
 from ..integrations.claude import (
+    build_ask_payload,
     ask,
     build_cardio_coach_payload,
     build_fasting_coach_payload,
@@ -459,19 +460,61 @@ class AskBody(BaseModel):
 async def ask_endpoint(
     body: AskBody, db: AsyncSession = Depends(get_session)
 ) -> dict[str, Any]:
+    """Structured, cached answer to a free-form question (ASK-1).
+
+    Two things changed here. The response is now forced tool-use, so both
+    clients render a card rather than a paragraph. And it is cached by
+    payload hash like every other AI surface — asking the same question
+    twice against unchanged data no longer bills twice, which for the one
+    surface a user can hammer freely was the wrong way round.
+    """
     if not body.question or not body.question.strip():
         raise HTTPException(status_code=400, detail="question is required")
+    question = body.question.strip()
     cfg = await _get_config(db)
     await _check_and_bump_quota(db, cfg)
-    result = await ask(db, cfg, body.question.strip())
+
+    # The question is inside the payload, so it is inside the hash: same
+    # question + same data hits cache, different question does not.
+    payload = await build_ask_payload(db, question)
+    payload_hash = _ai_cache_key(cfg, "ask", payload)
+    cached = await _coach_cached(db, "ask", payload_hash)
+    if cached is not None:
+        return {**cached, "question": question}
+
+    result = await ask(db, cfg, question)
     cfg.calls_today += 1
-    await db.commit()
+    persisted = await _coach_persist(db, "ask", payload_hash, result)
+    return {**persisted, "question": question}
+
+
+@router.get("/ask/latest")
+async def ask_latest(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any] | None:
+    """The most recent answer, without billing a call.
+
+    Lets both surfaces show the last answer on mount instead of an empty
+    box, matching every other card on the Coach page.
+    """
+    row = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == "ask")
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    import json as _json
+    try:
+        analysis = _json.loads(row.content)
+    except Exception:  # noqa: BLE001
+        analysis = {"raw": row.content}
     return {
-        "content": result.content,
-        "generated_at": datetime.now(timezone.utc),
-        "model": result.model,
-        "input_tokens": result.input_tokens,
-        "output_tokens": result.output_tokens,
+        "analysis": analysis,
+        "generated_at": row.generated_at,
+        "model": row.model,
+        "cached": True,
     }
 
 

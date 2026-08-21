@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, ref, watch } from "vue";
+import type { AiAskResult } from "@/api/types";
 import { useRoute } from "vue-router";
 
 const route = useRoute();
@@ -314,7 +315,7 @@ function swapXY() {
 // ── AI integration: Ask + Discovery explainer ─────────────
 const aiCfgEnabled = ref(false);
 const askQuestion = ref("");
-const askAnswer = ref<{ content: string } | null>(null);
+const askAnswer = ref<AiAskResult | null>(null);
 const askBusy = ref(false);
 const askError = ref<string | null>(null);
 const explainResults = ref<Record<string, string>>({});
@@ -326,6 +327,18 @@ async function loadAiCfg() {
     aiCfgEnabled.value = !!cfg.enabled;
   } catch { /* ignore */ }
 }
+/** Show the last answer on mount rather than an empty box. Free — the
+ *  /latest route reads the cache and never calls the model. */
+async function loadLastAnswer() {
+  try {
+    const r = await api.aiAskLatest();
+    if (r) {
+      askAnswer.value = r;
+      if (r.question) askQuestion.value = r.question;
+    }
+  } catch { /* nothing cached yet */ }
+}
+
 async function submitAsk() {
   if (!askQuestion.value.trim()) return;
   askBusy.value = true; askError.value = null; askAnswer.value = null;
@@ -353,6 +366,7 @@ async function explainCorrelation(xm: string, ym: string) {
 onMounted(() => {
   loadFindings();
   loadAiCfg();
+  loadLastAnswer();
   if (queryToken.value) fetchData();
 });
 watch([x, y, lag, days], fetchData);
@@ -465,7 +479,25 @@ const explorerStrength = computed(() => strengthIdx(result.value?.pearson_r));
         </button>
       </div>
       <div v-if="askError" class="err" style="margin-top: 0.5rem;">{{ askError }}</div>
-      <div v-if="askAnswer" class="ask-answer" v-html="renderMarkdown(askAnswer.content)"/>
+      <!-- ASK-1: structured fields, not markdown prose. The model is
+           forced through a tool schema, so these always exist. -->
+      <div v-if="askAnswer" class="ask-answer">
+        <div class="ask-head">
+          <span class="ask-headline">{{ askAnswer.analysis.headline }}</span>
+          <span class="conf" :class="askAnswer.analysis.confidence">
+            {{ askAnswer.analysis.confidence }} confidence
+          </span>
+        </div>
+        <ul v-if="askAnswer.analysis.answer_bullets.length" class="ask-bullets">
+          <li v-for="(b, i) in askAnswer.analysis.answer_bullets" :key="i">{{ b }}</li>
+        </ul>
+        <p v-if="askAnswer.analysis.caveat" class="ask-caveat">
+          {{ askAnswer.analysis.caveat }}
+        </p>
+        <p class="ask-meta">
+          {{ askAnswer.model }}<template v-if="askAnswer.cached"> · cached, not re-billed</template>
+        </p>
+      </div>
     </Card>
 
     <!-- ──────── FINDINGS FEED ──────── -->
@@ -802,4 +834,17 @@ h1 { margin: 0 0 0.4rem; }
   background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad);
   margin: 0.6rem 0;
 }
+.ask-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+.ask-headline { font-weight: 600; color: var(--text); }
+.conf { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.1rem 0.4rem; border-radius: 999px; border: 1px solid var(--border); }
+.conf.high { color: var(--good); border-color: var(--good); }
+.conf.medium { color: var(--muted); }
+/* Low confidence is styled as a warning rather than muted: the point is
+   that the data did not really support the answer, which the reader needs
+   to notice, not skim past. */
+.conf.low { color: var(--warn, #f59e0b); border-color: var(--warn, #f59e0b); }
+.ask-bullets { margin: 0.6rem 0 0; padding-left: 1.1rem; color: var(--text); font-size: 0.9rem; }
+.ask-bullets li { margin-bottom: 0.25rem; }
+.ask-caveat { margin: 0.7rem 0 0; font-size: 0.82rem; color: var(--muted); border-left: 2px solid var(--border); padding-left: 0.6rem; }
+.ask-meta { margin: 0.6rem 0 0; font-size: 0.72rem; color: var(--muted-2); }
 </style>

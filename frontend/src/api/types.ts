@@ -95,8 +95,31 @@ export interface ActivityStats {
   total_elevation_m: number;
   total_kcal: number;
   by_type: Record<string, number>;
+  /** Same number as consistency.current_streak_days; kept for older clients. */
   streak_days: number;
   period_pct_vs_prev: Record<string, number>;
+  /** CONS-1. Computed over full history in the user's timezone rather than
+   *  over the selected window in UTC — so it does not change when the date
+   *  picker does. Null from a backend older than v0.10.1. */
+  consistency?: TrainingConsistency | null;
+}
+
+export interface TrainingConsistency {
+  current_streak_days: number;
+  longest_streak_days: number;
+  current_streak_start?: string | null;
+  longest_streak_start?: string | null;
+  longest_streak_end?: string | null;
+  last_active: string | null;
+  /** True when the streak is carried by yesterday because today has not
+   *  been trained yet — render "keep it going", not "banked". */
+  today_pending: boolean;
+  sessions_per_week_actual: number;
+  sessions_last_7d: number;
+  sessions_last_28d: number;
+  frequency_window_days: number;
+  /** Strength stats only: days since each muscle last took a working set. */
+  days_since_by_muscle?: Record<string, number>;
 }
 
 export interface StravaStatus {
@@ -586,4 +609,24 @@ export interface TilePrefs {
   hidden: string[];
   available: TilePrefOption[];
   group_order: string[];
+}
+
+// ── ASK-1: structured free-form Q&A ──────────────────────────────────
+export interface AiAnswer {
+  headline: string;
+  answer_bullets: string[];
+  /** What the answer cannot tell you. Required server-side so the model
+   *  has to actively decide there is no caveat rather than quietly omit
+   *  the limitations of a claim about someone's health. */
+  caveat: string;
+  confidence: "high" | "medium" | "low";
+}
+
+export interface AiAskResult {
+  analysis: AiAnswer;
+  generated_at: string;
+  model: string;
+  cached: boolean;
+  /** Echoed back so a cached answer can be shown against its question. */
+  question?: string;
 }

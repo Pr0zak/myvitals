@@ -33,6 +33,14 @@ interface BackendApi {
 
     // ── Fasting ────────────────────────────────────────────────
     // ── Coach (AI) ─────────────────────────────────────────────
+    // ASK-1: free-form Q&A, structured and cached like every other card.
+    // The phone had no Ask surface at all — it was web-only.
+    @POST("ai/ask")
+    suspend fun aiAsk(@Body body: Map<String, String>): AiAskResult
+
+    @GET("ai/ask/latest")
+    suspend fun aiAskLatest(): Response<AiAskResult>
+
     @POST("ai/coach/cardio")
     suspend fun coachCardio(@Body body: Map<String, Any> = emptyMap()): CoachCard
 
@@ -273,6 +281,11 @@ interface BackendApi {
     // from putProfile because that endpoint replaces `extra` wholesale, so
     // saving any unrelated profile field through it drops preferences this
     // build does not know about.
+    // CONS-1: the phone did not consume this at all, so TrainHubScreen
+    // counted "this week" from whatever activities it had loaded.
+    @GET("activities/stats")
+    suspend fun activitiesStats(@retrofit2.http.Query("days") days: Int = 30): ActivityStatsOut
+
     @GET("profile/tile-prefs")
     suspend fun tilePrefs(): TilePrefsOut
 

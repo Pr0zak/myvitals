@@ -232,6 +232,11 @@ fun WorkoutChartsScreen(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    // CONS-1 sits first and deliberately does NOT respond to
+                    // the range selector — these are full-history figures, and
+                    // placing them below the range-bounded cards without
+                    // saying so would imply otherwise.
+                    s.consistency?.let { c -> item { ConsistencyCard(c, neon) } }
                     item { OverviewCard(s, neon) }
                     item { BodyMapCard(muscleVol, neon) }
                     item { DailyVolumeCard(s, neon) }
@@ -246,6 +251,92 @@ fun WorkoutChartsScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * CONS-1 — mirrors `frontend/src/components/ConsistencyCard.vue`.
+ *
+ * Renders only; every number here is computed by the backend over full
+ * history in the user's timezone. Deriving any of it from the loaded
+ * stats window is what made the streak change when the range chip did.
+ */
+@Composable
+private fun ConsistencyCard(c: app.myvitals.sync.TrainingConsistency, neon: Boolean) {
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val good = if (neon) NeonMV.Lime else MV.Green
+
+    // Most-rested first: that ordering answers "what should I train?",
+    // which is the question the number is for.
+    val rested = remember(c) { c.daysSinceByMuscle.entries.sortedByDescending { it.value } }
+
+    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("CONSISTENCY", color = muted,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                StatCell("${c.currentStreakDays}d", "current streak", ink, muted)
+                StatCell("${c.longestStreakDays}d", "longest", ink, muted)
+                StatCell("${c.sessionsPerWeekActual}", "per week", ink, muted)
+                StatCell("${c.sessionsLast28d}", "last 28d", ink, muted)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                when {
+                    c.currentStreakDays == 0 ->
+                        c.lastActive?.let { "Last session $it" } ?: "No history yet"
+                    // The distinction todayPending carries: a streak resting
+                    // on yesterday is alive but not yet banked, and saying
+                    // "banked" would be wrong by a day.
+                    c.todayPending -> "Train today to keep the streak"
+                    else -> "Today is banked"
+                },
+                color = if (c.todayPending) muted else good, fontSize = 11.sp,
+            )
+            Text(
+                "Frequency over ${c.frequencyWindowDays} days — not the "
+                    + "selected range.",
+                color = muted, fontSize = 10.sp,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+
+            if (rested.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Text("DAYS RESTED", color = muted,
+                    fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                Spacer(Modifier.height(4.dp))
+                for (chunk in rested.chunked(3)) {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        for ((muscle, days) in chunk) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    muscle.replace('_', ' '),
+                                    color = muted, fontSize = 10.sp, maxLines = 1,
+                                )
+                                Text(
+                                    "${days}d",
+                                    color = if (days >= 7) good else ink,
+                                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                        // Pad a short final row so columns stay aligned.
+                        repeat(3 - chunk.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatCell(value: String, label: String, ink: Color, muted: Color) {
+    Column {
+        Text(value, color = ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = muted, fontSize = 10.sp)
     }
 }
 

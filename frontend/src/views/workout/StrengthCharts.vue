@@ -7,8 +7,10 @@ import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
 import BodyMap from "@/components/BodyMap.vue";
+import ConsistencyCard from "@/components/ConsistencyCard.vue";
 import { api } from "@/api/client";
 import { chartTheme, isNeon } from "@/theme";
+import type { TrainingConsistency } from "@/api/types";
 
 const days = ref<number>(90);
 const loading = ref(true);
@@ -21,6 +23,8 @@ interface Stats {
   per_muscle: Array<{ muscle: string; volume_lb: number }>;
   progression: Record<string, Array<{ date: string; top_weight_lb: number; e1rm?: number }>>;
   progression_names: Record<string, string>;
+  /** CONS-1: full-history streaks + frequency; independent of `days`. */
+  consistency?: TrainingConsistency | null;
 }
 const stats = ref<Stats | null>(null);
 
@@ -244,6 +248,12 @@ const progressionOption = computed(() => {
     <p v-else-if="error" class="err">{{ error }}</p>
 
     <template v-else-if="stats">
+      <!-- CONS-1: sits above the range-bounded cards on purpose. Everything
+           below reflects the selected window; these numbers deliberately do
+           not, so putting them next to a "90d" toggle without saying so
+           would imply they did. -->
+      <ConsistencyCard :data="stats.consistency" noun="sessions" :show-muscles="true"/>
+
       <Card :flat="true" class="overview">
         <div class="stats-row">
           <div><div class="lbl">Workouts</div><div class="val">{{ stats.n_workouts }}</div></div>

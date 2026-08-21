@@ -12,14 +12,42 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import polyline as _polyline_lib
 
-from ..analytics import cardio, geo
+from ..analytics import cardio, consistency, geo
 from ..auth import require_any, require_query
+from ..config import settings
 from ..db import models
 from ..db.session import get_session
 from ..integrations import strava
 from ..integrations import strava_web
 
 router = APIRouter()
+
+
+def _local_tz() -> Any:
+    """The user's timezone, falling back to UTC when it will not resolve.
+
+    Same block as ``api/summary.py:_local_tz``. Activities are stored with
+    UTC timestamps, so any calendar-day question about them — which day was
+    this session on, is today part of a streak — has to be asked in the
+    user's zone or it answers for the wrong day every evening.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        return timezone.utc
+
+
+def _local_date(ts: datetime, tz: Any) -> Any:
+    """The LOCAL calendar date of a stored timestamp.
+
+    ``ts.date()`` gives the UTC date, which for a 20:00 Central session is
+    the *following* day. Doing that consistently shifts a whole training
+    history forward by one and manufactures gaps in streaks.
+    """
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(tz).date()
 
 
 class StravaStatus(BaseModel):
@@ -97,8 +125,14 @@ class ActivityStatsOut(BaseModel):
     total_elevation_m: float
     total_kcal: float
     by_type: dict[str, int]
+    #: Retained under its original name so an older APK keeps working;
+    #: it is the same number as `consistency.current_streak_days`.
     streak_days: int
     period_pct_vs_prev: dict[str, float]
+    #: CONS-1. Measured over full history in the user's local timezone,
+    #: not over the selected window in UTC — see analytics/consistency.py
+    #: for the three ways the previous inline version got this wrong.
+    consistency: dict[str, Any] | None = None
 
 
 def _mask(s: str) -> str:
@@ -267,12 +301,20 @@ async def activities_stats(
     for a in rows:
         by_type[a.type] = by_type.get(a.type, 0) + 1
 
-    active_days = {a.start_at.date() for a in rows}
-    streak = 0
-    d = now.date()
-    while d in active_days:
-        streak += 1
-        d -= _td(days=1)
+    # CONS-1: streaks are a property of the user's whole history, not of
+    # the window they happen to be looking at, and both the activity dates
+    # and "today" have to be resolved in the user's timezone. Computing
+    # them from `rows` (already filtered to `days`) truncated any streak
+    # that began before the window edge; anchoring on the UTC date
+    # reported zero for five hours every evening.
+    local_tz = _local_tz()
+    today_local = datetime.now(local_tz).date()
+    all_days_rows = (await db.execute(
+        select(models.Activity.start_at)
+    )).scalars().all()
+    active_days = {_local_date(t, local_tz) for t in all_days_rows}
+    streaks = consistency.compute_streaks(active_days, today_local)
+    streak = streaks.current_days
 
     def pct(curr: float, prev_val: float) -> float:
         if prev_val == 0:
@@ -295,6 +337,36 @@ async def activities_stats(
         total_kcal=total_kcal,
         by_type=by_type,
         streak_days=streak,
+        consistency={
+            "current_streak_days": streaks.current_days,
+            "longest_streak_days": streaks.longest_days,
+            "current_streak_start": (
+                streaks.current_start.isoformat() if streaks.current_start else None
+            ),
+            "longest_streak_start": (
+                streaks.longest_start.isoformat() if streaks.longest_start else None
+            ),
+            "longest_streak_end": (
+                streaks.longest_end.isoformat() if streaks.longest_end else None
+            ),
+            "last_active": (
+                streaks.last_active.isoformat() if streaks.last_active else None
+            ),
+            "today_pending": streaks.today_pending,
+            # Fixed trailing windows, deliberately independent of `days` —
+            # a frequency that moves when you change the date picker is
+            # describing the picker, not the training.
+            "sessions_per_week_actual": consistency.sessions_per_week(
+                active_days, today_local, 28,
+            ),
+            "sessions_last_7d": consistency.count_in_window(
+                active_days, today_local, 7,
+            ),
+            "sessions_last_28d": consistency.count_in_window(
+                active_days, today_local, 28,
+            ),
+            "frequency_window_days": 28,
+        },
         period_pct_vs_prev={
             "n": pct(n, pn), "distance": pct(total_distance, pd),
             "duration": pct(total_duration, pdur),

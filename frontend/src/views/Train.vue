@@ -13,12 +13,14 @@ import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
 import ActivityYearCalendar from "@/components/ActivityYearCalendar.vue";
-import type { Activity, StrengthWorkoutDetail } from "@/api/types";
+import type { Activity, ActivityStats, StrengthWorkoutDetail } from "@/api/types";
 
 const router = useRouter();
 const loading = ref(true);
 
 const workout = ref<StrengthWorkoutDetail | null>(null);
+/** CONS-1: server-computed streaks + frequency; see analytics/consistency.py. */
+const stats = ref<ActivityStats | null>(null);
 const activities = ref<Activity[]>([]);
 const workouts = ref<Array<{ date: string; status?: string | null;
   split_focus?: string | null }>>([]);
@@ -35,13 +37,15 @@ function ytdSince(): string {
 
 async function load(): Promise<void> {
   loading.value = true;
-  const [w, acts, wkts] = await Promise.all([
+  const [w, acts, wkts, st] = await Promise.all([
     api.strengthToday().catch(() => null),
     api.activities({ limit: 2000, since: ytdSince() }).catch(() => [] as Activity[]),
     api.strengthWorkouts({ limit: 400 }).catch(() => ({ count: 0, workouts: [] })),
+    api.activitiesStats(30).catch(() => null),
   ]);
   workout.value = w ?? null;
   activities.value = Array.isArray(acts) ? acts : [];
+  stats.value = st;
   workouts.value = ((wkts as any)?.workouts ?? [])
     .filter((x: any) => !["regenerated", "planned", "skipped"].includes(x.status))
     .filter((x: any) => !(x.split_focus === "cardio" && x.completed_by_activity_source));
@@ -82,14 +86,14 @@ function go(path: string): void {
   router.push(path);
 }
 
-// ── This-week pill: activities started within the trailing 7 days ─────
-const weekCount = computed<number>(() => {
-  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  return activities.value.filter((a) => {
-    const t = a?.start_at ? Date.parse(a.start_at) : NaN;
-    return !Number.isNaN(t) && t >= cutoff;
-  }).length;
-});
+// ── This-week pill ───────────────────────────────────────────────────
+// CONS-1: the count comes from the server. Deriving it here counted only
+// the activities this page happened to have loaded, and bucketed them by
+// comparing a UTC instant against a local cutoff — so an evening session
+// could fall on either side of the boundary depending on the hour the
+// page was opened. `sessions_last_7d` is computed over full history in
+// the user's timezone.
+const weekCount = computed<number>(() => stats.value?.consistency?.sessions_last_7d ?? 0);
 
 // ── Hero ring: completed exercises / total ────────────────────────────
 // Both counters come from the server (SKIP-1). Deriving "done" here is

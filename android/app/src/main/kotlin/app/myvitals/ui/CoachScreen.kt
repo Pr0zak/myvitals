@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.GpsFixed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -72,6 +73,17 @@ fun CoachScreen(
     val bg = if (neon) NeonMV.Bg else MV.Bg
     val ink = if (neon) NeonMV.Ink else MV.OnSurface
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+
+    // ASK-1: free-form question. Web-only until now.
+
+    var askQuestion by remember { mutableStateOf("") }
+
+    var askResult by remember { mutableStateOf<app.myvitals.sync.AiAskResult?>(null) }
+
+    var askLoading by remember { mutableStateOf(false) }
+
+    var askErr by remember { mutableStateOf<String?>(null) }
+
 
     var workoutOpen by remember { mutableStateOf(false) }
     var workout by remember { mutableStateOf<CoachCard?>(null) }
@@ -189,8 +201,33 @@ fun CoachScreen(
         app.myvitals.data.JsonCache.read<List<app.myvitals.sync.AiGoal>>(
             context, "coach_goals", goalsType,
         )?.let { goals = it.value }
+        // ASK-1: same SWR treatment as the coach cards.
+        app.myvitals.data.JsonCache.read<app.myvitals.sync.AiAskResult>(
+            context, "ai_ask_latest", app.myvitals.sync.AiAskResult::class.java,
+        )?.let {
+            askResult = it.value
+            it.value.question?.let { q -> askQuestion = q }
+        }
 
         if (!settings.isConfigured()) return@LaunchedEffect
+        // The last answer, free — /latest reads the cache and never calls
+        // the model, so this costs nothing on every screen open.
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val r = withContext(Dispatchers.IO) { api.aiAskLatest() }
+            if (r.isSuccessful) {
+                r.body()?.let { fresh ->
+                    askResult = fresh
+                    if (askQuestion.isBlank()) fresh.question?.let { askQuestion = it }
+                    app.myvitals.data.JsonCache.write(
+                        context, "ai_ask_latest",
+                        app.myvitals.sync.AiAskResult::class.java, fresh,
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "ask latest load failed")
+        }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val w = withContext(Dispatchers.IO) { api.coachWorkoutLatest() }
@@ -287,6 +324,39 @@ fun CoachScreen(
                 Pair("What to change", a["what_to_change"]?.toString() ?: "", neon)
                 EvidenceList(a["evidence"], neon)
                 LabeledPlan("This week's plan", a["weekly_plan_hint"]?.toString() ?: "", neon)
+            },
+        )
+
+        AskCard(
+            neon = neon,
+            question = askQuestion,
+            onQuestionChange = { askQuestion = it },
+            result = askResult,
+            loading = askLoading,
+            error = askErr,
+            onAsk = {
+                val q = askQuestion.trim()
+                if (q.isNotEmpty()) {
+                    scope.launch {
+                        askLoading = true; askErr = null
+                        try {
+                            val api = BackendClient.create(
+                                settings.backendUrl, settings.bearerToken,
+                            )
+                            val fresh = withContext(Dispatchers.IO) {
+                                api.aiAsk(mapOf("question" to q))
+                            }
+                            askResult = fresh
+                            app.myvitals.data.JsonCache.write(
+                                context, "ai_ask_latest",
+                                app.myvitals.sync.AiAskResult::class.java, fresh,
+                            )
+                        } catch (e: Exception) {
+                            Timber.w(e, "ask failed")
+                            askErr = e.message?.take(160) ?: "Ask failed"
+                        } finally { askLoading = false }
+                    }
+                }
             },
         )
 
@@ -434,6 +504,117 @@ fun CoachScreen(
         )
 
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * ASK-1 — free-form question, structured answer.
+ *
+ * Mirrors the Ask box on the web Insights page. Always expanded rather
+ * than lazy-loaded like the other cards: those cost a model call to open,
+ * this one costs nothing until the user actually asks something.
+ */
+@Composable
+private fun AskCard(
+    neon: Boolean,
+    question: String,
+    onQuestionChange: (String) -> Unit,
+    result: app.myvitals.sync.AiAskResult?,
+    loading: Boolean,
+    error: String?,
+    onAsk: () -> Unit,
+) {
+    val card1 = if (neon) NeonMV.Card else MV.SurfaceContainerLow
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val accent = if (neon) NeonMV.Cyan else MV.BrandRed
+    val errColor = if (neon) NeonMV.Bad else MV.Red
+    val good = if (neon) NeonMV.Lime else Color(0xFF22C55E)
+    val warn = if (neon) NeonMV.Amber else Color(0xFFF59E0B)
+
+    val line = if (neon) NeonMV.Line else MV.OutlineVariant
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(card1)
+            .border(1.dp, line, RoundedCornerShape(12.dp)),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Text("ASK", color = muted, fontSize = 11.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = question,
+                onValueChange = onQuestionChange,
+                placeholder = {
+                    Text("What's hurting my sleep this month?",
+                        color = muted, fontSize = 13.sp)
+                },
+                singleLine = false,
+                maxLines = 3,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (loading || question.isBlank()) line else accent)
+                    .clickable(enabled = !loading && question.isNotBlank()) { onAsk() }
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    if (loading) "Thinking…" else "Ask",
+                    color = if (loading || question.isBlank()) muted
+                            else if (neon) NeonMV.OnAccent else MV.OnSurface,
+                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                )
+            }
+
+            error?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, color = errColor, fontSize = 12.sp)
+            }
+
+            result?.let { r ->
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        r.analysis.headline, color = ink, fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        r.analysis.confidence.uppercase(),
+                        // Low confidence is warned, not muted: the reader
+                        // needs to notice the data did not really support
+                        // the answer, not skim past it.
+                        color = when (r.analysis.confidence) {
+                            "high" -> good
+                            "low" -> warn
+                            else -> muted
+                        },
+                        fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    )
+                }
+                for (b in r.analysis.answerBullets) {
+                    Row(Modifier.padding(top = 6.dp)) {
+                        Text("•", color = muted, fontSize = 13.sp,
+                            modifier = Modifier.padding(end = 6.dp))
+                        Text(b, color = ink, fontSize = 13.sp)
+                    }
+                }
+                if (r.analysis.caveat.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(r.analysis.caveat, color = muted, fontSize = 11.sp)
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    r.model + if (r.cached) " · cached, not re-billed" else "",
+                    color = muted, fontSize = 10.sp,
+                )
+            }
+        }
     }
 }
 

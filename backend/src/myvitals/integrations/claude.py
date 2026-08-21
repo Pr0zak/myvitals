@@ -30,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics.trends import compute_badges
+from ..config import settings
 from ..db import models
 
 log = logging.getLogger(__name__)
@@ -111,10 +112,74 @@ Examples:
 Output ONLY the sentence. No bullets, no markdown."""
 
 
+def _local_today() -> date:
+    """Today's date in the user's timezone — not UTC, not the process zone.
+
+    Every AI payload stamps a ``today`` and slices windows relative to it.
+    The container runs TZ=UTC while the user is Central, so a UTC-derived
+    date rolls at 7pm local: for five hours each evening the model was
+    told today was tomorrow, and every trailing window it reasoned over
+    was shifted a day forward. That produces confident, specific, wrong
+    statements ("your HRV dropped yesterday") from correct data.
+
+    It also poisons the cache in a way that looks like a cache bug rather
+    than a date bug: ``today`` is part of the hashed payload, so the key
+    changed at 7pm and again at midnight, re-billing the same question
+    twice a day for an unchanged answer.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        tz = timezone.utc
+    return datetime.now(tz).date()
+
+
 ASK_SYSTEM = """You are a brief health coach. The user has aggregate
-data and a specific question. Answer in ≤ 80 words. Be concrete: cite
-numbers and dates. Use bullets if listing > 1 cause. If the data
-doesn't support an answer, say so honestly. No emoji."""
+data and a specific question. Answer via the `give_answer` tool.
+
+Rules:
+- Cite specific numbers and dates from the context. A claim with no
+  number behind it is not worth returning.
+- If the context does not support an answer, say so in `caveat` and set
+  confidence to "low". Do NOT infer beyond the data to seem helpful;
+  a confident wrong answer about someone's health is the worst failure
+  mode available to you.
+- If the question is not about the user's health data, answer briefly
+  that you only have their health context, rather than guessing.
+- Never diagnose, and never contradict a clinician. Suggest seeing one
+  when the data looks genuinely concerning.
+- No emoji."""
+
+ASK_TOOL = {
+    "name": "give_answer",
+    "description": "Answer the user's question as structured fields.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "headline": {
+                "type": "string",
+                "description": "≤14 words. The direct answer, not a restatement of the question.",
+            },
+            "answer_bullets": {
+                "type": "array", "items": {"type": "string"},
+                "description": "1-4 short bullets, each citing a specific number or date.",
+            },
+            "caveat": {
+                "type": "string",
+                "description": (
+                    "What this answer cannot tell them — thin data, short window, "
+                    "confounders. Empty string only if there genuinely is none."
+                ),
+            },
+            "confidence": {
+                "type": "string", "enum": ["high", "medium", "low"],
+                "description": "How well the available data supports the answer.",
+            },
+        },
+        "required": ["headline", "answer_bullets", "caveat", "confidence"],
+    },
+}
 
 ANALYSIS_TOOL = {
     "name": "give_analysis",
@@ -138,7 +203,7 @@ ANALYSIS_TOOL = {
 def _bucket_age(dob: date | None) -> str | None:
     if dob is None:
         return None
-    age = (date.today() - dob).days // 365
+    age = (_local_today() - dob).days // 365
     if age < 25: return "<25"
     if age < 35: return "25-34"
     if age < 45: return "35-44"
@@ -162,7 +227,7 @@ async def _profile_ctx(db: AsyncSession) -> dict[str, Any]:
 
 
 async def _daily_rows(db: AsyncSession, days: int) -> list[dict[str, Any]]:
-    today = datetime.now(timezone.utc).date()
+    today = _local_today()
     since = today - timedelta(days=days)
     rows = (await db.execute(
         select(models.DailySummary)
@@ -257,7 +322,7 @@ async def _correlations(db: AsyncSession, days: int = 90, top_n: int = 5) -> lis
     except Exception as e:  # noqa: BLE001
         log.warning("claude._correlations: analytics import failed: %s", e)
         return []
-    today = datetime.now(timezone.utc).date()
+    today = _local_today()
     since = today - timedelta(days=days)
     # One query for every metric series (was one query per metric).
     cache = await all_daily_summary_metrics(db, since, today)
@@ -305,7 +370,7 @@ async def _fasting_status(db: AsyncSession) -> dict[str, Any] | None:
             .limit(1)
         )).scalar_one_or_none()
 
-        today_d = datetime.now(timezone.utc).date()
+        today_d = _local_today()
         seven_ago = today_d - _td(days=6)
 
         rows = (await db.execute(
@@ -404,7 +469,7 @@ async def build_summary_payload(db: AsyncSession, range_kind: str) -> dict[str, 
     range_kind: 'week' (7d) | 'month' (30d). Now richer — includes
     activities + annotations + WoW deltas computed server-side."""
     days = 30 if range_kind == "month" else 7
-    today = datetime.now(timezone.utc).date()
+    today = _local_today()
     daily = await _daily_rows(db, days * 2)  # pull 2× window for WoW deltas
 
     # Split current vs prior window for delta calc
@@ -440,7 +505,7 @@ async def build_summary_payload(db: AsyncSession, range_kind: str) -> dict[str, 
 
 async def build_topic_payload(db: AsyncSession, topic: str, days: int = 14) -> dict[str, Any]:
     """Slim payload for a focused single-topic read (sleep / recovery / sober)."""
-    today = datetime.now(timezone.utc).date()
+    today = _local_today()
     rows = await _daily_rows(db, days)
     activities = await _activities(db, days) if topic == "recovery" else []
     annotations = await _annotations(db, days) if topic in ("sleep", "recovery", "sober") else []
@@ -638,27 +703,87 @@ async def verdict(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
 
 # ─────────────── Free-form Q&A ───────────────
 
+def _tool_result(resp: Any, tool_name: str) -> dict[str, Any]:
+    """Extract a forced tool call's input, or {} if the model did not call it.
+
+    Every structured surface in this module inlines this loop. This is the
+    shared version; new surfaces should use it rather than adding a ninth
+    copy. Returning {} rather than raising lets each caller decide what a
+    missing tool call means for its own card — some can degrade, some
+    cannot.
+
+    `tool_choice={"type": "tool", ...}` makes the omission very unlikely,
+    but "very unlikely" over an external API is not "impossible", and an
+    IndexError in a health app is a worse outcome than an honest fallback.
+    """
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use" and block.name == tool_name:
+            return dict(block.input or {})
+    return {}
+
+
+MAX_QUESTION_CHARS = 500
+
+
+async def build_ask_payload(db: AsyncSession, question: str) -> dict[str, Any]:
+    """Bounded payload for a free-form question (ASK-1).
+
+    The question is part of the payload rather than a separate argument so
+    it lands inside the cache hash: asking the same question against
+    unchanged data must return the cached answer instead of re-billing,
+    and asking a *different* question against the same data must not.
+
+    Truncated at MAX_QUESTION_CHARS. An unbounded question is both a cost
+    lever and a prompt-injection surface, and 500 characters is more than
+    any real question here needs.
+    """
+    return {
+        "question": question.strip()[:MAX_QUESTION_CHARS],
+        "context": await build_summary_payload(db, "week"),
+    }
+
+
 async def ask(db: AsyncSession, cfg: models.AiConfig, question: str) -> AiResult:
+    """Structured answer to a free-form question (ASK-1).
+
+    This was the last AI surface returning free prose. Everything else
+    already went through forced tool-use, which is what lets the clients
+    render cards instead of a paragraph, and what stops the model padding
+    an answer to fill a text block.
+    """
     if not cfg.enabled or not cfg.anthropic_api_key:
         raise RuntimeError("AI is disabled or no API key configured")
-    if len(question) > 500:
-        question = question[:500]
-    payload = await build_summary_payload(db, "week")
+    payload = await build_ask_payload(db, question)
     user_text = (
-        f"Question: {question}\n\n"
+        f"Question: {payload['question']}\n\n"
         f"Aggregate context (last 7 days + correlations + sober):\n"
-        f"{json.dumps(payload, indent=2, default=str)}\n"
+        f"{json.dumps(payload['context'], indent=2, default=str)}\n"
     )
     client = get_provider(cfg)
     resp = await client.messages.create(
         model=cfg.model,
-        max_tokens=400,
+        max_tokens=600,
         system=_cached_system(ASK_SYSTEM, cfg),
+        tools=[ASK_TOOL],
+        tool_choice={"type": "tool", "name": "give_answer"},
         messages=[{"role": "user", "content": user_text}],
     )
-    text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+    analysis = _tool_result(resp, "give_answer")
+    if not analysis:
+        # No tool call. Say so rather than inventing an answer — this is a
+        # question about the user's health, and a fabricated response is
+        # worse than an admitted failure.
+        text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+        analysis = {
+            "headline": "Could not produce a structured answer",
+            "answer_bullets": [
+                t for t in ["\n\n".join(text_parts).strip()[:400]] if t
+            ] or ["The model returned no usable response."],
+            "caveat": "Try again, or pick a different model in Settings → AI.",
+            "confidence": "low",
+        }
     return AiResult(
-        content="\n\n".join(text_parts).strip(),
+        content=json.dumps(analysis),
         model=resp.model,
         input_tokens=resp.usage.input_tokens,
         output_tokens=resp.usage.output_tokens,
@@ -1518,7 +1643,7 @@ async def build_deload_payload(db: AsyncSession) -> dict[str, Any]:
     for delta math, computed server-side) + last 14d of strength workout
     aggregates (avg rating, missed/skipped sets, weights).
     """
-    today = datetime.now(timezone.utc).date()
+    today = _local_today()
     daily = await _daily_rows(db, 28)
     recent = [r for r in daily if r["date"] >= str(today - timedelta(days=7))]
     baseline = [r for r in daily if r["date"] < str(today - timedelta(days=7))]
@@ -2063,7 +2188,7 @@ async def build_cardio_coach_payload(db: AsyncSession) -> dict[str, Any]:
     summary = await cardio_summary(db, days=30)
     daily = await _daily_rows(db, 28)
     return {
-        "today": datetime.now(timezone.utc).date().isoformat(),
+        "today": _local_today().isoformat(),
         "profile": await _profile_ctx(db),
         "cardio_30d": summary,
         "recent_alerts": await _recent_alerts_ctx(db),
@@ -2373,7 +2498,7 @@ async def build_sleep_coach_payload(db: AsyncSession) -> dict[str, Any]:
         "readiness": _avg(daily, "readiness"),
     }
     return {
-        "today": datetime.now(timezone.utc).date().isoformat(),
+        "today": _local_today().isoformat(),
         "profile": await _profile_ctx(db),
         "last7_summary": last7_summary,
         "baseline_28d": baseline_28d,
@@ -2540,7 +2665,7 @@ async def build_recovery_coach_payload(db: AsyncSession) -> dict[str, Any]:
     skin_rows = (await db.execute(
         select(models.DailySummary.date, models.DailySummary.skin_temp_delta_avg)
         .where(models.DailySummary.date >= (
-            datetime.now(timezone.utc).date() - timedelta(days=28)
+            _local_today() - timedelta(days=28)
         ))
         .order_by(models.DailySummary.date)
     )).all()
@@ -2574,7 +2699,7 @@ async def build_recovery_coach_payload(db: AsyncSession) -> dict[str, Any]:
         1 for r in last7 if (r.get("skin_temp_delta") or 0) >= 0.3
     )
     return {
-        "today": datetime.now(timezone.utc).date().isoformat(),
+        "today": _local_today().isoformat(),
         "profile": await _profile_ctx(db),
         "last7_summary": last7_summary,
         "baseline_28d": baseline_28d,
@@ -2804,7 +2929,7 @@ async def _planned_strength_today(db: AsyncSession) -> dict[str, Any] | None:
     heavy day (no fasted lifting) or a yoga / cardio day (fasting is
     fine)."""
     from datetime import date as _date
-    today_d = _date.today()
+    today_d = _local_today()
     w = (await db.execute(
         select(models.StrengthWorkout)
         .where(models.StrengthWorkout.date == today_d)
@@ -2833,7 +2958,7 @@ async def build_fasting_coach_payload(db: AsyncSession) -> dict[str, Any]:
         and fasting["active_fast"].get("is_religious")
     )
     return {
-        "today": datetime.now(timezone.utc).date().isoformat(),
+        "today": _local_today().isoformat(),
         "profile": await _profile_ctx(db),
         "fasting_status": fasting,
         "is_religious_active": is_religious_active,
@@ -2913,7 +3038,7 @@ async def build_workout_coach_payload(db: AsyncSession) -> dict[str, Any]:
     # well inside the cache-keyed payload hash.
     daily = await _daily_rows(db, 28)
     return {
-        "today": datetime.now(timezone.utc).date().isoformat(),
+        "today": _local_today().isoformat(),
         "profile": await _profile_ctx(db),
         "vitals_trends": deload.get("trends"),
         "strength_last_14d": deload.get("strength_last_14d"),

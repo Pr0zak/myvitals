@@ -92,8 +92,22 @@ def test_expired_states_are_rejected():
 # Payload parsing
 # ---------------------------------------------------------------------------
 
+def test_sample_points_use_their_physical_time():
+    """The timestamp lives INSIDE the type body, not at the top level —
+    which the first version of this parser assumed, so it found none."""
+    ts = gh._point_time(
+        {"dataSource": {}, "oxygenSaturation": {
+            "sampleTime": {"physicalTime": "2026-08-21T12:17:50Z"}}},
+        "oxygen-saturation",
+    )
+    assert ts == datetime(2026, 8, 21, 12, 17, 50, tzinfo=timezone.utc)
+
+
 def test_interval_points_use_their_start_time():
-    ts = gh._point_time({"interval": {"startTime": "2026-08-18T03:14:00Z"}})
+    ts = gh._point_time(
+        {"dataSource": {}, "steps": {"interval": {"startTime": "2026-08-18T03:14:00Z"}}},
+        "steps",
+    )
     assert ts == datetime(2026, 8, 18, 3, 14, tzinfo=timezone.utc)
 
 
@@ -101,22 +115,58 @@ def test_daily_points_are_stamped_at_midday_not_midnight():
     """Midnight is exactly the boundary this codebase keeps getting wrong.
     A daily aggregate parked there is ambiguous about which day it belongs
     to; midday is unambiguous in any timezone this user will be in."""
-    ts = gh._point_time({"date": {"year": 2026, "month": 8, "day": 18}})
+    ts = gh._point_time(
+        {"dataSource": {}, "dailyRestingHeartRate": {
+            "date": {"year": 2026, "month": 8, "day": 18}}},
+        "daily-resting-heart-rate",
+    )
     assert ts == datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc)
 
 
 def test_unparseable_points_yield_none_rather_than_raising():
     """One malformed point must not abort a whole sync."""
-    assert gh._point_time({}) is None
-    assert gh._point_time({"interval": {"startTime": "not-a-date"}}) is None
-    assert gh._point_time({"date": {"year": "banana"}}) is None
+    assert gh._point_time({}, "steps") is None
+    assert gh._point_time(
+        {"dataSource": {}, "steps": {"interval": {"startTime": "not-a-date"}}}, "steps",
+    ) is None
+    assert gh._point_time(
+        {"dataSource": {}, "dailyX": {"date": {"year": "banana"}}}, "daily-x",
+    ) is None
 
 
-def test_value_extraction_walks_the_nested_payload():
-    point = {"oxygenSaturation": {"percentage": 96.5}}
-    assert gh._dig(point, "oxygenSaturation.percentage") == 96.5
-    assert gh._dig(point, "oxygenSaturation.missing") is None
-    assert gh._dig({}, "a.b.c") is None
+def test_value_extraction_matches_the_real_payloads():
+    """Shapes captured from the live account, Pixel Watch 3 via FITBIT.
+
+    The first version of this guessed a dotted path
+    (`dailySleepTemperatureDerivations.deltaCelsius`) that does not exist.
+    Google reports two absolute temperatures and the delta is derived.
+    """
+    spo2 = {"dataSource": {}, "oxygenSaturation": {
+        "sampleTime": {"physicalTime": "2026-08-21T12:17:50Z"},
+        "percentage": 93.5,
+    }}
+    assert gh._spo2_percent(gh._body(spo2, "oxygen-saturation")) == 93.5
+
+    skin = {"dataSource": {}, "dailySleepTemperatureDerivations": {
+        "date": {"year": 2026, "month": 8, "day": 20},
+        "nightlyTemperatureCelsius": 32.77371508379888,
+        "baselineTemperatureCelsius": 33.223477684454096,
+    }}
+    body = gh._body(skin, "daily-sleep-temperature-derivations")
+    assert gh._skin_temp_delta(body) == -0.45
+
+
+def test_skin_temp_is_stored_as_a_deviation_not_an_absolute():
+    """32.8 C at the wrist means nothing on its own; half a degree below
+    your own baseline does. vitals_skin_temp.celsius_delta says delta."""
+    assert gh._skin_temp_delta({"nightlyTemperatureCelsius": 33.0,
+                                "baselineTemperatureCelsius": 33.0}) == 0.0
+    assert gh._skin_temp_delta({"nightlyTemperatureCelsius": 33.0}) is None
+
+
+def test_camel_case_key_derivation():
+    assert gh._camel("oxygen-saturation") == "oxygenSaturation"
+    assert gh._camel("daily-sleep-temperature-derivations") == "dailySleepTemperatureDerivations"
 
 
 # ---------------------------------------------------------------------------
@@ -315,3 +365,57 @@ def test_configured_means_both_halves_are_present():
     a client id, the button would enable and the flow would fail at Google."""
     src = inspect.getsource(api.get_config)
     assert "cfg.client_id and cfg.client_secret" in src
+
+
+# ---------------------------------------------------------------------------
+# Per-type filter strategy — established empirically against the live API
+# ---------------------------------------------------------------------------
+
+def test_daily_types_filter_on_a_civil_date():
+    """The documentation describes the filter grammar but not which field
+    each type exposes. Getting it wrong is a flat 400
+    (INVALID_DATA_POINT_FILTER_DATA_TYPE_MEMBER), not an ignored parameter,
+    so every one of these was confirmed against the real API."""
+    from datetime import date as _date
+
+    f = gh._filter_for("daily-sleep-temperature-derivations",
+                       _date(2026, 8, 14), _date(2026, 8, 22))
+    assert f is not None
+    assert "daily_sleep_temperature_derivations.date" in f
+    assert "2026-08-14" in f and "T00:00:00Z" not in f
+
+
+def test_interval_types_filter_on_interval_start_time():
+    from datetime import date as _date
+
+    f = gh._filter_for("steps", _date(2026, 8, 14), _date(2026, 8, 22))
+    assert f is not None and "steps.interval.start_time" in f and "T00:00:00Z" in f
+
+
+def test_sample_and_session_types_accept_no_filter_at_all():
+    """oxygen-saturation, heart-rate, sleep and weight rejected every filter
+    field tried. They are fetched unfiltered and bounded in Python."""
+    from datetime import date as _date
+
+    for t in ("oxygen-saturation", "heart-rate", "sleep", "weight"):
+        assert gh._filter_for(t, _date(2026, 8, 14), _date(2026, 8, 22)) is None
+
+
+def test_unfiltered_fetches_are_bounded():
+    """Without a server-side filter there is nothing to stop a paginated walk
+    through years of samples if the newest-first ordering ever changes."""
+    src = inspect.getsource(gh.fetch_data_points)
+    assert "max_pages" in src
+    assert "_within(" in src
+
+
+def test_rate_limiting_is_retried_not_reported_as_absence():
+    """A 429 surfaced as a hard failure makes an available stream look
+    unavailable — the one thing the probe must not get wrong."""
+    src = inspect.getsource(gh._get_with_retry)
+    assert "429" in src and "Retry-After" in src
+
+
+def test_the_probe_paces_itself():
+    src = inspect.getsource(gh.probe_available_types)
+    assert "asyncio.sleep" in src

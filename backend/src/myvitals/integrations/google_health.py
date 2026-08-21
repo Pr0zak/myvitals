@@ -31,6 +31,7 @@ shared registration to leak and the quota is theirs.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -66,18 +67,58 @@ class GoogleHealthError(RuntimeError):
     """A call failed in a way worth showing the user."""
 
 
+def _camel(api_type: str) -> str:
+    """`oxygen-saturation` -> `oxygenSaturation`.
+
+    Every data point nests its body under this key alongside `dataSource`,
+    and both the reading AND its timestamp live inside it — there is no
+    top-level interval or date, which is what the first version of this
+    parser assumed.
+    """
+    head, *rest = api_type.split("-")
+    return head + "".join(w.capitalize() for w in rest)
+
+
+def _body(point: dict[str, Any], api_type: str) -> dict[str, Any]:
+    value = point.get(_camel(api_type))
+    return value if isinstance(value, dict) else {}
+
+
+def _spo2_percent(body: dict[str, Any]) -> float | None:
+    pct = body.get("percentage")
+    return float(pct) if pct is not None else None
+
+
+def _skin_temp_delta(body: dict[str, Any]) -> float | None:
+    """Nightly skin temperature as a DELTA from the user's own baseline.
+
+    Google reports two absolute figures — `nightlyTemperatureCelsius` and
+    `baselineTemperatureCelsius` — while `vitals_skin_temp` stores the
+    deviation, which is the number that actually means something: 32.8 C at
+    the wrist is meaningless on its own, half a degree below your own
+    thirty-day baseline is not. Deriving it here keeps the stored column
+    honest to its name.
+    """
+    nightly = body.get("nightlyTemperatureCelsius")
+    baseline = body.get("baselineTemperatureCelsius")
+    if nightly is None or baseline is None:
+        return None
+    return round(float(nightly) - float(baseline), 3)
+
+
 @dataclass(frozen=True)
 class DataTypeSpec:
-    """One data type, and where its values land in this app's schema.
+    """One data type, how to read it, and where its values land.
 
-    ``value_path`` is the dotted path into a data point's payload. The API
-    nests the reading under a key derived from the data type name, so
-    ``oxygen-saturation`` yields ``{"oxygenSaturation": {"percentage": 97}}``.
+    ``extract`` is a function rather than a dotted path because the payloads
+    are not uniformly shaped. SpO2 carries a ready-made percentage; skin
+    temperature carries two absolute readings whose difference is the value
+    this app stores. A path expression could express the first and not the
+    second, and guessing a path that did not exist is exactly how the first
+    version of this shipped broken.
     """
     api_type: str
-    value_path: str
-    # Which of this app's tables it feeds. Only types with NO competing
-    # writer are wired in the first cut — see INGEST_TYPES.
+    extract: Any          # (body: dict) -> float | None
     target: str
 
 
@@ -87,22 +128,19 @@ class DataTypeSpec:
 # HeartRate, Steps, SleepSession and BodyMetric are all written by the phone
 # already; vitals_hrv, vitals_spo2 and vitals_skin_temp key on `time` alone
 # with no source column, so a second writer at a different sampling
-# granularity would silently overwrite rather than coexist. Google's HRV is a
-# DAILY aggregate, which would be actively wrong written into a per-sample
-# table.
+# granularity would silently overwrite rather than coexist.
 #
 # SpO2 and skin temperature have no competing writer at all — vitals_spo2 has
 # never had one — so they carry zero conflict risk and are exactly the two
-# streams the firmware bug killed. Everything else waits until the probe
-# shows what this account actually serves.
+# streams the Pixel Watch firmware bug killed.
+#
+# Confirmed present on this account, sourced from a Pixel Watch 3 via
+# platform FITBIT, before being wired.
 INGEST_TYPES: tuple[DataTypeSpec, ...] = (
-    DataTypeSpec("oxygen-saturation", "oxygenSaturation.percentage", "spo2"),
-    DataTypeSpec(
-        "daily-sleep-temperature-derivations",
-        "dailySleepTemperatureDerivations.deltaCelsius",
-        "skin_temp",
-    ),
+    DataTypeSpec("oxygen-saturation", _spo2_percent, "spo2"),
+    DataTypeSpec("daily-sleep-temperature-derivations", _skin_temp_delta, "skin_temp"),
 )
+
 
 # Types worth reporting on in the probe even though nothing ingests them yet,
 # so the user can see at a glance what their account would make available.
@@ -241,44 +279,129 @@ def _dig(payload: dict[str, Any], path: str) -> Any:
     return cur
 
 
+# Which filter a data type will accept, established empirically against the
+# live API — the documentation describes the filter grammar but does not say
+# which field each type exposes, and getting it wrong is a flat 400
+# (INVALID_DATA_POINT_FILTER_DATA_TYPE_MEMBER) rather than an ignored
+# parameter.
+#
+#   daily-*        filter on `<type>.date` with plain YYYY-MM-DD bounds
+#   interval types filter on `<type>.interval.start_time` with RFC-3339
+#   everything else  rejects every filter field tried; fetch unfiltered and
+#                    bound the window client-side
+#
+# The last group is the awkward one and the reason `_within` exists. Results
+# come back newest-first, so pagination stops as soon as a page runs past the
+# start of the window rather than walking the user's whole history.
+_INTERVAL_TYPES = frozenset({
+    "steps", "distance", "floors", "total-calories", "active-zone-minutes",
+    "activity-level", "hydration-log",
+})
+
+
+def _filter_for(api_type: str, since: date, until: date) -> str | None:
+    field = api_type.replace("-", "_")
+    if api_type.startswith("daily-"):
+        return f'{field}.date >= "{since.isoformat()}" AND {field}.date < "{until.isoformat()}"'
+    if api_type in _INTERVAL_TYPES:
+        return (
+            f'{field}.interval.start_time >= "{since.isoformat()}T00:00:00Z" '
+            f'AND {field}.interval.start_time < "{until.isoformat()}T00:00:00Z"'
+        )
+    return None
+
+
+def _within(point: dict[str, Any], since: date, until: date,
+            api_type: str | None = None) -> bool:
+    """Is this point inside the window? Used only for unfiltered fetches."""
+    ts = _point_time(point, api_type)
+    if ts is None:
+        return False
+    return since <= ts.date() < until
+
+
+async def _get_with_retry(
+    client: httpx.AsyncClient, url: str, params: dict[str, Any], token: str,
+) -> httpx.Response:
+    """One GET, retrying on 429.
+
+    The API rate-limits, and it does so readily enough that a probe touching
+    a dozen types in a row trips it. A 429 surfaced as a hard failure would
+    make an available stream look unavailable, which is the one thing the
+    probe exists to report accurately.
+    """
+    delay = 2.0
+    for attempt in range(4):
+        resp = await client.get(
+            url, params=params, headers={"Authorization": f"Bearer {token}"},
+        )
+        if resp.status_code != 429:
+            return resp
+        if attempt == 3:
+            return resp
+        retry_after = resp.headers.get("Retry-After")
+        wait = float(retry_after) if (retry_after or "").isdigit() else delay
+        log.info("google health 429; retrying in %.0fs", wait)
+        await asyncio.sleep(wait)
+        delay *= 2
+    return resp
+
+
 async def fetch_data_points(
     token: str, api_type: str, since: date, until: date,
-    *, page_size: int = 1000,
+    *, page_size: int = 1000, max_pages: int = 50,
 ) -> list[dict[str, Any]]:
     """All data points of one type in a date range, following pagination.
 
-    The filter field name is the data type with hyphens replaced by
-    underscores, which is the API's own convention.
+    Applies whatever filter the type accepts and falls back to bounding the
+    window in Python for the types that accept none. `max_pages` is a
+    backstop for that fallback: without a server-side filter there is nothing
+    to stop a paginated walk through years of samples if the ordering
+    assumption ever fails.
     """
-    field = api_type.replace("-", "_")
-    params = {
-        "pageSize": page_size,
-        "filter": (
-            f'{field}.interval.start_time >= "{since.isoformat()}T00:00:00Z" '
-            f'AND {field}.interval.start_time < "{until.isoformat()}T00:00:00Z"'
-        ),
-    }
+    server_filter = _filter_for(api_type, since, until)
+    params: dict[str, Any] = {"pageSize": page_size}
+    if server_filter:
+        params["filter"] = server_filter
+
     out: list[dict[str, Any]] = []
     url = f"{API_BASE}/dataTypes/{api_type}/dataPoints"
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        while True:
-            resp = await client.get(
-                url, params=params,
-                headers={"Authorization": f"Bearer {token}"},
-            )
+        for _page in range(max_pages):
+            resp = await _get_with_retry(client, url, params, token)
             if resp.status_code == 403:
                 raise GoogleHealthError(
                     f"{api_type}: access denied — the granted scopes may not "
                     f"cover it ({resp.text[:160]})"
                 )
+            if resp.status_code == 429:
+                raise GoogleHealthError(
+                    f"{api_type}: rate limited by Google after retries — "
+                    "try again in a minute"
+                )
             if resp.status_code >= 400:
                 raise GoogleHealthError(f"{api_type}: {resp.status_code} {resp.text[:200]}")
             body = resp.json()
-            out.extend(body.get("dataPoints") or [])
-            token_next = body.get("nextPageToken")
-            if not token_next:
+            page = body.get("dataPoints") or []
+
+            if server_filter:
+                out.extend(page)
+            else:
+                out.extend(p for p in page if _within(p, since, until, api_type))
+                # Newest-first ordering: once a whole page predates the
+                # window there is nothing older worth walking to.
+                if page and all(
+                    (t := _point_time(p, api_type)) is not None and t.date() < since
+                    for p in page
+                ):
+                    return out
+
+            next_token = body.get("nextPageToken")
+            if not next_token:
                 return out
-            params = {**params, "pageToken": token_next}
+            params = {**params, "pageToken": next_token}
+    log.warning("google health %s hit the %d-page cap", api_type, max_pages)
+    return out
 
 
 async def probe_available_types(
@@ -302,7 +425,9 @@ async def probe_available_types(
             spec.api_type == api_type for spec in INGEST_TYPES
         )}
         try:
-            points = await fetch_data_points(token, api_type, since, until, page_size=50)
+            points = await fetch_data_points(
+                token, api_type, since, until, page_size=50, max_pages=2,
+            )
             entry["points"] = len(points)
             entry["ok"] = True
             if points:
@@ -313,6 +438,11 @@ async def probe_available_types(
             entry["ok"] = False
             entry["error"] = str(e)[:200]
         results.append(entry)
+        # The API rate-limits readily, and a probe walks a dozen types in a
+        # row. A short pause costs a few seconds once; a 429 makes an
+        # available stream report as unavailable, which is the one thing this
+        # function must not get wrong.
+        await asyncio.sleep(1.5)
     return results
 
 
@@ -320,23 +450,46 @@ async def probe_available_types(
 # Ingest
 # ---------------------------------------------------------------------------
 
-def _point_time(point: dict[str, Any]) -> datetime | None:
+def _point_time(point: dict[str, Any], api_type: str | None = None) -> datetime | None:
     """The instant a data point describes.
 
-    Instantaneous readings carry an interval; daily aggregates carry a civil
-    date instead. A daily value is stamped at local-ish midday rather than
-    midnight, because midnight is exactly the boundary the rest of this app
-    keeps getting wrong and a value parked there is ambiguous about which day
-    it belongs to.
+    The timestamp lives inside the type-specific body, in one of two shapes:
+    a sample carries ``sampleTime.physicalTime`` (an RFC-3339 instant), and a
+    daily aggregate carries a civil ``date``. A daily value is stamped at
+    midday rather than midnight, because midnight is exactly the boundary
+    this app keeps getting wrong and a value parked there is ambiguous about
+    which day it belongs to.
+
+    ``api_type`` is optional so the probe can call this without knowing the
+    type; it falls back to scanning for the one non-``dataSource`` key.
     """
-    interval = point.get("interval") or {}
+    body: dict[str, Any] = {}
+    if api_type:
+        body = _body(point, api_type)
+    if not body:
+        for key, value in point.items():
+            if key != "dataSource" and isinstance(value, dict):
+                body = value
+                break
+    if not body:
+        return None
+
+    physical = (body.get("sampleTime") or {}).get("physicalTime")
+    if physical:
+        try:
+            return datetime.fromisoformat(str(physical).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    interval = body.get("interval") or {}
     start = interval.get("startTime")
     if start:
         try:
             return datetime.fromisoformat(str(start).replace("Z", "+00:00"))
         except ValueError:
             return None
-    d = point.get("date") or {}
+
+    d = body.get("date") or {}
     if d.get("year"):
         try:
             return datetime(
@@ -374,8 +527,8 @@ async def ingest_range(
 
         rows: list[dict[str, Any]] = []
         for point in points:
-            ts = _point_time(point)
-            value = _dig(point, spec.value_path)
+            ts = _point_time(point, spec.api_type)
+            value = spec.extract(_body(point, spec.api_type))
             if ts is None or value is None:
                 continue
             if spec.target == "spo2":

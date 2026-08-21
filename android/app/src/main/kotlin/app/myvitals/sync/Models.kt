@@ -207,6 +207,10 @@ data class StrengthSetRow(
     // PR-1: set on the log_set response when this set just beat a record.
     @Json(name = "is_weight_pr") val isWeightPr: Boolean = false,
     @Json(name = "is_e1rm_pr") val isE1rmPr: Boolean = false,
+    /** PR-1b: weight | e1rm | added_load | hold | reps, or null.
+     *  The two booleans above are derived from this server-side and kept
+     *  only so an older APK still shows a badge. */
+    @Json(name = "pr_kind") val prKind: String? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -417,10 +421,21 @@ data class StrengthProgressionPoint(
 data class StrengthRecord(
     @Json(name = "exercise_id") val exerciseId: String,
     val name: String,
+    /** PR-1b: loaded | bodyweight | hold — which of the bests below is
+     *  the meaningful one for this exercise. Defaults to "loaded" so a
+     *  response from an older backend renders exactly as it used to. */
+    val kind: String = "loaded",
+    // These two stay non-null (0.0 for bodyweight rows). Making them
+    // nullable would throw JsonDataException here and the Records card
+    // would vanish behind WorkoutChartsScreen's swallowed catch.
     @Json(name = "best_weight_lb") val bestWeightLb: Double,
     @Json(name = "best_weight_date") val bestWeightDate: String? = null,
     @Json(name = "best_e1rm") val bestE1rm: Double,
     @Json(name = "best_e1rm_date") val bestE1rmDate: String? = null,
+    @Json(name = "best_reps") val bestReps: Int = 0,
+    @Json(name = "best_reps_date") val bestRepsDate: String? = null,
+    @Json(name = "best_hold_s") val bestHoldS: Int = 0,
+    @Json(name = "best_hold_date") val bestHoldDate: String? = null,
     @Json(name = "last_performed_date") val lastPerformedDate: String? = null,
 )
 
@@ -1494,6 +1509,32 @@ data class AiGoal(
     @Json(name = "current_value") val currentValue: Double? = null,
     @Json(name = "progress_pct") val progressPct: Double? = null,
     @Json(name = "baseline_value") val baselineValue: Double? = null,
+    /** GOAL-1: where this is heading, or why the data will not say. */
+    val projection: GoalProjection? = null,
+)
+
+/**
+ * GOAL-1 — trend projection for a goal.
+ *
+ * `isFallback` is the important field. The backend refuses to name a date
+ * when the trend is flat, running away from the target, mostly noise, or
+ * further out than two years — and puts the reason in `fallbackReason`.
+ * Render that reason; a projection that silently disappears reads as a
+ * loading bug rather than as the honest answer it is.
+ *
+ * `isFallback` defaults TRUE so an absent key means "no projection" rather
+ * than "projection with null fields", which would render as a blank ETA.
+ */
+@JsonClass(generateAdapter = true)
+data class GoalProjection(
+    @Json(name = "per_day") val perDay: Double? = null,
+    @Json(name = "per_week") val perWeek: Double? = null,
+    @Json(name = "eta_date") val etaDate: String? = null,
+    @Json(name = "eta_days") val etaDays: Int? = null,
+    val confidence: String? = null,
+    val method: String = "none",
+    @Json(name = "is_fallback") val isFallback: Boolean = true,
+    @Json(name = "fallback_reason") val fallbackReason: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

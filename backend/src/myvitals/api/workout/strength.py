@@ -588,8 +588,14 @@ class SetOut(BaseModel):
     set_type: str = "working"
     # PR-1: set on the log_set response when this set just beat the
     # exercise's prior best. Drives the transient "PR" badge on the client.
+    #
+    # PR-1b: `pr_kind` is the real field now — one of weight | e1rm |
+    # added_load | hold | reps. The two booleans are DERIVED from it and
+    # kept because an APK built before this release reads only them; drop
+    # them and every older phone silently stops showing PR badges.
     is_weight_pr: bool = False
     is_e1rm_pr: bool = False
+    pr_kind: str | None = None
 
 
 class WorkoutExerciseIn(BaseModel):
@@ -865,16 +871,38 @@ def _set_to_out(s: models.StrengthSet) -> SetOut:
 
 
 async def _detect_pr(
-    db: AsyncSession, exercise_id: str, s: "models.StrengthSet",
-) -> tuple[bool, bool]:
-    """PR-1: which records this set just set for the exercise, vs all PRIOR
-    working sets (excluding this one). Returns (weight_pr, e1rm_pr). No prior
-    history -> (False, False): the first-ever set isn't a "record"."""
-    if (s.actual_weight_lb is None or s.actual_reps is None or s.skipped
+    db: AsyncSession, exercise_id: str, s: "models.StrengthSet", workout_id: int,
+) -> str | None:
+    """Which kind of personal record this set just set, if any (PR-1b).
+
+    Returns one of `strength_algo.PR_PRECEDENCE`, or None.
+
+    The old version returned early whenever `actual_weight_lb` was None,
+    which made a record structurally impossible for every bodyweight
+    exercise — 31% of the sets in this database and 112 of 275 catalog
+    entries. The classification itself now lives in `analytics/strength.py`
+    so it is testable without a database; this function's only job is
+    gathering the prior sets.
+    """
+    if (s.actual_reps is None or s.skipped
             or (s.set_type or "working") == "warmup"):
-        return (False, False)
+        return None
+
+    # CATALOG_BY_ID, not the module-local `_CATALOG_BY_ID` built by this
+    # file's own json.load: `taxonomy.normalise_catalog` mutates the
+    # analytics copy in place at import, so only that one has canonical
+    # movement_pattern values — which `pr_eligible` reads to exclude
+    # mobility.
+    ex = strength_algo.CATALOG_BY_ID.get(exercise_id)
+    if not ex:
+        return None
+
     rows = (await db.execute(
-        select(models.StrengthSet.actual_weight_lb, models.StrengthSet.actual_reps)
+        select(
+            models.StrengthSet.actual_weight_lb,
+            models.StrengthSet.actual_reps,
+            models.StrengthWorkoutExercise.workout_id,
+        )
         .join(models.StrengthWorkoutExercise,
               models.StrengthSet.workout_exercise_id == models.StrengthWorkoutExercise.id)
         .where(models.StrengthWorkoutExercise.exercise_id == exercise_id)
@@ -884,16 +912,19 @@ async def _detect_pr(
         .where(models.StrengthSet.set_type != "warmup")
     )).all()
     if not rows:
-        return (False, False)
-    prior_w = [r.actual_weight_lb for r in rows if r.actual_weight_lb is not None]
-    prior_max_w = max(prior_w) if prior_w else None
-    prior_max_e1 = max(
-        (strength_algo.estimate_1rm(r.actual_weight_lb, r.actual_reps) or 0.0
-         for r in rows), default=0.0)
-    this_e1 = strength_algo.estimate_1rm(s.actual_weight_lb, s.actual_reps) or 0.0
-    weight_pr = prior_max_w is not None and s.actual_weight_lb > prior_max_w
-    e1rm_pr = this_e1 > prior_max_e1
-    return (weight_pr, e1rm_pr)
+        return None
+
+    prior = [
+        strength_algo.PriorSet(
+            weight_lb=r.actual_weight_lb,
+            reps=r.actual_reps,
+            same_workout=(r.workout_id == workout_id),
+        )
+        for r in rows
+    ]
+    return strength_algo.classify_pr(
+        ex, prior, s.actual_weight_lb, s.actual_reps,
+    )
 
 
 def _program_badge(state: dict) -> str:
@@ -1822,7 +1853,13 @@ async def log_set(
     await db.refresh(s)
     out = _set_to_out(s)
     if not s.skipped:
-        out.is_weight_pr, out.is_e1rm_pr = await _detect_pr(db, wex.exercise_id, s)
+        kind = await _detect_pr(db, wex.exercise_id, s, wex.workout_id)
+        out.pr_kind = kind
+        # Derived, so old clients keep working. Deciding WHICH badge to
+        # show is a server judgement now — both clients used to hard-code
+        # `is_weight_pr ? "weight" : "e1RM"` independently.
+        out.is_weight_pr = kind == "weight"
+        out.is_e1rm_pr = kind == "e1rm"
     return out
 
 
@@ -2521,9 +2558,16 @@ async def strength_volume_trend(
 
 @router.get("/records")
 async def strength_records(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
-    """PR-1: per-exercise personal bests — heaviest working set + best e1RM,
-    each with the date it was set, plus last-performed. Powers the Records
-    card. Working sets only (warmups/skipped excluded)."""
+    """Per-exercise personal bests (PR-1b).
+
+    Loaded lifts report a heaviest set and a best e1RM. Bodyweight
+    exercises report best reps (or best added load, for weighted
+    variants); timed holds report the longest hold. Before this, the query
+    filtered on `actual_weight_lb IS NOT NULL`, so every bodyweight
+    exercise was absent from the card entirely — 233 of 760 logged sets.
+
+    Working sets only; warmups and skipped sets excluded.
+    """
     rows = (await db.execute(
         select(
             models.StrengthWorkout.date,
@@ -2537,7 +2581,6 @@ async def strength_records(db: AsyncSession = Depends(get_session)) -> dict[str,
               models.StrengthWorkoutExercise.workout_id == models.StrengthWorkout.id)
         .where(models.StrengthSet.skipped.is_(False))
         .where(models.StrengthSet.actual_reps.is_not(None))
-        .where(models.StrengthSet.actual_weight_lb.is_not(None))
         .where(models.StrengthSet.set_type != "warmup")
         # ASC + strict-> below means the FIRST date a max was hit wins ties,
         # so the reported PR date is deterministic and reads as "first achieved".
@@ -2545,26 +2588,72 @@ async def strength_records(db: AsyncSession = Depends(get_session)) -> dict[str,
     )).all()
     recs: dict[str, dict[str, Any]] = {}
     for d, ex_id, w, reps in rows:
-        e1 = strength_algo.estimate_1rm(w, reps) or 0.0
+        ex = strength_algo.CATALOG_BY_ID.get(ex_id)
+        # Mobility poses are excluded for the same reason they cannot set
+        # a PR: adjust_mobility_target chases the user's best hold, so a
+        # "record" there is just the prescription catching up.
+        if not ex or not strength_algo.pr_eligible(ex):
+            continue
+        bodyweight = strength_algo._is_bodyweight_only(ex)
+        timed = bool(ex.get("is_timed"))
         r = recs.setdefault(ex_id, {
+            "kind": "hold" if timed else ("bodyweight" if bodyweight else "loaded"),
             "best_weight_lb": 0.0, "best_weight_date": None,
-            "best_e1rm": 0.0, "best_e1rm_date": None, "last_date": None})
-        if float(w) > r["best_weight_lb"]:
-            r["best_weight_lb"] = float(w); r["best_weight_date"] = d
-        if e1 > r["best_e1rm"]:
-            r["best_e1rm"] = e1; r["best_e1rm_date"] = d
+            "best_e1rm": 0.0, "best_e1rm_date": None,
+            "best_reps": 0, "best_reps_date": None,
+            "best_hold_s": 0, "best_hold_date": None,
+            "last_date": None})
+
+        if timed and w is None:
+            if int(reps) > r["best_hold_s"]:
+                r["best_hold_s"] = int(reps); r["best_hold_date"] = d
+        elif bodyweight:
+            if w is None:
+                if int(reps) > r["best_reps"]:
+                    r["best_reps"] = int(reps); r["best_reps_date"] = d
+            elif float(w) > r["best_weight_lb"]:
+                # Added load on a bodyweight movement. Deliberately NOT fed
+                # through estimate_1rm — Epley on 25 lb of added weight
+                # would report an e1RM as if 25 lb were the total load.
+                r["best_weight_lb"] = float(w); r["best_weight_date"] = d
+        elif w is not None:
+            e1 = strength_algo.estimate_1rm(w, reps) or 0.0
+            if float(w) > r["best_weight_lb"]:
+                r["best_weight_lb"] = float(w); r["best_weight_date"] = d
+            if e1 > r["best_e1rm"]:
+                r["best_e1rm"] = e1; r["best_e1rm_date"] = d
+
         if r["last_date"] is None or d > r["last_date"]:
             r["last_date"] = d
+
     out = [{
         "exercise_id": ex_id,
         "name": strength_algo.CATALOG_BY_ID.get(ex_id, {}).get("name", ex_id),
+        "kind": r["kind"],
+        # These two stay non-null numbers, 0.0 for bodyweight rows, rather
+        # than becoming nullable. The phone's Moshi adapter declares them
+        # non-null, so a null here throws JsonDataException and the whole
+        # Records card vanishes behind a swallowed catch in
+        # WorkoutChartsScreen — a silent blank rather than a visible error.
         "best_weight_lb": round(r["best_weight_lb"], 1),
         "best_weight_date": r["best_weight_date"].isoformat() if r["best_weight_date"] else None,
         "best_e1rm": round(r["best_e1rm"], 1),
         "best_e1rm_date": r["best_e1rm_date"].isoformat() if r["best_e1rm_date"] else None,
+        "best_reps": r["best_reps"],
+        "best_reps_date": r["best_reps_date"].isoformat() if r["best_reps_date"] else None,
+        "best_hold_s": r["best_hold_s"],
+        "best_hold_date": r["best_hold_date"].isoformat() if r["best_hold_date"] else None,
         "last_performed_date": r["last_date"].isoformat() if r["last_date"] else None,
     } for ex_id, r in recs.items()]
-    out.sort(key=lambda x: x["best_e1rm"], reverse=True)
+
+    # Loaded lifts first by e1RM, then bodyweight/hold rows by their own
+    # best. Sorting everything by e1RM alone would bury every bodyweight
+    # record below every loaded one at 0.0.
+    out.sort(key=lambda x: (
+        x["kind"] == "loaded",
+        x["best_e1rm"] if x["kind"] == "loaded"
+        else (x["best_hold_s"] if x["kind"] == "hold" else x["best_reps"]),
+    ), reverse=True)
     return {"records": out}
 
 

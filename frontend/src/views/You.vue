@@ -24,12 +24,27 @@ const fastActive = ref<boolean>(false);
 const soberDays = ref<number | null>(null);
 const soberLongest = ref<number | null>(null);
 
+interface GoalProjection {
+  per_day: number | null;
+  per_week: number | null;
+  eta_date: string | null;
+  eta_days: number | null;
+  confidence: "high" | "medium" | "low" | null;
+  is_fallback: boolean;
+  fallback_reason: string | null;
+  method: string;
+}
+
 interface GoalRow {
   id: number;
   kind: string;
   title: string;
   target_value: number | null;
   target_unit: string | null;
+  /** Real progress from the server. This screen used to fabricate it. */
+  current_value?: number | null;
+  progress_pct?: number | null;
+  projection?: GoalProjection | null;
 }
 const goals = ref<GoalRow[]>([]);
 
@@ -70,13 +85,43 @@ const GOAL_GLOWS: string[] = [
 ];
 const topGoals = computed<GoalRow[]>(() => goals.value.slice(0, 3));
 
-// Deterministic, bounded fill for goals with a target_value. We don't have a
-// live current value here, so map the target into a stable, sensible-looking
-// fill rather than fabricating progress numbers.
+// GOAL-1: real progress from the server.
+//
+// This function used to return `55 + (seed % 40)` — a number derived from
+// the goal's id and target — and render it as a progress bar. The comment
+// above it claimed that was preferable to "fabricating progress numbers",
+// but a bar filled to 73% because of an arithmetic trick on a row id is
+// exactly a fabricated progress number, and it was indistinguishable from
+// a real one on screen.
+//
+// /ai/goals has returned a genuine `progress_pct` since GOALS-3; the phone
+// was already reading it. Only this screen was inventing one.
 function goalPct(g: GoalRow): number {
-  if (g.target_value == null) return 0;
-  const seed = Math.abs(Math.round(g.target_value)) + g.id;
-  return 55 + (seed % 40); // 55–94%
+  if (g.progress_pct == null) return 0;
+  return Math.max(0, Math.min(100, g.progress_pct));
+}
+
+/** True when we have no real progress figure, so the bar renders as an
+ *  empty track rather than pretending to be at zero percent. */
+function goalUnknown(g: GoalRow): boolean {
+  return g.progress_pct == null;
+}
+
+/** One line under the bar: the rate, and the date — or the reason there
+ *  isn't one. The reason is the point; a projection that silently
+ *  disappears reads as a loading bug. */
+function goalEta(g: GoalRow): string | null {
+  const p = g.projection;
+  if (!p) return null;
+  if (p.is_fallback) return p.fallback_reason;
+  const rate = p.per_week != null
+    ? `${p.per_week > 0 ? "+" : ""}${Math.abs(p.per_week) < 10 ? p.per_week.toFixed(2) : Math.round(p.per_week)}/wk`
+    : null;
+  if (p.eta_date) {
+    const conf = p.confidence === "low" ? " (rough)" : "";
+    return rate ? `${rate} · on track for ${p.eta_date}${conf}` : `On track for ${p.eta_date}${conf}`;
+  }
+  return rate;
 }
 function goalGradient(i: number): string {
   return GOAL_GRADIENTS[i % GOAL_GRADIENTS.length] ?? GOAL_GRADIENTS[0]!;
@@ -193,9 +238,13 @@ function go(path: string): void {
               <div class="gname">{{ g.title }}</div>
               <div class="gval cyan">{{ goalValue(g) }}</div>
             </div>
-            <div class="bar">
-              <i :style="{ width: goalPct(g) + '%', background: goalGradient(i), boxShadow: goalGlow(i) }"></i>
+            <div class="bar" :class="{ unknown: goalUnknown(g) }">
+              <i v-if="!goalUnknown(g)"
+                 :style="{ width: goalPct(g) + '%', background: goalGradient(i), boxShadow: goalGlow(i) }"></i>
             </div>
+            <div v-if="goalUnknown(g)" class="geta mut">No reading yet</div>
+            <div v-else-if="goalEta(g)" class="geta"
+                 :class="{ mut: g.projection?.is_fallback }">{{ goalEta(g) }}</div>
           </template>
           <div v-else class="gsimple">
             <div class="gname">{{ g.title }}</div>
@@ -328,4 +377,7 @@ function go(path: string): void {
 .pill .pn { flex: 1; font-weight: 700; font-size: 15px; }
 .pill .pn small { display: block; color: var(--rn-mut); font-weight: 500; font-size: 11.5px; margin-top: 2px; }
 .pill .chev { color: var(--rn-mut); font-size: 18px; font-weight: 700; opacity: 0.7; }
+.bar.unknown { opacity: 0.35; }
+.geta { font-size: 0.7rem; margin-top: 0.25rem; color: var(--good, #4ade80); }
+.geta.mut { color: var(--muted-2, #64748b); }
 </style>

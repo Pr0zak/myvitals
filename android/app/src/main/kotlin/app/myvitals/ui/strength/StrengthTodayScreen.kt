@@ -1213,9 +1213,21 @@ fun StrengthTodayScreen(
                                 rating = rating,
                                 setType = setType,
                             ))
-                            // PR-1: transient toast the moment a record falls.
-                            if (logged != null && (logged.isWeightPr || logged.isE1rmPr)) {
-                                val what = if (logged.isWeightPr) "weight" else "e1RM"
+                            // PR-1b: transient toast the moment a record falls.
+                            // The KIND is the server's call — this used to be
+                            // `isWeightPr ? "weight" : "e1RM"`, hard-coded
+                            // identically and separately on both clients, and
+                            // it could not name a bodyweight or hold record
+                            // because neither could ever be detected.
+                            if (logged?.prKind != null) {
+                                val what = when (logged.prKind) {
+                                    "weight" -> "weight"
+                                    "e1rm" -> "e1RM"
+                                    "added_load" -> "added-weight"
+                                    "hold" -> "hold"
+                                    "reps" -> "rep"
+                                    else -> "personal"
+                                }
                                 android.widget.Toast.makeText(
                                     context, "🏆 New $what PR!",
                                     android.widget.Toast.LENGTH_SHORT,

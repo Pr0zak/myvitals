@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from itertools import chain, combinations
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import func, select
@@ -1549,6 +1550,149 @@ def pair_supersets(
 # ------------------------------------------------------------------
 # Pure: prescribe sets / reps / rest for an exercise slot
 # ------------------------------------------------------------------
+
+# ── PR-1b: personal records for bodyweight and timed work ────────────
+#
+# `_detect_pr` used to return early whenever `actual_weight_lb` was None,
+# and `/records` filtered those rows out entirely. In production that is
+# 233 of 760 logged sets — 31% of everything the user has recorded — and
+# 112 of the 275 catalog exercises are bodyweight-only. A push-up session
+# could never set a record no matter how it went.
+#
+# Kinds, in the order they win when more than one fires:
+#
+#   weight      a heavier top set on a loaded lift
+#   e1rm        a better estimated 1RM on a loaded lift
+#   added_load  more external load on a bodyweight movement (weighted dips)
+#   hold        a longer isometric hold (plank, side bridge)
+#   reps        more reps at bodyweight
+#
+# Deliberately NOT a kind: "more reps at the same weight" on a loaded
+# lift. That already fires as an e1rm PR, because more reps at equal
+# weight raises the Epley estimate. Adding a separate rep kind would
+# double-report the same achievement.
+PR_PRECEDENCE: tuple[str, ...] = (
+    "weight", "e1rm", "added_load", "hold", "reps",
+)
+
+
+@dataclass(frozen=True)
+class PriorSet:
+    """One previously logged set, for PR comparison.
+
+    `same_workout` separates "the record before today" from "earlier in
+    this session", which is what makes the badge fire once rather than on
+    every ascending set.
+    """
+
+    weight_lb: float | None
+    reps: int | None
+    same_workout: bool
+
+
+def pr_eligible(ex: dict[str, Any]) -> bool:
+    """Whether an exercise can hold a personal record at all.
+
+    Mobility is excluded, and this is not tidiness — it would actively
+    produce false records. `adjust_mobility_target` raises the prescribed
+    hold to the user's own `max_actual`, so the prescription chases the
+    best-ever hold. Every time the tuner steps a target up, the next
+    session beats the previous best *by construction* and a "record" fires
+    for following instructions. Production has 19 mobility poses with
+    enough history for that to happen.
+    """
+    from . import taxonomy
+    return taxonomy.canonical_pattern(ex.get("movement_pattern")) != "mobility"
+
+
+def _pr_metric(
+    ex: dict[str, Any], kind: str, weight_lb: float | None, reps: int | None,
+) -> float | None:
+    """The comparable number for one PR kind, or None if inapplicable."""
+    if reps is None or reps <= 0:
+        return None
+    bodyweight = _is_bodyweight_only(ex)
+    timed = bool(ex.get("is_timed"))
+
+    if kind == "weight":
+        if bodyweight or weight_lb is None:
+            return None
+        return weight_lb
+    if kind == "e1rm":
+        # Gated on NOT bodyweight. Without that gate a weighted dip logged
+        # at 25 lb produces an e1RM computed as though 25 lb were the
+        # total load — a nonsense number that then becomes the sort key
+        # for the whole Records card.
+        if bodyweight or weight_lb is None:
+            return None
+        return estimate_1rm(weight_lb, reps)
+    if kind == "added_load":
+        if not bodyweight or weight_lb is None or weight_lb <= 0:
+            return None
+        return weight_lb
+    if kind == "hold":
+        if not timed or weight_lb is not None:
+            return None
+        return float(reps)  # seconds
+    if kind == "reps":
+        if not bodyweight or weight_lb is not None or timed:
+            return None
+        return float(reps)
+    return None
+
+
+def classify_pr(
+    ex: dict[str, Any],
+    prior: Sequence[PriorSet],
+    weight_lb: float | None,
+    reps: int | None,
+) -> str | None:
+    """Which kind of personal record this set sets, if any.
+
+    Returns None when it sets none — including for the very first set of
+    an exercise, which is a baseline rather than a record.
+
+    Fires at most once per (exercise, kind) per workout: a set only counts
+    if nothing *earlier in the same session* had already beaten the old
+    best. Without that, a user working up 135 → 145 → 155 gets three
+    "personal record!" toasts for one achievement, and the third is the
+    only true one.
+    """
+    if reps is None or reps <= 0 or not pr_eligible(ex):
+        return None
+
+    earlier = [p for p in prior if not p.same_workout]
+    session = [p for p in prior if p.same_workout]
+
+    for kind in PR_PRECEDENCE:
+        metric = _pr_metric(ex, kind, weight_lb, reps)
+        if metric is None:
+            continue
+
+        prior_vals = [
+            m for m in (
+                _pr_metric(ex, kind, p.weight_lb, p.reps) for p in earlier
+            ) if m is not None
+        ]
+        if not prior_vals:
+            # No history for this kind — a baseline, not a record.
+            continue
+        best_before = max(prior_vals)
+        if metric <= best_before:
+            continue
+
+        session_vals = [
+            m for m in (
+                _pr_metric(ex, kind, p.weight_lb, p.reps) for p in session
+            ) if m is not None
+        ]
+        if session_vals and max(session_vals) > best_before:
+            # Already broken earlier in this same workout — the badge has
+            # been shown, so this set is an improvement on today, not news.
+            continue
+        return kind
+    return None
+
 
 def _is_bodyweight_only(ex: dict[str, Any]) -> bool:
     """True when an exercise has no external-load equipment — load is

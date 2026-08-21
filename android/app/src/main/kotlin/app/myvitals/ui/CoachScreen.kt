@@ -862,6 +862,29 @@ private fun GoalRow(g: app.myvitals.sync.AiGoal, neon: Boolean) {
                     .background(barColor),
             )
         }
+        // GOAL-1: rate and ETA, or the reason there isn't one. Mirrors the
+        // line under the web's goal bars.
+        g.projection?.let { p ->
+            val good = if (neon) NeonMV.Lime else Color(0xFF22C55E)
+            val line = when {
+                p.isFallback -> p.fallbackReason
+                p.etaDate != null -> {
+                    val rate = p.perWeek?.let {
+                        val v = if (kotlin.math.abs(it) < 10) "%.2f".format(it)
+                                else it.toInt().toString()
+                        "${if (it > 0) "+" else ""}$v/wk · "
+                    } ?: ""
+                    val rough = if (p.confidence == "low") " (rough)" else ""
+                    "${rate}on track for ${p.etaDate}$rough"
+                }
+                p.perWeek != null -> "%.2f/wk".format(p.perWeek)
+                else -> null
+            }
+            line?.let {
+                Spacer(Modifier.height(3.dp))
+                Text(it, color = if (p.isFallback) dim else good, fontSize = 10.sp)
+            }
+        }
         if (g.currentValue != null && g.targetValue != null) {
             Spacer(Modifier.height(2.dp))
             Text(

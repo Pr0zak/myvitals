@@ -1138,10 +1138,16 @@ export const api = {
     records: {
       exercise_id: string;
       name: string;
+      /** PR-1b: which columns are meaningful for this exercise. */
+      kind: "loaded" | "bodyweight" | "hold";
       best_weight_lb: number;
       best_weight_date: string | null;
       best_e1rm: number;
       best_e1rm_date: string | null;
+      best_reps: number;
+      best_reps_date: string | null;
+      best_hold_s: number;
+      best_hold_date: string | null;
       last_performed_date: string | null;
     }[];
   }> {

@@ -302,21 +302,51 @@ const progressionOption = computed(() => {
         </p>
       </Card>
 
+      <!-- PR-1b: bodyweight and timed exercises appear here now. They
+           were filtered out of this card entirely — a third of all logged
+           sets, and 112 of the 275 catalog entries, could not hold a
+           record. The columns differ by kind, so each row states what its
+           best actually measures rather than showing "0 lb". -->
       <Card v-if="records.length" title="Personal records">
         <table class="records">
           <thead>
-            <tr><th>Exercise</th><th>Best set</th><th>Best e1RM</th><th>Last</th></tr>
+            <tr><th>Exercise</th><th>Best</th><th>Also</th><th>Last</th></tr>
           </thead>
           <tbody>
             <tr v-for="r in records" :key="r.exercise_id">
-              <td class="rec-name">{{ r.name }}</td>
-              <td class="rec-num">
-                {{ r.best_weight_lb }} lb
-                <span class="rec-date">{{ fmtRecDate(r.best_weight_date) }}</span>
+              <td class="rec-name">
+                {{ r.name }}
+                <span v-if="r.kind !== 'loaded'" class="rec-kind">
+                  {{ r.kind === "hold" ? "hold" : "bodyweight" }}
+                </span>
               </td>
               <td class="rec-num">
-                {{ r.best_e1rm }} lb
-                <span class="rec-date">{{ fmtRecDate(r.best_e1rm_date) }}</span>
+                <template v-if="r.kind === 'hold'">
+                  {{ r.best_hold_s }} s
+                  <span class="rec-date">{{ fmtRecDate(r.best_hold_date) }}</span>
+                </template>
+                <template v-else-if="r.kind === 'bodyweight'">
+                  {{ r.best_reps }} reps
+                  <span class="rec-date">{{ fmtRecDate(r.best_reps_date) }}</span>
+                </template>
+                <template v-else>
+                  {{ r.best_weight_lb }} lb
+                  <span class="rec-date">{{ fmtRecDate(r.best_weight_date) }}</span>
+                </template>
+              </td>
+              <td class="rec-num">
+                <!-- Added load on a bodyweight movement (weighted dips).
+                     Never an e1RM: Epley on the ADDED weight alone would
+                     report a nonsense one-rep max. -->
+                <template v-if="r.kind === 'bodyweight' && r.best_weight_lb > 0">
+                  +{{ r.best_weight_lb }} lb
+                  <span class="rec-date">{{ fmtRecDate(r.best_weight_date) }}</span>
+                </template>
+                <template v-else-if="r.kind === 'loaded'">
+                  {{ r.best_e1rm }} lb e1RM
+                  <span class="rec-date">{{ fmtRecDate(r.best_e1rm_date) }}</span>
+                </template>
+                <span v-else class="rec-date">—</span>
               </td>
               <td class="rec-date">{{ fmtRecDate(r.last_performed_date) }}</td>
             </tr>
@@ -402,4 +432,5 @@ html[data-theme="neon"] .charts .records .rec-date { color: var(--rn-mut); }
 html[data-theme="neon"] .charts .records th,
 html[data-theme="neon"] .charts .records td { border-color: #ffffff14; }
 html[data-theme="neon"] .charts .rec-num { color: var(--rn-ink); }
+.rec-kind { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted-2); margin-left: 0.35rem; }
 </style>

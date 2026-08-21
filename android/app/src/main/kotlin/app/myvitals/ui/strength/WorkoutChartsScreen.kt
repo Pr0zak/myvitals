@@ -648,23 +648,45 @@ private fun RecordsCard(records: List<StrengthRecord>, neon: Boolean) {
                             Text("last $it", color = muted, fontSize = 10.sp)
                         }
                     }
+                    // PR-1b: which best is meaningful depends on the kind.
+                    // Rendering "0.0 lb · e1RM 0" for a push-up — which is
+                    // what the old unconditional format produced — reads as
+                    // broken data rather than as a rep record.
                     Column(horizontalAlignment = Alignment.End) {
+                        val primary = when (r.kind) {
+                            "hold" -> "${r.bestHoldS} s" to r.bestHoldDate
+                            "bodyweight" -> "${r.bestReps} reps" to r.bestRepsDate
+                            else -> "%.1f lb".format(r.bestWeightLb) to r.bestWeightDate
+                        }
                         Text(
                             buildString {
-                                append("%.1f lb".format(r.bestWeightLb))
-                                fmtRecDate(r.bestWeightDate).takeIf { it.isNotEmpty() }
+                                append(primary.first)
+                                fmtRecDate(primary.second).takeIf { it.isNotEmpty() }
                                     ?.let { append(" · $it") }
                             },
                             color = ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                         )
-                        Text(
-                            buildString {
-                                append("e1RM %.0f".format(r.bestE1rm))
-                                fmtRecDate(r.bestE1rmDate).takeIf { it.isNotEmpty() }
-                                    ?.let { append(" · $it") }
-                            },
-                            color = muted, fontSize = 11.sp,
-                        )
+                        val secondary: Pair<String, String?>? = when {
+                            // Added load on a bodyweight movement. Never an
+                            // e1RM — Epley on the added weight alone would
+                            // report a one-rep max for a load that is only
+                            // part of the total.
+                            r.kind == "bodyweight" && r.bestWeightLb > 0 ->
+                                "+%.1f lb".format(r.bestWeightLb) to r.bestWeightDate
+                            r.kind == "loaded" ->
+                                "e1RM %.0f".format(r.bestE1rm) to r.bestE1rmDate
+                            else -> null
+                        }
+                        secondary?.let { (label, d) ->
+                            Text(
+                                buildString {
+                                    append(label)
+                                    fmtRecDate(d).takeIf { it.isNotEmpty() }
+                                        ?.let { append(" · $it") }
+                                },
+                                color = muted, fontSize = 11.sp,
+                            )
+                        }
                     }
                 }
             }

@@ -9,8 +9,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..analytics import projection
 from ..analytics.trends import compute_badges
 from ..auth import require_any
+from ..config import settings
 from ..db import models
 from ..db.session import get_session
 from ..integrations.llm import LlmError, validate_base_url
@@ -61,6 +63,26 @@ async def _get_config(db: AsyncSession) -> models.AiConfig:
 
 # ─────────────── Config ───────────────
 
+def _local_today_ai() -> date:
+    """Today in the user's timezone, for every calendar-day decision here.
+
+    Two things in this module turn on "what day is it": the AI payload
+    stamps, and the daily call quota. Both were UTC, which in a TZ=UTC
+    container on Central time means the day rolls at 7pm — so a user's
+    "30 calls per day" allowance silently reset five hours early, and the
+    Settings page showed the count returning to zero mid-evening.
+
+    The quota read and write both go through this, so they cannot drift
+    apart and leave a stale counter that never resets.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        tz = timezone.utc
+    return datetime.now(tz).date()
+
+
 def _ai_cache_key(
     cfg: models.AiConfig, kind: str, payload: dict[str, Any],
 ) -> str:
@@ -100,7 +122,7 @@ async def get_config(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
         "api_key_masked": _mask_key(cfg.anthropic_api_key),
         "model": cfg.model,
         "daily_call_limit": cfg.daily_call_limit,
-        "calls_today": cfg.calls_today if cfg.calls_today_date == date.today() else 0,
+        "calls_today": cfg.calls_today if cfg.calls_today_date == _local_today_ai() else 0,
         "weekly_digest_enabled": cfg.weekly_digest_enabled,
         "tone": cfg.tone,
         "provider": cfg.provider or "anthropic",
@@ -219,7 +241,7 @@ async def _check_and_bump_quota(db: AsyncSession, cfg: models.AiConfig) -> None:
         raise HTTPException(status_code=400, detail="AI summaries disabled in Settings")
     if not cfg.anthropic_api_key:
         raise HTTPException(status_code=400, detail="Anthropic API key not configured")
-    today = date.today()
+    today = _local_today_ai()
     if cfg.calls_today_date != today:
         cfg.calls_today = 0
         cfg.calls_today_date = today
@@ -951,6 +973,84 @@ def _goal_progress(
     return {"current_value": round(current, 2), "progress_pct": round(pct, 1)}
 
 
+async def _goal_series(
+    db: AsyncSession, kind: str, today: Any, days: int = 28,
+) -> list[tuple[Any, float]]:
+    """Daily series behind a goal, for GOAL-1 projection.
+
+    Returns (date, value) pairs. Missing days are absent rather than
+    zero-filled — a day with no weigh-in is not a day of zero weight, and
+    a day the watch was off is not a day of zero steps. Filling either
+    would drag the fitted slope toward a trend that never happened.
+    """
+    from datetime import timedelta as _td2
+    since = today - _td2(days=days - 1)
+    if kind == "weight":
+        rows = (await db.execute(
+            select(models.BodyMetric.time, models.BodyMetric.weight_kg)
+            .where(models.BodyMetric.weight_kg.is_not(None))
+            .where(models.BodyMetric.time >= datetime.combine(
+                since, datetime.min.time(), tzinfo=timezone.utc))
+            .order_by(models.BodyMetric.time)
+        )).all()
+        # Last weigh-in of each day wins — a morning and evening reading
+        # on the same day are not two data points about a trend.
+        by_day: dict[Any, float] = {}
+        for ts, kg in rows:
+            by_day[ts.date()] = float(kg)
+        return sorted(by_day.items())
+
+    col = {
+        "sleep": models.DailySummary.sleep_duration_s,
+        "steps": models.DailySummary.steps_total,
+    }.get(kind)
+    if col is None:
+        return []
+    rows = (await db.execute(
+        select(models.DailySummary.date, col)
+        .where(models.DailySummary.date >= since)
+        .where(models.DailySummary.date <= today)
+        .where(col.is_not(None))
+        .order_by(models.DailySummary.date)
+    )).all()
+    if kind == "sleep":
+        return [(d, float(v) / 3600.0) for d, v in rows]
+    return [(d, float(v)) for d, v in rows]
+
+
+async def _goal_projection(
+    db: AsyncSession, g: models.AiGoal, current: float | None, today: Any,
+) -> dict[str, Any]:
+    """Where this goal is heading, or why we will not say (GOAL-1).
+
+    Streak-shaped goals advance at a known rate, so fitting a regression
+    to them would return slope≈1.0, r²≈1.0 and present arithmetic as a
+    forecast. They go through the deterministic path instead.
+    """
+    target = g.target_value
+    unit = (g.target_unit or "").strip().lower()
+    if g.kind == "weight" and target is not None and unit in (
+        "lb", "lbs", "pound", "pounds",
+    ):
+        target = target / 2.20462
+
+    if g.kind in ("sober", "fast_streak"):
+        per_day = 1.0 if g.kind == "sober" else 0.0
+        if g.kind == "fast_streak":
+            # Weekly fasting hours is not a streak that ticks up on its
+            # own; there is no honest deterministic rate for it.
+            return projection._fallback(
+                "Weekly totals do not accumulate on their own.",
+                method="deterministic",
+            ).to_dict()
+        return projection.project_deterministic(
+            current, target, today, per_day=per_day,
+        ).to_dict()
+
+    series = await _goal_series(db, g.kind, today)
+    return projection.project(series, target=target, today=today).to_dict()
+
+
 @router.get("/goals")
 async def list_goals(
     active_only: bool = True, db: AsyncSession = Depends(get_session),
@@ -970,10 +1070,15 @@ async def list_goals(
                 baseline = await _baseline_weight_kg_for_goal(db, g.started_at)
             d.update(_goal_progress(g, currents[g.kind], baseline))
             d["baseline_value"] = round(baseline, 2) if baseline is not None else None
+            # GOAL-1: rate + ETA, or an explicit reason there isn't one.
+            d["projection"] = await _goal_projection(
+                db, g, currents[g.kind], _local_today_ai(),
+            )
         else:
             d["current_value"] = None
             d["progress_pct"] = None
             d["baseline_value"] = None
+            d["projection"] = None
         out.append(d)
     return out
 

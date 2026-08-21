@@ -31,6 +31,15 @@ class MyVitalsApp : Application() {
         Timber.plant(RoomLogTree(this))           // → Room "logs" table
         Timber.i("App start v=%s code=%d", BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
 
+        // DISP-1: seed the unit preference from local storage before the
+        // first frame. Units is read from composables that have no
+        // SettingsRepository handle, so it carries the flag itself. The
+        // server copy reconciles on the next sync; starting from the
+        // cached value avoids rendering kilometres to someone who reads
+        // miles for the first few hundred milliseconds.
+        app.myvitals.data.Units.imperial =
+            app.myvitals.data.SettingsRepository(this).unitsImperial
+
         // Capture uncaught exceptions so crashes show up in the LogViewer
         // on next sync, rather than disappearing into logcat-only.
         val previousHandler = Thread.getDefaultUncaughtExceptionHandler()

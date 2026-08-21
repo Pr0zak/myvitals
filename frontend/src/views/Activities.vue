@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { toLocalISO } from "@/dates";
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import VChart from "@/echarts";
@@ -396,7 +397,7 @@ const calMinDate = computed<string | null>(() => {
   if (cfg.days != null && cfg.days > 0) {
     const d = new Date();
     d.setDate(d.getDate() - cfg.days);
-    return d.toISOString().slice(0, 10);
+    return toLocalISO(d);
   }
   return null;
 });

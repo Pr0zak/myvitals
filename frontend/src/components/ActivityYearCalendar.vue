@@ -8,6 +8,7 @@
  * and a lift were the same colour. The tooltip still carries the minutes,
  * so nothing that ramp encoded is lost.
  */
+import { todayISO } from "@/dates";
 import { computed } from "vue";
 import VChart from "@/echarts";
 import { chartTheme, isNeon } from "@/theme";
@@ -103,7 +104,7 @@ const option = computed(() => {
     // ~40% of the strip was empty future weeks and the cells shrank to fit
     // a year that hadn't happened yet.
     range: y === String(new Date().getFullYear())
-      ? [`${y}-01-01`, new Date().toISOString().slice(0, 10)]
+      ? [`${y}-01-01`, todayISO()]
       : y,
     itemStyle: {
       color: neon ? "#161a24" : "#1a2332",

@@ -1,5 +1,6 @@
 package app.myvitals.ui.trails
 
+import app.myvitals.data.Units
 import android.content.Intent
 import android.net.Uri
 import android.annotation.SuppressLint
@@ -1119,7 +1120,7 @@ private fun RideLinkRow(ride: ActivityRow, nowMs: Long, neon: Boolean = false, o
     val accent = if (neon) NeonMV.Cyan else MV.BrandRed
     val typeLabel = ride.type.replace("Ride", " ride", ignoreCase = true).trim()
     val ageStr = remember(nowMs, ride.startAt) { fmtAge(ride.startAt, nowMs) }
-    val distStr = ride.distanceM?.let { "${"%.1f".format(it / 1609.34)} mi" } ?: "—"
+    val distStr = Units.fmtDistance(ride.distanceM, 1)
     Card(
         colors = CardDefaults.cardColors(
             containerColor = if (neon) NeonMV.Card else MV.SurfaceContainer,
@@ -1170,7 +1171,7 @@ private fun RideLinkRow(ride: ActivityRow, nowMs: Long, neon: Boolean = false, o
 }
 
 private fun rideSubtitle(ride: ActivityRow): String {
-    val mi = ride.distanceM?.let { "%.1f mi".format(it / 1609.34) } ?: "—"
+    val mi = Units.fmtDistance(ride.distanceM, 1)
     val mins = ride.durationS / 60
     return "${ride.type} · $mi · ${mins}m"
 }

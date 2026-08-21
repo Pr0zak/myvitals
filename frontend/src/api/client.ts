@@ -1,11 +1,13 @@
 import axios from "axios";
 import { apiBase, queryToken } from "@/config";
+import { toLocalISO } from "@/dates";
 import type {
   AiAskResult,
   Annotation,
   AnnotationCreate,
   HeartRateSeries,
   HrvSeries,
+  DaySnapshot,
   PeriodCompare,
   SleepNight,
   StepsSeries,
@@ -214,11 +216,27 @@ export const api = {
   },
 
   async summaryRange(since: Date | string, until?: Date | string): Promise<TodaySummary[]> {
+    // toLocalISO, not toISOString().slice(0,10). The latter converts to UTC
+    // first, so a locally-built Date reports TOMORROW west of Greenwich from
+    // early evening on — every chart window silently shifted a day forward
+    // after 7pm Central.
     const params: Record<string, string> = {
-      since: since instanceof Date ? since.toISOString().slice(0, 10) : since,
+      since: since instanceof Date ? toLocalISO(since) : since,
     };
-    if (until) params.until = until instanceof Date ? until.toISOString().slice(0, 10) : until;
+    if (until) params.until = until instanceof Date ? toLocalISO(until) : until;
     const { data } = await http.get<TodaySummary[]>("/summary/range", { params });
+    return data;
+  },
+
+  /** DAY-1: everything about one calendar day in a single round-trip.
+   *
+   * Sections are independently best-effort server-side — a broken
+   * subsystem arrives as null in its slot rather than failing the page.
+   */
+  async summaryDay(date: string): Promise<DaySnapshot> {
+    const { data } = await http.get<DaySnapshot>("/summary/day", {
+      params: { date },
+    });
     return data;
   },
 
@@ -868,6 +886,24 @@ export const api = {
 
   async backfillHrRecovery(): Promise<{ considered: number; computed: number }> {
     const { data } = await http.post("/analytics/hr-recovery-backfill");
+    return data;
+  },
+
+  /** DISP-1: units / time format / theme, server-persisted.
+   *
+   * Separate from putProfile for the same reason as tile-prefs — that
+   * endpoint replaces `extra` wholesale. This one merges, so a partial
+   * patch cannot clobber a preference set on the phone.
+   */
+  async getDisplayPrefs(): Promise<import("@/displayPrefs").DisplayPrefs> {
+    const { data } = await http.get("/profile/display-prefs");
+    return data;
+  },
+
+  async putDisplayPrefs(
+    patch: Partial<import("@/displayPrefs").DisplayPrefs>,
+  ): Promise<import("@/displayPrefs").DisplayPrefs> {
+    const { data } = await http.put("/profile/display-prefs", patch);
     return data;
   },
 

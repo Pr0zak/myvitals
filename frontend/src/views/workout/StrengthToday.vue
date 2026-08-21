@@ -4,6 +4,7 @@
  * via one component: planned (preview + start), in_progress (active workout
  * with set logging + rest timer), completed (summary).
  */
+import { toLocalISO } from "@/dates";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { Play, Pause, RotateCw, Plus, SkipForward, Timer, Check } from "lucide-vue-next";
@@ -683,7 +684,10 @@ const weekStrip = computed<DayCell[]>(() => {
   for (let offset = -3; offset <= 3; offset++) {
     const d = new Date(today);
     d.setDate(today.getDate() + offset);
-    const iso = d.toISOString().slice(0, 10);
+    // LOCAL: this key indexes histByDate, so after 7pm Central the
+    // "Today" chip matched TOMORROW and the week strip showed the
+    // wrong session status against each day.
+    const iso = toLocalISO(d);
     const label = offset === 0 ? "Today"
       : d.toLocaleDateString(undefined, { weekday: "short" });
     const past = d.getTime() < todayMs;

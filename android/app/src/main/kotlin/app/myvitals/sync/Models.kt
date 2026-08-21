@@ -1376,6 +1376,60 @@ data class TilePrefsOut(
     @Json(name = "group_order") val groupOrder: List<String> = emptyList(),
 )
 
+/**
+ * DISP-1 — display preferences shared with the web dashboard.
+ *
+ * Defaults match `DISPLAY_DEFAULTS` in api/profile.py, so a backend that
+ * omits a key and a phone that never received one agree.
+ */
+@JsonClass(generateAdapter = true)
+data class DisplayPrefsOut(
+    val units: String = "imperial",
+    @Json(name = "time_format") val timeFormat: String = "auto",
+    val theme: String = "neon",
+)
+
+// ── DAY-1: unified day snapshot ──────────────────────────────────────
+// Every section is independently nullable because the server wraps each
+// in a safe(): one failing subsystem lands as null rather than taking the
+// whole day down. Null means "couldn't load" and must never render as 0 —
+// showing 0 steps for a day whose step query failed is a lie the user has
+// no way to detect.
+@JsonClass(generateAdapter = true)
+data class DayActivity(
+    val source: String = "",
+    @Json(name = "source_id") val sourceId: String = "",
+    val type: String = "",
+    val name: String? = null,
+    @Json(name = "start_at") val startAt: String = "",
+    @Json(name = "duration_s") val durationS: Long? = null,
+    @Json(name = "distance_m") val distanceM: Double? = null,
+    @Json(name = "elevation_gain_m") val elevationGainM: Double? = null,
+    val kcal: Double? = null,
+    @Json(name = "avg_hr") val avgHr: Double? = null,
+    @Json(name = "trail_id") val trailId: Long? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class DayWorkoutSummary(
+    val id: Long = 0,
+    val date: String = "",
+    val status: String = "",
+    @Json(name = "split_focus") val splitFocus: String? = null,
+    val notes: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class DaySnapshot(
+    val date: String = "",
+    @Json(name = "is_today") val isToday: Boolean = false,
+    val tiles: VitalTilesResponse? = null,
+    val steps: TimeSeries? = null,
+    val sleep: List<SleepNight>? = null,
+    val activities: List<DayActivity>? = null,
+    val workout: DayWorkoutSummary? = null,
+)
+
 @JsonClass(generateAdapter = true)
 data class TilePrefsIn(
     val order: List<String>,

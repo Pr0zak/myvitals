@@ -131,6 +131,35 @@ class SyncWorker(
         }
     }
 
+    /**
+     * Reconcile locally cached display preferences with the server's.
+     *
+     * The server is authoritative, so this overwrites the local cache
+     * rather than merging. A change made on the phone was pushed at the
+     * moment it was made, so by the time this runs the server already has
+     * it — the only way the two differ here is if the web changed it.
+     *
+     * Best-effort: a 404 from a backend older than v0.11.1, or no network,
+     * must leave the cached preference alone rather than reverting the
+     * user to defaults.
+     */
+    private suspend fun syncDisplayPrefs() {
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val prefs = api.displayPrefs()
+            val imperial = prefs.units != "metric"
+            if (imperial != settings.unitsImperial) {
+                settings.unitsImperial = imperial
+                Timber.i("display prefs: units -> %s", prefs.units)
+            }
+            if (prefs.timeFormat != settings.timeFormat) {
+                settings.timeFormat = prefs.timeFormat
+            }
+        } catch (e: Exception) {
+            Timber.d("display prefs sync skipped: %s", e.message)
+        }
+    }
+
     private suspend fun runSync(now: Instant): Result {
         if (!settings.isConfigured()) {
             val msg = "Skipping sync: not configured (url='${settings.backendUrl}' tokenSet=${settings.bearerToken.isNotEmpty()})"
@@ -145,6 +174,12 @@ class SyncWorker(
         // offline must re-open the workout screen while online for them
         // to sync.
         flushStrengthBuffers()
+
+        // DISP-1: pull display preferences down. Placed here — before the
+        // Health Connect availability gate — because it needs only the URL
+        // and token, so a device without HC still picks up a unit change
+        // made on the web.
+        syncDisplayPrefs()
 
         if (!gateway.isAvailable()) {
             val msg = "Skipping sync: Health Connect not available on this device"

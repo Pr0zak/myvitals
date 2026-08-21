@@ -8,7 +8,6 @@
  *   ⟳ Weekly steps        [Steps      1,100 ]
  *     17%                 [Readiness  58    ]
  *     67 of 390           [Sleep      8h 28m]
- *   [ + Log ]  [ Start ]
  *
  * The chips are FILLED rather than outlined — that saturation against the
  * dark ground is what makes the reference's hero read as a hero instead of
@@ -79,27 +78,6 @@ const CHIPS = computed(() => [
     fg: "#ff3ad8", route: "/sleep" },
 ]);
 
-/**
- * M3 Expressive FAB menu, replacing the flat "+ Log" button. Phone twin:
- * `LogFabMenu.kt`.
- *
- * Every entry routes somewhere that already exists and where a reading can
- * genuinely be recorded. Weight and blood pressure are deliberately absent:
- * their views have no entry form, so listing them would promise a flow the app
- * does not have.
- */
-const logOpen = ref(false);
-const LOG_ITEMS = [
-  { label: "Note", route: "/journal", tone: "#ff3ad8" },
-  { label: "Measurements", route: "/measurements", tone: "#28e6ff" },
-  { label: "Fast", route: "/fasting", tone: "#ffb52e" },
-  { label: "Sober", route: "/sober", tone: "#ff3ad8" },
-];
-function pickLog(route: string) {
-  logOpen.value = false;
-  router.push(route);
-}
-
 /** Inset so the stroke (plus its round cap) clears the card's corner
  *  radius — at r=52 with a 12px stroke the arc touched the card edge. */
 const R = 44;
@@ -159,27 +137,6 @@ const dash = computed(() => {
       </div>
     </div>
 
-    <!-- Both go somewhere real: Log opens the journal, Start opens today's
-         workout. No decorative buttons. -->
-    <div class="actions">
-      <div class="logwrap">
-        <transition-group name="fabitem" tag="div" class="fabitems">
-          <button
-            v-for="(it, i) in (logOpen ? LOG_ITEMS : [])" :key="it.route"
-            class="fabitem" :style="{ borderColor: it.tone, transitionDelay: `${i * 34}ms` }"
-            @click="pickLog(it.route)"
-          >
-            <span class="dot" :style="{ background: it.tone }"></span>{{ it.label }}
-          </button>
-        </transition-group>
-        <button class="fab" :class="{ open: logOpen }" @click="logOpen = !logOpen">
-          {{ logOpen ? "✕  Close" : "＋  Log" }}
-        </button>
-      </div>
-      <button class="act" @click="router.push('/workout/strength/today')">
-        Start
-      </button>
-    </div>
   </section>
 </template>
 
@@ -225,40 +182,7 @@ const dash = computed(() => {
   font-size: 1.25rem; font-weight: 400; color: #ececf5;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-
-.actions { display: flex; gap: 10px; margin-top: 12px; align-items: flex-end; }
-
-.logwrap { flex: 1; display: flex; flex-direction: column; align-items: stretch; }
-.fabitems { display: flex; flex-direction: column; gap: 8px; }
-.fabitem {
-  display: flex; align-items: center; gap: 9px; background: #181b27;
-  border: 1px solid; border-radius: 999px; padding: 9px 14px; margin-bottom: 8px;
-  color: #ececf5; font-size: .82rem; cursor: pointer; text-align: left;
-}
-.fabitem .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 /* Staggered unfurl — the menu opens rather than appearing. */
-.fabitem-enter-active { transition: opacity 160ms, transform 280ms cubic-bezier(.2,.9,.24,1.15); }
-.fabitem-leave-active { transition: opacity 90ms, transform 90ms; }
-.fabitem-enter-from, .fabitem-leave-to { opacity: 0; transform: translateY(8px) scale(.9); }
 
-.fab {
-  width: 100%; border: 0; cursor: pointer; background: #28e6ff; color: #06222b;
-  font-weight: 700; font-size: .9rem; padding: 12px 0;
-  /* The corner morph is the M3 signal that this became a menu rather than
-     navigating away. */
-  border-radius: 20px;
-  transition: border-radius 340ms cubic-bezier(.2,.9,.24,1.15);
-}
-.fab.open { border-radius: 999px; }
-
-@media (prefers-reduced-motion: reduce) {
-  .fab, .fabitem-enter-active, .fabitem-leave-active { transition-duration: 1ms; }
-}
-.act {
-  flex: 1; border-radius: 999px; padding: 11px 0;
-  background: #181b27; border: 1px solid rgba(40, 230, 255, .45);
-  color: #28e6ff; font-size: .9rem;
-  cursor: pointer; font-weight: 500;
-}
 .plus { font-weight: 400; margin-right: 2px; }
 </style>

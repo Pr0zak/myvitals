@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { toLocalISO } from "@/dates";
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
@@ -39,7 +40,10 @@ async function loadChart() {
   const weightByDate = new Map<string, number>();
   for (const p of weight.points) {
     if (p.weight_kg == null) continue;
-    const d = new Date(p.time).toISOString().slice(0, 10);
+    // LOCAL day: this key is matched against daily_summary.date, which is
+    // a local calendar day. A 9pm Central weigh-in maps to the next UTC
+    // day and would silently fail to match its own row.
+    const d = toLocalISO(new Date(p.time));
     weightByDate.set(d, p.weight_kg);
   }
   data.value = summaries.map((s) => ({

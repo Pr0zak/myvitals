@@ -185,18 +185,6 @@ fun TodayHero(
             }
         }
 
-        Spacer(Modifier.height(12.dp))
-        // Both go somewhere real — no decorative buttons. "Log" is an M3 FAB
-        // menu rather than a second flat button: it used to be a single label
-        // that navigated to the journal, leaving everything else you might
-        // record two or three taps deep on unrelated screens.
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            LogFabMenu(Modifier.weight(1f), onOpen = onOpen)
-            HeroAction("Start", Modifier.weight(1f)) { onOpen("workout/today") }
-        }
     }
 }
 
@@ -228,17 +216,3 @@ private fun HeroChip(
     }
 }
 
-@Composable
-private fun HeroAction(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(
-        modifier
-            .background(NeonMV.Card, RoundedCornerShape(999.dp))
-            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = NeonMV.Cyan, fontSize = 14.sp,
-            fontWeight = FontWeight.Medium)
-    }
-}

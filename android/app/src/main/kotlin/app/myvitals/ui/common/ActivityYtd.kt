@@ -1,5 +1,6 @@
 package app.myvitals.ui.common
 
+import app.myvitals.data.Units
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -115,7 +116,7 @@ fun computeYtdComparison(
     return YtdComparison(thisYear, lastYear, a, b)
 }
 
-fun ytdMiles(meters: Double): String = "%.0f".format(meters / 1609.344)
+fun ytdMiles(meters: Double): String = "%.0f".format(Units.distance(meters) ?: 0.0)
 
 /**
  * Compact two-cell strip (activities · distance) for a hub screen that

@@ -1,5 +1,6 @@
 package app.myvitals.ui.neon
 
+import app.myvitals.data.Units
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -1012,7 +1013,7 @@ private fun activityValue(a: ActivityRow, cls: ActivityClass): String {
 
 private fun milesOrNull(distanceM: Double?): String? {
     if (distanceM == null || distanceM <= 0) return null
-    return "%.1f mi".format(distanceM / 1609.344)
+    return Units.fmtDistance(distanceM, 1)
 }
 
 private fun hms(durationS: Int?): String {

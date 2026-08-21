@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { toLocalISO } from "@/dates";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import VChart from "@/echarts";
@@ -623,7 +624,7 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
             <input v-model="targetDateStr" type="date" class="goal-input" style="width: 140px;"/>
             <span v-if="goalProjection" class="muted" style="margin-left: 0.6rem;">
               <template v-if="goalProjection.etaDate">
-                ETA: {{ goalProjection.etaDate.toISOString().slice(0,10) }}
+                ETA: {{ toLocalISO(goalProjection.etaDate) }}
                 ({{ ((weightVal(goalProjection.perDay * 7) ?? 0)).toFixed(2) }} {{ weightUnit }}/wk)
               </template>
               <template v-else-if="goalProjection.headed === 'wrong'">

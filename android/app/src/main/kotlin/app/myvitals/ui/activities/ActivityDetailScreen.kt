@@ -1,5 +1,6 @@
 package app.myvitals.ui.activities
 
+import app.myvitals.data.Units
 import android.annotation.SuppressLint
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -515,7 +516,7 @@ private fun StatsCard(a: ActivityRow, neon: Boolean) {
             Text(formatStartAt(a.startAt), color = ink, fontSize = 14.sp)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                a.distanceM?.let { Stat("Distance", "%.2f mi".format(it / 1609.34), neon) }
+                a.distanceM?.let { Stat("Distance", Units.fmtDistance(it, 2), neon) }
                 Stat("Duration", fmtDurationHm(a.durationS), neon)
                 a.elevationGainM?.let { Stat("Elev", "%.0f ft".format(it * 3.28084), neon) }
             }
@@ -644,7 +645,8 @@ private fun NeonStatsCard(a: ActivityRow) {
     // and gated to foot sports with a real distance.
     val tiles = buildList {
         a.distanceM?.let {
-            add(NeonStatSpec("DISTANCE", "%.2f".format(it / 1609.34), "mi", NeonMV.Lime))
+            add(NeonStatSpec("DISTANCE", "%.2f".format(Units.distance(it) ?: 0.0),
+                Units.distanceUnit, NeonMV.Lime))
         }
         // Split so the big number stays a number: "1h 59" + "m" past the
         // hour, "47" + "min" below it. Raw minutes ("119 min") made anything
@@ -739,7 +741,7 @@ private fun computePaceMinPerMi(a: ActivityRow): NeonStatSpec? {
     val t = a.type.lowercase()
     val isFootSport = t.contains("run") || t.contains("walk") || t.contains("hike")
     if (!isFootSport) return null
-    val miles = dist / 1609.34
+    val miles = Units.distance(dist) ?: 0.0
     if (miles <= 0.0) return null
     val totalSecPerMile = a.durationS / miles
     val min = (totalSecPerMile / 60).toInt()

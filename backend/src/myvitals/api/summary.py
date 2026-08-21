@@ -792,6 +792,145 @@ async def today_snapshot(
     return snapshot
 
 
+@router.get("/day")
+async def day_snapshot(
+    date_: date | None = Query(None, alias="date"),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Everything about one calendar day, in a single round-trip (DAY-1).
+
+    The day-parameterised twin of ``/today/snapshot``. It reuses that
+    endpoint's shape deliberately — ``asyncio.gather`` over per-section
+    ``safe()`` wrappers, each with its own session — so one broken
+    subsystem lands as ``null`` in its slot rather than failing the whole
+    page. On a health dashboard a missing card is recoverable; a blank
+    screen because the Strava token expired is not.
+
+    Differences from ``/today/snapshot``, all of them consequences of the
+    day being arbitrary:
+
+    * Windows are bounded by the day itself rather than "trailing 24h", so
+      opening last Tuesday shows Tuesday, not the 24 hours before now.
+    * No stale-row repair and no live step splice. Both only make sense
+      for the current day — running them against a past date would
+      rewrite history from today's samples.
+    * ``sleep`` is the night that ENDED on this day, which is how a person
+      reads "Tuesday's sleep": the night of Monday into Tuesday.
+    """
+    from datetime import timedelta as _td
+    # Avoid circular imports — these modules in turn import .summary.
+    from .annotations import list_annotations as _journal_list
+    from .query import (
+        get_blood_pressure as _bp_get,
+        get_heartrate as _hr_get,
+        get_hrv as _hrv_get,
+        get_sleep_range as _sleep_range,
+        get_steps as _steps_get,
+        get_weight as _weight_get,
+    )
+    from ..db.session import SessionLocal
+
+    day, tz, is_today = resolve_day(date_)
+    day_start = datetime.combine(day, datetime.min.time(), tzinfo=tz)
+    day_end = datetime.combine(day, datetime.max.time(), tzinfo=tz)
+
+    async def safe(name: str, fn):
+        try:
+            async with SessionLocal() as own_db:
+                return name, await fn(own_db)
+        except Exception as e:  # noqa: BLE001
+            log.warning("day snapshot section %s failed for %s: %s", name, day, e)
+            return name, None
+
+    results = await asyncio.gather(
+        safe("tiles", lambda s: summary_tiles(date_=day, db=s)),
+        safe("events", lambda s: summary_events(date_=day, db=s)),
+        safe("readiness", lambda s: readiness_detail(date_=day, db=s)),
+        safe("hr", lambda s: _hr_get(
+            since=day_start, until=day_end, bucket_seconds=None, db=s)),
+        safe("hrv", lambda s: _hrv_get(since=day_start, until=day_end, db=s)),
+        safe("steps", lambda s: _steps_get(since=day_start, until=day_end, db=s)),
+        # The night that ENDED on this day. A person asking about Tuesday's
+        # sleep means Monday night into Tuesday morning, so the window opens
+        # the previous evening.
+        safe("sleep", lambda s: _sleep_range(
+            since=(day_start - _td(days=1)), until=day_end, db=s)),
+        safe("weight", lambda s: _weight_get(since=day_start, until=day_end, db=s)),
+        safe("blood_pressure", lambda s: _bp_get(
+            since=day_start, until=day_end, db=s)),
+        safe("annotations", lambda s: _journal_list(
+            since=day_start, until=day_end, type=None, limit=100, db=s)),
+        safe("activities", lambda s: _day_activities(s, day_start, day_end)),
+        safe("workout", lambda s: _day_workout(s, day)),
+    )
+
+    snapshot: dict[str, Any] = {
+        "date": day.isoformat(),
+        "is_today": is_today,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    for name, value in results:
+        snapshot[name] = value
+    return snapshot
+
+
+async def _day_activities(
+    db: AsyncSession, day_start: datetime, day_end: datetime,
+) -> list[dict[str, Any]]:
+    """Activities that STARTED on this day.
+
+    Bounded on start_at rather than overlap: an activity that begins at
+    23:40 belongs to the day it started, and counting it on both days
+    would double it in any per-day total.
+    """
+    rows = (await db.execute(
+        select(models.Activity)
+        .where(models.Activity.start_at >= day_start)
+        .where(models.Activity.start_at <= day_end)
+        .order_by(models.Activity.start_at)
+    )).scalars().all()
+    return [
+        {
+            "source": a.source,
+            "source_id": a.source_id,
+            "type": a.type,
+            "name": a.name,
+            "start_at": a.start_at.isoformat(),
+            "duration_s": a.duration_s,
+            "distance_m": a.distance_m,
+            "elevation_gain_m": a.elevation_gain_m,
+            "kcal": a.kcal,
+            "avg_hr": a.avg_hr,
+            "trail_id": a.trail_id,
+        }
+        for a in rows
+    ]
+
+
+async def _day_workout(db: AsyncSession, day: date) -> dict[str, Any] | None:
+    """The strength session planned or completed on this day, if any.
+
+    A compact summary rather than the full hydrated workout: the day view
+    is a digest, and the workout page is one tap away for the detail.
+    """
+    w = (await db.execute(
+        select(models.StrengthWorkout)
+        .where(models.StrengthWorkout.date == day)
+        .where(models.StrengthWorkout.status != "regenerated")
+        .order_by(models.StrengthWorkout.id.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if w is None:
+        return None
+    return {
+        "id": w.id,
+        "date": w.date.isoformat(),
+        "status": w.status,
+        "split_focus": w.split_focus,
+        "notes": w.notes,
+    }
+
+
 @router.get("/training-load")
 async def training_load(
     db: AsyncSession = Depends(get_session),

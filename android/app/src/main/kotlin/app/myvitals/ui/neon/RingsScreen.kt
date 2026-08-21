@@ -184,6 +184,19 @@ fun RingsScreen(
     NeonScreen(
         title = "Today",
         contentPadding = contentPadding,
+        // DAY-1: entry point to the single-day view. Opens on today; the
+        // picker inside moves from there.
+        headerTrailing = {
+            androidx.compose.material3.Text(
+                "Day view",
+                color = NeonMV.Cyan,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(999.dp))
+                    .clickable { onOpen("day/${java.time.LocalDate.now()}") }
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            )
+        },
         refreshing = refreshing,
         onRefresh = {
             scope.launch { refreshing = true; try { load() } finally { refreshing = false } }

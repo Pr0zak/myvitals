@@ -1,4 +1,5 @@
 import { createApp } from "vue";
+import { startDisplayPrefsSync } from "@/displayPrefs";
 import { createPinia } from "pinia";
 import { createRouter, createWebHistory } from "vue-router";
 
@@ -27,6 +28,9 @@ const router = createRouter({
     { path: "/coach-hub", name: "coach-hub", component: () => import("./views/CoachHub.vue") },
     { path: "/you", name: "you", component: () => import("./views/You.vue") },
     { path: "/trends", name: "trends", component: () => import("./views/Trends.vue") },
+    // DAY-1: the day is in the URL so a particular day is linkable and
+    // survives a reload. `/day` with no param resolves to today in the view.
+    { path: "/day/:date?", name: "day", component: () => import("./views/Day.vue") },
     { path: "/sleep", name: "sleep", component: () => import("./views/Sleep.vue") },
     { path: "/heart-rate", name: "heart-rate", component: () => import("./views/HeartRate.vue") },
     { path: "/weight", name: "weight", component: () => import("./views/Weight.vue") },
@@ -73,3 +77,9 @@ router.beforeEach((to) => {
 });
 
 createApp(App).use(createPinia()).use(router).mount("#app");
+
+// DISP-1: reconcile locally cached display preferences against the
+// server's. Fires after mount on purpose — the first paint uses the
+// localStorage values so the theme does not flash and distances do not
+// render in the wrong unit while a round-trip completes.
+startDisplayPrefsSync();

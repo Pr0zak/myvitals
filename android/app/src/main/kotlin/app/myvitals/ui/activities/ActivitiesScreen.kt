@@ -1,5 +1,6 @@
 package app.myvitals.ui.activities
 
+import app.myvitals.data.Units
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -700,7 +701,7 @@ private fun ActivityListRow(
     val tint = cat.color(neon)
     val title = a.name?.takeIf { it.isNotBlank() } ?: prettyType(a.type)
     val ageStr = remember(nowMs, a.startAt) { fmtAge(a.startAt, nowMs) }
-    val miles = a.distanceM?.let { "%.1f mi".format(it / 1609.34) } ?: "—"
+    val miles = Units.fmtDistance(a.distanceM, 1)
     val mins = a.durationS / 60
     Card(
         colors = CardDefaults.cardColors(
@@ -868,9 +869,9 @@ private fun YtdYoyCard(
                     modifier = Modifier.weight(1f),
                 )
                 YtdCell(
-                    value = "%.0f".format(ytd.distance / 1609.344) + " mi",
+                    value = "%.0f".format(Units.distance(ytd.distance) ?: 0.0) + " ${Units.distanceUnit}",
                     label = "distance",
-                    prev = "%.0f".format(lyr.distance / 1609.344) + "mi",
+                    prev = "%.0f".format(Units.distance(lyr.distance) ?: 0.0) + Units.distanceUnit,
                     pct = pctD(ytd.distance, lyr.distance),
                     neon = neon,
                     modifier = Modifier.weight(1f),

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { toLocalISO } from "@/dates";
 import { zeroAxisIncluding } from "@/chartAxis";
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
@@ -215,7 +216,7 @@ function onDayAxis(list: SleepNight[]): Array<{ date: string; night: SleepNight 
   // Guard against a pathological range building a huge array.
   if (days < 0 || days > 400) return list.map((n) => ({ date: n.date, night: n }));
   return Array.from({ length: days + 1 }, (_, i) => {
-    const d = new Date(first + i * 86_400_000).toISOString().slice(0, 10);
+    const d = toLocalISO(new Date(first + i * 86_400_000));
     return { date: d, night: byDate.get(d) ?? null };
   });
 }

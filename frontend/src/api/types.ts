@@ -630,3 +630,47 @@ export interface AiAskResult {
   /** Echoed back so a cached answer can be shown against its question. */
   question?: string;
 }
+
+// ── DAY-1: unified day view ──────────────────────────────────────────
+// Every section is independently nullable: the server wraps each in a
+// safe() so one failing subsystem lands as null rather than taking the
+// whole page down. Treat null as "couldn't load", never as zero.
+export interface DayActivity {
+  source: string;
+  source_id: string;
+  type: string;
+  name: string | null;
+  start_at: string;
+  duration_s: number | null;
+  distance_m: number | null;
+  elevation_gain_m: number | null;
+  kcal: number | null;
+  avg_hr: number | null;
+  trail_id: number | null;
+}
+
+export interface DayWorkout {
+  id: number;
+  date: string;
+  status: string;
+  split_focus: string | null;
+  notes: string | null;
+}
+
+export interface DaySnapshot {
+  date: string;
+  is_today: boolean;
+  generated_at: string;
+  tiles: { tiles?: VitalTile[]; group_order?: string[] } | null;
+  events: { events?: Array<Record<string, unknown>> } | null;
+  readiness: Record<string, unknown> | null;
+  hr: { points?: Array<{ time: string; bpm: number }> } | null;
+  hrv: { points?: Array<{ time: string; ms: number }> } | null;
+  steps: { points?: Array<{ time: string; count: number }>; total?: number } | null;
+  sleep: SleepNight[] | null;
+  weight: { points?: Array<{ time: string; weight_kg: number | null }> } | null;
+  blood_pressure: { points?: Array<Record<string, unknown>> } | null;
+  annotations: Array<Record<string, unknown>> | null;
+  activities: DayActivity[] | null;
+  workout: DayWorkout | null;
+}

@@ -1,5 +1,6 @@
 package app.myvitals.ui.trails
 
+import app.myvitals.data.Units
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -226,7 +227,7 @@ private fun VisitRow(
         }
         Column(horizontalAlignment = Alignment.End) {
             v.distanceM?.let {
-                Text(String.format("%.1f mi", it / 1609.344), color = fg, fontSize = 13.sp)
+                Text(Units.fmtDistance(it, 1), color = fg, fontSize = 13.sp)
             }
             Text(prettyDuration(v.durationS), color = dim, fontSize = 11.sp)
         }

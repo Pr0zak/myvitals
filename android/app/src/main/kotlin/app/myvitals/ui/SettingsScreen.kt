@@ -103,6 +103,12 @@ fun SettingsScreen(
     // neon == false → every color/layout below stays byte-identical.
     val neon = neonShellEnabled
 
+    // DISP-1: units / time format, shared with the web dashboard.
+    // Seeded from the local cache so the first frame is right, then
+    // reconciled against the server below.
+    var unitsImperial by remember { mutableStateOf(settings.unitsImperial) }
+    var timeFormat by remember { mutableStateOf(settings.timeFormat) }
+
     var permRefreshTick by remember { mutableIntStateOf(0) }
     app.myvitals.ui.common.LifecycleResumeEffect(staleAfterMs = 0L) { permRefreshTick++ }
     val permsGranted by produceState(
@@ -555,6 +561,32 @@ fun SettingsScreen(
         item {
             Section(title = "Display", neon = neon) {
                 Card {
+                    // The phone had no unit preference at all — twelve call
+                    // sites divided by a hardcoded metres-per-mile constant,
+                    // so choosing metric on the web still showed miles here.
+                    ChoiceRow(
+                        label = "Units",
+                        options = listOf("imperial" to "Imperial", "metric" to "Metric"),
+                        selected = if (unitsImperial) "imperial" else "metric",
+                        onSelect = { v ->
+                            val imperial = v == "imperial"
+                            unitsImperial = imperial
+                            settings.unitsImperial = imperial   // also updates Units
+                            scope.launch { pushDisplayPref(settings, "units" to v) }
+                        },
+                    )
+                    ChoiceRow(
+                        label = "Time",
+                        options = listOf(
+                            "auto" to "Auto", "12h" to "12-hour", "24h" to "24-hour",
+                        ),
+                        selected = timeFormat,
+                        onSelect = { v ->
+                            timeFormat = v
+                            settings.timeFormat = v
+                            scope.launch { pushDisplayPref(settings, "time_format" to v) }
+                        },
+                    )
                     ListLinkRow(label = "Key metrics order", onClick = onOpenTileOrder)
                 }
             }
@@ -1044,6 +1076,62 @@ private fun KvRow(label: String, value: String, valueColor: Color? = null) {
             color = valueColor ?: MV.OnSurfaceVariant,
             style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
         )
+    }
+}
+
+/**
+ * DISP-1 — push one display preference to the server.
+ *
+ * Partial by design: the endpoint merges, so sending only the key that
+ * changed cannot clobber a preference set on the web. Failures are
+ * swallowed deliberately — the local value has already applied, and
+ * reverting what the user just tapped because the network blinked would
+ * be worse than a preference that syncs on the next save.
+ */
+private suspend fun pushDisplayPref(
+    settings: SettingsRepository, pref: kotlin.Pair<String, String>,
+) {
+    if (!settings.isConfigured()) return
+    try {
+        val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+        withContext(Dispatchers.IO) { api.putDisplayPrefs(mapOf(pref.first to pref.second)) }
+    } catch (e: Exception) {
+        Timber.w(e, "display pref sync failed")
+    }
+}
+
+@Composable
+private fun ChoiceRow(
+    label: String,
+    options: List<kotlin.Pair<String, String>>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text(label, fontSize = 15.sp, color = MV.OnSurface)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for ((value, text) in options) {
+                val on = value == selected
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (on) MV.BrandRed else MV.SurfaceContainerHigh)
+                        .pointerInput(value) {
+                            detectTapGestures(onTap = { if (!on) onSelect(value) })
+                        }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                ) {
+                    Text(
+                        text,
+                        fontSize = 13.sp,
+                        color = if (on) MV.OnSurface else MV.OnSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }
 

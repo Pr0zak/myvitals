@@ -308,6 +308,22 @@ fun NeonAppShell(
                         onOpenTileOrder = { nav.navigate("settings/tile-order") },
                     )
                 }
+                // DAY-1: the date is a route argument so a particular day
+                // survives process death and back-stack restore.
+                composable(
+                    "day/{date}",
+                    arguments = listOf(
+                        navArgument("date") { type = NavType.StringType },
+                    ),
+                ) { entry ->
+                    app.myvitals.ui.DayScreen(
+                        settings = settings,
+                        initialDate = entry.arguments?.getString("date"),
+                        onBack = { nav.popBackStack() },
+                        onOpenActivity = { src, id -> nav.navigate("activity/$src/$id") },
+                        onOpenWorkout = { nav.navigate("workout/today") },
+                    )
+                }
                 composable("settings/tile-order") {
                     app.myvitals.ui.TileOrderScreen(
                         settings = settings,

@@ -1,5 +1,6 @@
 package app.myvitals.ui.vitals
 
+import app.myvitals.data.Units
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -149,8 +150,8 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
 @Composable
 private fun WeightHero(pts: List<WPoint>) {
     val tok = LocalAppTokens.current
-    val latestLb = pts.last().kg * 2.20462
-    val firstLb = pts.first().kg * 2.20462
+    val latestLb = Units.weight(pts.last().kg) ?: 0.0
+    val firstLb = Units.weight(pts.first().kg) ?: 0.0
     val delta = latestLb - firstLb
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
@@ -184,7 +185,7 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
             Text("TREND", color = tok.onSurfaceVariant,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(8.dp))
-            val lbs = pts.map { it.kg * 2.20462 }
+            val lbs = pts.map { Units.weight(it.kg) ?: 0.0 }
             val minV = lbs.min()
             val maxV = lbs.max()
             val span = (maxV - minV).coerceAtLeast(0.5)
@@ -258,7 +259,7 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
 @Composable
 private fun WeightStats(pts: List<WPoint>) {
     val tok = LocalAppTokens.current
-    val lbs = pts.map { it.kg * 2.20462 }
+    val lbs = pts.map { Units.weight(it.kg) ?: 0.0 }
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
             Text("STATS", color = tok.onSurfaceVariant,

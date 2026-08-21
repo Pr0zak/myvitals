@@ -143,6 +143,10 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/utils/muscleIcon.ts",
      "android/app/src/main/kotlin/app/myvitals/ui/strength/MuscleIcon.kt",
      "Muscle anatomy chip resolver"),
+    # DAY-1: the unified single-day view.
+    ("frontend/src/views/Day.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/DayScreen.kt",
+     "Unified day view"),
     # TILE-1: the Key-metrics order editor. Both surfaces write the same
     # scoped endpoint, so a change to one side's control set almost always
     # needs the other.

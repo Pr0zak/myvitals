@@ -23,6 +23,9 @@
  * be impossible to miss rather than a small label in one corner.
  */
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+// Extracted to @/dates so the six other call sites that had the broken
+// toISOString() form could share the correct one.
+import { toLocalISO } from "@/dates";
 
 const props = withDefaults(defineProps<{
   /** Selected day as a local `YYYY-MM-DD` string. */
@@ -33,15 +36,6 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ (e: "update:modelValue", v: string): void }>();
 
-/** Local calendar day as `YYYY-MM-DD`.
- *
- *  Deliberately not `toISOString().slice(0, 10)`: that converts to UTC first,
- *  so west of Greenwich it reports tomorrow for most of the evening. Same
- *  class of bug as the one the backend keeps re-learning. */
-function toLocalISO(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 
 function parseLocal(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number);

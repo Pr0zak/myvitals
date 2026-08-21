@@ -15,7 +15,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import {
-  Activity, BarChart3, Battery, Bed, Brain, Calendar, ChevronDown,
+  Activity, BarChart3, Battery, Bed, Brain, Calendar, CalendarClock, ChevronDown,
   ChevronRight, Download, Droplets, Dumbbell, Edit3, FileUp, Footprints, Github, GitCompare,
   Heart, Home, Hourglass, Key, List, Map, Menu, Monitor, Mountain, RotateCcw, Ruler, Scale, Search,
   Settings, Ship, Sparkles, Target, Terminal, Thermometer, TrendingUp, User, Watch as WatchIcon,
@@ -219,6 +219,9 @@ const groups = computed<Group[]>(() => {
     ? fmtDistance(activitiesDistanceM.value, 0) : "—";
   return [
     { id: "today",   to: "/",        icon: Home,        label: "Today" },
+    // DAY-1: one page for any single day. No :date param here so the link
+    // always opens today; the picker inside moves from there.
+    { id: "day",     to: "/day",     icon: CalendarClock, label: "Day view" },
     {
       id: "vitals", icon: Heart, label: "Vitals", children: [
         { to: "/heart-rate",     icon: Heart,       label: "Heart rate",     sub: hrStr,     subColor: "#ef4444" },

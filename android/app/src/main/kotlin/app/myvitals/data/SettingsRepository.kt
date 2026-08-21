@@ -78,6 +78,30 @@ class SettingsRepository(context: Context) {
 
     val neonShellEnabled: Boolean get() = true
 
+    /**
+     * DISP-1 — unit preference. The phone had none: twelve call sites
+     * divided by a hardcoded metres-per-mile constant, so a user who
+     * chose metric on the web still saw miles here.
+     *
+     * Cached locally so the first frame renders in the right unit rather
+     * than flipping after a round-trip; the server copy in
+     * `user_profile.extra.display` is the source of truth and reconciles
+     * on the next sync.
+     */
+    var unitsImperial: Boolean
+        get() = plain.getBoolean(KEY_UNITS_IMPERIAL, true)
+        set(value) {
+            plain.edit().putBoolean(KEY_UNITS_IMPERIAL, value).apply()
+            // Units is read from composables that have no repository
+            // handle, so the flag is mirrored there on every write.
+            Units.imperial = value
+        }
+
+    /** "auto" | "12h" | "24h". */
+    var timeFormat: String
+        get() = plain.getString(KEY_TIME_FORMAT, "auto") ?: "auto"
+        set(value) = plain.edit().putString(KEY_TIME_FORMAT, value).apply()
+
 
     /**
      * RETIRED in v0.7.366. "Neon Refined" was a third information
@@ -105,6 +129,8 @@ class SettingsRepository(context: Context) {
 
     companion object {
         private const val KEY_TRAILS_DENSE = "trails_dense"
+        private const val KEY_UNITS_IMPERIAL = "units_imperial"
+        private const val KEY_TIME_FORMAT = "time_format"
         private const val PLAIN_FILE = "myvitals_prefs"
         private const val SECURE_FILE = "myvitals_secure"
         private const val KEY_BACKEND_URL = "backend_url"

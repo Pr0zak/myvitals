@@ -1,5 +1,6 @@
 package app.myvitals.ui.vitals
 
+import app.myvitals.data.Units
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -467,7 +468,7 @@ private suspend fun fetchSeries(
             return summaryXY(dailyRows(api, range)) { it.recoveryScore }
         }
         Vital.WEIGHT -> {
-            return summaryXY(dailyRows(api, range)) { it.weightKg?.times(2.20462) }
+            return summaryXY(dailyRows(api, range)) { Units.weight(it.weightKg) }
         }
         Vital.BP -> {
             return summaryXY(dailyRows(api, range)) { it.bpSystolicAvg }

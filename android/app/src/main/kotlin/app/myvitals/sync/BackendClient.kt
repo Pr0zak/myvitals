@@ -286,6 +286,14 @@ interface BackendApi {
     @GET("activities/stats")
     suspend fun activitiesStats(@retrofit2.http.Query("days") days: Int = 30): ActivityStatsOut
 
+    // DISP-1: units / time format / theme. The phone had no unit
+    // preference at all before this.
+    @GET("profile/display-prefs")
+    suspend fun displayPrefs(): DisplayPrefsOut
+
+    @retrofit2.http.PUT("profile/display-prefs")
+    suspend fun putDisplayPrefs(@Body body: Map<String, String>): DisplayPrefsOut
+
     @GET("profile/tile-prefs")
     suspend fun tilePrefs(): TilePrefsOut
 
@@ -387,6 +395,11 @@ interface BackendApi {
     suspend fun readinessDetail(): ReadinessDetail
 
     /** Per-tile value, 14-day series and verdict. Judgement is server-side. */
+    // DAY-1: everything about one calendar day in a single call. Sections
+    // are independently best-effort server-side.
+    @GET("summary/day")
+    suspend fun summaryDay(@retrofit2.http.Query("date") date: String): DaySnapshot
+
     @GET("summary/tiles")
     suspend fun summaryTiles(): VitalTilesResponse
 

@@ -1,5 +1,6 @@
 package app.myvitals.widget
 
+import app.myvitals.data.Units
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.Context
@@ -52,7 +53,7 @@ class ActivityWidgetProvider : AppWidgetProvider() {
             } else {
                 rv.setTextViewText(R.id.widget_title, act.name ?: act.type)
                 rv.setTextViewText(R.id.widget_type, act.type.uppercase())
-                val miles = act.distanceM?.let { it / 1609.34 } ?: 0.0
+                val miles = act.distanceM?.let { Units.distance(it) } ?: 0.0
                 rv.setTextViewText(R.id.widget_distance, "%.1f mi".format(miles))
                 val mins = act.durationS / 60
                 val hrs = mins / 60

@@ -234,6 +234,104 @@ def _tile_prefs_payload(order: list[str], hidden: list[str]) -> dict[str, Any]:
     }
 
 
+# ── DISP-1: display preferences ──────────────────────────────────────
+#
+# Units, time format and theme were localStorage-only on the web, and the
+# phone had no preference at all — it hardcoded `/ 1609.34` in twelve
+# places across eight files (with two different values for the same
+# constant, 1609.34 and 1609.344). Clearing browser data reset the web;
+# nothing could change the phone.
+#
+# These live in `user_profile.extra` rather than getting columns: `extra`
+# is free-form JSON, so adding a preference later needs no migration.
+DISPLAY_DEFAULTS: dict[str, str] = {
+    "units": "imperial",
+    "time_format": "auto",
+    "theme": "neon",
+}
+
+DISPLAY_ALLOWED: dict[str, set[str]] = {
+    "units": {"metric", "imperial"},
+    "time_format": {"auto", "12h", "24h"},
+    # "refined" was retired in v0.7.366 but may still be in a client's
+    # localStorage; it is accepted here and folded to "neon" so an old
+    # value round-trips instead of 400ing on every save.
+    "theme": {"dark", "light", "auto", "neon", "refined"},
+}
+
+
+class DisplayPrefsIn(BaseModel):
+    units: str | None = None
+    time_format: str | None = None
+    theme: str | None = None
+
+
+def _display_payload(extra: dict[str, Any]) -> dict[str, Any]:
+    stored = (extra.get("display") or {}) if isinstance(extra, dict) else {}
+    out = dict(DISPLAY_DEFAULTS)
+    for k, allowed in DISPLAY_ALLOWED.items():
+        v = stored.get(k)
+        if isinstance(v, str) and v in allowed:
+            out[k] = "neon" if (k == "theme" and v == "refined") else v
+    return out
+
+
+@router.get("/display-prefs")
+async def get_display_prefs(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Units / time format / theme, with defaults filled in.
+
+    Always returns every key, so a client never has to know the default
+    for a preference it has not seen before.
+    """
+    p = await db.get(models.UserProfile, 1)
+    return _display_payload((p.extra if p and p.extra else {}) or {})
+
+
+@router.put("/display-prefs")
+async def put_display_prefs(
+    body: DisplayPrefsIn,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Scoped, partial write — same reasoning as /tile-prefs.
+
+    ``PUT /profile`` replaces ``extra`` wholesale, so routing display
+    preferences through it would let any client that does not carry them
+    forward erase them. Omitted fields here keep their stored value rather
+    than reverting to the default, so a client that only knows about
+    ``units`` cannot clobber a ``theme`` set from the other surface.
+    """
+    incoming = {
+        k: v for k, v in
+        (("units", body.units), ("time_format", body.time_format), ("theme", body.theme))
+        if v is not None
+    }
+    for k, v in incoming.items():
+        if v not in DISPLAY_ALLOWED[k]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{k} must be one of {sorted(DISPLAY_ALLOWED[k])}",
+            )
+
+    p = await db.get(models.UserProfile, 1)
+    now = datetime.now(timezone.utc)
+    if p is None:
+        p = models.UserProfile(id=1, updated_at=now)
+        db.add(p)
+
+    # Copy-then-reassign: SQLAlchemy does not track in-place mutation of a
+    # JSON column, so mutating p.extra directly would commit nothing.
+    extra = dict(p.extra or {})
+    display = dict(extra.get("display") or {})
+    display.update(incoming)
+    extra["display"] = display
+    p.extra = extra
+    p.updated_at = now
+    await db.commit()
+    return _display_payload(extra)
+
+
 @router.get("/tile-prefs")
 async def get_tile_prefs(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     """Current tile order and visibility, reconciled against today's tiles.

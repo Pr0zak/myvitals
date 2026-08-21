@@ -125,7 +125,7 @@ async def promote_health_connect_workouts(
         stmt = stmt.where(models.Workout.time >= since)
     sessions = (await db.execute(stmt)).scalars().all()
 
-    promoted = skipped_overlap = skipped_untimed = 0
+    promoted = already_present = skipped_overlap = skipped_untimed = 0
 
     for w in sessions:
         if not w.duration_s or w.duration_s <= 0:
@@ -162,6 +162,18 @@ async def promote_health_connect_workouts(
             skipped_overlap += 1
             continue
 
+        # Distinguish a new promotion from a re-promotion. The upsert
+        # below is idempotent either way, but a run that created nothing
+        # must not report that it promoted twelve sessions — this endpoint
+        # exists to say what it did, so the count has to be true.
+        source_id = start.isoformat()
+        exists = (await db.execute(
+            select(models.Activity.source_id)
+            .where(models.Activity.source == HC_SOURCE)
+            .where(models.Activity.source_id == source_id)
+            .limit(1)
+        )).scalar_one_or_none()
+
         await upsert_activity(
             db,
             {
@@ -169,7 +181,7 @@ async def promote_health_connect_workouts(
                 # The workouts PK is `time`, so the ISO instant is a stable
                 # natural key: re-promoting the same session updates its
                 # row rather than creating a second one.
-                "source_id": start.isoformat(),
+                "source_id": source_id,
                 "type": HC_TYPE_MAP.get(
                     (w.type or "").lower(), (w.type or "workout").lower(),
                 ),
@@ -186,10 +198,14 @@ async def promote_health_connect_workouts(
             # No GPS on these, so there is no trail to match.
             link_trail=False,
         )
-        promoted += 1
+        if exists is None:
+            promoted += 1
+        else:
+            already_present += 1
 
     return {
         "promoted": promoted,
+        "already_present": already_present,
         "skipped_overlap": skipped_overlap,
         "skipped_untimed": skipped_untimed,
         "considered": len(sessions),

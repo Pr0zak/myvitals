@@ -169,3 +169,26 @@ class TestTheQueryActuallyCompiles:
         assert models.Activity.__table__.primary_key.columns.keys() == [
             "source", "source_id",
         ]
+
+
+class TestTheCountIsTrue:
+    """A run that created nothing must not claim it promoted twelve.
+
+    The first live backfill promoted 12 sessions correctly, then reported
+    `promoted: 12` again on an immediate re-run that created nothing. The
+    data was right — 12 rows after both runs, because the upsert is
+    idempotent — but the number was not. This endpoint exists to report
+    what it did, so the count has to distinguish the two cases.
+    """
+
+    def test_existing_rows_are_counted_separately(self):
+        src = inspect.getsource(activity_sink.promote_health_connect_workouts)
+        assert "already_present" in src
+        assert "if exists is None:" in src
+
+    def test_the_existence_check_precedes_the_upsert(self):
+        """Checking afterwards would always find the row it just wrote."""
+        src = inspect.getsource(activity_sink.promote_health_connect_workouts)
+        assert src.index("exists = (await db.execute(") < src.index(
+            "await upsert_activity(",
+        )

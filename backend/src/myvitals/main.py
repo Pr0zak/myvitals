@@ -33,6 +33,12 @@ from .api import (
 )
 from .api.workout import strength as workout_strength
 from .config import settings
+from .logging_config import configure_logging
+
+# Before anything else: without this every log.info in the app is discarded,
+# because `fastapi run` configures only the uvicorn loggers and leaves root
+# at WARNING.
+configure_logging(settings.log_level)
 
 log = logging.getLogger(__name__)
 

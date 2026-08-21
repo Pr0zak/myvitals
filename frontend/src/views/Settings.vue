@@ -641,10 +641,12 @@ async function loadGoogleHealth() {
     if (ghCfg.value.client_id && !ghClientId.value) ghClientId.value = ghCfg.value.client_id;
     if (ghCfg.value.callback_url && !ghCallback.value) ghCallback.value = ghCfg.value.callback_url;
     if (!ghCallback.value) {
-      // The redirect URI must match what is registered in the Google Cloud
-      // console byte for byte, so offer the right one rather than making the
-      // user reconstruct it.
-      ghCallback.value = `${window.location.origin}/api/auth/google-health/callback`;
+      // Loopback, deliberately — Google rejects LAN hostnames outright
+      // ("must end with a public top-level domain") and localhost is its
+      // only exception to the HTTPS rule. Nothing listens on this address;
+      // it exists so the authorization code lands somewhere we can read it
+      // out of the address bar. See the paste step below.
+      ghCallback.value = "http://localhost:8080/api/auth/google-health/callback";
     }
   } catch { /* ignore */ }
 }
@@ -670,9 +672,29 @@ async function ghSaveConfig() {
   } catch (e) { ghFail(e); } finally { ghBusy.value = false; }
 }
 
-function ghConnect() {
-  // Full page navigation, not fetch: this is an OAuth consent redirect.
-  window.location.href = `/api/auth/google-health/login?token=${encodeURIComponent(queryToken.value)}`;
+const ghPasteUrl = ref("");
+const ghAuthUrl = ref("");
+
+async function ghConnect() {
+  ghBusy.value = true; ghError.value = ""; ghResult.value = "";
+  try {
+    // Open the consent screen in a new tab rather than navigating away, so
+    // Settings stays put and the paste field is still here to come back to.
+    const { url } = await api.googleHealthAuthorizeUrl();
+    ghAuthUrl.value = url;
+    window.open(url, "_blank", "noopener");
+  } catch (e) { ghFail(e); } finally { ghBusy.value = false; }
+}
+
+async function ghFinish() {
+  ghBusy.value = true; ghError.value = ""; ghResult.value = "";
+  try {
+    await api.googleHealthExchange(ghPasteUrl.value.trim());
+    ghPasteUrl.value = "";
+    ghAuthUrl.value = "";
+    ghResult.value = "Connected. Now press \u201cWhat data is available?\u201d.";
+    await loadGoogleHealth();
+  } catch (e) { ghFail(e); } finally { ghBusy.value = false; }
 }
 
 async function ghRunProbe() {
@@ -2468,6 +2490,15 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
         application", and add yourself as a test user. No verification is
         needed — that only applies above 100 users.
       </p>
+      <p class="hint">
+        <strong>Google will not accept a LAN address as the redirect URI.</strong>
+        It requires a public domain over HTTPS, and <code>localhost</code> is
+        its only exception — which is why the URI below is a loopback address
+        that nothing is listening on. That is deliberate: it means this never
+        has to be exposed to the internet. Google sends your browser there,
+        the page fails to load, and the authorization code is sitting in the
+        address bar for you to paste back in step 2.
+      </p>
 
       <label class="ai-instructions">
         <span>Redirect URI (paste this into the Google console, exactly)</span>
@@ -2487,7 +2518,7 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
       <div class="actions">
         <button class="ghost" :disabled="ghBusy" @click="ghSaveConfig">Save app credentials</button>
         <button class="primary" :disabled="ghBusy || !ghCfg?.configured" @click="ghConnect">
-          {{ ghStatus?.connected ? "Reconnect" : "Connect" }}
+          {{ ghStatus?.connected ? "Reconnect" : "1. Open Google consent" }}
         </button>
         <button class="ghost" :disabled="ghBusy || !ghStatus?.connected" @click="ghRunProbe">
           {{ ghBusy ? "Working…" : "What data is available?" }}
@@ -2495,6 +2526,29 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
         <button class="ghost" :disabled="ghBusy || !ghStatus?.connected" @click="ghSync(7)">Sync 7 days</button>
         <button class="ghost" :disabled="ghBusy || !ghStatus?.connected" @click="ghSync(90)">Backfill 90 days</button>
         <button class="ghost danger" v-if="ghStatus?.connected" @click="ghDisconnect">Disconnect</button>
+      </div>
+
+      <!-- Step 2 of the loopback flow. Only shown once the consent screen has
+           been opened, so it does not read as a field to fill in first. -->
+      <div v-if="ghAuthUrl" class="gh-paste">
+        <p class="hint">
+          A tab just opened for Google's consent screen. Approve it, then the
+          browser will land on a <code>localhost</code> page that
+          <strong>fails to load — that is expected</strong>. Copy the whole
+          address from that tab's URL bar and paste it here.
+        </p>
+        <input v-model="ghPasteUrl" class="add-search" type="text"
+               placeholder="http://localhost:8080/api/auth/google-health/callback?state=…&amp;code=…"/>
+        <div class="actions">
+          <button class="primary" :disabled="ghBusy || !ghPasteUrl.trim()" @click="ghFinish">
+            2. Finish connecting
+          </button>
+          <a :href="ghAuthUrl" target="_blank" rel="noopener" class="hint">reopen consent screen</a>
+        </div>
+        <p class="hint">
+          The link expires after 15 minutes. If it does, press
+          &ldquo;Open Google consent&rdquo; again for a fresh one.
+        </p>
       </div>
 
       <p v-if="ghError" class="err">{{ ghError }}</p>
@@ -3106,4 +3160,12 @@ html[data-theme="neon"] .settings .apply-steps li.current::before { color: var(-
 }
 .probe-table td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
 .probe-table .ok { color: var(--good); }
+
+.gh-paste {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 12px 0;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
 </style>

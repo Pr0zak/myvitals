@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from urllib.parse import parse_qs, urlparse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,13 +84,18 @@ async def set_config(
     return await get_config(db)
 
 
-@router.get("/auth/google-health/login", dependencies=[Depends(require_query)])
-async def login(db: AsyncSession = Depends(get_session)) -> RedirectResponse:
+@router.post("/google-health/authorize-url", dependencies=[Depends(require_query)])
+async def authorize_url(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    """The consent URL, returned rather than redirected to.
+
+    The paste flow needs the user to open this themselves and then bring back
+    the URL Google lands on, so handing over the link beats a 302 the browser
+    would follow away from Settings.
+    """
     cfg = await db.get(models.GoogleHealthConfig, 1)
     if cfg is None or not cfg.client_id or not cfg.callback_url:
         raise HTTPException(400, "Google Health app credentials are not configured")
-    url = gh.authorize_url(cfg.client_id, cfg.callback_url, _mint_state())
-    return RedirectResponse(url)
+    return {"url": gh.authorize_url(cfg.client_id, cfg.callback_url, _mint_state())}
 
 
 @router.get("/auth/google-health/callback")
@@ -114,6 +119,71 @@ async def callback(
     if cfg is None or not cfg.callback_url:
         raise HTTPException(400, "Google Health app credentials are not configured")
     try:
+        creds = await gh.exchange_code(db, code, cfg.callback_url)
+    except gh.GoogleHealthError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"connected": True, "scope": creds.scope}
+
+
+class ExchangeIn(BaseModel):
+    """Either the whole redirected URL, or the bare code and state.
+
+    Pasting the URL is what people actually do, so accept that and pull the
+    parameters out rather than making them dissect a query string.
+    """
+    redirected_url: str | None = None
+    code: str | None = None
+    state: str | None = None
+
+
+@router.post("/google-health/exchange", dependencies=[Depends(require_query)])
+async def exchange(
+    body: ExchangeIn, db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Finish the OAuth dance from a redirect this server never received.
+
+    Google will not accept a LAN hostname as a redirect URI -- it requires a
+    public top-level domain over HTTPS, with `localhost` the sole exception.
+    That leaves a self-hosted install three choices: expose the app to the
+    internet behind a real certificate, tunnel the loopback port, or capture
+    the code by hand.
+
+    This is the third. The user registers a `http://localhost/...` redirect,
+    Google sends the browser there, nothing is listening so the page fails --
+    and the authorization code is sitting in the address bar. Pasting that
+    URL here completes the exchange.
+
+    It is the only one of the three that requires no infrastructure and no
+    exposure, which for an app holding years of personal health data is worth
+    more than the small awkwardness of a copy and paste.
+    """
+    code, state = body.code, body.state
+    if body.redirected_url:
+        parsed = urlparse(body.redirected_url.strip())
+        params = parse_qs(parsed.query)
+        if params.get("error"):
+            raise HTTPException(400, f"Google returned: {params['error'][0]}")
+        code = code or (params.get("code") or [None])[0]
+        state = state or (params.get("state") or [None])[0]
+    if not code:
+        raise HTTPException(
+            400,
+            "No authorization code found. Paste the whole URL the browser "
+            "ended up on, including everything after the '?'.",
+        )
+    if not state or not _burn_state(state):
+        raise HTTPException(
+            400,
+            "That link's state token is unknown or has expired. Press Connect "
+            "again and paste the new URL within 15 minutes.",
+        )
+
+    cfg = await db.get(models.GoogleHealthConfig, 1)
+    if cfg is None or not cfg.callback_url:
+        raise HTTPException(400, "Google Health app credentials are not configured")
+    try:
+        # Must be byte-identical to the redirect_uri used in the authorize
+        # request, or Google rejects the exchange.
         creds = await gh.exchange_code(db, code, cfg.callback_url)
     except gh.GoogleHealthError as e:
         raise HTTPException(400, str(e)) from e

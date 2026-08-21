@@ -630,6 +630,23 @@ export const api = {
     return data;
   },
 
+  /** The consent URL, returned rather than redirected to — the paste flow
+   *  needs the user to open it themselves and bring back where they land. */
+  async googleHealthAuthorizeUrl(): Promise<{ url: string }> {
+    const { data } = await http.post("/google-health/authorize-url");
+    return data;
+  },
+
+  /** Finish the dance from a redirect this server never received. Google
+   *  will not accept a LAN hostname as a redirect URI, so the code comes
+   *  back in the address bar of a page that failed to load. */
+  async googleHealthExchange(redirectedUrl: string): Promise<{ connected: boolean }> {
+    const { data } = await http.post("/google-health/exchange", {
+      redirected_url: redirectedUrl,
+    });
+    return data;
+  },
+
   async googleHealthStatus(): Promise<{
     configured: boolean;
     connected: boolean;

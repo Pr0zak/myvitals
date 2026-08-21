@@ -194,7 +194,6 @@ def _routes() -> dict[str, set[str]]:
 @pytest.mark.parametrize("path,method", [
     ("/google-health/config", "GET"),
     ("/google-health/config", "POST"),
-    ("/auth/google-health/login", "GET"),
     ("/auth/google-health/callback", "GET"),
     ("/google-health/status", "GET"),
     ("/google-health/probe", "POST"),
@@ -225,3 +224,64 @@ def test_disconnect_keeps_the_ingested_readings():
     """The readings are the user's own history, not Google's copy of it."""
     src = inspect.getsource(api.disconnect)
     assert "Spo2" not in src and "SkinTemp" not in src
+
+
+# ---------------------------------------------------------------------------
+# The loopback paste flow
+# ---------------------------------------------------------------------------
+
+def test_the_browser_navigation_login_route_is_gone():
+    """It could never work and its failure was baffling.
+
+    `require_query` reads the bearer token from an Authorization header, and
+    this project has no cookie session. A GET the browser must navigate to
+    therefore cannot authenticate — pressing Connect produced a raw FastAPI
+    validation error about a missing header, which reads like a server fault
+    rather than an impossible design. The consent URL is fetched over the
+    authenticated XHR client now and opened with window.open.
+    """
+    assert "/auth/google-health/login" not in _routes()
+
+
+def test_exchange_route_exists():
+    """Google refuses a LAN hostname as a redirect URI — it demands a public
+    top-level domain over HTTPS, with `localhost` its only exception. For a
+    self-hosted install that leaves exposing the app, tunnelling the loopback
+    port, or capturing the code by hand. This is the third, and the only one
+    that requires no infrastructure and no exposure."""
+    assert "POST" in _routes().get("/google-health/exchange", set())
+    assert "POST" in _routes().get("/google-health/authorize-url", set())
+
+
+def test_exchange_accepts_a_pasted_url_and_pulls_out_the_parameters():
+    """People paste the whole address, not a dissected query string."""
+    src = inspect.getsource(api.exchange)
+    assert "urlparse" in src and "parse_qs" in src
+    assert "redirected_url" in src
+
+
+def test_exchange_still_enforces_the_state_handshake():
+    """The paste flow must not become a way around CSRF. The state is still
+    minted by this server and burned exactly once."""
+    src = inspect.getsource(api.exchange)
+    assert "_burn_state(state)" in src
+
+
+def test_exchange_reports_a_google_side_error_rather_than_a_missing_code():
+    """A denied consent comes back as ?error=access_denied with no code.
+    Saying "no authorization code found" there would send the user hunting
+    for a copy-paste mistake they did not make."""
+    src = inspect.getsource(api.exchange)
+    assert 'params.get("error")' in src
+
+
+def test_exchange_reuses_the_registered_redirect_uri():
+    """Google requires the redirect_uri in the token exchange to be
+    byte-identical to the one in the authorize request."""
+    src = inspect.getsource(api.exchange)
+    assert "cfg.callback_url" in src
+
+
+def test_expired_state_says_how_to_recover():
+    src = inspect.getsource(api.exchange)
+    assert "15 minutes" in src, "tell the user the window, not just that it closed"

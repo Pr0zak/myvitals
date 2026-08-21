@@ -216,6 +216,7 @@ async def status(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
         # Surfaced, not just logged — the Strava-cookie lesson.
         "last_error": creds.last_error if creds else None,
         "poll_enabled": bool(creds and creds.poll_enabled),
+        "poll_interval_min": int(getattr(creds, "poll_interval_min", 60) or 60) if creds else 60,
         "ingested_types": [s.api_type for s in gh.INGEST_TYPES],
     }
 
@@ -253,6 +254,11 @@ async def sync(
 
 class PollToggle(BaseModel):
     enabled: bool
+    # Minutes between polls. Floored at 15 in the handler: a poll fetches ten
+    # data types over a three-day window and the API rate-limits readily, so
+    # a tighter cadence spends quota without producing data that moves that
+    # fast.
+    interval_min: int | None = None
 
 
 @router.post("/google-health/poll", dependencies=[Depends(require_query)])
@@ -263,6 +269,8 @@ async def set_poll(
     if creds is None:
         raise HTTPException(400, "Google Health is not connected")
     creds.poll_enabled = body.enabled
+    if body.interval_min is not None:
+        creds.poll_interval_min = max(15, min(1440, int(body.interval_min)))
     await db.commit()
     return await status(db)
 

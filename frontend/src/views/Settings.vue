@@ -731,6 +731,14 @@ async function ghTogglePoll(enabled: boolean) {
   catch (e) { ghFail(e); }
 }
 
+async function ghSetInterval(minutes: number) {
+  if (!ghStatus.value) return;
+  try {
+    await api.googleHealthSetPoll(ghStatus.value.poll_enabled, minutes);
+    await loadGoogleHealth();
+  } catch (e) { ghFail(e); }
+}
+
 async function ghDisconnect() {
   try { await api.googleHealthDisconnect(); ghProbe.value = null; await loadGoogleHealth(); }
   catch (e) { ghFail(e); }
@@ -2584,7 +2592,23 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
       <label v-if="ghStatus?.connected" class="ai-toggle">
         <input type="checkbox" :checked="ghStatus.poll_enabled"
                @change="ghTogglePoll(($event.target as HTMLInputElement).checked)"/>
-        <span>Pull automatically every hour</span>
+        <span>Pull automatically</span>
+      </label>
+      <label v-if="ghStatus?.connected && ghStatus.poll_enabled" class="ai-toggle">
+        <span>Every:</span>
+        <select :value="ghStatus.poll_interval_min"
+                @change="ghSetInterval(Number(($event.target as HTMLSelectElement).value))">
+          <option :value="15">15 min</option>
+          <option :value="30">30 min</option>
+          <option :value="60">1 hour</option>
+          <option :value="180">3 hours</option>
+          <option :value="720">12 hours</option>
+        </select>
+        <span class="muted" style="font-size:0.72rem">
+          Overnight metrics only change once a night, so an hour is plenty
+          for SpO2 and skin temperature — tighten it if you want steps to
+          keep up. Google rate-limits, so 15 minutes is the floor.
+        </span>
       </label>
 
       <!-- The probe is the honest answer to the one thing the docs can't

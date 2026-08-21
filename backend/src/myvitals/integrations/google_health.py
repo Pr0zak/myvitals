@@ -39,6 +39,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import models
@@ -61,6 +62,12 @@ SCOPES = (
 # die underneath it mid-run.
 _REFRESH_MARGIN = timedelta(minutes=5)
 _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+
+# Written into the `source` column of every multi-source table this feeds,
+# so pick_canonical_steps_source can tell these rows apart from the phone's.
+# The string contains "googlehealth", which that helper already matches as a
+# watch source.
+SOURCE = "googlehealth"
 
 
 class GoogleHealthError(RuntimeError):
@@ -106,6 +113,62 @@ def _skin_temp_delta(body: dict[str, Any]) -> float | None:
     return round(float(nightly) - float(baseline), 3)
 
 
+def _rhr_bpm(body: dict[str, Any]) -> float | None:
+    # Google returns this as a STRING ("68"), which float() handles but a
+    # naive `isinstance(v, (int, float))` guard would have silently dropped.
+    v = body.get("beatsPerMinute")
+    return float(v) if v not in (None, "") else None
+
+
+def _hrv_avg(body: dict[str, Any]) -> float | None:
+    v = body.get("averageHeartRateVariabilityMilliseconds")
+    return float(v) if v is not None else None
+
+
+def _deep_sleep_rmssd(body: dict[str, Any]) -> float | None:
+    """The closest analogue to what vitals_hrv stores.
+
+    Kept alongside the average rather than instead of it: they are different
+    measurements and collapsing them would lose the distinction silently.
+    """
+    v = body.get("deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds")
+    return float(v) if v is not None else None
+
+
+def _respiratory_rate(body: dict[str, Any]) -> float | None:
+    for key in ("breathsPerMinute", "averageBreathsPerMinute", "respiratoryRate"):
+        v = body.get(key)
+        if v not in (None, ""):
+            return float(v)
+    return None
+
+
+def _vo2_max(body: dict[str, Any]) -> float | None:
+    for key in ("vo2MaxMillilitersPerMinuteKilogram", "vo2Max", "value"):
+        v = body.get(key)
+        if v not in (None, ""):
+            return float(v)
+    return None
+
+
+def _step_count(body: dict[str, Any]) -> float | None:
+    v = body.get("count")
+    return float(v) if v not in (None, "") else None
+
+
+def _weight_kg(body: dict[str, Any]) -> float | None:
+    for key in ("weightKilograms", "kilograms", "value"):
+        v = body.get(key)
+        if v not in (None, ""):
+            return float(v)
+    return None
+
+
+def _body_fat_pct(body: dict[str, Any]) -> float | None:
+    v = body.get("percentage")
+    return float(v) if v is not None else None
+
+
 @dataclass(frozen=True)
 class DataTypeSpec:
     """One data type, how to read it, and where its values land.
@@ -137,9 +200,49 @@ class DataTypeSpec:
 # Confirmed present on this account, sourced from a Pixel Watch 3 via
 # platform FITBIT, before being wired.
 INGEST_TYPES: tuple[DataTypeSpec, ...] = (
+    # No competing writer at all.
     DataTypeSpec("oxygen-saturation", _spo2_percent, "spo2"),
     DataTypeSpec("daily-sleep-temperature-derivations", _skin_temp_delta, "skin_temp"),
+    # Daily aggregates, into their own table. There is nowhere else for one
+    # to live: daily_summary is rewritten from raw samples on every lazy
+    # recompute, and vitals_hrv is per-sample.
+    DataTypeSpec("daily-resting-heart-rate", _rhr_bpm, "daily:resting_hr"),
+    DataTypeSpec("daily-heart-rate-variability", _hrv_avg, "daily:hrv_avg_ms"),
+    DataTypeSpec("daily-heart-rate-variability", _deep_sleep_rmssd,
+                 "daily:deep_sleep_rmssd_ms"),
+    DataTypeSpec("daily-respiratory-rate", _respiratory_rate, "daily:respiratory_rate"),
+    DataTypeSpec("daily-vo2-max", _vo2_max, "daily:vo2_max"),
+    # Safe by construction: vitals_steps carries a source column and
+    # pick_canonical_steps_source already lists "googlehealth" among the
+    # watch-source keywords, so a second source coexists rather than
+    # double-counting.
+    DataTypeSpec("steps", _step_count, "steps"),
+    # body_metrics also carries a source. Both return nothing on this
+    # account today; wired so they work the day a scale starts reporting.
+    DataTypeSpec("weight", _weight_kg, "weight"),
+    DataTypeSpec("body-fat", _body_fat_pct, "body_fat"),
 )
+
+# Types the probe reports but this integration deliberately does NOT ingest,
+# with the reason, so the omission reads as a decision rather than an
+# oversight:
+#
+#   heart-rate  vitals_heartrate keys on `time` alone, so a Google point at
+#               a colliding second would REPLACE a phone sample. Google
+#               serves roughly a hundred points a week — sparse aggregates
+#               against the phone's dense series — which is duplicative when
+#               the phone works and destructive when it collides.
+#   sleep       would create a second session per night beside the phone's,
+#               and every sleep analytic counts sessions.
+#   exercise    overlaps the Strava and Health Connect workouts already in
+#               the activities feed, which the ingest sink dedupes by
+#               (source, source_id) — a third source of the same session has
+#               no shared key to dedupe against.
+SKIPPED_TYPES: dict[str, str] = {
+    "heart-rate": "phone writes a denser series; PK collision would overwrite it",
+    "sleep": "would duplicate the phone's sleep sessions",
+    "exercise": "overlaps Strava / Health Connect activities with no shared dedupe key",
+}
 
 
 # Types worth reporting on in the probe even though nothing ingests them yet,
@@ -506,9 +609,15 @@ async def ingest_range(
 ) -> dict[str, int]:
     """Pull every wired data type for a date range and upsert it.
 
-    Returns per-type counts of rows written. Types are fetched independently
-    and a failure in one is recorded rather than aborting the rest: a scope
-    the user did not grant should cost that one stream, not the whole sync.
+    Returns per-target counts of rows written. Types are fetched
+    independently and a failure in one is recorded rather than aborting the
+    rest: a scope the user did not grant, or a type their watch does not
+    produce, should cost that one stream and nothing else.
+
+    Each API type is fetched ONCE even when several targets read from it —
+    daily-heart-rate-variability feeds both an average and a deep-sleep
+    RMSSD, and fetching it twice would double the request count against a
+    rate limit this API applies readily.
     """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -517,12 +626,22 @@ async def ingest_range(
     written: dict[str, int] = {}
     errors: list[str] = []
 
-    for spec in INGEST_TYPES:
+    # api_type -> points, fetched once and shared by every spec reading it.
+    fetched: dict[str, list[dict[str, Any]]] = {}
+    for api_type in dict.fromkeys(spec.api_type for spec in INGEST_TYPES):
         try:
-            points = await fetch_data_points(token, spec.api_type, since, until)
+            fetched[api_type] = await fetch_data_points(token, api_type, since, until)
         except GoogleHealthError as e:
-            errors.append(f"{spec.api_type}: {e}")
-            log.warning("google health %s failed: %s", spec.api_type, e)
+            errors.append(f"{api_type}: {e}")
+            log.warning("google health %s failed: %s", api_type, e)
+
+    # Daily-aggregate columns are accumulated per date and written in one
+    # upsert per day, so several specs targeting the same row do not fight.
+    daily: dict[date, dict[str, Any]] = {}
+
+    for spec in INGEST_TYPES:
+        points = fetched.get(spec.api_type)
+        if points is None:
             continue
 
         rows: list[dict[str, Any]] = []
@@ -531,29 +650,66 @@ async def ingest_range(
             value = spec.extract(_body(point, spec.api_type))
             if ts is None or value is None:
                 continue
-            if spec.target == "spo2":
+            if spec.target.startswith("daily:"):
+                column = spec.target.split(":", 1)[1]
+                daily.setdefault(ts.date(), {})[column] = value
+                rows.append({})          # counted below
+            elif spec.target == "spo2":
                 rows.append({"time": ts, "percent": float(value)})
             elif spec.target == "skin_temp":
                 rows.append({"time": ts, "celsius_delta": float(value)})
+            elif spec.target == "steps":
+                rows.append({"time": ts, "count": int(value), "source": SOURCE})
+            elif spec.target == "weight":
+                rows.append({"time": ts, "weight_kg": float(value), "source": SOURCE})
+            elif spec.target == "body_fat":
+                rows.append({"time": ts, "body_fat_pct": float(value), "source": SOURCE})
 
-        if not rows:
-            written[spec.api_type] = 0
+        written[spec.target] = len(rows)
+        if not rows or spec.target.startswith("daily:"):
             continue
 
-        # De-dupe within the batch: these tables key on `time` alone, so two
-        # points sharing an instant would make the statement conflict with
-        # itself. Last value wins, matching the FIT ingest's convention.
-        by_time = {r["time"]: r for r in rows}
-        deduped = list(by_time.values())
+        model, conflict = {
+            "spo2": (models.Spo2, ["time"]),
+            "skin_temp": (models.SkinTemp, ["time"]),
+            "steps": (models.Steps, ["time", "source"]),
+            "weight": (models.BodyMetric, ["time"]),
+            "body_fat": (models.BodyMetric, ["time"]),
+        }[spec.target]
 
-        model = models.Spo2 if spec.target == "spo2" else models.SkinTemp
+        # De-dupe within the batch. Several of these tables key on `time`
+        # alone, so two points sharing an instant would make the statement
+        # conflict with itself. Last value wins, matching the FIT ingest.
+        by_key = {tuple(r[c] for c in conflict): r for r in rows}
+        deduped = list(by_key.values())
         stmt = pg_insert(model).values(deduped)
         stmt = stmt.on_conflict_do_update(
-            index_elements=["time"],
-            set_={k: getattr(stmt.excluded, k) for k in deduped[0] if k != "time"},
+            index_elements=conflict,
+            set_={
+                k: getattr(stmt.excluded, k)
+                for k in deduped[0] if k not in conflict
+            },
         )
         await db.execute(stmt)
-        written[spec.api_type] = len(deduped)
+        written[spec.target] = len(deduped)
+
+    if daily:
+        now = datetime.now(timezone.utc)
+        payload = [{"date": d, **cols, "updated_at": now} for d, cols in daily.items()]
+        stmt = pg_insert(models.GoogleHealthDaily).values(payload)
+        # Merge rather than replace: a day whose VO2 max is missing must not
+        # blank the resting HR written for it a moment earlier.
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["date"],
+            set_={
+                col: func.coalesce(getattr(stmt.excluded, col),
+                                   getattr(models.GoogleHealthDaily, col))
+                for col in ("resting_hr", "hrv_avg_ms", "deep_sleep_rmssd_ms",
+                            "respiratory_rate", "vo2_max", "updated_at")
+            },
+        )
+        await db.execute(stmt)
+        written["daily_rows"] = len(payload)
 
     if creds is not None:
         creds.last_sync_at = datetime.now(timezone.utc)

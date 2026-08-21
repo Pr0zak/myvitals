@@ -173,30 +173,45 @@ def test_camel_case_key_derivation():
 # The deliberately narrow ingest surface
 # ---------------------------------------------------------------------------
 
-def test_only_streams_without_a_competing_writer_are_ingested():
-    """The double-counting guard, and the reason this first cut is small.
+def test_nothing_is_written_where_a_denser_writer_already_exists():
+    """The double-counting guard, restated per target.
 
-    HeartRate, Steps, SleepSession and BodyMetric are already written by the
-    phone. vitals_hrv, vitals_spo2 and vitals_skin_temp key on `time` alone
-    with no source column, so a second writer at a different granularity
-    would overwrite rather than coexist — and Google's HRV is a DAILY
-    aggregate, which written into a per-sample table would be actively wrong.
-
-    SpO2 and skin temperature have no competing writer at all, so they carry
-    zero conflict risk and are exactly the two streams the firmware bug
-    killed.
+    Only three shapes of destination are allowed: a table with no competing
+    writer, a table that carries a `source` column so two writers coexist,
+    or the dedicated daily-aggregate table. Anything else risks a Google
+    point replacing a phone measurement.
     """
-    targets = {spec.target for spec in gh.INGEST_TYPES}
-    assert targets == {"spo2", "skin_temp"}
-    api_types = {spec.api_type for spec in gh.INGEST_TYPES}
-    assert api_types == {"oxygen-saturation", "daily-sleep-temperature-derivations"}
+    allowed_direct = {"spo2", "skin_temp", "steps", "weight", "body_fat"}
+    for spec in gh.INGEST_TYPES:
+        assert spec.target.startswith("daily:") or spec.target in allowed_direct, spec
 
 
-def test_hrv_is_probed_but_not_ingested():
-    """Google serves HRV as a daily aggregate; vitals_hrv stores per-sample
-    RMSSD. Reporting it in the probe is useful; writing it would corrupt."""
-    assert "daily-heart-rate-variability" in gh.PROBE_TYPES
-    assert all(s.api_type != "daily-heart-rate-variability" for s in gh.INGEST_TYPES)
+def test_the_dense_streams_are_deliberately_skipped():
+    """heart-rate, sleep and exercise are all served and all declined, each
+    for a stated reason. The omission must read as a decision."""
+    assert set(gh.SKIPPED_TYPES) == {"heart-rate", "sleep", "exercise"}
+    ingested = {s.api_type for s in gh.INGEST_TYPES}
+    for skipped in gh.SKIPPED_TYPES:
+        assert skipped not in ingested
+        assert gh.SKIPPED_TYPES[skipped], "a skip needs its reason recorded"
+
+
+def test_daily_aggregates_go_to_their_own_table():
+    """daily_summary is rewritten from raw samples on every lazy recompute,
+    and vitals_hrv is per-sample — a single daily value dropped into either
+    is clobbered or skews averages."""
+    daily = {s.target for s in gh.INGEST_TYPES if s.target.startswith("daily:")}
+    assert "daily:resting_hr" in daily
+    assert "daily:hrv_avg_ms" in daily
+    assert "daily:deep_sleep_rmssd_ms" in daily
+
+
+def test_multi_source_tables_are_tagged_with_a_recognised_source():
+    """vitals_steps coexists by source, and pick_canonical_steps_source has
+    to recognise this one as a watch source or it will not be preferred."""
+    from myvitals.analytics.jobs import _is_watch_source
+
+    assert _is_watch_source(gh.SOURCE)
 
 
 def test_every_ingest_type_is_also_probed():
@@ -207,11 +222,27 @@ def test_every_ingest_type_is_also_probed():
 
 
 def test_ingest_dedupes_within_a_batch():
-    """These tables key on `time` alone, so two points sharing an instant
-    would make the insert conflict with itself."""
+    """Several of these tables key on `time` alone, so two points sharing an
+    instant would make the insert conflict with itself."""
     src = inspect.getsource(gh.ingest_range)
-    assert "by_time" in src
+    assert "by_key" in src
     assert "on_conflict_do_update" in src
+
+
+def test_each_api_type_is_fetched_once_even_with_several_targets():
+    """daily-heart-rate-variability feeds both an average and a deep-sleep
+    RMSSD. Fetching it per target would double the request count against a
+    rate limit this API applies readily."""
+    src = inspect.getsource(gh.ingest_range)
+    assert "dict.fromkeys(" in src
+    assert "fetched.get(spec.api_type)" in src
+
+
+def test_daily_upsert_merges_rather_than_replaces():
+    """A day whose VO2 max is missing must not blank the resting HR written
+    for it moments earlier."""
+    src = inspect.getsource(gh.ingest_range)
+    assert "func.coalesce" in src
 
 
 def test_a_failing_stream_does_not_abort_the_others():
@@ -419,3 +450,45 @@ def test_rate_limiting_is_retried_not_reported_as_absence():
 def test_the_probe_paces_itself():
     src = inspect.getsource(gh.probe_available_types)
     assert "asyncio.sleep" in src
+
+
+# ---------------------------------------------------------------------------
+# Poll cadence — GH-2
+# ---------------------------------------------------------------------------
+
+def test_the_tick_enforces_the_configured_interval():
+    """The scheduler ticks on a fixed short cadence and the tick itself
+    decides whether enough time has passed.
+
+    Rescheduling the APScheduler job on every settings change would work too,
+    and would not take effect until the next restart. Gating inside the tick
+    means a changed interval applies on the next tick.
+    """
+    from myvitals.tasks import scheduled
+
+    src = inspect.getsource(scheduled._google_health_tick)
+    assert "poll_interval_min" in src
+    assert "last_sync_at" in src
+    assert "timedelta(minutes=interval)" in src
+
+
+def test_the_interval_has_a_floor():
+    """A poll fetches ten data types over a three-day window, and the API
+    rate-limits readily enough that a dozen calls in a row trips a 429.
+    Polling every couple of minutes spends quota to re-read overnight
+    metrics that change once a night."""
+    from myvitals.tasks import scheduled
+
+    assert "max(15" in inspect.getsource(scheduled._google_health_tick)
+    assert "max(15" in inspect.getsource(api.set_poll)
+
+
+def test_the_interval_has_a_ceiling():
+    """A day is the longest interval that still counts as polling."""
+    assert "min(1440" in inspect.getsource(api.set_poll)
+
+
+def test_enabling_the_poll_does_not_require_naming_an_interval():
+    """interval_min is optional so a plain enable keeps the stored value
+    rather than silently resetting it to a default."""
+    assert api.PollToggle.model_fields["interval_min"].default is None

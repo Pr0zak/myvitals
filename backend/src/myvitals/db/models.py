@@ -248,6 +248,29 @@ class UserProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class GoogleHealthDaily(Base):
+    """Daily aggregates the Google Health API only serves at day granularity.
+
+    Deliberately NOT daily_summary: compute_daily_summary derives resting_hr
+    and hrv_avg from raw samples and rewrites that row on every lazy
+    recompute, so anything stored there would be clobbered. And deliberately
+    not vitals_hrv: that table is per-sample RMSSD, and one daily value
+    dropped into it would coexist by timestamp while skewing every average
+    taken across it.
+
+    The analytics read this only as a fallback, when the sample-derived
+    figure is None because the phone was not syncing.
+    """
+    __tablename__ = "google_health_daily"
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    resting_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hrv_avg_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    deep_sleep_rmssd_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    respiratory_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vo2_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class GoogleHealthConfig(Base):
     """The OAuth app the user registers in their own Google Cloud project.
 
@@ -279,6 +302,13 @@ class GoogleHealthCredentials(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     poll_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False,
+    )
+    # Minutes between polls. The scheduler ticks on a fixed short cadence and
+    # each tick skips unless this much time has passed since last_sync_at —
+    # simpler and more responsive than rescheduling an APScheduler job every
+    # time the setting changes, and the setting takes effect immediately.
+    poll_interval_min: Mapped[int] = mapped_column(
+        Integer, default=60, server_default="60", nullable=False,
     )
 
 

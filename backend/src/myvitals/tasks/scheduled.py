@@ -195,6 +195,15 @@ async def _google_health_tick() -> None:
             creds = await db.get(models.GoogleHealthCredentials, 1)
             if creds is None or not creds.refresh_token or not creds.poll_enabled:
                 return
+            # The job ticks on a fixed short cadence; the user's chosen
+            # interval is enforced here. Doing it this way rather than
+            # rescheduling the APScheduler job means a changed setting takes
+            # effect on the next tick instead of the next restart.
+            interval = max(15, int(getattr(creds, "poll_interval_min", 60) or 60))
+            if creds.last_sync_at is not None:
+                elapsed = datetime.now(timezone.utc) - creds.last_sync_at
+                if elapsed < timedelta(minutes=interval):
+                    return
             # A short trailing window, re-pulled every time. These upserts key
             # on `time`, so re-reading yesterday is idempotent and it catches
             # readings the watch uploaded late — which is the normal case for
@@ -274,10 +283,16 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
 
     # Google Health incremental poll — hourly, no-op until connected AND
     # the user has explicitly enabled polling.
+    # Ticks every 5 minutes; the tick itself honours the user's configured
+    # interval (default 60 min, floor 15). A short fixed cadence with the
+    # gate inside means changing the setting takes effect immediately.
     scheduler.add_job(
         _google_health_tick,
-        trigger="interval", minutes=60,
+        trigger="interval", minutes=5,
         id="google_health_poll", replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
     )
-    log.info("Google Health poll scheduled hourly (no-op until connected + enabled)")
+    log.info(
+        "Google Health poll ticking every 5 min, gated on the configured "
+        "interval (no-op until connected + enabled)"
+    )

@@ -657,6 +657,8 @@ export const api = {
      *  look like a quiet week. */
     last_error: string | null;
     poll_enabled: boolean;
+    /** Minutes between polls. Floor 15 — the API rate-limits readily. */
+    poll_interval_min: number;
     ingested_types: string[];
   }> {
     const { data } = await http.get("/google-health/status");
@@ -683,8 +685,10 @@ export const api = {
     return data;
   },
 
-  async googleHealthSetPoll(enabled: boolean): Promise<unknown> {
-    const { data } = await http.post("/google-health/poll", { enabled });
+  async googleHealthSetPoll(enabled: boolean, intervalMin?: number): Promise<unknown> {
+    const { data } = await http.post("/google-health/poll", {
+      enabled, interval_min: intervalMin ?? null,
+    });
     return data;
   },
 

@@ -47,7 +47,12 @@ async def nightly_rhr(db: AsyncSession, day: date) -> float | None:
     )
     result = await db.execute(select(func.min(buckets.c.bpm)))
     val = result.scalar()
-    return float(val) if val is not None else None
+    if val is not None:
+        return float(val)
+    # GH-2 — fall back to Google's own daily resting HR when we hold no
+    # samples for the night, which in practice means the phone was not
+    # syncing. See _google_health_daily for why a measured value always wins.
+    return await _google_health_daily(db, day, "resting_hr")
 
 
 async def nightly_hrv(db: AsyncSession, day: date) -> float | None:
@@ -59,7 +64,38 @@ async def nightly_hrv(db: AsyncSession, day: date) -> float | None:
         .where(models.Hrv.time <= end)
     )
     val = result.scalar()
-    return float(val) if val is not None else None
+    if val is not None:
+        return float(val)
+    return await _google_health_daily(db, day, "hrv_avg_ms")
+
+
+async def _google_health_daily(
+    db: AsyncSession, day: date, column: str,
+) -> float | None:
+    """GH-2 — Google's own daily figure for `day`, as a LAST RESORT.
+
+    Reached only when the sample-derived computation above returned None,
+    which in practice means the phone was not syncing that night. A measured
+    value always wins: an aggregate Google computed from data we do not hold
+    is better than a blank, and worse than our own arithmetic over the raw
+    samples.
+
+    Kept in its own table for exactly this reason. Writing these into
+    daily_summary would have them clobbered by the next lazy recompute, and
+    writing them into vitals_hrv would skew every average taken over a
+    per-sample table with a single daily number.
+    """
+    try:
+        row = await db.get(models.GoogleHealthDaily, day)
+    except Exception:  # noqa: BLE001
+        # Mid-rollout the app can run against a database that has not taken
+        # migration 0053 yet. A missing table must degrade to "no fallback"
+        # rather than break every daily summary at once.
+        return None
+    if row is None:
+        return None
+    value = getattr(row, column, None)
+    return float(value) if value is not None else None
 
 
 async def rolling_baseline(

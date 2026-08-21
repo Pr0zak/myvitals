@@ -1,6 +1,9 @@
 # Meals, recipes, pantry and shopping — design plan
 
-Status: **plan only, nothing built.** Captured 2026-08-21.
+Status: **plan only, nothing built. TABLED 2026-08-21** at the user's
+request — revisit once the SparkyFitness teardown backlog is finished.
+The open question below (tracking vs awareness) is what to answer first
+when it is picked back up.
 
 The ask: a healthy-meals list with recipes, a place to record what is
 already in the house, suggestions built from that, a shopping list that

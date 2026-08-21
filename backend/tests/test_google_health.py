@@ -492,3 +492,30 @@ def test_enabling_the_poll_does_not_require_naming_an_interval():
     """interval_min is optional so a plain enable keeps the stored value
     rather than silently resetting it to a default."""
     assert api.PollToggle.model_fields["interval_min"].default is None
+
+
+def test_daily_upsert_rows_all_carry_the_same_columns():
+    """pg_insert(...).values(list_of_dicts) builds its column list from the
+    FIRST dict and silently drops keys that only appear in later ones.
+
+    That shipped: fifteen days had a resting heart rate and ten also had HRV
+    and respiratory rate; the first row carried only resting_hr, so the other
+    three columns were never written even though the sync counted them as
+    extracted. The counts were right and the table was empty.
+    """
+    src = inspect.getsource(gh.ingest_range)
+    assert "_DAILY_COLUMNS" in src
+    assert "cols.get(col) for col in _DAILY_COLUMNS" in src
+
+
+def test_every_daily_target_maps_to_a_real_column():
+    """A target naming a column that does not exist would fail at insert
+    time, inside a scheduled job, on whichever type happened to serve data."""
+    from myvitals.db import models
+
+    real = set(models.GoogleHealthDaily.__table__.columns.keys())
+    for spec in gh.INGEST_TYPES:
+        if spec.target.startswith("daily:"):
+            column = spec.target.split(":", 1)[1]
+            assert column in real, f"{spec.target} has no column"
+            assert column in gh._DAILY_COLUMNS, f"{column} missing from _DAILY_COLUMNS"

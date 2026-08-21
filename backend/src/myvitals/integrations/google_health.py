@@ -69,6 +69,15 @@ _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 # watch source.
 SOURCE = "googlehealth"
 
+# Columns of google_health_daily that a data type can populate. Every upsert
+# row carries all of them so the generated INSERT names them all; missing
+# values arrive as None and the COALESCE in the conflict clause leaves any
+# previously stored value alone.
+_DAILY_COLUMNS = (
+    "resting_hr", "hrv_avg_ms", "deep_sleep_rmssd_ms",
+    "respiratory_rate", "vo2_max",
+)
+
 
 class GoogleHealthError(RuntimeError):
     """A call failed in a way worth showing the user."""
@@ -695,7 +704,22 @@ async def ingest_range(
 
     if daily:
         now = datetime.now(timezone.utc)
-        payload = [{"date": d, **cols, "updated_at": now} for d, cols in daily.items()]
+        # Every row must carry the SAME keys. `pg_insert(...).values(list)`
+        # builds its column list from the FIRST dict and silently drops keys
+        # that only appear later — which is exactly what happened: fifteen
+        # days had a resting heart rate and ten also had HRV and respiratory
+        # rate, the first row carried only resting_hr, and the other three
+        # columns were never written despite the counts saying they had been
+        # extracted. Normalising to a fixed key set makes the statement
+        # describe what was actually collected.
+        payload = [
+            {
+                "date": d,
+                **{col: cols.get(col) for col in _DAILY_COLUMNS},
+                "updated_at": now,
+            }
+            for d, cols in daily.items()
+        ]
         stmt = pg_insert(models.GoogleHealthDaily).values(payload)
         # Merge rather than replace: a day whose VO2 max is missing must not
         # blank the resting HR written for it a moment earlier.
@@ -704,8 +728,7 @@ async def ingest_range(
             set_={
                 col: func.coalesce(getattr(stmt.excluded, col),
                                    getattr(models.GoogleHealthDaily, col))
-                for col in ("resting_hr", "hrv_avg_ms", "deep_sleep_rmssd_ms",
-                            "respiratory_rate", "vo2_max", "updated_at")
+                for col in (*_DAILY_COLUMNS, "updated_at")
             },
         )
         await db.execute(stmt)

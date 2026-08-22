@@ -609,6 +609,27 @@ interface BackendApi {
     // as a successful Response with body() == null.
     @GET("ai/meals/suggest/latest")
     suspend fun mealsSuggestLatest(): Response<MealSuggestEnvelope>
+
+    @GET("meals/log")
+    suspend fun mealsLog(
+        @Query("start") start: String? = null,
+        @Query("days") days: Int = 7,
+    ): List<LogDayOut>
+
+    @POST("meals/log")
+    suspend fun mealsAddLogEntry(@Body body: LogEntryIn): LogEntryOut
+
+    @DELETE("meals/log/{id}")
+    suspend fun mealsDeleteLogEntry(@Path("id") id: Long): Response<Unit>
+
+    @PATCH("meals/log/day/{day}")
+    suspend fun mealsMarkLogDay(
+        @Path("day") day: String,
+        @Body body: LogDayPatch,
+    ): LogDayOut
+
+    @GET("meals/log/stats")
+    suspend fun mealsLogStats(@Query("days") days: Int = 30): LogStatsOut
 }
 
 object BackendClient {

@@ -2092,3 +2092,85 @@ data class MealSuggestEnvelope(
     val model: String? = null,
     val cached: Boolean = false,
 )
+
+
+// ── Meals: the food log (MEAL-5) ─────────────────────────────────────
+//
+// Intermittent logging is the design assumption. Days with no entries
+// come back as EMPTY days rather than being omitted — a gap is a gap —
+// and their totals are null, never zero.
+
+@JsonClass(generateAdapter = true)
+data class LogEntryOut(
+    val id: Long = 0,
+    val day: String = "",
+    val slot: String = "dinner",
+    @Json(name = "food_id") val foodId: Long? = null,
+    @Json(name = "recipe_id") val recipeId: Long? = null,
+    val label: String = "",
+    val quantity: Double? = null,
+    val unit: String? = null,
+    val servings: Double? = null,
+    @Json(name = "logged_at") val loggedAt: String? = null,
+    val nutrition: Map<String, Double?> = emptyMap(),
+    // "catalog" | "recipe" | "manual" | "none". A looked-up figure and
+    // one typed off a menu deserve different confidence on screen.
+    val source: String = "none",
+    @Json(name = "unresolved_reason") val unresolvedReason: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class LogMealOut(
+    val slot: String = "",
+    val entries: List<LogEntryOut> = emptyList(),
+    val totals: Map<String, Double?> = emptyMap(),
+    // A meal is the unit fat is judged on.
+    @Json(name = "fat_assessment") val fatAssessment: FatAssessment? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class LogDayOut(
+    val day: String = "",
+    val meals: List<LogMealOut> = emptyList(),
+    val totals: Map<String, Double?> = emptyMap(),
+    // Declared by the user, never inferred.
+    val complete: Boolean = false,
+    val note: String? = null,
+    @Json(name = "entry_count") val entryCount: Int = 0,
+    @Json(name = "unresolved_count") val unresolvedCount: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class LogEntryIn(
+    val day: String? = null,
+    val slot: String = "dinner",
+    @Json(name = "food_id") val foodId: Long? = null,
+    @Json(name = "recipe_id") val recipeId: Long? = null,
+    val label: String? = null,
+    val quantity: Double? = null,
+    val unit: String? = null,
+    val servings: Double? = null,
+    @Json(name = "manual_kcal") val manualKcal: Double? = null,
+    @Json(name = "manual_fat_g") val manualFatG: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class LogDayPatch(
+    val complete: Boolean? = null,
+    val note: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class LogStatsOut(
+    @Json(name = "complete_days") val completeDays: Int = 0,
+    @Json(name = "partial_days") val partialDays: Int = 0,
+    @Json(name = "days_needed") val daysNeeded: Int = 0,
+    // Null whenever `reason` is set — never a number you must know to
+    // distrust.
+    @Json(name = "avg_kcal") val avgKcal: Double? = null,
+    @Json(name = "avg_fat_g") val avgFatG: Double? = null,
+    @Json(name = "max_meal_fat_g") val maxMealFatG: Double? = null,
+    @Json(name = "meals_counted") val mealsCounted: Int = 0,
+    @Json(name = "median_meal_fat_g") val medianMealFatG: Double? = null,
+    val reason: String? = null,
+)

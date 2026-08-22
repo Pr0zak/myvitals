@@ -88,6 +88,7 @@ private const val CACHE_PANTRY = "meals_pantry"
 
 private enum class MealsTab(val label: String) {
     PLAN("Plan"),
+    LOG("Log"),
     IDEAS("Ideas"),
     RECIPES("Recipes"),
     SHOPPING("Shopping"),
@@ -124,6 +125,7 @@ fun MealsScreen(settings: SettingsRepository) {
         Box(Modifier.fillMaxSize().padding(top = 10.dp)) {
             when (tab) {
                 MealsTab.PLAN -> PlanTab(settings)
+                MealsTab.LOG -> LogTab(settings)
                 MealsTab.IDEAS -> SuggestTab(settings)
                 MealsTab.SHOPPING -> ShoppingTab(settings)
                 MealsTab.RECIPES -> RecipesTab(settings)
@@ -761,6 +763,11 @@ private fun PantryAdder(
     var expires by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // A pantry is a list of things you cook with, so the picker defaults
+    // to whole ingredients. Packaged and prepared food is still stockable
+    // — hence the toggle — but leading with it buries plain chicken
+    // breast under deli slices and restaurant sandwiches.
+    var ingredientsOnly by remember { mutableStateOf(true) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -769,8 +776,20 @@ private fun PantryAdder(
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     if (picked == null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Ingredients only",
+                                color = NeonMV.Muted, fontSize = 11.sp,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Switch(
+                                checked = ingredientsOnly,
+                                onCheckedChange = { ingredientsOnly = it },
+                            )
+                        }
                         FoodPicker(
                             settings = settings,
+                            ingredientsOnly = ingredientsOnly,
                             placeholder = "Search the food catalog…",
                             onPick = { picked = it; label = "" },
                         )

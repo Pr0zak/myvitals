@@ -541,3 +541,71 @@ def test_the_lambda_name_check_can_actually_fail():
         and n.id not in module_names
     ]
     assert found == ["timezone"]
+
+
+# ---------------------------------------- whole ingredients rank first
+#
+# Reported from live use: adding raw chicken breast to the pantry was
+# effectively impossible. A search for "chicken breast" answered with
+# deli roll, fat-free sliced chicken and a White Castle sandwich, because
+# those put both terms in the first ten characters and have short names,
+# while USDA spells the actual ingredient "Chicken, broiler or fryers,
+# breast, skinless, boneless, meat only, raw" — thirty characters in and
+# four times the length. Position and name-length both pushed the right
+# answer down.
+
+
+def test_plain_ingredient_beats_deli_and_restaurant_forms():
+    top = F.search("chicken breast", limit=1)[0]
+    assert F.is_ingredient(top), f"{top['name']!r} is {top['category']!r}"
+    assert "raw" in top["name"].lower()
+
+
+def test_bare_noun_searches_lead_with_ingredients():
+    """The same bug in its milder form: "chicken" alone answered "Chicken
+    kiev" and "Chicken curry"."""
+    for q in ("chicken", "beef", "cheese", "yogurt", "rice"):
+        top = F.search(q, limit=3)
+        assert top, q
+        assert all(F.is_ingredient(r) for r in top), (
+            f"{q!r} returned prepared food: "
+            f"{[r['name'] for r in top if not F.is_ingredient(r)]}"
+        )
+
+
+def test_the_ingredient_tier_does_not_break_the_food_log():
+    """It must be a no-op when only prepared foods match, or logging a
+    meal out stops working — which is the failure the catalog broadening
+    existed to fix in the first place."""
+    for q, expect in (
+        ("big mac", "mcdonald"),
+        ("whopper", "burger king"),
+        ("burrito supreme", "taco bell"),
+    ):
+        hits = F.search(q, limit=3)
+        assert hits, q
+        assert expect in " ".join(h["name"].lower() for h in hits)
+
+
+def test_ingredient_tier_ranks_below_the_processed_word_demotion():
+    """Order matters: an unrequested "breaded"/"dried" must still outrank
+    the ingredient/prepared split, or "salmon" leads with breaded fish
+    fillets simply because they are categorised as an ingredient."""
+    top = F.search("salmon", limit=3)
+    assert not any("breaded" in r["name"].lower() for r in top)
+
+
+def test_pantry_picker_defaults_to_ingredients_on_both_surfaces():
+    """The ranking fix alone is not enough — the pantry picker was
+    searching the whole catalog, so packaged forms still crowded the
+    list. Both clients now default to ingredients with a toggle."""
+    web = (pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src"
+           / "views" / "meals" / "Pantry.vue").read_text()
+    assert "ingredientsOnly = ref(true)" in web
+    assert ":ingredients-only=\"ingredientsOnly\"" in web
+
+    phone = (pathlib.Path(__file__).resolve().parents[2] / "android" / "app"
+             / "src" / "main" / "kotlin" / "app" / "myvitals" / "ui" / "meals"
+             / "MealsScreen.kt").read_text()
+    assert "var ingredientsOnly by remember { mutableStateOf(true) }" in phone
+    assert "ingredientsOnly = ingredientsOnly" in phone

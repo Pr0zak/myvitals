@@ -1020,3 +1020,62 @@ class ShoppingListItem(Base):
         Boolean, default=False, server_default="false", nullable=False,
     )
     order_index: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class FoodLogEntry(Base):
+    """One thing eaten, at one meal, on one day (MEAL-5).
+
+    An entry points at a food, a recipe, or neither. "Neither" is a
+    first-class case: someone logging a meal out has a name and maybe a
+    fat figure off a menu, and refusing that would make the log unusable
+    exactly when it matters most.
+    """
+
+    __tablename__ = "food_log_entries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    #: The user's LOCAL calendar day, resolved in settings.tz. Deriving
+    #: it from a UTC timestamp would file an evening meal under tomorrow.
+    day: Mapped[date] = mapped_column(Date, index=True)
+    #: "breakfast" | "lunch" | "dinner" | "snack". The unit of interest
+    #: for fat, which is why it is required rather than optional.
+    slot: Mapped[str] = mapped_column(String(16), default="dinner")
+    food_id: Mapped[int | None] = mapped_column(
+        ForeignKey("foods.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    recipe_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recipes.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    #: Free text for anything that resolves to neither.
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: Servings, when the entry is a recipe.
+    servings: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Nutrition typed in by hand, for a meal out where the only source
+    #: is a menu. Kept separate from the computed figures so the API can
+    #: say which is which rather than presenting a guess as a lookup.
+    manual_kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    manual_fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    logged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class FoodLogDay(Base):
+    """Whether a day's log is COMPLETE, as declared by the user.
+
+    This exists because logging here is expected to be intermittent, and
+    a half-logged day is worse than an unlogged one: it reads as "you
+    barely ate" rather than "you barely logged", and any average built
+    from it is wrong in a direction that looks like progress.
+
+    So completeness is never inferred — the app cannot know. The user
+    marks a day complete, the default is partial, and everything derived
+    counts ONLY complete days and says how many it used.
+    """
+
+    __tablename__ = "food_log_days"
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    complete: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

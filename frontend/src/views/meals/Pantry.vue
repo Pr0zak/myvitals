@@ -24,6 +24,11 @@ const loading = ref(true);
 const error = ref<string | null>(null);
 
 const adding = ref(false);
+/** A pantry is a list of things you cook with, so the picker defaults to
+ *  whole ingredients. Packaged and prepared food is still stockable —
+ *  hence the toggle — but leading with it buries plain chicken breast
+ *  under deli slices and restaurant sandwiches. */
+const ingredientsOnly = ref(true);
 const draftFood = ref<Food | null>(null);
 const draftLabel = ref("");
 const draftQty = ref("");
@@ -130,11 +135,17 @@ function expiryClass(i: PantryItem): string {
     </PageHeader>
 
     <Card v-if="adding" flat title="Add to pantry">
-      <FoodPicker
-        v-if="!draftFood"
-        placeholder="Search the food catalog…"
-        @pick="pick"
-      />
+      <template v-if="!draftFood">
+        <label class="toggle">
+          <input v-model="ingredientsOnly" type="checkbox" />
+          <span>Ingredients only — uncheck to find packaged or prepared food</span>
+        </label>
+        <FoodPicker
+          :ingredients-only="ingredientsOnly"
+          placeholder="Search the food catalog…"
+          @pick="pick"
+        />
+      </template>
       <div v-else class="chosen">
         <span>{{ draftFood.name }}</span>
         <button class="link" @click="draftFood = null">change</button>
@@ -235,6 +246,11 @@ button.ghost { background: transparent; color: var(--muted-2); }
   border: 1px solid var(--line); border-radius: 9px; padding: 0.45rem 0.6rem;
 }
 .or { color: var(--muted-2); font-size: 0.8rem; margin: 0.6rem 0 0.35rem; }
+.toggle {
+  display: flex; align-items: center; gap: 0.4rem;
+  font-size: 0.78rem; color: var(--muted-2); margin-bottom: 0.5rem;
+}
+.toggle input { width: auto; flex: none; }
 .text, .fields input {
   width: 100%; border: 1px solid var(--line); border-radius: 9px;
   background: var(--bg-1); color: var(--fg); font: inherit;

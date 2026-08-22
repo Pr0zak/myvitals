@@ -296,6 +296,93 @@ class ShoppingListIn(BaseModel):
     name: str | None = Field(default=None, max_length=255)
 
 
+class LogEntryIn(BaseModel):
+    day: date | None = None
+    slot: str = Field(default="dinner", max_length=16)
+    food_id: int | None = None
+    recipe_id: int | None = None
+    label: str | None = Field(default=None, max_length=255)
+    quantity: float | None = None
+    unit: str | None = Field(default=None, max_length=32)
+    servings: float | None = None
+    #: Typed off a menu when nothing else is available. Kept apart from
+    #: computed figures so the API can say which is which.
+    manual_kcal: float | None = None
+    manual_fat_g: float | None = None
+
+
+class LogEntryOut(BaseModel):
+    id: int
+    day: date
+    slot: str
+    food_id: int | None
+    recipe_id: int | None
+    label: str
+    quantity: float | None
+    unit: str | None = None
+    servings: float | None
+    logged_at: datetime
+    nutrition: dict[str, float | None] = Field(default_factory=dict)
+    #: "catalog" | "recipe" | "manual" | "none". Rendered, because a
+    #: looked-up figure and a typed-in one deserve different confidence.
+    source: str = "none"
+    #: Set when this entry could not be costed at all.
+    unresolved_reason: str | None = None
+
+
+class LogMealOut(BaseModel):
+    """One slot's worth of a day — the unit fat is judged on."""
+
+    slot: str
+    entries: list[LogEntryOut] = Field(default_factory=list)
+    totals: dict[str, float | None] = Field(default_factory=dict)
+    #: The per-meal fat verdict, from the same three-basis logic used
+    #: everywhere else. A meal is exactly what this feature exists for.
+    fat_assessment: dict[str, Any] = Field(default_factory=dict)
+
+
+class LogDayOut(BaseModel):
+    day: date
+    meals: list[LogMealOut] = Field(default_factory=list)
+    totals: dict[str, float | None] = Field(default_factory=dict)
+    #: Declared by the user, never inferred. Default false.
+    complete: bool = False
+    note: str | None = None
+    entry_count: int = 0
+    #: How many entries could not be costed. Non-zero means the day
+    #: totals understate, and the clients say so.
+    unresolved_count: int = 0
+
+
+class LogDayPatch(BaseModel):
+    complete: bool | None = None
+    note: str | None = Field(default=None, max_length=255)
+
+
+class LogStatsOut(BaseModel):
+    """Derived numbers, built ONLY from days the user marked complete.
+
+    When there are too few, this refuses and says so rather than
+    averaging partial days — which would read as "you barely ate" instead
+    of "you barely logged", and would be wrong in the direction that
+    looks like progress.
+    """
+
+    complete_days: int = 0
+    partial_days: int = 0
+    days_needed: int = 0
+    #: None whenever `reason` is set. Never a number the caller has to
+    #: know is untrustworthy.
+    avg_kcal: float | None = None
+    avg_fat_g: float | None = None
+    max_meal_fat_g: float | None = None
+    #: Distribution of per-meal fat across complete days, which is the
+    #: number this user's condition actually cares about.
+    meals_counted: int = 0
+    median_meal_fat_g: float | None = None
+    reason: str | None = None
+
+
 class PantryIn(BaseModel):
     food_id: int | None = None
     label: str | None = Field(default=None, max_length=255)
@@ -1419,6 +1506,316 @@ async def delete_shopping_list(
         raise HTTPException(404, "shopping list not found")
     await db.delete(lst)
     await db.commit()
+
+
+# --------------------------------------------------------- food log
+#
+# Intermittent logging is the DESIGN ASSUMPTION here, not a failure mode.
+# There is deliberately no streak, no completion percentage and no
+# nagging notification anywhere in this section — a tracker that turns
+# red the moment you stop is a tracker you stop opening. The awareness
+# half of the feature works with zero entries; this is opt-in on top and
+# is meant to survive lying fallow for months.
+
+#: Complete days needed before any average is reported. Below this the
+#: stats endpoint refuses rather than averaging a handful of days.
+MIN_COMPLETE_DAYS = 5
+
+_SLOT_ORDER = {"breakfast": 0, "lunch": 1, "dinner": 2, "snack": 3}
+
+
+def _entry_nutrition(
+    e: models.FoodLogEntry,
+    food: models.Food | None,
+    recipe_per_serving: dict[str, float | None] | None,
+) -> tuple[dict[str, float | None], str, str | None]:
+    """Cost one log entry. Returns (nutrition, source, unresolved_reason).
+
+    Resolution order is most-trustworthy first, and the source is
+    reported: a figure looked up from the catalog and a figure typed off
+    a menu are both useful and should not be presented identically.
+    """
+    empty = {c: None for c in food_lib.NUTRIENT_COLUMNS}
+
+    if food is not None:
+        grams = food_lib.to_grams(e.quantity, e.unit, _food_dict(food))
+        if grams is None:
+            return empty, "catalog", (
+                f"cannot convert {e.unit!r} for this food"
+                if e.unit else "no quantity given"
+            )
+        return food_lib.nutrition_for(_food_dict(food), grams), "catalog", None
+
+    if recipe_per_serving is not None:
+        n = e.servings if e.servings is not None else 1.0
+        return (
+            {
+                k: (None if v is None else round(v * n, 2))
+                for k, v in recipe_per_serving.items()
+            },
+            "recipe",
+            None,
+        )
+
+    if e.manual_kcal is not None or e.manual_fat_g is not None:
+        out = dict(empty)
+        out["kcal"] = e.manual_kcal
+        out["fat_g"] = e.manual_fat_g
+        return out, "manual", None
+
+    return empty, "none", "nothing to cost this against"
+
+
+async def _log_days(
+    db: AsyncSession, start: date, end: date,
+) -> list[LogDayOut]:
+    entries = list((await db.execute(
+        select(models.FoodLogEntry)
+        .where(models.FoodLogEntry.day >= start)
+        .where(models.FoodLogEntry.day <= end)
+        .order_by(models.FoodLogEntry.day, models.FoodLogEntry.id)
+    )).scalars().all())
+
+    food_ids = {e.food_id for e in entries if e.food_id is not None}
+    foods: dict[int, models.Food] = {}
+    if food_ids:
+        for f in (await db.execute(
+            select(models.Food).where(models.Food.id.in_(food_ids))
+        )).scalars().all():
+            foods[f.id] = f
+
+    recipe_ids = {e.recipe_id for e in entries if e.recipe_id is not None}
+    per_serving: dict[int, dict[str, float | None]] = {}
+    if recipe_ids:
+        diet = await _diet_settings(db)
+        for r in (await db.execute(
+            select(models.Recipe).where(models.Recipe.id.in_(recipe_ids))
+        )).scalars().all():
+            hydrated = await _hydrate_recipe(db, r, diet=diet, history=[])
+            per_serving[r.id] = hydrated.per_serving
+
+    marks = {
+        m.day: m for m in (await db.execute(
+            select(models.FoodLogDay)
+            .where(models.FoodLogDay.day >= start)
+            .where(models.FoodLogDay.day <= end)
+        )).scalars().all()
+    }
+
+    diet = await _diet_settings(db)
+    history = await _fat_history(db)
+
+    by_day: dict[date, list[models.FoodLogEntry]] = {}
+    for e in entries:
+        by_day.setdefault(e.day, []).append(e)
+
+    out: list[LogDayOut] = []
+    cursor = start
+    while cursor <= end:
+        rows = by_day.get(cursor, [])
+        mark = marks.get(cursor)
+
+        by_slot: dict[str, list[LogEntryOut]] = {}
+        day_nutritions: list[dict[str, float | None]] = []
+        unresolved = 0
+        for e in rows:
+            food = foods.get(e.food_id) if e.food_id is not None else None
+            rps = per_serving.get(e.recipe_id) if e.recipe_id is not None else None
+            nut, source, reason = _entry_nutrition(e, food, rps)
+            if reason is not None:
+                unresolved += 1
+            else:
+                day_nutritions.append(nut)
+            label = (
+                food.name if food
+                else (e.label or f"Recipe #{e.recipe_id}" if e.recipe_id else "Unnamed")
+            )
+            by_slot.setdefault(e.slot, []).append(LogEntryOut(
+                id=e.id, day=e.day, slot=e.slot, food_id=e.food_id,
+                recipe_id=e.recipe_id, label=label, quantity=e.quantity,
+                unit=e.unit, servings=e.servings, logged_at=e.logged_at,
+                nutrition=nut, source=source, unresolved_reason=reason,
+            ))
+
+        meals: list[LogMealOut] = []
+        for slot in sorted(by_slot, key=lambda s: (_SLOT_ORDER.get(s, 9), s)):
+            slot_entries = by_slot[slot]
+            slot_totals = _sum_nutrition([
+                x.nutrition for x in slot_entries if x.unresolved_reason is None
+            ])
+            assessment = nutri.assess_meal_fat(
+                slot_totals.get("fat_g"),
+                target_g=diet.get("fat_per_meal_target_g"),
+                history_fat_g=history,
+            )
+            assessment["target_source"] = diet.get("fat_target_source")
+            meals.append(LogMealOut(
+                slot=slot, entries=slot_entries, totals=slot_totals,
+                fat_assessment=assessment,
+            ))
+
+        out.append(LogDayOut(
+            day=cursor, meals=meals,
+            totals=_sum_nutrition(day_nutritions),
+            complete=bool(mark.complete) if mark else False,
+            note=mark.note if mark else None,
+            entry_count=len(rows), unresolved_count=unresolved,
+        ))
+        cursor += timedelta(days=1)
+    return out
+
+
+@router.get("/log", response_model=list[LogDayOut])
+async def get_log(
+    start: date | None = None,
+    days: int = Query(default=7, ge=1, le=62),
+    db: AsyncSession = Depends(get_session),
+):
+    """The log for a window, one object per day.
+
+    Days with no entries are returned as EMPTY days, not omitted — a gap
+    is shown as a gap. Their totals are null rather than zero, because a
+    day that was not logged is not a day nothing was eaten.
+    """
+    begin = start or (_local_today() - timedelta(days=days - 1))
+    return await _log_days(db, begin, begin + timedelta(days=days - 1))
+
+
+@router.post("/log", response_model=LogEntryOut, status_code=201)
+async def add_log_entry(
+    body: LogEntryIn, db: AsyncSession = Depends(get_session),
+):
+    if body.food_id is None and body.recipe_id is None and not (body.label or "").strip():
+        raise HTTPException(
+            422, "a log entry needs a food, a recipe, or at least a name",
+        )
+    if body.food_id is not None and await db.get(models.Food, body.food_id) is None:
+        raise HTTPException(404, "food not found")
+    if body.recipe_id is not None and await db.get(models.Recipe, body.recipe_id) is None:
+        raise HTTPException(404, "recipe not found")
+
+    e = models.FoodLogEntry(
+        day=body.day or _local_today(),
+        slot=body.slot,
+        food_id=body.food_id,
+        recipe_id=body.recipe_id,
+        label=(body.label or None),
+        quantity=body.quantity,
+        unit=food_lib.canonical_unit(body.unit) or None,
+        servings=body.servings,
+        manual_kcal=body.manual_kcal,
+        manual_fat_g=body.manual_fat_g,
+        logged_at=datetime.now(timezone.utc),
+    )
+    db.add(e)
+    await db.commit()
+    await db.refresh(e)
+
+    food = await db.get(models.Food, e.food_id) if e.food_id else None
+    rps = None
+    if e.recipe_id:
+        r = await db.get(models.Recipe, e.recipe_id)
+        if r is not None:
+            rps = (await _hydrate_recipe(db, r, history=[])).per_serving
+    nut, source, reason = _entry_nutrition(e, food, rps)
+    return LogEntryOut(
+        id=e.id, day=e.day, slot=e.slot, food_id=e.food_id,
+        recipe_id=e.recipe_id,
+        label=(food.name if food else (e.label or "Unnamed")),
+        quantity=e.quantity, unit=e.unit, servings=e.servings,
+        logged_at=e.logged_at, nutrition=nut, source=source,
+        unresolved_reason=reason,
+    )
+
+
+@router.delete("/log/{entry_id}", status_code=204)
+async def delete_log_entry(
+    entry_id: int, db: AsyncSession = Depends(get_session),
+):
+    e = await db.get(models.FoodLogEntry, entry_id)
+    if e is None:
+        raise HTTPException(404, "log entry not found")
+    await db.delete(e)
+    await db.commit()
+
+
+@router.patch("/log/day/{day}", response_model=LogDayOut)
+async def mark_log_day(
+    day: date, body: LogDayPatch, db: AsyncSession = Depends(get_session),
+):
+    """Mark a day complete, or add a note to it.
+
+    Completeness is DECLARED, never inferred. The app cannot tell "I
+    stopped logging" from "I stopped eating", and guessing wrong in
+    either direction corrupts every average built on top.
+    """
+    mark = await db.get(models.FoodLogDay, day)
+    now = datetime.now(timezone.utc)
+    if mark is None:
+        mark = models.FoodLogDay(day=day, complete=False, updated_at=now)
+        db.add(mark)
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(mark, k, v)
+    mark.updated_at = now
+    await db.commit()
+    return (await _log_days(db, day, day))[0]
+
+
+@router.get("/log/stats", response_model=LogStatsOut)
+async def log_stats(
+    days: int = Query(default=30, ge=7, le=365),
+    db: AsyncSession = Depends(get_session),
+):
+    """Averages over COMPLETE days only, or a refusal explaining why not.
+
+    Partial days are excluded rather than counted, because a half-logged
+    day reads as "you barely ate" and drags every average down in the
+    direction that looks like success. The count of both is reported so
+    the exclusion is visible instead of mysterious.
+    """
+    end = _local_today()
+    begin = end - timedelta(days=days - 1)
+    rows = await _log_days(db, begin, end)
+
+    complete = [d for d in rows if d.complete]
+    partial = [d for d in rows if not d.complete and d.entry_count > 0]
+
+    out = LogStatsOut(
+        complete_days=len(complete),
+        partial_days=len(partial),
+        days_needed=MIN_COMPLETE_DAYS,
+    )
+
+    # Per-meal fat is worth reporting even when whole-day averages are
+    # not: a single meal is the unit of interest, so one complete meal is
+    # already meaningful in a way that one complete day is not.
+    meal_fats = [
+        m.totals.get("fat_g")
+        for d in rows for m in d.meals
+        if m.totals.get("fat_g") is not None
+    ]
+    if meal_fats:
+        import statistics
+
+        out.meals_counted = len(meal_fats)
+        out.median_meal_fat_g = round(statistics.median(meal_fats), 1)
+        out.max_meal_fat_g = round(max(meal_fats), 1)
+
+    if len(complete) < MIN_COMPLETE_DAYS:
+        out.reason = (
+            f"{len(complete)} complete day"
+            f"{'' if len(complete) == 1 else 's'} in the last {days} "
+            f"(needs {MIN_COMPLETE_DAYS}). Daily averages are left blank "
+            "rather than computed from partly-logged days, which would "
+            "read as eating less than you did."
+        )
+        return out
+
+    kcals = [d.totals.get("kcal") for d in complete if d.totals.get("kcal") is not None]
+    fats = [d.totals.get("fat_g") for d in complete if d.totals.get("fat_g") is not None]
+    out.avg_kcal = round(sum(kcals) / len(kcals), 1) if kcals else None
+    out.avg_fat_g = round(sum(fats) / len(fats), 1) if fats else None
+    return out
 
 
 @router.get("/stats", response_model=dict)

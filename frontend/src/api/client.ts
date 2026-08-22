@@ -2059,6 +2059,90 @@ export interface ShoppingList {
   covered_by_pantry: number;
 }
 
+// ── Meals: the food log (MEAL-5) ─────────────────────────────────────
+//
+// Intermittent logging is the design assumption. Days with no entries
+// come back as EMPTY days rather than being omitted — a gap is a gap —
+// and their totals are null, never zero.
+
+export interface LogEntry {
+  id: number;
+  day: string;
+  slot: string;
+  food_id: number | null;
+  recipe_id: number | null;
+  label: string;
+  quantity: number | null;
+  unit: string | null;
+  servings: number | null;
+  logged_at: string;
+  nutrition: Partial<Nutrition>;
+  /** "catalog" | "recipe" | "manual" | "none" — a looked-up figure and
+   *  one typed off a menu deserve different confidence. */
+  source: string;
+  unresolved_reason: string | null;
+}
+
+export interface LogMeal {
+  slot: string;
+  entries: LogEntry[];
+  totals: Partial<Nutrition>;
+  /** A meal is the unit fat is judged on. */
+  fat_assessment: FatAssessment;
+}
+
+export interface LogDay {
+  day: string;
+  meals: LogMeal[];
+  totals: Partial<Nutrition>;
+  /** Declared by the user, never inferred. */
+  complete: boolean;
+  note: string | null;
+  entry_count: number;
+  unresolved_count: number;
+}
+
+export interface LogStats {
+  complete_days: number;
+  partial_days: number;
+  days_needed: number;
+  /** Null whenever `reason` is set — never a number you must know to
+   *  distrust. */
+  avg_kcal: number | null;
+  avg_fat_g: number | null;
+  max_meal_fat_g: number | null;
+  meals_counted: number;
+  median_meal_fat_g: number | null;
+  reason: string | null;
+}
+
+export const getLog = (start?: string, days = 7) =>
+  http.get<LogDay[]>("/meals/log", { params: { start, days } }).then((r) => r.data);
+
+export const addLogEntry = (body: {
+  day?: string | null;
+  slot?: string;
+  food_id?: number | null;
+  recipe_id?: number | null;
+  label?: string | null;
+  quantity?: number | null;
+  unit?: string | null;
+  servings?: number | null;
+  manual_kcal?: number | null;
+  manual_fat_g?: number | null;
+}) => http.post<LogEntry>("/meals/log", body).then((r) => r.data);
+
+export const deleteLogEntry = (id: number) =>
+  http.delete(`/meals/log/${id}`).then(() => undefined);
+
+export const markLogDay = (
+  day: string,
+  body: { complete?: boolean; note?: string | null },
+) => http.patch<LogDay>(`/meals/log/day/${day}`, body).then((r) => r.data);
+
+export const logStats = (days = 30) =>
+  http.get<LogStats>("/meals/log/stats", { params: { days } }).then((r) => r.data);
+
 export const getPlan = (start?: string, days = 7) =>
   http
     .get<PlanDay[]>("/meals/plan", { params: { start, days } })
@@ -2151,4 +2235,9 @@ export const meals = {
   getShoppingList,
   checkShoppingItem,
   deleteShoppingList,
+  getLog,
+  addLogEntry,
+  deleteLogEntry,
+  markLogDay,
+  logStats,
 };

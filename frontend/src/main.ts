@@ -51,6 +51,7 @@ const router = createRouter({
     { path: "/meals/plan", name: "meals-plan", component: () => import("./views/meals/Plan.vue") },
     { path: "/meals/shopping", name: "meals-shopping", component: () => import("./views/meals/Shopping.vue") },
     { path: "/meals/ideas", name: "meals-ideas", component: () => import("./views/meals/Suggest.vue") },
+    { path: "/meals/log", name: "meals-log", component: () => import("./views/meals/Log.vue") },
     { path: "/meals/nutrition", name: "meals-nutrition", component: () => import("./views/meals/Nutrition.vue") },
     { path: "/activities", name: "activities", component: () => import("./views/Activities.vue") },
     { path: "/activity/:source/:id", name: "activity-detail", component: () => import("./views/ActivityDetail.vue") },

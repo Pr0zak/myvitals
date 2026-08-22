@@ -269,7 +269,7 @@ def search(
         rows = [r for r in rows if is_ingredient(r)]
 
     asked = set(terms)
-    scored: list[tuple[int, int, int, int, str, dict[str, Any]]] = []
+    scored: list[tuple[int, int, int, int, int, str, dict[str, Any]]] = []
     for r in rows:
         name = r["name"].lower()
         positions: list[int] = []
@@ -287,13 +287,28 @@ def search(
                 1 for w in _WORD_RE.findall(name)
                 if w in _PROCESSED_FORM_WORDS and w not in asked
             )
+            # Whole ingredients outrank prepared foods, even in the
+            # unfiltered lens. Without this, a search for "chicken breast"
+            # answers with deli roll and a White Castle sandwich, because
+            # those put both terms in the first ten characters while USDA
+            # spells the actual ingredient "Chicken, broiler or fryers,
+            # breast, skinless, boneless, meat only, raw" — thirty
+            # characters in and four times the length, so position and
+            # name-length both push the right answer DOWN.
+            #
+            # This tier is a no-op whenever only one kind matches, so a
+            # food log searching "big mac" is unaffected. It only reorders
+            # when both an ingredient and a prepared dish match, which is
+            # exactly when the ingredient is wanted.
+            kind = 0 if is_ingredient(r) else 1
             # Fewest partial matches, then fewest unrequested processed
-            # forms, then earliest in the name (which floats USDA's
-            # inverted "Oil, olive, ..." form to the top), then the
-            # shortest name, which is the plainest form.
+            # forms, then ingredients first, then earliest in the name
+            # (which floats USDA's inverted "Oil, olive, ..." form to the
+            # top), then the shortest name, which is the plainest form.
             scored.append(
-                (partials, processed, sum(positions), len(r["name"]), r["name"], r),
+                (partials, processed, kind, sum(positions), len(r["name"]),
+                 r["name"], r),
             )
 
-    scored.sort(key=lambda s: s[:5])
-    return [s[5] for s in scored[:limit]]
+    scored.sort(key=lambda s: s[:6])
+    return [s[6] for s in scored[:limit]]

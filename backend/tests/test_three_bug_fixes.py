@@ -287,3 +287,61 @@ class TestStatusFieldsComeFromTheRightRow:
                 f"{cls.__name__} has no last_sync_at, so its row cannot "
                 "answer 'when did this last work?'"
             )
+
+
+class TestExportLocalDay:
+    """The export end date was UTC, split across two statements.
+
+    `end = datetime.now(timezone.utc)` then `end.date()` for a date-keyed
+    table yields TOMORROW after 7pm Central, so the export ran one day
+    past its intended end.
+
+    The AST guard in test_local_day_boundary.py never caught it because
+    that matcher only recognises the single chained
+    `datetime.now(timezone.utc).date()` form — adding export.py to
+    DAY_FACING_MODULES before the fix would have passed green over a live
+    bug, which is the more useful lesson.
+    """
+
+    def test_the_end_instant_is_local(self):
+        from myvitals.api import export
+
+        src = inspect.getsource(export.export_table)
+        assert "datetime.now(_local_tz())" in src
+        assert "datetime.now(timezone.utc)" not in self._code(src)
+
+    @staticmethod
+    def _code(src: str) -> str:
+        return "\n".join(
+            ln for ln in src.splitlines() if not ln.lstrip().startswith("#")
+        )
+
+
+class TestOrphanedImportJobReaper:
+    """An import runs in-process, so a deploy mid-import strands the row at
+    `running` with nothing behind it. Production has one (job 10, stranded
+    while 11-13 completed after it)."""
+
+    def test_it_runs_once_at_startup_not_on_a_timer(self):
+        """At startup nothing can legitimately be running, so every
+        `running` row is by definition orphaned. A periodic sweep would
+        need a heartbeat or an age threshold and would eventually kill a
+        real import."""
+        from myvitals.tasks import scheduled
+
+        src = inspect.getsource(scheduled.register_jobs)
+        assert 'id="reap_import_jobs"' in src
+        assert 'trigger="date"' in src
+
+    def test_it_marks_failed_with_an_actionable_reason(self):
+        from myvitals.tasks import scheduled
+
+        src = inspect.getsource(scheduled._reap_orphaned_import_jobs)
+        assert 'r.status = "failed"' in src
+        assert "Re-upload" in src
+
+    def test_it_only_touches_running_rows(self):
+        from myvitals.tasks import scheduled
+
+        src = inspect.getsource(scheduled._reap_orphaned_import_jobs)
+        assert 'ImportJob.status == "running"' in src

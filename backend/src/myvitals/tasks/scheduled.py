@@ -297,6 +297,48 @@ async def _strava_cookie_tick() -> None:
             await db.commit()
 
 
+async def _reap_orphaned_import_jobs() -> None:
+    """Mark import jobs left `running` by a restart as failed.
+
+    An import runs in-process. If the backend is recreated mid-import —
+    which happens on every deploy, and deploys are frequent here — the row
+    stays `running` forever with nothing behind it. The Imports UI then
+    shows a job that appears to be in flight and will never finish, and
+    there is no way to tell it apart from one that genuinely is.
+
+    Runs ONCE at startup rather than on a timer, and that distinction is
+    load-bearing: at startup nothing can legitimately be running yet, so
+    every `running` row is by definition orphaned. A periodic sweep would
+    need a heartbeat or an age threshold to avoid killing a real import,
+    and would eventually kill one anyway.
+
+    Production has one such row (job 10), stranded while 11-13 completed
+    after it.
+    """
+    from ..db.session import SessionLocal
+    from ..db import models
+
+    async with SessionLocal() as db:
+        rows = (await db.execute(
+            select(models.ImportJob).where(models.ImportJob.status == "running")
+        )).scalars().all()
+        if not rows:
+            return
+        now = datetime.now(timezone.utc)
+        for r in rows:
+            r.status = "failed"
+            r.error = (
+                "Interrupted — the backend restarted while this import was "
+                "running. Re-upload the file to try again."
+            )
+            r.finished_at = now
+        await db.commit()
+        log.warning(
+            "Reaped %d import job(s) left running by a restart: %s",
+            len(rows), [r.id for r in rows],
+        )
+
+
 def register_jobs(scheduler: AsyncIOScheduler) -> None:
     """Register every scheduled job.
 
@@ -391,4 +433,14 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
     log.info(
         "Strava cookie poll ticking every 15 min, gated on the configured "
         "interval with backoff (no-op until enabled)"
+    )
+
+    # One-shot at startup. Nothing can legitimately be `running` before
+    # the app has finished booting, so anything that is was orphaned by a
+    # restart.
+    scheduler.add_job(
+        _reap_orphaned_import_jobs,
+        trigger="date",
+        run_date=datetime.now(timezone.utc) + timedelta(seconds=20),
+        id="reap_import_jobs", replace_existing=True,
     )

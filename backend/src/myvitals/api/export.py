@@ -57,7 +57,18 @@ async def export_table(
         raise HTTPException(400, "fmt must be csv or json")
 
     model, cols = TABLES[table]
-    end = until or datetime.now(timezone.utc)
+    # LOCAL now, not UTC. Below, a `date`-keyed table takes `.date()` off
+    # this instant — and a UTC instant yields TOMORROW's date after 7pm
+    # Central, so the export silently ran one day past the intended end.
+    #
+    # Split across two statements, which is why the AST guard in
+    # test_local_day_boundary.py never caught it: that matcher only
+    # recognises the single chained `datetime.now(timezone.utc).date()`
+    # form. Adding export.py to DAY_FACING_MODULES before this fix would
+    # have passed green over a live bug.
+    from .summary import _local_tz  # local import: summary imports models too
+
+    end = until or datetime.now(_local_tz())
     start = since or (end - timedelta(days=90))
 
     # Pick the time column for filtering — every model has either `time`, `ts`, `start_at`, or `date`.

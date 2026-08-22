@@ -1168,6 +1168,17 @@ const EXPORT_TABLES = [
   "body_metrics", "skin_temp", "blood_pressure",
 ];
 
+// EXPORT-1: the range the download covers.
+//
+// This could not safely exist until v0.12.5. The endpoint materialised
+// every row and then the whole body as one string, so a wide range was an
+// OOM kill of the backend rather than a slow download — the feature was
+// blocked on the streaming rewrite, not on this UI.
+//
+// Empty means "use the server default", which is the trailing 90 days.
+const exportSince = ref("");
+const exportUntil = ref("");
+
 function exportUrl(table: string, fmt: "csv" | "json"): string {
   const base = (apiBase.value || "/api").replace(/\/$/, "");
   // We can't add Authorization headers to a plain <a> click — use a query
@@ -1177,7 +1188,11 @@ function exportUrl(table: string, fmt: "csv" | "json"): string {
   // doesn't do auth either) — so this only works because the user is
   // already on the dashboard on the same host. Token is injected client-side
   // via a fetch + blob trick:
-  return `${base}/export/${table}.${fmt}`;
+  const qs = new URLSearchParams();
+  if (exportSince.value) qs.set("since", exportSince.value);
+  if (exportUntil.value) qs.set("until", exportUntil.value);
+  const q = qs.toString();
+  return `${base}/export/${table}.${fmt}${q ? `?${q}` : ""}`;
 }
 
 async function downloadExport(table: string, fmt: "csv" | "json") {
@@ -1965,6 +1980,15 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
       </div>
       <h3 class="sub">Export raw data</h3>
       <div class="exports">
+        <div class="exprange">
+          <label>From <input type="date" v-model="exportSince"/></label>
+          <label>To <input type="date" v-model="exportUntil"/></label>
+          <button v-if="exportSince || exportUntil" class="ghost"
+                  @click="exportSince = ''; exportUntil = ''">Clear</button>
+          <span class="muted">
+            {{ exportSince || exportUntil ? "Custom range" : "Last 90 days" }}
+          </span>
+        </div>
         <button v-for="t in EXPORT_TABLES" :key="t" class="dl" @click="downloadExport(t, 'csv')">{{ t }}.csv</button>
         <button v-for="t in EXPORT_TABLES" :key="`${t}-json`" class="dl json" @click="downloadExport(t, 'json')">{{ t }}.json</button>
       </div>
@@ -3278,4 +3302,6 @@ html[data-theme="neon"] .settings .apply-steps li.current::before { color: var(-
 }
 .pollrow { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; margin-top: 0.7rem; }
 .pollrow select { background: transparent; color: inherit; border: 1px solid rgba(148,163,184,0.3); border-radius: 6px; padding: 0.2rem 0.4rem; }
+.exprange { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.7rem; }
+.exprange input { background: transparent; color: inherit; border: 1px solid rgba(148,163,184,0.3); border-radius: 6px; padding: 0.2rem 0.4rem; }
 </style>

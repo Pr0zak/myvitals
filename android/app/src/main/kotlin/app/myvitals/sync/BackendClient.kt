@@ -288,6 +288,10 @@ interface BackendApi {
 
     // DISP-1: units / time format / theme. The phone had no unit
     // preference at all before this.
+    // HEALTH-1: per-stream freshness + per-integration status in one call.
+    @GET("query/data-health")
+    suspend fun dataHealth(): DataHealth
+
     @GET("profile/display-prefs")
     suspend fun displayPrefs(): DisplayPrefsOut
 

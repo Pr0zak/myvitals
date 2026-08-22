@@ -674,3 +674,50 @@ export interface DaySnapshot {
   activities: DayActivity[] | null;
   workout: DayWorkout | null;
 }
+
+// ── HEALTH-1: data health ────────────────────────────────────────────
+// `status` carries the judgement, made once on the server. Note that
+// `ad_hoc` and `not_configured` are NOT failures — a weigh-in 103 days
+// ago is a fact about the user, and an unconfigured Home Assistant feed
+// is switched off, not broken. Rendering either as red is how the whole
+// card gets ignored.
+export type StreamStatus =
+  | "ok" | "stale" | "ad_hoc" | "not_configured" | "never";
+
+export interface StreamHealth {
+  key: string;
+  label: string;
+  kind: "continuous" | "nightly" | "ad_hoc" | "optional";
+  source: string;
+  last_at: string | null;
+  age_hours: number | null;
+  status: StreamStatus;
+  stale_after_hours: number | null;
+}
+
+export interface IntegrationHealth {
+  key: string;
+  label: string;
+  configured: boolean;
+  last_sync_at: string | null;
+  age_hours: number | null;
+  last_error: string | null;
+  status: "ok" | "stale" | "error" | "never" | "not_configured";
+}
+
+export interface DataHealth {
+  streams: StreamHealth[];
+  integrations: IntegrationHealth[];
+  phone: {
+    last_attempt: string | null;
+    last_success: string | null;
+    permissions_lost: boolean;
+    perms_granted: number | null;
+    perms_required: number | null;
+    error_summary: string | null;
+    app_version: string | null;
+  };
+  /** Server-computed. Do not re-derive — the two clients would drift. */
+  problem_keys: string[];
+  ok: boolean;
+}

@@ -150,3 +150,74 @@ class TestSleepConsistencyIsNotDead:
         src = inspect.getsource(advanced.sleep_consistency_score)
         assert "_local_tz()" in src
         assert "datetime.now(timezone.utc).date()" not in src
+
+
+class TestDataHealthModelNamesResolve:
+    """The endpoint references three ORM models by attribute.
+
+    A wrong name is an AttributeError at request time, not at import — the
+    full suite passed green while `models.Concept2Creds` (the real class is
+    `Concept2Credentials`) sat in the source, because nothing executed the
+    endpoint. Same failure shape as the `Activity.id` bug in v0.12.1.
+    """
+
+    def test_every_referenced_model_exists(self):
+        import re
+
+        from myvitals.analytics import data_health
+        from myvitals.db import models
+
+        src = inspect.getsource(data_health)
+        for name in sorted(set(re.findall(r"models\.(\w+)", src))):
+            assert hasattr(models, name), f"models.{name} does not exist"
+
+    def test_every_stream_table_and_column_exists(self):
+        """A typo'd table name here is a runtime SQL error on a nav poll."""
+        from myvitals.analytics import data_health
+        from myvitals.db import models
+
+        tables = models.Base.metadata.tables
+        for spec in data_health.STREAMS:
+            assert spec.table in tables, f"unknown table {spec.table}"
+            cols = tables[spec.table].columns.keys()
+            assert spec.time_col in cols, (
+                f"{spec.table} has no column {spec.time_col}"
+            )
+
+    def test_ad_hoc_streams_can_never_report_stale(self):
+        """The whole point: body metrics 103 days old is a fact about the
+        user, not a fault. Painting it red trains you to ignore the card."""
+        from datetime import datetime, timedelta, timezone
+
+        from myvitals.analytics import data_health
+
+        now = datetime.now(timezone.utc)
+        for spec in data_health.STREAMS:
+            if spec.kind != "ad_hoc":
+                continue
+            status, _age = data_health._classify(
+                spec, now - timedelta(days=365), now,
+            )
+            assert status == "ad_hoc", f"{spec.key} went {status} at a year old"
+
+    def test_an_unwritten_optional_stream_is_not_configured_not_broken(self):
+        from datetime import datetime, timezone
+
+        from myvitals.analytics import data_health
+
+        spec = next(s for s in data_health.STREAMS if s.kind == "optional")
+        status, _ = data_health._classify(spec, None, datetime.now(timezone.utc))
+        assert status == "not_configured"
+
+    def test_a_silent_continuous_stream_does_report_stale(self):
+        """The one case that must still go red."""
+        from datetime import datetime, timedelta, timezone
+
+        from myvitals.analytics import data_health
+
+        spec = next(s for s in data_health.STREAMS if s.kind == "continuous")
+        now = datetime.now(timezone.utc)
+        status, _ = data_health._classify(
+            spec, now - timedelta(hours=spec.stale_after_h + 1), now,
+        )
+        assert status == "stale"

@@ -106,6 +106,9 @@ fun SettingsScreen(
     // DISP-1: units / time format, shared with the web dashboard.
     // Seeded from the local cache so the first frame is right, then
     // reconciled against the server below.
+    // HEALTH-1: per-stream freshness + integration status.
+    var dataHealth by remember { mutableStateOf<app.myvitals.sync.DataHealth?>(null) }
+
     var unitsImperial by remember { mutableStateOf(settings.unitsImperial) }
     var timeFormat by remember { mutableStateOf(settings.timeFormat) }
 
@@ -163,6 +166,25 @@ fun SettingsScreen(
             },
         )
     }
+
+    LaunchedEffect(Unit) {
+
+        if (!settings.isConfigured()) return@LaunchedEffect
+
+        try {
+
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+
+            dataHealth = withContext(Dispatchers.IO) { api.dataHealth() }
+
+        } catch (e: Exception) {
+
+            Timber.w(e, "data health load failed")
+
+        }
+
+    }
+
 
     LaunchedEffect(Unit) {
         if (!settings.isConfigured()) return@LaunchedEffect
@@ -588,6 +610,18 @@ fun SettingsScreen(
                         },
                     )
                     ListLinkRow(label = "Key metrics order", onClick = onOpenTileOrder)
+                }
+            }
+
+            Section(title = "Data health", neon = neon) {
+                Card {
+                    dataHealth?.let { dh -> DataHealthRows(dh) }
+                        ?: Text(
+                            "Checking…",
+                            color = MV.OnSurfaceVariant,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(16.dp),
+                        )
                 }
             }
 
@@ -1097,6 +1131,107 @@ private suspend fun pushDisplayPref(
         withContext(Dispatchers.IO) { api.putDisplayPrefs(mapOf(pref.first to pref.second)) }
     } catch (e: Exception) {
         Timber.w(e, "display pref sync failed")
+    }
+}
+
+/**
+ * HEALTH-1 — renders only. Every status is decided server-side, so this
+ * and the web card cannot drift.
+ *
+ * Most of these streams are SUPPOSED to be quiet: body metrics and blood
+ * pressure are recorded when the user feels like it, not on a schedule.
+ * They render neutral. Only a stream meant to be continuous can show as a
+ * fault — otherwise the card is a permanent wall of warnings and gets
+ * ignored, which defeats the point of having it.
+ */
+@Composable
+private fun DataHealthRows(dh: app.myvitals.sync.DataHealth) {
+    val good = Color(0xFF22C55E)
+    val bad = MV.Red
+    val warn = Color(0xFFF59E0B)
+    val muted = MV.OnSurfaceVariant
+
+    fun tone(status: String): Color = when (status) {
+        "ok" -> good
+        "stale", "error" -> bad
+        "never" -> warn
+        else -> muted          // ad_hoc, not_configured — not faults
+    }
+
+    fun age(h: Double?): String = when {
+        h == null -> "never"
+        h < 1 -> "${(h * 60).toInt().coerceAtLeast(1)}m"
+        h < 48 -> "${h.toInt()}h"
+        else -> "${(h / 24).toInt()}d"
+    }
+
+    Column(Modifier.padding(16.dp)) {
+        Text(
+            if (dh.ok) "Everything that should be flowing is flowing."
+            else "${dh.problemKeys.size} need attention.",
+            color = if (dh.ok) good else bad,
+            fontSize = 13.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        for (s in dh.streams) {
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(7.dp)
+                        .background(tone(s.status), RoundedCornerShape(4.dp)),
+                )
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(s.label, color = MV.OnSurface, fontSize = 13.sp)
+                    if (s.source.isNotBlank()) {
+                        Text(s.source, color = muted, fontSize = 10.sp)
+                    }
+                }
+                Text(
+                    if (s.status == "not_configured" && s.lastAt == null) "not set up"
+                    else age(s.ageHours),
+                    color = muted, fontSize = 12.sp,
+                )
+            }
+        }
+        if (dh.integrations.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Text("INTEGRATIONS", color = muted, fontSize = 10.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+            Spacer(Modifier.height(4.dp))
+            for (i in dh.integrations) {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier.size(7.dp)
+                            .background(tone(i.status), RoundedCornerShape(4.dp)),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(i.label, color = MV.OnSurface, fontSize = 13.sp)
+                        // The error text is the whole reason this exists for
+                        // Strava: a dead cookie syncs zero rides silently.
+                        i.lastError?.let {
+                            Text(it.take(120), color = bad, fontSize = 10.sp)
+                        }
+                    }
+                    Text(
+                        if (i.configured) age(i.ageHours) else "not connected",
+                        color = muted, fontSize = 12.sp,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Grey rows are recorded when you choose to, not on a schedule, "
+                + "so an old reading there is not a fault.",
+            color = muted, fontSize = 10.sp,
+        )
     }
 }
 

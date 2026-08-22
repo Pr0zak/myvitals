@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import require_any
 from ..config import settings
+from ..analytics import data_health as data_health_mod
 from ..db import models
 from ..db.session import get_session
 from ..schemas import (
@@ -654,6 +655,54 @@ async def get_skin_temp(
     rows = result.all()
     return {
         "points": [{"time": t.isoformat(), "value": v} for t, v in rows],
+    }
+
+
+@router.get("/data-health")
+async def data_health(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    """Is my data actually arriving? (HEALTH-1)
+
+    Per-stream freshness and per-integration status in one response,
+    because they are two halves of one question: when steps stop
+    arriving, the next thing you want to know is whether the phone
+    stopped syncing or the integration stopped answering.
+
+    Most streams here are SUPPOSED to be stale — a weigh-in is something
+    you do when you feel like it. Each stream declares what normal looks
+    like for it, and only streams that should be continuous can be
+    reported as stale. See analytics/data_health.py for why that matters
+    more than it sounds.
+    """
+    streams = await data_health_mod.stream_health(db)
+    integrations = await data_health_mod.integration_health(db)
+
+    # The phone's own heartbeat, which is upstream of every phone-fed
+    # stream: if it stopped, nothing below it will be fresh either.
+    hb = (await db.execute(
+        select(models.SyncHeartbeat)
+        .order_by(models.SyncHeartbeat.attempt_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    problems = [s["key"] for s in streams if s["status"] == "stale"]
+    problems += [i["key"] for i in integrations if i["status"] in ("error", "stale")]
+
+    return {
+        "streams": streams,
+        "integrations": integrations,
+        "phone": {
+            "last_attempt": hb.attempt_at if hb else None,
+            "last_success": hb.last_success_at if hb else None,
+            "permissions_lost": bool(hb.permissions_lost) if hb else False,
+            "perms_granted": hb.perms_granted if hb else None,
+            "perms_required": hb.perms_required if hb else None,
+            "error_summary": hb.error_summary if hb else None,
+            "app_version": hb.app_version if hb else None,
+        },
+        # Precomputed so no client decides for itself what counts as a
+        # problem — the two surfaces would eventually disagree.
+        "problem_keys": problems,
+        "ok": not problems,
     }
 
 

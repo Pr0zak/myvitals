@@ -13,6 +13,7 @@ import { themeChoice } from "@/theme";
 import { fmtDateTime, timeFormat } from "@/format";
 import type { StravaAppConfigStatus, StravaStatus } from "@/api/types";
 import TileOrderEditor from "@/components/TileOrderEditor.vue";
+import DataHealthCard from "@/components/DataHealthCard.vue";
 
 const tokenInput = ref(queryToken.value);
 const tokenVisible = ref(false);
@@ -1664,6 +1665,9 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           <label class="pick"><input type="radio" value="24h" v-model="timeFormat"/> 24-hour <span class="muted">(19:35)</span></label>
         </div>
       </div>
+
+      <h2 style="margin-top:2rem;">Data health</h2>
+      <DataHealthCard v-if="queryToken"/>
 
       <h2 style="margin-top:2rem;">Key metrics</h2>
       <TileOrderEditor v-if="queryToken"/>

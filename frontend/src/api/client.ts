@@ -7,6 +7,7 @@ import type {
   AnnotationCreate,
   HeartRateSeries,
   HrvSeries,
+  DataHealth,
   DaySnapshot,
   PeriodCompare,
   SleepNight,
@@ -225,6 +226,17 @@ export const api = {
     };
     if (until) params.until = until instanceof Date ? toLocalISO(until) : until;
     const { data } = await http.get<TodaySummary[]>("/summary/range", { params });
+    return data;
+  },
+
+  /** HEALTH-1: is my data actually arriving?
+   *
+   * Per-stream freshness and per-integration status in one response.
+   * `problem_keys` and `ok` are computed server-side so the two surfaces
+   * cannot disagree about what counts as a problem.
+   */
+  async dataHealth(): Promise<DataHealth> {
+    const { data } = await http.get<DataHealth>("/query/data-health");
     return data;
   },
 

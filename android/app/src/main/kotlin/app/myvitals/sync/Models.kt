@@ -1430,6 +1430,42 @@ data class DaySnapshot(
     val workout: DayWorkoutSummary? = null,
 )
 
+// ── HEALTH-1: data health ────────────────────────────────────────────
+// `status` carries the judgement, made once on the server. `ad_hoc` and
+// `not_configured` are NOT failures — a weigh-in months ago is a fact
+// about the user, not a fault — and rendering either as an error is how
+// the card gets ignored.
+@JsonClass(generateAdapter = true)
+data class StreamHealth(
+    val key: String = "",
+    val label: String = "",
+    val kind: String = "continuous",
+    val source: String = "",
+    @Json(name = "last_at") val lastAt: String? = null,
+    @Json(name = "age_hours") val ageHours: Double? = null,
+    val status: String = "ok",
+)
+
+@JsonClass(generateAdapter = true)
+data class IntegrationHealth(
+    val key: String = "",
+    val label: String = "",
+    val configured: Boolean = false,
+    @Json(name = "last_sync_at") val lastSyncAt: String? = null,
+    @Json(name = "age_hours") val ageHours: Double? = null,
+    @Json(name = "last_error") val lastError: String? = null,
+    val status: String = "ok",
+)
+
+@JsonClass(generateAdapter = true)
+data class DataHealth(
+    val streams: List<StreamHealth> = emptyList(),
+    val integrations: List<IntegrationHealth> = emptyList(),
+    /** Server-computed. Do not re-derive — the two clients would drift. */
+    @Json(name = "problem_keys") val problemKeys: List<String> = emptyList(),
+    val ok: Boolean = true,
+)
+
 @JsonClass(generateAdapter = true)
 data class TilePrefsIn(
     val order: List<String>,

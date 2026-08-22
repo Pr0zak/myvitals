@@ -44,13 +44,57 @@ CHUNK = 500
 _COLUMNS = ("slug", "name", "category", *NUTRIENT_COLUMNS, "unit_grams")
 
 
+async def _needs_reseed(db: AsyncSession, rows: list[dict]) -> str | None:
+    """Decide whether the stored catalog is behind the bundled one.
+
+    Returns a human-readable reason, or None when the DB is up to date.
+
+    Row count alone is NOT sufficient, and assuming it was shipped a bug:
+    v0.16.0 added four vitamin columns without changing the row count, so
+    the count-only guard short-circuited, the seed never ran, and every
+    new column stayed NULL in production while the tables looked fine.
+
+    So this also asks, per nutrient column, "the bundled catalog has
+    values for this — does the database?". A column that is entirely null
+    in the DB while the file has data for it means the stored rows predate
+    that column. One aggregate query over ~10k rows, run once at startup.
+    """
+    have = (await db.execute(
+        select(func.count()).select_from(models.Food)
+        .where(models.Food.source == "usda")
+    )).scalar_one()
+    if have < len(rows):
+        return f"{have} stored rows against {len(rows)} in the bundled catalog"
+
+    # Which columns does the FILE actually supply? A column the catalog
+    # has no data for cannot be used as evidence of staleness.
+    supplied = {
+        c for c in NUTRIENT_COLUMNS
+        if any(r.get(c) is not None for r in rows)
+    }
+    if not supplied:
+        return None
+
+    counts = (await db.execute(
+        select(*[
+            func.count(getattr(models.Food, c)) for c in sorted(supplied)
+        ]).select_from(models.Food)
+        .where(models.Food.source == "usda")
+    )).one()
+    empty = [
+        c for c, n in zip(sorted(supplied), counts) if not n
+    ]
+    if empty:
+        return f"columns present in the catalog but empty in the database: {', '.join(empty)}"
+    return None
+
+
 async def seed_foods(db: AsyncSession, *, force: bool = False) -> int:
     """Upsert the bundled catalog. Returns the number of rows written.
 
-    With `force=False` (the default) the work is skipped entirely when the
-    table already holds at least as many USDA rows as the catalog carries.
-    That check is what makes this safe to call on every startup: the common
-    case costs one COUNT, not 14 round trips.
+    With `force=False` (the default) the work is skipped when the stored
+    catalog already matches the bundled one — see `_needs_reseed` for what
+    "matches" means, and why a row count on its own is not enough.
     """
     rows = catalog()
     if not rows:
@@ -58,13 +102,11 @@ async def seed_foods(db: AsyncSession, *, force: bool = False) -> int:
         return 0
 
     if not force:
-        have = (await db.execute(
-            select(func.count()).select_from(models.Food)
-            .where(models.Food.source == "usda")
-        )).scalar_one()
-        if have >= len(rows):
-            log.debug("food catalog already seeded (%d rows); skipping", have)
+        reason = await _needs_reseed(db, rows)
+        if reason is None:
+            log.debug("food catalog already up to date; skipping seed")
             return 0
+        log.info("re-seeding food catalog: %s", reason)
 
     written = 0
     for start in range(0, len(rows), CHUNK):

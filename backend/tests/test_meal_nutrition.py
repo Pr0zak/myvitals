@@ -290,3 +290,45 @@ def test_assessment_judges_a_serving_not_the_whole_batch():
     fn = fn[: fn.index("async def _replace_ingredients")]
     assert 'per_srv.get("fat_g")' in fn
     assert 'totals.get("fat_g")' not in fn
+
+
+# --------------------------------------------- the seeder staleness guard
+
+
+def test_seed_guard_is_not_row_count_only():
+    """A row-count-only guard is what let v0.16.0 deploy with every new
+    vitamin column NULL in production.
+
+    Adding four columns did not change the number of rows, so the seeder
+    decided it was already up to date, skipped, and the tables looked
+    perfectly healthy while the data was missing. The guard has to notice
+    that a column the bundled catalog supplies is empty in the database.
+    """
+    src = (SRC / "db" / "seed_foods.py").read_text()
+    tree = ast.parse(src)
+    fn = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "_needs_reseed"
+    )
+    body = ast.unparse(fn)
+    assert "NUTRIENT_COLUMNS" in body, "guard must inspect the nutrient columns"
+    assert "func.count(" in body
+
+
+def test_seed_guard_only_blames_columns_the_catalog_supplies():
+    """A column the bundled file has no data for cannot be evidence that
+    the database is stale — otherwise the seeder would re-run forever."""
+    src = (SRC / "db" / "seed_foods.py").read_text()
+    fn = src[src.index("async def _needs_reseed("):]
+    fn = fn[: fn.index("async def seed_foods(")]
+    assert "supplied" in fn
+    assert "if not supplied" in fn
+
+
+def test_seeder_writes_the_vitamin_columns():
+    """The seeder splats NUTRIENT_COLUMNS, so the new columns are only
+    written if they are in that tuple AND in the seeder's column list."""
+    from myvitals.db.seed_foods import _COLUMNS
+
+    for col in F.FAT_SOLUBLE_COLUMNS:
+        assert col in _COLUMNS, f"seeder does not write {col}"

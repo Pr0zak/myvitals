@@ -16,6 +16,7 @@ import NarrativeCards from "@/components/NarrativeCards.vue";
 import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
+import { isConfigured } from "@/config";
 
 const router = useRouter();
 const loading = ref(true);
@@ -39,14 +40,33 @@ const today = computed(() =>
   new Date().toLocaleDateString([], { month: "short", day: "numeric" }),
 );
 
+/** Why the page is empty, when it is. Null means "nothing is wrong".
+ *
+ *  Every call below swallows its own error so one dead subsystem cannot
+ *  blank the page — which is right, but it also meant a TOTAL failure
+ *  (no token, backend unreachable) rendered as a grid of dashes with no
+ *  explanation at all. A first-run user saw a broken-looking dashboard
+ *  and nothing telling them what to do. */
+const emptyReason = ref<"unconfigured" | "unreachable" | null>(null);
+
 async function load() {
   loading.value = true;
+  emptyReason.value = null;
+
+  if (!isConfigured()) {
+    emptyReason.value = "unconfigured";
+    loading.value = false;
+    return;
+  }
+
   const [sum, prof, sober, fast] = await Promise.all([
     api.todaySummary().catch(() => null),
     api.getProfile().catch(() => null),
     api.soberStats().catch(() => null),
     api.fastingCurrent().catch(() => null),
   ]);
+  // All four failing is a connection problem, not four coincidences.
+  if (!sum && !prof && !sober && !fast) emptyReason.value = "unreachable";
   if (sum) {
     sleepScore.value = sum.sleep_score;
     recoveryScore.value = sum.recovery_score;
@@ -73,7 +93,21 @@ function fmt(n: number | null, d = 0): string {
 </script>
 
 <template>
-  <div class="rings-view">
+  <div v-if="emptyReason" class="setup">
+    <template v-if="emptyReason === 'unconfigured'">
+      <h2>Nothing to show yet</h2>
+      <p>Paste your <code>QUERY_TOKEN</code> so the dashboard can read your data.</p>
+      <button class="primary" @click="router.push('/settings?tab=access')">
+        Open Settings
+      </button>
+    </template>
+    <template v-else>
+      <h2>Couldn't reach the backend</h2>
+      <p>Every request failed. The server may be restarting, or the token may be wrong.</p>
+      <button class="primary" @click="load()">Try again</button>
+    </template>
+  </div>
+  <div v-else class="rings-view">
     <header class="head">
       <h1>Today</h1>
       <span class="date">{{ today }}</span>
@@ -130,4 +164,8 @@ function fmt(n: number | null, d = 0): string {
 .pv b.mag { color: var(--rn-mag); } .pv b.lime { color: var(--rn-lime); }
 .pv .ok { color: var(--rn-lime); } .pv .chev { color: var(--rn-mut); }
 
+.setup { padding: 2.5rem 1rem; text-align: center; }
+.setup h2 { margin: 0 0 0.4rem; font-size: 1.1rem; color: var(--text); }
+.setup p { color: var(--muted); font-size: 0.9rem; margin: 0 0 1rem; }
+.setup code { background: var(--surface-2); padding: 0.1rem 0.3rem; border-radius: 4px; }
 </style>

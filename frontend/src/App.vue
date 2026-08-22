@@ -93,8 +93,12 @@ onMounted(async () => {
     <NeonNav v-else />
 
     <div class="main-col">
-      <RouterLink v-if="!isConfigured()" to="/settings" class="banner">
-        ⚠ No query token set — go to Settings to paste your QUERY_TOKEN.
+      <!-- Deep-linked to the Access pane. This used to point at plain
+           /settings, which opens on whichever section is the default —
+           so the banner that exists to say "paste your token" dropped the
+           user on a page that does not contain the token field. -->
+      <RouterLink v-if="!isConfigured()" to="/settings?tab=access" class="banner">
+        ⚠ No query token set — open Settings to paste your QUERY_TOKEN.
       </RouterLink>
       <div v-else-if="permsLost" class="banner banner-perms">
         ⚠ Health Connect is denying reads on the phone. Sync attempts are firing but every record type is rejected.

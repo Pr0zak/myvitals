@@ -1973,3 +1973,81 @@ data class MealsStats(
     @Json(name = "pantry_items") val pantryItems: Int = 0,
     @Json(name = "expiring_soon") val expiringSoon: Int = 0,
 )
+
+
+// ── Meals: weekly plan + shopping list (MEAL-3) ──────────────────────
+
+@JsonClass(generateAdapter = true)
+data class PlanEntryOut(
+    val id: Long = 0,
+    val day: String = "",
+    val slot: String = "dinner",
+    @Json(name = "recipe_id") val recipeId: Long? = null,
+    @Json(name = "recipe_name") val recipeName: String? = null,
+    val note: String? = null,
+    // Meal-prep multiplier — "how many containers". No household model.
+    val servings: Int = 1,
+    @Json(name = "kcal_per_serving") val kcalPerServing: Double? = null,
+    @Json(name = "fat_per_serving_g") val fatPerServingG: Double? = null,
+    @Json(name = "fat_verdict") val fatVerdict: String = "unknown",
+)
+
+@JsonClass(generateAdapter = true)
+data class PlanDayOut(
+    val day: String = "",
+    val entries: List<PlanEntryOut> = emptyList(),
+    // Null, not zero, when nothing planned has a costable value. Zero
+    // would read as "you are eating nothing today".
+    val kcal: Double? = null,
+    @Json(name = "fat_g") val fatG: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class PlanEntryIn(
+    val day: String,
+    val slot: String = "dinner",
+    @Json(name = "recipe_id") val recipeId: Long? = null,
+    val note: String? = null,
+    val servings: Int = 1,
+)
+
+@JsonClass(generateAdapter = true)
+data class ShoppingItemOut(
+    val id: Long = 0,
+    @Json(name = "food_id") val foodId: Long? = null,
+    val label: String = "",
+    val grams: Double? = null,
+    // Gram total rendered in a unit someone would shop in.
+    val amount: String? = null,
+    // Lines that would not convert to grams, kept in their own units.
+    @Json(name = "amount_text") val amountText: String? = null,
+    // The pantry holds some of this but the amount is unknown, so it
+    // could not be subtracted. The item stays ON the list, flagged —
+    // "some, amount unknown" is not evidence of "enough".
+    @Json(name = "pantry_uncertain") val pantryUncertain: Boolean = false,
+    @Json(name = "pantry_covered_g") val pantryCoveredG: Double? = null,
+    val checked: Boolean = false,
+    @Json(name = "order_index") val orderIndex: Int = 0,
+    // Tier-1 deep link, generated server-side and never fetched there.
+    @Json(name = "walmart_url") val walmartUrl: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class ShoppingListOut(
+    val id: Long = 0,
+    val name: String? = null,
+    @Json(name = "start_day") val startDay: String? = null,
+    @Json(name = "end_day") val endDay: String? = null,
+    val status: String = "open",
+    @Json(name = "created_at") val createdAt: String? = null,
+    val items: List<ShoppingItemOut> = emptyList(),
+    @Json(name = "planned_meals") val plannedMeals: Int = 0,
+    @Json(name = "covered_by_pantry") val coveredByPantry: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class ShoppingListIn(
+    val start: String? = null,
+    val days: Int = 7,
+    val name: String? = null,
+)

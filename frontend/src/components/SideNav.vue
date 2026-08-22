@@ -19,7 +19,7 @@ import {
   ChevronRight, Download, Droplets, Dumbbell, Edit3, FileUp, Footprints, Github, GitCompare,
   Heart, Home, Hourglass, Key, List, Map, Menu, Monitor, Mountain, RotateCcw, Ruler, Scale, Search,
   Settings, Ship, Sparkles, Target, Terminal, Thermometer, TrendingUp, User, Watch as WatchIcon,
-  UtensilsCrossed, BookOpen, Package, Apple, HeartPulse,
+  UtensilsCrossed, BookOpen, Package, Apple, HeartPulse, ShoppingCart,
   Wrench, type LucideIcon,
 } from "lucide-vue-next";
 import { api, meals } from "@/api/client";
@@ -265,7 +265,9 @@ const groups = computed<Group[]>(() => {
         ? `${expiringCount.value} to use` : undefined,
       badgeColor: "#fbbf24",
       children: [
+        { to: "/meals/plan",    icon: Calendar,   label: "Plan" },
         { to: "/meals/recipes", icon: BookOpen, label: "Recipes" },
+        { to: "/meals/shopping", icon: ShoppingCart, label: "Shopping" },
         { to: "/meals/pantry",  icon: Package,  label: "Pantry" },
         { to: "/meals/foods",   icon: Apple,    label: "Foods" },
         { to: "/meals/nutrition", icon: HeartPulse, label: "Nutrition" },

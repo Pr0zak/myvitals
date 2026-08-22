@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics import foods as food_lib
 from ..analytics import nutrition as nutri
+from ..analytics import shopping as shop
 from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
@@ -207,6 +208,92 @@ class DietProfileOut(BaseModel):
     #: can say how far off it is instead of just refusing.
     comparison_meals: int = 0
     comparison_meals_needed: int = nutri.MIN_HISTORY
+
+
+class PlanEntryIn(BaseModel):
+    day: date
+    slot: str = Field(default="dinner", max_length=16)
+    recipe_id: int | None = None
+    note: str | None = Field(default=None, max_length=500)
+    #: Meal-prep multiplier. There is no household model — single person
+    #: — so this is simply "how many containers of this".
+    servings: int = Field(default=1, ge=1, le=100)
+
+
+class PlanEntryPatch(BaseModel):
+    day: date | None = None
+    slot: str | None = Field(default=None, max_length=16)
+    recipe_id: int | None = None
+    note: str | None = Field(default=None, max_length=500)
+    servings: int | None = Field(default=None, ge=1, le=100)
+
+
+class PlanEntryOut(BaseModel):
+    id: int
+    day: date
+    slot: str
+    recipe_id: int | None
+    recipe_name: str | None
+    note: str | None
+    servings: int
+    #: Per-serving figures carried through from the recipe so the grid
+    #: can show what a day adds up to without a second round trip.
+    kcal_per_serving: float | None = None
+    fat_per_serving_g: float | None = None
+    #: The per-meal fat verdict for THIS entry. Same three-basis logic as
+    #: everywhere else, and the same refusal when there is no basis.
+    fat_verdict: str = "unknown"
+
+
+class PlanDayOut(BaseModel):
+    day: date
+    entries: list[PlanEntryOut] = Field(default_factory=list)
+    #: Day totals across planned entries. Null when nothing planned has
+    #: a costable value — never 0, which would read as "you ate nothing".
+    kcal: float | None = None
+    fat_g: float | None = None
+
+
+class ShoppingItemOut(BaseModel):
+    id: int
+    food_id: int | None
+    label: str
+    grams: float | None
+    #: Gram total rendered in a unit someone would shop in.
+    amount: str | None = None
+    #: Lines that would not convert to grams, kept in their own units.
+    amount_text: str | None = None
+    #: The pantry holds some of this but in an unknown amount, so it
+    #: could not be subtracted. The item stays on the list, flagged.
+    pantry_uncertain: bool = False
+    pantry_covered_g: float | None = None
+    checked: bool = False
+    order_index: int = 0
+    #: Tier-1 Walmart deep link. Generated, never fetched — the server
+    #: does not talk to Walmart at all.
+    walmart_url: str | None = None
+
+
+class ShoppingListOut(BaseModel):
+    id: int
+    name: str | None
+    start_day: date | None
+    end_day: date | None
+    status: str
+    created_at: datetime
+    items: list[ShoppingItemOut] = Field(default_factory=list)
+    #: How many planned meals fed into this, so an empty list can say
+    #: "nothing planned" rather than "nothing needed".
+    planned_meals: int = 0
+    #: Items dropped because the pantry demonstrably covered them. Shown
+    #: as a count so the subtraction is visible rather than mysterious.
+    covered_by_pantry: int = 0
+
+
+class ShoppingListIn(BaseModel):
+    start: date | None = None
+    days: int = Field(default=7, ge=1, le=31)
+    name: str | None = Field(default=None, max_length=255)
 
 
 class PantryIn(BaseModel):
@@ -933,6 +1020,404 @@ async def delete_pantry(item_id: int, db: AsyncSession = Depends(get_session)):
     if p is None:
         raise HTTPException(404, "pantry item not found")
     await db.delete(p)
+    await db.commit()
+
+
+# ---------------------------------------------------------- meal plan
+
+
+def _week_start(d: date) -> date:
+    """Monday of the week containing `d`."""
+    return d - timedelta(days=d.weekday())
+
+
+async def _plan_rows(
+    db: AsyncSession, start: date, end: date,
+) -> list[models.MealPlanEntry]:
+    return list((await db.execute(
+        select(models.MealPlanEntry)
+        .where(models.MealPlanEntry.day >= start)
+        .where(models.MealPlanEntry.day <= end)
+        .order_by(models.MealPlanEntry.day,
+                  models.MealPlanEntry.order_index,
+                  models.MealPlanEntry.id)
+    )).scalars().all())
+
+
+@router.get("/plan", response_model=list[PlanDayOut])
+async def get_plan(
+    start: date | None = None,
+    days: int = Query(default=7, ge=1, le=31),
+    db: AsyncSession = Depends(get_session),
+):
+    """The plan grid for a window, one object per day.
+
+    `start` defaults to the Monday of the user's LOCAL current week. The
+    container runs TZ=UTC while the user is Central, so deriving it from
+    a UTC date would roll the week over at 7pm on a Sunday and show the
+    wrong seven days all evening.
+    """
+    begin = start or _week_start(_local_today())
+    end = begin + timedelta(days=days - 1)
+
+    rows = await _plan_rows(db, begin, end)
+    recipe_ids = {r.recipe_id for r in rows if r.recipe_id is not None}
+
+    diet = await _diet_settings(db)
+    history = await _fat_history(db)
+    recipes: dict[int, RecipeOut] = {}
+    if recipe_ids:
+        for r in (await db.execute(
+            select(models.Recipe).where(models.Recipe.id.in_(recipe_ids))
+        )).scalars().all():
+            recipes[r.id] = await _hydrate_recipe(
+                db, r, diet=diet, history=history,
+            )
+
+    by_day: dict[date, list[PlanEntryOut]] = {}
+    for e in rows:
+        hydrated = recipes.get(e.recipe_id) if e.recipe_id else None
+        kcal = hydrated.per_serving.get("kcal") if hydrated else None
+        fat = hydrated.per_serving.get("fat_g") if hydrated else None
+        by_day.setdefault(e.day, []).append(PlanEntryOut(
+            id=e.id, day=e.day, slot=e.slot, recipe_id=e.recipe_id,
+            recipe_name=hydrated.name if hydrated else None,
+            note=e.note, servings=e.servings,
+            kcal_per_serving=kcal, fat_per_serving_g=fat,
+            fat_verdict=(
+                hydrated.fat_assessment.get("verdict", "unknown")
+                if hydrated else "unknown"
+            ),
+        ))
+
+    out: list[PlanDayOut] = []
+    for i in range(days):
+        d = begin + timedelta(days=i)
+        entries = by_day.get(d, [])
+        # A day total sums the SERVINGS planned, not one portion each —
+        # planning three containers of something is three meals' worth of
+        # shopping and three meals' worth of energy.
+        kcals = [
+            e.kcal_per_serving * e.servings
+            for e in entries if e.kcal_per_serving is not None
+        ]
+        fats = [
+            e.fat_per_serving_g * e.servings
+            for e in entries if e.fat_per_serving_g is not None
+        ]
+        out.append(PlanDayOut(
+            day=d, entries=entries,
+            # Null, not zero: a day with nothing costable planned has an
+            # unknown total, which is not the same as an empty one.
+            kcal=round(sum(kcals), 1) if kcals else None,
+            fat_g=round(sum(fats), 1) if fats else None,
+        ))
+    return out
+
+
+@router.post("/plan", response_model=PlanEntryOut, status_code=201)
+async def add_plan_entry(
+    body: PlanEntryIn, db: AsyncSession = Depends(get_session),
+):
+    if body.recipe_id is None and not (body.note or "").strip():
+        raise HTTPException(422, "a plan entry needs either a recipe or a note")
+    if body.recipe_id is not None:
+        if await db.get(models.Recipe, body.recipe_id) is None:
+            raise HTTPException(404, "recipe not found")
+
+    n = (await db.execute(
+        select(func.count()).select_from(models.MealPlanEntry)
+        .where(models.MealPlanEntry.day == body.day)
+    )).scalar_one()
+
+    e = models.MealPlanEntry(
+        day=body.day, slot=body.slot, recipe_id=body.recipe_id,
+        note=(body.note or None), servings=body.servings,
+        order_index=n, created_at=datetime.now(timezone.utc),
+    )
+    db.add(e)
+    await db.commit()
+    await db.refresh(e)
+
+    name = None
+    if e.recipe_id:
+        r = await db.get(models.Recipe, e.recipe_id)
+        name = r.name if r else None
+    return PlanEntryOut(
+        id=e.id, day=e.day, slot=e.slot, recipe_id=e.recipe_id,
+        recipe_name=name, note=e.note, servings=e.servings,
+    )
+
+
+@router.patch("/plan/{entry_id}", response_model=PlanEntryOut)
+async def update_plan_entry(
+    entry_id: int, body: PlanEntryPatch, db: AsyncSession = Depends(get_session),
+):
+    e = await db.get(models.MealPlanEntry, entry_id)
+    if e is None:
+        raise HTTPException(404, "plan entry not found")
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(e, k, v)
+    await db.commit()
+    await db.refresh(e)
+    name = None
+    if e.recipe_id:
+        r = await db.get(models.Recipe, e.recipe_id)
+        name = r.name if r else None
+    return PlanEntryOut(
+        id=e.id, day=e.day, slot=e.slot, recipe_id=e.recipe_id,
+        recipe_name=name, note=e.note, servings=e.servings,
+    )
+
+
+@router.delete("/plan/{entry_id}", status_code=204)
+async def delete_plan_entry(
+    entry_id: int, db: AsyncSession = Depends(get_session),
+):
+    e = await db.get(models.MealPlanEntry, entry_id)
+    if e is None:
+        raise HTTPException(404, "plan entry not found")
+    await db.delete(e)
+    await db.commit()
+
+
+# ----------------------------------------------------- shopping lists
+
+
+def _shopping_out(
+    lst: models.ShoppingList,
+    items: list[models.ShoppingListItem],
+    foods: dict[int, models.Food],
+    planned: int = 0,
+    covered: int = 0,
+) -> ShoppingListOut:
+    return ShoppingListOut(
+        id=lst.id, name=lst.name, start_day=lst.start_day, end_day=lst.end_day,
+        status=lst.status, created_at=lst.created_at,
+        planned_meals=planned, covered_by_pantry=covered,
+        items=[
+            ShoppingItemOut(
+                id=i.id, food_id=i.food_id, label=i.label, grams=i.grams,
+                amount=(
+                    shop.humanise(i.grams, _food_dict(foods.get(i.food_id)))
+                    if i.grams else None
+                ),
+                amount_text=i.amount_text,
+                pantry_uncertain=i.pantry_uncertain,
+                pantry_covered_g=i.pantry_covered_g,
+                checked=i.checked, order_index=i.order_index,
+                walmart_url=shop.walmart_search_url(i.label),
+            )
+            for i in items
+        ],
+    )
+
+
+@router.post("/shopping-list", response_model=ShoppingListOut, status_code=201)
+async def generate_shopping_list(
+    body: ShoppingListIn, db: AsyncSession = Depends(get_session),
+):
+    """Plan minus pantry, computed here so both clients agree.
+
+    Persisted rather than recomputed on view: the user ticks items off
+    while shopping, and regenerating would silently undo that.
+    """
+    begin = body.start or _week_start(_local_today())
+    end = begin + timedelta(days=body.days - 1)
+
+    entries = await _plan_rows(db, begin, end)
+    planned = [e for e in entries if e.recipe_id is not None]
+
+    # Every ingredient line of every planned recipe, scaled by how many
+    # servings of it are planned.
+    lines: list[dict[str, Any]] = []
+    if planned:
+        recipe_ids = {e.recipe_id for e in planned}
+        recipes = {
+            r.id: r for r in (await db.execute(
+                select(models.Recipe).where(models.Recipe.id.in_(recipe_ids))
+            )).scalars().all()
+        }
+        ings = (await db.execute(
+            select(models.RecipeIngredient)
+            .where(models.RecipeIngredient.recipe_id.in_(recipe_ids))
+        )).scalars().all()
+        food_ids = {i.food_id for i in ings if i.food_id is not None}
+        foods_by_id: dict[int, models.Food] = {}
+        if food_ids:
+            for f in (await db.execute(
+                select(models.Food).where(models.Food.id.in_(food_ids))
+            )).scalars().all():
+                foods_by_id[f.id] = f
+
+        by_recipe: dict[int, list[models.RecipeIngredient]] = {}
+        for i in ings:
+            by_recipe.setdefault(i.recipe_id, []).append(i)
+
+        for e in planned:
+            recipe = recipes.get(e.recipe_id)
+            if recipe is None:
+                continue
+            # Planning 4 servings of a recipe written for 2 means buying
+            # twice the ingredients.
+            mult = e.servings / max(recipe.servings, 1)
+            for i in by_recipe.get(e.recipe_id, []):
+                food = foods_by_id.get(i.food_id) if i.food_id else None
+                grams = (
+                    food_lib.to_grams(i.quantity, i.unit, _food_dict(food))
+                    if food else None
+                )
+                lines.append({
+                    "food_id": i.food_id,
+                    "label": (food.name if food else (i.raw_text or "Unnamed")),
+                    "quantity": i.quantity,
+                    "unit": i.unit,
+                    "grams": grams,
+                    "multiplier": mult,
+                })
+
+    needs = shop.aggregate_needs(lines)
+
+    # Pantry, grouped by food so several jars of the same thing add up.
+    pantry_rows = (await db.execute(select(models.PantryItem))).scalars().all()
+    pantry_by_food: dict[int, list[dict[str, Any]]] = {}
+    pantry_by_label: dict[str, list[dict[str, Any]]] = {}
+    for p in pantry_rows:
+        rec = {"quantity": p.quantity, "unit": p.unit}
+        if p.food_id is not None:
+            pantry_by_food.setdefault(p.food_id, []).append(rec)
+        elif p.label:
+            pantry_by_label.setdefault(p.label.lower(), []).append(rec)
+
+    all_food_ids = {n.food_id for n in needs.values() if n.food_id is not None}
+    need_foods: dict[int, models.Food] = {}
+    if all_food_ids:
+        for f in (await db.execute(
+            select(models.Food).where(models.Food.id.in_(all_food_ids))
+        )).scalars().all():
+            need_foods[f.id] = f
+
+    lst = models.ShoppingList(
+        name=body.name, start_day=begin, end_day=end, status="open",
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(lst)
+    await db.flush()
+
+    covered_count = 0
+    order = 0
+    kept: list[models.ShoppingListItem] = []
+    for need in sorted(needs.values(), key=lambda n: n.label.lower()):
+        food = need_foods.get(need.food_id) if need.food_id is not None else None
+        have = (
+            pantry_by_food.get(need.food_id, [])
+            if need.food_id is not None
+            else pantry_by_label.get(need.label.lower(), [])
+        )
+        row = shop.subtract_pantry(need, have, _food_dict(food))
+        if row["fully_covered"]:
+            # The ONLY case where a line is dropped: the arithmetic was
+            # complete and the pantry demonstrably covers it. Counted so
+            # the subtraction is visible rather than mysterious.
+            covered_count += 1
+            continue
+        item = models.ShoppingListItem(
+            list_id=lst.id, food_id=row["food_id"], label=row["label"],
+            grams=row["grams"], amount_text=row["amount_text"],
+            pantry_uncertain=row["pantry_uncertain"],
+            pantry_covered_g=row["pantry_covered_g"],
+            checked=False, order_index=order,
+        )
+        order += 1
+        db.add(item)
+        kept.append(item)
+
+    await db.commit()
+    for i in kept:
+        await db.refresh(i)
+    await db.refresh(lst)
+    return _shopping_out(lst, kept, need_foods, len(planned), covered_count)
+
+
+@router.get("/shopping-lists", response_model=list[ShoppingListOut])
+async def list_shopping_lists(db: AsyncSession = Depends(get_session)):
+    lists = (await db.execute(
+        select(models.ShoppingList)
+        .order_by(models.ShoppingList.created_at.desc())
+        .limit(20)
+    )).scalars().all()
+    out: list[ShoppingListOut] = []
+    for lst in lists:
+        items = list((await db.execute(
+            select(models.ShoppingListItem)
+            .where(models.ShoppingListItem.list_id == lst.id)
+            .order_by(models.ShoppingListItem.order_index)
+        )).scalars().all())
+        food_ids = {i.food_id for i in items if i.food_id is not None}
+        foods: dict[int, models.Food] = {}
+        if food_ids:
+            for f in (await db.execute(
+                select(models.Food).where(models.Food.id.in_(food_ids))
+            )).scalars().all():
+                foods[f.id] = f
+        out.append(_shopping_out(lst, items, foods))
+    return out
+
+
+@router.get("/shopping-list/{list_id}", response_model=ShoppingListOut)
+async def get_shopping_list(list_id: int, db: AsyncSession = Depends(get_session)):
+    lst = await db.get(models.ShoppingList, list_id)
+    if lst is None:
+        raise HTTPException(404, "shopping list not found")
+    items = list((await db.execute(
+        select(models.ShoppingListItem)
+        .where(models.ShoppingListItem.list_id == list_id)
+        .order_by(models.ShoppingListItem.order_index)
+    )).scalars().all())
+    food_ids = {i.food_id for i in items if i.food_id is not None}
+    foods: dict[int, models.Food] = {}
+    if food_ids:
+        for f in (await db.execute(
+            select(models.Food).where(models.Food.id.in_(food_ids))
+        )).scalars().all():
+            foods[f.id] = f
+    return _shopping_out(lst, items, foods)
+
+
+@router.patch("/shopping-list/{list_id}/items/{item_id}", response_model=dict)
+async def check_shopping_item(
+    list_id: int, item_id: int, checked: bool,
+    db: AsyncSession = Depends(get_session),
+):
+    item = await db.get(models.ShoppingListItem, item_id)
+    if item is None or item.list_id != list_id:
+        raise HTTPException(404, "item not found")
+    item.checked = checked
+    await db.commit()
+    return {"id": item.id, "checked": item.checked}
+
+
+@router.patch("/shopping-list/{list_id}", response_model=dict)
+async def set_shopping_status(
+    list_id: int, status: str = Query(pattern="^(open|done)$"),
+    db: AsyncSession = Depends(get_session),
+):
+    lst = await db.get(models.ShoppingList, list_id)
+    if lst is None:
+        raise HTTPException(404, "shopping list not found")
+    lst.status = status
+    await db.commit()
+    return {"id": lst.id, "status": lst.status}
+
+
+@router.delete("/shopping-list/{list_id}", status_code=204)
+async def delete_shopping_list(
+    list_id: int, db: AsyncSession = Depends(get_session),
+):
+    lst = await db.get(models.ShoppingList, list_id)
+    if lst is None:
+        raise HTTPException(404, "shopping list not found")
+    await db.delete(lst)
     await db.commit()
 
 

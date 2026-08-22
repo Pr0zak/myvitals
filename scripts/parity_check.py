@@ -48,6 +48,12 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/components/FatAssessment.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/meals/FatAssessmentCard.kt",
      "Per-meal fat verdict card (MEAL-2)"),
+    ("frontend/src/views/meals/Plan.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/meals/PlanShoppingTabs.kt",
+     "Weekly meal plan grid (MEAL-3)"),
+    ("frontend/src/views/meals/Shopping.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/meals/PlanShoppingTabs.kt",
+     "Shopping list + Walmart deep links (MEAL-3)"),
     # ── Vitality Neon shell (opt-in 6-tab redesign) — web view ↔ phone screen ──
     ("frontend/src/components/NeonNav.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/neon/NeonAppShell.kt",

@@ -927,3 +927,96 @@ class PantryItem(Base):
     unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
     expires_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MealPlanEntry(Base):
+    """One planned meal on one day (MEAL-3).
+
+    A plan entry is deliberately thin: a date, a slot, and either a
+    recipe or a free-text note. There is no household or portion model —
+    confirmed single-person — so `servings` is a plain multiplier on a
+    recipe already sized for one or two, which is what meal prep needs
+    ("make four containers of this").
+
+    `recipe_id` is nullable with ON DELETE SET NULL rather than CASCADE.
+    Deleting a recipe must not silently empty days out of the plan; the
+    entry keeps its note and is shown as needing attention.
+    """
+
+    __tablename__ = "meal_plan_entries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    #: The LOCAL calendar day, resolved server-side in settings.tz. Never
+    #: derived from a UTC timestamp — see the day-boundary rule.
+    day: Mapped[date] = mapped_column(Date, index=True)
+    #: "breakfast" | "lunch" | "dinner" | "snack" | "prep"
+    slot: Mapped[str] = mapped_column(String(16))
+    recipe_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recipes.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    #: For a planned meal with no recipe behind it — eating out, or
+    #: leftovers. Carries no nutrition, and the shopping list ignores it.
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    #: How many portions of the recipe to make. The meal-prep multiplier.
+    servings: Mapped[int] = mapped_column(Integer, default=1)
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ShoppingList(Base):
+    """A generated shopping list and its state (MEAL-3).
+
+    Persisted rather than recomputed on every view because the user ticks
+    items off as they shop, and that state has to survive a page reload
+    and follow them to the other client. Regenerating would silently undo
+    their ticks.
+    """
+
+    __tablename__ = "shopping_lists"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: The local-day window the list was generated from, kept so the list
+    #: can say what it covers rather than being an undated snapshot.
+    start_day: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_day: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: "open" | "done"
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ShoppingListItem(Base):
+    """One line on a shopping list.
+
+    Quantities are stored as computed — the aggregation across planned
+    meals and the pantry subtraction both happen server-side, so the two
+    clients cannot disagree about what to buy.
+    """
+
+    __tablename__ = "shopping_list_items"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    list_id: Mapped[int] = mapped_column(
+        ForeignKey("shopping_lists.id", ondelete="CASCADE"), index=True,
+    )
+    food_id: Mapped[int | None] = mapped_column(
+        ForeignKey("foods.id", ondelete="SET NULL"), nullable=True,
+    )
+    #: Display name, snapshotted at generation time so a renamed or
+    #: deleted food does not leave a blank line on a list mid-shop.
+    label: Mapped[str] = mapped_column(String(255))
+    #: Total needed, in grams, when every contributing line converted.
+    grams: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: A human-readable amount ("2 cup, 1 clove"). Populated when the
+    #: lines could NOT all be reduced to grams, which is common and not
+    #: an error — there is no general weight for one clove.
+    amount_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: True when the pantry already holds some of this but in an unknown
+    #: quantity. The item stays ON the list, flagged — silently dropping
+    #: it would send the user home without something they needed.
+    pantry_uncertain: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
+    #: How much the pantry covered, in grams, when it could be subtracted.
+    pantry_covered_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    checked: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
+    order_index: Mapped[int] = mapped_column(Integer, default=0)

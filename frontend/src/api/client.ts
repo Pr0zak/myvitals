@@ -1969,6 +1969,106 @@ export const updatePantry = (id: number, body: Record<string, unknown>) =>
 export const deletePantry = (id: number) =>
   http.delete(`/meals/pantry/${id}`).then(() => undefined);
 
+// ── Meals: weekly plan + shopping list (MEAL-3) ──────────────────────
+
+export interface PlanEntry {
+  id: number;
+  day: string;
+  slot: string;
+  recipe_id: number | null;
+  recipe_name: string | null;
+  note: string | null;
+  /** Meal-prep multiplier — "how many containers". No household model. */
+  servings: number;
+  kcal_per_serving: number | null;
+  fat_per_serving_g: number | null;
+  fat_verdict: FatAssessment["verdict"];
+}
+
+export interface PlanDay {
+  day: string;
+  entries: PlanEntry[];
+  /** Null, not zero, when nothing planned has a costable value. */
+  kcal: number | null;
+  fat_g: number | null;
+}
+
+export interface ShoppingItem {
+  id: number;
+  food_id: number | null;
+  label: string;
+  grams: number | null;
+  /** Gram total in a unit you'd shop in. */
+  amount: string | null;
+  /** Lines that would not convert to grams, kept in their own units. */
+  amount_text: string | null;
+  /** Pantry holds some but the amount is unknown, so it could not be
+   *  subtracted. The item stays on the list — flagged, never dropped. */
+  pantry_uncertain: boolean;
+  pantry_covered_g: number | null;
+  checked: boolean;
+  order_index: number;
+  /** Tier-1 deep link. Generated server-side, never fetched. */
+  walmart_url: string | null;
+}
+
+export interface ShoppingList {
+  id: number;
+  name: string | null;
+  start_day: string | null;
+  end_day: string | null;
+  status: string;
+  created_at: string;
+  items: ShoppingItem[];
+  planned_meals: number;
+  covered_by_pantry: number;
+}
+
+export const getPlan = (start?: string, days = 7) =>
+  http
+    .get<PlanDay[]>("/meals/plan", { params: { start, days } })
+    .then((r) => r.data);
+
+export const addPlanEntry = (body: {
+  day: string;
+  slot?: string;
+  recipe_id?: number | null;
+  note?: string | null;
+  servings?: number;
+}) => http.post<PlanEntry>("/meals/plan", body).then((r) => r.data);
+
+export const updatePlanEntry = (id: number, body: Record<string, unknown>) =>
+  http.patch<PlanEntry>(`/meals/plan/${id}`, body).then((r) => r.data);
+
+export const deletePlanEntry = (id: number) =>
+  http.delete(`/meals/plan/${id}`).then(() => undefined);
+
+export const generateShoppingList = (body: {
+  start?: string | null;
+  days?: number;
+  name?: string | null;
+}) => http.post<ShoppingList>("/meals/shopping-list", body).then((r) => r.data);
+
+export const listShoppingLists = () =>
+  http.get<ShoppingList[]>("/meals/shopping-lists").then((r) => r.data);
+
+export const getShoppingList = (id: number) =>
+  http.get<ShoppingList>(`/meals/shopping-list/${id}`).then((r) => r.data);
+
+export const checkShoppingItem = (
+  listId: number,
+  itemId: number,
+  checked: boolean,
+) =>
+  http
+    .patch(`/meals/shopping-list/${listId}/items/${itemId}`, null, {
+      params: { checked },
+    })
+    .then((r) => r.data);
+
+export const deleteShoppingList = (id: number) =>
+  http.delete(`/meals/shopping-list/${id}`).then(() => undefined);
+
 export const getDietProfile = () =>
   http.get<DietProfile>("/meals/diet-profile").then((r) => r.data);
 
@@ -2007,4 +2107,13 @@ export const meals = {
   getDietProfile,
   putDietProfile,
   assessFat,
+  getPlan,
+  addPlanEntry,
+  updatePlanEntry,
+  deletePlanEntry,
+  generateShoppingList,
+  listShoppingLists,
+  getShoppingList,
+  checkShoppingItem,
+  deleteShoppingList,
 };

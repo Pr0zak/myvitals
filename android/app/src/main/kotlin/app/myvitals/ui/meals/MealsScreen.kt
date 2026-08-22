@@ -1,6 +1,8 @@
 package app.myvitals.ui.meals
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -85,7 +87,9 @@ private const val CACHE_RECIPES = "meals_recipes"
 private const val CACHE_PANTRY = "meals_pantry"
 
 private enum class MealsTab(val label: String) {
+    PLAN("Plan"),
     RECIPES("Recipes"),
+    SHOPPING("Shopping"),
     PANTRY("Pantry"),
     FOODS("Foods"),
     NUTRITION("Nutrition"),
@@ -93,7 +97,7 @@ private enum class MealsTab(val label: String) {
 
 @Composable
 fun MealsScreen(settings: SettingsRepository) {
-    var tab by remember { mutableStateOf(MealsTab.RECIPES) }
+    var tab by remember { mutableStateOf(MealsTab.PLAN) }
 
     Column(Modifier.fillMaxSize().background(NeonMV.Bg)) {
         Text(
@@ -103,8 +107,13 @@ fun MealsScreen(settings: SettingsRepository) {
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 10.dp),
         )
+        // Six chips do not fit across a phone. Scrolling the row keeps
+        // every tab reachable rather than silently clipping the last two.
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             MealsTab.entries.forEach { t ->
@@ -113,6 +122,8 @@ fun MealsScreen(settings: SettingsRepository) {
         }
         Box(Modifier.fillMaxSize().padding(top = 10.dp)) {
             when (tab) {
+                MealsTab.PLAN -> PlanTab(settings)
+                MealsTab.SHOPPING -> ShoppingTab(settings)
                 MealsTab.RECIPES -> RecipesTab(settings)
                 MealsTab.PANTRY -> PantryTab(settings)
                 MealsTab.FOODS -> FoodsTab(settings)
@@ -937,7 +948,7 @@ private fun FoodStat(
 // ─────────────────────────────────────────────────────────────── shared
 
 @Composable
-private fun SectionLabel(text: String) {
+internal fun SectionLabel(text: String) {
     Text(
         text,
         color = NeonMV.Muted,
@@ -948,13 +959,13 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun MutedText(text: String) {
+internal fun MutedText(text: String) {
     Text(text, color = NeonMV.Muted, fontSize = 12.sp, lineHeight = 18.sp,
         modifier = Modifier.padding(vertical = 12.dp))
 }
 
 @Composable
-private fun ErrorText(text: String) {
+internal fun ErrorText(text: String) {
     Text(text, color = NeonMV.Bad, fontSize = 12.sp,
         modifier = Modifier.padding(vertical = 8.dp))
 }
@@ -973,7 +984,7 @@ private val VIT_UNITS = mapOf(
 )
 
 /** "2.0" reads wrong on an ingredient line; "2" is what a recipe says. */
-private fun trimNum(v: Double): String =
+internal fun trimNum(v: Double): String =
     if (v == v.toLong().toDouble()) v.toLong().toString() else v.toString()
 
 // ─────────────────────────────────────────────────────────── nutrition

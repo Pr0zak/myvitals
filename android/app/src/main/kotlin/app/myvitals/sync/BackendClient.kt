@@ -572,6 +572,34 @@ interface BackendApi {
 
     @GET("meals/nutrition/assess")
     suspend fun mealsAssessFat(@Query("fat_g") fatG: Double): FatAssessment
+
+    @GET("meals/plan")
+    suspend fun mealsPlan(
+        @Query("start") start: String? = null,
+        @Query("days") days: Int = 7,
+    ): List<PlanDayOut>
+
+    @POST("meals/plan")
+    suspend fun mealsAddPlanEntry(@Body body: PlanEntryIn): PlanEntryOut
+
+    @DELETE("meals/plan/{id}")
+    suspend fun mealsDeletePlanEntry(@Path("id") id: Long): Response<Unit>
+
+    @POST("meals/shopping-list")
+    suspend fun mealsGenerateShoppingList(@Body body: ShoppingListIn): ShoppingListOut
+
+    @GET("meals/shopping-lists")
+    suspend fun mealsShoppingLists(): List<ShoppingListOut>
+
+    @PATCH("meals/shopping-list/{listId}/items/{itemId}")
+    suspend fun mealsCheckShoppingItem(
+        @Path("listId") listId: Long,
+        @Path("itemId") itemId: Long,
+        @Query("checked") checked: Boolean,
+    ): Map<String, Any>
+
+    @DELETE("meals/shopping-list/{id}")
+    suspend fun mealsDeleteShoppingList(@Path("id") id: Long): Response<Unit>
 }
 
 object BackendClient {

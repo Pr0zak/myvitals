@@ -2184,6 +2184,35 @@ export interface CommonItem {
   in_pantry: boolean;
 }
 
+/** One food the vision pass thinks it saw. `food_id` is resolved
+ *  server-side against the catalog; `unmatched` means it found nothing
+ *  and the item can only be added as a typed label. */
+export interface IdentifiedFood {
+  name: string;
+  confidence: "high" | "medium" | "low";
+  detail: string | null;
+  food_id: number | null;
+  concept: string | null;
+  food_name: string | null;
+  unmatched: boolean;
+}
+
+export interface IdentifyResult {
+  items: IdentifiedFood[];
+  notes: string[];
+  model: string | null;
+}
+
+/** Identify foods in a photo. Adds NOTHING — the caller confirms and
+ *  then quick-adds. The photo is forwarded once and never stored. */
+export const identifyFoods = (imageBase64: string, mediaType: string) =>
+  http
+    .post<IdentifyResult>("/ai/meals/identify", {
+      image_base64: imageBase64,
+      media_type: mediaType,
+    })
+    .then((r) => r.data);
+
 export const commonIngredients = () =>
   http.get<CommonItem[]>("/meals/common-ingredients").then((r) => r.data);
 
@@ -2329,6 +2358,7 @@ export const meals = {
   logStats,
   canMake,
   commonIngredients,
+  identifyFoods,
   quickAddPantry,
   getStaples,
   putStaples,

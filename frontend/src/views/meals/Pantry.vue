@@ -16,6 +16,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import Card from "@/components/Card.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import FoodPicker from "@/components/FoodPicker.vue";
+import PhotoPantry from "@/components/PhotoPantry.vue";
 import QuantityPicker from "@/components/QuantityPicker.vue";
 import { Plus, Trash2, AlertTriangle } from "lucide-vue-next";
 import { meals, type CommonItem, type Food, type PantryItem } from "@/api/client";
@@ -239,6 +240,10 @@ function expiryClass(i: PantryItem): string {
     </p>
 
     <p v-if="error" class="err">{{ error }}</p>
+
+    <Card flat>
+      <PhotoPantry @added="load" />
+    </Card>
 
     <Card v-if="common.length" flat>
       <div class="common-head">

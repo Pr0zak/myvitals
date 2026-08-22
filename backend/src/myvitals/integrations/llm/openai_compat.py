@@ -111,6 +111,44 @@ class _Messages:
         self._base_url = base_url
         self._api_key = api_key
 
+def _map_images(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Translate Anthropic image blocks into the OpenAI shape.
+
+    The two vendors disagree on exactly one thing here. Anthropic sends
+    ``{"type": "image", "source": {"type": "base64", "media_type": ...,
+    "data": ...}}``; OpenAI sends ``{"type": "image_url", "image_url":
+    {"url": "data:<media_type>;base64,<data>"}}``.
+
+    Without this, the call sites that pass a photo would post an
+    Anthropic-shaped block to an OpenAI-compatible endpoint, which either
+    errors or — worse — silently ignores the image and answers about
+    nothing. Text-only messages pass through untouched, so no existing
+    call site changes.
+    """
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        content = m.get("content")
+        if not isinstance(content, list):
+            out.append(m)
+            continue
+        blocks: list[Any] = []
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "image":
+                src = b.get("source") or {}
+                if src.get("type") == "base64":
+                    mt = src.get("media_type", "image/jpeg")
+                    blocks.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mt};base64,{src.get('data', '')}",
+                        },
+                    })
+                    continue
+            blocks.append(b)
+        out.append({**m, "content": blocks})
+    return out
+
+
     async def create(
         self,
         *,
@@ -131,7 +169,7 @@ class _Messages:
         sys_text = _flatten_system(system)
         if sys_text:
             body["messages"].append({"role": "system", "content": sys_text})
-        body["messages"].extend(messages or [])
+        body["messages"].extend(_map_images(messages or []))
         mapped_tools = _map_tools(tools)
         if mapped_tools:
             body["tools"] = mapped_tools

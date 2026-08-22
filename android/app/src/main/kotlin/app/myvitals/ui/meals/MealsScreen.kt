@@ -740,6 +740,8 @@ private fun PantryTab(settings: SettingsRepository) {
                 )
             }
 
+            item { PhotoPantry(settings = settings, onAdded = { scope.launch { fetch() } }) }
+
             if (common.isNotEmpty()) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {

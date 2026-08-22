@@ -2253,3 +2253,39 @@ data class CommonItemOut(
 data class QuickAddIn(
     @Json(name = "food_ids") val foodIds: List<Long> = emptyList(),
 )
+
+
+// ── Identify foods from a photo (MEAL-7) ─────────────────────────────
+//
+// The endpoint ADDS NOTHING. It returns candidates; the user confirms and
+// the ordinary quick-add runs. Vision misidentifies confidently, and a
+// pantry that grows items the user did not put there stops being
+// trustworthy — which makes the shopping list built on it worse than
+// useless.
+
+@JsonClass(generateAdapter = true)
+data class IdentifyIn(
+    @Json(name = "image_base64") val imageBase64: String,
+    @Json(name = "media_type") val mediaType: String = "image/jpeg",
+)
+
+@JsonClass(generateAdapter = true)
+data class IdentifiedFood(
+    val name: String = "",
+    // "high" | "medium" | "low". Rendered, never flattened — a guess and
+    // a certainty must not look the same to someone accepting in bulk.
+    val confidence: String = "low",
+    val detail: String? = null,
+    @Json(name = "food_id") val foodId: Long? = null,
+    val concept: String? = null,
+    @Json(name = "food_name") val foodName: String? = null,
+    // The catalog had nothing. Offered as a typed label rather than dropped.
+    val unmatched: Boolean = false,
+)
+
+@JsonClass(generateAdapter = true)
+data class IdentifyResult(
+    val items: List<IdentifiedFood> = emptyList(),
+    val notes: List<String> = emptyList(),
+    val model: String? = null,
+)

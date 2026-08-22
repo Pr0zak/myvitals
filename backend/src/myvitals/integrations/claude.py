@@ -3377,3 +3377,175 @@ async def meal_suggestions(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
         input_tokens=resp.usage.input_tokens,
         output_tokens=resp.usage.output_tokens,
     )
+
+
+# ── Identify foods from a photo (MEAL-7) ─────────────────────────────
+#
+# Filling a pantry by hand is the friction that stops one being kept
+# current — the whole reason MEAL-6b added a one-tap staples list. A
+# photograph of a shelf or a receipt covers the rest in one action.
+#
+# Three rules this surface does not bend:
+#
+#   1. NOTHING IS EVER ADDED AUTOMATICALLY. The model proposes; the user
+#      ticks. Vision misidentifies confidently, and a pantry that grows
+#      items you did not put there stops being trustworthy — at which
+#      point the shopping list built on it is worse than useless.
+#   2. THE PHOTO IS NEVER STORED. It is forwarded once and discarded.
+#      There is no image column, no cache, no log line containing it.
+#   3. CONFIDENCE IS REPORTED, not hidden. A guess and a certainty must
+#      not render identically when the user is about to accept in bulk.
+
+IDENTIFY_TOOL = {
+    "name": "give_identified_foods",
+    "description": (
+        "List the distinct food items visible in the photo, as things "
+        "someone would put on a shopping list."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": (
+                                "The plain name a person would write: "
+                                '"chicken breast", "olive oil", "eggs". '
+                                "Not a brand and not a description."
+                            ),
+                        },
+                        "confidence": {
+                            "type": "string",
+                            "enum": ["high", "medium", "low"],
+                            "description": (
+                                "How sure you are this item is present AND "
+                                "correctly identified. Use low freely."
+                            ),
+                        },
+                        "detail": {
+                            "type": "string",
+                            "description": (
+                                "What you actually saw, briefly — a label "
+                                "read, a shape recognised. Empty if none."
+                            ),
+                        },
+                    },
+                    "required": ["name", "confidence"],
+                },
+            },
+            "notes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Anything the user should know: a blurry photo, a "
+                    "cropped label, items you could see but not name."
+                ),
+            },
+        },
+        "required": ["items"],
+    },
+}
+
+
+def _identify_system(tone: str) -> str:
+    return (
+        "You identify food items in a photograph so they can be added to "
+        "a kitchen pantry inventory.\n\n"
+        f"Tone: {tone}.\n\n"
+        "## What to return\n"
+        "Plain shopping-list names — \"chicken breast\", \"olive oil\", "
+        "\"eggs\" — not brands, not descriptions, not recipes. One entry "
+        "per distinct item. If you see six eggs, that is one entry: "
+        "\"eggs\".\n\n"
+        "## Be honest about uncertainty\n"
+        "Use `confidence: low` freely. A wrong item added to a pantry "
+        "makes the shopping list tell someone they already have "
+        "something they do not, and they find out while cooking. An "
+        "item you are unsure of is still worth listing AS LOW — the user "
+        "confirms every item before anything is added — but marking a "
+        "guess as high confidence is the one thing that breaks this.\n\n"
+        "If the photo is too blurry, too dark, or shows no food at all, "
+        "return an empty `items` list and say why in `notes`. Do not "
+        "invent a plausible pantry.\n\n"
+        "Do not identify people, and do not describe anything in the "
+        "photo that is not food.\n\n"
+        "Answer only via the `give_identified_foods` tool."
+    )
+
+
+#: Anthropic accepts these; anything else is rejected before a call is
+#: made rather than after it is billed.
+ALLOWED_IMAGE_TYPES = frozenset({
+    "image/jpeg", "image/png", "image/gif", "image/webp",
+})
+
+#: Bytes of DECODED image. Anthropic's own limit is 5 MB; this is lower
+#: because a phone photo needs downscaling before upload anyway and a
+#: 4 MB JPEG of a fridge shelf identifies no better than a 600 KB one.
+MAX_IMAGE_BYTES = 3_500_000
+
+
+async def identify_foods(
+    db: AsyncSession,
+    cfg: models.AiConfig,
+    image_b64: str,
+    media_type: str,
+) -> AiResult:
+    """Name the foods in one photo. Adds nothing; proposes only."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+    if media_type not in ALLOWED_IMAGE_TYPES:
+        raise ValueError(f"unsupported image type {media_type!r}")
+
+    client = get_provider(cfg)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=1000,
+        system=_cached_system(_identify_system(cfg.tone), cfg),
+        tools=[IDENTIFY_TOOL],
+        tool_choice={"type": "tool", "name": "give_identified_foods"},
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": image_b64,
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "List the food items in this photo via the "
+                        "`give_identified_foods` tool."
+                    ),
+                },
+            ],
+        }],
+    )
+
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if (getattr(block, "type", "") == "tool_use"
+                and block.name == "give_identified_foods"):
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    if not tool_input:
+        tool_input = {
+            "items": [],
+            "notes": ["Nothing could be identified in that photo."],
+        }
+
+    _normalize_array_field(tool_input, "notes")
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )

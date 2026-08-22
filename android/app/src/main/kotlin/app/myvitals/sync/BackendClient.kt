@@ -639,6 +639,9 @@ interface BackendApi {
 
     @POST("meals/pantry/quick-add")
     suspend fun mealsQuickAddPantry(@Body body: QuickAddIn): Map<String, Int>
+
+    @POST("ai/meals/identify")
+    suspend fun mealsIdentify(@Body body: IdentifyIn): IdentifyResult
 }
 
 object BackendClient {

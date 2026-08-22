@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +30,10 @@ from ..integrations.claude import (
     explain_discovery,
     explain_legacy,
     explain_topic,
+    ALLOWED_IMAGE_TYPES,
+    MAX_IMAGE_BYTES,
     build_meal_suggestion_payload,
+    identify_foods,
     fasting_coach,
     meal_suggestions,
     MAX_CUSTOM_INSTRUCTIONS,
@@ -1756,6 +1759,129 @@ async def meals_suggest_endpoint(
     result = await meal_suggestions(db, cfg)
     cfg.calls_today += 1
     return await _coach_persist(db, "meal_suggest", payload_hash, result)
+
+
+class IdentifyIn(BaseModel):
+    """One photo, inline.
+
+    Base64 rather than multipart because the payload is small, both
+    clients already speak JSON to this API, and it keeps the auth and
+    error handling identical to every other endpoint here.
+    """
+
+    image_base64: str = Field(min_length=16)
+    media_type: str = Field(default="image/jpeg", max_length=40)
+
+
+@router.post("/meals/identify")
+async def meals_identify_endpoint(
+    body: IdentifyIn,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Identify foods in a photo and match them to the catalog.
+
+    MEAL-7. Three properties this endpoint guarantees, all of which are
+    easy to lose later:
+
+    **Nothing is added.** It returns candidates. The client confirms and
+    then calls the ordinary quick-add. Vision misidentifies confidently,
+    and a pantry that grows items the user did not put there stops being
+    trustworthy — which makes the shopping list built on it worse than
+    useless.
+
+    **The photo is not stored.** It is forwarded once and discarded.
+    There is no image column, nothing written to `ai_summaries`, and no
+    log line carrying it. This is also why the result is NOT cached by
+    payload hash the way every other AI surface is: caching would mean
+    keeping a fingerprint of the user's photos, and every photo differs
+    anyway so the cache would never hit.
+
+    **Confidence survives to the client.** A guess and a certainty must
+    not render identically to someone accepting in bulk.
+    """
+    import base64
+
+    cfg = await _get_config(db)
+
+    media_type = (body.media_type or "").strip().lower()
+    if media_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            400,
+            f"unsupported image type {media_type!r} — "
+            f"use one of {', '.join(sorted(ALLOWED_IMAGE_TYPES))}",
+        )
+
+    # Decode to check the real size. Trusting the base64 length would let
+    # a padded string through, and the size limit exists to stop a
+    # multi-megabyte upload being billed before anyone notices.
+    raw = (body.image_base64 or "").strip()
+    if "," in raw[:64] and raw[:5] == "data:":
+        raw = raw.split(",", 1)[1]
+    try:
+        decoded = base64.b64decode(raw, validate=True)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(400, "image_base64 is not valid base64") from None
+    if not decoded:
+        raise HTTPException(400, "image is empty")
+    if len(decoded) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            413,
+            f"image is {len(decoded) // 1024} KB; the limit is "
+            f"{MAX_IMAGE_BYTES // 1024} KB. Downscale it before sending — "
+            "a smaller photo identifies just as well.",
+        )
+
+    await _check_and_bump_quota(db, cfg)
+    result = await identify_foods(db, cfg, raw, media_type)
+    cfg.calls_today += 1
+    await db.commit()
+
+    import json as _json
+    try:
+        analysis = _json.loads(result.content)
+    except Exception:  # noqa: BLE001
+        analysis = {"items": [], "notes": ["Could not read the response."]}
+
+    # Resolve each name to a real catalog food, so the client can offer a
+    # one-tap add rather than making the user search for what the photo
+    # already told it. An unresolved name is still returned, flagged, and
+    # can be added as free text.
+    from ..analytics import foods as food_lib
+
+    items: list[dict[str, Any]] = []
+    for item in analysis.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("name") or "").strip()
+        if not name:
+            continue
+        hits = food_lib.search(name, ingredients_only=True, limit=1)
+        if not hits:
+            hits = food_lib.search(name, limit=1)
+        food_id = concept = food_name = None
+        if hits:
+            row = (await db.execute(
+                select(models.Food).where(models.Food.slug == hits[0]["slug"])
+            )).scalar_one_or_none()
+            if row is not None:
+                food_id, concept, food_name = row.id, row.concept, row.name
+        items.append({
+            "name": name,
+            "confidence": item.get("confidence") or "low",
+            "detail": item.get("detail") or None,
+            "food_id": food_id,
+            "concept": concept,
+            "food_name": food_name,
+            # True when the catalog had nothing. The client offers it as
+            # a typed pantry label instead of dropping it.
+            "unmatched": food_id is None,
+        })
+
+    return {
+        "items": items,
+        "notes": analysis.get("notes") or [],
+        "model": result.model,
+    }
 
 
 @router.get("/meals/suggest/latest")

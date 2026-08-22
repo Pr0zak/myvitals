@@ -432,3 +432,112 @@ def test_the_brand_check_can_actually_fail():
     }
     assert len(owners) > 20
     assert any("mcdonald" in o for o in owners)
+
+
+def test_every_model_default_actually_runs():
+    """Execute every Python-side column default in the whole models module.
+
+    `Food.created_at` shipped as
+    `default=lambda: datetime.now(timezone.utc)` while `models.py` imports
+    only `date` and `datetime` — so every INSERT raised
+    `NameError: name 'timezone' is not defined`. The entire suite passed,
+    because no test executed an insert against a real database, and the
+    startup seeder logged-and-swallowed the failure. The tables were
+    created and stayed empty.
+
+    A default is a callable nobody calls until production does. This
+    calls all of them.
+
+    Note this guard is currently DORMANT: the fix removed the only
+    callable default in the module, so it iterates zero columns. It is
+    kept because it arms itself automatically the moment anyone adds
+    one back. `test_model_lambdas_only_use_names_that_resolve` is the
+    test that actively pins the regression.
+    """
+    from myvitals.db.models import Base
+
+    failures = []
+    for table in Base.metadata.tables.values():
+        for col in table.columns:
+            d = col.default
+            if d is None or not getattr(d, "is_callable", False):
+                continue
+            try:
+                d.arg(None)
+            except Exception as e:  # noqa: BLE001
+                failures.append(f"{table.name}.{col.name}: {type(e).__name__}: {e}")
+    assert failures == [], "column defaults that raise:\n  " + "\n  ".join(failures)
+
+
+def test_meal_tables_rely_on_a_server_default_for_timestamps():
+    """The non-null timestamp columns have no Python default, so the
+    INSERT must be able to omit them. Migration 0056 supplies now()."""
+    mig = (pathlib.Path(__file__).resolve().parents[1]
+           / "alembic" / "versions" / "0056_meals.py").read_text()
+    assert mig.count('server_default=sa.text("now()")') >= 3
+
+    from myvitals.db.models import Food, PantryItem
+    for model, col in ((Food, "created_at"), (PantryItem, "updated_at")):
+        assert model.__table__.columns[col].default is None, (
+            f"{model.__name__}.{col} has a Python default; the seeder omits "
+            f"the column and relies on the server default"
+        )
+
+
+def test_model_lambdas_only_use_names_that_resolve():
+    """Every name inside a lambda in `models.py` must be importable there.
+
+    This is the fifth instance this session of a name that parses fine and
+    does not exist at runtime — after `Activity.id`, `models.Concept2Creds`,
+    a missing `select` import, and a router prefix typo. The pattern is
+    always the same: the reference sits on a path no test executes, so the
+    whole suite stays green and production raises.
+
+    A lambda body is the worst case, because it is not evaluated at import
+    time either — the module loads cleanly and fails on first use.
+    """
+    import ast
+    import builtins
+    from myvitals.db import models as models_mod
+
+    src = pathlib.Path(models_mod.__file__).read_text()
+    tree = ast.parse(src)
+
+    module_names = set(vars(models_mod)) | set(dir(builtins))
+
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Lambda):
+            continue
+        bound = {a.arg for a in node.args.args}
+        bound |= {a.arg for a in node.args.kwonlyargs}
+        if node.args.vararg:
+            bound.add(node.args.vararg.arg)
+        if node.args.kwarg:
+            bound.add(node.args.kwarg.arg)
+        for sub in ast.walk(node.body):
+            if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
+                if sub.id not in bound and sub.id not in module_names:
+                    offenders.append(f"line {sub.lineno}: {sub.id}")
+
+    assert offenders == [], (
+        "these names are used in a models.py lambda but are not importable "
+        "there, so the default raises NameError on first INSERT:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_the_lambda_name_check_can_actually_fail():
+    """Guards the guard, since the real check passes on a clean module."""
+    import ast
+    import builtins
+
+    tree = ast.parse("f = lambda: datetime.now(timezone.utc)\n")
+    module_names = {"datetime"} | set(dir(builtins))
+    found = [
+        n.id for node in ast.walk(tree) if isinstance(node, ast.Lambda)
+        for n in ast.walk(node.body)
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+        and n.id not in module_names
+    ]
+    assert found == ["timezone"]

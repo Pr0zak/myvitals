@@ -830,9 +830,12 @@ class Food(Base):
     #: Without this a recipe written in cups cannot be costed in grams,
     #: which is how recipes are actually written.
     unit_grams: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
-    )
+    # No Python-side default: migration 0056 sets server_default now(),
+    # which is how every other model in this file does it. A
+    # `default=lambda: datetime.now(timezone.utc)` here raised NameError
+    # on every INSERT, because this module imports `date` and `datetime`
+    # but not `timezone`.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Recipe(Base):
@@ -858,9 +861,12 @@ class Recipe(Base):
     archived: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False,
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
-    )
+    # No Python-side default: migration 0056 sets server_default now(),
+    # which is how every other model in this file does it. A
+    # `default=lambda: datetime.now(timezone.utc)` here raised NameError
+    # on every INSERT, because this module imports `date` and `datetime`
+    # but not `timezone`.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )
@@ -910,6 +916,4 @@ class PantryItem(Base):
     quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
     unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
     expires_on: Mapped[date | None] = mapped_column(Date, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

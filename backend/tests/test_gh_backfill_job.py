@@ -42,12 +42,25 @@ class TestTracked:
         assert "background.add_task" in src
         assert '"job_id": job_id' in src
 
+    def test_the_poll_url_matches_the_real_route(self):
+        """The imports router is mounted at /import, not /imports.
+
+        The first version returned /imports/jobs/{id}, which 404s — and
+        the test asserted that same wrong string, so it passed. Derive the
+        prefix from the router instead of writing it out twice.
+        """
+        from myvitals.api import imports as imports_api
+
+        prefix = imports_api.router.prefix
+        src = inspect.getsource(gh_api.backfill)
+        assert f'"{prefix}/jobs/' in src
+
     def test_it_reuses_the_existing_job_table(self):
         """A second progress mechanism beside import_jobs would be a
         second thing to keep correct, and the UI already polls that one."""
         src = inspect.getsource(gh_api.backfill)
         assert "_create_job" in src
-        assert '"/imports/jobs/' in src
+        assert '"/import/jobs/' in src
 
     def test_the_worker_uses_its_own_session(self):
         """A background task outlives the request, so the injected session

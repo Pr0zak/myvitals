@@ -775,7 +775,7 @@ export const api = {
     id: number; kind: string; status: string;
     counts: Record<string, number> | null; error: string | null;
   }> {
-    const { data } = await http.get(`/imports/jobs/${id}`);
+    const { data } = await http.get(`/import/jobs/${id}`);
     return data;
   },
 

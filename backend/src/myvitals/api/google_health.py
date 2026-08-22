@@ -362,7 +362,7 @@ async def backfill(
         "since": body.since.isoformat(),
         "until": body.until.isoformat(),
         "windows": -(-span // _BACKFILL_WINDOW_D),
-        "poll": f"/imports/jobs/{job_id}",
+        "poll": f"/import/jobs/{job_id}",
     }
 
 

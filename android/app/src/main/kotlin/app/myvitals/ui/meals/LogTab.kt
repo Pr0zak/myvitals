@@ -435,18 +435,14 @@ private fun LogEntryDialog(
                         }
                     }
                     item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = qty, onValueChange = { qty = it },
-                                label = { Text("qty") }, singleLine = true,
-                                modifier = Modifier.weight(1f),
-                            )
-                            OutlinedTextField(
-                                value = unit, onValueChange = { unit = it },
-                                label = { Text("unit") }, singleLine = true,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
+                        QuantityPicker(
+                            food = food,
+                            quantity = qty,
+                            unit = unit,
+                            onQuantityChange = { qty = it },
+                            onUnitChange = { unit = it },
+                            label = "How much?",
+                        )
                     }
                 } else {
                     item {

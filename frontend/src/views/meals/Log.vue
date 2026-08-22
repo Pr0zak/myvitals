@@ -23,6 +23,7 @@ import Card from "@/components/Card.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import FoodPicker from "@/components/FoodPicker.vue";
 import FatAssessment from "@/components/FatAssessment.vue";
+import QuantityPicker from "@/components/QuantityPicker.vue";
 import {
   Plus, Trash2, ChevronLeft, ChevronRight, Check, Info,
 } from "lucide-vue-next";
@@ -299,10 +300,12 @@ const rangeLabel = computed(() => {
           <option v-for="r in recipes" :key="r.id" :value="r.id">{{ r.name }}</option>
         </select>
 
-        <template v-if="draftFood">
-          <input v-model="draftQty" type="number" step="any" min="0" placeholder="qty" />
-          <input v-model="draftUnit" type="text" placeholder="unit" />
-        </template>
+        <QuantityPicker
+          v-if="draftFood"
+          v-model:quantity="draftQty"
+          v-model:unit="draftUnit"
+          :food="draftFood"
+        />
         <input
           v-else-if="draftRecipe !== ''"
           v-model="draftServings"

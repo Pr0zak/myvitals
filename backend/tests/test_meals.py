@@ -609,3 +609,86 @@ def test_pantry_picker_defaults_to_ingredients_on_both_surfaces():
              / "MealsScreen.kt").read_text()
     assert "var ingredientsOnly by remember { mutableStateOf(true) }" in phone
     assert "ingredientsOnly = ingredientsOnly" in phone
+
+
+# ------------------------------------------ the food knows its own units
+#
+# Reported from live use, immediately after the search fix: having found
+# raw chicken breast, there was no way to know what to enter for quantity
+# and unit. The food carries {oz: 28.25, package: 926, piece: 272} from
+# USDA — "1 piece" is one breast — but the UI showed a blank box, so the
+# user had to guess at a word the app already knew.
+
+
+def test_staple_ingredients_carry_a_countable_measure():
+    """A pantry is filled in pieces and packages, not grams. If these
+    disappear from the extract, the pickers go back to guesswork."""
+    for name_part, wanted in (
+        ("breast, skinless, boneless, meat only, raw", "piece"),
+        ("Butter, salted", "stick"),
+        ("Spinach, raw", "bunch"),
+    ):
+        hit = next(
+            (r for r in F.catalog() if name_part in r["name"]), None,
+        )
+        assert hit is not None, f"missing catalog entry for {name_part!r}"
+        units = {k.lower() for k in (hit.get("unit_grams") or {})}
+        assert wanted in units, f"{hit['name']!r} lost its {wanted!r} measure"
+
+
+def test_one_chicken_breast_is_a_plausible_weight():
+    """Guards the portion extractor: `gramWeight` is the weight of
+    `amount` units, not of one, and reading it directly used to double
+    every quantity."""
+    hit = next(
+        r for r in F.catalog()
+        if "breast, skinless, boneless, meat only, raw" in r["name"]
+    )
+    piece = hit["unit_grams"]["piece"]
+    assert 150 <= piece <= 400, f"one chicken breast reported as {piece} g"
+
+
+def test_a_piece_of_chicken_costs_sensibly():
+    hit = next(
+        r for r in F.catalog()
+        if "breast, skinless, boneless, meat only, raw" in r["name"]
+    )
+    grams = F.to_grams(1, "piece", hit)
+    n = F.nutrition_for(hit, grams)
+    # ~272 g of raw breast: roughly 325 kcal and 7 g fat.
+    assert 250 <= n["kcal"] <= 450
+    assert 4 <= n["fat_g"] <= 12
+
+
+def test_quantity_pickers_exist_on_both_surfaces():
+    """The ranking fix made the food findable; this made it enterable.
+    Both clients offer the food's own measures rather than a blank box."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    web = (root / "frontend" / "src" / "components" / "QuantityPicker.vue")
+    phone = (root / "android" / "app" / "src" / "main" / "kotlin" / "app"
+             / "myvitals" / "ui" / "meals" / "QuantityPicker.kt")
+    assert web.exists() and phone.exists()
+    for f in (web, phone):
+        src = f.read_text()
+        assert "unit_grams" in src or "unitGrams" in src
+
+
+def test_quantity_pickers_offer_no_generic_volume_unit():
+    """A cup of flour and a cup of honey differ by more than a factor of
+    two, so a generic "cup" would be a wrong answer dressed as a
+    convenience. Volume must come from the food's own table or not at
+    all."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    for f in (
+        root / "frontend" / "src" / "components" / "QuantityPicker.vue",
+        root / "android" / "app" / "src" / "main" / "kotlin" / "app"
+        / "myvitals" / "ui" / "meals" / "QuantityPicker.kt",
+    ):
+        src = f.read_text()
+        # A fixed window rather than a delimiter: the TS list closes with
+        # "]" and the Kotlin one with ")", and hard-coding either makes
+        # the test throw on the other file instead of failing usefully.
+        start = src.index("GENERIC")
+        generic = src[start:start + 400]
+        for volume in ('"cup"', '"tbsp"', '"tsp"', '"ml"'):
+            assert volume not in generic, f"{f.name} offers a generic {volume}"

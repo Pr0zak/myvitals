@@ -16,6 +16,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import Card from "@/components/Card.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import FoodPicker from "@/components/FoodPicker.vue";
+import QuantityPicker from "@/components/QuantityPicker.vue";
 import { Plus, Trash2, AlertTriangle } from "lucide-vue-next";
 import { meals, type Food, type PantryItem } from "@/api/client";
 
@@ -163,13 +164,13 @@ function expiryClass(i: PantryItem): string {
       />
 
       <div class="fields">
-        <label>
-          <span>Quantity</span>
-          <input v-model="draftQty" type="number" step="any" min="0" placeholder="optional" />
-        </label>
-        <label>
-          <span>Unit</span>
-          <input v-model="draftUnit" type="text" placeholder="g / cup / can" />
+        <label class="wide">
+          <span>How much? (optional — "we have some" is a useful fact too)</span>
+          <QuantityPicker
+            v-model:quantity="draftQty"
+            v-model:unit="draftUnit"
+            :food="draftFood"
+          />
         </label>
         <label>
           <span>Use by</span>
@@ -260,6 +261,7 @@ button.ghost { background: transparent; color: var(--muted-2); }
   display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 0.6rem; margin-top: 0.7rem;
 }
+.fields .wide { grid-column: 1 / -1; }
 .fields label { display: flex; flex-direction: column; gap: 0.25rem; }
 .fields span { font-size: 0.75rem; color: var(--muted-2); }
 .actions { display: flex; gap: 0.5rem; margin-top: 0.8rem; }

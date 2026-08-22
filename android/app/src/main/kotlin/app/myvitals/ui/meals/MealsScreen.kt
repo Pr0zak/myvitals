@@ -519,29 +519,46 @@ private fun RecipeEditor(
                 item { SectionLabel("Ingredients") }
                 items(lines.size) { idx ->
                     val line = lines[idx]
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        OutlinedTextField(
-                            value = line.quantity,
-                            onValueChange = { lines[idx] = line.copy(quantity = it) },
-                            label = { Text("qty") }, singleLine = true,
-                            modifier = Modifier.weight(0.9f),
-                        )
-                        OutlinedTextField(
-                            value = line.unit,
-                            onValueChange = { lines[idx] = line.copy(unit = it) },
-                            label = { Text("unit") }, singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            line.foodName ?: line.rawText ?: "—",
-                            color = NeonMV.Ink, fontSize = 12.sp,
-                            modifier = Modifier.weight(1.6f),
-                        )
-                        IconButton(onClick = { lines.removeAt(idx) }) {
-                            Icon(Icons.Filled.Delete, "Remove", tint = NeonMV.Muted)
+                    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                line.foodName ?: line.rawText ?: "—",
+                                color = NeonMV.Ink, fontSize = 12.sp,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(onClick = { lines.removeAt(idx) }) {
+                                Icon(Icons.Filled.Delete, "Remove", tint = NeonMV.Muted)
+                            }
+                        }
+                        if (line.foodId != null) {
+                            QuantityPicker(
+                                food = null,
+                                quantity = line.quantity,
+                                unit = line.unit,
+                                onQuantityChange = {
+                                    lines[idx] = line.copy(quantity = it)
+                                },
+                                onUnitChange = { lines[idx] = line.copy(unit = it) },
+                                label = "How much?",
+                                ownUnits = line.unitGrams,
+                            )
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedTextField(
+                                    value = line.quantity,
+                                    onValueChange = {
+                                        lines[idx] = line.copy(quantity = it)
+                                    },
+                                    label = { Text("qty") }, singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                OutlinedTextField(
+                                    value = line.unit,
+                                    onValueChange = { lines[idx] = line.copy(unit = it) },
+                                    label = { Text("unit") }, singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
                     }
                 }
@@ -550,7 +567,11 @@ private fun RecipeEditor(
                         settings = settings,
                         ingredientsOnly = true,
                         placeholder = "Add an ingredient…",
-                        onPick = { f -> lines.add(DraftLine(f.id, f.name, null, "", "")) },
+                        onPick = { f ->
+                            lines.add(
+                                DraftLine(f.id, f.name, null, "", "", f.unitGrams),
+                            )
+                        },
                     )
                 }
                 item {
@@ -614,6 +635,9 @@ private data class DraftLine(
     val rawText: String?,
     val quantity: String,
     val unit: String,
+    /** The food's own measures, so the unit picker can offer them. Null
+     *  for a hand-typed line, which falls back to free text. */
+    val unitGrams: Map<String, Double>? = null,
 )
 
 // ─────────────────────────────────────────────────────────────── pantry
@@ -813,18 +837,17 @@ private fun PantryAdder(
                     }
                 }
                 item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = qty, onValueChange = { qty = it },
-                            label = { Text("Qty") }, singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                        OutlinedTextField(
-                            value = unit, onValueChange = { unit = it },
-                            label = { Text("Unit") }, singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
+                    // Optional on purpose: "we have olive oil" is a useful
+                    // fact without a number, and demanding one is the
+                    // friction that stops a pantry being kept up to date.
+                    QuantityPicker(
+                        food = picked,
+                        quantity = qty,
+                        unit = unit,
+                        onQuantityChange = { qty = it },
+                        onUnitChange = { unit = it },
+                        label = "How much? (optional)",
+                    )
                 }
                 item {
                     OutlinedTextField(

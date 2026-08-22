@@ -16,6 +16,7 @@ import Card from "@/components/Card.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import FoodPicker from "@/components/FoodPicker.vue";
 import FatAssessment from "@/components/FatAssessment.vue";
+import QuantityPicker from "@/components/QuantityPicker.vue";
 import {
   Plus, Trash2, ChevronDown, ChevronRight, AlertCircle, Pencil, X as XIcon,
 } from "lucide-vue-next";
@@ -38,8 +39,17 @@ const draftServings = ref(1);
 const draftPrep = ref("");
 const draftCook = ref("");
 const draftMethod = ref("");
+/** Draft lines carry the food's own measures so the unit picker can
+ *  offer them. Without this the user is guessing at a unit the app
+ *  already knows — "1 piece" is one chicken breast, but a blank box
+ *  never says so. */
 const draftLines = ref<
-  Array<IngredientInput & { food_name?: string | null }>
+  Array<
+    IngredientInput & {
+      food_name?: string | null;
+      unit_grams?: Record<string, number> | null;
+    }
+  >
 >([]);
 
 async function load() {
@@ -78,7 +88,21 @@ function startEdit(r: Recipe) {
     raw_text: i.raw_text,
     quantity: i.quantity,
     unit: i.unit,
+    unit_grams: null,
   }));
+  // Re-fetch each line's food so its own measures are available for
+  // editing. Failures are ignored: the line still edits, it just falls
+  // back to the by-weight units.
+  r.ingredients.forEach(async (i, idx) => {
+    if (i.food_id == null) return;
+    try {
+      const f = await meals.getFood(i.food_id);
+      const line = draftLines.value[idx];
+      if (line) line.unit_grams = f.unit_grams;
+    } catch {
+      /* leave it null */
+    }
+  });
 }
 
 function addLine(f: Food) {
@@ -88,12 +112,14 @@ function addLine(f: Food) {
     quantity: null,
     unit: null,
     raw_text: null,
+    unit_grams: f.unit_grams,
   });
 }
 
 function addFreeLine() {
   draftLines.value.push({
-    food_id: null, food_name: null, quantity: null, unit: null, raw_text: "",
+    food_id: null, food_name: null, quantity: null, unit: null,
+    raw_text: "", unit_grams: null,
   });
 }
 
@@ -217,23 +243,33 @@ function scaled(r: Recipe, v: number | null | undefined): number | null {
       <h3 class="sub">Ingredients</h3>
       <ul v-if="draftLines.length" class="draft-lines">
         <li v-for="(l, idx) in draftLines" :key="idx">
-          <input
-            v-model.number="l.quantity"
-            class="qty-in"
-            type="number"
-            step="any"
-            min="0"
-            placeholder="qty"
-          />
-          <input v-model="l.unit" class="unit-in" type="text" placeholder="unit" />
-          <input
-            v-if="l.food_id == null"
-            v-model="l.raw_text"
-            class="free-in"
-            type="text"
-            placeholder="ingredient"
-          />
-          <span v-else class="line-name">{{ l.food_name }}</span>
+          <template v-if="l.food_id == null">
+            <input
+              v-model.number="l.quantity"
+              class="qty-in"
+              type="number"
+              step="any"
+              min="0"
+              placeholder="qty"
+            />
+            <input v-model="l.unit" class="unit-in" type="text" placeholder="unit" />
+            <input
+              v-model="l.raw_text"
+              class="free-in"
+              type="text"
+              placeholder="ingredient"
+            />
+          </template>
+          <template v-else>
+            <QuantityPicker
+              :quantity="l.quantity == null ? '' : String(l.quantity)"
+              :unit="l.unit ?? ''"
+              :food="({ unit_grams: l.unit_grams ?? null } as Food)"
+              @update:quantity="(v) => (l.quantity = v === '' ? null : Number(v))"
+              @update:unit="(v) => (l.unit = v || null)"
+            />
+            <span class="line-name">{{ l.food_name }}</span>
+          </template>
           <button class="icon-btn" title="Remove" @click="dropLine(idx)">
             <XIcon :size="14" />
           </button>

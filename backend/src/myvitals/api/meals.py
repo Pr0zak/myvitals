@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..analytics import foods as food_lib
 from ..analytics import nutrition as nutri
 from ..analytics import canmake as cm
+from ..analytics import common_pantry as common
 from ..analytics import shopping as shop
 from ..analytics import staples as stap
 from ..auth import require_any
@@ -339,6 +340,30 @@ class CanMakeOut(BaseModel):
     #: What was assumed present, so an unexpected "yes" is explicable.
     staples_assumed: list[str] = Field(default_factory=list)
     pantry_concepts: int = 0
+
+
+class CommonItemOut(BaseModel):
+    label: str
+    category: str
+    food_id: int | None = None
+    concept: str | None = None
+    #: What USDA actually calls it. Shown small, so the one-tap label
+    #: stays scannable while the precision behind it is visible.
+    food_name: str | None = None
+    #: Already in the pantry — the chip renders as done rather than
+    #: adding a duplicate.
+    in_pantry: bool = False
+
+
+class QuickAddIn(BaseModel):
+    """Food ids to drop into the pantry in one go.
+
+    No quantities. A pantry is a "do I have this" list, which is the
+    whole reason SuperCook's boolean pantry gets kept up to date and a
+    quantity-demanding one does not.
+    """
+
+    food_ids: list[int] = Field(default_factory=list, max_length=200)
 
 
 class StaplesIn(BaseModel):
@@ -2015,6 +2040,88 @@ async def can_make(db: AsyncSession = Depends(get_session)):
         staples_assumed=sorted(staples),
         pantry_concepts=len(pantry),
     )
+
+
+@router.get("/common-ingredients", response_model=list[CommonItemOut])
+async def common_ingredients(db: AsyncSession = Depends(get_session)):
+    """Everyday staples, one tap each.
+
+    Filling a pantry by searching USDA is miserable, and typing plain
+    names only appears to work — measured against this catalog, nine of
+    twenty everyday staples match a concept when typed and the rest fail
+    silently. This is the curated list every app in the category ships
+    instead.
+
+    Each entry resolves its search term through the SAME ranked search
+    the pickers use, so an entry that stops resolving disappears rather
+    than pointing at the wrong food.
+    """
+    have = await _pantry_concepts(db)
+
+    slugs: dict[str, tuple[str, str]] = {}
+    for cat, label, term in common.flat():
+        hits = food_lib.search(term, ingredients_only=True, limit=1)
+        if not hits:
+            hits = food_lib.search(term, limit=1)
+        if hits:
+            slugs[hits[0]["slug"]] = (cat, label)
+
+    rows: dict[str, models.Food] = {}
+    if slugs:
+        for f in (await db.execute(
+            select(models.Food).where(models.Food.slug.in_(list(slugs)))
+        )).scalars().all():
+            rows[f.slug] = f
+
+    out: list[CommonItemOut] = []
+    for slug, (cat, label) in slugs.items():
+        f = rows.get(slug)
+        if f is None:
+            continue
+        out.append(CommonItemOut(
+            label=label, category=cat, food_id=f.id, concept=f.concept,
+            food_name=f.name,
+            in_pantry=bool(f.concept and f.concept in have),
+        ))
+    return out
+
+
+@router.post("/pantry/quick-add", response_model=dict)
+async def quick_add_pantry(
+    body: QuickAddIn, db: AsyncSession = Depends(get_session),
+):
+    """Add several foods to the pantry at once, without quantities.
+
+    Skips anything already stocked under the same concept rather than
+    creating a duplicate — tapping a chip twice should be harmless.
+    """
+    if not body.food_ids:
+        return {"added": 0, "skipped": 0}
+
+    foods = {
+        f.id: f for f in (await db.execute(
+            select(models.Food).where(models.Food.id.in_(body.food_ids))
+        )).scalars().all()
+    }
+    have = await _pantry_concepts(db)
+
+    added = skipped = 0
+    now = datetime.now(timezone.utc)
+    for fid in body.food_ids:
+        f = foods.get(fid)
+        if f is None:
+            skipped += 1
+            continue
+        if f.concept and f.concept in have:
+            skipped += 1
+            continue
+        db.add(models.PantryItem(food_id=f.id, updated_at=now))
+        if f.concept:
+            have.add(f.concept)
+        added += 1
+
+    await db.commit()
+    return {"added": added, "skipped": skipped}
 
 
 @router.get("/staples", response_model=StaplesOut)

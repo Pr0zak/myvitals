@@ -18,7 +18,7 @@ import EmptyState from "@/components/EmptyState.vue";
 import FoodPicker from "@/components/FoodPicker.vue";
 import QuantityPicker from "@/components/QuantityPicker.vue";
 import { Plus, Trash2, AlertTriangle } from "lucide-vue-next";
-import { meals, type Food, type PantryItem } from "@/api/client";
+import { meals, type CommonItem, type Food, type PantryItem } from "@/api/client";
 
 const items = ref<PantryItem[]>([]);
 const loading = ref(true);
@@ -30,6 +30,44 @@ const adding = ref(false);
  *  hence the toggle — but leading with it buries plain chicken breast
  *  under deli slices and restaurant sandwiches. */
 const ingredientsOnly = ref(true);
+
+/** One-tap staples. Filling a pantry by searching USDA is miserable, and
+ *  typing plain names only appears to work — nine of twenty everyday
+ *  staples match a concept when typed and the rest fail silently. */
+const common = ref<CommonItem[]>([]);
+const showCommon = ref(true);
+const quickBusy = ref(false);
+
+const commonByCategory = computed(() => {
+  const out: Record<string, CommonItem[]> = {};
+  for (const c of common.value) (out[c.category] ??= []).push(c);
+  return out;
+});
+
+async function loadCommon() {
+  try {
+    common.value = await meals.commonIngredients();
+  } catch {
+    // Decoration on this page — a failure must not stop the pantry working.
+    common.value = [];
+  }
+}
+
+async function quickAdd(item: CommonItem) {
+  if (!item.food_id || item.in_pantry || quickBusy.value) return;
+  quickBusy.value = true;
+  // Optimistic: tapping a grid of chips should feel instant.
+  item.in_pantry = true;
+  try {
+    await meals.quickAddPantry([item.food_id]);
+    await load();
+  } catch (e) {
+    item.in_pantry = false;
+    error.value = e instanceof Error ? e.message : "could not add";
+  } finally {
+    quickBusy.value = false;
+  }
+}
 const draftFood = ref<Food | null>(null);
 const draftLabel = ref("");
 const draftQty = ref("");
@@ -48,7 +86,10 @@ async function load() {
     loading.value = false;
   }
 }
-onMounted(load);
+onMounted(async () => {
+  await load();
+  await loadCommon();
+});
 
 const expiring = computed(() =>
   items.value.filter((i) => i.days_to_expiry != null && i.days_to_expiry <= 3),
@@ -199,6 +240,38 @@ function expiryClass(i: PantryItem): string {
 
     <p v-if="error" class="err">{{ error }}</p>
 
+    <Card v-if="common.length" flat>
+      <div class="common-head">
+        <strong>Common staples</strong>
+        <button class="link" @click="showCommon = !showCommon">
+          {{ showCommon ? "hide" : "show" }}
+        </button>
+      </div>
+      <p v-if="showCommon" class="common-sub">
+        Tap to add. No amounts needed — the pantry only has to know
+        whether you have something.
+      </p>
+      <div v-if="showCommon">
+        <div v-for="(items, cat) in commonByCategory" :key="cat" class="cat-block">
+          <span class="cat-label">{{ cat }}</span>
+          <div class="chips">
+            <button
+              v-for="i in items"
+              :key="i.label"
+              class="chip"
+              :class="{ have: i.in_pantry }"
+              :disabled="i.in_pantry"
+              :title="i.food_name ?? ''"
+              @click="quickAdd(i)"
+            >
+              {{ i.label }}
+              <span v-if="i.in_pantry" class="tick">✓</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Card>
+
     <Card v-if="expiring.length" flat class="alert">
       <div class="alert-head">
         <AlertTriangle :size="15" />
@@ -278,6 +351,23 @@ button.ghost { background: transparent; color: var(--muted-2); }
 .actions { display: flex; gap: 0.5rem; margin-top: 0.8rem; }
 .alert-head { display: flex; align-items: center; gap: 0.4rem; color: #fbbf24; }
 .alert-body { margin: 0.35rem 0 0; font-size: 0.85rem; color: var(--muted-2); }
+.common-head { display: flex; align-items: baseline; justify-content: space-between; }
+.common-sub { margin: 0.3rem 0 0.6rem; font-size: 0.78rem; color: var(--muted-2); }
+.cat-block { margin-bottom: 0.6rem; }
+.cat-label {
+  display: block; font-size: 0.68rem; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--muted-2); margin-bottom: 0.25rem;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.chip {
+  border: 1px solid var(--line); background: var(--bg-1); color: var(--fg);
+  border-radius: 999px; padding: 0.24rem 0.6rem; font: inherit;
+  font-size: 0.78rem; cursor: pointer;
+}
+.chip:hover:not(:disabled) { border-color: var(--accent, #38bdf8); }
+.chip.have { color: #22c55e; border-color: #22c55e55; cursor: default; }
+.tick { font-size: 0.7rem; }
+
 .list { list-style: none; margin: 0; padding: 0; }
 .list li {
   display: flex; align-items: center; justify-content: space-between;

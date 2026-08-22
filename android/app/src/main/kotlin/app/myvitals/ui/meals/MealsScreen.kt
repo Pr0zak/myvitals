@@ -2,6 +2,8 @@ package app.myvitals.ui.meals
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +51,8 @@ import app.myvitals.data.JsonCache
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendApi
 import app.myvitals.sync.BackendClient
+import app.myvitals.sync.CommonItemOut
+import app.myvitals.sync.QuickAddIn
 import app.myvitals.sync.DietProfile
 import app.myvitals.sync.DietProfileIn
 import app.myvitals.sync.FatAssessment
@@ -137,6 +141,24 @@ fun MealsScreen(settings: SettingsRepository) {
             }
         }
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StapleChip(c: CommonItemOut, onClick: () -> Unit) {
+    Text(
+        c.label + if (c.inPantry) "  \u2713" else "",
+        color = if (c.inPantry) NeonMV.Lime else NeonMV.Ink,
+        fontSize = 12.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(NeonMV.CardHigh)
+            .then(
+                if (c.inPantry) Modifier
+                else Modifier.clickable(onClick = onClick),
+            )
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    )
 }
 
 @Composable
@@ -644,6 +666,7 @@ private data class DraftLine(
 
 // ─────────────────────────────────────────────────────────────── pantry
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PantryTab(settings: SettingsRepository) {
     val context = LocalContext.current
@@ -657,6 +680,10 @@ private fun PantryTab(settings: SettingsRepository) {
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var adding by remember { mutableStateOf(false) }
+    // One-tap staples. Typing plain names only appears to work — nine of
+    // twenty everyday staples match a concept and the rest fail silently.
+    var common by remember { mutableStateOf<List<CommonItemOut>>(emptyList()) }
+    var showCommon by remember { mutableStateOf(true) }
 
     suspend fun fetch() {
         if (!settings.isConfigured()) {
@@ -668,6 +695,9 @@ private fun PantryTab(settings: SettingsRepository) {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val rows = withContext(Dispatchers.IO) { api.mealsPantry() }
             items = rows
+            runCatching {
+                common = withContext(Dispatchers.IO) { api.mealsCommonIngredients() }
+            }
             error = null
             JsonCache.write(context, CACHE_PANTRY, type, rows)
         } catch (e: Exception) {
@@ -708,6 +738,68 @@ private fun PantryTab(settings: SettingsRepository) {
                         "your recipes against.",
                     color = NeonMV.Muted, fontSize = 11.sp, lineHeight = 16.sp,
                 )
+            }
+
+            if (common.isNotEmpty()) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Common staples", color = NeonMV.Ink, fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            if (showCommon) "hide" else "show",
+                            color = NeonMV.Cyan, fontSize = 11.sp,
+                            modifier = Modifier.clickable { showCommon = !showCommon },
+                        )
+                    }
+                }
+                if (showCommon) {
+                    item {
+                        Text(
+                            "Tap to add. No amounts needed — the pantry only has " +
+                                "to know whether you have something.",
+                            color = NeonMV.Muted, fontSize = 10.sp, lineHeight = 14.sp,
+                        )
+                    }
+                    common.groupBy { it.category }.forEach { (cat, entries) ->
+                        item {
+                            Column(Modifier.padding(top = 6.dp)) {
+                                Text(
+                                    cat.uppercase(), color = NeonMV.Muted,
+                                    fontSize = 9.sp,
+                                    modifier = Modifier.padding(bottom = 3.dp),
+                                )
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                                ) {
+                                    entries.forEach { c ->
+                                        StapleChip(c) {
+                                            scope.launch {
+                                                c.foodId?.let { fid ->
+                                                    runCatching {
+                                                        val api = BackendClient.create(
+                                                            settings.backendUrl,
+                                                            settings.bearerToken,
+                                                        )
+                                                        withContext(Dispatchers.IO) {
+                                                            api.mealsQuickAddPantry(
+                                                                QuickAddIn(listOf(fid)),
+                                                            )
+                                                        }
+                                                    }
+                                                    fetch()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             item {
                 Button(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) {

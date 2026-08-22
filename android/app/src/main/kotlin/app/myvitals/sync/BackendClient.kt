@@ -633,6 +633,12 @@ interface BackendApi {
 
     @GET("meals/can-make")
     suspend fun mealsCanMake(): CanMakeOut
+
+    @GET("meals/common-ingredients")
+    suspend fun mealsCommonIngredients(): List<CommonItemOut>
+
+    @POST("meals/pantry/quick-add")
+    suspend fun mealsQuickAddPantry(@Body body: QuickAddIn): Map<String, Int>
 }
 
 object BackendClient {

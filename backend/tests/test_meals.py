@@ -726,3 +726,79 @@ def test_pantry_and_foods_explain_what_they_are_for():
     assert "in the house" in pantry
     assert "reference catalog" in foods
     assert "does <strong>not</strong>" in foods or "does not" in foods
+
+
+# ------------------------------------------------ one-tap common staples
+#
+# Asked directly: "should I just name them and leave it as it is? would
+# that be good enough?". Measured against this catalog, no — typing plain
+# names works for nine of twenty everyday staples and fails SILENTLY for
+# the rest, because their concepts are "whole egg", "wheat flour",
+# "granulated sugar". A pantry item that looks right and never matches is
+# worse than one that is obviously missing.
+
+
+def test_typing_a_plain_name_is_not_reliable():
+    """The measurement behind the curated list. If this ever passes for
+    everything, the list has become unnecessary and can go."""
+    from myvitals.analytics.concepts import concept_for
+
+    concepts = {c for r in F.catalog() if (c := concept_for(r))}
+    typed = ["eggs", "flour", "sugar", "milk", "salt", "cheese", "bread"]
+    missing = [t for t in typed if t not in concepts]
+    assert missing, "plain names now all resolve; the curated list is redundant"
+
+
+def test_every_common_staple_resolves_to_a_real_food():
+    """Terms are resolved through the same ranked search the pickers use,
+    so a term that stops working must be caught here rather than silently
+    dropping a staple off the list."""
+    from myvitals.analytics.common_pantry import flat
+    from myvitals.analytics.concepts import concept_for
+
+    misses = []
+    for _cat, label, term in flat():
+        hits = F.search(term, ingredients_only=True, limit=1) or F.search(term, limit=1)
+        if not hits or not concept_for(hits[0]):
+            misses.append(label)
+    assert misses == [], f"staples that no longer resolve: {misses}"
+
+
+def test_honey_resolves_to_honey_not_a_dressing():
+    """Two bugs in one case. Honey is filed under "Sweets", which the
+    ingredients-only picker used to exclude entirely — so searching the
+    pantry for honey returned nothing. And the first search term chosen
+    for it resolved to honey-mustard DRESSING."""
+    from myvitals.analytics.common_pantry import flat
+    from myvitals.analytics.concepts import concept_for
+
+    _cat, _label, term = next(x for x in flat() if x[1] == "Honey")
+    hit = (F.search(term, ingredients_only=True, limit=1) or F.search(term, limit=1))[0]
+    assert concept_for(hit) == "honey", f"Honey resolved to {hit['name']!r}"
+
+
+def test_sweets_are_searchable_as_ingredients():
+    """Honey, sugar and syrup are things you cook with. Excluding the
+    whole category to keep candy bars out was the wrong trade."""
+    assert "Sweets" in F.INGREDIENT_CATEGORIES
+    assert F.search("honey", ingredients_only=True, limit=1)
+
+
+def test_deli_meat_is_still_excluded_from_the_ingredient_picker():
+    """Widening the ingredient categories once reintroduced the ORIGINAL
+    bug: adding "Sausages and Luncheon Meats" put deli chicken breast,
+    sliced fat-free chicken and rotisserie-seasoned chicken ahead of raw
+    chicken breast again."""
+    assert "Sausages and Luncheon Meats" not in F.INGREDIENT_CATEGORIES
+    top = F.search("chicken breast", ingredients_only=True, limit=1)[0]
+    assert top["category"] == "Poultry Products"
+    assert "raw" in top["name"].lower()
+
+
+def test_quick_add_asks_for_no_quantities():
+    """A pantry is a "do I have this" list. Demanding amounts is what
+    stops one being kept up to date — SuperCook's boolean pantry is the
+    precedent."""
+    from myvitals.api.meals import QuickAddIn
+
+    assert set(QuickAddIn.model_fields) == {"food_ids"}

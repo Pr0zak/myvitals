@@ -2230,3 +2230,26 @@ data class CanMakeOut(
     @Json(name = "staples_assumed") val staplesAssumed: List<String> = emptyList(),
     @Json(name = "pantry_concepts") val pantryConcepts: Int = 0,
 )
+
+
+/** An everyday staple offered as one tap (MEAL-6b).
+ *
+ * Filling a pantry by searching USDA is miserable, and typing plain names
+ * only appears to work — nine of twenty everyday staples match a concept
+ * when typed and the rest fail silently. `foodId` is resolved server-side
+ * through the same ranked search the pickers use.
+ */
+@JsonClass(generateAdapter = true)
+data class CommonItemOut(
+    val label: String = "",
+    val category: String = "",
+    @Json(name = "food_id") val foodId: Long? = null,
+    val concept: String? = null,
+    @Json(name = "food_name") val foodName: String? = null,
+    @Json(name = "in_pantry") val inPantry: Boolean = false,
+)
+
+@JsonClass(generateAdapter = true)
+data class QuickAddIn(
+    @Json(name = "food_ids") val foodIds: List<Long> = emptyList(),
+)

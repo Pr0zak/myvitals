@@ -2173,6 +2173,30 @@ export interface Staples {
 export const canMake = () =>
   http.get<CanMake>("/meals/can-make").then((r) => r.data);
 
+/** An everyday staple offered as one tap. `food_id` is resolved
+ *  server-side through the same ranked search the pickers use. */
+export interface CommonItem {
+  label: string;
+  category: string;
+  food_id: number | null;
+  concept: string | null;
+  food_name: string | null;
+  in_pantry: boolean;
+}
+
+export const commonIngredients = () =>
+  http.get<CommonItem[]>("/meals/common-ingredients").then((r) => r.data);
+
+/** Add several foods to the pantry at once, without quantities. A pantry
+ *  is a "do I have this" list — demanding amounts is what stops one
+ *  being kept up to date. */
+export const quickAddPantry = (foodIds: number[]) =>
+  http
+    .post<{ added: number; skipped: number }>("/meals/pantry/quick-add", {
+      food_ids: foodIds,
+    })
+    .then((r) => r.data);
+
 export const getStaples = () =>
   http.get<Staples>("/meals/staples").then((r) => r.data);
 
@@ -2304,6 +2328,8 @@ export const meals = {
   markLogDay,
   logStats,
   canMake,
+  commonIngredients,
+  quickAddPantry,
   getStaples,
   putStaples,
 };

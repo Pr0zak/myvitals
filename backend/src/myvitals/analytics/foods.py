@@ -38,6 +38,21 @@ INGREDIENT_CATEGORIES: frozenset[str] = frozenset({
     "Vegetables and Vegetable Products", "Fruits and Fruit Juices",
     "Nut and Seed Products", "Legumes and Legume Products",
     "Cereal Grains and Pasta", "Soups, Sauces, and Gravies",
+    # Added after a live report: searching the ingredients-only pantry
+    # picker for "honey" returned nothing, because USDA files honey —
+    # and sugar, syrup and cocoa — under "Sweets". They are unambiguously
+    # things you cook with, and excluding a whole category to keep candy
+    # bars out was the wrong trade: the search ranking already demotes
+    # prepared forms, and a picker that cannot find sugar is broken.
+    "Sweets",
+    # Bread, tortillas and breadcrumbs are ingredients in their own
+    # right, and this is where oats and breakfast grains live.
+    "Baked Products", "Breakfast Cereals",
+    # NOT "Sausages and Luncheon Meats". Adding it put deli chicken
+    # breast, sliced fat-free chicken and rotisserie-seasoned chicken
+    # ahead of raw chicken breast again — the exact regression this
+    # picker was fixed for. Bacon and sausage are reachable anyway:
+    # "Pork, cured, bacon" is filed under Pork Products.
 })
 
 #: Nutrient columns carried per 100 g. Every one is nullable downstream:

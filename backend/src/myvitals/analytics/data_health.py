@@ -215,13 +215,20 @@ async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
         return (await db.execute(select(model).limit(1))).scalar_one_or_none()
 
     gh = await one(models.GoogleHealthConfig)
+    # The OAuth tokens live in a SEPARATE table from the config — the
+    # config holds the client id/secret, the credentials hold the refresh
+    # token. Testing `refresh_token` on the config row silently reported a
+    # working, actively-polling integration as "not connected", which is
+    # the one thing this card must never get wrong: it would send you off
+    # to re-authorise something that is fine.
+    gh_creds = await one(models.GoogleHealthCredentials)
     cookie = await one(models.StravaCookieCreds)
     c2 = await one(models.Concept2Credentials)
 
     out = [
         # Google Health polls on a timer, so a day of silence is a fault.
         entry("google_health", "Google Health", gh,
-              configured=bool(gh and getattr(gh, "refresh_token", None)),
+              configured=bool(gh_creds and gh_creds.refresh_token),
               stale_after_h=24.0),
         # Strava is cookie-session and manual: the cookie expires and the
         # sync goes quiet. `last_error` is the signal that matters.

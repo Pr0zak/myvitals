@@ -221,3 +221,37 @@ class TestDataHealthModelNamesResolve:
             spec, now - timedelta(hours=spec.stale_after_h + 1), now,
         )
         assert status == "stale"
+
+
+class TestIntegrationConfiguredChecks:
+    """The `configured` flag must read the field that actually holds the
+    credential, which is not always on the row you would expect.
+
+    Google Health splits config (client id/secret) from credentials
+    (refresh token) across two tables. Reading `refresh_token` off the
+    config row reported a working, actively-polling integration as "not
+    connected" — the single worst error this card can make, because it
+    sends the user to re-authorise something that is fine.
+    """
+
+    def test_google_health_reads_the_credentials_table(self):
+        from myvitals.analytics import data_health
+
+        src = inspect.getsource(data_health.integration_health)
+        assert "GoogleHealthCredentials" in src
+        assert 'getattr(gh, "refresh_token"' not in src
+
+    def test_it_matches_how_the_status_endpoint_decides(self):
+        """Two places answering "is this connected?" must agree.
+
+        /google-health/status uses `bool(creds and creds.refresh_token)`.
+        If this card used a different test, Settings would contradict
+        itself on the same screen.
+        """
+        from myvitals.analytics import data_health
+        from myvitals.api import google_health as gh_api
+
+        status_src = inspect.getsource(gh_api.status)
+        health_src = inspect.getsource(data_health.integration_health)
+        assert "creds.refresh_token" in status_src
+        assert "gh_creds.refresh_token" in health_src

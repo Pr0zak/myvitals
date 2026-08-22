@@ -125,6 +125,54 @@ LEGACY_VITAL_NAMES: dict[str, str] = {
 }
 
 
+#: DOW-1: per-weekday step-goal overrides.
+#:
+#: Only the days that DIFFER need an entry; anything absent falls back to
+#: the single `steps_goal`. That keeps the existing scalar meaningful, so
+#: a user who never opens this feature is unaffected and one who sets only
+#: a weekend figure does not have to restate the other five.
+#:
+#: Keys are lowercase three-letter weekday names, which survive a JSON
+#: round-trip more legibly than integers and cannot be confused about
+#: whether the week starts on Sunday.
+WEEKDAY_KEYS: tuple[str, ...] = (
+    "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+)
+
+DEFAULT_STEPS_GOAL = 10_000
+
+
+def resolve_steps_goal(extra: dict[str, Any] | None, day: date) -> int:
+    """The step goal that applies on a given LOCAL day.
+
+    Deliberately drives the daily tile only. The AiGoal system keeps its
+    single `target_value`, because a long-run goal tracks progress toward
+    one number — "walk more this quarter" is not seven separate goals, and
+    making its target vary by weekday would make its progress percentage
+    mean something different on a Tuesday than a Sunday.
+    """
+    extra = extra or {}
+    base = extra.get("steps_goal")
+    try:
+        base_i = int(base) if base is not None else DEFAULT_STEPS_GOAL
+    except (TypeError, ValueError):
+        base_i = DEFAULT_STEPS_GOAL
+
+    sched = extra.get("steps_goal_schedule")
+    if not isinstance(sched, dict):
+        return base_i
+    raw = sched.get(WEEKDAY_KEYS[day.weekday()])
+    if raw is None:
+        return base_i
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        return base_i
+    # A zero or negative override would make the tile unreachable or
+    # always-met; treat it as "no override" rather than honouring it.
+    return v if v > 0 else base_i
+
+
 def _canonical_tile_key(raw: str) -> str | None:
     """Accept either a tile key or a legacy Vital enum name."""
     if raw in TILE_LABELS:
@@ -406,7 +454,8 @@ async def tile_stats(
     hrv_mu, hrv_sd, hrv_n, rhr_mu, rhr_sd, rhr_n = bl or (None,) * 6
 
     extra = (getattr(profile, "extra", None) or {}) if profile else {}
-    steps_goal = int(extra.get("steps_goal") or 10_000)
+    # DOW-1: a weekday override when one is set, else the single goal.
+    steps_goal = resolve_steps_goal(extra, day)
     sleep_target = float(getattr(profile, "sleep_target_h", None) or 8.0)
 
     tiles: list[dict[str, Any]] = []

@@ -245,7 +245,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     <span><b style="background:var(--sp)"></b> in progress &nbsp;0</span>
     <span><b style="background:var(--rule)"></b> not started &nbsp;0</span>
     <span>·</span>
-    <span>full menu: 40 options, 30 shipped, 2 declined</span>
+    <span>full menu: 40 options, 31 shipped, 3 declined</span>
   </div>
 </div>
 
@@ -746,8 +746,8 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     <div class="dbody">
       <div class="opts">
         <div class="opt"><div class="h">Derived sleep need, chronotype and decayed sleep debt</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Port the MCTQ approach: derive the target from your own free-day sleep instead of asking you to type 8. Deterministic, server-side, no new ingest, and it feeds the existing sleep coach and readiness score. Their constants are a reasonable starting point — 90-day window, ≥8 free days, clamp 6–10 h, decay λ=0.5 over 14 days.</p></div>
-        <div class="opt"><div class="h">Structured mood and symptom logging</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">myvitals folds all subjective logging into <code>annotations.payload</code> — a bare JSON blob with a <code>String(32)</code> type and a free-text note, no schema, no vocabulary, no per-type UI. <code>/analytics/correlate</code> already supports 22 metrics with ±30d lag, so structured mood and symptom rows are the highest-value missing correlation <em>input</em> the app could have, and they need no new hardware.</p></div>
-        <div class="opt"><div class="h">Day-of-week-varying goals</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div><p class="b">Their <code>weekly_goal_plans</code> supplies different targets per weekday with one plan active at a time. Every myvitals goal — steps, sleep, weight, fasting hours — is a single flat number. A training-day step goal that differs from a rest-day one is a real want on a 4-day split, and it is a pure-backend change.</p></div>
+        <div class="opt"><div class="h">Structured mood and symptom logging</div><div class="meta"><span class="chip c-cut">declined</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">myvitals folds all subjective logging into <code>annotations.payload</code> — a bare JSON blob with a <code>String(32)</code> type and a free-text note, no schema, no vocabulary, no per-type UI. <code>/analytics/correlate</code> already supports 22 metrics with ±30d lag, so structured mood and symptom rows are the highest-value missing correlation <em>input</em> the app could have, and they need no new hardware.</p></div>
+        <div class="opt"><div class="h">Day-of-week-varying goals</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-md">medium</span></div><p class="b">Their <code>weekly_goal_plans</code> supplies different targets per weekday with one plan active at a time. Every myvitals goal — steps, sleep, weight, fasting hours — is a single flat number. A training-day step goal that differs from a rest-day one is a real want on a 4-day split, and it is a pure-backend change.</p></div>
         <div class="opt"><div class="h">Progress photos</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-lo">low</span></div><p class="b">Date-keyed and typed front/side/back, under a configurable uploads root with a path-traversal guard. Body-metrics adjacent; needs a gitignored volume and must never touch the public repo.</p></div>
       </div>
     </div>

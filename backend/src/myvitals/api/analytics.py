@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics.jobs import compute_daily_summary
 from ..auth import require_query
+from ..config import settings
 from ..db import models
 from ..db.session import get_session
 
@@ -212,21 +213,61 @@ async def _activity_duration_per_day(
     return {row[0]: float(row[1]) for row in result.all()}
 
 
+def _analytics_local_tz() -> Any:
+    """The user's timezone. Annotations are timestamps; the correlations
+    they feed are per-DAY, so the conversion has to happen somewhere."""
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:  # noqa: BLE001
+        return timezone.utc
+
+
 async def _annotation_per_day(
-    db: AsyncSession, ann_type: str, payload_key: str | None, since: date, until: date,
+    db: AsyncSession, ann_type: str, payload_key: str | None,
+    since: date, until: date, *, agg: str = "sum",
 ) -> dict[date, float]:
-    """Per-day count or summed payload value for a given annotation type."""
-    start = datetime.combine(since, datetime.min.time(), tzinfo=timezone.utc)
-    end = datetime.combine(until, datetime.max.time(), tzinfo=timezone.utc)
+    """Per-day aggregate of an annotation type.
+
+    Two things here were wrong in ways that silently corrupted the
+    correlations built on top of them.
+
+    **The day was the UTC day.** `row.ts.date()` on an 8pm Central entry
+    yields the FOLLOWING date, so every evening annotation was filed a day
+    forward. That does not merely add noise — it inverts the shipped
+    "Alcohol -> next-day HRV" preset, because the drink lands on the same
+    day as the HRV it is supposed to precede. Evening is when alcohol
+    annotations happen, so this was the common case, not the edge.
+
+    **Everything was summed.** Correct for a count (two drinks is two) and
+    for a dose (two coffees is the total mg), and wrong for a score: two
+    mood entries of 7 read as 14 on a 1-10 scale, which is not a value the
+    scale can produce and would dominate any correlation it entered.
+    """
+    tz = _analytics_local_tz()
+    # Widened by a day on each side, then filtered after conversion: a row
+    # inside the LOCAL window can sit outside the same UTC window.
+    start = datetime.combine(
+        since - timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc,
+    )
+    end = datetime.combine(
+        until + timedelta(days=1), datetime.max.time(), tzinfo=timezone.utc,
+    )
     result = await db.execute(
         select(models.Annotation)
         .where(models.Annotation.ts >= start)
         .where(models.Annotation.ts <= end)
         .where(models.Annotation.type == ann_type)
     )
-    out: dict[date, float] = {}
+    sums: dict[date, float] = {}
+    counts: dict[date, int] = {}
     for row in result.scalars().all():
-        d = row.ts.date()
+        ts = row.ts
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        d = ts.astimezone(tz).date()
+        if d < since or d > until:
+            continue
         if payload_key is not None:
             v = (row.payload or {}).get(payload_key)
             if v is None:
@@ -237,8 +278,12 @@ async def _annotation_per_day(
                 continue
         else:
             v = 1.0  # count
-        out[d] = out.get(d, 0.0) + v
-    return out
+        sums[d] = sums.get(d, 0.0) + v
+        counts[d] = counts.get(d, 0) + 1
+
+    if agg == "mean":
+        return {d: sums[d] / counts[d] for d in sums if counts[d]}
+    return sums
 
 
 async def _series_for_metric(
@@ -253,7 +298,11 @@ async def _series_for_metric(
     if metric == "caffeine_mg":
         return await _annotation_per_day(db, "caffeine", "mg", since, until)
     if metric == "mood_score":
-        return await _annotation_per_day(db, "mood", "score", since, until)
+        # Mean, not sum: a 1-10 score aggregated by addition produces
+        # values the scale cannot express.
+        return await _annotation_per_day(
+            db, "mood", "score", since, until, agg="mean",
+        )
     return {}
 
 

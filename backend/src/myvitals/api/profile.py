@@ -360,6 +360,66 @@ async def put_display_prefs(
     return _display_payload(extra)
 
 
+class StepsScheduleIn(BaseModel):
+    """Per-weekday step-goal overrides. Omit a day to use the base goal."""
+
+    schedule: dict[str, int | None]
+
+
+@router.get("/steps-schedule")
+async def get_steps_schedule(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """The base step goal plus any per-weekday overrides (DOW-1)."""
+    p = await db.get(models.UserProfile, 1)
+    extra = (p.extra if p and p.extra else {}) or {}
+    sched = extra.get("steps_goal_schedule")
+    return {
+        "base": int(extra.get("steps_goal") or tiles.DEFAULT_STEPS_GOAL),
+        "schedule": sched if isinstance(sched, dict) else {},
+        "weekdays": list(tiles.WEEKDAY_KEYS),
+        "effective_today": tiles.resolve_steps_goal(
+            extra, datetime.now(timezone.utc).date(),
+        ),
+    }
+
+
+@router.put("/steps-schedule")
+async def put_steps_schedule(
+    body: StepsScheduleIn,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Set per-weekday overrides. Scoped and merging, like the other
+    preference endpoints — a null or absent day clears its override and
+    falls back to the base goal rather than to zero."""
+    clean: dict[str, int] = {}
+    for k, v in body.schedule.items():
+        key = k.strip().lower()[:3]
+        if key not in tiles.WEEKDAY_KEYS or v is None:
+            continue
+        try:
+            iv = int(v)
+        except (TypeError, ValueError):
+            continue
+        # Reject non-positive rather than storing it: a zero goal is
+        # always met and a negative one is never reachable, and neither
+        # is a thing a user means.
+        if iv > 0:
+            clean[key] = iv
+
+    p = await db.get(models.UserProfile, 1)
+    now = datetime.now(timezone.utc)
+    if p is None:
+        p = models.UserProfile(id=1, updated_at=now)
+        db.add(p)
+    extra = dict(p.extra or {})
+    extra["steps_goal_schedule"] = clean
+    p.extra = extra
+    p.updated_at = now
+    await db.commit()
+    return await get_steps_schedule(db=db)
+
+
 @router.get("/tile-prefs")
 async def get_tile_prefs(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     """Current tile order and visibility, reconciled against today's tiles.

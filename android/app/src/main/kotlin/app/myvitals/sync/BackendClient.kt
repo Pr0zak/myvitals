@@ -630,6 +630,9 @@ interface BackendApi {
 
     @GET("meals/log/stats")
     suspend fun mealsLogStats(@Query("days") days: Int = 30): LogStatsOut
+
+    @GET("meals/can-make")
+    suspend fun mealsCanMake(): CanMakeOut
 }
 
 object BackendClient {

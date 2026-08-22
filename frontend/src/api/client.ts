@@ -2116,6 +2116,65 @@ export interface LogStats {
   reason: string | null;
 }
 
+// ── Meals: what can I cook right now (MEAL-6) ────────────────────────
+//
+// Deterministic and free — no AI call. Matching happens on the server,
+// on canonical CONCEPT rather than food id, so a pantry holding raw
+// chicken breast cancels a recipe naming the cooked row.
+
+export interface CanMakeRecipe {
+  recipe_id: number;
+  name: string;
+  servings: number;
+  /** Matched over required. */
+  coverage: number;
+  cookable: boolean;
+  /** Nothing missing, but a line could not be identified — so the app
+   *  will not claim it is cookable. */
+  uncertain: boolean;
+  have: string[];
+  missing: string[];
+  /** Counted as had because assumed, not because the pantry says so. */
+  from_staples: string[];
+  unknown: string[];
+}
+
+export interface Unlock {
+  item: string;
+  unlocks: number;
+  recipes: string[];
+}
+
+export interface CanMake {
+  summary: {
+    total_recipes: number;
+    cookable_now: number;
+    missing_one: number;
+    probably_cookable: number;
+    recipes_with_unknown_lines: number;
+  };
+  recipes: CanMakeRecipe[];
+  unlock: Unlock[];
+  staples_assumed: string[];
+  pantry_concepts: number;
+}
+
+export interface Staples {
+  defaults: string[];
+  added: string[];
+  removed: string[];
+  effective: string[];
+}
+
+export const canMake = () =>
+  http.get<CanMake>("/meals/can-make").then((r) => r.data);
+
+export const getStaples = () =>
+  http.get<Staples>("/meals/staples").then((r) => r.data);
+
+export const putStaples = (body: { added?: string[]; removed?: string[] }) =>
+  http.put<Staples>("/meals/staples", body).then((r) => r.data);
+
 export const getLog = (start?: string, days = 7) =>
   http.get<LogDay[]>("/meals/log", { params: { start, days } }).then((r) => r.data);
 
@@ -2240,4 +2299,7 @@ export const meals = {
   deleteLogEntry,
   markLogDay,
   logStats,
+  canMake,
+  getStaples,
+  putStaples,
 };

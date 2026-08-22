@@ -25,6 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..analytics.concepts import concept_for
 from ..analytics.foods import NUTRIENT_COLUMNS, catalog
 from . import models
 
@@ -41,7 +42,9 @@ log = logging.getLogger(__name__)
 #: failure is cheap to retry.
 CHUNK = 500
 
-_COLUMNS = ("slug", "name", "category", *NUTRIENT_COLUMNS, "unit_grams")
+_COLUMNS = (
+    "slug", "name", "category", *NUTRIENT_COLUMNS, "unit_grams", "concept",
+)
 
 
 async def _needs_reseed(db: AsyncSession, rows: list[dict]) -> str | None:
@@ -65,6 +68,19 @@ async def _needs_reseed(db: AsyncSession, rows: list[dict]) -> str | None:
     )).scalar_one()
     if have < len(rows):
         return f"{have} stored rows against {len(rows)} in the bundled catalog"
+
+    # Concepts are DERIVED rather than read from the file, so they need
+    # their own check: a database seeded before the concept layer existed
+    # has the right row count and the right nutrients and no concepts at
+    # all. This is the same shape as the vitamin-column miss in 0057.
+    if any(concept_for(r) for r in rows):
+        have_concepts = (await db.execute(
+            select(func.count(models.Food.concept))
+            .select_from(models.Food)
+            .where(models.Food.source == "usda")
+        )).scalar_one()
+        if not have_concepts:
+            return "catalog has ingredient concepts but the database has none"
 
     # Which columns does the FILE actually supply? A column the catalog
     # has no data for cannot be used as evidence of staleness.
@@ -119,6 +135,10 @@ async def seed_foods(db: AsyncSession, *, force: bool = False) -> int:
                 "category": r.get("category"),
                 **{c: r.get(c) for c in NUTRIENT_COLUMNS},
                 "unit_grams": r.get("unit_grams"),
+                # Derived, not stored in the bundled JSON — so improving
+                # the extractor only needs a restart, not a catalog
+                # rebuild and a 3.9 MB diff.
+                "concept": concept_for(r),
             }
             for r in chunk
         ]

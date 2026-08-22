@@ -2174,3 +2174,53 @@ data class LogStatsOut(
     @Json(name = "median_meal_fat_g") val medianMealFatG: Double? = null,
     val reason: String? = null,
 )
+
+
+// ── Meals: what can I cook right now (MEAL-6) ────────────────────────
+//
+// Deterministic and free — no AI call. Matching happens on the server,
+// on canonical CONCEPT rather than food id, so a pantry holding raw
+// chicken breast cancels a recipe naming the cooked row.
+
+@JsonClass(generateAdapter = true)
+data class CanMakeRecipeOut(
+    @Json(name = "recipe_id") val recipeId: Long = 0,
+    val name: String = "",
+    val servings: Int = 1,
+    // Matched over required.
+    val coverage: Double = 0.0,
+    val cookable: Boolean = false,
+    // Nothing missing, but a line could not be identified — so the app
+    // will not claim it is cookable, and it sorts BELOW verified ones.
+    val uncertain: Boolean = false,
+    val have: List<String> = emptyList(),
+    val missing: List<String> = emptyList(),
+    // Counted as had because assumed, not because the pantry says so.
+    @Json(name = "from_staples") val fromStaples: List<String> = emptyList(),
+    val unknown: List<String> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class UnlockOut(
+    val item: String = "",
+    val unlocks: Int = 0,
+    val recipes: List<String> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class CanMakeSummary(
+    @Json(name = "total_recipes") val totalRecipes: Int = 0,
+    @Json(name = "cookable_now") val cookableNow: Int = 0,
+    @Json(name = "missing_one") val missingOne: Int = 0,
+    @Json(name = "probably_cookable") val probablyCookable: Int = 0,
+    @Json(name = "recipes_with_unknown_lines") val recipesWithUnknownLines: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class CanMakeOut(
+    val summary: CanMakeSummary = CanMakeSummary(),
+    val recipes: List<CanMakeRecipeOut> = emptyList(),
+    val unlock: List<UnlockOut> = emptyList(),
+    @Json(name = "staples_assumed") val staplesAssumed: List<String> = emptyList(),
+    @Json(name = "pantry_concepts") val pantryConcepts: Int = 0,
+)

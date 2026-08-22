@@ -836,6 +836,14 @@ class Food(Base):
     vitamin_e_mg: Mapped[float | None] = mapped_column(Float, nullable=True)
     vitamin_k_ug: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    #: Canonical pantry concept (migration 0060). USDA rows are nutrition
+    #: rows: raw and grilled chicken breast are separate ids with genuinely
+    #: different nutrition, but they are ONE thing to buy and to have in
+    #: the house. Matching a pantry item to a recipe ingredient happens on
+    #: this, never on `id`. NULL means "not a pantry ingredient" — a
+    #: prepared dish — so `concept IS NOT NULL` is the stockable test.
+    concept: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+
     #: Grams per common household unit, e.g. {"cup": 240, "tbsp": 15}.
     #: Without this a recipe written in cups cannot be costed in grams,
     #: which is how recipes are actually written.

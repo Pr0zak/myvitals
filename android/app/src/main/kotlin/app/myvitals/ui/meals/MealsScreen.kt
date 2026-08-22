@@ -88,6 +88,7 @@ private const val CACHE_PANTRY = "meals_pantry"
 
 private enum class MealsTab(val label: String) {
     PLAN("Plan"),
+    CAN_MAKE("Can make"),
     LOG("Log"),
     IDEAS("Ideas"),
     RECIPES("Recipes"),
@@ -125,6 +126,7 @@ fun MealsScreen(settings: SettingsRepository) {
         Box(Modifier.fillMaxSize().padding(top = 10.dp)) {
             when (tab) {
                 MealsTab.PLAN -> PlanTab(settings)
+                MealsTab.CAN_MAKE -> CanMakeTab(settings)
                 MealsTab.LOG -> LogTab(settings)
                 MealsTab.IDEAS -> SuggestTab(settings)
                 MealsTab.SHOPPING -> ShoppingTab(settings)

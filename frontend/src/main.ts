@@ -50,6 +50,7 @@ const router = createRouter({
     { path: "/meals/foods", name: "meals-foods", component: () => import("./views/meals/Foods.vue") },
     { path: "/meals/plan", name: "meals-plan", component: () => import("./views/meals/Plan.vue") },
     { path: "/meals/shopping", name: "meals-shopping", component: () => import("./views/meals/Shopping.vue") },
+    { path: "/meals/can-make", name: "meals-can-make", component: () => import("./views/meals/CanMake.vue") },
     { path: "/meals/ideas", name: "meals-ideas", component: () => import("./views/meals/Suggest.vue") },
     { path: "/meals/log", name: "meals-log", component: () => import("./views/meals/Log.vue") },
     { path: "/meals/nutrition", name: "meals-nutrition", component: () => import("./views/meals/Nutrition.vue") },

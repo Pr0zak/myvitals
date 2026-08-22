@@ -29,7 +29,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics import foods as food_lib
 from ..analytics import nutrition as nutri
+from ..analytics import canmake as cm
 from ..analytics import shopping as shop
+from ..analytics import staples as stap
 from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
@@ -294,6 +296,55 @@ class ShoppingListIn(BaseModel):
     start: date | None = None
     days: int = Field(default=7, ge=1, le=31)
     name: str | None = Field(default=None, max_length=255)
+
+
+class CanMakeRecipeOut(BaseModel):
+    recipe_id: int
+    name: str
+    servings: int
+    #: Matched over required. 1.0 with `cookable` true means go and cook.
+    coverage: float
+    cookable: bool
+    #: Nothing missing, but a line could not be identified — so the app
+    #: will not claim it is cookable. Kept apart from `cookable` so the
+    #: headline count is one the user can trust literally.
+    uncertain: bool
+    have: list[str] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
+    #: Counted as had because they are assumed staples, not because the
+    #: pantry says so. Shown, or the user cannot tell why it says yes.
+    from_staples: list[str] = Field(default_factory=list)
+    unknown: list[str] = Field(default_factory=list)
+
+
+class UnlockOut(BaseModel):
+    item: str
+    unlocks: int
+    recipes: list[str] = Field(default_factory=list)
+
+
+class CanMakeOut(BaseModel):
+    summary: dict[str, Any] = Field(default_factory=dict)
+    recipes: list[CanMakeRecipeOut] = Field(default_factory=list)
+    #: Which single purchase frees the most recipes. The payoff of the
+    #: whole endpoint — knowing you can cook three things is mild;
+    #: knowing one packet of rice makes it seven changes a shopping trip.
+    unlock: list[UnlockOut] = Field(default_factory=list)
+    #: What was assumed present, so an unexpected "yes" is explicable.
+    staples_assumed: list[str] = Field(default_factory=list)
+    pantry_concepts: int = 0
+
+
+class StaplesIn(BaseModel):
+    added: list[str] | None = None
+    removed: list[str] | None = None
+
+
+class StaplesOut(BaseModel):
+    defaults: list[str] = Field(default_factory=list)
+    added: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    effective: list[str] = Field(default_factory=list)
 
 
 class LogEntryIn(BaseModel):
@@ -1365,14 +1416,33 @@ async def generate_shopping_list(
 
     needs = shop.aggregate_needs(lines)
 
-    # Pantry, grouped by food so several jars of the same thing add up.
+    # Pantry, grouped by CONCEPT rather than by food id.
+    #
+    # This is the MEAL-6 correctness fix. Raw and grilled chicken breast
+    # are different USDA rows with genuinely different nutrition, but they
+    # are one thing to have in the house — so a pantry holding the raw row
+    # used to fail to cancel a recipe naming the cooked one, and the list
+    # told you to buy chicken you already had.
     pantry_rows = (await db.execute(select(models.PantryItem))).scalars().all()
+    pantry_food_ids = {p.food_id for p in pantry_rows if p.food_id is not None}
+    concept_of: dict[int, str | None] = {}
+    if pantry_food_ids:
+        for fid, concept in (await db.execute(
+            select(models.Food.id, models.Food.concept)
+            .where(models.Food.id.in_(pantry_food_ids))
+        )).all():
+            concept_of[fid] = concept
+
     pantry_by_food: dict[int, list[dict[str, Any]]] = {}
     pantry_by_label: dict[str, list[dict[str, Any]]] = {}
+    pantry_by_concept: dict[str, list[dict[str, Any]]] = {}
     for p in pantry_rows:
         rec = {"quantity": p.quantity, "unit": p.unit}
         if p.food_id is not None:
             pantry_by_food.setdefault(p.food_id, []).append(rec)
+            c = concept_of.get(p.food_id)
+            if c:
+                pantry_by_concept.setdefault(c, []).append(rec)
         elif p.label:
             pantry_by_label.setdefault(p.label.lower(), []).append(rec)
 
@@ -1396,11 +1466,20 @@ async def generate_shopping_list(
     kept: list[models.ShoppingListItem] = []
     for need in sorted(needs.values(), key=lambda n: n.label.lower()):
         food = need_foods.get(need.food_id) if need.food_id is not None else None
-        have = (
-            pantry_by_food.get(need.food_id, [])
-            if need.food_id is not None
-            else pantry_by_label.get(need.label.lower(), [])
-        )
+        # Exact food id first (most precise), then the shared concept,
+        # then a hand-typed label. Concept matching is what makes a
+        # pantry of raw chicken cancel a recipe's cooked chicken.
+        if need.food_id is not None:
+            have = list(pantry_by_food.get(need.food_id, []))
+            concept = getattr(food, "concept", None) if food else None
+            if not have and concept:
+                have = list(pantry_by_concept.get(concept, []))
+        else:
+            have = list(pantry_by_label.get(need.label.lower(), []))
+            # A hand-typed recipe line can still match a stocked food
+            # whose concept is literally what was typed.
+            if not have:
+                have = list(pantry_by_concept.get(need.label.lower(), []))
         row = shop.subtract_pantry(need, have, _food_dict(food))
         if row["fully_covered"]:
             # The ONLY case where a line is dropped: the arithmetic was
@@ -1816,6 +1895,156 @@ async def log_stats(
     out.avg_kcal = round(sum(kcals) / len(kcals), 1) if kcals else None
     out.avg_fat_g = round(sum(fats) / len(fats), 1) if fats else None
     return out
+
+
+# ------------------------------------------------- can-make + staples
+
+#: Where the user's staple edits live, inside `user_profile.extra`.
+STAPLES_KEY = "meal_staples"
+
+
+async def _staple_prefs(db: AsyncSession) -> tuple[list[str], list[str]]:
+    p = await db.get(models.UserProfile, 1)
+    extra = (p.extra if p and p.extra else {}) or {}
+    saved = extra.get(STAPLES_KEY) or {}
+    return list(saved.get("added") or []), list(saved.get("removed") or [])
+
+
+async def _pantry_concepts(db: AsyncSession) -> set[str]:
+    """The set of concepts currently in the house.
+
+    Reads through `foods.concept`, never through `foods.id`. That is the
+    whole point of the concept layer: raw and grilled chicken breast are
+    different rows and one thing to have in the house.
+    """
+    rows = (await db.execute(
+        select(models.Food.concept)
+        .select_from(models.PantryItem)
+        .join(models.Food, models.Food.id == models.PantryItem.food_id)
+        .where(models.Food.concept.is_not(None))
+    )).scalars().all()
+    out = {c for c in rows if c}
+
+    # Hand-typed pantry entries have no food row. Their label is matched
+    # against known concepts directly, so "rice" typed by hand still
+    # cancels a recipe's rice.
+    labels = (await db.execute(
+        select(models.PantryItem.label)
+        .where(models.PantryItem.food_id.is_(None))
+        .where(models.PantryItem.label.is_not(None))
+    )).scalars().all()
+    out |= {(lbl or "").strip().lower() for lbl in labels if lbl}
+    return out
+
+
+async def _recipe_lines_for_matching(db: AsyncSession) -> list[dict[str, Any]]:
+    recipes = (await db.execute(
+        select(models.Recipe).where(models.Recipe.archived.is_(False))
+    )).scalars().all()
+    if not recipes:
+        return []
+    ings = (await db.execute(
+        select(models.RecipeIngredient)
+        .where(models.RecipeIngredient.recipe_id.in_([r.id for r in recipes]))
+        .order_by(models.RecipeIngredient.order_index)
+    )).scalars().all()
+    food_ids = {i.food_id for i in ings if i.food_id is not None}
+    concepts: dict[int, tuple[str | None, str]] = {}
+    if food_ids:
+        for fid, concept, name in (await db.execute(
+            select(models.Food.id, models.Food.concept, models.Food.name)
+            .where(models.Food.id.in_(food_ids))
+        )).all():
+            concepts[fid] = (concept, name)
+
+    by_recipe: dict[int, list[dict[str, Any]]] = {}
+    for i in ings:
+        concept, name = (
+            concepts.get(i.food_id, (None, "")) if i.food_id else (None, "")
+        )
+        if concept is None and i.food_id is None and i.raw_text:
+            # A hand-typed line is matched on its own text. Imperfect,
+            # but silently dropping it would inflate coverage.
+            concept = i.raw_text.strip().lower() or None
+        by_recipe.setdefault(i.recipe_id, []).append({
+            "concept": concept,
+            "label": name or i.raw_text or "unnamed",
+        })
+
+    return [
+        {
+            "id": r.id, "name": r.name, "servings": r.servings,
+            "lines": by_recipe.get(r.id, []),
+        }
+        for r in recipes
+    ]
+
+
+@router.get("/can-make", response_model=CanMakeOut)
+async def can_make(db: AsyncSession = Depends(get_session)):
+    """Which of your own recipes you can cook right now.
+
+    Deterministic and free — no AI call. This answers a question the
+    suggestion card cannot: not "what could I eat" but "what can I make
+    tonight from what is actually here".
+    """
+    added, removed = await _staple_prefs(db)
+    staples = stap.effective_staples(added, removed)
+    pantry = await _pantry_concepts(db)
+    recipes = await _recipe_lines_for_matching(db)
+
+    matches = cm.match_recipes(recipes, pantry, staples)
+    return CanMakeOut(
+        summary=cm.summarise(matches),
+        recipes=[
+            CanMakeRecipeOut(
+                recipe_id=m.recipe_id, name=m.name, servings=m.servings,
+                coverage=round(m.coverage, 3), cookable=m.cookable,
+                uncertain=m.uncertain, have=m.have, missing=m.missing,
+                from_staples=m.from_staples, unknown=m.unknown,
+            )
+            for m in matches
+        ],
+        unlock=[UnlockOut(**u) for u in cm.unlock_ranking(matches)],
+        staples_assumed=sorted(staples),
+        pantry_concepts=len(pantry),
+    )
+
+
+@router.get("/staples", response_model=StaplesOut)
+async def get_staples(db: AsyncSession = Depends(get_session)):
+    added, removed = await _staple_prefs(db)
+    return StaplesOut(
+        defaults=sorted(stap.DEFAULT_STAPLES),
+        added=added, removed=removed,
+        effective=sorted(stap.effective_staples(added, removed)),
+    )
+
+
+@router.put("/staples", response_model=StaplesOut)
+async def put_staples(body: StaplesIn, db: AsyncSession = Depends(get_session)):
+    """Scoped write — merges into `extra` rather than replacing it."""
+    p = await db.get(models.UserProfile, 1)
+    now = datetime.now(timezone.utc)
+    if p is None:
+        p = models.UserProfile(id=1, updated_at=now)
+        db.add(p)
+    extra = dict(p.extra or {})
+    saved = dict(extra.get(STAPLES_KEY) or {})
+    for k, v in body.model_dump(exclude_unset=True).items():
+        saved[k] = v
+    extra[STAPLES_KEY] = saved
+    p.extra = extra
+    p.updated_at = now
+    await db.commit()
+
+    added = list(saved.get("added") or [])
+    removed = list(saved.get("removed") or [])
+    return StaplesOut(
+        defaults=sorted(stap.DEFAULT_STAPLES),
+        added=added, removed=removed,
+        effective=sorted(stap.effective_staples(added, removed)),
+    )
 
 
 @router.get("/stats", response_model=dict)

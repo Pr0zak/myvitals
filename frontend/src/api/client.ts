@@ -757,6 +757,28 @@ export const api = {
     return data;
   },
 
+  /** GH-BACKFILL: start a TRACKED backfill over an explicit date range.
+   *
+   * Returns a job id immediately; poll importJob() for progress. The
+   * older googleHealthSync() runs inline, so a long range was one HTTP
+   * request that could outlive its own timeout with no way to tell a
+   * slow run from a dead one.
+   */
+  async googleHealthBackfill(since: string, until: string): Promise<{
+    job_id: number; since: string; until: string; windows: number; poll: string;
+  }> {
+    const { data } = await http.post("/google-health/backfill", { since, until });
+    return data;
+  },
+
+  async importJob(id: number): Promise<{
+    id: number; kind: string; status: string;
+    counts: Record<string, number> | null; error: string | null;
+  }> {
+    const { data } = await http.get(`/imports/jobs/${id}`);
+    return data;
+  },
+
   async googleHealthSync(days = 7): Promise<{
     since: string; until: string; written: Record<string, number>;
   }> {

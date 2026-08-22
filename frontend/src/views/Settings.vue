@@ -736,6 +736,42 @@ async function ghRunProbe() {
   } catch (e) { ghFail(e); } finally { ghBusy.value = false; }
 }
 
+const ghBackfillOpen = ref(false);
+const ghSince = ref("");
+const ghUntil = ref("");
+const ghJobId = ref<number | null>(null);
+const ghJob = ref<{ status: string; counts: Record<string, number> | null; error: string | null } | null>(null);
+
+async function startGhBackfill() {
+  if (!ghSince.value || !ghUntil.value) return;
+  try {
+    const r = await api.googleHealthBackfill(ghSince.value, ghUntil.value);
+    ghJobId.value = r.job_id;
+    ghJob.value = { status: "running", counts: null, error: null };
+    // Poll while it walks the range. Stops on any terminal status, so a
+    // partial run (some windows failed) ends the poll rather than
+    // spinning forever waiting for "done".
+    const tick = window.setInterval(async () => {
+      try {
+        const j = await api.importJob(r.job_id);
+        ghJob.value = j;
+        if (["done", "partial", "failed"].includes(j.status)) {
+          window.clearInterval(tick);
+          ghJobId.value = null;
+        }
+      } catch {
+        window.clearInterval(tick);
+        ghJobId.value = null;
+      }
+    }, 3000);
+  } catch (e) {
+    ghJob.value = {
+      status: "failed", counts: null,
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
 async function ghSync(days: number) {
   ghBusy.value = true; ghError.value = ""; ghResult.value = "";
   try {
@@ -2633,8 +2669,30 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           {{ ghBusy ? "Working…" : "What data is available?" }}
         </button>
         <button class="ghost" :disabled="ghBusy || !ghStatus?.connected" @click="ghSync(7)">Sync 7 days</button>
-        <button class="ghost" :disabled="ghBusy || !ghStatus?.connected" @click="ghSync(90)">Backfill 90 days</button>
+        <button class="ghost danger-none" :disabled="ghBusy || !ghStatus?.connected"
+                @click="ghBackfillOpen = !ghBackfillOpen">Backfill a range…</button>
         <button class="ghost danger" v-if="ghStatus?.connected" @click="ghDisconnect">Disconnect</button>
+      </div>
+
+      <!-- GH-BACKFILL: an explicit range, not a "days" number. "90 days"
+           cannot express "the fortnight the phone was off", which is the
+           shape a real gap has. Runs as a tracked job so a long pull shows
+           progress instead of being indistinguishable from a hung one. -->
+      <div v-if="ghBackfillOpen" class="gh-backfill">
+        <label>From <input type="date" v-model="ghSince"/></label>
+        <label>To <input type="date" v-model="ghUntil"/></label>
+        <button class="primary" :disabled="!ghSince || !ghUntil || ghJobId !== null"
+                @click="startGhBackfill">Start</button>
+        <span v-if="ghJob" class="muted">
+          {{ ghJob.status }}
+          <template v-if="ghJob.counts?._windows_done">
+            · {{ ghJob.counts._windows_done }} window(s)
+          </template>
+          <template v-if="ghJob.counts?._windows_failed">
+            · {{ ghJob.counts._windows_failed }} failed
+          </template>
+        </span>
+        <span v-if="ghJob?.error" class="err">{{ ghJob.error }}</span>
       </div>
 
       <!-- Step 2 of the loopback flow. Only shown once the consent screen has
@@ -3308,4 +3366,6 @@ html[data-theme="neon"] .settings .apply-steps li.current::before { color: var(-
 .pollrow select { background: transparent; color: inherit; border: 1px solid rgba(148,163,184,0.3); border-radius: 6px; padding: 0.2rem 0.4rem; }
 .exprange { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.7rem; }
 .exprange input { background: transparent; color: inherit; border: 1px solid rgba(148,163,184,0.3); border-radius: 6px; padding: 0.2rem 0.4rem; }
+.gh-backfill { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin: 0.7rem 0; }
+.gh-backfill input { background: transparent; color: inherit; border: 1px solid rgba(148,163,184,0.3); border-radius: 6px; padding: 0.2rem 0.4rem; }
 </style>

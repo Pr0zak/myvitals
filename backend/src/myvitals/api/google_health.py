@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from urllib.parse import parse_qs, urlparse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -250,6 +250,120 @@ async def sync(
     except gh.GoogleHealthError as e:
         raise HTTPException(400, str(e)) from e
     return {"since": since.isoformat(), "until": until.isoformat(), "written": written}
+
+
+class BackfillIn(BaseModel):
+    """An explicit date range, not a `days` number.
+
+    "Backfill 90 days" cannot express "the fortnight I was on holiday and
+    the phone was off", which is the shape a real gap has. Dates also make
+    a re-run idempotent to describe: the same range means the same window
+    regardless of when it is pressed.
+    """
+
+    since: date
+    until: date
+
+
+#: Days pulled per API round. The range is walked in windows rather than
+#: requested whole for three reasons: the API rate-limits readily, a
+#: failure mid-range then costs one window instead of the lot, and progress
+#: is only visible at all if there is something to report between windows.
+_BACKFILL_WINDOW_D = 7
+
+
+async def _run_backfill(job_id: int, since: date, until: date) -> None:
+    """Walk the range window by window, reporting progress as it goes.
+
+    Runs against its own session: this is a background task, so the
+    request-scoped session is long closed by the time it starts.
+
+    A window that fails is recorded and the walk CONTINUES. One
+    rate-limited or malformed window should not abandon the other twelve —
+    and because ingest upserts, re-running the range later repairs the gap
+    without duplicating anything that landed.
+    """
+    from ..api.imports import _finish_job, _update_job_counts
+    from ..db.session import SessionLocal
+
+    totals: dict[str, int] = {}
+    failures: list[str] = []
+    cursor = since
+    windows = 0
+
+    try:
+        while cursor < until:
+            window_end = min(cursor + timedelta(days=_BACKFILL_WINDOW_D), until)
+            try:
+                async with SessionLocal() as db:
+                    written = await gh.ingest_range(db, cursor, window_end)
+                for k, v in (written or {}).items():
+                    totals[k] = totals.get(k, 0) + int(v or 0)
+            except Exception as e:  # noqa: BLE001
+                failures.append(f"{cursor.isoformat()}: {type(e).__name__}")
+                log.warning("backfill window %s..%s failed: %s", cursor, window_end, e)
+
+            windows += 1
+            cursor = window_end
+            # Progress after every window, so a long run is visibly moving
+            # rather than indistinguishable from a hung one.
+            await _update_job_counts(
+                job_id, {**totals, "_windows_done": windows,
+                         "_windows_failed": len(failures)},
+            )
+
+        status = "done" if not failures else "partial"
+        await _finish_job(
+            job_id, status,
+            {**totals, "_windows_done": windows, "_windows_failed": len(failures)},
+            error=("; ".join(failures[:5]) or None),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.exception("Google Health backfill failed")
+        await _finish_job(job_id, "failed", totals, error=f"{type(e).__name__}: {e}")
+
+
+@router.post("/google-health/backfill", dependencies=[Depends(require_query)])
+async def backfill(
+    body: BackfillIn,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Start a tracked backfill over an explicit date range.
+
+    Returns immediately with a job id; poll `/imports/jobs/{id}` for
+    progress. The previous `/google-health/sync?days=N` ran inline, so a
+    long range was a single HTTP request that could outlive its own
+    timeout with no way to tell a slow run from a dead one.
+    """
+    creds = await db.get(models.GoogleHealthCredentials, 1)
+    if creds is None or not creds.refresh_token:
+        raise HTTPException(400, "Google Health is not connected")
+    if body.until <= body.since:
+        raise HTTPException(400, "until must be after since")
+
+    # A year is already ~52 windows and several hundred API calls. Beyond
+    # that the run stops being something to watch and becomes something to
+    # schedule, which is a different feature.
+    span = (body.until - body.since).days
+    if span > 366:
+        raise HTTPException(400, "range is limited to 366 days per run")
+
+    from ..api.imports import _create_job
+
+    job_id = await _create_job(
+        "google_health",
+        f"{body.since.isoformat()}..{body.until.isoformat()}",
+        None,
+    )
+    background.add_task(_run_backfill, job_id, body.since, body.until)
+    return {
+        "job_id": job_id,
+        "since": body.since.isoformat(),
+        "until": body.until.isoformat(),
+        "windows": -(-span // _BACKFILL_WINDOW_D),
+        "poll": f"/imports/jobs/{job_id}",
+    }
 
 
 class PollToggle(BaseModel):

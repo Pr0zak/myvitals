@@ -143,3 +143,66 @@ class TestFitIngestSafety:
         src = inspect.getsource(strava_web)
         assert "dense_enough" in src
         assert "if dense_enough:" in src
+
+
+class TestTheseFunctionsActuallyRun:
+    """Source inspection cannot catch a missing import.
+
+    `_reap_orphaned_import_jobs` and `_strava_cookie_tick` both call
+    `select(...)`, which was not imported in tasks/scheduled.py. Every
+    test above passed while both raised `NameError` at runtime — the
+    reaper on its one startup run, the Strava tick every fifteen minutes.
+
+    This is the third time in this session that a source-reading test
+    passed over a name that does not resolve (Activity.id in v0.12.1,
+    Concept2Creds in v0.12.6). Executing the function is the only check
+    that catches the class.
+    """
+
+    async def test_the_reaper_runs_without_a_name_error(self, monkeypatch):
+        from myvitals.tasks import scheduled
+
+        calls: list[str] = []
+
+        class _Result:
+            def scalars(self): return self
+            def all(self): return []
+
+        class _Session:
+            async def execute(self, *a, **k):
+                calls.append("execute")
+                return _Result()
+            async def commit(self): calls.append("commit")
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+
+        monkeypatch.setattr(
+            "myvitals.db.session.SessionLocal", lambda: _Session(),
+        )
+        # No rows -> returns early after the query, without raising.
+        await scheduled._reap_orphaned_import_jobs()
+        assert "execute" in calls
+
+    async def test_the_strava_tick_runs_without_a_name_error(self, monkeypatch):
+        from myvitals.tasks import scheduled
+
+        class _Result:
+            def scalar_one_or_none(self): return None
+
+        class _Session:
+            async def execute(self, *a, **k): return _Result()
+            async def commit(self): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+
+        monkeypatch.setattr(
+            "myvitals.db.session.SessionLocal", lambda: _Session(),
+        )
+        # No credentials row -> returns early, without raising.
+        await scheduled._strava_cookie_tick()
+
+    def test_select_is_importable_from_the_module(self):
+        """Belt and braces: the name the two functions depend on."""
+        from myvitals.tasks import scheduled
+
+        assert hasattr(scheduled, "select")

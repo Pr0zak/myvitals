@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from sqlalchemy import select
 
 from ..config import settings
 from ..integrations.home_assistant import pull_states as ha_pull_states

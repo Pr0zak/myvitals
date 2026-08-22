@@ -14,6 +14,7 @@ import { fmtDateTime, timeFormat } from "@/format";
 import type { StravaAppConfigStatus, StravaStatus } from "@/api/types";
 import TileOrderEditor from "@/components/TileOrderEditor.vue";
 import DataHealthCard from "@/components/DataHealthCard.vue";
+import StepsScheduleEditor from "@/components/StepsScheduleEditor.vue";
 
 const tokenInput = ref(queryToken.value);
 const tokenVisible = ref(false);
@@ -1702,6 +1703,9 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
 
       <h2 style="margin-top:2rem;">Data health</h2>
       <DataHealthCard v-if="queryToken"/>
+
+      <h2 style="margin-top:2rem;">Step goal by day</h2>
+      <StepsScheduleEditor v-if="queryToken"/>
 
       <h2 style="margin-top:2rem;">Key metrics</h2>
       <TileOrderEditor v-if="queryToken"/>

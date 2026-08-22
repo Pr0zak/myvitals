@@ -147,6 +147,12 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/views/Day.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/DayScreen.kt",
      "Unified day view"),
+    # DOW-1: per-weekday step goals. The web has a standalone component;
+    # the phone renders it inline in Settings, so this pairs the component
+    # against the screen that owns the phone half.
+    ("frontend/src/components/StepsScheduleEditor.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/SettingsScreen.kt",
+     "Per-weekday step goal editor"),
     # TILE-1: the Key-metrics order editor. Both surfaces write the same
     # scoped endpoint, so a change to one side's control set almost always
     # needs the other.

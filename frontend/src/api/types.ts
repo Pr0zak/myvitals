@@ -721,3 +721,13 @@ export interface DataHealth {
   problem_keys: string[];
   ok: boolean;
 }
+
+// ── DOW-1: per-weekday step goals ────────────────────────────────────
+export interface StepsSchedule {
+  /** The single goal every unlisted day falls back to. */
+  base: number;
+  /** Sparse: only days that differ appear here. */
+  schedule: Record<string, number>;
+  weekdays: string[];
+  effective_today: number;
+}

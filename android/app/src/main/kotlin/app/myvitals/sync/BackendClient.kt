@@ -298,6 +298,13 @@ interface BackendApi {
     @retrofit2.http.PUT("profile/display-prefs")
     suspend fun putDisplayPrefs(@Body body: Map<String, String>): DisplayPrefsOut
 
+    // DOW-1: per-weekday step-goal overrides.
+    @GET("profile/steps-schedule")
+    suspend fun stepsSchedule(): StepsSchedule
+
+    @retrofit2.http.PUT("profile/steps-schedule")
+    suspend fun putStepsSchedule(@Body body: StepsScheduleIn): StepsSchedule
+
     @GET("profile/tile-prefs")
     suspend fun tilePrefs(): TilePrefsOut
 

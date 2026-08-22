@@ -108,6 +108,10 @@ fun SettingsScreen(
     // reconciled against the server below.
     // HEALTH-1: per-stream freshness + integration status.
     var dataHealth by remember { mutableStateOf<app.myvitals.sync.DataHealth?>(null) }
+    // DOW-1: per-weekday step goals. Sparse — a blank day uses the base.
+    var stepsSched by remember { mutableStateOf<app.myvitals.sync.StepsSchedule?>(null) }
+    var stepsDraft by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var stepsSaving by remember { mutableStateOf(false) }
 
     var unitsImperial by remember { mutableStateOf(settings.unitsImperial) }
     var timeFormat by remember { mutableStateOf(settings.timeFormat) }
@@ -176,6 +180,16 @@ fun SettingsScreen(
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
 
             dataHealth = withContext(Dispatchers.IO) { api.dataHealth() }
+
+            val sched = withContext(Dispatchers.IO) { api.stepsSchedule() }
+
+            stepsSched = sched
+
+            stepsDraft = sched.weekdays.associateWith {
+
+                sched.schedule[it]?.toString() ?: ""
+
+            }
 
         } catch (e: Exception) {
 
@@ -610,6 +624,42 @@ fun SettingsScreen(
                         },
                     )
                     ListLinkRow(label = "Key metrics order", onClick = onOpenTileOrder)
+                }
+            }
+
+            Section(title = "Step goal by day", neon = neon) {
+                Card {
+                    stepsSched?.let { sched ->
+                        StepsScheduleRows(
+                            sched = sched,
+                            draft = stepsDraft,
+                            saving = stepsSaving,
+                            onChange = { k, v -> stepsDraft = stepsDraft + (k to v) },
+                            onSave = {
+                                scope.launch {
+                                    stepsSaving = true
+                                    try {
+                                        val api = BackendClient.create(
+                                            settings.backendUrl, settings.bearerToken,
+                                        )
+                                        val body = app.myvitals.sync.StepsScheduleIn(
+                                            schedule = stepsDraft.mapValues { (_, v) ->
+                                                v.trim().toIntOrNull()
+                                            },
+                                        )
+                                        stepsSched = withContext(Dispatchers.IO) {
+                                            api.putStepsSchedule(body)
+                                        }
+                                    } catch (e: Exception) {
+                                        Timber.w(e, "steps schedule save failed")
+                                    } finally { stepsSaving = false }
+                                }
+                            },
+                        )
+                    } ?: Text(
+                        "Loading…", color = MV.OnSurfaceVariant,
+                        fontSize = 13.sp, modifier = Modifier.padding(16.dp),
+                    )
                 }
             }
 
@@ -1232,6 +1282,72 @@ private fun DataHealthRows(dh: app.myvitals.sync.DataHealth) {
                 + "so an old reading there is not a fault.",
             color = muted, fontSize = 10.sp,
         )
+    }
+}
+
+/**
+ * DOW-1 — per-weekday step goals.
+ *
+ * Every field starts EMPTY rather than pre-filled with the base goal.
+ * A pre-filled field would silently write seven overrides the user never
+ * asked for, which defeats the sparse design: blank means "use the base",
+ * and that is what lets someone set a lower Saturday without restating
+ * the other six.
+ */
+@Composable
+private fun StepsScheduleRows(
+    sched: app.myvitals.sync.StepsSchedule,
+    draft: Map<String, String>,
+    saving: Boolean,
+    onChange: (String, String) -> Unit,
+    onSave: () -> Unit,
+) {
+    val muted = MV.OnSurfaceVariant
+    Column(Modifier.padding(16.dp)) {
+        Text(
+            "Leave a day blank to use your usual goal (${sched.base}).",
+            color = muted, fontSize = 12.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        for (chunk in sched.weekdays.chunked(4)) {
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                for (day in chunk) {
+                    Column(Modifier.weight(1f)) {
+                        Text(day.replaceFirstChar { it.uppercase() },
+                            color = muted, fontSize = 10.sp)
+                        OutlinedTextField(
+                            value = draft[day] ?: "",
+                            onValueChange = { onChange(day, it.filter(Char::isDigit)) },
+                            placeholder = {
+                                Text(sched.base.toString(), color = muted, fontSize = 11.sp)
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                repeat(4 - chunk.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (saving) MV.SurfaceContainerHigh else MV.BrandRed)
+                    .pointerInput(saving) {
+                        detectTapGestures(onTap = { if (!saving) onSave() })
+                    }
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+            ) {
+                Text(if (saving) "Saving…" else "Save", color = MV.OnSurface, fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(10.dp))
+            Text("Today: ${sched.effectiveToday}", color = muted, fontSize = 11.sp)
+        }
     }
 }
 

@@ -1466,6 +1466,22 @@ data class DataHealth(
     val ok: Boolean = true,
 )
 
+// ── DOW-1: per-weekday step goals ────────────────────────────────────
+// Sparse: only days that differ appear in `schedule`; anything absent
+// falls back to `base`. A blank day means "use the base goal", not zero.
+@JsonClass(generateAdapter = true)
+data class StepsSchedule(
+    val base: Int = 10_000,
+    val schedule: Map<String, Int> = emptyMap(),
+    val weekdays: List<String> = emptyList(),
+    @Json(name = "effective_today") val effectiveToday: Int = 10_000,
+)
+
+@JsonClass(generateAdapter = true)
+data class StepsScheduleIn(
+    val schedule: Map<String, Int?>,
+)
+
 @JsonClass(generateAdapter = true)
 data class TilePrefsIn(
     val order: List<String>,

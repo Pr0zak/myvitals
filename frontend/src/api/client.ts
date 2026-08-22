@@ -11,6 +11,7 @@ import type {
   DaySnapshot,
   PeriodCompare,
   SleepNight,
+  StepsSchedule,
   StepsSeries,
   TilePrefs,
   TodaySummary,
@@ -932,6 +933,23 @@ export const api = {
     patch: Partial<import("@/displayPrefs").DisplayPrefs>,
   ): Promise<import("@/displayPrefs").DisplayPrefs> {
     const { data } = await http.put("/profile/display-prefs", patch);
+    return data;
+  },
+
+  /** DOW-1: per-weekday step-goal overrides.
+   *
+   * Sparse — only days that differ need an entry; anything absent falls
+   * back to the single base goal.
+   */
+  async getStepsSchedule(): Promise<StepsSchedule> {
+    const { data } = await http.get<StepsSchedule>("/profile/steps-schedule");
+    return data;
+  },
+
+  async putStepsSchedule(schedule: Record<string, number | null>): Promise<StepsSchedule> {
+    const { data } = await http.put<StepsSchedule>(
+      "/profile/steps-schedule", { schedule },
+    );
     return data;
   },
 

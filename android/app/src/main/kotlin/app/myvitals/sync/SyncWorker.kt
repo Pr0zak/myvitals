@@ -257,13 +257,33 @@ class SyncWorker(
         val checkpoint = settings.lastSyncInstant() ?: now.minusSeconds(6 * 3600)
         val safetyFloor = now.minusSeconds(48 * 3600)
         val needDeepSweep = (now.epochSecond - settings.lastDeepSweepEpochSeconds) > 6 * 3600
-        val since = when {
+        val rawSince = when {
             needDeepSweep -> {
                 Timber.i("Deep sweep — pulling last 7 days of HC")
                 now.minusSeconds(7 * 86400)
             }
             checkpoint.isBefore(safetyFloor) -> checkpoint
             else -> safetyFloor
+        }
+        // Clamp the lookback. Now that a failed delivery no longer advances
+        // the cursor, a long outage would otherwise grow the read window
+        // without bound — and HealthConnectGateway.read() caps at 100 pages
+        // and RETURNS THE PARTIAL LIST as if it were complete, so an
+        // oversized window fails silently rather than loudly.
+        //
+        // Anything older than this is either already sitting in the Room
+        // buffer waiting to replay, or was dropped and is unrecoverable
+        // regardless. Bounding the window keeps the app syncing.
+        val maxLookback = now.minusSeconds(MAX_LOOKBACK_DAYS * 86400L)
+        val since = if (rawSince.isBefore(maxLookback)) {
+            Timber.w(
+                "Sync window clamped: checkpoint %s is older than %d days; reading from %s",
+                rawSince, MAX_LOOKBACK_DAYS, maxLookback,
+            )
+            state.errors += "sync window clamped to ${MAX_LOOKBACK_DAYS}d"
+            maxLookback
+        } else {
+            rawSince
         }
         val until = now
 
@@ -322,9 +342,23 @@ class SyncWorker(
                     )
                 )
             }
-            settings.lastSyncEpochSeconds = until.epochSecond
-            // Don't advance the deep-sweep checkpoint when the request fails —
-            // we want to retry the deep sweep on the next periodic run.
+            // DO NOT advance lastSyncEpochSeconds here.
+            //
+            // This used to advance on the failure path too, on the reasoning
+            // that the batch had been buffered to Room and would replay. But
+            // buffered batches can be DROPPED — oversized rows are deleted
+            // above, and flushBuffered gives up after MAX_BUFFER_ATTEMPTS —
+            // and once the cursor has moved past that window nothing can ever
+            // re-read it. That is silent, permanent loss of samples the watch
+            // recorded.
+            //
+            // Leaving the cursor where it is makes the next sync re-read the
+            // same window, which costs nothing: the server's _bulk_upsert
+            // uses on_conflict_do_nothing, so re-delivering rows that did
+            // land is a no-op. Re-reading is cheap; losing data is not.
+            //
+            // The deep-sweep checkpoint is likewise not advanced, so the
+            // sweep retries on the next periodic run.
             Result.success()
         }
     }
@@ -544,6 +578,15 @@ class SyncWorker(
         const val UNIQUE_NAME = "myvitals_periodic_sync"
         private const val MAX_PER_TYPE = 4000
         private const val MAX_BUFFER_ATTEMPTS = 3
+
+        /** Widest window a single sync will read from Health Connect.
+         *
+         *  A failed delivery no longer advances the cursor, so without this
+         *  a long outage would grow the window without bound — and
+         *  HealthConnectGateway.read() caps at 100 pages and returns the
+         *  partial list as though it were complete, which fails silently
+         *  rather than loudly. 14 days is twice the deep-sweep window. */
+        private const val MAX_LOOKBACK_DAYS = 14
         private const val BUFFER_ENTRY_TIMEOUT_MS = 240_000L
 
         // Android's CursorWindow ceiling is ~2 MB; any single buffered_batches

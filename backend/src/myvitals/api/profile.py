@@ -172,7 +172,35 @@ async def put_profile(
     p.resting_hr_baseline = body.resting_hr_baseline
     p.max_hr = body.max_hr
     p.activity_level = body.activity_level
-    p.extra = body.extra
+    # Preserve keys the caller does not model.
+    #
+    # This used to be `p.extra = body.extra` — a wholesale replace. The
+    # phone's ProfileExtra models six keys, so toggling the workout
+    # reminder there silently deleted every other key in `extra`,
+    # including the `display` block (units / time format / theme) and
+    # `fasting_prefs`. The phone's saveReminderPrefs already re-copies
+    # `steps_goal`, `sleep_goal_h`, `vitals_order` and `vitals_hidden` by
+    # hand precisely because of this, which is a workaround for a server
+    # bug rather than a fix.
+    #
+    # Merging here means a client can send only what it knows about, and
+    # is what makes the scoped preference endpoints (/tile-prefs,
+    # /display-prefs) safe to coexist with this one.
+    #
+    # The protocol this implies, stated out loud because it is the part a
+    # client can get wrong: an ABSENT key means "leave it alone", and an
+    # explicit NULL means "clear it".
+    #
+    # Settings.vue used to clear a goal with `delete extra.steps_goal`,
+    # which under a merge would mean "keep" and would silently stop the
+    # clear from working. It now sends an explicit null instead. Nulls are
+    # therefore written through rather than skipped — and every reader
+    # already uses `.get(...)`, so a stored null and an absent key are
+    # indistinguishable downstream.
+    if body.extra is not None:
+        merged = dict(p.extra or {})
+        merged.update(body.extra)
+        p.extra = merged
     p.home_latitude = body.home_latitude
     p.home_longitude = body.home_longitude
     if new_sleep is not None:

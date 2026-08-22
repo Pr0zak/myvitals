@@ -1020,12 +1020,19 @@ async function saveProfile() {
     const extra: Record<string, unknown> = {
       ...(profile.value.extra as Record<string, unknown> | null ?? {}),
     };
-    if (stepsGoalInput.value && stepsGoalInput.value > 0) {
-      extra.steps_goal = Number(stepsGoalInput.value);
-    } else { delete extra.steps_goal; }
-    if (sleepGoalInput.value && sleepGoalInput.value > 0) {
-      extra.sleep_goal_h = Number(sleepGoalInput.value);
-    } else { delete extra.sleep_goal_h; }
+    // Explicit null, not `delete`. PUT /profile now MERGES `extra` so a
+    // client that models only some keys cannot erase the rest — the phone
+    // was deleting the display block every time the workout reminder was
+    // toggled. Under a merge, an absent key means "leave it alone", so
+    // clearing a goal has to say so out loud.
+    extra.steps_goal =
+      stepsGoalInput.value && stepsGoalInput.value > 0
+        ? Number(stepsGoalInput.value)
+        : null;
+    extra.sleep_goal_h =
+      sleepGoalInput.value && sleepGoalInput.value > 0
+        ? Number(sleepGoalInput.value)
+        : null;
 
     profile.value = await api.putProfile({
       birth_date: profile.value.birth_date,

@@ -7,6 +7,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Float,
+    ForeignKey,
     Integer,
     String,
     Text,
@@ -780,3 +781,135 @@ class SyncHeartbeat(Base):
     error_summary: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     records_pulled: Mapped[int | None] = mapped_column(Integer, nullable=True)
     app_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+# ===== Meals: foods, recipes, pantry (MEAL-1) ========================
+#
+# See docs/MEALS_PLAN.md. Two shape decisions worth knowing before
+# editing:
+#
+# 1. Nutrition is stored PER 100 G, which is how USDA publishes it and
+#    how every conversion in the app is then a single multiply. Storing
+#    per-serving would mean re-deriving whenever a recipe scales.
+# 2. There is no household or portion model. Confirmed 2026-08-22:
+#    cooking for one. A recipe has `servings` and meal prep multiplies
+#    it; nothing else is needed.
+
+class Food(Base):
+    """A canonical ingredient with its nutrition per 100 g.
+
+    Seeded from USDA FoodData Central (public domain) and extendable by
+    the user — `source` distinguishes the two, so a re-seed can replace
+    the bundled rows without touching anything hand-entered.
+    """
+
+    __tablename__ = "foods"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    #: Stable slug. For USDA rows this embeds the FDC id, so a re-seed
+    #: updates a row rather than inserting a duplicate.
+    slug: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    #: "usda" | "user". Only "usda" rows are touched by a re-seed.
+    source: Mapped[str] = mapped_column(String(16), default="usda")
+    category: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+
+    # Per 100 g. Nullable throughout: USDA does not carry every nutrient
+    # for every food, and a null must stay distinguishable from a zero —
+    # "we do not know the sodium" is not "this food has no sodium".
+    kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    protein_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    carbs_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: The nutrient that matters most here — see MEALS_PLAN hard part 5.
+    fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    saturated_fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fiber_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sugar_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sodium_mg: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    #: Grams per common household unit, e.g. {"cup": 240, "tbsp": 15}.
+    #: Without this a recipe written in cups cannot be costed in grams,
+    #: which is how recipes are actually written.
+    unit_grams: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+    )
+
+
+class Recipe(Base):
+    """A recipe the USER owns.
+
+    The app never ships or scrapes third-party recipes — see MEALS_PLAN
+    hard part 1. Everything here is entered or imported by the user into
+    their own private install, and none of it belongs in the repo.
+    """
+
+    __tablename__ = "recipes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    #: How many portions the ingredient quantities below produce.
+    servings: Mapped[int] = mapped_column(Integer, default=1)
+    prep_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cook_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    method: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    #: Where an imported recipe came from, so its provenance is visible.
+    source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    archived: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+
+class RecipeIngredient(Base):
+    """One line of a recipe.
+
+    `food_id` is nullable on purpose. An imported or hand-typed line may
+    not resolve to a known food ("splash of sesame oil"), and dropping it
+    would silently shorten the recipe. An unresolved line keeps its raw
+    text, is shown as-is, and is EXCLUDED from nutrition totals — which
+    the API reports, so a total is never quietly incomplete.
+    """
+
+    __tablename__ = "recipe_ingredients"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recipe_id: Mapped[int] = mapped_column(
+        ForeignKey("recipes.id", ondelete="CASCADE"), index=True,
+    )
+    food_id: Mapped[int | None] = mapped_column(
+        ForeignKey("foods.id", ondelete="SET NULL"), nullable=True,
+    )
+    #: What the user actually wrote, kept verbatim even when resolved.
+    raw_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: "g" | "ml" | "cup" | "tbsp" | "tsp" | "item" ...
+    unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class PantryItem(Base):
+    """Something currently in the house.
+
+    Quantities are optional: "we have olive oil" is a useful fact even
+    without knowing how much, and demanding a number is the kind of
+    friction that stops a pantry being kept up to date at all.
+    """
+
+    __tablename__ = "pantry_items"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    food_id: Mapped[int | None] = mapped_column(
+        ForeignKey("foods.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    #: For things with no food row yet.
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    expires_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+    )

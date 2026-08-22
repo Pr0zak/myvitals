@@ -9,6 +9,7 @@ import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.DELETE
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -503,6 +504,64 @@ interface BackendApi {
 
     @POST("update/apply")
     suspend fun updateApply(): UpdateApplyResult
+
+    // ── Meals (MEAL-1) ────────────────────────────────────────────────
+    //
+    // Paths are bare, with no leading "/api". Caddy strips that prefix
+    // exactly once for the browser; the phone talks to the backend
+    // directly, so spelling it here would 404. Same standard form as
+    // every other endpoint above.
+
+    @GET("meals/foods/search")
+    suspend fun mealsSearchFoods(
+        @Query("q") q: String,
+        @Query("ingredients_only") ingredientsOnly: Boolean = false,
+        @Query("limit") limit: Int = 25,
+    ): List<FoodOut>
+
+    @GET("meals/foods/{id}")
+    suspend fun mealsGetFood(@Path("id") id: Long): FoodOut
+
+    @POST("meals/foods")
+    suspend fun mealsCreateFood(@Body body: FoodIn): FoodOut
+
+    @PATCH("meals/foods/{id}")
+    suspend fun mealsUpdateFood(@Path("id") id: Long, @Body body: FoodIn): FoodOut
+
+    @DELETE("meals/foods/{id}")
+    suspend fun mealsDeleteFood(@Path("id") id: Long): Response<Unit>
+
+    @GET("meals/recipes")
+    suspend fun mealsRecipes(
+        @Query("include_archived") includeArchived: Boolean = false,
+    ): List<RecipeOut>
+
+    @GET("meals/recipes/{id}")
+    suspend fun mealsRecipe(@Path("id") id: Long): RecipeOut
+
+    @POST("meals/recipes")
+    suspend fun mealsCreateRecipe(@Body body: RecipeIn): RecipeOut
+
+    @PATCH("meals/recipes/{id}")
+    suspend fun mealsUpdateRecipe(@Path("id") id: Long, @Body body: RecipeIn): RecipeOut
+
+    @DELETE("meals/recipes/{id}")
+    suspend fun mealsDeleteRecipe(@Path("id") id: Long): Response<Unit>
+
+    @GET("meals/pantry")
+    suspend fun mealsPantry(): List<PantryItemOut>
+
+    @POST("meals/pantry")
+    suspend fun mealsAddPantry(@Body body: PantryItemIn): PantryItemOut
+
+    @PATCH("meals/pantry/{id}")
+    suspend fun mealsUpdatePantry(@Path("id") id: Long, @Body body: PantryItemIn): PantryItemOut
+
+    @DELETE("meals/pantry/{id}")
+    suspend fun mealsDeletePantry(@Path("id") id: Long): Response<Unit>
+
+    @GET("meals/stats")
+    suspend fun mealsStats(): MealsStats
 }
 
 object BackendClient {

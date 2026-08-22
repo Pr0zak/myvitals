@@ -28,7 +28,7 @@ ANALYTICS = SRC / "analytics"
 # training-load week boundary all resolve days). Adding a module here turns
 # the suite red until every offending expression in it is fixed, which is
 # the point — the guard is only worth anything if it is allowed to fail.
-DAY_FACING_MODULES = ["summary.py", "strava.py", "workout/strength.py"]
+DAY_FACING_MODULES = ["summary.py", "strava.py", "workout/strength.py", "meals.py"]
 
 
 def _utc_today_calls(tree: ast.AST) -> list[int]:

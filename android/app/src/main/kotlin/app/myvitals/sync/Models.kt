@@ -1744,3 +1744,147 @@ data class TrainingLoad(
     val atl: Double? = null,
     val daily: List<TrainingLoadDay> = emptyList(),
 )
+
+
+// ── Meals: foods, recipes, pantry (MEAL-1) ───────────────────────────
+//
+// Every nutrition figure here is computed by the backend. Scaling, unit
+// conversion and the unresolved-line accounting all live in
+// `api/meals.py`; re-deriving any of it in Compose is how the phone and
+// the web end up disagreeing about how much fat is in dinner.
+//
+// Nullable nutrients are load-bearing. USDA does not carry every
+// nutrient for every food, and a null has to stay distinguishable from a
+// zero — "we do not know this food's sodium" is a different claim from
+// "this food contains no sodium". Do NOT give these `= 0.0` defaults;
+// Moshi would then fill a real-looking number whenever the key is
+// absent, which is the landmine documented in CLAUDE.md.
+
+@JsonClass(generateAdapter = true)
+data class FoodOut(
+    val id: Long = 0,
+    val slug: String = "",
+    val name: String = "",
+    val source: String = "usda",
+    val category: String? = null,
+    val kcal: Double? = null,
+    @Json(name = "protein_g") val proteinG: Double? = null,
+    @Json(name = "carbs_g") val carbsG: Double? = null,
+    @Json(name = "fat_g") val fatG: Double? = null,
+    @Json(name = "saturated_fat_g") val saturatedFatG: Double? = null,
+    @Json(name = "fiber_g") val fiberG: Double? = null,
+    @Json(name = "sugar_g") val sugarG: Double? = null,
+    @Json(name = "sodium_mg") val sodiumMg: Double? = null,
+    @Json(name = "unit_grams") val unitGrams: Map<String, Double>? = null,
+    // Whether this is a whole ingredient rather than a prepared dish.
+    // The recipe picker filters on it; the food log does not.
+    @Json(name = "is_ingredient") val isIngredient: Boolean = false,
+)
+
+@JsonClass(generateAdapter = true)
+data class FoodIn(
+    val name: String,
+    val category: String? = null,
+    val kcal: Double? = null,
+    @Json(name = "protein_g") val proteinG: Double? = null,
+    @Json(name = "carbs_g") val carbsG: Double? = null,
+    @Json(name = "fat_g") val fatG: Double? = null,
+    @Json(name = "saturated_fat_g") val saturatedFatG: Double? = null,
+    @Json(name = "fiber_g") val fiberG: Double? = null,
+    @Json(name = "sugar_g") val sugarG: Double? = null,
+    @Json(name = "sodium_mg") val sodiumMg: Double? = null,
+    @Json(name = "unit_grams") val unitGrams: Map<String, Double>? = null,
+)
+
+/** One line of a recipe as the server returns it, already costed. */
+@JsonClass(generateAdapter = true)
+data class RecipeIngredientOut(
+    val id: Long = 0,
+    @Json(name = "food_id") val foodId: Long? = null,
+    @Json(name = "food_name") val foodName: String? = null,
+    @Json(name = "raw_text") val rawText: String? = null,
+    val quantity: Double? = null,
+    val unit: String? = null,
+    @Json(name = "order_index") val orderIndex: Int = 0,
+    val grams: Double? = null,
+    // Present when the line could NOT be costed. Show it — the totals
+    // exclude this line, so presenting them as complete would be a lie.
+    @Json(name = "unresolved_reason") val unresolvedReason: String? = null,
+    val nutrition: Map<String, Double?> = emptyMap(),
+)
+
+@JsonClass(generateAdapter = true)
+data class RecipeIngredientIn(
+    @Json(name = "food_id") val foodId: Long? = null,
+    @Json(name = "raw_text") val rawText: String? = null,
+    val quantity: Double? = null,
+    val unit: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class RecipeOut(
+    val id: Long = 0,
+    val name: String = "",
+    val servings: Int = 1,
+    @Json(name = "prep_min") val prepMin: Int? = null,
+    @Json(name = "cook_min") val cookMin: Int? = null,
+    val method: String? = null,
+    val notes: String? = null,
+    val tags: List<String>? = null,
+    @Json(name = "source_url") val sourceUrl: String? = null,
+    val archived: Boolean = false,
+    @Json(name = "created_at") val createdAt: String? = null,
+    @Json(name = "updated_at") val updatedAt: String? = null,
+    val ingredients: List<RecipeIngredientOut> = emptyList(),
+    val totals: Map<String, Double?> = emptyMap(),
+    @Json(name = "per_serving") val perServing: Map<String, Double?> = emptyMap(),
+    // Non-zero means `totals` understates the real figures.
+    @Json(name = "unresolved_count") val unresolvedCount: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class RecipeIn(
+    val name: String,
+    val servings: Int = 1,
+    @Json(name = "prep_min") val prepMin: Int? = null,
+    @Json(name = "cook_min") val cookMin: Int? = null,
+    val method: String? = null,
+    val notes: String? = null,
+    val tags: List<String>? = null,
+    @Json(name = "source_url") val sourceUrl: String? = null,
+    val ingredients: List<RecipeIngredientIn>? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class PantryItemOut(
+    val id: Long = 0,
+    @Json(name = "food_id") val foodId: Long? = null,
+    val label: String? = null,
+    @Json(name = "food_name") val foodName: String? = null,
+    val quantity: Double? = null,
+    val unit: String? = null,
+    @Json(name = "expires_on") val expiresOn: String? = null,
+    @Json(name = "updated_at") val updatedAt: String? = null,
+    // Negative when already past. Server-derived against the configured
+    // timezone — computing it from the phone's clock would disagree with
+    // the web dashboard and with every other date in the app.
+    @Json(name = "days_to_expiry") val daysToExpiry: Int? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class PantryItemIn(
+    @Json(name = "food_id") val foodId: Long? = null,
+    val label: String? = null,
+    val quantity: Double? = null,
+    val unit: String? = null,
+    @Json(name = "expires_on") val expiresOn: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class MealsStats(
+    val foods: Int = 0,
+    @Json(name = "user_foods") val userFoods: Int = 0,
+    val recipes: Int = 0,
+    @Json(name = "pantry_items") val pantryItems: Int = 0,
+    @Json(name = "expiring_soon") val expiringSoon: Int = 0,
+)

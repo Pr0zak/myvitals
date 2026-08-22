@@ -22,6 +22,7 @@ from .api import (
     fasting,
     imports,
     mcp,
+    meals,
     ingest,
     profile,
     query,
@@ -56,6 +57,12 @@ async def lifespan(app: FastAPI):
     # populated immediately. Don't block app startup if it fails.
     asyncio.create_task(_safe_initial_summary())
 
+    # Load the bundled USDA food catalog (MEAL-1). Idempotent and a no-op
+    # once seeded, so the steady-state cost is a single COUNT. Backgrounded
+    # because the first run writes ~7,000 rows and nothing else at startup
+    # needs to wait for it.
+    asyncio.create_task(_safe_seed_foods())
+
     # HA WebSocket realtime consumer — always start the task; the run()
     # function reads ha_config (DB) + env fallbacks and bails out if
     # url / token / realtime_enabled aren't all set. This lets Settings
@@ -80,6 +87,22 @@ async def _safe_initial_summary() -> None:
         await compute_daily_summary()
     except Exception as e:  # noqa: BLE001
         log.warning("initial daily_summary failed (likely no data yet): %s", e)
+
+
+async def _safe_seed_foods() -> None:
+    """Seed the food catalog, never blocking startup on it.
+
+    A failure here costs an empty food picker, not a broken app, so it is
+    logged and swallowed. Notably it also fails harmlessly on a backend
+    that starts before migration 0056 has run.
+    """
+    from .db import session as _session
+    from .db.seed_foods import seed_foods
+    try:
+        async with _session.SessionLocal() as db:
+            await seed_foods(db)
+    except Exception as e:  # noqa: BLE001
+        log.warning("food catalog seed failed: %s", e)
 
 
 async def _anomaly_scan() -> None:
@@ -218,6 +241,7 @@ app.include_router(trails.router, tags=["trails"])
 app.include_router(devices.router, tags=["devices"])
 app.include_router(fasting.router, tags=["fasting"])
 app.include_router(update_api.router, tags=["update"])
+app.include_router(meals.router, tags=["meals"])
 # MCP-1: read-only MCP endpoint. Publishes the same aggregates the AI
 # surfaces use, so the user's own Claude subscription can read their
 # health data without billing this app's key.

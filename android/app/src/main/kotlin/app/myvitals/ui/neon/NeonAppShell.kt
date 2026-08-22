@@ -99,7 +99,7 @@ private val NEON_TABS = listOf(
     },
     NeonTab(NeonRoutes.YOU, "You", NeonMV.Cyan, Icons.Outlined.Person) {
         it == NeonRoutes.YOU ||
-            it in setOf("settings", "sober", "fasting", "journal", "coach")
+            it in setOf("settings", "sober", "fasting", "journal", "coach", "meals")
     },
 )
 
@@ -212,6 +212,9 @@ fun NeonAppShell(
                 }
                 composable("journal") {
                     app.myvitals.ui.JournalScreen(settings = settings, onBack = { nav.popBackStack() })
+                }
+                composable("meals") {
+                    app.myvitals.ui.meals.MealsScreen(settings = settings)
                 }
                 composable("workout/today") {
                     app.myvitals.ui.strength.StrengthTodayScreen(

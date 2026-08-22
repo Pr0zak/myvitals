@@ -25,6 +25,23 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Each pair: (web_path, phone_path, optional notes). Both relative to repo root.
 PAIRS: list[tuple[str, str, str]] = [
+    # ── Meals: recipes, pantry, food lookup (MEAL-1) ──
+    # Three web views map onto one phone screen with three tabs, so all
+    # three rows point at MealsScreen.kt. That is deliberate: a change to
+    # any one of the web views should still make the checker ask whether
+    # the phone tab moved with it.
+    ("frontend/src/views/meals/Recipes.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/meals/MealsScreen.kt",
+     "Recipes — list, editor, nutrition totals"),
+    ("frontend/src/views/meals/Pantry.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/meals/MealsScreen.kt",
+     "Pantry — what is in the house, expiry"),
+    ("frontend/src/views/meals/Foods.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/meals/MealsScreen.kt",
+     "Food lookup + user-entered foods"),
+    ("frontend/src/components/FoodPicker.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/meals/FoodPicker.kt",
+     "Food type-ahead search"),
     # ── Vitality Neon shell (opt-in 6-tab redesign) — web view ↔ phone screen ──
     ("frontend/src/components/NeonNav.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/neon/NeonAppShell.kt",

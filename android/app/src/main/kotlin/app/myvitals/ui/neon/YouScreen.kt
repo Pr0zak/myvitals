@@ -22,6 +22,7 @@ import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.LocalFireDepartment
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.Icon
@@ -64,7 +65,8 @@ import kotlin.math.roundToInt
  * Server is source of truth: everything renders from /fasting/current,
  * /sober/current, /ai/goals, /profile and /summary/today via BackendClient.
  *
- * onOpen routes used: "settings", "sober", "fasting", "journal", "coach".
+ * onOpen routes used: "settings", "sober", "fasting", "journal", "coach",
+ * "meals".
  */
 @Composable
 fun YouScreen(
@@ -184,6 +186,12 @@ fun YouScreen(
             icon = Icons.Outlined.Psychology, tint = NeonMV.Periwinkle,
             title = "Coach", subtitle = "AI reads on training, sleep & recovery",
             onClick = { onOpen("coach") },
+        )
+        Spacer(Modifier.height(8.dp))
+        LinkPill(
+            icon = Icons.Outlined.Restaurant, tint = NeonMV.Lime,
+            title = "Meals", subtitle = "Recipes · pantry · food lookup",
+            onClick = { onOpen("meals") },
         )
         Spacer(Modifier.height(8.dp))
         LinkPill(

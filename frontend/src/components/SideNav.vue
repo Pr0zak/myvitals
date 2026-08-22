@@ -19,9 +19,10 @@ import {
   ChevronRight, Download, Droplets, Dumbbell, Edit3, FileUp, Footprints, Github, GitCompare,
   Heart, Home, Hourglass, Key, List, Map, Menu, Monitor, Mountain, RotateCcw, Ruler, Scale, Search,
   Settings, Ship, Sparkles, Target, Terminal, Thermometer, TrendingUp, User, Watch as WatchIcon,
+  UtensilsCrossed, BookOpen, Package, Apple,
   Wrench, type LucideIcon,
 } from "lucide-vue-next";
-import { api } from "@/api/client";
+import { api, meals } from "@/api/client";
 import { queryToken } from "@/config";
 import { fmtDateTime } from "@/format";
 import { fmtWeight, fmtDistance, weightVal, distanceUnit } from "@/units";
@@ -82,6 +83,11 @@ const summary = ref<Awaited<ReturnType<typeof api.todaySummary>> | null>(null);
 const activitiesCount = ref<number | null>(null);
 const activitiesDistanceM = ref<number | null>(null);
 const discoveriesCount = ref<number | null>(null);
+/** Pantry items within three days of their use-by date. The count comes
+ *  from the server so it is resolved against the configured timezone,
+ *  not the browser's — the same reason every other day-facing number in
+ *  the app is server-derived. */
+const expiringCount = ref<number | null>(null);
 const backendOk = ref<boolean | null>(null);
 const lastSyncAt = ref<Date | null>(null);
 const lastAttemptAt = ref<Date | null>(null);
@@ -100,7 +106,7 @@ const nowTick = ref(Date.now());
 
 async function refreshSidebarData() {
   try {
-    const [s, stats, disc, sync, sober, fast, watch] = await Promise.all([
+    const [s, stats, disc, sync, sober, fast, watch, mealCounts] = await Promise.all([
       api.todaySummary().catch(() => null),
       api.activitiesStats(365).catch(() => null),
       api.discoveries(90).catch(() => []),
@@ -108,6 +114,7 @@ async function refreshSidebarData() {
       api.soberCurrent().catch(() => null),
       api.fastingCurrent().catch(() => null),
       api.deviceStatusLatest().catch(() => null),
+      meals.stats().catch(() => null),
     ]);
     summary.value = s;
     if (stats) {
@@ -115,6 +122,7 @@ async function refreshSidebarData() {
       activitiesDistanceM.value = stats.total_distance_m;
     }
     discoveriesCount.value = disc?.length ?? 0;
+    expiringCount.value = mealCounts?.expiring_soon ?? null;
     soberDays.value = sober?.days ?? null;
     fastingActive.value = !!fast?.is_active;
     watchBatteryPct.value = watch?.battery_pct ?? null;
@@ -249,6 +257,17 @@ const groups = computed<Group[]>(() => {
         { to: "/workout/strength/catalog",   icon: BarChart3,   label: "Workout catalog" },
         { to: "/workout/strength/history",   icon: List,        label: "Workout history" },
         { to: "/workout/strength/equipment", icon: Settings,    label: "Workout equipment" },
+      ],
+    },
+    {
+      id: "meals", icon: UtensilsCrossed, label: "Meals",
+      badge: expiringCount.value && expiringCount.value > 0
+        ? `${expiringCount.value} to use` : undefined,
+      badgeColor: "#fbbf24",
+      children: [
+        { to: "/meals/recipes", icon: BookOpen, label: "Recipes" },
+        { to: "/meals/pantry",  icon: Package,  label: "Pantry" },
+        { to: "/meals/foods",   icon: Apple,    label: "Foods" },
       ],
     },
     { id: "trails", to: "/trails", icon: Mountain, label: "Trails" },

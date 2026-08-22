@@ -1726,3 +1726,219 @@ export const api = {
     return data;
   },
 };
+
+// ── Meals: foods, recipes, pantry (MEAL-1) ───────────────────────────
+//
+// Every nutrition figure here is computed by the backend. Recipes scale,
+// units convert and lines fail to resolve, and doing that arithmetic a
+// second time in Vue is how the web and the phone end up disagreeing
+// about how much fat is in dinner. Render these numbers; never derive
+// them.
+
+/** Per-100g nutrition. Every field is nullable: USDA does not carry every
+ *  nutrient for every food, and "unknown" must stay distinguishable from
+ *  zero so a total is never presented as complete when it is not. */
+export interface Nutrition {
+  kcal: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+  saturated_fat_g: number | null;
+  fiber_g: number | null;
+  sugar_g: number | null;
+  sodium_mg: number | null;
+}
+
+export interface Food extends Nutrition {
+  id: number;
+  slug: string;
+  name: string;
+  source: string;
+  category: string | null;
+  unit_grams: Record<string, number> | null;
+  is_ingredient: boolean;
+}
+
+export interface RecipeIngredient {
+  id: number;
+  food_id: number | null;
+  food_name: string | null;
+  raw_text: string | null;
+  quantity: number | null;
+  unit: string | null;
+  order_index: number;
+  grams: number | null;
+  unresolved_reason: string | null;
+  nutrition: Partial<Nutrition>;
+}
+
+export interface IngredientInput {
+  food_id?: number | null;
+  raw_text?: string | null;
+  quantity?: number | null;
+  unit?: string | null;
+}
+
+export interface Recipe {
+  id: number;
+  name: string;
+  servings: number;
+  prep_min: number | null;
+  cook_min: number | null;
+  method: string | null;
+  notes: string | null;
+  tags: string[] | null;
+  source_url: string | null;
+  archived: boolean;
+  created_at: string;
+  updated_at: string | null;
+  ingredients: RecipeIngredient[];
+  totals: Partial<Nutrition>;
+  per_serving: Partial<Nutrition>;
+  /** Non-zero means `totals` understates the real figures. Show it. */
+  unresolved_count: number;
+}
+
+export interface PantryItem {
+  id: number;
+  food_id: number | null;
+  label: string | null;
+  food_name: string | null;
+  quantity: number | null;
+  unit: string | null;
+  expires_on: string | null;
+  updated_at: string;
+  /** Negative when already past. Derived server-side against the user's
+   *  LOCAL day — deriving it here would roll over at 7pm Central. */
+  days_to_expiry: number | null;
+}
+
+export interface MealsStats {
+  foods: number;
+  user_foods: number;
+  recipes: number;
+  pantry_items: number;
+  expiring_soon: number;
+}
+
+export const searchFoods = (
+  q: string,
+  opts: { ingredientsOnly?: boolean; limit?: number } = {},
+) =>
+  http
+    .get<Food[]>("/meals/foods/search", {
+      params: {
+        q,
+        ingredients_only: opts.ingredientsOnly ?? false,
+        limit: opts.limit ?? 25,
+      },
+    })
+    .then((r) => r.data);
+
+export const getFood = (id: number) =>
+  http.get<Food>(`/meals/foods/${id}`).then((r) => r.data);
+
+export const createFood = (body: Partial<Food> & { name: string }) =>
+  http.post<Food>("/meals/foods", body).then((r) => r.data);
+
+export const updateFood = (id: number, body: Partial<Food> & { name: string }) =>
+  http.patch<Food>(`/meals/foods/${id}`, body).then((r) => r.data);
+
+export const deleteFood = (id: number) =>
+  http.delete(`/meals/foods/${id}`).then(() => undefined);
+
+export const listRecipes = (includeArchived = false) =>
+  http
+    .get<Recipe[]>("/meals/recipes", {
+      params: { include_archived: includeArchived },
+    })
+    .then((r) => r.data);
+
+export const getRecipe = (id: number) =>
+  http.get<Recipe>(`/meals/recipes/${id}`).then((r) => r.data);
+
+export const createRecipe = (body: {
+  name: string;
+  servings?: number;
+  prep_min?: number | null;
+  cook_min?: number | null;
+  method?: string | null;
+  notes?: string | null;
+  tags?: string[] | null;
+  source_url?: string | null;
+  ingredients?: IngredientInput[];
+}) => http.post<Recipe>("/meals/recipes", body).then((r) => r.data);
+
+export const updateRecipe = (
+  id: number,
+  body: Record<string, unknown>,
+) => http.patch<Recipe>(`/meals/recipes/${id}`, body).then((r) => r.data);
+
+export const deleteRecipe = (id: number) =>
+  http.delete(`/meals/recipes/${id}`).then(() => undefined);
+
+/** Scale a recipe to a different serving count. Server-side so the phone
+ *  and the web agree on the arithmetic. */
+export const scaleRecipe = (id: number, servings: number) =>
+  http
+    .get<{
+      recipe_id: number;
+      name: string;
+      base_servings: number;
+      servings: number;
+      factor: number;
+      ingredients: Array<{
+        food_id: number | null;
+        food_name: string | null;
+        raw_text: string | null;
+        quantity: number | null;
+        unit: string | null;
+        grams: number | null;
+        unresolved_reason: string | null;
+      }>;
+      totals: Partial<Nutrition>;
+      per_serving: Partial<Nutrition>;
+      unresolved_count: number;
+    }>(`/meals/recipes/${id}/scaled`, { params: { servings } })
+    .then((r) => r.data);
+
+export const listPantry = () =>
+  http.get<PantryItem[]>("/meals/pantry").then((r) => r.data);
+
+export const addPantry = (body: {
+  food_id?: number | null;
+  label?: string | null;
+  quantity?: number | null;
+  unit?: string | null;
+  expires_on?: string | null;
+}) => http.post<PantryItem>("/meals/pantry", body).then((r) => r.data);
+
+export const updatePantry = (id: number, body: Record<string, unknown>) =>
+  http.patch<PantryItem>(`/meals/pantry/${id}`, body).then((r) => r.data);
+
+export const deletePantry = (id: number) =>
+  http.delete(`/meals/pantry/${id}`).then(() => undefined);
+
+export const mealsStats = () =>
+  http.get<MealsStats>("/meals/stats").then((r) => r.data);
+
+/** Namespace object, mirroring the `api` export's shape so views read
+ *  the same way whichever surface they touch: `meals.listRecipes()`. */
+export const meals = {
+  searchFoods,
+  getFood,
+  createFood,
+  updateFood,
+  deleteFood,
+  listRecipes,
+  getRecipe,
+  createRecipe,
+  updateRecipe,
+  deleteRecipe,
+  scaleRecipe,
+  listPantry,
+  addPantry,
+  updatePantry,
+  deletePantry,
+  stats: mealsStats,
+};

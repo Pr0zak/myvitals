@@ -3092,3 +3092,288 @@ async def workout_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
         input_tokens=resp.usage.input_tokens,
         output_tokens=resp.usage.output_tokens,
     )
+
+
+# ── Meal suggestions (MEAL-4) ────────────────────────────────────────
+#
+# The differentiator this codebase actually has: every other meal app
+# starts cold, so "healthy" means whatever its editors decided. This one
+# already knows the weight goal and its trend, training load, fasting
+# state, the day's planned workout — and, uniquely here, a per-meal fat
+# constraint from a cholecystectomy.
+#
+# Two rules the prompt cannot be trusted to enforce on its own, so both
+# are ALSO enforced in code after the tool call (`meal_suggestions`):
+#
+#   1. Fat per meal. A prompt rule is a request, not a guarantee, and the
+#      one number this user's condition makes matter is exactly the one a
+#      model is most likely to be breezy about. Every returned suggestion
+#      is re-judged by `analytics/nutrition.assess_meal_fat`, the same
+#      deterministic function the rest of the app uses, and the model's
+#      own opinion of it is discarded.
+#   2. Recipes are compositions, never reproductions. The app does not
+#      ship or scrape third-party recipe text, and a suggestion that
+#      claims to be a known published recipe would be doing by proxy what
+#      the scraper decision ruled out.
+
+MEAL_SUGGEST_TOOL = {
+    "name": "give_meal_suggestions",
+    "description": (
+        "Return 2-4 meal suggestions composed from what the user has, "
+        "fitted to their training, fasting and health context."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "headline": {
+                "type": "string",
+                "description": "One sentence on what today calls for, and why.",
+            },
+            "suggestions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "slot": {
+                            "type": "string",
+                            "enum": ["breakfast", "lunch", "dinner", "snack"],
+                        },
+                        "why": {
+                            "type": "string",
+                            "description": (
+                                "Why THIS meal today — tie it to training "
+                                "load, fasting state, the weight goal or "
+                                "recovery. Not generic nutrition advice."
+                            ),
+                        },
+                        "uses_from_pantry": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Pantry items this uses up.",
+                        },
+                        "also_needs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Anything not already in the pantry.",
+                        },
+                        "est_prep_min": {"type": "integer"},
+                        "est_fat_g": {
+                            "type": "number",
+                            "description": (
+                                "Estimated fat in grams for ONE serving. Be "
+                                "honest and rather over- than under-estimate; "
+                                "this is checked against a medical constraint."
+                            ),
+                        },
+                        "est_kcal": {"type": "number"},
+                        "based_on_saved_recipe": {
+                            "type": "string",
+                            "description": (
+                                "Name of the user's own saved recipe this "
+                                "comes from, or empty if newly composed."
+                            ),
+                        },
+                    },
+                    "required": ["name", "slot", "why", "est_fat_g"],
+                },
+            },
+            "notes": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["headline", "suggestions"],
+    },
+}
+
+
+def _meal_suggest_system(tone: str) -> str:
+    return (
+        "You suggest meals for a single self-hosted user, composing from "
+        "what they already have.\n\n"
+        f"Tone: {tone}.\n\n"
+        "## What makes a good suggestion here\n"
+        "Tie every suggestion to TODAY'S context — the training load, the "
+        "planned workout, the fasting state, the weight goal, recovery. "
+        '"Higher-carb the evening before a long ride" is a suggestion. '
+        '"Eat more vegetables" is not; the user did not need an LLM for '
+        "that. Prefer meals that use pantry items which expire soonest.\n\n"
+        "## Fat per meal is a medical constraint, not a preference\n"
+        "This user has had their gall bladder removed. Bile now drips "
+        "continuously instead of arriving as a bolus, so what matters is "
+        "how much fat lands in ONE sitting, not the daily total. If a "
+        "per-meal fat target is given, keep every suggestion under it. If "
+        "no target is given, do NOT invent one and do not claim a meal is "
+        "safe — tolerance varies a lot between people. Estimate `est_fat_g` "
+        "honestly per serving and err on the high side; it is checked "
+        "against a deterministic rule after you answer.\n\n"
+        "## Do not reproduce published recipes\n"
+        "Compose from ingredients, or adapt one of the user's OWN saved "
+        "recipes and name it in `based_on_saved_recipe`. Never reproduce "
+        "the text of a published recipe from memory, and never present an "
+        "invented dish as a known published one.\n\n"
+        "## Honesty\n"
+        "If the pantry is nearly empty, say so in `notes` and suggest few "
+        "things rather than inventing a full week. Anything the user does "
+        "not have goes in `also_needs` — do not quietly assume staples.\n\n"
+        "Answer only via the `give_meal_suggestions` tool."
+    )
+
+
+async def build_meal_suggestion_payload(db: AsyncSession) -> dict[str, Any]:
+    """Bounded payload for the meal-suggestion card.
+
+    Bounded is the operative word — see the AI section of CLAUDE.md. The
+    pantry and recipe lists are names and quantities only; no nutrition
+    tables, no ingredient rows, no history. Everything numeric the model
+    needs has already been aggregated server-side.
+    """
+    from sqlalchemy import select as _select
+
+    from ..api.meals import DIET_KEY, _DIET_DEFAULTS
+
+    # Pantry: name, amount, and how close it is to expiring. Soonest
+    # first, capped — a long pantry should not balloon the cache key.
+    pantry_rows = (await db.execute(_select(models.PantryItem))).scalars().all()
+    food_ids = {p.food_id for p in pantry_rows if p.food_id is not None}
+    names: dict[int, str] = {}
+    if food_ids:
+        for fid, name in (await db.execute(
+            _select(models.Food.id, models.Food.name)
+            .where(models.Food.id.in_(food_ids))
+        )).all():
+            names[fid] = name
+    today = _local_today()
+    pantry = []
+    for p in pantry_rows:
+        label = names.get(p.food_id) if p.food_id else p.label
+        if not label:
+            continue
+        pantry.append({
+            "item": label,
+            "amount": (
+                f"{p.quantity:g} {p.unit}".strip()
+                if p.quantity is not None else (p.unit or "some")
+            ),
+            "days_to_expiry": (
+                (p.expires_on - today).days if p.expires_on else None
+            ),
+        })
+    pantry.sort(key=lambda x: (
+        x["days_to_expiry"] if x["days_to_expiry"] is not None else 10**6
+    ))
+    pantry = pantry[:60]
+
+    # The user's own recipes, by name and headline numbers only.
+    recipes = (await db.execute(
+        _select(models.Recipe)
+        .where(models.Recipe.archived.is_(False))
+        .order_by(models.Recipe.name)
+        .limit(40)
+    )).scalars().all()
+    saved = [
+        {
+            "name": r.name,
+            "servings": r.servings,
+            "minutes": (r.prep_min or 0) + (r.cook_min or 0) or None,
+        }
+        for r in recipes
+    ]
+
+    profile = await db.get(models.UserProfile, 1)
+    extra = (profile.extra if profile and profile.extra else {}) or {}
+    diet = {**_DIET_DEFAULTS, **(extra.get(DIET_KEY) or {})}
+
+    daily = await _daily_rows(db, 14)
+    return {
+        "today": today.isoformat(),
+        "profile": await _profile_ctx(db),
+        "pantry": pantry,
+        "pantry_size": len(pantry_rows),
+        "saved_recipes": saved,
+        # The medical constraint, and explicitly whether one is set.
+        # A null target is NOT permission to guess a limit.
+        "fat_per_meal_target_g": diet.get("fat_per_meal_target_g"),
+        "fat_target_source": diet.get("fat_target_source"),
+        "daily_kcal_target": diet.get("daily_kcal_target"),
+        "active_weight_goal": await _active_weight_goal_ctx(db),
+        "planned_strength_today": await _planned_strength_today(db),
+        "fasting_status": await _fasting_status(db),
+        "recent_dailies": daily,
+        "wow_deltas": _wow_deltas(daily),
+    }
+
+
+async def meal_suggestions(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
+    """Meal ideas from the pantry, fitted to today's training and health."""
+    if not cfg.enabled or not cfg.anthropic_api_key:
+        raise RuntimeError("AI is disabled or no API key configured")
+
+    from ..analytics.nutrition import assess_meal_fat
+
+    payload = await build_meal_suggestion_payload(db)
+    user_text = (
+        "Suggest meals for this user via the `give_meal_suggestions` "
+        "tool:\n\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = get_provider(cfg)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=1200,
+        system=_cached_system(_meal_suggest_system(cfg.tone), cfg),
+        tools=[MEAL_SUGGEST_TOOL],
+        tool_choice={"type": "tool", "name": "give_meal_suggestions"},
+        messages=[{"role": "user", "content": user_text}],
+    )
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if (getattr(block, "type", "") == "tool_use"
+                and block.name == "give_meal_suggestions"):
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    if not tool_input:
+        tool_input = {
+            "headline": "No suggestions could be generated.",
+            "suggestions": [],
+            "notes": [],
+        }
+
+    # ── Application-layer fat check ──────────────────────────────────
+    #
+    # Belt and braces over the prompt rule, in the same shape as the
+    # religious-fast safeguard above. Each suggestion's fat estimate is
+    # re-judged by the SAME deterministic function every other surface
+    # uses, so the card cannot disagree with the recipe page, and a model
+    # that quietly ignored the target cannot present a meal as fine.
+    #
+    # Nothing is removed — a suggestion over the target is FLAGGED, not
+    # hidden. Silently dropping it would leave the user wondering why the
+    # obvious meal was not offered.
+    target = payload.get("fat_per_meal_target_g")
+    flagged = 0
+    for s in tool_input.get("suggestions") or []:
+        if not isinstance(s, dict):
+            continue
+        est = s.get("est_fat_g")
+        try:
+            est = None if est is None else float(est)
+        except (TypeError, ValueError):
+            est = None
+        verdict = assess_meal_fat(est, target_g=target, history_fat_g=[])
+        s["fat_assessment"] = verdict
+        if verdict["verdict"] in {"high", "very_high"}:
+            flagged += 1
+    if flagged and target is not None:
+        tool_input.setdefault("notes", []).append(
+            f"{flagged} suggestion{'' if flagged == 1 else 's'} came back "
+            f"above your {target:g} g per-meal fat target and "
+            f"{'is' if flagged == 1 else 'are'} marked — the estimates are "
+            "the model's, so treat them as rough."
+        )
+
+    _normalize_array_field(tool_input, "notes")
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )

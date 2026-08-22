@@ -30,7 +30,9 @@ from ..integrations.claude import (
     explain_discovery,
     explain_legacy,
     explain_topic,
+    build_meal_suggestion_payload,
     fasting_coach,
+    meal_suggestions,
     MAX_CUSTOM_INSTRUCTIONS,
     hash_payload,
     pre_workout,
@@ -1731,6 +1733,55 @@ async def coach_fasting_endpoint(
     result = await fasting_coach(db, cfg)
     cfg.calls_today += 1
     return await _coach_persist(db, "coach_fasting", payload_hash, result)
+
+
+@router.post("/meals/suggest")
+async def meals_suggest_endpoint(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Meal ideas composed from the pantry, fitted to today's context.
+
+    MEAL-4. Same shape as every other AI surface: bounded payload,
+    forced tool-use so the clients render cards rather than prose,
+    cached by payload hash so an unchanged pantry never re-bills, and
+    quota-checked before the call.
+    """
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    payload = await build_meal_suggestion_payload(db)
+    payload_hash = _ai_cache_key(cfg, "meal_suggest", payload)
+    cached = await _coach_cached(db, "meal_suggest", payload_hash)
+    if cached is not None:
+        return cached
+    result = await meal_suggestions(db, cfg)
+    cfg.calls_today += 1
+    return await _coach_persist(db, "meal_suggest", payload_hash, result)
+
+
+@router.get("/meals/suggest/latest")
+async def meals_suggest_latest(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any] | None:
+    """Most recent suggestion card without billing."""
+    row = (await db.execute(
+        select(models.AiSummary)
+        .where(models.AiSummary.range_kind == "meal_suggest")
+        .order_by(models.AiSummary.generated_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    import json as _json
+    try:
+        analysis = _json.loads(row.content)
+    except Exception:  # noqa: BLE001
+        analysis = {"raw": row.content}
+    return {
+        "analysis": analysis,
+        "generated_at": row.generated_at,
+        "model": row.model,
+        "cached": True,
+    }
 
 
 @router.get("/coach/fasting/latest")

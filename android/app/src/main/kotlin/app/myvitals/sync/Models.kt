@@ -2051,3 +2051,44 @@ data class ShoppingListIn(
     val days: Int = 7,
     val name: String? = null,
 )
+
+
+// ── Meals: AI suggestions (MEAL-4) ───────────────────────────────────
+
+/**
+ * One AI meal suggestion.
+ *
+ * `fatAssessment` is NOT the model's opinion. The server re-judges every
+ * estimate with the same deterministic function the recipe pages use and
+ * overwrites whatever the model thought, so this card cannot disagree
+ * with the rest of the app about the one number a cholecystectomy makes
+ * matter.
+ */
+@JsonClass(generateAdapter = true)
+data class MealSuggestion(
+    val name: String = "",
+    val slot: String = "dinner",
+    val why: String = "",
+    @Json(name = "uses_from_pantry") val usesFromPantry: List<String> = emptyList(),
+    @Json(name = "also_needs") val alsoNeeds: List<String> = emptyList(),
+    @Json(name = "est_prep_min") val estPrepMin: Int? = null,
+    @Json(name = "est_fat_g") val estFatG: Double? = null,
+    @Json(name = "est_kcal") val estKcal: Double? = null,
+    @Json(name = "based_on_saved_recipe") val basedOnSavedRecipe: String? = null,
+    @Json(name = "fat_assessment") val fatAssessment: FatAssessment? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class MealSuggestionCard(
+    val headline: String = "",
+    val suggestions: List<MealSuggestion> = emptyList(),
+    val notes: List<String> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class MealSuggestEnvelope(
+    val analysis: MealSuggestionCard? = null,
+    @Json(name = "generated_at") val generatedAt: String? = null,
+    val model: String? = null,
+    val cached: Boolean = false,
+)

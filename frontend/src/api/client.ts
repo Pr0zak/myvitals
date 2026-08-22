@@ -1671,6 +1671,19 @@ export const api = {
     return data;
   },
 
+  /** MEAL-4. Meal ideas composed from the pantry, fitted to today's
+   *  training, fasting state and weight goal. Cached by payload hash
+   *  server-side, so calling this with an unchanged pantry costs
+   *  nothing. */
+  async mealSuggest(): Promise<CoachCardOut> {
+    const { data } = await http.post("/ai/meals/suggest", {});
+    return data;
+  },
+  async mealSuggestLatest(): Promise<CoachCardOut | null> {
+    const { data } = await http.get("/ai/meals/suggest/latest");
+    return data;
+  },
+
   async deviceStatusLatest(device_id = "pixel_watch_3"): Promise<{
     device_id: string;
     time: string;
@@ -1782,6 +1795,28 @@ export interface FatSoluble {
   missing: string[];
   /** True when NOTHING is known — a different claim from "contains none". */
   no_data: boolean;
+}
+
+/** One AI meal suggestion. `fat_assessment` is NOT the model's opinion —
+ *  it is recomputed server-side by the same deterministic function the
+ *  recipe pages use, so the two can never disagree. */
+export interface MealSuggestion {
+  name: string;
+  slot: string;
+  why: string;
+  uses_from_pantry?: string[];
+  also_needs?: string[];
+  est_prep_min?: number;
+  est_fat_g?: number;
+  est_kcal?: number;
+  based_on_saved_recipe?: string;
+  fat_assessment?: FatAssessment;
+}
+
+export interface MealSuggestionCard {
+  headline: string;
+  suggestions: MealSuggestion[];
+  notes?: string[];
 }
 
 export interface DietProfile {

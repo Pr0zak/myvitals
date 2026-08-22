@@ -600,6 +600,15 @@ interface BackendApi {
 
     @DELETE("meals/shopping-list/{id}")
     suspend fun mealsDeleteShoppingList(@Path("id") id: Long): Response<Unit>
+
+    @POST("ai/meals/suggest")
+    suspend fun mealsSuggest(@Body body: Map<String, String> = emptyMap()): MealSuggestEnvelope
+
+    // Reading the last card must never bill. Returns 200 with a null
+    // body when nothing has been generated yet, which Retrofit surfaces
+    // as a successful Response with body() == null.
+    @GET("ai/meals/suggest/latest")
+    suspend fun mealsSuggestLatest(): Response<MealSuggestEnvelope>
 }
 
 object BackendClient {

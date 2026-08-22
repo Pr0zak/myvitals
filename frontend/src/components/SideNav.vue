@@ -270,6 +270,7 @@ const groups = computed<Group[]>(() => {
         { to: "/meals/shopping", icon: ShoppingCart, label: "Shopping" },
         { to: "/meals/pantry",  icon: Package,  label: "Pantry" },
         { to: "/meals/foods",   icon: Apple,    label: "Foods" },
+        { to: "/meals/ideas",  icon: Sparkles,   label: "Meal ideas" },
         { to: "/meals/nutrition", icon: HeartPulse, label: "Nutrition" },
       ],
     },

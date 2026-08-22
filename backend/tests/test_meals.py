@@ -692,3 +692,37 @@ def test_quantity_pickers_offer_no_generic_volume_unit():
         generic = src[start:start + 400]
         for volume in ('"cup"', '"tbsp"', '"tsp"', '"ml"'):
             assert volume not in generic, f"{f.name} offers a generic {volume}"
+
+
+def test_food_search_exposes_the_readable_concept():
+    """Reported from live use, twice.
+
+    Ranking put raw chicken breast first, but the row still READ as
+    "Chicken, broiler or fryers, breast, skinless, boneless, meat only,
+    raw" — so the list looked like it had no plain chicken breast in it.
+    The concept is the scannable title; the USDA name stays underneath
+    because its precision is what makes the nutrition right.
+    """
+    from myvitals.api.meals import FoodOut
+
+    assert "concept" in FoodOut.model_fields
+
+
+def test_both_pickers_title_on_concept_not_the_usda_name():
+    root = pathlib.Path(__file__).resolve().parents[2]
+    web = (root / "frontend" / "src" / "components" / "FoodPicker.vue").read_text()
+    phone = (root / "android" / "app" / "src" / "main" / "kotlin" / "app"
+             / "myvitals" / "ui" / "meals" / "FoodPicker.kt").read_text()
+    assert "title(f)" in web and "f.concept" in web
+    assert "f.concept?.replaceFirstChar" in phone
+
+
+def test_pantry_and_foods_explain_what_they_are_for():
+    """Asked directly: "what is the difference between the pantry and
+    foods section". If a user has to ask, the screens have to say."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    pantry = (root / "frontend" / "src" / "views" / "meals" / "Pantry.vue").read_text()
+    foods = (root / "frontend" / "src" / "views" / "meals" / "Foods.vue").read_text()
+    assert "in the house" in pantry
+    assert "reference catalog" in foods
+    assert "does <strong>not</strong>" in foods or "does not" in foods

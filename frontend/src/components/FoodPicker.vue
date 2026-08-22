@@ -78,6 +78,17 @@ function clear() {
   results.value = [];
 }
 
+/** What to show as the row's headline.
+ *
+ *  USDA's full name is precise and unscannable — "Chicken, broiler or
+ *  fryers, breast, skinless, boneless, meat only, raw" — so the concept
+ *  leads and the full name goes underneath. The precision is what makes
+ *  the nutrition right, so it is demoted rather than hidden. */
+function title(f: Food): string {
+  if (!f.concept) return f.name;
+  return f.concept.charAt(0).toUpperCase() + f.concept.slice(1);
+}
+
 /** Rounded kcal for the result row. Null stays "—": a food with unknown
  *  energy is not a food with zero energy. */
 function kcalLabel(f: Food): string {
@@ -112,9 +123,10 @@ function kcalLabel(f: Food): string {
       <li v-for="f in results" :key="f.id">
         <button class="row" @click="choose(f)">
           <span class="name">
-            {{ f.name }}
+            {{ title(f) }}
             <span v-if="f.source !== 'usda'" class="badge">yours</span>
           </span>
+          <span v-if="f.concept" class="full">{{ f.name }}</span>
           <span class="macros">
             <span class="kcal">{{ kcalLabel(f) }}</span>
             <span v-if="f.fat_g != null" class="fat">{{ f.fat_g.toFixed(1) }}g fat</span>
@@ -159,6 +171,10 @@ function kcalLabel(f: Food): string {
 }
 .row:hover, .row:focus-visible { background: var(--bg-2); }
 .name { font-size: 0.88rem; line-height: 1.3; }
+.full {
+  display: block; font-size: 0.7rem; color: var(--muted-2);
+  line-height: 1.35; margin-top: 0.1rem;
+}
 .badge {
   font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.04em;
   border: 1px solid var(--line); border-radius: 5px;

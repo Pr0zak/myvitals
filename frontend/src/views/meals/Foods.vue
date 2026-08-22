@@ -148,6 +148,13 @@ function fmt(v: number | null, digits: number, suffix: string): string {
       </button>
     </PageHeader>
 
+    <p class="purpose">
+      A reference catalog — look up what a food contains, or add one the
+      catalog doesn't have. Adding a food here does <strong>not</strong>
+      mean you have it; that's the
+      <RouterLink to="/meals/pantry">Pantry</RouterLink>.
+    </p>
+
     <p v-if="stats" class="counts">
       {{ stats.foods.toLocaleString() }} foods in the catalog
       <template v-if="stats.user_foods">
@@ -205,7 +212,10 @@ function fmt(v: number | null, digits: number, suffix: string): string {
     <Card v-if="selected && !editing" flat>
       <div class="head">
         <div>
-          <strong>{{ selected.name }}</strong>
+          <strong>{{ selected.concept
+            ? selected.concept.charAt(0).toUpperCase() + selected.concept.slice(1)
+            : selected.name }}</strong>
+          <span v-if="selected.concept" class="cat">{{ selected.name }}</span>
           <span v-if="selected.category" class="cat">{{ selected.category }}</span>
         </div>
         <div class="head-actions">
@@ -251,7 +261,12 @@ function fmt(v: number | null, digits: number, suffix: string): string {
 </template>
 
 <style scoped>
-.counts { color: var(--muted-2); font-size: 0.8rem; margin: -0.4rem 0 0.8rem; }
+.counts { color: var(--muted-2); font-size: 0.8rem; margin: -0.2rem 0 0.8rem; }
+.purpose {
+  color: var(--muted-2); font-size: 0.8rem; line-height: 1.5;
+  margin: -0.4rem 0 0.5rem;
+}
+.purpose strong { color: var(--fg); }
 .err { color: #f87171; font-size: 0.85rem; }
 .hint { color: var(--muted-2); font-size: 0.8rem; margin: 0 0 0.7rem; line-height: 1.45; }
 button.primary, button.ghost {

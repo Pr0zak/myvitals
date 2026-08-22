@@ -702,6 +702,14 @@ private fun PantryTab(settings: SettingsRepository) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             item {
+                Text(
+                    "What's actually in the house. This is what the shopping " +
+                        "list subtracts from, and what the Can-make tab matches " +
+                        "your recipes against.",
+                    color = NeonMV.Muted, fontSize = 11.sp, lineHeight = 16.sp,
+                )
+            }
+            item {
                 Button(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Filled.Add, contentDescription = null)
                     Text("  Add item")
@@ -909,6 +917,14 @@ private fun FoodsTab(settings: SettingsRepository) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
+            Text(
+                "A reference catalog — look up what a food contains, or add " +
+                    "one the catalog doesn't have. Adding a food here does NOT " +
+                    "mean you have it; that's the Pantry tab.",
+                color = NeonMV.Muted, fontSize = 11.sp, lineHeight = 16.sp,
+            )
+        }
+        item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     if (ingredientsOnly) "Ingredients only" else "All foods",
@@ -937,7 +953,14 @@ private fun FoodsTab(settings: SettingsRepository) {
                         .background(NeonMV.Card)
                         .padding(12.dp),
                 ) {
-                    Text(f.name, color = NeonMV.Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        f.concept?.replaceFirstChar { c -> c.uppercase() } ?: f.name,
+                        color = NeonMV.Ink, fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    if (f.concept != null) {
+                        Text(f.name, color = NeonMV.Muted, fontSize = 10.sp, lineHeight = 14.sp)
+                    }
                     f.category?.let {
                         Text(it, color = NeonMV.Muted, fontSize = 11.sp)
                     }

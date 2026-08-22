@@ -138,7 +138,11 @@ private fun FoodRow(f: FoodOut, onClick: () -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                f.name,
+                // Concept first. USDA's full name is precise and
+                // unscannable, so it is demoted to the line below rather
+                // than hidden — the precision is what makes the
+                // nutrition right.
+                f.concept?.replaceFirstChar { it.uppercase() } ?: f.name,
                 color = NeonMV.Ink,
                 fontSize = 13.sp,
                 lineHeight = 17.sp,
@@ -152,6 +156,12 @@ private fun FoodRow(f: FoodOut, onClick: () -> Unit) {
                     fontWeight = FontWeight.Medium,
                 )
             }
+        }
+        if (f.concept != null) {
+            Text(
+                f.name, color = NeonMV.Muted, fontSize = 10.sp,
+                lineHeight = 13.sp,
+            )
         }
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),

@@ -1838,6 +1838,10 @@ export interface Food extends Nutrition {
   category: string | null;
   unit_grams: Record<string, number> | null;
   is_ingredient: boolean;
+  /** Canonical pantry concept — "chicken breast" where USDA says
+   *  "Chicken, broiler or fryers, breast, skinless, boneless, meat only,
+   *  raw". Show this as the title and the full name underneath. */
+  concept: string | null;
 }
 
 export interface RecipeIngredient {

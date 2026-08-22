@@ -1786,6 +1786,12 @@ data class FoodOut(
     // Whether this is a whole ingredient rather than a prepared dish.
     // The recipe picker filters on it; the food log does not.
     @Json(name = "is_ingredient") val isIngredient: Boolean = false,
+    // The canonical pantry concept — "chicken breast" for a row USDA
+    // calls "Chicken, broiler or fryers, breast, skinless, boneless,
+    // meat only, raw". Shown as the row TITLE with the USDA name
+    // underneath: the full name carries the precision that makes the
+    // nutrition right, but nobody scans a list of them.
+    val concept: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

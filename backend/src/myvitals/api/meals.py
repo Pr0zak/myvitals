@@ -69,6 +69,12 @@ class FoodOut(BaseModel):
     #: True when this food is a whole ingredient rather than a prepared
     #: dish. The recipe picker filters on it; the food log does not.
     is_ingredient: bool = False
+    #: The canonical pantry concept — "chicken breast" for a row USDA
+    #: calls "Chicken, broiler or fryers, breast, skinless, boneless,
+    #: meat only, raw". Clients show THIS as the title and the USDA name
+    #: underneath: the full name carries the precision that makes the
+    #: nutrition right, but nobody scans a list of them.
+    concept: str | None = None
 
 
 class FoodIn(BaseModel):
@@ -476,7 +482,7 @@ def _food_dict(f: models.Food | None) -> dict[str, Any] | None:
 def _food_out(f: models.Food) -> FoodOut:
     return FoodOut(
         id=f.id, slug=f.slug, name=f.name, source=f.source, category=f.category,
-        unit_grams=f.unit_grams,
+        unit_grams=f.unit_grams, concept=f.concept,
         is_ingredient=(f.category or "") in food_lib.INGREDIENT_CATEGORIES,
         **{c: getattr(f, c, None) for c in food_lib.NUTRIENT_COLUMNS},
     )

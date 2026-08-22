@@ -190,6 +190,13 @@ function expiryClass(i: PantryItem): string {
       </div>
     </Card>
 
+    <p class="purpose">
+      What's actually in the house. This is what the shopping list
+      subtracts from and what
+      <RouterLink to="/meals/can-make">What can I make?</RouterLink>
+      matches your recipes against.
+    </p>
+
     <p v-if="error" class="err">{{ error }}</p>
 
     <Card v-if="expiring.length" flat class="alert">
@@ -229,6 +236,10 @@ function expiryClass(i: PantryItem): string {
 
 <style scoped>
 .err { color: #f87171; font-size: 0.85rem; }
+.purpose {
+  color: var(--muted-2); font-size: 0.8rem; line-height: 1.5;
+  margin: -0.4rem 0 0.7rem;
+}
 button.primary, button.ghost {
   display: inline-flex; align-items: center; gap: 0.35rem;
   border-radius: 9px; padding: 0.4rem 0.7rem; font: inherit;

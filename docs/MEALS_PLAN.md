@@ -1,18 +1,22 @@
 # Meals, recipes, pantry and shopping — design plan
 
-Status: **plan only, nothing built. TABLED 2026-08-21** at the user's
-request — revisit once the SparkyFitness teardown backlog is finished.
-The open question below (tracking vs awareness) is what to answer first
-when it is picked back up.
+Status: **plan only, nothing built.** Tabled 2026-08-21, scope settled
+2026-08-22.
 
 The ask: a healthy-meals list with recipes, a place to record what is
 already in the house, suggestions built from that, a shopping list that
 reaches a Walmart cart, and a meal-prep section that handles both
 single-person and family portions.
 
-This document records the design and — more importantly — the three
+Scope settled since: **calorie tracking AND nutrition awareness, both**,
+plus **allergies and medical conditions that affect diet**. The allergy
+requirement changes the safety posture of the whole feature and is
+treated as a hard part in its own right below.
+
+This document records the design and — more importantly — the five
 places where the obvious approach does not work, so they are not
-rediscovered mid-build.
+rediscovered mid-build. Two of them are about safety rather than
+correctness, and those are the ones to read first.
 
 ---
 
@@ -34,7 +38,7 @@ needs a 40-minute prep window on a day the calendar is full.
 
 ---
 
-## The three hard parts
+## The five hard parts
 
 ### 1. Recipes cannot be scraped
 
@@ -113,6 +117,81 @@ predictably, and let the user mark exceptions.
 Meal-prep plans then declare *who* and *how many meals*, not a
 multiplier.
 
+### 4. Allergen filtering is a safety claim, and must not be made
+
+This is the part most likely to hurt someone, so it gets stated before
+any of the pleasant parts.
+
+An app that hides recipes containing peanuts is implicitly telling a
+peanut-allergic person that what remains is safe to eat. It cannot know
+that, and the gap between what it knows and what it implies is where the
+harm lives:
+
+* **Ingredient lists are not allergen labels.** USDA FoodData Central
+  describes what a food IS, not what a manufacturing line also handles.
+  "May contain traces of" exists on packaging precisely because the
+  ingredient list is insufficient, and none of that reaches this app.
+* **A recipe the user typed is only as complete as they typed it.**
+  "Sauce" is one ingredient to the database and a dozen to an allergist.
+* **An AI suggestion is generated text.** It can invent a dish, and it
+  can omit an ingredient it did not think to mention. It must never be
+  the layer standing between a user and an allergen.
+
+**Decision: allergens are a WARNING system, never a filter that promises
+safety.**
+
+Concretely:
+
+- Matching ingredients are **flagged prominently on the recipe**, not
+  silently removed from the list. Removal hides the reason; a flag
+  teaches the user which recipes to avoid and why.
+- The wording never claims safety. "Contains almonds" is a statement
+  about the recipe. "Safe for your allergies" is a claim about the world,
+  and the app is not entitled to make it.
+- Anything the app could not check says so. An imported recipe with a
+  free-text ingredient it could not resolve to a food row is marked
+  **unverified**, not clean.
+- The AI meal suggester is given the allergen list and told to avoid
+  them, and its output is **re-checked by the same deterministic matcher
+  afterwards** — belt and braces, following the pattern
+  `fasting_coach()` already uses for religious-fast safeguards: a prompt
+  rule plus an application-layer override, because a prompt rule alone
+  is a request, not a guarantee.
+- A severity distinction is worth carrying: an intolerance is a bad
+  evening, an anaphylactic allergy is an ambulance. The UI should not
+  render them identically.
+
+### 5. Medical conditions imply different numbers, not just different lists
+
+"Conditions that affect diet" is not one feature. Each condition changes
+*which nutrient matters*, and a tracker that only counts calories cannot
+express any of them:
+
+| Condition | What actually needs tracking |
+|---|---|
+| Type 2 diabetes | Carbohydrate per meal, not per day; fibre |
+| Hypertension | Sodium |
+| Chronic kidney disease | Potassium, phosphorus, and *limited* protein |
+| Coeliac disease | Gluten as an allergen-style flag |
+| High cholesterol | Saturated fat |
+| IBS | FODMAP groups — which USDA does not carry |
+
+Two consequences for the design:
+
+1. The tracked nutrient set must be **configurable**, not a fixed
+   calories/protein/carbs/fat quartet. A condition switches additional
+   nutrients on.
+2. **The app suggests, it does not prescribe.** Kidney disease in
+   particular has targets that depend on labs and stage, and a number
+   invented by a health tracker could do real harm. Conditions set what
+   is *displayed and warned on*; any actual target is user-entered, ideally
+   from what a clinician told them. The app should say where a target
+   came from, exactly as the sleep-need work does now.
+
+Note that IBS/FODMAP is deliberately listed as a gap rather than
+promised: USDA does not carry FODMAP data, so it would need a separate
+dataset and should not ship as a half-answer.
+
 ---
 
 ## Data model sketch
@@ -128,10 +207,17 @@ has to query and aggregate these, which a blob cannot do):
 | `pantry_items` | food, quantity, unit, optional `expires_on`, updated_at. |
 | `meal_plans` | A dated plan: date, meal slot, recipe, servings, who. |
 | `shopping_lists` | A generated list + its state (open/ordered/done). |
+| `food_log` | What was eaten, when, how much. The tracking half. |
+| `food_allergens` | food -> allergen tags, so matching is a join not a text search. |
 
 Config in `user_profile.extra` (free-form JSON, no migration, matching
 the established pattern): `household` members and portion factors,
-dietary restrictions, disliked foods, default store.
+dietary preferences, disliked foods, default store, `allergens` (with a
+severity per entry), `conditions`, and `tracked_nutrients`.
+
+Allergens go in config but are matched through `food_allergens` rather
+than by substring. "Nut" matching "nutmeg" and missing "marzipan" is
+exactly the failure mode a warning system cannot afford.
 
 ### Nutrition source: USDA FoodData Central
 
@@ -144,6 +230,40 @@ works offline and does not depend on an external service staying up.
 
 Open Food Facts is the option for *barcoded packaged* goods later. Skip
 for v1: whole ingredients are what recipes are made of.
+
+### Calorie tracking, and the one thing this app can do that others cannot
+
+Tracking needs a `food_log` and a daily target. The target is where this
+differs from every other tracker.
+
+Most apps estimate TDEE from an equation — Mifflin-St Jeor on height,
+weight, age and an activity multiplier the user guesses at. This app has
+something better already in the database: **observed weight trend and
+measured training load**. Once intake is being logged, energy balance can
+be derived from what actually happened rather than predicted from a
+formula:
+
+    TDEE ≈ mean intake − (weight change in kg × ~7700 kcal/kg) / days
+
+That is only trustworthy over a few weeks and only while logging is
+reasonably complete, so it must carry the same honesty the projection
+work already does: report `confidence`, and REFUSE with a reason when
+logging is too sparse or the weight trend is too noisy — the same
+pattern as `derive_sleep_need`, which currently refuses on this user's
+data and says why.
+
+Until it can be derived, the target is the equation-based estimate,
+clearly labelled as an estimate, and user-overridable. `analytics/energy.py`
+(TD-4) already computes per-workout kcal from heart rate, so the
+expenditure side of the day is partly answered.
+
+**Awareness without obligation.** Tracking every meal is a habit most
+people abandon, and a half-logged day produces a number worse than no
+number — it reads as "you barely ate" rather than "you barely logged".
+So: a day is marked complete or partial by the user, partial days are
+excluded from any derived TDEE, and the nutrition *awareness* half —
+seeing what a planned meal contains before cooking it — works with zero
+logging. Awareness is the floor; tracking is opt-in on top.
 
 ---
 
@@ -161,6 +281,11 @@ POST                  /meals/pantry/consume        (after cooking)
 GET/POST              /meals/plan?week=            (the weekly grid)
 POST                  /meals/shopping-list         (plan − pantry)
 GET                   /meals/shopping-list/{id}/walmart   (deep links)
+GET/POST/DELETE       /meals/log?date=             (the tracking half)
+GET                   /meals/nutrition?date=       (day roll-up vs targets)
+GET/PUT               /meals/diet-profile          (allergens, conditions,
+                                                    tracked nutrients)
+GET                   /meals/energy-balance        (derived TDEE, or why not)
 POST                  /ai/meals/suggest            (bounded, cached)
 ```
 
@@ -183,17 +308,32 @@ of the one before it.
    This is where the real value lands: plan − pantry = list.
 3. **Walmart tier 1.** Per-item search deep links, plus copy-to-clipboard
    for anyone who prefers pasting.
-4. **AI suggestions.** Pantry + goals + training load + fasting state.
-   Last, because it is only good once 1-3 give it real data to read.
-5. **Optional:** recipe URL import; nutrition roll-up per day tied to the
-   weight goal; Walmart tier 2 item-ID carts.
+4. **Diet profile: allergens and conditions.** Before AI suggestions, not
+   after — the suggester must never be the first thing that has to know
+   about an allergy. Flags on recipes, configurable tracked nutrients.
+5. **Nutrition awareness.** What a planned meal contains, against the
+   tracked nutrient set. No logging required.
+6. **Calorie tracking.** `food_log`, day roll-up, complete/partial days.
+7. **AI suggestions.** Pantry + goals + training load + fasting state +
+   the diet profile, with a deterministic allergen re-check after the
+   model returns. Last, because it is only good once the rest give it
+   real data to read.
+8. **Derived energy balance**, once enough complete days exist to make
+   it honest.
+9. **Optional:** recipe URL import; Walmart tier 2 item-ID carts;
+   FODMAP data from a source other than USDA.
 
-## What to decide before starting
+## Decided
 
-- Is nutrition **tracking** wanted (calories/macros per day against a
-  target), or only nutrition *awareness* for choosing meals? Tracking is
-  a much larger feature and a daily logging habit; the ask does not
-  clearly call for it.
-- How many people in the household, and their portion factors.
+- **Both** calorie tracking and nutrition awareness (2026-08-22).
+  Awareness is the floor and needs no logging; tracking is opt-in on top.
+- **Allergens and medical conditions are in scope**, as a warning system
+  rather than a safety filter — see hard part 4.
+
+## Still to decide before starting
+
+- Household members and their portion factors.
+- Which conditions actually apply, since each one switches on a
+  different nutrient rather than a generic "healthy" mode.
 - Whether recipe URL import is wanted at all, given it only ever writes
   to the private install.

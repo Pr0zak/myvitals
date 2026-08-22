@@ -2,6 +2,8 @@
 import csv
 import io
 import json
+from collections.abc import AsyncIterator
+from typing import Any
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -69,26 +71,94 @@ async def export_table(
         e = end.date() if time_col.key == "date" else end
         stmt = stmt.where(time_col >= s).where(time_col <= e)
 
-    result = await db.execute(stmt)
-    rows = result.scalars().all()
-
+    # Genuinely streamed, in batches, from a server-side cursor.
+    #
+    # This used to do `result.scalars().all()` and then build the entire
+    # output as one string before wrapping it in `iter([...])` — a
+    # StreamingResponse that streams a single pre-built blob. It was
+    # double-buffered: every ORM row in memory, then the whole serialised
+    # body in memory again.
+    #
+    # `vitals_heartrate` holds ~23.6M rows and the container has no
+    # mem_limit on an 8 GB CT, so a wide range was an OOM kill of the
+    # backend rather than a slow download. That is also why the date range
+    # could never safely be made user-selectable: the feature was blocked
+    # on this.
     if fmt == "json":
-        payload = [{c: getattr(r, c) for c in cols} for r in rows]
         return StreamingResponse(
-            iter([json.dumps(payload, default=str)]),
+            _stream_json(model, cols, stmt),
             media_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="myvitals-{table}.json"'},
         )
-
-    # CSV
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(cols)
-    for r in rows:
-        writer.writerow([str(getattr(r, c)) if getattr(r, c) is not None else "" for c in cols])
-    buf.seek(0)
     return StreamingResponse(
-        iter([buf.getvalue()]),
+        _stream_csv(cols, stmt),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="myvitals-{table}.csv"'},
     )
+
+
+#: Rows pulled from the cursor per round trip. Large enough that the
+#: per-batch overhead is negligible, small enough that a batch of the
+#: widest row is a rounding error against container memory.
+_STREAM_BATCH = 2000
+
+
+def _cell(row: Any, col: str) -> str:
+    v = getattr(row, col)
+    return "" if v is None else str(v)
+
+
+async def _stream_csv(cols: list[str], stmt: Any) -> AsyncIterator[str]:
+    """Yield a CSV header then batches of rows.
+
+    Opens its OWN session rather than using the request-scoped one. A
+    StreamingResponse body is consumed after the endpoint function has
+    returned, so the dependency-injected session may already be closed by
+    the time the first row is pulled — the failure looks like a truncated
+    download rather than an error.
+    """
+    from ..db.session import SessionLocal
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(cols)
+    yield buf.getvalue()
+
+    async with SessionLocal() as own_db:
+        result = await own_db.stream_scalars(
+            stmt.execution_options(yield_per=_STREAM_BATCH),
+        )
+        async for batch in result.partitions(_STREAM_BATCH):
+            buf.seek(0)
+            buf.truncate(0)
+            for row in batch:
+                writer.writerow([_cell(row, c) for c in cols])
+            yield buf.getvalue()
+
+
+async def _stream_json(
+    model: Any, cols: list[str], stmt: Any,
+) -> AsyncIterator[str]:
+    """Yield a JSON array incrementally.
+
+    Assembled by hand rather than with json.dumps over the whole list,
+    for the same reason as the CSV path — the point is never to hold the
+    full result in memory. Each ROW is still serialised by json.dumps, so
+    escaping stays correct.
+    """
+    from ..db.session import SessionLocal
+
+    yield "["
+    first = True
+    async with SessionLocal() as own_db:
+        result = await own_db.stream_scalars(
+            stmt.execution_options(yield_per=_STREAM_BATCH),
+        )
+        async for batch in result.partitions(_STREAM_BATCH):
+            chunk = []
+            for row in batch:
+                obj = {c: getattr(row, c) for c in cols}
+                chunk.append(("" if first else ",") + json.dumps(obj, default=str))
+                first = False
+            yield "".join(chunk)
+    yield "]"

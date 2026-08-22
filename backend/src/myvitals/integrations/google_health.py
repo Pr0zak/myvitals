@@ -73,6 +73,46 @@ SOURCE = "googlehealth"
 # row carries all of them so the generated INSERT names them all; missing
 # values arrive as None and the COALESCE in the conflict clause leaves any
 # previously stored value alone.
+#: asyncpg refuses a statement carrying more than 32,767 bind parameters,
+#: and a multi-row INSERT binds one per column per row. A single
+#: `pg_insert(...).values(list)` therefore caps at 32767/len(columns)
+#: rows — about 16k for a two-column table like `vitals_spo2` and 10k for
+#: three-column `vitals_steps`.
+#:
+#: That ceiling is why the shipped "Backfill 90 days" button could not
+#: succeed: ~500 SpO2 readings a day is ~45,000 rows for one type. The
+#: failure is an asyncpg error at execute time, not a truncation, so the
+#: whole sync aborts. 30,000 leaves headroom under the limit.
+_MAX_BIND_PARAMS = 30_000
+
+
+async def _chunked_upsert(
+    db: Any, pg_insert: Any, model: Any, rows: list[dict[str, Any]],
+    conflict: list[str],
+) -> None:
+    """Upsert `rows` in statements small enough for asyncpg to accept.
+
+    Chunk size is derived from the actual column count rather than fixed,
+    so a table gaining a column cannot silently push the statement back
+    over the ceiling.
+    """
+    if not rows:
+        return
+    n_cols = max(1, len(rows[0]))
+    chunk_size = max(1, _MAX_BIND_PARAMS // n_cols)
+    for i in range(0, len(rows), chunk_size):
+        chunk = rows[i:i + chunk_size]
+        stmt = pg_insert(model).values(chunk)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=conflict,
+            set_={
+                k: getattr(stmt.excluded, k)
+                for k in chunk[0] if k not in conflict
+            },
+        )
+        await db.execute(stmt)
+
+
 _DAILY_COLUMNS = (
     "resting_hr", "hrv_avg_ms", "deep_sleep_rmssd_ms",
     "respiratory_rate", "vo2_max",
@@ -691,15 +731,7 @@ async def ingest_range(
         # conflict with itself. Last value wins, matching the FIT ingest.
         by_key = {tuple(r[c] for c in conflict): r for r in rows}
         deduped = list(by_key.values())
-        stmt = pg_insert(model).values(deduped)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=conflict,
-            set_={
-                k: getattr(stmt.excluded, k)
-                for k in deduped[0] if k not in conflict
-            },
-        )
-        await db.execute(stmt)
+        await _chunked_upsert(db, pg_insert, model, deduped, conflict)
         written[spec.target] = len(deduped)
 
     if daily:

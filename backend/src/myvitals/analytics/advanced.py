@@ -308,6 +308,34 @@ async def sleep_consistency_score(
         cur_last = ts + timedelta(seconds=dur)
     if cur_start and cur_last:
         sessions.append((cur_start, cur_last))
+
+    # Keep one NIGHT per local date, not every sleep session.
+    #
+    # The clustering above splits on any gap over 2h, so an afternoon nap
+    # became its own "night" with a mid-afternoon start and wake. Feeding
+    # that into a circular standard deviation of bed and wake times pushes
+    # sigma far past the 120-minute floor, and the score clamps to zero.
+    #
+    # In production this metric was dead: 0.0 on 86 of the last 89 days.
+    # A number that is almost always zero reads as "you are terrible at
+    # this" rather than as a broken metric, which is worse than showing
+    # nothing.
+    #
+    # Two filters, both matching how a person reads their own sleep:
+    # a night is at least MIN_NIGHT_H long, and there is one per date —
+    # the longest session ENDING on that date, since a night beginning at
+    # 23:40 belongs to the morning it ends on.
+    MIN_NIGHT_H = 3.0
+    by_date: dict[date, tuple[datetime, datetime]] = {}
+    for start, end in sessions:
+        if (end - start).total_seconds() < MIN_NIGHT_H * 3600:
+            continue
+        d = end.astimezone(_tz).date()
+        prev = by_date.get(d)
+        if prev is None or (end - start) > (prev[1] - prev[0]):
+            by_date[d] = (start, end)
+    sessions = [by_date[d] for d in sorted(by_date)]
+
     if len(sessions) < 5:
         return None
 

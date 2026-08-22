@@ -43,11 +43,13 @@ scanner would serve better.
 
 ## Why so few nutrients
 
-Eight, plus portions. The app tracks calories, the macros, and the
-nutrients its one medical constraint needs — fat and saturated fat, since
-a cholecystectomy makes fat-per-meal the number that matters. USDA
-carries 119 nutrients per food; keeping them all would multiply the
-bundle size for columns nothing reads.
+Twelve, plus portions. The app tracks calories, the macros, and the
+nutrients its one medical constraint needs. A cholecystectomy makes
+fat-per-meal the number that matters, and makes the four fat-soluble
+vitamins (A, D, E, K) the ones most likely to run low, because absorbing
+them depends on absorbing fat. USDA carries 119 nutrients per food;
+keeping them all would multiply the bundle size for columns nothing
+reads.
 """
 
 from __future__ import annotations
@@ -69,6 +71,16 @@ NUTRIENTS: dict[int, str] = {
     1079: "fiber_g",
     2000: "sugar_g",         # Total sugars
     1093: "sodium_mg",
+    # Fat-soluble vitamins (MEAL-2). These are carried because absorbing
+    # them DEPENDS on absorbing fat, so a cholecystectomy makes them the
+    # nutrients most likely to run low — which is exactly the thing a
+    # macro-only tracker cannot see. Coverage in SR Legacy is partial
+    # (A 89%, D 67%, E 72%, K 65%); the missing ones stay null rather
+    # than zero, all the way to the UI.
+    1106: "vitamin_a_ug",    # Vitamin A, RAE (ug)
+    1114: "vitamin_d_ug",    # Vitamin D (D2 + D3) (ug)
+    1109: "vitamin_e_mg",    # Vitamin E (alpha-tocopherol) (mg)
+    1185: "vitamin_k_ug",    # Vitamin K (phylloquinone) (ug)
 }
 
 #: Categories carried into the bundle.

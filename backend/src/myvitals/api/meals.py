@@ -28,6 +28,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics import foods as food_lib
+from ..analytics import nutrition as nutri
 from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
@@ -54,6 +55,13 @@ class FoodOut(BaseModel):
     fiber_g: float | None = None
     sugar_g: float | None = None
     sodium_mg: float | None = None
+    # Fat-soluble (MEAL-2). Absorbing these depends on absorbing fat, so
+    # they are what a cholecystectomy puts at risk. Null is common —
+    # USDA covers them for 65-89% of foods — and stays null.
+    vitamin_a_ug: float | None = None
+    vitamin_d_ug: float | None = None
+    vitamin_e_mg: float | None = None
+    vitamin_k_ug: float | None = None
     unit_grams: dict[str, float] | None = None
     #: True when this food is a whole ingredient rather than a prepared
     #: dish. The recipe picker filters on it; the food log does not.
@@ -75,6 +83,13 @@ class FoodIn(BaseModel):
     fiber_g: float | None = None
     sugar_g: float | None = None
     sodium_mg: float | None = None
+    # Fat-soluble (MEAL-2). Absorbing these depends on absorbing fat, so
+    # they are what a cholecystectomy puts at risk. Null is common —
+    # USDA covers them for 65-89% of foods — and stays null.
+    vitamin_a_ug: float | None = None
+    vitamin_d_ug: float | None = None
+    vitamin_e_mg: float | None = None
+    vitamin_k_ug: float | None = None
     unit_grams: dict[str, float] | None = None
 
 
@@ -148,6 +163,50 @@ class RecipeOut(BaseModel):
     #: totals above understate the real figures, and the clients say so
     #: rather than presenting them as complete.
     unresolved_count: int = 0
+    #: MEAL-2. Per-SERVING fat judgment, because a serving is the meal.
+    #: Carries `verdict`, `basis` and `reason` — the basis matters as
+    #: much as the verdict, since the app refuses to invent a threshold
+    #: and has to say what it judged against.
+    fat_assessment: dict[str, Any] = Field(default_factory=dict)
+    #: Share of energy from each macro, per serving.
+    energy_split: dict[str, Any] = Field(default_factory=dict)
+    #: Fat-soluble vitamins per serving, as awareness with no targets.
+    fat_soluble: dict[str, Any] = Field(default_factory=dict)
+
+
+class DietProfileIn(BaseModel):
+    """Diet settings. Every field optional — a PATCH-shaped PUT.
+
+    Lives in `user_profile.extra` under one key, written through a scoped
+    merging endpoint. `PUT /profile` assigns `extra` wholesale, so a
+    client saving one field there would erase preferences it does not
+    carry forward; see the scoped-endpoint rule in CLAUDE.md.
+    """
+
+    #: Grams of fat the user is aiming to stay under IN A SINGLE MEAL.
+    #: There is deliberately no default and no app-supplied value — see
+    #: `analytics/nutrition.py`. Null means "not set", which makes the
+    #: assessment fall back to the user's own history or refuse outright.
+    fat_per_meal_target_g: float | None = Field(default=None, ge=0, le=500)
+    #: Free text: where the number came from. Rendered next to it,
+    #: because a figure a clinician gave and a figure the user guessed
+    #: deserve different confidence and the app should not flatten them.
+    fat_target_source: str | None = Field(default=None, max_length=200)
+    #: Show the fat-soluble vitamins (A/D/E/K) on meal breakdowns.
+    track_fat_soluble: bool | None = None
+    daily_kcal_target: int | None = Field(default=None, ge=0, le=20000)
+
+
+class DietProfileOut(BaseModel):
+    fat_per_meal_target_g: float | None = None
+    fat_target_source: str | None = None
+    track_fat_soluble: bool = True
+    daily_kcal_target: int | None = None
+    #: How many saved recipes can act as a comparison baseline, and how
+    #: many are needed. Surfaced so the "no basis to judge this" message
+    #: can say how far off it is instead of just refusing.
+    comparison_meals: int = 0
+    comparison_meals_needed: int = nutri.MIN_HISTORY
 
 
 class PantryIn(BaseModel):
@@ -212,6 +271,90 @@ def _local_today() -> date:
     return resolve_day()[0]
 
 
+#: The single key everything MEAL-2 stores lives under, inside
+#: `user_profile.extra`. One key keeps the scoped merge trivial and keeps
+#: the diet settings from colliding with the tile / display prefs that
+#: already share that column.
+DIET_KEY = "diet"
+
+_DIET_DEFAULTS: dict[str, Any] = {
+    # No default fat target, on purpose and permanently. Tolerance after
+    # a cholecystectomy varies widely between people and commonly
+    # improves over months, so a number this app invented could be wrong
+    # in either direction — and wrong-and-permissive is the bad one.
+    "fat_per_meal_target_g": None,
+    "fat_target_source": None,
+    "track_fat_soluble": True,
+    "daily_kcal_target": None,
+}
+
+
+async def _diet_settings(db: AsyncSession) -> dict[str, Any]:
+    p = await db.get(models.UserProfile, 1)
+    extra = (p.extra if p and p.extra else {}) or {}
+    saved = extra.get(DIET_KEY) or {}
+    return {**_DIET_DEFAULTS, **saved}
+
+
+async def _fat_history(
+    db: AsyncSession, exclude_id: int | None = None,
+) -> list[float]:
+    """Per-serving fat across the user's OTHER saved recipes.
+
+    This is the comparison baseline when no explicit target is set. It is
+    a statement about what this person actually cooks, which is why it
+    needs no medical basis — unlike a gram threshold, which would.
+
+    The recipe being judged is excluded so a meal cannot pull its own
+    median toward itself.
+
+    Deliberately does NOT call `_hydrate_recipe`: that would recurse
+    (hydration asks for the history, the history hydrates) and would make
+    listing N recipes cost N^2 hydrations. It reads the ingredient rows
+    directly in two queries instead, regardless of recipe count.
+    """
+    recipes = (await db.execute(
+        select(models.Recipe.id, models.Recipe.servings)
+        .where(models.Recipe.archived.is_(False))
+    )).all()
+    wanted = [(rid, sv) for rid, sv in recipes if rid != exclude_id]
+    if not wanted:
+        return []
+
+    ings = (await db.execute(
+        select(models.RecipeIngredient)
+        .where(models.RecipeIngredient.recipe_id.in_([r for r, _ in wanted]))
+    )).scalars().all()
+    food_ids = {i.food_id for i in ings if i.food_id is not None}
+    foods: dict[int, models.Food] = {}
+    if food_ids:
+        for f in (await db.execute(
+            select(models.Food).where(models.Food.id.in_(food_ids))
+        )).scalars().all():
+            foods[f.id] = f
+
+    per_recipe: dict[int, list[float]] = {}
+    for i in ings:
+        food = foods.get(i.food_id) if i.food_id is not None else None
+        _, reason, nut = _line_nutrition(i, food)
+        if reason is not None:
+            continue
+        v = nut.get("fat_g")
+        if v is not None:
+            per_recipe.setdefault(i.recipe_id, []).append(v)
+
+    out: list[float] = []
+    for rid, servings in wanted:
+        lines = per_recipe.get(rid)
+        # A recipe with no costable fat line contributes nothing rather
+        # than contributing a zero — an unknown must not drag the median
+        # of "what this person cooks" down toward nothing.
+        if not lines:
+            continue
+        out.append(sum(lines) / max(servings, 1))
+    return out
+
+
 def _slugify_user_food(name: str) -> str:
     base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:140]
     return f"user-{base}" if base else "user-food"
@@ -260,7 +403,19 @@ def _divide(totals: dict[str, float | None], n: int) -> dict[str, float | None]:
     }
 
 
-async def _hydrate_recipe(db: AsyncSession, r: models.Recipe) -> RecipeOut:
+async def _hydrate_recipe(
+    db: AsyncSession,
+    r: models.Recipe,
+    *,
+    diet: dict[str, Any] | None = None,
+    history: list[float] | None = None,
+) -> RecipeOut:
+    """Cost a recipe and, when given the diet context, judge it.
+
+    `diet` and `history` are passed IN rather than fetched here so that
+    listing N recipes costs one settings read and one history pass, not
+    N of each.
+    """
     rows = (await db.execute(
         select(models.RecipeIngredient)
         .where(models.RecipeIngredient.recipe_id == r.id)
@@ -295,13 +450,33 @@ async def _hydrate_recipe(db: AsyncSession, r: models.Recipe) -> RecipeOut:
         ))
 
     totals = _sum_nutrition(nutritions)
+    per_srv = _divide(totals, r.servings)
+
+    # A SERVING is the meal. Judging the whole-recipe total would flag a
+    # batch of six portions as an enormous fat load when each plate is
+    # ordinary, which is exactly the per-meal-not-per-day distinction
+    # this feature exists for.
+    settings = diet or _DIET_DEFAULTS
+    assessment = nutri.assess_meal_fat(
+        per_srv.get("fat_g"),
+        target_g=settings.get("fat_per_meal_target_g"),
+        history_fat_g=list(history or []),
+    )
+    assessment["target_source"] = settings.get("fat_target_source")
+
     return RecipeOut(
         id=r.id, name=r.name, servings=r.servings, prep_min=r.prep_min,
         cook_min=r.cook_min, method=r.method, notes=r.notes, tags=r.tags,
         source_url=r.source_url, archived=r.archived,
         created_at=r.created_at, updated_at=r.updated_at,
         ingredients=out_lines, totals=totals,
-        per_serving=_divide(totals, r.servings), unresolved_count=unresolved,
+        per_serving=per_srv, unresolved_count=unresolved,
+        fat_assessment=assessment,
+        energy_split=nutri.energy_split(per_srv),
+        fat_soluble=(
+            nutri.fat_soluble_summary(per_srv)
+            if settings.get("track_fat_soluble", True) else {}
+        ),
     )
 
 
@@ -450,7 +625,30 @@ async def list_recipes(
     if not include_archived:
         stmt = stmt.where(models.Recipe.archived.is_(False))
     rows = (await db.execute(stmt)).scalars().all()
-    return [await _hydrate_recipe(db, r) for r in rows]
+
+    diet = await _diet_settings(db)
+    # One baseline for the whole list. Each recipe is then judged against
+    # the others by excluding its own value from the passed-in history,
+    # which is a list operation rather than another query.
+    all_fat = await _fat_history(db)
+    out: list[RecipeOut] = []
+    for r in rows:
+        hydrated = await _hydrate_recipe(db, r, diet=diet, history=all_fat)
+        mine = hydrated.per_serving.get("fat_g")
+        if mine is not None and diet.get("fat_per_meal_target_g") is None:
+            others = list(all_fat)
+            # Remove one occurrence of this recipe's own value so a meal
+            # cannot be compared against itself.
+            try:
+                others.remove(mine)
+            except ValueError:
+                pass
+            hydrated.fat_assessment = nutri.assess_meal_fat(
+                mine, target_g=None, history_fat_g=others,
+            )
+            hydrated.fat_assessment["target_source"] = diet.get("fat_target_source")
+        out.append(hydrated)
+    return out
 
 
 @router.post("/recipes", response_model=RecipeOut, status_code=201)
@@ -467,7 +665,11 @@ async def create_recipe(body: RecipeIn, db: AsyncSession = Depends(get_session))
         await _replace_ingredients(db, r.id, body.ingredients)
     await db.commit()
     await db.refresh(r)
-    return await _hydrate_recipe(db, r)
+    return await _hydrate_recipe(
+        db, r,
+        diet=await _diet_settings(db),
+        history=await _fat_history(db, exclude_id=r.id),
+    )
 
 
 @router.get("/recipes/{recipe_id}", response_model=RecipeOut)
@@ -475,7 +677,11 @@ async def get_recipe(recipe_id: int, db: AsyncSession = Depends(get_session)):
     r = await db.get(models.Recipe, recipe_id)
     if r is None:
         raise HTTPException(404, "recipe not found")
-    return await _hydrate_recipe(db, r)
+    return await _hydrate_recipe(
+        db, r,
+        diet=await _diet_settings(db),
+        history=await _fat_history(db, exclude_id=r.id),
+    )
 
 
 @router.patch("/recipes/{recipe_id}", response_model=RecipeOut)
@@ -494,7 +700,11 @@ async def update_recipe(
     r.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(r)
-    return await _hydrate_recipe(db, r)
+    return await _hydrate_recipe(
+        db, r,
+        diet=await _diet_settings(db),
+        history=await _fat_history(db, exclude_id=r.id),
+    )
 
 
 @router.delete("/recipes/{recipe_id}", status_code=204)
@@ -521,7 +731,11 @@ async def scale_recipe(
     r = await db.get(models.Recipe, recipe_id)
     if r is None:
         raise HTTPException(404, "recipe not found")
-    hydrated = await _hydrate_recipe(db, r)
+    hydrated = await _hydrate_recipe(
+        db, r,
+        diet=await _diet_settings(db),
+        history=await _fat_history(db, exclude_id=r.id),
+    )
     factor = servings / max(r.servings, 1)
     return {
         "recipe_id": r.id,
@@ -548,6 +762,80 @@ async def scale_recipe(
         "per_serving": hydrated.per_serving,
         "unresolved_count": hydrated.unresolved_count,
     }
+
+
+# --------------------------------------------------------- diet profile
+
+
+@router.get("/diet-profile", response_model=DietProfileOut)
+async def get_diet_profile(db: AsyncSession = Depends(get_session)):
+    settings = await _diet_settings(db)
+    history = await _fat_history(db)
+    return DietProfileOut(
+        **{k: settings.get(k) for k in _DIET_DEFAULTS if k != "track_fat_soluble"},
+        track_fat_soluble=bool(settings.get("track_fat_soluble", True)),
+        comparison_meals=len(history),
+    )
+
+
+@router.put("/diet-profile", response_model=DietProfileOut)
+async def put_diet_profile(
+    body: DietProfileIn, db: AsyncSession = Depends(get_session),
+):
+    """Scoped write — merges into `extra` rather than replacing it.
+
+    `PUT /profile` assigns `extra` wholesale, so writing diet settings
+    through it would erase the tile and display preferences that share
+    the column. Same pattern as `/profile/tile-prefs`.
+    """
+    p = await db.get(models.UserProfile, 1)
+    now = datetime.now(timezone.utc)
+    if p is None:
+        p = models.UserProfile(id=1, updated_at=now)
+        db.add(p)
+
+    # Copy-then-reassign: SQLAlchemy does not track in-place mutation of
+    # a JSON column, so mutating p.extra would commit nothing.
+    extra = dict(p.extra or {})
+    diet = dict(extra.get(DIET_KEY) or {})
+    # exclude_unset so omitting a field leaves it alone, while explicitly
+    # sending null CLEARS it — which is how a user removes a fat target
+    # they no longer want the app judging against.
+    diet.update(body.model_dump(exclude_unset=True))
+    extra[DIET_KEY] = diet
+    p.extra = extra
+    p.updated_at = now
+    await db.commit()
+
+    settings = {**_DIET_DEFAULTS, **diet}
+    history = await _fat_history(db)
+    return DietProfileOut(
+        **{k: settings.get(k) for k in _DIET_DEFAULTS if k != "track_fat_soluble"},
+        track_fat_soluble=bool(settings.get("track_fat_soluble", True)),
+        comparison_meals=len(history),
+    )
+
+
+@router.get("/nutrition/assess", response_model=dict)
+async def assess_arbitrary_meal(
+    fat_g: float = Query(ge=0, le=1000),
+    db: AsyncSession = Depends(get_session),
+):
+    """Judge a fat figure the user is holding in their hand.
+
+    Exists so the awareness half works with no recipe and no log at all —
+    read a number off a package, ask whether it is a lot for you. That is
+    the floor this feature is designed to have: useful with zero data
+    entered.
+    """
+    diet = await _diet_settings(db)
+    result = nutri.assess_meal_fat(
+        fat_g,
+        target_g=diet.get("fat_per_meal_target_g"),
+        history_fat_g=await _fat_history(db),
+    )
+    result["target_source"] = diet.get("fat_target_source")
+    return result
 
 
 # -------------------------------------------------------------- pantry

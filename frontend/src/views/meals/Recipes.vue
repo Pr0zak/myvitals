@@ -15,6 +15,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import Card from "@/components/Card.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import FoodPicker from "@/components/FoodPicker.vue";
+import FatAssessment from "@/components/FatAssessment.vue";
 import {
   Plus, Trash2, ChevronDown, ChevronRight, AlertCircle, Pencil, X as XIcon,
 } from "lucide-vue-next";
@@ -145,6 +146,19 @@ function toggle(id: number) {
 }
 
 /** A nutrient the data does not have renders as "—", never as 0. */
+const VIT_LABELS: Record<string, string> = {
+  vitamin_a_ug: "Vitamin A",
+  vitamin_d_ug: "Vitamin D",
+  vitamin_e_mg: "Vitamin E",
+  vitamin_k_ug: "Vitamin K",
+};
+const VIT_UNITS: Record<string, string> = {
+  vitamin_a_ug: "µg",
+  vitamin_d_ug: "µg",
+  vitamin_e_mg: "mg",
+  vitamin_k_ug: "µg",
+};
+
 function num(v: number | null | undefined, digits = 0, suffix = ""): string {
   if (v == null) return "—";
   return `${v.toFixed(digits)}${suffix}`;
@@ -270,6 +284,14 @@ function scaled(r: Recipe, v: number | null | undefined): number | null {
             · {{ num(r.per_serving.kcal) }} kcal/serving
           </span>
         </div>
+        <span
+          v-if="r.fat_assessment && r.fat_assessment.verdict !== 'unknown'"
+          class="fat-pill"
+          :class="r.fat_assessment.verdict"
+          :title="r.fat_assessment.reason ?? ''"
+        >
+          {{ num(r.per_serving.fat_g, 1) }}g fat
+        </span>
         <div class="head-actions" @click.stop>
           <button class="icon-btn" title="Edit" @click="startEdit(r)">
             <Pencil :size="14" />
@@ -286,6 +308,28 @@ function scaled(r: Recipe, v: number | null | undefined): number | null {
           <span>
             {{ r.unresolved_count }} ingredient{{ r.unresolved_count === 1 ? "" : "s" }}
             could not be costed, so these totals are an underestimate.
+          </span>
+        </div>
+
+        <FatAssessment
+          v-if="r.fat_assessment"
+          :assessment="r.fat_assessment"
+          class="fat-block"
+        />
+
+        <div v-if="r.energy_split && r.energy_split.kcal_from_macros" class="split">
+          <span class="split-label">Energy from</span>
+          <span
+            v-for="k in (['protein','carbs','fat'] as const)"
+            :key="k"
+            class="split-part"
+            :class="k"
+          >
+            {{ k }}
+            {{ r.energy_split.percent[k] == null ? "—" : r.energy_split.percent[k] + "%" }}
+          </span>
+          <span v-if="r.energy_split.incomplete" class="split-warn">
+            partial — a macro is unknown
           </span>
         </div>
 
@@ -356,6 +400,20 @@ function scaled(r: Recipe, v: number | null | undefined): number | null {
             </tr>
           </tbody>
         </table>
+
+        <template v-if="r.fat_soluble && !r.fat_soluble.no_data">
+          <h4>Fat-soluble vitamins (per serving)</h4>
+          <ul class="vits">
+            <li v-for="(v, k) in r.fat_soluble.present" :key="k">
+              <span>{{ VIT_LABELS[k] ?? k }}</span>
+              <span>{{ v.toFixed(1) }} {{ VIT_UNITS[k] ?? "" }}</span>
+            </li>
+          </ul>
+          <p v-if="r.fat_soluble.missing.length" class="vit-note">
+            {{ r.fat_soluble.missing.length }} not known for these
+            ingredients — absent, not zero.
+          </p>
+        </template>
 
         <h4>Ingredients</h4>
         <ul class="ings">
@@ -455,5 +513,28 @@ h4 { font-size: 0.78rem; color: var(--muted-2); margin: 0.8rem 0 0.35rem; font-w
 .ings li.unresolved { color: var(--muted-2); }
 .why { font-size: 0.74rem; color: #fbbf24; flex: none; }
 .g { font-size: 0.76rem; color: var(--muted-2); font-variant-numeric: tabular-nums; flex: none; }
+.fat-pill {
+  flex: none; font-size: 0.72rem; font-weight: 600;
+  border-radius: 999px; padding: 0.12rem 0.5rem;
+  border: 1px solid var(--line); font-variant-numeric: tabular-nums;
+}
+.fat-pill.ok { color: #22c55e; border-color: #22c55e55; }
+.fat-pill.approaching { color: #fbbf24; border-color: #fbbf2455; }
+.fat-pill.high { color: #fb923c; border-color: #fb923c55; }
+.fat-pill.very_high { color: #f87171; border-color: #f8717155; }
+.fat-block { margin-bottom: 0.8rem; }
+.split {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  font-size: 0.76rem; margin-bottom: 0.8rem;
+}
+.split-label { color: var(--muted-2); }
+.split-part { text-transform: capitalize; font-variant-numeric: tabular-nums; }
+.split-part.protein { color: #38bdf8; }
+.split-part.carbs { color: #a78bfa; }
+.split-part.fat { color: #fb923c; }
+.split-warn { color: #fbbf24; }
+.vits { list-style: none; margin: 0; padding: 0; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.vits li { display: flex; justify-content: space-between; padding: 0.2rem 0; border-bottom: 1px solid var(--line); }
+.vit-note { margin: 0.35rem 0 0; font-size: 0.74rem; color: var(--muted-2); }
 .method-text { white-space: pre-wrap; font-size: 0.85rem; line-height: 1.5; margin: 0; }
 </style>

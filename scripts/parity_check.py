@@ -42,6 +42,12 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/components/FoodPicker.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/meals/FoodPicker.kt",
      "Food type-ahead search"),
+    ("frontend/src/views/meals/Nutrition.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/meals/MealsScreen.kt",
+     "Diet settings + standalone fat check (MEAL-2)"),
+    ("frontend/src/components/FatAssessment.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/meals/FatAssessmentCard.kt",
+     "Per-meal fat verdict card (MEAL-2)"),
     # ── Vitality Neon shell (opt-in 6-tab redesign) — web view ↔ phone screen ──
     ("frontend/src/components/NeonNav.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/neon/NeonAppShell.kt",

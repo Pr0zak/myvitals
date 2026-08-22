@@ -12,6 +12,7 @@ import retrofit2.http.GET
 import retrofit2.http.DELETE
 import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
@@ -562,6 +563,15 @@ interface BackendApi {
 
     @GET("meals/stats")
     suspend fun mealsStats(): MealsStats
+
+    @GET("meals/diet-profile")
+    suspend fun mealsDietProfile(): DietProfile
+
+    @PUT("meals/diet-profile")
+    suspend fun mealsPutDietProfile(@Body body: DietProfileIn): DietProfile
+
+    @GET("meals/nutrition/assess")
+    suspend fun mealsAssessFat(@Query("fat_g") fatG: Double): FatAssessment
 }
 
 object BackendClient {

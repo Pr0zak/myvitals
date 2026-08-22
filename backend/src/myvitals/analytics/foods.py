@@ -46,6 +46,17 @@ INGREDIENT_CATEGORIES: frozenset[str] = frozenset({
 NUTRIENT_COLUMNS: tuple[str, ...] = (
     "kcal", "protein_g", "carbs_g", "fat_g",
     "saturated_fat_g", "fiber_g", "sugar_g", "sodium_mg",
+    # Fat-soluble (MEAL-2). Absorbing these depends on absorbing fat, so
+    # they are the nutrients a cholecystectomy puts at risk. USDA covers
+    # them for 65-89% of foods; the rest stay null.
+    "vitamin_a_ug", "vitamin_d_ug", "vitamin_e_mg", "vitamin_k_ug",
+)
+
+#: The subset that is fat-soluble, surfaced as awareness rather than as a
+#: target. The app deliberately sets no RDA thresholds for these — see
+#: `analytics/nutrition.py` for why it refuses to invent numbers.
+FAT_SOLUBLE_COLUMNS: tuple[str, ...] = (
+    "vitamin_a_ug", "vitamin_d_ug", "vitamin_e_mg", "vitamin_k_ug",
 )
 
 #: Spelling variants collapsed to one canonical unit.

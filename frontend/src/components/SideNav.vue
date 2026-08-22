@@ -19,7 +19,7 @@ import {
   ChevronRight, Download, Droplets, Dumbbell, Edit3, FileUp, Footprints, Github, GitCompare,
   Heart, Home, Hourglass, Key, List, Map, Menu, Monitor, Mountain, RotateCcw, Ruler, Scale, Search,
   Settings, Ship, Sparkles, Target, Terminal, Thermometer, TrendingUp, User, Watch as WatchIcon,
-  UtensilsCrossed, BookOpen, Package, Apple,
+  UtensilsCrossed, BookOpen, Package, Apple, HeartPulse,
   Wrench, type LucideIcon,
 } from "lucide-vue-next";
 import { api, meals } from "@/api/client";
@@ -268,6 +268,7 @@ const groups = computed<Group[]>(() => {
         { to: "/meals/recipes", icon: BookOpen, label: "Recipes" },
         { to: "/meals/pantry",  icon: Package,  label: "Pantry" },
         { to: "/meals/foods",   icon: Apple,    label: "Foods" },
+        { to: "/meals/nutrition", icon: HeartPulse, label: "Nutrition" },
       ],
     },
     { id: "trails", to: "/trails", icon: Mountain, label: "Trails" },

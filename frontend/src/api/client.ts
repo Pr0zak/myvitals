@@ -1747,6 +1747,52 @@ export interface Nutrition {
   fiber_g: number | null;
   sugar_g: number | null;
   sodium_mg: number | null;
+  /** Fat-soluble (MEAL-2). Absorbing these depends on absorbing fat, so
+   *  they are the nutrients a cholecystectomy puts at risk. USDA covers
+   *  them for 65-89% of foods; the rest are genuinely unknown. */
+  vitamin_a_ug: number | null;
+  vitamin_d_ug: number | null;
+  vitamin_e_mg: number | null;
+  vitamin_k_ug: number | null;
+}
+
+/** Per-meal fat judgment. `basis` matters as much as `verdict`: the app
+ *  refuses to invent a threshold, so it must say what it judged against.
+ *  A verdict of "unknown" is a real answer, not an error. */
+export interface FatAssessment {
+  fat_g: number | null;
+  verdict: "unknown" | "ok" | "approaching" | "high" | "very_high";
+  basis: "none" | "target" | "history";
+  reason: string | null;
+  target_g: number | null;
+  target_source?: string | null;
+  median_g: number | null;
+  comparison_meals: number;
+}
+
+export interface EnergySplit {
+  kcal_stated: number | null;
+  kcal_from_macros: number | null;
+  percent: { protein: number | null; carbs: number | null; fat: number | null };
+  incomplete: boolean;
+}
+
+export interface FatSoluble {
+  present: Record<string, number>;
+  missing: string[];
+  /** True when NOTHING is known — a different claim from "contains none". */
+  no_data: boolean;
+}
+
+export interface DietProfile {
+  /** Grams of fat per SINGLE MEAL. Null means not set, and the app will
+   *  then judge against history or refuse. It never supplies a default. */
+  fat_per_meal_target_g: number | null;
+  fat_target_source: string | null;
+  track_fat_soluble: boolean;
+  daily_kcal_target: number | null;
+  comparison_meals: number;
+  comparison_meals_needed: number;
 }
 
 export interface Food extends Nutrition {
@@ -1797,6 +1843,10 @@ export interface Recipe {
   per_serving: Partial<Nutrition>;
   /** Non-zero means `totals` understates the real figures. Show it. */
   unresolved_count: number;
+  /** MEAL-2, all per SERVING, because a serving is the meal. */
+  fat_assessment: FatAssessment;
+  energy_split: EnergySplit;
+  fat_soluble: FatSoluble;
 }
 
 export interface PantryItem {
@@ -1919,6 +1969,19 @@ export const updatePantry = (id: number, body: Record<string, unknown>) =>
 export const deletePantry = (id: number) =>
   http.delete(`/meals/pantry/${id}`).then(() => undefined);
 
+export const getDietProfile = () =>
+  http.get<DietProfile>("/meals/diet-profile").then((r) => r.data);
+
+export const putDietProfile = (body: Partial<DietProfile>) =>
+  http.put<DietProfile>("/meals/diet-profile", body).then((r) => r.data);
+
+/** Judge a fat figure read straight off a package — the awareness half
+ *  works with no recipe and no log at all. */
+export const assessFat = (fatG: number) =>
+  http
+    .get<FatAssessment>("/meals/nutrition/assess", { params: { fat_g: fatG } })
+    .then((r) => r.data);
+
 export const mealsStats = () =>
   http.get<MealsStats>("/meals/stats").then((r) => r.data);
 
@@ -1941,4 +2004,7 @@ export const meals = {
   updatePantry,
   deletePantry,
   stats: mealsStats,
+  getDietProfile,
+  putDietProfile,
+  assessFat,
 };

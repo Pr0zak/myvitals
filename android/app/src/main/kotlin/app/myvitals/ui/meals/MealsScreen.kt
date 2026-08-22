@@ -24,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,6 +47,9 @@ import app.myvitals.data.JsonCache
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendApi
 import app.myvitals.sync.BackendClient
+import app.myvitals.sync.DietProfile
+import app.myvitals.sync.DietProfileIn
+import app.myvitals.sync.FatAssessment
 import app.myvitals.sync.FoodOut
 import app.myvitals.sync.PantryItemIn
 import app.myvitals.sync.PantryItemOut
@@ -84,6 +88,7 @@ private enum class MealsTab(val label: String) {
     RECIPES("Recipes"),
     PANTRY("Pantry"),
     FOODS("Foods"),
+    NUTRITION("Nutrition"),
 }
 
 @Composable
@@ -111,6 +116,7 @@ fun MealsScreen(settings: SettingsRepository) {
                 MealsTab.RECIPES -> RecipesTab(settings)
                 MealsTab.PANTRY -> PantryTab(settings)
                 MealsTab.FOODS -> FoodsTab(settings)
+                MealsTab.NUTRITION -> NutritionTab(settings)
             }
         }
     }
@@ -269,6 +275,18 @@ private fun RecipeCard(
                     fontSize = 11.sp,
                 )
             }
+            r.fatAssessment?.takeIf { it.verdict != "unknown" }?.let { fa ->
+                Text(
+                    fa.fatG?.let { String.format("%.1fg fat", it) } ?: "— fat",
+                    color = when (fa.verdict) {
+                        "very_high" -> NeonMV.Bad
+                        "high", "approaching" -> NeonMV.Amber
+                        else -> NeonMV.Lime
+                    },
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
             IconButton(onClick = onEdit) {
                 Icon(Icons.Filled.Edit, "Edit", tint = NeonMV.Muted)
             }
@@ -302,6 +320,37 @@ private fun RecipeCard(
             }
         }
 
+        r.fatAssessment?.let {
+            Box(Modifier.padding(top = 10.dp)) { FatAssessmentCard(it) }
+        }
+
+        r.energySplit?.takeIf { it.kcalFromMacros != null }?.let { es ->
+            Row(
+                Modifier.padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Energy from", color = NeonMV.Muted, fontSize = 11.sp)
+                Text(
+                    "protein " + (es.percent.protein?.let { "$it%" } ?: "—"),
+                    color = NeonMV.Cyan, fontSize = 11.sp,
+                )
+                Text(
+                    "carbs " + (es.percent.carbs?.let { "$it%" } ?: "—"),
+                    color = NeonMV.Periwinkle, fontSize = 11.sp,
+                )
+                Text(
+                    "fat " + (es.percent.fat?.let { "$it%" } ?: "—"),
+                    color = NeonMV.Amber, fontSize = 11.sp,
+                )
+            }
+            if (es.incomplete) {
+                Text(
+                    "Partial — a macro is unknown for at least one ingredient.",
+                    color = NeonMV.Amber, fontSize = 10.sp,
+                )
+            }
+        }
+
         Column(Modifier.padding(top = 10.dp)) {
             NutriRow("Calories", r.perServing["kcal"], r.totals["kcal"], 0, "")
             NutriRow("Fat", r.perServing["fat_g"], r.totals["fat_g"], 1, " g", emphasise = true)
@@ -310,6 +359,29 @@ private fun RecipeCard(
             NutriRow("Carbs", r.perServing["carbs_g"], r.totals["carbs_g"], 1, " g")
             NutriRow("Fibre", r.perServing["fiber_g"], r.totals["fiber_g"], 1, " g")
             NutriRow("Sodium", r.perServing["sodium_mg"], r.totals["sodium_mg"], 0, " mg")
+        }
+
+        r.fatSoluble?.takeIf { !it.noData }?.let { fs ->
+            SectionLabel("Fat-soluble vitamins (per serving)")
+            fs.present.forEach { (k, v) ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                    Text(
+                        VIT_LABELS[k] ?: k, color = NeonMV.Muted, fontSize = 12.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        String.format("%.1f %s", v, VIT_UNITS[k] ?: ""),
+                        color = NeonMV.Ink, fontSize = 12.sp,
+                    )
+                }
+            }
+            if (fs.missing.isNotEmpty()) {
+                Text(
+                    "${fs.missing.size} not known for these ingredients — " +
+                        "absent, not zero.",
+                    color = NeonMV.Muted, fontSize = 10.sp,
+                )
+            }
         }
 
         SectionLabel("Ingredients")
@@ -887,6 +959,274 @@ private fun ErrorText(text: String) {
         modifier = Modifier.padding(vertical = 8.dp))
 }
 
+private val VIT_LABELS = mapOf(
+    "vitamin_a_ug" to "Vitamin A",
+    "vitamin_d_ug" to "Vitamin D",
+    "vitamin_e_mg" to "Vitamin E",
+    "vitamin_k_ug" to "Vitamin K",
+)
+private val VIT_UNITS = mapOf(
+    "vitamin_a_ug" to "\u00b5g",
+    "vitamin_d_ug" to "\u00b5g",
+    "vitamin_e_mg" to "mg",
+    "vitamin_k_ug" to "\u00b5g",
+)
+
 /** "2.0" reads wrong on an ingredient line; "2" is what a recipe says. */
 private fun trimNum(v: Double): String =
     if (v == v.toLong().toDouble()) v.toLong().toString() else v.toString()
+
+// ─────────────────────────────────────────────────────────── nutrition
+
+/**
+ * Diet settings and the standalone fat check — the phone mirror of the
+ * web's `views/meals/Nutrition.vue`.
+ *
+ * Both halves work with zero logging, which is the design floor for this
+ * feature: setting a target needs nothing, and checking a number read off
+ * a package needs nothing.
+ *
+ * The app never supplies a default fat target. This screen asks for the
+ * number AND where it came from, and the second answer is rendered next
+ * to the first wherever the target is used — a figure a clinician gave
+ * and a figure the user guessed deserve different confidence.
+ */
+@Composable
+private fun NutritionTab(settings: SettingsRepository) {
+    val scope = rememberCoroutineScope()
+    var profile by remember { mutableStateOf<DietProfile?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var savedNote by remember { mutableStateOf(false) }
+
+    var targetG by remember { mutableStateOf("") }
+    var targetSource by remember { mutableStateOf("") }
+    var trackVitamins by remember { mutableStateOf(true) }
+    var kcalTarget by remember { mutableStateOf("") }
+
+    var checkFat by remember { mutableStateOf("") }
+    var checkResult by remember { mutableStateOf<FatAssessment?>(null) }
+    var checking by remember { mutableStateOf(false) }
+
+    suspend fun load() {
+        if (!settings.isConfigured()) {
+            error = "Backend not configured — set URL + token in Settings."
+            loading = false
+            return
+        }
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val p = withContext(Dispatchers.IO) { api.mealsDietProfile() }
+            profile = p
+            targetG = p.fatPerMealTargetG?.let { trimNum(it) } ?: ""
+            targetSource = p.fatTargetSource ?: ""
+            trackVitamins = p.trackFatSoluble
+            kcalTarget = p.dailyKcalTarget?.toString() ?: ""
+            error = null
+        } catch (e: Exception) {
+            error = e.message ?: "load failed"
+        } finally {
+            loading = false
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        error?.let { item { ErrorText(it) } }
+        if (loading) {
+            item { MutedText("Loading…") }
+            return@LazyColumn
+        }
+
+        item {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(NeonMV.Card)
+                    .padding(12.dp),
+            ) {
+                Text(
+                    "Fat per meal", color = NeonMV.Ink, fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "Without a gall bladder, bile drips continuously instead of " +
+                        "arriving as a bolus, so what matters is how much fat turns " +
+                        "up in ONE sitting — not the daily total.",
+                    color = NeonMV.Muted, fontSize = 12.sp, lineHeight = 17.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                Text(
+                    "This app will not guess a limit for you. Tolerance varies a lot " +
+                        "between people and usually improves over months, so any " +
+                        "number here should be one you were actually given.",
+                    color = NeonMV.Muted, fontSize = 12.sp, lineHeight = 17.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+
+                OutlinedTextField(
+                    value = targetG, onValueChange = { targetG = it },
+                    label = { Text("Target grams per meal") },
+                    placeholder = { Text("blank if you don't have one") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                )
+                OutlinedTextField(
+                    value = targetSource, onValueChange = { targetSource = it },
+                    label = { Text("Where did this number come from?") },
+                    placeholder = { Text("e.g. dietitian, Mar 2026") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+                OutlinedTextField(
+                    value = kcalTarget, onValueChange = { kcalTarget = it },
+                    label = { Text("Daily calorie target (optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Show fat-soluble vitamins (A, D, E, K) on meals — " +
+                            "absorbing these depends on absorbing fat",
+                        color = NeonMV.Muted, fontSize = 11.sp, lineHeight = 15.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(checked = trackVitamins, onCheckedChange = { trackVitamins = it })
+                }
+
+                Row(
+                    Modifier.padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Button(
+                        enabled = !saving,
+                        onClick = {
+                            scope.launch {
+                                saving = true
+                                savedNote = false
+                                error = null
+                                try {
+                                    val api = BackendClient.create(
+                                        settings.backendUrl, settings.bearerToken,
+                                    )
+                                    // An empty field CLEARS the value rather than
+                                    // leaving it — that is how the user removes a
+                                    // target they no longer want judged against.
+                                    val p = withContext(Dispatchers.IO) {
+                                        api.mealsPutDietProfile(
+                                            DietProfileIn(
+                                                fatPerMealTargetG = targetG.toDoubleOrNull(),
+                                                fatTargetSource =
+                                                    targetSource.ifBlank { null },
+                                                trackFatSoluble = trackVitamins,
+                                                dailyKcalTarget = kcalTarget.toIntOrNull(),
+                                            ),
+                                        )
+                                    }
+                                    profile = p
+                                    savedNote = true
+                                } catch (e: Exception) {
+                                    error = e.message ?: "save failed"
+                                } finally {
+                                    saving = false
+                                }
+                            }
+                        },
+                    ) { Text(if (saving) "Saving…" else "Save") }
+                    if (savedNote) {
+                        Text("  Saved", color = NeonMV.Lime, fontSize = 12.sp)
+                    }
+                }
+
+                basisNow(profile)?.let {
+                    Text(
+                        it, color = NeonMV.Muted, fontSize = 11.sp, lineHeight = 16.sp,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
+            }
+        }
+
+        item {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(NeonMV.Card)
+                    .padding(12.dp),
+            ) {
+                Text(
+                    "Check a meal", color = NeonMV.Ink, fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "Read the fat off a package or a menu and see how it compares — " +
+                        "no recipe or logging needed.",
+                    color = NeonMV.Muted, fontSize = 12.sp, lineHeight = 17.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = checkFat, onValueChange = { checkFat = it },
+                        label = { Text("grams of fat") }, singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(
+                        enabled = !checking && checkFat.toDoubleOrNull() != null,
+                        onClick = {
+                            scope.launch {
+                                checking = true
+                                try {
+                                    val api = BackendClient.create(
+                                        settings.backendUrl, settings.bearerToken,
+                                    )
+                                    checkResult = withContext(Dispatchers.IO) {
+                                        api.mealsAssessFat(checkFat.toDouble())
+                                    }
+                                } catch (e: Exception) {
+                                    error = e.message ?: "check failed"
+                                } finally {
+                                    checking = false
+                                }
+                            }
+                        },
+                        modifier = Modifier.padding(start = 8.dp),
+                    ) { Text(if (checking) "…" else "Check") }
+                }
+                checkResult?.let {
+                    Box(Modifier.padding(top = 10.dp)) { FatAssessmentCard(it) }
+                }
+            }
+        }
+    }
+}
+
+/** What the app will judge against right now, said plainly, so a verdict
+ *  appearing on a recipe is never a surprise. */
+private fun basisNow(p: DietProfile?): String? {
+    if (p == null) return null
+    p.fatPerMealTargetG?.let {
+        return "Meals are judged against your ${trimNum(it)} g target."
+    }
+    if (p.comparisonMeals >= p.comparisonMealsNeeded) {
+        return "No target set, so meals are judged against the median of your " +
+            "${p.comparisonMeals} saved recipes."
+    }
+    return "No target set, and only ${p.comparisonMeals} of the " +
+        "${p.comparisonMealsNeeded} saved recipes needed to compare against. " +
+        "Meals will show \"not enough to judge\" until you set a target or add " +
+        "more recipes."
+}

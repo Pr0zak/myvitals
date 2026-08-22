@@ -1775,6 +1775,13 @@ data class FoodOut(
     @Json(name = "fiber_g") val fiberG: Double? = null,
     @Json(name = "sugar_g") val sugarG: Double? = null,
     @Json(name = "sodium_mg") val sodiumMg: Double? = null,
+    // Fat-soluble (MEAL-2). Absorbing these depends on absorbing fat, so
+    // they are the nutrients a cholecystectomy puts at risk. Null is
+    // common — USDA covers them for 65-89% of foods — and must stay null.
+    @Json(name = "vitamin_a_ug") val vitaminAUg: Double? = null,
+    @Json(name = "vitamin_d_ug") val vitaminDUg: Double? = null,
+    @Json(name = "vitamin_e_mg") val vitaminEMg: Double? = null,
+    @Json(name = "vitamin_k_ug") val vitaminKUg: Double? = null,
     @Json(name = "unit_grams") val unitGrams: Map<String, Double>? = null,
     // Whether this is a whole ingredient rather than a prepared dish.
     // The recipe picker filters on it; the food log does not.
@@ -1793,6 +1800,10 @@ data class FoodIn(
     @Json(name = "fiber_g") val fiberG: Double? = null,
     @Json(name = "sugar_g") val sugarG: Double? = null,
     @Json(name = "sodium_mg") val sodiumMg: Double? = null,
+    @Json(name = "vitamin_a_ug") val vitaminAUg: Double? = null,
+    @Json(name = "vitamin_d_ug") val vitaminDUg: Double? = null,
+    @Json(name = "vitamin_e_mg") val vitaminEMg: Double? = null,
+    @Json(name = "vitamin_k_ug") val vitaminKUg: Double? = null,
     @Json(name = "unit_grams") val unitGrams: Map<String, Double>? = null,
 )
 
@@ -1840,6 +1851,80 @@ data class RecipeOut(
     @Json(name = "per_serving") val perServing: Map<String, Double?> = emptyMap(),
     // Non-zero means `totals` understates the real figures.
     @Json(name = "unresolved_count") val unresolvedCount: Int = 0,
+    // MEAL-2, all per SERVING, because a serving is the meal.
+    @Json(name = "fat_assessment") val fatAssessment: FatAssessment? = null,
+    @Json(name = "energy_split") val energySplit: EnergySplit? = null,
+    @Json(name = "fat_soluble") val fatSoluble: FatSoluble? = null,
+)
+
+/**
+ * Per-meal fat judgment (MEAL-2).
+ *
+ * `basis` matters as much as `verdict`. The app refuses to invent a fat
+ * threshold — tolerance after a cholecystectomy varies widely between
+ * people — so it must always say what it judged against. A verdict of
+ * "unknown" is a real answer and must NOT render as reassurance.
+ */
+@JsonClass(generateAdapter = true)
+data class FatAssessment(
+    @Json(name = "fat_g") val fatG: Double? = null,
+    val verdict: String = "unknown",
+    val basis: String = "none",
+    val reason: String? = null,
+    @Json(name = "target_g") val targetG: Double? = null,
+    @Json(name = "target_source") val targetSource: String? = null,
+    @Json(name = "median_g") val medianG: Double? = null,
+    @Json(name = "comparison_meals") val comparisonMeals: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class EnergyPercent(
+    val protein: Double? = null,
+    val carbs: Double? = null,
+    val fat: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class EnergySplit(
+    @Json(name = "kcal_stated") val kcalStated: Double? = null,
+    @Json(name = "kcal_from_macros") val kcalFromMacros: Double? = null,
+    val percent: EnergyPercent = EnergyPercent(),
+    val incomplete: Boolean = false,
+)
+
+@JsonClass(generateAdapter = true)
+data class FatSoluble(
+    val present: Map<String, Double> = emptyMap(),
+    val missing: List<String> = emptyList(),
+    // True when NOTHING is known — a different claim from "contains none".
+    @Json(name = "no_data") val noData: Boolean = false,
+)
+
+/**
+ * Diet settings.
+ *
+ * `fatPerMealTargetG` has no default and the app never supplies one.
+ * Note `trackFatSoluble` defaults to true only because the SERVER always
+ * sends it; per the Moshi landmine in CLAUDE.md, a boolean that gates
+ * behaviour should default to the safe value when the key is absent, and
+ * here showing the vitamins is the harmless direction.
+ */
+@JsonClass(generateAdapter = true)
+data class DietProfile(
+    @Json(name = "fat_per_meal_target_g") val fatPerMealTargetG: Double? = null,
+    @Json(name = "fat_target_source") val fatTargetSource: String? = null,
+    @Json(name = "track_fat_soluble") val trackFatSoluble: Boolean = true,
+    @Json(name = "daily_kcal_target") val dailyKcalTarget: Int? = null,
+    @Json(name = "comparison_meals") val comparisonMeals: Int = 0,
+    @Json(name = "comparison_meals_needed") val comparisonMealsNeeded: Int = 6,
+)
+
+@JsonClass(generateAdapter = true)
+data class DietProfileIn(
+    @Json(name = "fat_per_meal_target_g") val fatPerMealTargetG: Double? = null,
+    @Json(name = "fat_target_source") val fatTargetSource: String? = null,
+    @Json(name = "track_fat_soluble") val trackFatSoluble: Boolean? = null,
+    @Json(name = "daily_kcal_target") val dailyKcalTarget: Int? = null,
 )
 
 @JsonClass(generateAdapter = true)

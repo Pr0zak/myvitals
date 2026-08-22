@@ -826,6 +826,16 @@ class Food(Base):
     sugar_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     sodium_mg: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Fat-soluble vitamins (migration 0057). Carried because absorbing
+    # them depends on absorbing fat, which is the one thing this user's
+    # cholecystectomy changes — so they are the nutrients a macro-only
+    # tracker would miss. Units are in the names deliberately: USDA
+    # publishes vitamin A in both RAE micrograms and IU.
+    vitamin_a_ug: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vitamin_d_ug: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vitamin_e_mg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vitamin_k_ug: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     #: Grams per common household unit, e.g. {"cup": 240, "tbsp": 15}.
     #: Without this a recipe written in cups cannot be costed in grams,
     #: which is how recipes are actually written.

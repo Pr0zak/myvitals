@@ -5,6 +5,7 @@ nightly job populates daily_summary in one transaction.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
@@ -365,24 +366,159 @@ async def sleep_consistency_score(
 
 # ===== Sleep debt (running deficit vs target) =======================
 
+#: Half-life of sleep debt, in days.
+#:
+#: Debt was a flat 7-day window: a deficit six days old counted in full
+#: and a deficit seven days old counted zero. That is a step function, so
+#: the number jumped whenever a bad night aged out — a drop the user had
+#: done nothing to earn — and it weighted last night the same as last
+#: Tuesday.
+#:
+#: Three days is a deliberate choice rather than a derived constant.
+#: Recovery-sleep research does not give a clean decay rate, and the
+#: honest reading is that recent deficit dominates and older deficit
+#: fades without ever being formally "repaid". A 3-day half-life leaves
+#: last night at full weight, three nights ago at half, and a week ago at
+#: about a fifth — which matches how the deficit actually feels, and
+#: removes the cliff.
+SLEEP_DEBT_HALF_LIFE_D = 3.0
+
+#: Nights considered. Beyond this the weight is under 2% and the row is
+#: noise, but the window is wider than the old 7 so nothing drops off a
+#: cliff at the edge either.
+SLEEP_DEBT_WINDOW_D = 14
+
+
 async def sleep_debt_hours(
     db: AsyncSession, target: date, target_h: float,
 ) -> float | None:
-    """Cumulative deficit (target - actual) over the last 7 days.
-    Positive = behind on sleep; negative = ahead."""
-    cutoff = target - timedelta(days=6)
+    """Time-decayed sleep deficit. Positive = behind, negative = ahead.
+
+    Each night's deficit is weighted by how recent it is, halving every
+    SLEEP_DEBT_HALF_LIFE_D days, rather than counted in full inside a
+    hard window and dropped entirely outside it.
+
+    The result is still expressed in hours and is still comparable to the
+    old figure in magnitude — a steady deficit converges to roughly the
+    same number — but it no longer steps when an old night ages out.
+    """
+    cutoff = target - timedelta(days=SLEEP_DEBT_WINDOW_D - 1)
     rows = (await db.execute(
-        select(models.DailySummary.sleep_duration_s)
+        select(models.DailySummary.date, models.DailySummary.sleep_duration_s)
         .where(models.DailySummary.date >= cutoff)
         .where(models.DailySummary.date <= target)
         .where(models.DailySummary.sleep_duration_s.is_not(None))
     )).all()
     if not rows:
         return None
-    debt_h = 0.0
-    for (s,) in rows:
-        debt_h += target_h - (float(s) / 3600.0)
-    return round(debt_h, 1)
+
+    # Normalised so a CONSTANT nightly deficit over a full window still
+    # reads as roughly "deficit x nights", keeping the number on the same
+    # scale as before. Without this, decay would silently shrink every
+    # debt figure and look like the user had improved.
+    total_w = 0.0
+    weighted = 0.0
+    for d, s in rows:
+        age_d = (target - d).days
+        w = 0.5 ** (age_d / SLEEP_DEBT_HALF_LIFE_D)
+        weighted += w * (target_h - (float(s) / 3600.0))
+        total_w += w
+    if total_w <= 0:
+        return None
+    # Scale back up to the equivalent of a 7-night sum, so the number a
+    # user has been looking at keeps its meaning across this change.
+    return round(weighted / total_w * 7.0, 1)
+
+
+@dataclass(frozen=True)
+class SleepNeed:
+    """A data-derived estimate of how much sleep this person needs.
+
+    `usable` is the field that matters. The standard derivation reads
+    unrestricted sleep off FREE days and contrasts it with work days — if
+    someone sleeps the same on both, there is no unrestricted night in the
+    record and the method has nothing to work with. Returning a confident
+    number anyway would be inventing one.
+    """
+
+    hours: float | None
+    usable: bool
+    reason: str
+    free_day_mean_h: float | None = None
+    work_day_mean_h: float | None = None
+    n_nights: int = 0
+
+
+#: Minimum free-vs-work gap, in hours, for the derivation to mean anything.
+#: Below this the two populations are the same population.
+_FREE_DAY_MIN_GAP_H = 0.5
+
+
+async def derive_sleep_need(
+    db: AsyncSession, target: date, window_days: int = 180,
+) -> SleepNeed:
+    """Estimate sleep need from the record, or explain why it cannot.
+
+    Deliberately NOT wired to `user_profile.sleep_target_h` by default.
+    On this database the typed target is 8.0h while the measured mean is
+    about 6.6h, so adopting a derived need silently would cut the computed
+    debt by roughly ten hours a week, move the tile's colour band and
+    relax the sleep AiGoal — all in one deploy, with the user never having
+    asked for it. A derived number can inform that decision; it should not
+    make it.
+    """
+    cutoff = target - timedelta(days=window_days)
+    rows = (await db.execute(
+        select(models.DailySummary.date, models.DailySummary.sleep_duration_s)
+        .where(models.DailySummary.date >= cutoff)
+        .where(models.DailySummary.date <= target)
+        .where(models.DailySummary.sleep_duration_s.is_not(None))
+    )).all()
+    if len(rows) < 30:
+        return SleepNeed(None, False,
+                         f"Only {len(rows)} nights recorded; need at least 30.",
+                         n_nights=len(rows))
+
+    free: list[float] = []
+    work: list[float] = []
+    for d, s in rows:
+        h = float(s) / 3600.0
+        # Saturday and Sunday as the free-day proxy. Crude, and stated as
+        # such: a shift worker's free days are not the weekend. It is the
+        # only signal available without asking the user to label nights.
+        (free if d.weekday() >= 5 else work).append(h)
+
+    if not free or not work:
+        return SleepNeed(None, False, "No free-day / work-day contrast in the record.",
+                         n_nights=len(rows))
+
+    free_mean = sum(free) / len(free)
+    work_mean = sum(work) / len(work)
+    gap = free_mean - work_mean
+
+    if gap < _FREE_DAY_MIN_GAP_H:
+        # The live case here: 6.67 free vs 6.59 work, a gap of 0.08h over
+        # 180 nights. Sleeping the same on free days means either the need
+        # is genuinely met or it is restricted every night; the data
+        # cannot tell those apart, and guessing would produce a target
+        # that quietly rewrites the debt figure.
+        return SleepNeed(
+            None, False,
+            f"Free and work days differ by only {gap:.2f}h, so the record "
+            "contains no unrestricted nights to estimate need from.",
+            free_day_mean_h=round(free_mean, 2),
+            work_day_mean_h=round(work_mean, 2),
+            n_nights=len(rows),
+        )
+
+    return SleepNeed(
+        round(free_mean, 2), True,
+        "Estimated from free-day sleep, which is the least restricted "
+        "sleep in the record.",
+        free_day_mean_h=round(free_mean, 2),
+        work_day_mean_h=round(work_mean, 2),
+        n_nights=len(rows),
+    )
 
 
 # ===== Illness early warning composite =============================

@@ -931,6 +931,38 @@ async def _day_workout(db: AsyncSession, day: date) -> dict[str, Any] | None:
     }
 
 
+@router.get("/sleep-need")
+async def sleep_need(
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """A data-derived sleep-need estimate, or why one cannot be made.
+
+    Reported as information, never applied. The typed target keeps
+    driving the debt figure, the tile band and the sleep goal unless the
+    user changes it themselves — adopting a derived number silently would
+    rewrite all three in one deploy.
+    """
+    from ..analytics.advanced import derive_sleep_need
+
+    day, _tz, _is_today = resolve_day()
+    need = await derive_sleep_need(db, day)
+    prof = await db.get(models.UserProfile, 1)
+    typed = float(prof.sleep_target_h) if prof and prof.sleep_target_h else 8.0
+
+    return {
+        "derived_hours": need.hours,
+        "usable": need.usable,
+        "reason": need.reason,
+        "free_day_mean_h": need.free_day_mean_h,
+        "work_day_mean_h": need.work_day_mean_h,
+        "n_nights": need.n_nights,
+        # What is actually in use, so the client never has to guess which
+        # number the rest of the app is computing against.
+        "target_hours": typed,
+        "target_source": "manual",
+    }
+
+
 @router.get("/training-load")
 async def training_load(
     db: AsyncSession = Depends(get_session),

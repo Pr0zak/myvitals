@@ -772,6 +772,12 @@ async def list_activities(
 # Strava is paywalling on 2026-06-30 for Standard Tier developers.
 # ─────────────────────────────────────────────────────────────────
 
+#: Consecutive failures before the scheduled poll stops trying.
+#: Shared with tasks/scheduled.py so the API and the scheduler
+#: cannot disagree about when polling has stopped.
+STRAVA_POLL_MAX_FAILURES = 5
+
+
 class StravaCookieStatus(BaseModel):
     configured: bool
     athlete_id: int | None = None
@@ -784,6 +790,14 @@ class StravaCookieStatus(BaseModel):
     # cleared on every successful run, so a non-null value reliably
     # means "sync is broken, go fix it in Settings".
     needs_reconnect: bool = False
+    # Scheduled poll (migration 0055). Off by default — this reaches a
+    # third party on a timer with a credential that cannot self-heal.
+    poll_enabled: bool = False
+    poll_interval_min: int = 360
+    poll_consecutive_failures: int = 0
+    # True once the hard stop has tripped, so the UI can say "polling
+    # stopped" rather than leaving the user to infer it from silence.
+    poll_stopped: bool = False
     # SCS-6: surfaced so the UI knows whether to show the email +
     # password form. False when STRAVA_CREDS_KEY isn't set in .env.
     auto_login_available: bool = False
@@ -841,7 +855,47 @@ async def get_cookie_status(
         auto_login_enabled=row.auto_login_enabled,
         email=row.email,
         last_auto_login_at=row.last_auto_login_at,
+        poll_enabled=row.poll_enabled,
+        poll_interval_min=row.poll_interval_min,
+        poll_consecutive_failures=row.poll_consecutive_failures,
+        poll_stopped=row.poll_consecutive_failures >= STRAVA_POLL_MAX_FAILURES,
     )
+
+
+class StravaPollIn(BaseModel):
+    enabled: bool | None = None
+    interval_min: int | None = None
+
+
+@router.put("/strava/cookie/poll", response_model=StravaCookieStatus,
+            dependencies=[Depends(require_query)])
+async def set_cookie_poll(
+    body: StravaPollIn,
+    db: AsyncSession = Depends(get_session),
+) -> StravaCookieStatus:
+    """Enable, disable or re-pace the scheduled Strava poll.
+
+    Enabling also clears the failure counter. That is the reconnect
+    gesture: after a dead cookie trips the hard stop, the user pastes a
+    fresh cookie and turns the poll back on, and it must start trying
+    again rather than staying stopped because of failures that belonged
+    to the previous credential.
+    """
+    row = await strava_web.get_cookie_creds(db)
+    if row is None:
+        raise HTTPException(404, "no Strava cookie configured")
+    if body.interval_min is not None:
+        # Floor of 15 minutes. Strava is not a live feed — a ride appears
+        # minutes to hours after it ends — and a tighter cadence spends
+        # request budget against a third party for no new data.
+        row.poll_interval_min = max(15, min(24 * 60, int(body.interval_min)))
+    if body.enabled is not None:
+        row.poll_enabled = bool(body.enabled)
+        if body.enabled:
+            row.poll_consecutive_failures = 0
+    await db.commit()
+    await db.refresh(row)
+    return await get_cookie_status(db=db)
 
 
 @router.put("/strava/cookie", response_model=StravaCookieStatus,

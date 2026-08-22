@@ -216,6 +216,87 @@ async def _google_health_tick() -> None:
 
 # ── Registration ─────────────────────────────────────────────────
 
+async def _strava_cookie_tick() -> None:
+    """Poll Strava over the cookie session. No-op unless enabled.
+
+    Off by default, and that default is load-bearing. Google Health can
+    recover on its own — an expired access token is refreshed from a
+    stored refresh token — but the Strava cookie cannot: the production
+    credentials row has no auto-login email or password, so once the
+    session dies only a human can restore it. A timer that keeps hitting
+    a third party with a credential that can never come back on its own
+    is how an IP gets rate-limited or flagged.
+
+    Hence backoff and a hard stop rather than a fixed cadence:
+
+    * Each consecutive failure doubles the wait, capped so the interval
+      cannot run away entirely.
+    * After MAX_FAILURES the poll stops trying and leaves `last_error`
+      set, which the reconnect banner added in v0.7.319 already surfaces.
+      Stopping is the honest outcome — continuing to retry a credential
+      that requires a human would just be noise that hides the one
+      message that matters.
+
+    A successful sync resets the counter, so a transient network blip
+    costs one longer gap rather than permanent silence.
+    """
+    from ..db.session import SessionLocal
+    from ..db import models
+
+    from ..api.strava import STRAVA_POLL_MAX_FAILURES as MAX_FAILURES
+    MAX_BACKOFF_MULT = 8
+
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            select(models.StravaCookieCreds).limit(1)
+        )).scalar_one_or_none()
+        if row is None or not row.poll_enabled:
+            return
+        if not (row.remember_token or row.sid_cookie):
+            return
+
+        if row.poll_consecutive_failures >= MAX_FAILURES:
+            # Hard stop. Logged once per tick would be noise; the state is
+            # visible in /query/data-health and in Settings.
+            return
+
+        interval_min = max(15, int(row.poll_interval_min or 360))
+        backoff = min(MAX_BACKOFF_MULT, 2 ** row.poll_consecutive_failures)
+        wait_min = interval_min * backoff
+        if row.last_sync_at is not None:
+            last = row.last_sync_at
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            elapsed_min = (datetime.now(timezone.utc) - last).total_seconds() / 60
+            if elapsed_min < wait_min:
+                return
+
+        from ..api.strava import _run_cookie_sync
+
+        try:
+            since = datetime.now(timezone.utc) - timedelta(days=7)
+            result = await _run_cookie_sync(db, since=since)
+            if result.error:
+                row.poll_consecutive_failures += 1
+                log.warning(
+                    "Strava poll failed (%d consecutive): %s",
+                    row.poll_consecutive_failures, result.error,
+                )
+            else:
+                if row.poll_consecutive_failures:
+                    log.info("Strava poll recovered after %d failures",
+                             row.poll_consecutive_failures)
+                row.poll_consecutive_failures = 0
+                log.info("Strava poll upserted %d activities", result.upserted)
+            await db.commit()
+        except Exception as e:  # noqa: BLE001
+            row.poll_consecutive_failures += 1
+            row.last_error = f"{type(e).__name__}: {e}"[:500]
+            log.warning("Strava poll raised (%d consecutive): %s",
+                        row.poll_consecutive_failures, e)
+            await db.commit()
+
+
 def register_jobs(scheduler: AsyncIOScheduler) -> None:
     """Register every scheduled job.
 
@@ -295,4 +376,19 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
     log.info(
         "Google Health poll ticking every 5 min, gated on the configured "
         "interval (no-op until connected + enabled)"
+    )
+
+    # Strava cookie poll. Same shape as Google Health — short fixed tick,
+    # gate inside — so a changed interval takes effect immediately rather
+    # than on the next restart. Default OFF; see _strava_cookie_tick for
+    # why that matters more here than it does for Google Health.
+    scheduler.add_job(
+        _strava_cookie_tick,
+        trigger="interval", minutes=15,
+        id="strava_cookie_poll", replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=150),
+    )
+    log.info(
+        "Strava cookie poll ticking every 15 min, gated on the configured "
+        "interval with backoff (no-op until enabled)"
     )

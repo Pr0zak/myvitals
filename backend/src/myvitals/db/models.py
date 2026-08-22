@@ -348,6 +348,20 @@ class StravaCookieCreds(Base):
     athlete_name_cached: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Scheduled poll (migration 0055). Default OFF: this reaches a third
+    # party on a timer, and unlike Google Health the credential cannot
+    # self-heal — with no stored auto-login, only a human can restore an
+    # expired cookie. `poll_consecutive_failures` drives both the backoff
+    # and the hard stop, so a dead cookie is not retried forever.
+    poll_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
+    poll_interval_min: Mapped[int] = mapped_column(
+        Integer, default=360, server_default="360", nullable=False,
+    )
+    poll_consecutive_failures: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False,
+    )
     # SCS-6 auto-login. Email is plain; password is Fernet-encrypted
     # with settings.strava_creds_key. Both nullable so the row can
     # still hold paste-only cookies when auto-login is off.

@@ -628,6 +628,12 @@ export const api = {
     auto_login_enabled: boolean;
     email: string | null;
     last_auto_login_at: string | null;
+    poll_enabled: boolean;
+    poll_interval_min: number;
+    poll_consecutive_failures: number;
+    /** True once the hard stop has tripped. Say "polling stopped" rather
+     *  than leaving the user to infer it from missing rides. */
+    poll_stopped: boolean;
   }> {
     const { data } = await http.get("/strava/cookie");
     return data;
@@ -642,6 +648,16 @@ export const api = {
     auto_login_enabled?: boolean;
   }) {
     const { data } = await http.put("/strava/cookie", body);
+    return data;
+  },
+
+  /** STRAVA-1: enable/disable/re-pace the scheduled cookie poll.
+   *
+   * Enabling also clears the failure counter server-side — that is the
+   * reconnect gesture after a dead cookie tripped the hard stop.
+   */
+  async stravaCookiePoll(body: { enabled?: boolean; interval_min?: number }) {
+    const { data } = await http.put("/strava/cookie/poll", body);
     return data;
   },
 

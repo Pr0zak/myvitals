@@ -112,6 +112,13 @@ interface StravaCookieStatus {
   auto_login_enabled: boolean;
   email: string | null;
   last_auto_login_at: string | null;
+  // STRAVA-1: scheduled poll state.
+  poll_enabled: boolean;
+  poll_interval_min: number;
+  poll_consecutive_failures: number;
+  /** True once the hard stop has tripped — say "polling stopped" rather
+   *  than leaving the user to infer it from missing rides. */
+  poll_stopped: boolean;
 }
 const cookieStatus = ref<StravaCookieStatus | null>(null);
 const cookieRememberInput = ref("");
@@ -212,6 +219,18 @@ async function disconnectCookie() {
   } catch (e) {
     cookieResult.value = `Disconnect failed: ${e instanceof Error ? e.message : String(e)}`;
   }
+}
+
+async function setCookiePoll(enabled: boolean) {
+  try {
+    cookieStatus.value = await api.stravaCookiePoll({ enabled });
+  } catch { /* status refresh below will show the truth */ }
+}
+
+async function setCookieInterval(interval_min: number) {
+  try {
+    cookieStatus.value = await api.stravaCookiePoll({ interval_min });
+  } catch { /* ignore */ }
 }
 
 async function syncCookieNow() {
@@ -2158,6 +2177,33 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
             <button class="ghost danger" @click="disconnectCookie">Disconnect</button>
           </div>
 
+          <!-- STRAVA-1. Off by default: this reaches Strava on a timer with
+               a credential that cannot refresh itself, so it should be a
+               decision the user makes rather than a default. -->
+          <div class="pollrow">
+            <label class="pick">
+              <input type="checkbox" :checked="cookieStatus.poll_enabled"
+                     @change="setCookiePoll(($event.target as HTMLInputElement).checked)"/>
+              Sync automatically
+            </label>
+            <select v-if="cookieStatus.poll_enabled"
+                    :value="String(cookieStatus.poll_interval_min)"
+                    @change="setCookieInterval(Number(($event.target as HTMLSelectElement).value))">
+              <option value="60">hourly</option>
+              <option value="360">every 6 hours</option>
+              <option value="720">every 12 hours</option>
+              <option value="1440">daily</option>
+            </select>
+            <span v-if="cookieStatus.poll_stopped" class="err">
+              Automatic sync stopped after repeated failures — paste a fresh
+              cookie, then switch it back on.
+            </span>
+            <span v-else-if="cookieStatus.poll_consecutive_failures > 0" class="muted">
+              {{ cookieStatus.poll_consecutive_failures }} recent failure(s);
+              retrying less often until one succeeds.
+            </span>
+          </div>
+
           <details style="margin-top: 1rem;">
             <summary class="muted">Bulk import history</summary>
             <div class="form" style="margin-top: 0.6rem;">
@@ -3230,4 +3276,6 @@ html[data-theme="neon"] .settings .apply-steps li.current::before { color: var(-
   margin: 12px 0;
   background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
+.pollrow { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; margin-top: 0.7rem; }
+.pollrow select { background: transparent; color: inherit; border: 1px solid rgba(148,163,184,0.3); border-radius: 6px; padding: 0.2rem 0.4rem; }
 </style>

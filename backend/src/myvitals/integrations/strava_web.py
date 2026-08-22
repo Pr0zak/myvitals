@@ -649,28 +649,60 @@ async def upsert_activity_from_fit(
     # lag), so chest-strap winning is the right policy.
     if parsed.hr_samples:
         from sqlalchemy import delete
-        first_ts = parsed.hr_samples[0][0]
-        last_ts = parsed.hr_samples[-1][0]
-        await db.execute(
-            delete(models.HeartRate)
-            .where(models.HeartRate.time >= first_ts)
-            .where(models.HeartRate.time <= last_ts)
-        )
+
         # FIT records can repeat a timestamp (pause/resume, >1 record
         # per second) and the PK is `time` alone — de-dupe keeping the
-        # last sample per ts or the batch insert conflicts with itself
-        # (the window delete above can't help with intra-batch dupes).
+        # last sample per ts or the batch insert conflicts with itself.
         by_ts = {ts: bpm for ts, bpm in parsed.hr_samples}
         hr_values = [
             {"time": ts, "bpm": bpm, "source": "strava_fit"}
             for ts, bpm in sorted(by_ts.items())
         ]
-        # Prior strava_fit rows were removed by the delete above; the
-        # on-conflict guards against a watch-ingest race in the window.
-        ins = pg_insert(models.HeartRate).values(hr_values)
-        await db.execute(ins.on_conflict_do_update(
-            index_elements=["time"],
-            set_={"bpm": ins.excluded.bpm, "source": ins.excluded.source},
-        ))
+        first_ts = hr_values[0]["time"]
+        last_ts = hr_values[-1]["time"]
+        span_s = (last_ts - first_ts).total_seconds()
+
+        # Only clear the window when the FIT stream is dense enough to
+        # actually replace what is being removed.
+        #
+        # The delete takes out EVERY heart-rate row in the ride window
+        # regardless of source, so that the chest strap wins over the
+        # wrist — a defensible policy for cycling, where optical HR is
+        # unreliable on bouncing handlebars. But a truncated or sparse
+        # FIT (a dropped strap, a corrupt download) can span two hours
+        # with a handful of samples, and the delete would then destroy
+        # two hours of good watch data to install five points.
+        #
+        # Requiring at least one sample every 30 seconds on average
+        # keeps the intended behaviour for a real ride while refusing
+        # the trade when there is nothing to trade with.
+        dense_enough = span_s <= 0 or (len(hr_values) / span_s) >= (1 / 30)
+        if dense_enough:
+            await db.execute(
+                delete(models.HeartRate)
+                .where(models.HeartRate.time >= first_ts)
+                .where(models.HeartRate.time <= last_ts)
+            )
+        else:
+            log.warning(
+                "FIT HR stream too sparse to replace watch data "
+                "(%d samples over %.0f min); inserting alongside instead",
+                len(hr_values), span_s / 60,
+            )
+
+        # Chunked. asyncpg refuses more than 32,767 bind parameters and
+        # these rows bind three each, so a single statement caps at
+        # ~10,900 samples — about three hours at 1 Hz. The longest ride
+        # in this database is already 2h22m, so a longer one would have
+        # failed the whole import with an asyncpg error rather than
+        # dropping a few points.
+        chunk_size = 10_000
+        for i in range(0, len(hr_values), chunk_size):
+            chunk = hr_values[i:i + chunk_size]
+            ins = pg_insert(models.HeartRate).values(chunk)
+            await db.execute(ins.on_conflict_do_update(
+                index_elements=["time"],
+                set_={"bpm": ins.excluded.bpm, "source": ins.excluded.source},
+            ))
 
     return True

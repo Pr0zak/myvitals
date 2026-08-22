@@ -245,7 +245,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
     <span><b style="background:var(--sp)"></b> in progress &nbsp;0</span>
     <span><b style="background:var(--rule)"></b> not started &nbsp;0</span>
     <span>·</span>
-    <span>full menu: 40 options, 27 shipped, 2 declined</span>
+    <span>full menu: 40 options, 28 shipped, 2 declined</span>
   </div>
 </div>
 
@@ -673,7 +673,7 @@ details[open] summary{border-bottom:1px solid var(--rule-soft)}
       <div class="opts">
         <div class="opt"><div class="h">One Activity ingest sink</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Ranked #5. Three defects, one fix.</p></div>
         <div class="opt"><div class="h">Persist per-integration sync health as one endpoint</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Exactly one integration has a <code>last_error</code> — <code>strava_cookie_creds</code>, added in v0.7.319 after a dead cookie masqueraded as "up to date" for six weeks. Concept2, Home Assistant and RainoutLine failures still vanish into <code>log.warning</code>. The lesson was learned once and never generalised.</p></div>
-        <div class="opt"><div class="h">Schedule the cookie-mode Strava sync with backoff and a hard stop</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Adds <code>poll_enabled</code> / <code>poll_interval_min</code> and registers a job that reuses the existing <code>_run_cookie_sync</code>, stopping cleanly on repeated auth failure rather than hammering a dead cookie.</p></div>
+        <div class="opt"><div class="h">Schedule the cookie-mode Strava sync with backoff and a hard stop</div><div class="meta"><span class="chip c-done">shipped</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b">Adds <code>poll_enabled</code> / <code>poll_interval_min</code> and registers a job that reuses the existing <code>_run_cookie_sync</code>, stopping cleanly on repeated auth failure rather than hammering a dead cookie.</p></div>
         <div class="opt"><div class="h">Extract the FIT telemetry the cookie path discards</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">M</span><span class="chip c-hi">high</span></div><p class="b"><code>elevation_gain_m</code>, <code>avg_power_w</code>, <code>kcal</code>, cadence and normalized power are columns on <code>models.Activity</code>, populated by the retired OAuth path and left permanently null by the live one. Natural follow-on once the sink exists.</p></div>
         <div class="opt"><div class="h">Bulk backfill as a tracked job with a range picker</div><div class="meta"><span class="chip c-todo">not started</span><span class="chip c-eff">L</span><span class="chip c-md">medium</span></div><p class="b">Follows the pattern <code>api/imports.py</code> already uses — <code>ImportJob</code> row, <code>202 {job_id}</code>, progress counts. Borrow Garmin's ≤7-day chunk-with-token-refresh so a long import cannot die at an expiry.</p></div>
       </div>

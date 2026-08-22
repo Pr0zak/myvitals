@@ -255,3 +255,35 @@ class TestIntegrationConfiguredChecks:
         health_src = inspect.getsource(data_health.integration_health)
         assert "creds.refresh_token" in status_src
         assert "gh_creds.refresh_token" in health_src
+
+
+class TestStatusFieldsComeFromTheRightRow:
+    """`configured`, `last_sync_at` and `last_error` must all be read from
+    the row that actually carries them.
+
+    For Google Health that is the CREDENTIALS row for all three; the
+    config row holds only the client id and secret. Getting this half
+    right produced `configured=True, status=never` on an integration that
+    had synced minutes earlier — a subtler wrong answer than the original
+    bug, and one the suite could not see because nothing executed it.
+    """
+
+    def test_google_health_status_reads_the_credentials_row(self):
+        from myvitals.analytics import data_health
+
+        src = inspect.getsource(data_health.integration_health)
+        assert 'entry("google_health", "Google Health", gh_creds,' in src
+
+    def test_the_row_passed_actually_has_the_status_fields(self):
+        """Whatever row each integration passes must carry last_sync_at."""
+        from myvitals.db import models
+
+        for cls in (
+            models.GoogleHealthCredentials,
+            models.StravaCookieCreds,
+            models.Concept2Credentials,
+        ):
+            assert hasattr(cls, "last_sync_at"), (
+                f"{cls.__name__} has no last_sync_at, so its row cannot "
+                "answer 'when did this last work?'"
+            )

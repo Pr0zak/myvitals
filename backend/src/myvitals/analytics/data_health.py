@@ -214,7 +214,6 @@ async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
     async def one(model: Any) -> Any:
         return (await db.execute(select(model).limit(1))).scalar_one_or_none()
 
-    gh = await one(models.GoogleHealthConfig)
     # The OAuth tokens live in a SEPARATE table from the config — the
     # config holds the client id/secret, the credentials hold the refresh
     # token. Testing `refresh_token` on the config row silently reported a
@@ -227,7 +226,13 @@ async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
 
     out = [
         # Google Health polls on a timer, so a day of silence is a fault.
-        entry("google_health", "Google Health", gh,
+        #
+        # Everything this needs is on the CREDENTIALS row — refresh_token,
+        # last_sync_at and last_error all live there. The config row holds
+        # only the client id and secret, so passing it here produced
+        # `configured=True, status=never` on an integration that had synced
+        # minutes earlier.
+        entry("google_health", "Google Health", gh_creds,
               configured=bool(gh_creds and gh_creds.refresh_token),
               stale_after_h=24.0),
         # Strava is cookie-session and manual: the cookie expires and the

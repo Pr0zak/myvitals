@@ -615,6 +615,41 @@ const aiProvider = ref<
  *  `claude setup-token`. Stored separately from the API key on purpose:
  *  an API key in the CLI's environment makes it bill per token. */
 const aiCliToken = ref("");
+const aiCliSaving = ref(false);
+const aiCliError = ref("");
+const aiCliSaved = ref(false);
+
+/** Save the CLI token on its own.
+ *
+ *  It used to ride along with the provider save, which meant typing a
+ *  token and clicking away silently did nothing unless you also changed
+ *  the dropdown. A write-only field with no save button of its own is a
+ *  trap, and this one cost a debugging session.
+ */
+async function aiSaveCliToken(clear = false) {
+  aiCliSaving.value = true;
+  aiCliError.value = "";
+  aiCliSaved.value = false;
+  try {
+    await api.aiUpdateConfig(
+      clear
+        ? { clear_cli_token: true }
+        : { cli_oauth_token: aiCliToken.value.trim() },
+    );
+    aiCliToken.value = "";
+    await loadAiCfg();
+    aiCliSaved.value = true;
+    setTimeout(() => (aiCliSaved.value = false), 2500);
+  } catch (e: unknown) {
+    const resp = (e && typeof e === "object" && "response" in e)
+      ? (e as { response?: { data?: { detail?: string } } }).response
+      : null;
+    aiCliError.value = resp?.data?.detail
+      ?? (e instanceof Error ? e.message : String(e));
+  } finally {
+    aiCliSaving.value = false;
+  }
+}
 const aiBaseUrl = ref("");
 const aiProviderSaving = ref(false);
 const aiProviderError = ref("");
@@ -630,11 +665,6 @@ async function aiSaveProvider() {
     await api.aiUpdateConfig({
       provider: aiProvider.value,
       base_url: aiBaseUrl.value.trim(),
-      // Only sent when non-empty; the backend leaves a stored token alone
-      // on null, so saving the provider does not wipe a token set earlier.
-      ...(aiCliToken.value.trim()
-        ? { cli_oauth_token: aiCliToken.value.trim() }
-        : {}),
     });
     await loadAiCfg();
   } catch (e: unknown) {
@@ -1962,9 +1992,33 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
           </select>
         </label>
         <label v-if="aiProvider === 'claude_cli'" class="ai-instructions">
-          <span>CLI OAuth token (optional)</span>
+          <span>
+            CLI OAuth token
+            <em v-if="aiCfg?.cli_token_set" class="muted">
+              currently {{ aiCfg.cli_token_masked }}
+            </em>
+            <em v-else class="muted">not set</em>
+          </span>
+          <p v-if="aiCfg?.cli_token_set && !aiCfg?.cli_token_looks_valid"
+             class="err">
+            The stored value does not look like a Claude OAuth token — those
+            begin <code>sk-ant-oat</code>. Anything else is rejected with
+            “401 Invalid bearer token” when a card is generated.
+          </p>
           <input v-model="aiCliToken" type="password" class="add-search"
-                 placeholder="from `claude setup-token`"/>
+                 placeholder="sk-ant-oat01-… (from `claude setup-token`)"/>
+          <div class="actions">
+            <button class="primary" :disabled="aiCliSaving || !aiCliToken.trim()"
+                    @click="aiSaveCliToken(false)">
+              {{ aiCliSaving ? "Saving…" : "Save token" }}
+            </button>
+            <button v-if="aiCfg?.cli_token_set" class="ghost danger"
+                    :disabled="aiCliSaving" @click="aiSaveCliToken(true)">
+              Clear token
+            </button>
+            <span v-if="aiCliSaved" class="ok">Saved</span>
+            <span v-if="aiCliError" class="err">{{ aiCliError }}</span>
+          </div>
           <div class="ai-instructions-foot">
             <span class="muted">
               Runs <code>claude -p</code> inside the backend container on your

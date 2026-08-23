@@ -134,6 +134,21 @@ async def get_config(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
         "base_url": cfg.base_url or "",
         "custom_instructions": cfg.custom_instructions or "",
         "custom_instructions_max": MAX_CUSTOM_INSTRUCTIONS,
+        # Whether a CLI OAuth token is stored, masked the same way the API
+        # key is. Without this the Settings field is write-only: a user
+        # cannot tell a saved token from an empty one, which is how an
+        # invalid token sat there returning 401 with nothing on screen.
+        "cli_token_set": bool(cfg.cli_oauth_token),
+        "cli_token_masked": (
+            f"{cfg.cli_oauth_token[:12]}…{cfg.cli_oauth_token[-4:]}"
+            if cfg.cli_oauth_token and len(cfg.cli_oauth_token) > 20 else None
+        ),
+        # The CLI accepts only an OAuth token from `claude setup-token`.
+        # Anything else 401s at call time, so a stored value that cannot
+        # possibly be one is flagged here rather than discovered later.
+        "cli_token_looks_valid": bool(
+            cfg.cli_oauth_token and cfg.cli_oauth_token.startswith("sk-ant-oat")
+        ),
     }
 
 

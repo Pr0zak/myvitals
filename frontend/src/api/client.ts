@@ -375,11 +375,19 @@ export const api = {
     tone: "supportive" | "blunt" | "data-only";
     /** Which backend answers. "anthropic" is the default and the only one
      *  that supports prompt caching. */
-    provider: "anthropic" | "openai_compatible" | "ollama";
+    provider: "anthropic" | "openai_compatible" | "ollama" | "claude_cli";
     base_url: string;
     /** Standing instructions appended to every AI system prompt. */
     custom_instructions: string;
     custom_instructions_max: number;
+    /** Whether a CLI OAuth token is stored, and a masked hint. Without
+     *  these the Settings field is write-only and a bad token is
+     *  invisible until a card fails with a 401. */
+    cli_token_set: boolean;
+    cli_token_masked: string | null;
+    /** False when a token is stored but cannot be a Claude OAuth token —
+     *  those begin `sk-ant-oat`. */
+    cli_token_looks_valid: boolean;
   }> {
     const { data } = await http.get("/ai/config");
     return data;

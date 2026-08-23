@@ -273,3 +273,56 @@ def test_credentials_are_mounted_read_only():
     root = pathlib.Path(__file__).resolve().parents[2]
     compose = (root / "docker-compose.yml").read_text()
     assert "/root/.claude:ro" in compose
+
+
+# ------------------------------------------------- the token is visible
+#
+# Reported from live use: "i dont see any way to save it or view it". The
+# field shipped write-only and with no save button of its own — it only
+# reached the server if the provider dropdown also changed. So a token
+# typed and left sat unsaved, and an invalid one already stored was
+# invisible while every call failed with 401.
+
+
+def test_config_reports_whether_a_cli_token_is_stored():
+    src = (SRC / "api" / "ai.py").read_text()
+    fn = src[src.index("async def get_config("):]
+    fn = fn[: fn.index("class ConfigUpdate")]
+    assert "cli_token_set" in fn
+    assert "cli_token_masked" in fn
+
+
+def test_config_flags_a_token_that_cannot_be_an_oauth_token():
+    """The CLI accepts only `sk-ant-oat…`. Anything else 401s at call
+    time; saying so in the settings response turns a mystifying failure
+    into a visible one."""
+    src = (SRC / "api" / "ai.py").read_text()
+    fn = src[src.index("async def get_config("):]
+    fn = fn[: fn.index("class ConfigUpdate")]
+    assert 'startswith("sk-ant-oat")' in fn
+
+
+def test_the_token_is_masked_never_returned_whole():
+    src = (SRC / "api" / "ai.py").read_text()
+    fn = src[src.index("async def get_config("):]
+    fn = fn[: fn.index("class ConfigUpdate")]
+    # The raw column must not be echoed back to a client.
+    assert '"cli_oauth_token": cfg.cli_oauth_token' not in fn
+
+
+def test_the_settings_field_has_its_own_save_and_clear():
+    root = pathlib.Path(__file__).resolve().parents[2]
+    ui = (root / "frontend" / "src" / "views" / "Settings.vue").read_text()
+    assert "aiSaveCliToken" in ui
+    assert "Save token" in ui
+    assert "Clear token" in ui
+
+
+def test_saving_the_provider_no_longer_smuggles_the_token():
+    """Riding along with the provider save is what made the field appear
+    to do nothing unless the dropdown was also touched."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    ui = (root / "frontend" / "src" / "views" / "Settings.vue").read_text()
+    fn = ui[ui.index("async function aiSaveProvider("):]
+    fn = fn[: fn.index("async function", 10)] if "async function" in fn[10:] else fn[:900]
+    assert "cli_oauth_token" not in fn

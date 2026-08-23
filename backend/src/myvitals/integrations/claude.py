@@ -4102,7 +4102,7 @@ async def build_prep_plan_payload(
         n for (n,) in (await db.execute(
             _select(models.FoodLogEntry.label)
             .where(models.FoodLogEntry.label.isnot(None))
-            .where(models.FoodLogEntry.eaten_on >= since)
+            .where(models.FoodLogEntry.day >= since)
             .distinct()
             .limit(40)
         )).all() if n

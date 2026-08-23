@@ -287,3 +287,44 @@ def test_model_defaults_still_all_run():
             except Exception as e:  # noqa: BLE001
                 failures.append(f"{table.name}.{col.name}: {e}")
     assert failures == []
+
+
+def test_a_free_text_entry_shows_its_own_label():
+    """Reported: "add food item to todays log and it shows unnamed even
+    though i named it".
+
+    The rendering was a nested conditional expression that Python bound
+    as `food.name if food else ((e.label or "Recipe #N") if e.recipe_id
+    else "Unnamed")` — so an entry with no food and no recipe skipped its
+    own label entirely, however carefully it was named. Written out as an
+    if/elif chain now, because that is what the precedence bug was
+    hiding in.
+    """
+    src = _fn("_log_days", end="@router.get")
+    assert "elif e.label:" in src
+    assert "label = e.label" in src
+
+
+def test_the_label_render_prefers_food_then_label_then_recipe():
+    """Order matters and is not arbitrary: a resolved food name beats a
+    stale typed label, and a typed label beats a bare recipe id."""
+    src = _fn("_log_days", end="@router.get")
+    i_food = src.index("label = food.name")
+    i_label = src.index("label = e.label")
+    i_recipe = src.index("Recipe #")
+    i_unnamed = src.index("'Unnamed'") if "'Unnamed'" in src else src.index('"Unnamed"')
+    assert i_food < i_label < i_recipe < i_unnamed
+
+
+def test_a_pasted_block_is_flattened_to_one_line():
+    """People paste a whole menu or nutrition panel into the name field.
+    A multi-line value renders as a wall of text in every list it
+    appears in; nothing is discarded, it is flattened and capped."""
+    from myvitals.api.meals import _flatten_label
+
+    out = _flatten_label("Steak & Shrimp\nCalories (cal)\n1,220\nFat\n65")
+    assert "\n" not in out
+    assert out.startswith("Steak & Shrimp")
+    assert len(_flatten_label("x" * 400)) <= 255
+    assert _flatten_label("   ") is None
+    assert _flatten_label(None) is None

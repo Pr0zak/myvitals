@@ -611,6 +611,18 @@ async def _fat_history(
     return out
 
 
+def _flatten_label(text: str | None) -> str | None:
+    """One line, trimmed to the column width.
+
+    A pasted menu or nutrition block arrives with newlines and runs of
+    spaces, and renders as a wall of text in every list it appears in.
+    Flattening keeps the content while making it a usable name.
+    """
+    if not text:
+        return None
+    return re.sub(r"\s+", " ", text).strip()[:255] or None
+
+
 def _slugify_user_food(name: str) -> str:
     base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:140]
     return f"user-{base}" if base else "user-food"
@@ -1736,10 +1748,20 @@ async def _log_days(
                 unresolved += 1
             else:
                 day_nutritions.append(nut)
-            label = (
-                food.name if food
-                else (e.label or f"Recipe #{e.recipe_id}" if e.recipe_id else "Unnamed")
-            )
+            # Written out rather than nested in a conditional expression.
+            # The one-liner this replaces bound as
+            #   food.name if food else ((e.label or "Recipe #N")
+            #                            if e.recipe_id else "Unnamed")
+            # so a free-text entry — no food, no recipe — skipped its own
+            # label and rendered "Unnamed" however carefully it was named.
+            if food is not None:
+                label = food.name
+            elif e.label:
+                label = e.label
+            elif e.recipe_id:
+                label = f"Recipe #{e.recipe_id}"
+            else:
+                label = "Unnamed"
             by_slot.setdefault(e.slot, []).append(LogEntryOut(
                 id=e.id, day=e.day, slot=e.slot, food_id=e.food_id,
                 recipe_id=e.recipe_id, label=label, quantity=e.quantity,
@@ -1809,7 +1831,11 @@ async def add_log_entry(
         slot=body.slot,
         food_id=body.food_id,
         recipe_id=body.recipe_id,
-        label=(body.label or None),
+        # Collapse whitespace: people paste a whole nutrition block into
+        # the name field, and a multi-line value renders as a wall of
+        # text everywhere it appears. Nothing is discarded — it is
+        # flattened and capped to the column width.
+        label=(_flatten_label(body.label) or None),
         quantity=body.quantity,
         unit=food_lib.canonical_unit(body.unit) or None,
         servings=body.servings,

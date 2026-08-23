@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
+from math import ceil
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -2834,6 +2835,79 @@ async def generate_prep_plan(
             ),
             order_index=idx,
         ))
+
+    await db.flush()
+
+    # ── Reconcile portions against what the meals actually draw ──────
+    #
+    # The prompt states the balance rule and the model still gets it
+    # wrong. The first live plan cooked 6 portions of chicken and then
+    # assigned 11.5 of them across the week. Shipping that means shopping
+    # for 1.2 kg and running out on Wednesday — worse than useless,
+    # because the user followed the plan and the plan was wrong.
+    #
+    # The meals ARE the week, so the batch has to cover them. Scaling
+    # `quantity` in step with `portions` holds grams-per-portion fixed,
+    # so every per-meal figure is unchanged and only the shopping
+    # quantity moves. A SURPLUS is left alone: cooking more than the week
+    # needs is the flexibility feature, and the ledger reports it as
+    # spare rather than as an error.
+    meal_rows = (await db.execute(
+        select(models.PrepMeal).where(models.PrepMeal.plan_id == plan.id)
+    )).scalars().all()
+    demand: dict[int, float] = {}
+    for m in meal_rows:
+        for u in (m.component_ids or []):
+            cid = u.get("component_id")
+            if cid is not None:
+                demand[cid] = demand.get(cid, 0.0) + float(u.get("portions") or 1)
+
+    scaled: list[str] = []
+    for _, row in prepared:
+        want = demand.get(row.id, 0.0)
+        if want <= row.portions + 1e-6:
+            continue
+        needed = ceil(want)
+        if row.quantity is not None:
+            row.quantity = round(row.quantity * needed / row.portions, 2)
+        scaled.append(f"{row.name} ({row.portions} to {needed} portions)")
+        row.portions = needed
+
+    extra_notes: list[str] = []
+    if scaled:
+        # Say so out loud. A silently doubled shopping quantity is the
+        # kind of correction that erodes trust in every other number.
+        extra_notes.append(
+            "Batch sizes were raised to cover the meals planned: "
+            + "; ".join(scaled) + "."
+        )
+
+    await db.flush()
+    hydrated = await _prep_hydrate(db, plan)
+
+    # ── Note an under-target week as a fact about the PLAN ───────────
+    #
+    # Computed once, here, against the plan as generated — never on read.
+    # Recomputing it in `_prep_hydrate` would turn it into a comment on
+    # the user's behaviour the moment they skipped a meal, and nothing in
+    # this feature does that.
+    lean = [
+        d for d in hydrated.schedule
+        if d.budget_kcal and d.planned_kcal
+        and d.planned_kcal < d.budget_kcal * 0.8
+    ]
+    if lean and len(lean) >= max(2, len(hydrated.schedule) // 2):
+        avg = round(sum(d.planned_kcal for d in lean) / len(lean))
+        avg_budget = round(sum(d.budget_kcal for d in lean) / len(lean))
+        extra_notes.append(
+            f"These meals come to about {avg} kcal on most days against a "
+            f"{avg_budget} kcal budget for the slots they cover. That is "
+            f"the plan being light, not you — add a side, a bigger grain "
+            f"portion, or regenerate for larger batches."
+        )
+
+    if extra_notes:
+        plan.notes = "\n\n".join([p for p in [plan.notes, *extra_notes] if p])
 
     await db.commit()
     await db.refresh(plan)

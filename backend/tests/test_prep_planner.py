@@ -569,3 +569,59 @@ def test_every_weight_goal_reader_shares_one_conversion():
     assert "2.20462" not in code
     code = _code_only((SRC / "integrations" / "claude.py").read_text())
     assert "2.20462" not in code
+
+
+# ------------------------------------------- portion reconciliation
+
+
+def test_the_prompt_spells_out_how_to_count_portions():
+    """Stating the rule was not enough — the first live plan cooked 6
+    portions of chicken and assigned 11.5. The prompt now says how to
+    count, and the server reconciles regardless."""
+    sys = C._prep_plan_system("blunt").lower()
+    assert "add up every" in sys
+    assert "size the batches to the budget" in sys
+
+
+def test_the_prompt_gives_the_raw_weight_arithmetic():
+    """Batches came back far under budget because the model was not
+    connecting a raw purchase weight to a per-portion cooked serving."""
+    sys = C._prep_plan_system("blunt").lower()
+    assert "raw" in sys and "167 g" in sys
+
+
+def test_reconciliation_scales_quantity_with_portions():
+    """The invariant the repair must preserve: grams-per-portion is
+    unchanged, so every per-meal figure the user already read stays the
+    same and only the shopping quantity moves."""
+    food = _chicken()
+    before = P.resolve_components(
+        [{"id": 1, "name": "Chicken", "kind": "protein", "food_id": 7,
+          "quantity": 1200, "unit": "g", "portions": 6}],
+        {7: food},
+    )[0]
+    # 11.5 portions demanded -> ceil to 12, quantity scaled 1200*12/6.
+    after = P.resolve_components(
+        [{"id": 1, "name": "Chicken", "kind": "protein", "food_id": 7,
+          "quantity": 2400, "unit": "g", "portions": 12}],
+        {7: food},
+    )[0]
+    assert before["grams_per_portion"] == after["grams_per_portion"]
+    assert after["grams_total"] == before["grams_total"] * 2
+
+
+def test_reconciliation_is_visible_in_the_source_not_silent():
+    """A silently doubled shopping quantity erodes trust in every other
+    number on the page, so the repair writes a note naming what changed."""
+    code = _code_only((SRC / "api" / "meals.py").read_text())
+    assert "Batch sizes were raised to cover the meals planned" in code
+
+
+def test_the_lean_week_note_is_computed_at_generate_not_on_read():
+    """Recomputing it in `_prep_hydrate` would turn a statement about the
+    plan into a comment on the user's behaviour the moment they skipped a
+    meal — which this feature never does."""
+    src = (SRC / "api" / "meals.py").read_text()
+    hydrate = src[src.index("async def _prep_hydrate"):src.index("@router.get(\"/prep/targets\"")]
+    assert "0.8" not in hydrate
+    assert "That is" not in hydrate

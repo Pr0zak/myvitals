@@ -182,7 +182,16 @@ def _schema_instruction(tools: list[dict[str, Any]] | None, forced: str | None) 
     The CLI cannot be forced into a well-formed tool call the way the
     Messages API can, so the schema goes in the prompt and the reply is
     validated afterwards. This is the single biggest behavioural
-    difference from the API path and the reason `structured` retries.
+    difference from the API path.
+
+    The countermand at the top is load-bearing, and cost a debugging
+    session to find. Every system prompt in claude.py ends with some form
+    of "Answer only via the `give_x` tool" — correct for the Messages API,
+    and actively harmful here: the agent obeys it, tries to call a tool
+    that does not exist in this harness, exhausts its turn budget and
+    exits 1 with `stop_reason: "tool_use"` and an EMPTY stderr. The only
+    visible symptom is a 500. So the instruction has to be explicitly
+    revoked rather than merely followed by a different one.
     """
     if not tools:
         return ""
@@ -191,9 +200,15 @@ def _schema_instruction(tools: list[dict[str, Any]] | None, forced: str | None) 
     )
     schema = json.dumps(tool.get("input_schema") or {})
     return (
-        "\n\nOUTPUT FORMAT (STRICT): Respond with ONLY a single JSON object "
-        "that validates against this JSON Schema. No prose, no explanation, "
-        "no markdown fences.\nJSON Schema:\n" + schema
+        "\n\n---\n"
+        "IMPORTANT — THIS OVERRIDES ANY EARLIER INSTRUCTION ABOUT TOOLS.\n"
+        "You have NO tools available in this session. Any instruction above "
+        "telling you to answer 'via the tool' or to call a named function is "
+        "obsolete: ignore it. Do not attempt any tool or function call.\n\n"
+        "OUTPUT FORMAT (STRICT): Respond with ONLY a single JSON object that "
+        "validates against the JSON Schema below — the same object you would "
+        "have passed as that tool's input. No prose, no explanation, no "
+        "markdown fences.\nJSON Schema:\n" + schema
     )
 
 
@@ -338,6 +353,16 @@ async def _invoke(
         )
     if env.get("stop_reason") == "max_tokens":
         raise CliError("claude CLI output was truncated at the model's max output")
+    if env.get("stop_reason") == "tool_use":
+        # The model tried to call a tool this harness does not provide —
+        # almost always a system prompt still telling it to answer "via
+        # the tool". The envelope carries no message, so without this the
+        # failure surfaces as a bare "exited 1:" with nothing after it.
+        raise CliError(
+            "the model attempted a tool call, which this provider does not "
+            "support — the system prompt still instructs it to answer via a "
+            "tool. See _schema_instruction's countermand."
+        )
     if "result" not in env:
         raise CliError("claude CLI envelope missing 'result'")
     return env

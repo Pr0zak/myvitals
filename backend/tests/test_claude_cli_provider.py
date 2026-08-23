@@ -326,3 +326,42 @@ def test_saving_the_provider_no_longer_smuggles_the_token():
     fn = ui[ui.index("async function aiSaveProvider("):]
     fn = fn[: fn.index("async function", 10)] if "async function" in fn[10:] else fn[:900]
     assert "cli_oauth_token" not in fn
+
+
+# ------------------------------------------- the tool-instruction trap
+#
+# Found end-to-end, not in unit tests. Every system prompt in claude.py
+# ends with "Answer only via the `give_x` tool" — correct for the Messages
+# API and actively harmful here. The agent obeys it, tries to call a tool
+# this harness does not provide, exhausts its turns and exits 1 with
+# `stop_reason: "tool_use"` and an EMPTY stderr. The only visible symptom
+# was a 500.
+
+
+def test_the_schema_instruction_revokes_the_tool_instruction():
+    """Following the tool instruction with a different one is not enough —
+    it has to be explicitly revoked."""
+    instr = CLI._schema_instruction(
+        [{"name": "give_x", "input_schema": {"type": "object"}}], "give_x",
+    )
+    low = instr.lower()
+    assert "no tools available" in low
+    assert "overrides any earlier instruction" in low
+    assert "do not attempt any tool" in low
+
+
+def test_a_tool_use_stop_is_reported_not_swallowed():
+    """The envelope carries no message on this failure, so without an
+    explicit check it surfaces as a bare "exited 1:" with nothing after
+    the colon — which is exactly how it presented."""
+    src = inspect.getsource(CLI._invoke)
+    assert 'stop_reason") == "tool_use"' in src
+    assert "attempted a tool call" in src
+
+
+def test_real_system_prompts_do_instruct_tool_use():
+    """Guards the premise. If claude.py ever stops saying this, the
+    countermand is dead weight — but while it does, removing the
+    countermand breaks every CLI call."""
+    src = (SRC / "integrations" / "claude.py").read_text()
+    assert "via the `give_" in src or "via the tool" in src.lower()

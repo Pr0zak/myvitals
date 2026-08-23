@@ -794,11 +794,19 @@ async def search_foods(
     ranked = food_lib.search(q, ingredients_only=ingredients_only, limit=limit)
     order = {r["slug"]: n for n, r in enumerate(ranked)}
 
+    # User foods are matched with the SAME token-AND rule the bundled
+    # catalog gets, one ILIKE per term. A single `ilike("%{q}%")` on the
+    # whole query is a contiguous-substring test, so "marketside" and
+    # "tortelloni" each found "Marketside Chicken & Mozzarella
+    # Tortelloni" and "marketside tortelloni" found nothing — leaving the
+    # food you added yourself the hardest one in the app to find.
+    terms = [t for t in q.split() if t]
+    user_match = models.Food.source != "usda"
+    for t in terms:
+        user_match = user_match & models.Food.name.ilike(f"%{t}%")
+
     stmt = select(models.Food).where(
-        or_(
-            models.Food.slug.in_(list(order)),
-            (models.Food.source != "usda") & (models.Food.name.ilike(f"%{q}%")),
-        )
+        or_(models.Food.slug.in_(list(order)), user_match)
     ).limit(limit * 2)
     rows = (await db.execute(stmt)).scalars().all()
 

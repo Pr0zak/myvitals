@@ -802,3 +802,18 @@ def test_quick_add_asks_for_no_quantities():
     from myvitals.api.meals import QuickAddIn
 
     assert set(QuickAddIn.model_fields) == {"food_ids"}
+
+
+def test_user_foods_are_matched_term_by_term():
+    """A food you added yourself was the hardest thing in the app to
+    find. The bundled catalog gets token-AND ranking, but user rows were
+    matched with a single `ilike("%<whole query>%")` — a contiguous
+    substring test. So "marketside" found the tortelloni, "tortelloni"
+    found it, and "marketside tortelloni" found nothing.
+    """
+    src = (pathlib.Path(__file__).resolve().parents[1] / "src" / "myvitals"
+           / "api" / "meals.py").read_text()
+    fn = src[src.index("async def search_foods("):]
+    fn = fn[: fn.index("@router.get")]
+    assert "for t in terms:" in fn
+    assert 'ilike(f"%{q}%")' not in fn, "still a whole-query substring match"

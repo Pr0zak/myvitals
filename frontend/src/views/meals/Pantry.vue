@@ -17,6 +17,7 @@ import Card from "@/components/Card.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import FoodPicker from "@/components/FoodPicker.vue";
 import PhotoPantry from "@/components/PhotoPantry.vue";
+import PackageScan from "@/components/PackageScan.vue";
 import QuantityPicker from "@/components/QuantityPicker.vue";
 import { Plus, Trash2, AlertTriangle } from "lucide-vue-next";
 import { meals, type CommonItem, type Food, type PantryItem } from "@/api/client";
@@ -243,6 +244,10 @@ function expiryClass(i: PantryItem): string {
 
     <Card flat>
       <PhotoPantry @added="load" />
+    </Card>
+
+    <Card flat>
+      <PackageScan stock @saved="load" />
     </Card>
 
     <Card v-if="common.length" flat>

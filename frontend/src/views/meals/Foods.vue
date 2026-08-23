@@ -12,6 +12,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import Card from "@/components/Card.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import FoodPicker from "@/components/FoodPicker.vue";
+import PackageScan from "@/components/PackageScan.vue";
 import { Plus, Trash2, Pencil, Camera, Loader2 } from "lucide-vue-next";
 import { meals, type Food, type MealsStats } from "@/api/client";
 
@@ -248,6 +249,10 @@ function fmt(v: number | null, digits: number, suffix: string): string {
     </p>
 
     <p v-if="error" class="err">{{ error }}</p>
+
+    <Card flat>
+      <PackageScan @saved="loadStats" />
+    </Card>
 
     <Card flat>
       <label class="toggle">

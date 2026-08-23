@@ -746,6 +746,16 @@ private fun PantryTab(settings: SettingsRepository) {
             }
 
             item { PhotoPantry(settings = settings, onAdded = { scope.launch { fetch() } }) }
+            item {
+                PackageScan(
+                    settings = settings,
+                    // Scanning a pack in the PANTRY means "I just bought
+                    // this": define it AND stock it. In the Foods tab the
+                    // same photos mean only "define this product".
+                    stock = true,
+                    onSaved = { scope.launch { fetch() } },
+                )
+            }
 
             if (common.isNotEmpty()) {
                 item {
@@ -1209,7 +1219,7 @@ private fun LabelScanCard(sc: LabelScan) {
 }
 
 @Composable
-private fun FoodStat(
+internal fun FoodStat(
     label: String, v: Double?, digits: Int, suffix: String, emphasise: Boolean = false,
 ) {
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {

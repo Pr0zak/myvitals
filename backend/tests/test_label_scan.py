@@ -211,14 +211,56 @@ def test_migration_0062_adds_the_ingredients_column():
     assert 'down_revision: str | None = "0061"' in mig
 
 
+def test_the_scan_lives_in_both_tabs_with_different_intent():
+    """Asked directly: "why does that go into the food tab and not
+    pantry?".
+
+    Fair. Putting a product DEFINITION in the catalog is the right
+    taxonomy, but the intent behind photographing a pack you just bought
+    is "I have this" — and making someone scan in Foods and then search
+    for the result in Pantry is two steps for one intent. The same
+    component now appears in both, and the Pantry one also stocks what it
+    creates.
+    """
+    root = pathlib.Path(__file__).resolve().parents[2]
+    pantry = (root / "frontend" / "src" / "views" / "meals" / "Pantry.vue").read_text()
+    foods = (root / "frontend" / "src" / "views" / "meals" / "Foods.vue").read_text()
+    assert "<PackageScan stock" in pantry, "pantry scan must also stock it"
+    assert "PackageScan" in foods
+    assert "<PackageScan stock" not in foods, (
+        "a catalog definition must not imply owning the product"
+    )
+
+
+def test_the_phone_pantry_scan_also_stocks():
+    root = pathlib.Path(__file__).resolve().parents[2]
+    phone = (root / "android" / "app" / "src" / "main" / "kotlin" / "app"
+             / "myvitals" / "ui" / "meals" / "MealsScreen.kt").read_text()
+    assert "stock = true" in phone
+
+
+def test_nothing_is_saved_until_confirmed():
+    """The scan populates a form. Saving is a separate, explicit action,
+    because a transcription error written straight into the catalog is a
+    wrong number nobody knows to look for."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    comp = (root / "frontend" / "src" / "components" / "PackageScan.vue").read_text()
+    # createFood is only reachable from the save handler, never from the
+    # scan handler.
+    scan_fn = comp[comp.index("async function onFiles("):comp.index("const canSave")]
+    assert "createFood" not in scan_fn
+
+
 def test_both_surfaces_offer_the_scan():
     root = pathlib.Path(__file__).resolve().parents[2]
     web = (root / "frontend" / "src" / "views" / "meals" / "Foods.vue").read_text()
     phone = (root / "android" / "app" / "src" / "main" / "kotlin" / "app"
              / "myvitals" / "ui" / "meals" / "MealsScreen.kt").read_text()
-    assert "Scan a package" in web
-    assert "readLabel" in web
-    assert "multiple" in web, "the web picker must accept several photos"
-    assert "Scan a package" in phone
-    assert "mealsReadLabel" in phone
-    assert "GetMultipleContents" in phone
+    assert "PackageScan" in web
+    assert "Scan a package" in phone or "PackageScan" in phone
+    comp_web = (root / "frontend" / "src" / "components" / "PackageScan.vue").read_text()
+    comp_phone = (root / "android" / "app" / "src" / "main" / "kotlin" / "app"
+                  / "myvitals" / "ui" / "meals" / "PackageScan.kt").read_text()
+    assert "readLabel" in comp_web and "multiple" in comp_web
+    assert "mealsReadLabel" in comp_phone
+    assert "GetMultipleContents" in comp_phone

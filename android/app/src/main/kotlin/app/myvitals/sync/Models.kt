@@ -1814,6 +1814,9 @@ data class FoodIn(
     @Json(name = "vitamin_e_mg") val vitaminEMg: Double? = null,
     @Json(name = "vitamin_k_ug") val vitaminKUg: Double? = null,
     @Json(name = "unit_grams") val unitGrams: Map<String, Double>? = null,
+    // Verbatim from the packaging, in its original order — items are
+    // declared by descending weight, so it is never re-sorted.
+    val ingredients: String? = null,
 )
 
 /** One line of a recipe as the server returns it, already costed. */

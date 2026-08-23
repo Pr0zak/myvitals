@@ -12,7 +12,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import Card from "@/components/Card.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import FoodPicker from "@/components/FoodPicker.vue";
-import { Plus, Trash2, Pencil } from "lucide-vue-next";
+import { Plus, Trash2, Pencil, Camera, Loader2 } from "lucide-vue-next";
 import { meals, type Food, type MealsStats } from "@/api/client";
 
 const selected = ref<Food | null>(null);
@@ -21,6 +21,66 @@ const error = ref<string | null>(null);
 const ingredientsOnly = ref(false);
 
 const editing = ref(false);
+// MEAL-8: scan the panel instead of typing thirteen numbers off it.
+const scanBusy = ref(false);
+const scanNotes = ref<string[]>([]);
+const scanUnreadable = ref<string[]>([]);
+const scanReason = ref<string | null>(null);
+const labelInput = ref<HTMLInputElement | null>(null);
+
+/** Downscale in the browser: the server limit exists to stop a huge
+ *  upload being billed, and re-encoding also strips EXIF. Labels are
+ *  small text, so 1600px keeps them legible. */
+async function downscaleLabel(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(bitmap.width * scale);
+  c.height = Math.round(bitmap.height * scale);
+  const ctx = c.getContext("2d");
+  if (!ctx) throw new Error("could not process the image");
+  ctx.drawImage(bitmap, 0, 0, c.width, c.height);
+  bitmap.close?.();
+  return c.toDataURL("image/jpeg", 0.85).split(",", 2)[1];
+}
+
+async function onLabel(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  scanBusy.value = true;
+  error.value = null;
+  scanNotes.value = [];
+  scanUnreadable.value = [];
+  scanReason.value = null;
+  try {
+    const b64 = await downscaleLabel(file);
+    const r = await meals.readLabel(b64, "image/jpeg");
+    // Fill the form for confirmation — never save directly. A
+    // transcription error written straight into the catalog is a wrong
+    // number nobody knows to look for.
+    editing.value = true;
+    selected.value = null;
+    if (r.name) draft.value.name = r.name;
+    const n = r.per_100g;
+    const put = (k: keyof typeof draft.value, v: number | null | undefined) => {
+      if (v != null) (draft.value[k] as string) = String(v);
+    };
+    put("kcal", n.kcal); put("protein_g", n.protein_g);
+    put("carbs_g", n.carbs_g); put("fat_g", n.fat_g);
+    put("saturated_fat_g", n.saturated_fat_g); put("fiber_g", n.fiber_g);
+    put("sugar_g", n.sugar_g); put("sodium_mg", n.sodium_mg);
+    if (r.serving_size_g) draft.value.serving_g = String(r.serving_size_g);
+    scanNotes.value = r.notes;
+    scanUnreadable.value = r.unreadable;
+    scanReason.value = r.convertible ? null : r.reason;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "could not read that label";
+  } finally {
+    scanBusy.value = false;
+  }
+}
 const saving = ref(false);
 const draft = ref({
   name: "", category: "", kcal: "", protein_g: "", carbs_g: "", fat_g: "",
@@ -143,9 +203,16 @@ function fmt(v: number | null, digits: number, suffix: string): string {
 <template>
   <div class="foods">
     <PageHeader title="Foods">
+      <button class="ghost" :disabled="scanBusy" @click="labelInput?.click()">
+        <component :is="scanBusy ? Loader2 : Camera" :size="14"
+                   :class="{ spin: scanBusy }" />
+        {{ scanBusy ? "Reading…" : "Scan a label" }}
+      </button>
       <button class="primary" @click="startNew">
         <Plus :size="14" /> Add a food
       </button>
+      <input ref="labelInput" type="file" accept="image/*" capture="environment"
+             hidden @change="onLabel" />
     </PageHeader>
 
     <p class="purpose">
@@ -177,6 +244,12 @@ function fmt(v: number | null, digits: number, suffix: string): string {
     </Card>
 
     <Card v-if="editing" flat :title="selected ? 'Edit food' : 'Add a food'">
+      <p v-if="scanReason" class="warn-line">{{ scanReason }}</p>
+      <p v-if="scanUnreadable.length" class="warn-line">
+        Couldn't read on the label: {{ scanUnreadable.join(", ") }} — left
+        blank rather than guessed.
+      </p>
+      <p v-for="n in scanNotes" :key="n" class="warn-line">{{ n }}</p>
       <p class="hint">
         Enter the figures <strong>per 100 g</strong>, the way a label's
         nutrition panel gives them. Leave anything the label does not
@@ -269,6 +342,10 @@ function fmt(v: number | null, digits: number, suffix: string): string {
 .purpose strong { color: var(--fg); }
 .err { color: #f87171; font-size: 0.85rem; }
 .hint { color: var(--muted-2); font-size: 0.8rem; margin: 0 0 0.7rem; line-height: 1.45; }
+.warn-line { color: #fbbf24; font-size: 0.78rem; margin: 0 0 0.45rem; line-height: 1.45; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 button.primary, button.ghost {
   display: inline-flex; align-items: center; gap: 0.35rem;
   border-radius: 9px; padding: 0.4rem 0.7rem; font: inherit;

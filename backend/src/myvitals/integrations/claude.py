@@ -3571,3 +3571,167 @@ async def identify_foods(
         input_tokens=resp.usage.input_tokens,
         output_tokens=resp.usage.output_tokens,
     )
+
+
+# ── Read a nutrition-facts panel from a photo (MEAL-8) ───────────────
+#
+# Roughly half this user's diet is packaged, and the only nutrition
+# source for a packaged item is the label on it. Typing thirteen numbers
+# off a panel is the friction that stops a food ever being added; a photo
+# of the panel is one action.
+#
+# Distinct from `identify_foods`, which names WHAT is in a picture. This
+# one reads NUMBERS off a specific, highly structured document, so the
+# rules differ: every field is optional and null means "not printed on
+# this label", never zero. A label that omits fibre is not a food with no
+# fibre, and quietly filling in 0 would corrupt a total this app's
+# medical constraint depends on.
+
+LABEL_TOOL = {
+    "name": "give_nutrition_label",
+    "description": (
+        "Transcribe a nutrition-facts panel. Report only what is printed."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": (
+                    "Product name if visible on the packaging, else empty."
+                ),
+            },
+            "serving_size_g": {
+                "type": "number",
+                "description": (
+                    "Grams (or millilitres) in ONE serving, as printed. This "
+                    "is what every other number below is per."
+                ),
+            },
+            "serving_text": {
+                "type": "string",
+                "description": 'The serving as written, e.g. "2/3 cup (55g)".',
+            },
+            "basis": {
+                "type": "string",
+                "enum": ["per_serving", "per_100g", "unknown"],
+                "description": (
+                    "Which column you read. US labels are per serving; UK/EU "
+                    "labels usually print both and per-100g is the reliable "
+                    "one. Say which you used — the server converts."
+                ),
+            },
+            "kcal": {"type": "number"},
+            "protein_g": {"type": "number"},
+            "carbs_g": {"type": "number"},
+            "fat_g": {"type": "number"},
+            "saturated_fat_g": {"type": "number"},
+            "fiber_g": {"type": "number"},
+            "sugar_g": {"type": "number"},
+            "sodium_mg": {"type": "number"},
+            "unreadable": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Fields present on the label but too blurred or cropped "
+                    "to read. Better here than guessed."
+                ),
+            },
+            "notes": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["basis"],
+    },
+}
+
+
+def _label_system(tone: str) -> str:
+    return (
+        "You transcribe nutrition-facts panels from photographs into "
+        "structured data.\n\n"
+        f"Tone: {tone}.\n\n"
+        "## Report only what is printed\n"
+        "OMIT any field the label does not show. Do NOT infer, estimate, "
+        "or fill a plausible value — a field you leave out is recorded as "
+        "'not stated', which is correct and useful. A field you guess "
+        "becomes a wrong number in a medical fat total that the user has "
+        "no way to spot. If a value is on the label but you cannot read "
+        "it, list the field name in `unreadable` rather than guessing.\n\n"
+        "## Say which column you read\n"
+        "US panels print per serving. UK and EU panels usually print both "
+        "per-100g and per-serving. Set `basis` to whichever you actually "
+        "read, and give `serving_size_g` when it is stated — the server "
+        "converts to per-100g and needs to know which it is starting "
+        "from. If you cannot tell, use `unknown` and the server will ask "
+        "the user rather than assume.\n\n"
+        "## Units\n"
+        "Report sodium in MILLIGRAMS. Some labels print grams of salt "
+        "instead — salt is about 2.5x sodium by weight, but do NOT do "
+        "that conversion yourself; say so in `notes` and leave sodium "
+        "out.\n\n"
+        "If the photo is not a nutrition panel, return `basis: unknown` "
+        "with nothing else and say so in `notes`.\n\n"
+        "Answer only via the `give_nutrition_label` tool."
+    )
+
+
+async def read_nutrition_label(
+    db: AsyncSession,
+    cfg: models.AiConfig,
+    image_b64: str,
+    media_type: str,
+) -> AiResult:
+    """Transcribe one nutrition-facts panel. Saves nothing."""
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
+    if media_type not in ALLOWED_IMAGE_TYPES:
+        raise ValueError(f"unsupported image type {media_type!r}")
+
+    client = get_provider(cfg)
+    resp = await client.messages.create(
+        model=cfg.model,
+        max_tokens=900,
+        system=_cached_system(_label_system(cfg.tone), cfg),
+        tools=[LABEL_TOOL],
+        tool_choice={"type": "tool", "name": "give_nutrition_label"},
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": image_b64,
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "Transcribe this nutrition label via the "
+                        "`give_nutrition_label` tool."
+                    ),
+                },
+            ],
+        }],
+    )
+
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if (getattr(block, "type", "") == "tool_use"
+                and block.name == "give_nutrition_label"):
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    if not tool_input:
+        tool_input = {
+            "basis": "unknown",
+            "notes": ["Nothing could be read from that photo."],
+        }
+
+    _normalize_array_field(tool_input, "notes")
+    _normalize_array_field(tool_input, "unreadable")
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )

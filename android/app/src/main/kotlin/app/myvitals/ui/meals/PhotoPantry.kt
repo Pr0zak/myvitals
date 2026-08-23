@@ -92,7 +92,7 @@ fun PhotoPantry(settings: SettingsRepository, onAdded: () -> Unit) {
             notes = emptyList()
             picked = emptySet()
             try {
-                val b64 = withContext(Dispatchers.IO) { downscaleToBase64(context, uri) }
+                val b64 = withContext(Dispatchers.IO) { downscaleUriToBase64(context, uri) }
                 if (b64 == null) {
                     error = "Could not read that image."
                     return@launch
@@ -266,7 +266,7 @@ fun PhotoPantry(settings: SettingsRepository, onAdded: () -> Unit) {
  * allocating the pixels, so a 50 MP image never lands in memory whole —
  * decoding one first and scaling after is a reliable OOM on a phone.
  */
-private fun downscaleToBase64(context: Context, uri: Uri): String? = runCatching {
+internal fun downscaleUriToBase64(context: Context, uri: Uri): String? = runCatching {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     context.contentResolver.openInputStream(uri)?.use {
         BitmapFactory.decodeStream(it, null, bounds)

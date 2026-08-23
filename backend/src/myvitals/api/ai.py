@@ -34,6 +34,7 @@ from ..integrations.claude import (
     MAX_IMAGE_BYTES,
     build_meal_suggestion_payload,
     identify_foods,
+    read_nutrition_label,
     fasting_coach,
     meal_suggestions,
     MAX_CUSTOM_INSTRUCTIONS,
@@ -1910,6 +1911,128 @@ async def meals_identify_endpoint(
     return {
         "items": items,
         "notes": analysis.get("notes") or [],
+        "model": result.model,
+    }
+
+
+@router.post("/meals/read-label")
+async def meals_read_label_endpoint(
+    body: IdentifyIn,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Transcribe a nutrition-facts panel into a ready-to-save food.
+
+    MEAL-8. Roughly half this user's diet is packaged, and the only
+    nutrition source for a packaged item is the label on it. Typing
+    thirteen numbers off a panel is the friction that stops a food ever
+    being added.
+
+    Saves nothing: it returns fields for the user to confirm, then the
+    ordinary `POST /meals/foods` creates it. Same reasoning as the photo
+    identifier — a transcription error that writes itself into the
+    catalog is a wrong number nobody knows to look for.
+
+    The per-serving to per-100g CONVERSION happens here, not in the
+    model. Asking a model to both read numbers and do arithmetic on them
+    is two chances to be wrong where one will do, and the catalog stores
+    per-100g throughout.
+    """
+    import base64
+
+    cfg = await _get_config(db)
+
+    media_type = (body.media_type or "").strip().lower()
+    if media_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            400,
+            f"unsupported image type {media_type!r} — "
+            f"use one of {', '.join(sorted(ALLOWED_IMAGE_TYPES))}",
+        )
+    raw = (body.image_base64 or "").strip()
+    if raw[:5] == "data:" and "," in raw[:64]:
+        raw = raw.split(",", 1)[1]
+    try:
+        decoded = base64.b64decode(raw, validate=True)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(400, "image_base64 is not valid base64") from None
+    if not decoded:
+        raise HTTPException(400, "image is empty")
+    if len(decoded) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            413,
+            f"image is {len(decoded) // 1024} KB; the limit is "
+            f"{MAX_IMAGE_BYTES // 1024} KB. Downscale it before sending.",
+        )
+
+    await _check_and_bump_quota(db, cfg)
+    result = await read_nutrition_label(db, cfg, raw, media_type)
+    cfg.calls_today += 1
+    await db.commit()
+
+    import json as _json
+    try:
+        label = _json.loads(result.content)
+    except Exception:  # noqa: BLE001
+        label = {"basis": "unknown", "notes": ["Could not read the response."]}
+
+    from ..analytics import foods as food_lib
+
+    basis = label.get("basis") or "unknown"
+    serving = label.get("serving_size_g")
+    try:
+        serving = float(serving) if serving is not None else None
+    except (TypeError, ValueError):
+        serving = None
+
+    # Scale to per-100g, which is what the catalog stores. A per-serving
+    # label without a stated serving size CANNOT be converted, and the
+    # honest answer is to say so rather than to assume 100 g — that would
+    # silently inflate or deflate every number on the card.
+    per100: dict[str, float | None] = {c: None for c in food_lib.NUTRIENT_COLUMNS}
+    convertible = True
+    reason: str | None = None
+    factor = 1.0
+    if basis == "per_100g":
+        factor = 1.0
+    elif basis == "per_serving" and serving and serving > 0:
+        factor = 100.0 / serving
+    else:
+        convertible = False
+        reason = (
+            "The label's serving size could not be read, so the figures "
+            "cannot be scaled to the per-100 g basis the catalog uses. "
+            "Enter the serving size and they will convert."
+            if basis == "per_serving"
+            else "Could not tell whether the label is per serving or per 100 g."
+        )
+
+    if convertible:
+        for col in food_lib.NUTRIENT_COLUMNS:
+            v = label.get(col)
+            if v is None:
+                continue
+            try:
+                per100[col] = round(float(v) * factor, 2)
+            except (TypeError, ValueError):
+                continue
+
+    return {
+        # Ready to hand straight to POST /meals/foods once confirmed.
+        "name": (label.get("name") or "").strip(),
+        "basis": basis,
+        "serving_size_g": serving,
+        "serving_text": label.get("serving_text") or None,
+        "convertible": convertible,
+        "reason": reason,
+        "per_100g": per100,
+        # What the model actually read, before conversion, so a user can
+        # check the transcription against the packet in their hand.
+        "as_read": {
+            c: label.get(c) for c in food_lib.NUTRIENT_COLUMNS
+            if label.get(c) is not None
+        },
+        "unreadable": label.get("unreadable") or [],
+        "notes": label.get("notes") or [],
         "model": result.model,
     }
 

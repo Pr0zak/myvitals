@@ -2289,3 +2289,30 @@ data class IdentifyResult(
     val notes: List<String> = emptyList(),
     val model: String? = null,
 )
+
+
+// ── Nutrition-label scanning (MEAL-8) ────────────────────────────────
+//
+// `per100g` is what the catalog stores; `asRead` is what the model
+// actually saw before conversion, so the transcription can be checked
+// against the packet in hand. A missing nutrient is null — "not printed
+// on this label" — never zero.
+
+@JsonClass(generateAdapter = true)
+data class LabelScan(
+    val name: String = "",
+    // "per_serving" | "per_100g" | "unknown"
+    val basis: String = "unknown",
+    @Json(name = "serving_size_g") val servingSizeG: Double? = null,
+    @Json(name = "serving_text") val servingText: String? = null,
+    // False when the figures could not be scaled to per-100g — usually a
+    // per-serving label whose serving size could not be read. Assuming
+    // 100 g would silently inflate or deflate every number.
+    val convertible: Boolean = false,
+    val reason: String? = null,
+    @Json(name = "per_100g") val per100g: Map<String, Double?> = emptyMap(),
+    @Json(name = "as_read") val asRead: Map<String, Double> = emptyMap(),
+    val unreadable: List<String> = emptyList(),
+    val notes: List<String> = emptyList(),
+    val model: String? = null,
+)

@@ -30,7 +30,8 @@ const tabs: Tab[] = [
     match: (p) => p === "/coach-hub" || p === "/coach" || p === "/insights" || p.startsWith("/analytics") },
   { to: "/you", label: "You", color: "#28e6ff", icon: User,
     match: (p) => p === "/you" ||
-      ["/sober", "/fasting", "/journal", "/goals"].includes(p) || p.startsWith("/settings") },
+      ["/sober", "/fasting", "/journal", "/goals"].includes(p)
+      || p.startsWith("/settings") || p.startsWith("/meals") },
 ];
 
 const activeIndex = computed(() => {

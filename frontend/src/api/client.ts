@@ -2225,6 +2225,38 @@ export const identifyFoods = (imageBase64: string, mediaType: string) =>
     })
     .then((r) => r.data);
 
+/** A nutrition-facts panel as transcribed from a photo.
+ *
+ *  `per_100g` is what the catalog stores; `as_read` is what the model
+ *  actually saw before conversion, so the transcription can be checked
+ *  against the packet. A missing nutrient is null — "not printed on this
+ *  label" — never zero. */
+export interface LabelScan {
+  name: string;
+  basis: "per_serving" | "per_100g" | "unknown";
+  serving_size_g: number | null;
+  serving_text: string | null;
+  /** False when the figures could not be scaled to per-100g — usually a
+   *  per-serving label whose serving size could not be read. */
+  convertible: boolean;
+  reason: string | null;
+  per_100g: Partial<Nutrition>;
+  as_read: Record<string, number>;
+  unreadable: string[];
+  notes: string[];
+  model: string | null;
+}
+
+/** Read a nutrition label from a photo. Saves nothing — the caller
+ *  confirms and then calls createFood. */
+export const readLabel = (imageBase64: string, mediaType: string) =>
+  http
+    .post<LabelScan>("/ai/meals/read-label", {
+      image_base64: imageBase64,
+      media_type: mediaType,
+    })
+    .then((r) => r.data);
+
 export const commonIngredients = () =>
   http.get<CommonItem[]>("/meals/common-ingredients").then((r) => r.data);
 
@@ -2371,6 +2403,7 @@ export const meals = {
   canMake,
   commonIngredients,
   identifyFoods,
+  readLabel,
   quickAddPantry,
   getStaples,
   putStaples,

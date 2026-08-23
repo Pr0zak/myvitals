@@ -23,6 +23,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Warning
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -57,6 +59,8 @@ import app.myvitals.sync.DietProfile
 import app.myvitals.sync.DietProfileIn
 import app.myvitals.sync.FatAssessment
 import app.myvitals.sync.FoodOut
+import app.myvitals.sync.IdentifyIn
+import app.myvitals.sync.LabelScan
 import app.myvitals.sync.PantryItemIn
 import app.myvitals.sync.PantryItemOut
 import app.myvitals.sync.RecipeIn
@@ -1003,8 +1007,44 @@ private fun PantryAdder(
 
 @Composable
 private fun FoodsTab(settings: SettingsRepository) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var selected by remember { mutableStateOf<FoodOut?>(null) }
     var ingredientsOnly by remember { mutableStateOf(false) }
+    // MEAL-8: scan the panel rather than typing thirteen numbers off it.
+    var scanBusy by remember { mutableStateOf(false) }
+    var scan by remember { mutableStateOf<LabelScan?>(null) }
+    var scanError by remember { mutableStateOf<String?>(null) }
+
+    val labelPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            scanBusy = true
+            scanError = null
+            scan = null
+            try {
+                val b64 = withContext(Dispatchers.IO) {
+                    downscaleUriToBase64(context, uri)
+                }
+                if (b64 == null) {
+                    scanError = "Could not read that image."
+                    return@launch
+                }
+                val api = BackendClient.create(
+                    settings.backendUrl, settings.bearerToken,
+                )
+                scan = withContext(Dispatchers.IO) {
+                    api.mealsReadLabel(IdentifyIn(imageBase64 = b64))
+                }
+            } catch (e: Exception) {
+                scanError = e.message ?: "could not read that label"
+            } finally {
+                scanBusy = false
+            }
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -1038,6 +1078,17 @@ private fun FoodsTab(settings: SettingsRepository) {
                 onPick = { selected = it },
             )
         }
+        item {
+            Button(
+                enabled = !scanBusy,
+                onClick = { labelPicker.launch("image/*") },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (scanBusy) "Reading label…" else "Scan a nutrition label")
+            }
+        }
+        scanError?.let { item { ErrorText(it) } }
+        scan?.let { sc -> item { LabelScanCard(sc) } }
         selected?.let { f ->
             item {
                 Column(
@@ -1083,6 +1134,58 @@ private fun FoodsTab(settings: SettingsRepository) {
         }
         if (selected == null) {
             item { MutedText("Search for a food to see its nutrition.") }
+        }
+    }
+}
+
+/** What the label said, for checking against the packet in hand.
+ *
+ *  Deliberately read-only. Nothing is saved from here: a transcription
+ *  error written straight into the catalog is a wrong number nobody
+ *  knows to look for. */
+@Composable
+private fun LabelScanCard(sc: LabelScan) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(NeonMV.Card).padding(12.dp),
+    ) {
+        Text(
+            sc.name.ifBlank { "Nutrition label" },
+            color = NeonMV.Ink, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+        )
+        sc.servingText?.let {
+            Text("Serving: $it", color = NeonMV.Muted, fontSize = 11.sp)
+        }
+        if (!sc.convertible) {
+            Text(
+                sc.reason ?: "Could not scale these figures to per 100 g.",
+                color = NeonMV.Amber, fontSize = 11.sp, lineHeight = 15.sp,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        } else {
+            SectionLabel("Per 100 g")
+            FoodStat("Calories", sc.per100g["kcal"], 0, "")
+            FoodStat("Fat", sc.per100g["fat_g"], 1, " g", emphasise = true)
+            FoodStat("Saturated", sc.per100g["saturated_fat_g"], 1, " g")
+            FoodStat("Protein", sc.per100g["protein_g"], 1, " g")
+            FoodStat("Carbs", sc.per100g["carbs_g"], 1, " g")
+            FoodStat("Fibre", sc.per100g["fiber_g"], 1, " g")
+            FoodStat("Sugar", sc.per100g["sugar_g"], 1, " g")
+            FoodStat("Sodium", sc.per100g["sodium_mg"], 0, " mg")
+        }
+        if (sc.unreadable.isNotEmpty()) {
+            Text(
+                "Couldn't read: " + sc.unreadable.joinToString(", ") +
+                    " — left blank rather than guessed.",
+                color = NeonMV.Amber, fontSize = 10.sp, lineHeight = 14.sp,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+        sc.notes.forEach {
+            Text(
+                it, color = NeonMV.Muted, fontSize = 10.sp, lineHeight = 14.sp,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
     }
 }

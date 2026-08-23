@@ -153,6 +153,10 @@ class ConfigUpdate(BaseModel):
     # "openai_compatible" or "ollama"; the latter two need base_url.
     provider: str | None = None
     base_url: str | None = None
+    # Subscription OAuth token for the claude_cli provider, from
+    # `claude setup-token`. Empty string clears it; null leaves it alone.
+    cli_oauth_token: str | None = None
+    clear_cli_token: bool = False
 
 
 @router.post("/config")
@@ -175,12 +179,21 @@ async def update_config(
     if body.tone is not None and body.tone in ("supportive", "blunt", "data-only"):
         cfg.tone = body.tone
     if body.provider is not None:
-        if body.provider not in ("anthropic", "openai_compatible", "ollama"):
+        if body.provider not in (
+            "anthropic", "openai_compatible", "ollama", "claude_cli",
+        ):
             raise HTTPException(
                 status_code=400,
-                detail="provider must be anthropic, openai_compatible or ollama",
+                detail=(
+                    "provider must be anthropic, openai_compatible, ollama "
+                    "or claude_cli"
+                ),
             )
         cfg.provider = body.provider
+    if body.clear_cli_token:
+        cfg.cli_oauth_token = None
+    elif body.cli_oauth_token:
+        cfg.cli_oauth_token = body.cli_oauth_token.strip()
     if body.base_url is not None:
         trimmed = body.base_url.strip()
         if trimmed:
@@ -197,7 +210,9 @@ async def update_config(
     # that out on the first coach tap is a worse experience than being told
     # while saving.
     effective_provider = cfg.provider or "anthropic"
-    if effective_provider != "anthropic" and not cfg.base_url:
+    # claude_cli talks to a local binary, not a URL, so the base-URL
+    # requirement below applies only to the HTTP-backed providers.
+    if effective_provider not in ("anthropic", "claude_cli") and not cfg.base_url:
         raise HTTPException(
             status_code=400,
             detail=f"{effective_provider} needs a base URL "

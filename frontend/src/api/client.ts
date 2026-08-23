@@ -395,8 +395,12 @@ export const api = {
     tone?: "supportive" | "blunt" | "data-only";
     /** Empty string clears; omit to leave unchanged. */
     custom_instructions?: string;
-    provider?: "anthropic" | "openai_compatible" | "ollama";
+    provider?: "anthropic" | "openai_compatible" | "ollama" | "claude_cli";
     base_url?: string;
+    /** Subscription OAuth token for the claude_cli provider, from
+     *  `claude setup-token`. Omit to leave a stored token unchanged. */
+    cli_oauth_token?: string;
+    clear_cli_token?: boolean;
   }) {
     const { data } = await http.post("/ai/config", body);
     return data;

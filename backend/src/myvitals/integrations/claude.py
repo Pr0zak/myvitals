@@ -562,6 +562,28 @@ def personalise(text: str, cfg: "models.AiConfig | None") -> str:
     )
 
 
+def _credentials_missing(cfg: "models.AiConfig") -> bool:
+    """True when this config cannot make a call.
+
+    Every AI runner used to guard on `not cfg.anthropic_api_key`, which
+    is right for the Anthropic path and wrong for every other provider:
+    the CLI authenticates with the machine's subscription OAuth and has
+    no API key at all, so that guard would refuse every surface while
+    reporting "no API key configured". Ollama needs no key either.
+    """
+    provider = (getattr(cfg, "provider", None) or "anthropic").strip().lower()
+    if provider == "claude_cli":
+        # Auth lives in the CLI's own credentials (or a stored OAuth
+        # token). A missing login fails loudly at call time with the
+        # CLI's own message, which is more useful than a guess here.
+        return False
+    if provider in ("openai_compatible", "ollama"):
+        # A local endpoint usually needs no key; the base URL is what
+        # matters, and that is validated when it is saved.
+        return not getattr(cfg, "base_url", None)
+    return not cfg.anthropic_api_key
+
+
 def _cached_system(text: str, cfg: "models.AiConfig | None" = None) -> list[dict]:
     """Wrap the system prompt for Anthropic's prompt cache so the fixed
     template doesn't get re-billed at full input rate on every call.
@@ -581,8 +603,8 @@ def _cached_system(text: str, cfg: "models.AiConfig | None" = None) -> list[dict
 
 async def explain_legacy(db: AsyncSession, range_kind: str, cfg: models.AiConfig) -> AiResult:
     """Backwards-compat narrative output (markdown). Used by /ai/explain."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_summary_payload(db, range_kind)
     user_text = (
         f"Range: last {payload['window_days']} days as of {payload['today']}.\n\n"
@@ -612,8 +634,8 @@ async def explain_topic(
 ) -> AiResult:
     """Targeted explain — calls Claude with the analysis tool so the
     response comes back as a typed JSON blob, not free prose."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
 
     if topic == "week":
         payload = await build_summary_payload(db, "week")
@@ -681,8 +703,8 @@ async def build_verdict_payload(db: AsyncSession) -> dict[str, Any]:
 
 
 async def verdict(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_verdict_payload(db)
     user_text = f"Aggregate snapshot:\n{json.dumps(payload, indent=2, default=str)}\n"
     client = get_provider(cfg)
@@ -751,8 +773,8 @@ async def ask(db: AsyncSession, cfg: models.AiConfig, question: str) -> AiResult
     render cards instead of a paragraph, and what stops the model padding
     an answer to fill a text block.
     """
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_ask_payload(db, question)
     user_text = (
         f"Question: {payload['question']}\n\n"
@@ -796,8 +818,8 @@ async def explain_discovery(
     db: AsyncSession, cfg: models.AiConfig,
     x_metric: str, y_metric: str,
 ) -> AiResult:
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     discoveries = await _correlations(db, days=90, top_n=20)
     target = next(
         (d for d in discoveries if (d["x"] == x_metric and d["y"] == y_metric)
@@ -838,8 +860,8 @@ async def explain_discovery(
 # ─────────────── Pre-workout recommendation ───────────────
 
 async def pre_workout(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     rows = await _daily_rows(db, 7)
     today = rows[-1] if rows else None
     payload = {
@@ -876,8 +898,8 @@ async def activity_summary(
     db: AsyncSession, cfg: models.AiConfig, act: "models.Activity",
 ) -> AiResult:
     """Two-line context for a just-finished workout."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
 
     # Recent metric context — what's the user's recovery state going in
     rows = await _daily_rows(db, 7)
@@ -927,8 +949,8 @@ async def goal_check(
     db: AsyncSession, cfg: models.AiConfig, goal: "models.AiGoal",
 ) -> AiResult:
     """Coaching read on a goal — trajectory + leverage + ETA."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
 
     # 30-day context, plus any goal-relevant metric
     rows = await _daily_rows(db, 30)
@@ -1026,8 +1048,8 @@ ALL_TOPICS_TOOL = {
 
 
 async def explain_all(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_summary_payload(db, "week")
     user_text = (
         "Run analyses on each of week / sleep / recovery / sober / anomaly. "
@@ -1489,8 +1511,8 @@ async def strength_nudge(
     selectable_ids: set[str] | None = None,
 ) -> AiResult:
     """Generate up to 2 variety-swap suggestions for today's plan."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_strength_nudge_payload(
         db, workout_id, catalog_by_id, selectable_ids,
     )
@@ -1526,8 +1548,8 @@ async def strength_review(
     db: AsyncSession, workout_id: int, cfg: models.AiConfig,
 ) -> AiResult:
     """Generate a structured strength review for a completed workout."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_strength_review_payload(db, workout_id)
     if not payload:
         raise RuntimeError("workout not found")
@@ -1717,8 +1739,8 @@ async def build_deload_payload(db: AsyncSession) -> dict[str, Any]:
 
 async def deload_check(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     """Multi-signal AI judgment: should the user deload right now?"""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_deload_payload(db)
     user_text = (
         f"Decide if the user should deload right now. The data covers "
@@ -1902,8 +1924,8 @@ async def strength_focus_cue(
     catalog_by_id: dict[str, dict],
 ) -> AiResult:
     """Pre-workout focus cue — short, plan-specific."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_focus_cue_payload(db, workout_id, catalog_by_id)
     if not payload:
         raise RuntimeError("workout not found")
@@ -1941,8 +1963,8 @@ async def strength_focus_cue(
 
 async def phrase_anomaly(cfg: models.AiConfig, anomaly: dict[str, Any]) -> str:
     """Single-sentence push notification body for an anomaly. ~$0.0005/call."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     user_text = (
         f"Statistical anomaly detected:\n{json.dumps(anomaly)}\n\n"
         f"Write ONE sentence (≤ 18 words) for a phone notification. Plain "
@@ -2199,8 +2221,8 @@ async def build_cardio_coach_payload(db: AsyncSession) -> dict[str, Any]:
 
 async def cardio_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     """Structured AI analysis of cardio zone distribution + dose."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_cardio_coach_payload(db)
     user_text = (
         f"Analyze this user's cardio pattern over the last 30 days and "
@@ -2515,8 +2537,8 @@ async def build_sleep_coach_payload(db: AsyncSession) -> dict[str, Any]:
 async def sleep_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     """Structured AI verdict on whether sleep is currently supporting
     recovery."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_sleep_coach_payload(db)
     user_text = (
         f"Read the user's last 28 days of sleep + recovery vitals and "
@@ -2714,8 +2736,8 @@ async def build_recovery_coach_payload(db: AsyncSession) -> dict[str, Any]:
 
 async def recovery_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     """Multi-week recovery trend verdict + recommendation."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_recovery_coach_payload(db)
     user_text = (
         f"Read the user's last 28 days of recovery vitals and return a "
@@ -2975,8 +2997,8 @@ async def build_fasting_coach_payload(db: AsyncSession) -> dict[str, Any]:
 
 async def fasting_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     """'Should I fast today?' structured card."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_fasting_coach_payload(db)
     user_text = (
         f"Read the user's vitals, goal, and fasting history and decide "
@@ -3053,8 +3075,8 @@ async def build_workout_coach_payload(db: AsyncSession) -> dict[str, Any]:
 
 async def workout_coach(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     """Synthesizing AI coach — weekly perspective, multi-signal."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     payload = await build_workout_coach_payload(db)
     user_text = (
         f"Synthesize the user's strength + cardio + recovery picture "
@@ -3304,8 +3326,8 @@ async def build_meal_suggestion_payload(db: AsyncSession) -> dict[str, Any]:
 
 async def meal_suggestions(db: AsyncSession, cfg: models.AiConfig) -> AiResult:
     """Meal ideas from the pantry, fitted to today's training and health."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
 
     from ..analytics.nutrition import assess_meal_fat
 
@@ -3496,8 +3518,8 @@ async def identify_foods(
     media_type: str,
 ) -> AiResult:
     """Name the foods in one photo. Adds nothing; proposes only."""
-    if not cfg.enabled or not cfg.anthropic_api_key:
-        raise RuntimeError("AI is disabled or no API key configured")
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
     if media_type not in ALLOWED_IMAGE_TYPES:
         raise ValueError(f"unsupported image type {media_type!r}")
 

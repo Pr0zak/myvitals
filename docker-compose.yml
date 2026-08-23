@@ -7,6 +7,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       TZ: ${TZ:-UTC}
+      # AI-CLI: bound how long a headless call may run and how many may
+      # run at once. Each is a Node agent process, so an unbounded
+      # fan-out is memory pressure plus a rate-limit burst.
+      CLAUDE_CLI_TIMEOUT: ${CLAUDE_CLI_TIMEOUT:-180}
+      CLAUDE_CLI_CONCURRENCY: ${CLAUDE_CLI_CONCURRENCY:-2}
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
@@ -36,6 +41,11 @@ services:
       QUERY_TOKEN: ${QUERY_TOKEN}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       TZ: ${TZ:-UTC}
+      # AI-CLI: bound how long a headless call may run and how many may
+      # run at once. Each is a Node agent process, so an unbounded
+      # fan-out is memory pressure plus a rate-limit burst.
+      CLAUDE_CLI_TIMEOUT: ${CLAUDE_CLI_TIMEOUT:-180}
+      CLAUDE_CLI_CONCURRENCY: ${CLAUDE_CLI_CONCURRENCY:-2}
       HA_URL: ${HA_URL:-}
       HA_TOKEN: ${HA_TOKEN:-}
       HA_ENTITIES: ${HA_ENTITIES:-}
@@ -53,6 +63,13 @@ services:
       # auto-update cron watches the same path on the next minute
       # tick and runs deploy/auto-update.sh.
       - update_signals:/var/lib/myvitals
+      # AI-CLI: the headless `claude` binary authenticates with the
+      # machine's subscription OAuth, which lives in ~/.claude on the
+      # HOST. Mounted read-only — the container needs to read the
+      # credentials, never to rewrite them. Optional: the mount simply
+      # does not resolve on a host that has never run `claude login`,
+      # and the provider then falls back to CLAUDE_CODE_OAUTH_TOKEN.
+      - ${CLAUDE_CONFIG_DIR:-/root/.claude}:/root/.claude:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)"]
       interval: 30s

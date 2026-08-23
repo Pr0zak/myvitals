@@ -86,6 +86,16 @@ def get_provider(cfg: Any) -> LlmProvider:
         from .anthropic_provider import AnthropicProvider
         return AnthropicProvider(api_key=cfg.anthropic_api_key)
 
+    if provider == "claude_cli":
+        # Headless Claude Code CLI on the machine's subscription OAuth.
+        # No API key is used — see claude_cli._AUTH_ENV_STRIP for why an
+        # inherited one is actively harmful rather than merely redundant.
+        from .claude_cli import ClaudeCliProvider
+        log.info("LLM provider=claude_cli model=%s", getattr(cfg, "model", "?"))
+        return ClaudeCliProvider(
+            oauth_token=getattr(cfg, "cli_oauth_token", None),
+        )
+
     if provider in ("openai_compatible", "ollama"):
         from .openai_compat import OpenAiCompatProvider
         base_url = validate_base_url(getattr(cfg, "base_url", "") or "")

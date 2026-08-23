@@ -467,6 +467,12 @@ class AiConfig(Base):
     # ignores it entirely).
     provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    #: Subscription OAuth token for the `claude_cli` provider, from
+    #: `claude setup-token`. Kept SEPARATE from `anthropic_api_key`: an
+    #: API key in the CLI's environment makes it bill per token, which
+    #: defeats the point, so the provider strips that variable and passes
+    #: this one instead.
+    cli_oauth_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
     daily_call_limit: Mapped[int] = mapped_column(Integer, default=30)
     calls_today: Mapped[int] = mapped_column(Integer, default=0)
     calls_today_date: Mapped[date | None] = mapped_column(Date, nullable=True)

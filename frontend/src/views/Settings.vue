@@ -608,7 +608,13 @@ async function aiSaveInstructions() {
 // that required an external account and a credit card. An OpenAI-compatible
 // endpoint pointed at Ollama on the LAN takes the running cost to zero and
 // keeps every byte inside the house.
-const aiProvider = ref<"anthropic" | "openai_compatible" | "ollama">("anthropic");
+const aiProvider = ref<
+  "anthropic" | "openai_compatible" | "ollama" | "claude_cli"
+>("anthropic");
+/** Subscription OAuth token for the headless CLI provider, from
+ *  `claude setup-token`. Stored separately from the API key on purpose:
+ *  an API key in the CLI's environment makes it bill per token. */
+const aiCliToken = ref("");
 const aiBaseUrl = ref("");
 const aiProviderSaving = ref(false);
 const aiProviderError = ref("");
@@ -624,6 +630,11 @@ async function aiSaveProvider() {
     await api.aiUpdateConfig({
       provider: aiProvider.value,
       base_url: aiBaseUrl.value.trim(),
+      // Only sent when non-empty; the backend leaves a stored token alone
+      // on null, so saving the provider does not wipe a token set earlier.
+      ...(aiCliToken.value.trim()
+        ? { cli_oauth_token: aiCliToken.value.trim() }
+        : {}),
     });
     await loadAiCfg();
   } catch (e: unknown) {
@@ -1947,9 +1958,32 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
             <option value="anthropic">Anthropic (Claude)</option>
             <option value="openai_compatible">OpenAI-compatible</option>
             <option value="ollama">Ollama (local)</option>
+            <option value="claude_cli">Claude CLI (subscription, no API cost)</option>
           </select>
         </label>
-        <label v-if="aiProvider !== 'anthropic'" class="ai-instructions">
+        <label v-if="aiProvider === 'claude_cli'" class="ai-instructions">
+          <span>CLI OAuth token (optional)</span>
+          <input v-model="aiCliToken" type="password" class="add-search"
+                 placeholder="from `claude setup-token`"/>
+          <div class="ai-instructions-foot">
+            <span class="muted">
+              Runs <code>claude -p</code> inside the backend container on your
+              Claude <strong>subscription</strong>, so calls cost nothing per
+              token — they draw on the subscription's rate limit instead.
+              Leave the token blank to use the credentials mounted from the
+              host's <code>~/.claude</code>.
+              <br /><br />
+              Trade-offs: no schema-constrained output, so a malformed reply
+              is retried once and can still render a thin card; roughly 14k
+              tokens of agent overhead per cold call (quota, not money); and
+              higher latency, since each call spawns a process. Any API key
+              in the environment is deliberately withheld from it — an API
+              key would make it bill per token, which is the whole thing this
+              avoids.
+            </span>
+          </div>
+        </label>
+        <label v-if="aiProvider !== 'anthropic' && aiProvider !== 'claude_cli'" class="ai-instructions">
           <span>Base URL</span>
           <input v-model="aiBaseUrl" type="url" class="add-search"
                  placeholder="http://ollama.lan:11434/v1"/>

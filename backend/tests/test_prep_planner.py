@@ -625,3 +625,17 @@ def test_the_lean_week_note_is_computed_at_generate_not_on_read():
     hydrate = src[src.index("async def _prep_hydrate"):src.index("@router.get(\"/prep/targets\"")]
     assert "0.8" not in hydrate
     assert "That is" not in hydrate
+
+
+def test_the_prompt_forbids_multi_ingredient_components():
+    """A component costs against exactly one catalog food, so a
+    component named "roasted broccoli and bell pepper" resolves to
+    broccoli and the peppers vanish from every total — silently, because
+    a food DID match, so none of the unresolved machinery fires.
+
+    Seen live on the second generated plan. The fix is structural on the
+    model's side: combine ingredients in a MEAL, never in a component.
+    """
+    sys = C._prep_plan_system("blunt").lower()
+    assert "one ingredient per component" in sys
+    assert "silently vanish" in sys

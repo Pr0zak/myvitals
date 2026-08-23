@@ -59,7 +59,8 @@ import app.myvitals.sync.DietProfile
 import app.myvitals.sync.DietProfileIn
 import app.myvitals.sync.FatAssessment
 import app.myvitals.sync.FoodOut
-import app.myvitals.sync.IdentifyIn
+import app.myvitals.sync.ImageIn
+import app.myvitals.sync.LabelIn
 import app.myvitals.sync.LabelScan
 import app.myvitals.sync.PantryItemIn
 import app.myvitals.sync.PantryItemOut
@@ -1016,27 +1017,37 @@ private fun FoodsTab(settings: SettingsRepository) {
     var scan by remember { mutableStateOf<LabelScan?>(null) }
     var scanError by remember { mutableStateOf<String?>(null) }
 
+    // Multiple photos: the panel has the numbers and no product name, the
+    // front has the name and no numbers, and a third of the ingredients
+    // list is transcribed verbatim.
     val labelPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent(),
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+        ActivityResultContracts.GetMultipleContents(),
+    ) { uris ->
+        if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
+        if (uris.size > 4) {
+            scanError = "Pick at most 4 photos — the front, the panel and " +
+                "the ingredients is all it can use."
+            return@rememberLauncherForActivityResult
+        }
         scope.launch {
             scanBusy = true
             scanError = null
             scan = null
             try {
-                val b64 = withContext(Dispatchers.IO) {
-                    downscaleUriToBase64(context, uri)
+                val encoded = withContext(Dispatchers.IO) {
+                    uris.mapNotNull { downscaleUriToBase64(context, it) }
                 }
-                if (b64 == null) {
-                    scanError = "Could not read that image."
+                if (encoded.isEmpty()) {
+                    scanError = "Could not read those images."
                     return@launch
                 }
                 val api = BackendClient.create(
                     settings.backendUrl, settings.bearerToken,
                 )
                 scan = withContext(Dispatchers.IO) {
-                    api.mealsReadLabel(IdentifyIn(imageBase64 = b64))
+                    api.mealsReadLabel(
+                        LabelIn(encoded.map { ImageIn(imageBase64 = it) }),
+                    )
                 }
             } catch (e: Exception) {
                 scanError = e.message ?: "could not read that label"
@@ -1084,7 +1095,10 @@ private fun FoodsTab(settings: SettingsRepository) {
                 onClick = { labelPicker.launch("image/*") },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(if (scanBusy) "Reading label…" else "Scan a nutrition label")
+                Text(
+                    if (scanBusy) "Reading…"
+                    else "Scan a package (front + label + ingredients)",
+                )
             }
         }
         scanError?.let { item { ErrorText(it) } }
@@ -1180,6 +1194,10 @@ private fun LabelScanCard(sc: LabelScan) {
                 color = NeonMV.Amber, fontSize = 10.sp, lineHeight = 14.sp,
                 modifier = Modifier.padding(top = 6.dp),
             )
+        }
+        sc.ingredients?.takeIf { it.isNotBlank() }?.let {
+            SectionLabel("Ingredients")
+            Text(it, color = NeonMV.Muted, fontSize = 10.sp, lineHeight = 14.sp)
         }
         sc.notes.forEach {
             Text(

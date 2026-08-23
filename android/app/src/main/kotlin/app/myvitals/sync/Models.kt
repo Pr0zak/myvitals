@@ -1783,6 +1783,9 @@ data class FoodOut(
     @Json(name = "vitamin_e_mg") val vitaminEMg: Double? = null,
     @Json(name = "vitamin_k_ug") val vitaminKUg: Double? = null,
     @Json(name = "unit_grams") val unitGrams: Map<String, Double>? = null,
+    // The packaging's ingredient declaration, verbatim. Only ever set on
+    // a user-added packaged food; USDA rows have none.
+    val ingredients: String? = null,
     // Whether this is a whole ingredient rather than a prepared dish.
     // The recipe picker filters on it; the food log does not.
     @Json(name = "is_ingredient") val isIngredient: Boolean = false,
@@ -2312,7 +2315,28 @@ data class LabelScan(
     val reason: String? = null,
     @Json(name = "per_100g") val per100g: Map<String, Double?> = emptyMap(),
     @Json(name = "as_read") val asRead: Map<String, Double> = emptyMap(),
+    // Verbatim from the packaging when a photo showed it.
+    val ingredients: String? = null,
     val unreadable: List<String> = emptyList(),
     val notes: List<String> = emptyList(),
+    @Json(name = "images_used") val imagesUsed: Int = 0,
     val model: String? = null,
+)
+
+/** One or more photos of the SAME packaged food.
+ *
+ *  Multiple is the normal case: a Nutrition Facts panel carries no
+ *  product name — that is on the front of the pack — so a panel alone
+ *  yields perfect numbers attached to nothing. A third photo of the
+ *  ingredients list is transcribed verbatim.
+ */
+@JsonClass(generateAdapter = true)
+data class ImageIn(
+    @Json(name = "image_base64") val imageBase64: String,
+    @Json(name = "media_type") val mediaType: String = "image/jpeg",
+)
+
+@JsonClass(generateAdapter = true)
+data class LabelIn(
+    val images: List<ImageIn>,
 )

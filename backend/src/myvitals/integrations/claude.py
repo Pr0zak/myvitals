@@ -3629,6 +3629,16 @@ LABEL_TOOL = {
             "fiber_g": {"type": "number"},
             "sugar_g": {"type": "number"},
             "sodium_mg": {"type": "number"},
+            "ingredients_text": {
+                "type": "string",
+                "description": (
+                    "The ingredients list, transcribed verbatim from the "
+                    "packaging if one of the photos shows it. Keep the "
+                    "original order and wording — it is a legal ingredient "
+                    "declaration, not prose to tidy up. Empty if no photo "
+                    "shows one."
+                ),
+            },
             "unreadable": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -3649,6 +3659,17 @@ def _label_system(tone: str) -> str:
         "You transcribe nutrition-facts panels from photographs into "
         "structured data.\n\n"
         f"Tone: {tone}.\n\n"
+        "## More than one photo may arrive\n"
+        "They are the SAME product from different angles — typically the "
+        "front of the pack, the Nutrition Facts panel, and sometimes the "
+        "ingredients list. Take the product name from whichever photo "
+        "shows it (the panel never carries one), the numbers from the "
+        "panel, and the ingredients from whichever photo shows them. Do "
+        "not treat them as different foods.\n\n"
+        "Transcribe an ingredients list VERBATIM, in its original order "
+        "and wording. It is a legal declaration, not prose to tidy up, "
+        "and re-ordering or summarising it destroys the one thing it is "
+        "good for.\n\n"
         "## Report only what is printed\n"
         "OMIT any field the label does not show. Do NOT infer, estimate, "
         "or fill a plausible value — a field you leave out is recorded as "
@@ -3677,14 +3698,45 @@ def _label_system(tone: str) -> str:
 async def read_nutrition_label(
     db: AsyncSession,
     cfg: models.AiConfig,
-    image_b64: str,
-    media_type: str,
+    images: list[tuple[str, str]],
 ) -> AiResult:
-    """Transcribe one nutrition-facts panel. Saves nothing."""
+    """Transcribe a packaged food from one or more photos. Saves nothing.
+
+    `images` is [(base64, media_type), ...]. Multiple photos are the
+    normal case rather than a nicety: a Nutrition Facts panel carries no
+    product name — that is on the FRONT of the pack — so transcribing a
+    panel alone produces perfect numbers attached to nothing. Sending the
+    front and the panel together is what actually adds a packaged food.
+    """
     if not cfg.enabled or _credentials_missing(cfg):
         raise RuntimeError("AI is disabled or no credentials configured")
-    if media_type not in ALLOWED_IMAGE_TYPES:
-        raise ValueError(f"unsupported image type {media_type!r}")
+    if not images:
+        raise ValueError("at least one image is required")
+    for _b64, media_type in images:
+        if media_type not in ALLOWED_IMAGE_TYPES:
+            raise ValueError(f"unsupported image type {media_type!r}")
+
+    content: list[dict[str, Any]] = [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64", "media_type": media_type, "data": b64,
+            },
+        }
+        for b64, media_type in images
+    ]
+    content.append({
+        "type": "text",
+        "text": (
+            f"{len(images)} photo(s) of the same packaged food. Some may "
+            "show the front of the pack (product name, brand, net weight) "
+            "and some the Nutrition Facts panel (the numbers). Combine "
+            "them and answer via the `give_nutrition_label` tool."
+            if len(images) > 1 else
+            "Transcribe this nutrition label via the "
+            "`give_nutrition_label` tool."
+        ),
+    })
 
     client = get_provider(cfg)
     resp = await client.messages.create(
@@ -3693,26 +3745,7 @@ async def read_nutrition_label(
         system=_cached_system(_label_system(cfg.tone), cfg),
         tools=[LABEL_TOOL],
         tool_choice={"type": "tool", "name": "give_nutrition_label"},
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": media_type,
-                        "data": image_b64,
-                    },
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        "Transcribe this nutrition label via the "
-                        "`give_nutrition_label` tool."
-                    ),
-                },
-            ],
-        }],
+        messages=[{"role": "user", "content": content}],
     )
 
     tool_input: dict[str, Any] = {}

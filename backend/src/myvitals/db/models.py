@@ -842,6 +842,13 @@ class Food(Base):
     vitamin_e_mg: Mapped[float | None] = mapped_column(Float, nullable=True)
     vitamin_k_ug: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    #: The packaging's ingredient declaration, transcribed verbatim from
+    #: a photo (migration 0062). Null on every USDA row — this is only
+    #: ever user-supplied, for a packaged product. Kept as text in its
+    #: original ORDER, which is meaningful: items are declared by
+    #: descending weight.
+    ingredients: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     #: Canonical pantry concept (migration 0060). USDA rows are nutrition
     #: rows: raw and grilled chicken breast are separate ids with genuinely
     #: different nutrition, but they are ONE thing to buy and to have in

@@ -1792,6 +1792,27 @@ async def meals_suggest_endpoint(
     return await _coach_persist(db, "meal_suggest", payload_hash, result)
 
 
+class ImageIn(BaseModel):
+    image_base64: str = Field(min_length=16)
+    media_type: str = Field(default="image/jpeg", max_length=40)
+
+
+class LabelIn(BaseModel):
+    """One or more photos of the SAME packaged food.
+
+    Multiple is the normal case, not a nicety: a Nutrition Facts panel
+    carries no product name — that is on the front of the pack — so a
+    panel alone yields perfect numbers attached to nothing.
+
+    `image_base64` is kept alongside `images` so an older client, or a
+    caller that only has the panel, keeps working unchanged.
+    """
+
+    images: list[ImageIn] | None = None
+    image_base64: str | None = None
+    media_type: str = Field(default="image/jpeg", max_length=40)
+
+
 class IdentifyIn(BaseModel):
     """One photo, inline.
 
@@ -1917,55 +1938,83 @@ async def meals_identify_endpoint(
 
 @router.post("/meals/read-label")
 async def meals_read_label_endpoint(
-    body: IdentifyIn,
+    body: LabelIn,
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Transcribe a nutrition-facts panel into a ready-to-save food.
+    """Transcribe a packaged food from one or more photos.
 
-    MEAL-8. Roughly half this user's diet is packaged, and the only
-    nutrition source for a packaged item is the label on it. Typing
-    thirteen numbers off a panel is the friction that stops a food ever
-    being added.
+    MEAL-8. Send the front of the pack AND the Nutrition Facts panel:
+    the panel has the numbers and no name, the front has the name and no
+    numbers, and a packaged food needs both.
 
-    Saves nothing: it returns fields for the user to confirm, then the
-    ordinary `POST /meals/foods` creates it. Same reasoning as the photo
-    identifier — a transcription error that writes itself into the
-    catalog is a wrong number nobody knows to look for.
+    Saves nothing — it returns fields for the user to confirm, and the
+    ordinary `POST /meals/foods` creates the row. A transcription error
+    written straight into the catalog is a wrong number nobody knows to
+    look for.
 
     The per-serving to per-100g CONVERSION happens here, not in the
     model. Asking a model to both read numbers and do arithmetic on them
-    is two chances to be wrong where one will do, and the catalog stores
-    per-100g throughout.
+    is two chances to be wrong where one will do.
     """
     import base64
 
     cfg = await _get_config(db)
 
-    media_type = (body.media_type or "").strip().lower()
-    if media_type not in ALLOWED_IMAGE_TYPES:
+    raw_images = body.images or []
+    if not raw_images and body.image_base64:
+        raw_images = [ImageIn(
+            image_base64=body.image_base64, media_type=body.media_type,
+        )]
+    if not raw_images:
+        raise HTTPException(400, "send at least one image")
+    if len(raw_images) > 4:
         raise HTTPException(
             400,
-            f"unsupported image type {media_type!r} — "
-            f"use one of {', '.join(sorted(ALLOWED_IMAGE_TYPES))}",
+            "at most 4 photos — more than the front and the panel adds "
+            "cost without adding information",
         )
-    raw = (body.image_base64 or "").strip()
-    if raw[:5] == "data:" and "," in raw[:64]:
-        raw = raw.split(",", 1)[1]
-    try:
-        decoded = base64.b64decode(raw, validate=True)
-    except Exception:  # noqa: BLE001
-        raise HTTPException(400, "image_base64 is not valid base64") from None
-    if not decoded:
-        raise HTTPException(400, "image is empty")
-    if len(decoded) > MAX_IMAGE_BYTES:
+
+    decoded_images: list[tuple[str, str]] = []
+    total = 0
+    for i, img in enumerate(raw_images):
+        media_type = (img.media_type or "").strip().lower()
+        if media_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(
+                400,
+                f"image {i + 1}: unsupported type {media_type!r} — use one "
+                f"of {', '.join(sorted(ALLOWED_IMAGE_TYPES))}",
+            )
+        raw = (img.image_base64 or "").strip()
+        if raw[:5] == "data:" and "," in raw[:64]:
+            raw = raw.split(",", 1)[1]
+        try:
+            decoded = base64.b64decode(raw, validate=True)
+        except Exception:  # noqa: BLE001
+            raise HTTPException(
+                400, f"image {i + 1} is not valid base64",
+            ) from None
+        if not decoded:
+            raise HTTPException(400, f"image {i + 1} is empty")
+        if len(decoded) > MAX_IMAGE_BYTES:
+            raise HTTPException(
+                413,
+                f"image {i + 1} is {len(decoded) // 1024} KB; the limit is "
+                f"{MAX_IMAGE_BYTES // 1024} KB each. Downscale before sending.",
+            )
+        total += len(decoded)
+        decoded_images.append((raw, media_type))
+
+    # A per-image cap alone lets four near-limit photos through as one
+    # very expensive call, so the batch is bounded too.
+    if total > MAX_IMAGE_BYTES * 2:
         raise HTTPException(
             413,
-            f"image is {len(decoded) // 1024} KB; the limit is "
-            f"{MAX_IMAGE_BYTES // 1024} KB. Downscale it before sending.",
+            f"the photos total {total // 1024} KB; the limit is "
+            f"{(MAX_IMAGE_BYTES * 2) // 1024} KB across all of them.",
         )
 
     await _check_and_bump_quota(db, cfg)
-    result = await read_nutrition_label(db, cfg, raw, media_type)
+    result = await read_nutrition_label(db, cfg, decoded_images)
     cfg.calls_today += 1
     await db.commit()
 
@@ -1986,7 +2035,7 @@ async def meals_read_label_endpoint(
 
     # Scale to per-100g, which is what the catalog stores. A per-serving
     # label without a stated serving size CANNOT be converted, and the
-    # honest answer is to say so rather than to assume 100 g — that would
+    # honest answer is to say so rather than assume 100 g — that would
     # silently inflate or deflate every number on the card.
     per100: dict[str, float | None] = {c: None for c in food_lib.NUTRIENT_COLUMNS}
     convertible = True
@@ -2017,7 +2066,6 @@ async def meals_read_label_endpoint(
                 continue
 
     return {
-        # Ready to hand straight to POST /meals/foods once confirmed.
         "name": (label.get("name") or "").strip(),
         "basis": basis,
         "serving_size_g": serving,
@@ -2026,13 +2074,17 @@ async def meals_read_label_endpoint(
         "reason": reason,
         "per_100g": per100,
         # What the model actually read, before conversion, so a user can
-        # check the transcription against the packet in their hand.
+        # check the transcription against the packet in hand.
         "as_read": {
             c: label.get(c) for c in food_lib.NUTRIENT_COLUMNS
             if label.get(c) is not None
         },
+        # Verbatim from the packaging when a photo showed it. Passed
+        # straight to POST /meals/foods, which stores it as-is.
+        "ingredients": (label.get("ingredients_text") or "").strip() or None,
         "unreadable": label.get("unreadable") or [],
         "notes": label.get("notes") or [],
+        "images_used": len(decoded_images),
         "model": result.model,
     }
 

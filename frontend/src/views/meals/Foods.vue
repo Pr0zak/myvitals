@@ -46,17 +46,30 @@ async function downscaleLabel(file: File): Promise<string> {
 
 async function onLabel(e: Event) {
   const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
+  const files = Array.from(input.files ?? []);
   input.value = "";
-  if (!file) return;
+  if (!files.length) return;
+  if (files.length > 4) {
+    error.value = "Pick at most 4 photos — the front, the panel and the "
+      + "ingredients is all it can use.";
+    return;
+  }
   scanBusy.value = true;
   error.value = null;
   scanNotes.value = [];
   scanUnreadable.value = [];
   scanReason.value = null;
   try {
-    const b64 = await downscaleLabel(file);
-    const r = await meals.readLabel(b64, "image/jpeg");
+    // Send them together: the panel carries the numbers and no product
+    // name, the front carries the name and no numbers, and a third photo
+    // of the ingredients list is transcribed verbatim.
+    const images = await Promise.all(
+      files.map(async (f) => ({
+        image_base64: await downscaleLabel(f),
+        media_type: "image/jpeg",
+      })),
+    );
+    const r = await meals.readLabel(images);
     // Fill the form for confirmation — never save directly. A
     // transcription error written straight into the catalog is a wrong
     // number nobody knows to look for.
@@ -72,6 +85,7 @@ async function onLabel(e: Event) {
     put("saturated_fat_g", n.saturated_fat_g); put("fiber_g", n.fiber_g);
     put("sugar_g", n.sugar_g); put("sodium_mg", n.sodium_mg);
     if (r.serving_size_g) draft.value.serving_g = String(r.serving_size_g);
+    draft.value.ingredients = r.ingredients ?? "";
     scanNotes.value = r.notes;
     scanUnreadable.value = r.unreadable;
     scanReason.value = r.convertible ? null : r.reason;
@@ -85,6 +99,7 @@ const saving = ref(false);
 const draft = ref({
   name: "", category: "", kcal: "", protein_g: "", carbs_g: "", fat_g: "",
   saturated_fat_g: "", fiber_g: "", sugar_g: "", sodium_mg: "", serving_g: "",
+  ingredients: "",
 });
 
 async function loadStats() {
@@ -102,6 +117,7 @@ function resetDraft() {
   draft.value = {
     name: "", category: "", kcal: "", protein_g: "", carbs_g: "", fat_g: "",
     saturated_fat_g: "", fiber_g: "", sugar_g: "", sodium_mg: "", serving_g: "",
+    ingredients: "",
   };
 }
 
@@ -124,6 +140,7 @@ function startEdit(f: Food) {
     sugar_g: f.sugar_g?.toString() ?? "",
     sodium_mg: f.sodium_mg?.toString() ?? "",
     serving_g: f.unit_grams?.serving?.toString() ?? "",
+    ingredients: f.ingredients ?? "",
   };
   editing.value = true;
 }
@@ -152,6 +169,7 @@ async function save() {
     sugar_g: orNull(d.sugar_g),
     sodium_mg: orNull(d.sodium_mg),
     unit_grams: orNull(d.serving_g) ? { serving: Number(d.serving_g) } : null,
+    ingredients: d.ingredients.trim() || null,
   };
   try {
     const saved = selected.value
@@ -206,12 +224,12 @@ function fmt(v: number | null, digits: number, suffix: string): string {
       <button class="ghost" :disabled="scanBusy" @click="labelInput?.click()">
         <component :is="scanBusy ? Loader2 : Camera" :size="14"
                    :class="{ spin: scanBusy }" />
-        {{ scanBusy ? "Reading…" : "Scan a label" }}
+        {{ scanBusy ? "Reading…" : "Scan a package" }}
       </button>
       <button class="primary" @click="startNew">
         <Plus :size="14" /> Add a food
       </button>
-      <input ref="labelInput" type="file" accept="image/*" capture="environment"
+      <input ref="labelInput" type="file" accept="image/*" multiple
              hidden @change="onLabel" />
     </PageHeader>
 
@@ -251,6 +269,12 @@ function fmt(v: number | null, digits: number, suffix: string): string {
       </p>
       <p v-for="n in scanNotes" :key="n" class="warn-line">{{ n }}</p>
       <p class="hint">
+        Photograph the <strong>front of the pack</strong>, the
+        <strong>Nutrition Facts panel</strong> and, if you like, the
+        <strong>ingredients list</strong> — select them together. The panel
+        has the numbers but no product name; the front has the name.
+      </p>
+      <p class="hint">
         Enter the figures <strong>per 100 g</strong>, the way a label's
         nutrition panel gives them. Leave anything the label does not
         state blank — blank means unknown, which is not the same as zero.
@@ -273,6 +297,11 @@ function fmt(v: number | null, digits: number, suffix: string): string {
         <label><span>Sugar (g)</span><input v-model="draft.sugar_g" type="number" step="any" /></label>
         <label><span>Sodium (mg)</span><input v-model="draft.sodium_mg" type="number" step="any" /></label>
         <label><span>Serving (g)</span><input v-model="draft.serving_g" type="number" step="any" placeholder="optional" /></label>
+        <label class="wide">
+          <span>Ingredients (as printed)</span>
+          <textarea v-model="draft.ingredients" rows="3"
+                    placeholder="optional — transcribed from a photo of the ingredients list" />
+        </label>
       </div>
       <div class="actions">
         <button class="primary" :disabled="saving || !draft.name.trim()" @click="save">
@@ -315,6 +344,11 @@ function fmt(v: number | null, digits: number, suffix: string): string {
           </tr>
         </tbody>
       </table>
+
+      <template v-if="selected.ingredients">
+        <h4>Ingredients</h4>
+        <p class="ingredients">{{ selected.ingredients }}</p>
+      </template>
 
       <template v-if="selected.unit_grams && Object.keys(selected.unit_grams).length">
         <h4>Measures</h4>
@@ -366,12 +400,13 @@ button.ghost { background: transparent; color: var(--muted-2); }
 .grid .wide { grid-column: 1 / -1; }
 .grid label { display: flex; flex-direction: column; gap: 0.25rem; }
 .grid span { font-size: 0.75rem; color: var(--muted-2); }
-input {
+input, textarea {
   width: 100%; border: 1px solid var(--line); border-radius: 9px;
   background: var(--bg-1); color: var(--fg); font: inherit;
   font-size: 0.85rem; padding: 0.4rem 0.55rem; outline: none;
 }
 .actions { display: flex; gap: 0.5rem; margin-top: 0.9rem; }
+textarea { font: inherit; font-size: 0.85rem; padding: 0.4rem 0.55rem; resize: vertical; }
 .head {
   display: flex; align-items: flex-start; justify-content: space-between;
   gap: 0.7rem; margin-bottom: 0.7rem;
@@ -390,6 +425,7 @@ input {
 .nutri tr + tr { border-top: 1px solid var(--line); }
 .nutri tr.emph th, .nutri tr.emph td { color: var(--fg); font-weight: 600; }
 h4 { font-size: 0.78rem; color: var(--muted-2); margin: 0.9rem 0 0.35rem; font-weight: 600; }
+.ingredients { margin: 0; font-size: 0.8rem; line-height: 1.5; color: var(--muted-2); }
 .units { list-style: none; margin: 0; padding: 0; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
 .units li { display: flex; justify-content: space-between; padding: 0.2rem 0; border-bottom: 1px solid var(--line); }
 </style>

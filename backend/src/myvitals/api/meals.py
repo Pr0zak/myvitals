@@ -67,6 +67,9 @@ class FoodOut(BaseModel):
     vitamin_e_mg: float | None = None
     vitamin_k_ug: float | None = None
     unit_grams: dict[str, float] | None = None
+    #: The packaging's ingredient declaration, verbatim. Only ever set on
+    #: a user-added packaged food; USDA rows have none.
+    ingredients: str | None = None
     #: True when this food is a whole ingredient rather than a prepared
     #: dish. The recipe picker filters on it; the food log does not.
     is_ingredient: bool = False
@@ -101,6 +104,10 @@ class FoodIn(BaseModel):
     vitamin_e_mg: float | None = None
     vitamin_k_ug: float | None = None
     unit_grams: dict[str, float] | None = None
+    #: The packaging's ingredient declaration, verbatim. Stored in its
+    #: original ORDER, which is meaningful — items are declared by
+    #: descending weight — so it is never re-sorted or summarised.
+    ingredients: str | None = None
 
 
 class IngredientIn(BaseModel):
@@ -508,6 +515,7 @@ def _food_out(f: models.Food) -> FoodOut:
     return FoodOut(
         id=f.id, slug=f.slug, name=f.name, source=f.source, category=f.category,
         unit_grams=f.unit_grams, concept=f.concept,
+        ingredients=f.ingredients,
         is_ingredient=(f.category or "") in food_lib.INGREDIENT_CATEGORIES,
         **{c: getattr(f, c, None) for c in food_lib.NUTRIENT_COLUMNS},
     )
@@ -830,6 +838,7 @@ async def create_food(body: FoodIn, db: AsyncSession = Depends(get_session)):
     f = models.Food(
         slug=slug, name=body.name.strip(), source="user",
         category=body.category, unit_grams=body.unit_grams,
+        ingredients=(body.ingredients or None),
         **{c: getattr(body, c) for c in food_lib.NUTRIENT_COLUMNS},
     )
     db.add(f)
@@ -854,6 +863,7 @@ async def update_food(
     f.name = body.name.strip()
     f.category = body.category
     f.unit_grams = body.unit_grams
+    f.ingredients = body.ingredients or None
     for c in food_lib.NUTRIENT_COLUMNS:
         setattr(f, c, getattr(body, c))
     f.source = "user"

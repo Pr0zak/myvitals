@@ -1843,6 +1843,9 @@ export interface DietProfile {
 }
 
 export interface Food extends Nutrition {
+  /** The packaging's ingredient declaration, verbatim. Only ever set on
+   *  a user-added packaged food. */
+  ingredients?: string | null;
   id: number;
   slug: string;
   name: string;
@@ -2242,20 +2245,23 @@ export interface LabelScan {
   reason: string | null;
   per_100g: Partial<Nutrition>;
   as_read: Record<string, number>;
+  /** Verbatim from the packaging when a photo showed it. */
+  ingredients: string | null;
   unreadable: string[];
   notes: string[];
+  images_used: number;
   model: string | null;
 }
 
-/** Read a nutrition label from a photo. Saves nothing — the caller
- *  confirms and then calls createFood. */
-export const readLabel = (imageBase64: string, mediaType: string) =>
-  http
-    .post<LabelScan>("/ai/meals/read-label", {
-      image_base64: imageBase64,
-      media_type: mediaType,
-    })
-    .then((r) => r.data);
+/** Read a packaged food from one or more photos. Saves nothing — the
+ *  caller confirms and then calls createFood.
+ *
+ *  Send the front of the pack AND the Nutrition Facts panel: the panel
+ *  has the numbers and no product name, the front has the name and no
+ *  numbers. A third photo of the ingredients list is transcribed too. */
+export const readLabel = (
+  images: Array<{ image_base64: string; media_type: string }>,
+) => http.post<LabelScan>("/ai/meals/read-label", { images }).then((r) => r.data);
 
 export const commonIngredients = () =>
   http.get<CommonItem[]>("/meals/common-ingredients").then((r) => r.data);

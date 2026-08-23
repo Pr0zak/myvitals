@@ -158,12 +158,67 @@ def test_the_reader_uses_the_provider_aware_credentials_check():
     assert "not cfg.anthropic_api_key" not in src
 
 
+def test_multiple_photos_are_accepted():
+    """A Nutrition Facts panel carries NO product name — that is on the
+    front of the pack — so transcribing a panel alone yields perfect
+    numbers attached to nothing. Reported directly: "want to add two
+    images so I can include nutrition label with it but cant"."""
+    from myvitals.api.ai import LabelIn
+
+    assert "images" in LabelIn.model_fields
+    # The single-image form still works, so an older client and a
+    # panel-only caller are unaffected.
+    assert "image_base64" in LabelIn.model_fields
+
+
+def test_the_batch_is_bounded_not_just_each_image():
+    """A per-image cap alone lets four near-limit photos through as one
+    very expensive call."""
+    fn = _code_only(_endpoint())
+    assert "MAX_IMAGE_BYTES * 2" in fn
+    assert "len(raw_images) > 4" in fn
+
+
+def test_the_prompt_says_the_photos_are_one_product():
+    """Otherwise the model reports them as separate foods."""
+    p = C._label_system("Blunt")
+    low = p.lower()
+    assert "same product" in low
+    assert "not treat them" in low
+
+
+def test_ingredients_are_transcribed_verbatim():
+    """An ingredients declaration is a legal document whose ORDER is
+    meaningful — items are listed by descending weight — so re-ordering
+    or summarising it destroys the one thing it is good for."""
+    props = C.LABEL_TOOL["input_schema"]["properties"]
+    assert "ingredients_text" in props
+    assert "verbatim" in props["ingredients_text"]["description"].lower()
+    assert "verbatim" in C._label_system("Blunt").lower()
+
+
+def test_ingredients_round_trip_through_the_food_api():
+    from myvitals.api.meals import FoodIn, FoodOut
+
+    assert "ingredients" in FoodIn.model_fields
+    assert "ingredients" in FoodOut.model_fields
+
+
+def test_migration_0062_adds_the_ingredients_column():
+    mig = (pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions"
+           / "0062_food_ingredients.py").read_text()
+    assert "ingredients" in mig
+    assert 'down_revision: str | None = "0061"' in mig
+
+
 def test_both_surfaces_offer_the_scan():
     root = pathlib.Path(__file__).resolve().parents[2]
     web = (root / "frontend" / "src" / "views" / "meals" / "Foods.vue").read_text()
     phone = (root / "android" / "app" / "src" / "main" / "kotlin" / "app"
              / "myvitals" / "ui" / "meals" / "MealsScreen.kt").read_text()
-    assert "Scan a label" in web
+    assert "Scan a package" in web
     assert "readLabel" in web
-    assert "Scan a nutrition label" in phone
+    assert "multiple" in web, "the web picker must accept several photos"
+    assert "Scan a package" in phone
     assert "mealsReadLabel" in phone
+    assert "GetMultipleContents" in phone

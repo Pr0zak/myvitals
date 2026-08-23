@@ -644,7 +644,7 @@ interface BackendApi {
     suspend fun mealsIdentify(@Body body: IdentifyIn): IdentifyResult
 
     @POST("ai/meals/read-label")
-    suspend fun mealsReadLabel(@Body body: IdentifyIn): LabelScan
+    suspend fun mealsReadLabel(@Body body: LabelIn): LabelScan
 }
 
 object BackendClient {

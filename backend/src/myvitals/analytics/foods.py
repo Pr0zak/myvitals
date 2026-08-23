@@ -170,9 +170,59 @@ _PROCESSED_FORM_WORDS: frozenset[str] = frozenset({
     "breaded", "nuggets", "battered", "canned", "frozen", "instant",
     "imitation", "concentrate", "extract", "mix", "prepared",
     "restaurant", "sweetened", "creamed", "smoked", "cured",
+    # Derived forms. Each of these outranked the plain ingredient on
+    # name length alone: "Potato flour" is shorter than "Potatoes, raw",
+    # and "Tomatoes, sun-dried" shorter than "Tomatoes, red, ripe, raw".
+    "sun-dried", "flour", "flakes", "syrup", "juice", "paste", "puree",
+    "chips", "sauce", "soup", "bread", "meal",
+    # Dishes MADE of the ingredient. USDA files several of these under
+    # "Vegetables and Vegetable Products", so the ingredient tier does
+    # not separate them and "Potato pancakes" outranked "Potatoes, raw".
+    # "salad" is deliberately NOT here: it appears in "Oil, olive, salad
+    # or cooking", which is the correct answer for "olive oil" and the
+    # original bug this ranking exists to fix.
+    "pancakes", "pancake", "fritters", "fritter", "croquettes",
+})
+
+#: Words naming a DIFFERENT PART of the same organism. An unrequested
+#: one is a much stronger signal of "not what you asked for" than name
+#: length is, and length alone gets it wrong: "Sweet potato leaves, raw"
+#: is shorter than "Sweet potato, raw, unprepared", so a search for
+#: "sweet potato" answered with a leafy green that has half the calories
+#: of the tuber — and answered it silently, in the shopping list, the
+#: recipe coster and the prep planner alike.
+#:
+#: Demotion only applies to words the user did NOT type, exactly as it
+#: does for processed forms above, so searching "sweet potato leaves" or
+#: "sunflower seeds" still finds them first.
+_PART_WORDS: frozenset[str] = frozenset({
+    "leaves", "leaf", "greens", "tops", "stems", "stalks", "sprouts",
+    "shoots", "flowers", "blossoms", "seeds", "kernels", "hulls",
+    "shells", "peel", "rind", "skins", "pods", "roots", "bran", "germ",
 })
 
 _WORD_RE = re.compile(r"[a-z][a-z-]+")
+
+
+#: USDA appends provenance notes to some names — "Sweet potato, raw,
+#: unprepared (Includes foods for USDA's Food Distribution Program)".
+#: The note says nothing about the food, but it triples the name length,
+#: and the length tiebreak reads a long name as a more qualified and
+#: therefore less plain form. So the plainest raw sweet potato lost to
+#: "Sweet potato leaves, raw" — a different plant with half the
+#: calories, silently substituted into anything the user costed.
+_PROVENANCE_RE = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def _plainness(name: str) -> int:
+    """Name length for tiebreaking, ignoring a trailing parenthetical.
+
+    Length is a good proxy for "plainest form of this food" precisely
+    because USDA qualifies with commas: "Broccoli, raw" beats "Broccoli,
+    frozen, chopped, cooked, boiled, drained, without salt". A trailing
+    provenance note carries no such qualification and must not count.
+    """
+    return len(_PROVENANCE_RE.sub("", name))
 
 
 def is_ingredient(row: dict[str, Any]) -> bool:
@@ -276,7 +326,15 @@ def search(
     # what stops a search for "egg" answering "Eggnog" — both match as a
     # prefix, and Eggnog has the shorter name, so every other tiebreak
     # picks the wrong one.
-    exact = [re.compile(r"\b" + re.escape(t) + r"\b") for t in terms]
+    # A regular plural counts as a whole-word match. USDA names roots in
+    # the plural and leaves in the singular — "Beets, raw" but "Beet
+    # greens, raw" — so without this a search for "beet" scores the
+    # greens as an exact hit and the root as a mere prefix, and the
+    # stronger tier wins before the part-word demotion below ever runs.
+    # You asked for a root vegetable and got a leafy green.
+    exact = [
+        re.compile(r"\b" + re.escape(t) + r"(?:e?s)?\b") for t in terms
+    ]
     prefix = [re.compile(r"\b" + re.escape(t)) for t in terms]
 
     rows = catalog()
@@ -300,7 +358,8 @@ def search(
         else:
             processed = sum(
                 1 for w in _WORD_RE.findall(name)
-                if w in _PROCESSED_FORM_WORDS and w not in asked
+                if (w in _PROCESSED_FORM_WORDS or w in _PART_WORDS)
+                and w not in asked
             )
             # Whole ingredients outrank prepared foods, even in the
             # unfiltered lens. Without this, a search for "chicken breast"
@@ -321,8 +380,8 @@ def search(
             # (which floats USDA's inverted "Oil, olive, ..." form to the
             # top), then the shortest name, which is the plainest form.
             scored.append(
-                (partials, processed, kind, sum(positions), len(r["name"]),
-                 r["name"], r),
+                (partials, processed, kind, sum(positions),
+                 _plainness(r["name"]), r["name"], r),
             )
 
     scored.sort(key=lambda s: s[:6])

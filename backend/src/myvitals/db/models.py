@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import (
+    func,
     JSON,
     BigInteger,
     Boolean,
@@ -861,12 +862,20 @@ class Food(Base):
     #: Without this a recipe written in cups cannot be costed in grams,
     #: which is how recipes are actually written.
     unit_grams: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    # No Python-side default: migration 0056 sets server_default now(),
-    # which is how every other model in this file does it. A
-    # `default=lambda: datetime.now(timezone.utc)` here raised NameError
-    # on every INSERT, because this module imports `date` and `datetime`
-    # but not `timezone`.
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # `server_default` must be declared HERE, not only in the migration.
+    # The migration sets it on the table, but SQLAlchemy does not read the
+    # database schema — without this it treats the column as one it must
+    # supply and sends an explicit NULL, which the not-null constraint
+    # then rejects. The seeder never hit it (pg_insert omits the column
+    # entirely, so the table default fired); creating a food through the
+    # ORM did, and returned a 500.
+    #
+    # A `default=lambda: datetime.now(timezone.utc)` is NOT the fix: this
+    # module imports `date` and `datetime` but not `timezone`, and that
+    # spelling raised NameError on every INSERT (v0.15.1).
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+    )
 
 
 class Recipe(Base):
@@ -892,12 +901,20 @@ class Recipe(Base):
     archived: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False,
     )
-    # No Python-side default: migration 0056 sets server_default now(),
-    # which is how every other model in this file does it. A
-    # `default=lambda: datetime.now(timezone.utc)` here raised NameError
-    # on every INSERT, because this module imports `date` and `datetime`
-    # but not `timezone`.
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # `server_default` must be declared HERE, not only in the migration.
+    # The migration sets it on the table, but SQLAlchemy does not read the
+    # database schema — without this it treats the column as one it must
+    # supply and sends an explicit NULL, which the not-null constraint
+    # then rejects. The seeder never hit it (pg_insert omits the column
+    # entirely, so the table default fired); creating a food through the
+    # ORM did, and returned a 500.
+    #
+    # A `default=lambda: datetime.now(timezone.utc)` is NOT the fix: this
+    # module imports `date` and `datetime` but not `timezone`, and that
+    # spelling raised NameError on every INSERT (v0.15.1).
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+    )
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )

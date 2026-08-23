@@ -839,6 +839,11 @@ async def create_food(body: FoodIn, db: AsyncSession = Depends(get_session)):
         slug=slug, name=body.name.strip(), source="user",
         category=body.category, unit_grams=body.unit_grams,
         ingredients=(body.ingredients or None),
+        # Set explicitly as well as relying on the column's server
+        # default. The two together mean a food row can be created
+        # through the ORM whether or not the model happens to know what
+        # the table does — which is exactly the gap that 500'd here.
+        created_at=datetime.now(timezone.utc),
         **{c: getattr(body, c) for c in food_lib.NUTRIENT_COLUMNS},
     )
     db.add(f)

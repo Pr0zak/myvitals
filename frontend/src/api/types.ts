@@ -693,6 +693,12 @@ export interface StreamHealth {
   age_hours: number | null;
   status: StreamStatus;
   stale_after_hours: number | null;
+  /**
+   * True when this row reflects ONE writer out of several, not the whole
+   * table. Steps have seven sources on this database and they coexist,
+   * so a whole-table max stays fresh while the watch feed is dead.
+   */
+  canonical_source_only?: boolean;
 }
 
 export interface IntegrationHealth {
@@ -703,6 +709,15 @@ export interface IntegrationHealth {
   age_hours: number | null;
   last_error: string | null;
   status: "ok" | "stale" | "error" | "never" | "not_configured";
+  /** Newest row this integration has actually produced. */
+  last_item_at?: string | null;
+  item_age_hours?: number | null;
+  /**
+   * Polling fine, nothing arriving for a month. A HINT, never a fault —
+   * `last_sync_at` alone cannot tell a dead cookie returning zero rides
+   * from a month with no rides, and the user knows which it is.
+   */
+  importing_nothing?: boolean;
 }
 
 export interface DataHealth {

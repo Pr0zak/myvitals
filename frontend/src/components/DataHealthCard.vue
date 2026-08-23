@@ -73,7 +73,11 @@ const problems = computed(() => data.value?.problem_keys ?? []);
           <span class="dot"></span>
           <span class="name">
             {{ s.label }}
-            <span class="src">{{ s.source }}</span>
+            <!-- Say when a row speaks for one writer among several,
+                 rather than implying the whole table is reported. -->
+            <span class="src">
+              {{ s.source }}{{ s.canonical_source_only ? " · main source only" : "" }}
+            </span>
           </span>
           <span class="age">
             {{ s.status === "not_configured" && s.last_at === null
@@ -97,6 +101,12 @@ const problems = computed(() => data.value?.problem_keys ?? []);
           </span>
           <span class="age">
             {{ i.configured ? age(i.age_hours) : "not connected" }}
+            <!-- Polled recently but importing nothing. Shown as a plain
+                 statement, not a warning: a quiet month may simply be a
+                 quiet month, and the app cannot tell. -->
+            <small v-if="i.importing_nothing" class="quiet">
+              last import {{ age(i.item_age_hours ?? null) }}
+            </small>
           </span>
         </li>
       </ul>
@@ -114,6 +124,7 @@ const problems = computed(() => data.value?.problem_keys ?? []);
 </template>
 
 <style scoped>
+.quiet { display: block; opacity: 0.7; font-size: 0.72em; }
 .summary { margin: 0 0 0.8rem; font-size: 0.9rem; }
 .summary.ok { color: var(--good); }
 .summary.bad { color: var(--bad); }

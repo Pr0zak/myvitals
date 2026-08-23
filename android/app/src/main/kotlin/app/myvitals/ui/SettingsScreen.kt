@@ -1236,7 +1236,14 @@ private fun DataHealthRows(dh: app.myvitals.sync.DataHealth) {
                 Column(Modifier.weight(1f)) {
                     Text(s.label, color = MV.OnSurface, fontSize = 13.sp)
                     if (s.source.isNotBlank()) {
-                        Text(s.source, color = muted, fontSize = 10.sp)
+                        Text(
+                            // Say when a row speaks for one writer among
+                            // several, rather than implying the whole
+                            // table is being reported.
+                            if (s.canonicalSourceOnly) "${s.source} · main source only"
+                            else s.source,
+                            color = muted, fontSize = 10.sp,
+                        )
                     }
                 }
                 Text(
@@ -1269,10 +1276,23 @@ private fun DataHealthRows(dh: app.myvitals.sync.DataHealth) {
                             Text(it.take(120), color = bad, fontSize = 10.sp)
                         }
                     }
-                    Text(
-                        if (i.configured) age(i.ageHours) else "not connected",
-                        color = muted, fontSize = 12.sp,
-                    )
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            if (i.configured) age(i.ageHours) else "not connected",
+                            color = muted, fontSize = 12.sp,
+                        )
+                        // Polling fine, nothing arriving for a month.
+                        // Stated plainly rather than coloured as a
+                        // fault: `lastSyncAt` cannot tell a dead cookie
+                        // returning zero rides from a month with no
+                        // rides, and the user knows which it is.
+                        if (i.importingNothing) {
+                            Text(
+                                "last import ${age(i.itemAgeHours)}",
+                                color = muted, fontSize = 10.sp,
+                            )
+                        }
+                    }
                 }
             }
         }

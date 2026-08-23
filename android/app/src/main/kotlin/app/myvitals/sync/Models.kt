@@ -1444,6 +1444,10 @@ data class StreamHealth(
     @Json(name = "last_at") val lastAt: String? = null,
     @Json(name = "age_hours") val ageHours: Double? = null,
     val status: String = "ok",
+    // True when this row reflects ONE writer out of several rather than
+    // the whole table. Steps have seven sources here and they coexist,
+    // so a whole-table max stays fresh while the watch feed is dead.
+    @Json(name = "canonical_source_only") val canonicalSourceOnly: Boolean = false,
 )
 
 @JsonClass(generateAdapter = true)
@@ -1455,6 +1459,13 @@ data class IntegrationHealth(
     @Json(name = "age_hours") val ageHours: Double? = null,
     @Json(name = "last_error") val lastError: String? = null,
     val status: String = "ok",
+    // Newest row this integration has actually produced, beside when it
+    // last ran. `lastSyncAt` alone cannot tell a dead Strava cookie
+    // returning zero rides from a month with no rides.
+    @Json(name = "last_item_at") val lastItemAt: String? = null,
+    @Json(name = "item_age_hours") val itemAgeHours: Double? = null,
+    // A hint, never a fault — the user knows which of the two it is.
+    @Json(name = "importing_nothing") val importingNothing: Boolean = false,
 )
 
 @JsonClass(generateAdapter = true)

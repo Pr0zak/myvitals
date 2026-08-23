@@ -141,3 +141,147 @@ def test_previously_broken_staples_stay_fixed(term, prefix):
 def test_search_still_returns_nothing_for_an_empty_term():
     assert F.search("") == []
     assert F.search("   ") == []
+
+
+# ------------------------------------- curated default variety (SEARCH-1)
+
+
+def test_every_curated_preference_actually_lands():
+    """The table is only worth its maintenance cost if each line works.
+
+    A qualifier that does not discriminate is silently inert: the entry
+    looks like a fix, the search returns the same wrong row, and nobody
+    finds out. Assert the whole table end to end, in both lenses.
+    """
+    misses = []
+    for term, wanted in F._PREFERRED_VARIETY.items():
+        for lens in (True, False):
+            hits = F.search(term, ingredients_only=lens, limit=1)
+            name = hits[0]["name"].lower() if hits else "<no result>"
+            if not any(w in name for w in wanted):
+                misses.append(f"{term!r} (ingredients_only={lens}) -> {name}")
+    assert not misses, "\n".join(misses)
+
+
+@pytest.mark.parametrize(
+    "term,expect",
+    [
+        # 37 vs 22 kcal/100 g, decided by an alphabetical coin flip.
+        ("mushrooms", "mushrooms, white, raw"),
+        # "Bacon, meatless" is not bacon.
+        ("bacon", "pork, cured, bacon"),
+        # Oil-packed is 198 kcal / 8.2 g fat; water-packed is 90.
+        ("tuna", "canned in water"),
+        # Wild Atlantic salmon is half the fat of the farmed fish sold.
+        ("salmon", "atlantic, farmed"),
+        # Plain "mustard" returned mustard SPINACH, a leafy green.
+        ("mustard", "mustard, prepared"),
+        # "lean only" silently trims a third of the fat off a steak.
+        ("steak", "separable lean and fat"),
+        # The plain hit was the low-sodium renal-diet product.
+        ("baking powder", "double-acting"),
+        # Yolk and white both beat "whole" on name length.
+        ("egg", "egg, whole"),
+        # The 365 kcal dry-milling grain outranked the vegetable.
+        ("corn", "corn, sweet"),
+        ("milk", "3.25% milkfat"),
+        ("flour", "all-purpose"),
+        ("sugar", "sugars, granulated"),
+        ("almond", "nuts, almonds"),
+    ],
+)
+def test_named_default_variety_cases(term, expect):
+    assert expect in top(term).lower(), top(term)
+
+
+def test_the_preference_tier_runs_before_the_demotion():
+    """Placement is load-bearing, not cosmetic.
+
+    Eight entries name a row the processed-form or part-word demotion is
+    currently firing on — "prepared" mustard, "canned" tuna, "cured"
+    bacon, salsa "sauce", kidney "seeds". Ranked after the demotion
+    instead of before it, all eight would silently do nothing.
+    """
+    for term, expect in [
+        ("mustard", "prepared"), ("tuna", "canned"), ("bacon", "cured"),
+        ("salsa", "sauce"), ("kidney beans", "seeds"),
+    ]:
+        name = top(term).lower()
+        assert expect in name, f"{term} -> {name}"
+
+
+def test_a_preference_is_a_hint_not_a_filter():
+    """If nothing matches the qualifier the tier must fall through, so a
+    line that rots after a catalog rebuild stops helping rather than
+    starting to hurt."""
+    F._PREFERRED_VARIETY["broccoli"] = ("no-such-qualifier-anywhere",)
+    try:
+        assert top("broccoli") == "Broccoli, raw"
+    finally:
+        del F._PREFERRED_VARIETY["broccoli"]
+
+
+def test_an_unlisted_term_is_completely_unaffected():
+    assert "kale" not in F._PREFERRED_VARIETY
+    assert top("kale") == "Kale, raw"
+
+
+# --------------------------------------------- query aliases (SEARCH-1)
+
+
+@pytest.mark.parametrize(
+    "term,expect",
+    [
+        # These three returned ZERO rows. A tiebreak cannot help an empty
+        # candidate set, and the quick-add staples list was offering
+        # items that could never resolve.
+        ("bell pepper", "peppers, sweet"),
+        ("breadcrumbs", "bread, crumbs"),
+        ("chilli powder", "chili powder"),
+        # The herb is "Spearmint", and \bmint cannot match inside it, so
+        # a recipe asking for mint got a NESTLE After Eight.
+        ("mint", "spearmint"),
+        # Regional spellings.
+        ("courgette", "zucchini"),
+        ("aubergine", "eggplant"),
+        ("prawns", "shrimp"),
+        ("yoghurt", "yogurt"),
+        ("rocket", "arugula"),
+        ("green onion", "scallions"),
+    ],
+)
+def test_query_aliases_reach_the_catalogs_own_vocabulary(term, expect):
+    assert expect in top(term).lower(), top(term)
+
+
+def test_aliasing_is_whole_query_only():
+    """Rewriting a substring of a longer phrase could corrupt a query
+    that merely contains one of these words."""
+    assert "mint" in F._QUERY_ALIASES
+    # "peppermint tea" is not the bare word, so it must not be rewritten.
+    assert F._QUERY_ALIASES.get("peppermint tea") is None
+
+
+def test_every_alias_target_resolves():
+    """An alias pointing at vocabulary the catalog does not have is worse
+    than no alias: it replaces one empty result with another, and hides
+    the original term in the process."""
+    dead = [
+        f"{k} -> {v}" for k, v in F._QUERY_ALIASES.items()
+        if not F.search(v, limit=1)
+    ]
+    assert not dead, "\n".join(dead)
+
+
+def test_the_curated_staples_list_still_resolves_end_to_end():
+    """The pantry quick-add offers search TERMS, not ids, so an entry
+    that stops resolving degrades to "not offered" — silently. This is
+    the assertion that catches it."""
+    from myvitals.analytics import common_pantry as CP
+
+    dead = []
+    for group, items in CP.COMMON_PANTRY.items():
+        for _label, term in items:
+            if not F.search(term, limit=1):
+                dead.append(f"{group}: {term}")
+    assert not dead, "\n".join(dead)

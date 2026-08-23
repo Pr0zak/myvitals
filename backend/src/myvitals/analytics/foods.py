@@ -203,6 +203,137 @@ _PART_WORDS: frozenset[str] = frozenset({
 
 _WORD_RE = re.compile(r"[a-z][a-z-]+")
 
+#: Words people type that the catalog does not use (SEARCH-1).
+#:
+#: The ranking tiers can only reorder candidates. When a query produces
+#: NO candidates at all there is nothing to reorder, and no amount of
+#: tiebreaking will help: USDA writes "Peppers, sweet", so "bell pepper"
+#: matches nothing whatsoever, and the quick-add staples list has been
+#: silently offering three items that could never resolve.
+#:
+#: Rewriting happens on the WHOLE query, before tokenising, and only on
+#: an exact match — so this cannot corrupt a longer phrase that happens
+#: to contain one of these words. Every mapping is a vocabulary
+#: difference (regional spelling, or the shop's name for the thing versus
+#: USDA's), never a change of food.
+_QUERY_ALIASES: dict[str, str] = {
+    # USDA files these under a name a shopper would not type.
+    "bell pepper": "sweet pepper",
+    "bell peppers": "sweet pepper",
+    "breadcrumbs": "bread crumbs",
+    "green onion": "scallions",
+    "green onions": "scallions",
+    "spring onion": "scallions",
+    "spring onions": "scallions",
+    # The herb is "Spearmint" in the catalog, and the search's whole-word
+    # matcher cannot see "mint" inside it — so a recipe asking for mint
+    # got a NESTLE After Eight.
+    "mint": "spearmint",
+    # British spellings. Harmless where the US form already works, and
+    # the difference between a result and an empty list where it does not.
+    "chilli": "chili",
+    "chilli powder": "chili powder",
+    "courgette": "zucchini",
+    "courgettes": "zucchini",
+    "aubergine": "eggplant",
+    "aubergines": "eggplant",
+    "prawn": "shrimp",
+    "prawns": "shrimp",
+    "yoghurt": "yogurt",
+    "rocket": "arugula",
+    "coriander leaves": "cilantro",
+}
+
+#: Which variety a bare ingredient name means (SEARCH-1).
+#:
+#: When a user types "mushrooms" the catalog offers enoki, morel, white,
+#: oyster, maitake, shiitake, portabella and chanterelle. Every ranking
+#: tier ties, so the winner is decided ALPHABETICALLY — a coin flip that
+#: landed on enoki, at 37 kcal/100 g against white's 22. The row that wins
+#: is the row that costs a recipe, a shopping list, a food-log entry and a
+#: prep component, and it does so silently.
+#:
+#: There is no data-driven answer to "which variety did they mean", so
+#: this is the same curated list `common_pantry.py` ships for the same
+#: reason: it is what every app in this category does instead of
+#: pretending the question has an algorithmic answer.
+#:
+#: A value is a tuple of lowercase SUBSTRINGS. A row scores better if its
+#: name contains any of them. Substrings, not words, because several of
+#: the discriminating qualifiers are phrases or numbers that no word
+#: tokeniser produces — "atlantic, farmed", "canned in water", "3.25%".
+#:
+#: It is a TIEBREAK HINT, not a filter. If no row matches, the tier is a
+#: no-op and ranking falls through unchanged. That is what keeps a rotted
+#: entry harmless after a catalog rebuild: it stops helping rather than
+#: starting to hurt.
+#:
+#: Every entry below was verified against the live catalog. Terms whose
+#: current answer is already right are deliberately absent — each line
+#: here is hand-maintained, so the table has to earn its size.
+_PREFERRED_VARIETY: dict[str, tuple[str, ...]] = {
+    # Nuts: the plain search hits the OIL first, which is a different food.
+    "almond": ("nuts",),
+    "almonds": ("nuts",),
+    # Florida avocados are a third less fat than the Californian fruit US
+    # shops actually sell; "all commercial varieties" is the honest row.
+    "avocado": ("commercial",),
+    "avocados": ("commercial",),
+    # "Bacon, meatless" is not bacon.
+    "bacon": ("cured",),
+    # The plain hit is the low-sodium renal-diet product, ~100x off.
+    "baking powder": ("double-acting",),
+    "bread": ("commercially prepared",),
+    "cheese": ("cheddar",),
+    "cinnamon": ("spices",),
+    # Otherwise the 365 kcal dry-milling grain outranks the vegetable.
+    "corn": ("sweet",),
+    # Yolk and white both beat "whole" on name length.
+    "egg": ("whole",),
+    "eggs": ("whole",),
+    "flour": ("all-purpose",),
+    "grape": ("seedless",),
+    "grapes": ("seedless",),
+    "ground beef": ("80%",),
+    "hot sauce": ("ready-to-serve",),
+    "kidney beans": ("red",),
+    # USDA names the fruit "Lemons"; every impostor uses the singular.
+    "lemon": ("lemons",),
+    "mayonnaise": ("regular",),
+    # NOT ("whole",) — that matches "Milk, buttermilk, fluid, whole",
+    # which is shorter and wins. Only the fat percentage discriminates.
+    "milk": ("3.25%",),
+    "mozzarella": ("whole",),
+    "mushroom": ("white",),
+    "mushrooms": ("white",),
+    # Plain "mustard" returns mustard SPINACH, a leafy green.
+    "mustard": ("prepared",),
+    "noodles": ("dry",),
+    "parmesan": ("hard",),
+    "potato": ("flesh",),
+    "potatoes": ("flesh",),
+    "quinoa": ("uncooked",),
+    # NOT ("atlantic",) alone: that lands on the WILD row at half the fat
+    # of the farmed fish a US shop sells. Under-reporting fat is the
+    # failure direction this app cannot afford.
+    "salmon": ("atlantic, farmed",),
+    "salsa": ("ready-to-serve",),
+    "sour cream": ("cultured",),
+    # Pins the trim, not the cut. "lean only" silently trims a third of
+    # the fat off every steak logged.
+    "steak": ("lean and fat",),
+    "sugar": ("granulated",),
+    "tofu": ("magnesium chloride",),
+    # NOT ("ripe",) — that matches the COOKED row, which is shorter.
+    "tomato": ("year round",),
+    "tomatoes": ("year round",),
+    # NOT ("canned",) or ("light",): both land on the oil-packed row at
+    # 198 kcal / 8.2 g fat against 90 kcal for water-packed.
+    "tuna": ("canned in water",),
+    "zucchini": ("summer",),
+}
+
+
 
 #: USDA appends provenance notes to some names — "Sweet potato, raw,
 #: unprepared (Includes foods for USDA's Food Distribution Program)".
@@ -317,7 +448,12 @@ def search(
 
     Whole-word matching also stops "oil" matching "boiled".
     """
-    terms = [t for t in re.split(r"\s+", term.strip().lower()) if t]
+    # Rewrite the whole query first, so an alias feeds every tier below —
+    # including the preferred-variety lookup, which is keyed on the
+    # catalog's vocabulary rather than the user's.
+    normalised = " ".join(term.strip().lower().split())
+    normalised = _QUERY_ALIASES.get(normalised, normalised)
+    terms = [t for t in re.split(r"\s+", normalised) if t]
     if not terms:
         return []
     # Two patterns per term. The whole-word form is what the user almost
@@ -342,7 +478,12 @@ def search(
         rows = [r for r in rows if is_ingredient(r)]
 
     asked = set(terms)
-    scored: list[tuple[int, int, int, int, int, str, dict[str, Any]]] = []
+    # Empty when the query has no curated default, which makes the
+    # preference tier a no-op for every row rather than a filter.
+    wanted_variety = _PREFERRED_VARIETY.get(" ".join(terms), ())
+    scored: list[
+        tuple[int, int, int, int, int, int, str, dict[str, Any]]
+    ] = []
     for r in rows:
         name = r["name"].lower()
         positions: list[int] = []
@@ -375,14 +516,21 @@ def search(
             # when both an ingredient and a prepared dish match, which is
             # exactly when the ingredient is wanted.
             kind = 0 if is_ingredient(r) else 1
+            # Curated default variety. Ranked BEFORE the processed-form
+            # and part-word demotion, not after, and the placement is
+            # load-bearing: eight of the entries name a row that the
+            # demotion is currently firing on ("prepared" mustard,
+            # "canned" tuna, "cured" bacon, salsa "sauce"). Placed after,
+            # those entries would silently do nothing.
+            preferred = 0 if any(w in name for w in wanted_variety) else 1
             # Fewest partial matches, then fewest unrequested processed
             # forms, then ingredients first, then earliest in the name
             # (which floats USDA's inverted "Oil, olive, ..." form to the
             # top), then the shortest name, which is the plainest form.
             scored.append(
-                (partials, processed, kind, sum(positions),
+                (partials, preferred, processed, kind, sum(positions),
                  _plainness(r["name"]), r["name"], r),
             )
 
-    scored.sort(key=lambda s: s[:6])
-    return [s[6] for s in scored[:limit]]
+    scored.sort(key=lambda s: s[:7])
+    return [s[7] for s in scored[:limit]]

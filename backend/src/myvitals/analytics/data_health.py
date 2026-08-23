@@ -69,10 +69,17 @@ class StreamSpec:
 #: Order is display order — most-continuous first, so the streams that
 #: can actually be broken sit at the top where they will be seen.
 STREAMS: tuple[StreamSpec, ...] = (
+    # 24 h, not 6 h. Measured over 30 days on this database, the longest
+    # real gap between heart-rate samples is 16.4 hours — the watch comes
+    # off to charge, and it is not worn every night. A 6 h threshold
+    # therefore fires "stale" on perfectly healthy data most weeks, which
+    # is precisely the cry-wolf failure the module docstring above warns
+    # about: once the card has been wrong three times it gets ignored,
+    # and then the one time heart rate really does stop, nobody looks.
     StreamSpec("heart_rate", "Heart rate", "vitals_heartrate", "time",
-               "continuous", 6.0, "Watch via phone"),
+               "continuous", 24.0, "Watch via phone"),
     StreamSpec("steps", "Steps", "vitals_steps", "time",
-               "continuous", 6.0, "Watch via phone"),
+               "continuous", 24.0, "Watch via phone"),
     StreamSpec("hrv", "HRV", "vitals_hrv", "time",
                "nightly", 48.0, "Watch, overnight"),
     StreamSpec("sleep", "Sleep", "sleep_stages", "time",
@@ -90,6 +97,46 @@ STREAMS: tuple[StreamSpec, ...] = (
     StreamSpec("environment", "Bedroom environment", "env_readings", "time",
                "optional", 6.0, "Home Assistant"),
 )
+
+#: Steps are written by SEVEN sources on this database and `source` is
+#: part of the primary key, so they coexist rather than overwrite. Three
+#: are currently live; four stopped between May and August.
+#:
+#: That makes a whole-table `MAX(time)` the wrong question. It stays
+#: green as long as ANY writer is active, so the watch feed could die
+#: while the phone's built-in pedometer kept the badge fresh — and the
+#: watch feed is the one every summary and analytic actually uses, via
+#: `pick_canonical_steps_source`. The card would be reassuring about a
+#: stream that had stopped, which is the exact failure it exists to
+#: catch.
+#:
+#: `_is_watch_source` is imported rather than re-listed: the keyword list
+#: has been extended twice already (for the Fitbit rename and the Google
+#: Health rebrand) and a second copy here would silently drift.
+_MULTI_SOURCE_STREAMS: frozenset[str] = frozenset({"steps"})
+
+
+async def _canonical_steps_last(db: AsyncSession) -> datetime | None:
+    """Newest step sample from the source the rest of the app trusts.
+
+    Cheap: one grouped MAX over an indexed column, no time predicate
+    needed because there is one row per source.
+    """
+    from .jobs import _is_watch_source
+
+    rows = (await db.execute(text(
+        'SELECT source, max("time") AS newest FROM vitals_steps '
+        "WHERE source <> 'unknown' GROUP BY source"
+    ))).all()
+    if not rows:
+        return None
+    watch = [r for r in rows if r.source and _is_watch_source(r.source)]
+    if watch:
+        return max(r.newest for r in watch if r.newest is not None)
+    # No watch writer at all — fall back to the freshest of whatever is
+    # there, which matches what the summaries would do.
+    candidates = [r.newest for r in rows if r.newest is not None]
+    return max(candidates) if candidates else None
 
 #: Freshness does not need sub-minute accuracy, and the nav polls this on
 #: every page load. One statement per minute is plenty.
@@ -142,15 +189,25 @@ async def stream_health(db: AsyncSession, *, use_cache: bool = True) -> list[dic
     row = (await db.execute(text(f"SELECT {parts}"))).one()  # noqa: S608
     now = datetime.now(timezone.utc)
 
+    # One extra statement, only for the streams where a whole-table MAX
+    # answers the wrong question. See _MULTI_SOURCE_STREAMS.
+    canonical: dict[str, datetime | None] = {}
+    if "steps" in _MULTI_SOURCE_STREAMS:
+        canonical["steps"] = await _canonical_steps_last(db)
+
     out: list[dict[str, Any]] = []
     for spec in STREAMS:
-        last = getattr(row, spec.key, None)
+        last = canonical.get(spec.key) if spec.key in canonical else getattr(row, spec.key, None)
         status, age_h = _classify(spec, last, now)
         out.append({
             "key": spec.key,
             "label": spec.label,
             "kind": spec.kind,
             "source": spec.source,
+            # True when this row is judged on one writer among several,
+            # so the client can say which rather than implying the table
+            # as a whole is being reported.
+            "canonical_source_only": spec.key in _MULTI_SOURCE_STREAMS,
             "last_at": last.isoformat() if last else None,
             "age_hours": round(age_h, 2) if age_h is not None else None,
             "status": status,
@@ -161,6 +218,51 @@ async def stream_health(db: AsyncSession, *, use_cache: bool = True) -> list[dic
 
     _cache = (now_mono, out)
     return out
+
+
+#: Where to look for what an integration has actually IMPORTED, as
+#: opposed to whether its poll ran.
+#:
+#: This is the gap the card had. A poll that succeeds and brings back
+#: nothing is indistinguishable, from `last_sync_at` alone, from a poll
+#: that succeeds when there genuinely was nothing to bring — and the
+#: first of those is precisely how Strava fails here. The cookie expires,
+#: the request 401s, the sync completes, and zero rides arrive; CLAUDE.md
+#: records that going unnoticed until a reconnect banner was added.
+#:
+#: Live proof that it is still a gap: Concept2 reports `status: ok` with
+#: no error, polling every thirty minutes, and its newest imported
+#: session is from three months ago.
+#:
+#: These numbers get REPORTED, never turned into a red status. A three
+#: month gap in erg sessions is a perfectly ordinary thing for a person
+#: to do, so inferring breakage from it would generate exactly the false
+#: alarm this module is otherwise careful to avoid. Showing "polled 18
+#: minutes ago, last imported 102 days ago" side by side lets the user
+#: draw a conclusion the app cannot safely draw for them.
+_ITEM_PROBES: dict[str, tuple[str, str, str | None]] = {
+    # key -> (table, time column, optional SQL predicate)
+    "strava": ("activities", "start_at", "source = 'strava'"),
+    "concept2": ("activities", "start_at", "source = 'concept2'"),
+    # Google Health feeds daily aggregates rather than the activity feed.
+    "google_health": ("google_health_daily", "date", None),
+}
+
+
+async def _last_items(db: AsyncSession) -> dict[str, datetime | None]:
+    """Newest row each integration has produced, in one statement.
+
+    Same shape as the streams query: table and column names come from the
+    constant above, never from user input, so the interpolation is not an
+    injection surface. `activities` holds ~2k rows, so the predicate scan
+    is immaterial next to the round trip it saves.
+    """
+    parts = []
+    for key, (table, col, pred) in _ITEM_PROBES.items():
+        where = f" WHERE {pred}" if pred else ""
+        parts.append(f'(SELECT max("{col}") FROM {table}{where}) AS {key}')
+    row = (await db.execute(text("SELECT " + ", ".join(parts)))).one()  # noqa: S608
+    return {key: getattr(row, key, None) for key in _ITEM_PROBES}
 
 
 async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
@@ -176,6 +278,7 @@ async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
     from ..db import models
 
     now = datetime.now(timezone.utc)
+    last_items = await _last_items(db)
 
     def entry(
         key: str, label: str, row: Any, *,
@@ -201,6 +304,16 @@ async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
         else:
             status = "ok"
 
+        # What it last actually brought back, beside when it last ran.
+        # Deliberately NOT folded into `status` — see _ITEM_PROBES.
+        item = last_items.get(key)
+        if item is not None and not isinstance(item, datetime):
+            # `google_health_daily.date` is a plain calendar date.
+            item = datetime(item.year, item.month, item.day, tzinfo=timezone.utc)
+        if item is not None and item.tzinfo is None:
+            item = item.replace(tzinfo=timezone.utc)
+        item_age_h = (now - item).total_seconds() / 3600.0 if item else None
+
         return {
             "key": key,
             "label": label,
@@ -209,6 +322,18 @@ async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
             "age_hours": round(age_h, 2) if age_h is not None else None,
             "last_error": err,
             "status": status,
+            # Null, never a zero age, when the integration has produced
+            # nothing at all — "imported nothing ever" and "imported
+            # nothing lately" are different facts.
+            "last_item_at": item.isoformat() if item else None,
+            "item_age_hours": round(item_age_h, 2) if item_age_h is not None else None,
+            # True when the poll is healthy but nothing has arrived in a
+            # long time. A HINT for the client to render as a neutral
+            # note, not a fault: the user may simply not have ridden.
+            "importing_nothing": bool(
+                status == "ok" and item_age_h is not None
+                and age_h is not None and item_age_h > 24 * 30
+            ),
         }
 
     async def one(model: Any) -> Any:

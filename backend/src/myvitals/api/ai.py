@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics import projection
+from ..analytics.targets import goal_target_kg
 from ..analytics.trends import compute_badges
 from ..auth import require_any
 from ..config import settings
@@ -713,11 +714,14 @@ async def _check_goals_for_completion(db: AsyncSession) -> None:
         """Normalise a weight goal's target to kilograms regardless of
         the unit the user typed it in. The /goals form lets users pick
         either kg or lb; storing both unit + value lets us be robust
-        without forcing a migration."""
-        unit = (g.target_unit or "").strip().lower()
-        if unit in ("lb", "lbs", "pound", "pounds"):
-            return g.target_value / 2.20462
-        return g.target_value
+        without forcing a migration.
+
+        The conversion itself lives in `analytics/targets.py` so every
+        reader of a weight goal shares one implementation. A 200 lb goal
+        read as 200 kg does not fail loudly — it concludes the user wants
+        to gain 86 kg and prescribes a surplus.
+        """
+        return goal_target_kg(g.target_value, g.target_unit)
 
     new_alerts: list[models.AiAlert] = []
     for g in goals:
@@ -991,10 +995,9 @@ def _goal_progress(
     """
     if current is None or g.target_value is None:
         return {"current_value": None, "progress_pct": None}
-    unit = (g.target_unit or "").strip().lower()
     target = g.target_value
     if g.kind == "weight":
-        target_kg = (target / 2.20462) if unit in ("lb", "lbs", "pound", "pounds") else target
+        target_kg = goal_target_kg(target, g.target_unit)
         start = baseline if baseline is not None else (current + 1.0)
         denom = start - target_kg
         if denom <= 0:
@@ -1064,11 +1067,8 @@ async def _goal_projection(
     forecast. They go through the deterministic path instead.
     """
     target = g.target_value
-    unit = (g.target_unit or "").strip().lower()
-    if g.kind == "weight" and target is not None and unit in (
-        "lb", "lbs", "pound", "pounds",
-    ):
-        target = target / 2.20462
+    if g.kind == "weight":
+        target = goal_target_kg(target, g.target_unit)
 
     if g.kind in ("sober", "fast_streak"):
         per_day = 1.0 if g.kind == "sober" else 0.0

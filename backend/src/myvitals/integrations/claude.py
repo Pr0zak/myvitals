@@ -4148,7 +4148,7 @@ async def compute_targets_for_user(db: AsyncSession) -> dict[str, Any]:
     """
     from sqlalchemy import select as _select
 
-    from ..analytics.targets import compute_targets
+    from ..analytics.targets import compute_targets, goal_target_kg
 
     profile = await db.get(models.UserProfile, 1)
     weight = (await db.execute(
@@ -4167,8 +4167,11 @@ async def compute_targets_for_user(db: AsyncSession) -> dict[str, Any]:
         .order_by(models.AiGoal.started_at.desc())
         .limit(1)
     )).scalar_one_or_none()
-    if goal_row is not None and goal_row.target_value is not None:
-        goal_kg = float(goal_row.target_value)
+    if goal_row is not None:
+        # The goal form stores the unit the user typed. Reading 200 lb as
+        # 200 kg concludes they are trying to GAIN 86 kg and prescribes a
+        # surplus, silently and plausibly.
+        goal_kg = goal_target_kg(goal_row.target_value, goal_row.target_unit)
 
     return compute_targets(
         weight_kg=float(weight) if weight is not None else None,

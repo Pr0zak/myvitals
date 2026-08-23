@@ -65,6 +65,33 @@ MIN_MALE_KCAL = 1500.0
 MIN_FEMALE_KCAL = 1200.0
 
 
+#: Pounds per kilogram. The /goals form lets the user type a target in
+#: either unit and stores both value and unit, so anything reading a
+#: weight goal MUST convert — a 200 lb goal read as 200 kg does not fail
+#: loudly, it silently concludes the user is trying to gain 86 kg and
+#: prescribes a surplus. That is exactly what happened the first time
+#: this module was wired up.
+KG_PER_LB = 0.45359237
+
+_LB_UNITS: frozenset[str] = frozenset({"lb", "lbs", "pound", "pounds"})
+
+
+def goal_target_kg(
+    target_value: float | None, target_unit: str | None,
+) -> float | None:
+    """Normalise a weight goal's target to kilograms.
+
+    Returns None for a goal with no target rather than guessing, so a
+    caller cannot mistake "no goal set" for "goal of zero".
+    """
+    if target_value is None:
+        return None
+    unit = (target_unit or "").strip().lower()
+    if unit in _LB_UNITS:
+        return float(target_value) * KG_PER_LB
+    return float(target_value)
+
+
 def _age(birth: date | None, today: date) -> int | None:
     if not birth:
         return None

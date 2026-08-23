@@ -522,3 +522,50 @@ def test_the_known_real_profile_lands_where_it_should():
     assert out["bmr_kcal"] == pytest.approx(2038, abs=8)
     assert out["target_kcal"] == pytest.approx(2300, abs=15)
     assert 145 <= out["protein_g"] <= 181
+
+
+# ------------------------------------------------- weight-goal units
+
+
+def test_a_pound_goal_is_converted_not_read_as_kilograms():
+    """Caught live, on real data, after this module first shipped.
+
+    The /goals form stores the unit the user typed. This user's goal is
+    "200 lb", and reading 200 as kilograms does not fail loudly — it
+    concludes they are trying to GAIN 86 kg, applies no deficit, scales
+    protein to current bodyweight, and returns a perfectly plausible
+    2,795 kcal surplus target. Every number on the screen looked right.
+    """
+    assert T.goal_target_kg(200, "lb") == pytest.approx(90.72, abs=0.01)
+    assert T.goal_target_kg(200, "lbs") == pytest.approx(90.72, abs=0.01)
+    assert T.goal_target_kg(200, "POUNDS") == pytest.approx(90.72, abs=0.01)
+    assert T.goal_target_kg(90.7, "kg") == 90.7
+    assert T.goal_target_kg(90.7, None) == 90.7
+
+
+def test_no_goal_target_is_none_not_zero():
+    """"No goal set" and "goal of zero" must not collapse — a zero goal
+    weight would prescribe the largest deficit the floor allows."""
+    assert T.goal_target_kg(None, "lb") is None
+
+
+def test_the_pound_goal_produces_a_deficit_not_a_surplus():
+    """The end-to-end version of the bug: same profile, goal in pounds."""
+    out = T.compute_targets(
+        weight_kg=114.3, height_cm=180, birth_date=date(1978, 8, 18),
+        sex="male", activity_level="light",
+        goal_weight_kg=T.goal_target_kg(200, "lb"),
+        today=date(2026, 8, 23),
+    )
+    assert out["deficit_kcal"] == 500
+    assert out["target_kcal"] < out["tdee_kcal"]
+    assert out["expected_loss_kg_per_week"] > 0
+
+
+def test_every_weight_goal_reader_shares_one_conversion():
+    """Three copies of `/ 2.20462` lived in api/ai.py. A fourth is how
+    one surface starts disagreeing with the others about the goal."""
+    code = _code_only((SRC / "api" / "ai.py").read_text())
+    assert "2.20462" not in code
+    code = _code_only((SRC / "integrations" / "claude.py").read_text())
+    assert "2.20462" not in code

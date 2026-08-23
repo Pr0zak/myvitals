@@ -1,20 +1,50 @@
 # myvitals — Pending Work
 
-Snapshot updated **2026-08-01** after shipping **v0.7.347**; prior
-snapshot by session-close on **2026-07-28** after **v0.7.342**
-(previous snapshot v0.7.321, 2026-07-22). This session shipped the entire
-13-task **#ENHANCE** strength backlog (v0.7.322→342) — all deployed +
-verified. One low-severity follow-up (`PROG-STATE-1`) is deferred pending
-a product decision; see Active below.
+Snapshot updated **2026-08-23** after shipping **v0.26.9**; prior snapshot
+**2026-08-01** after **v0.7.347**. The gap between those two is large: the
+version line jumped from `0.7.x` to `0.15.0` for the meals feature and ran
+to `0.26.9`, covering MEAL-1 through MEAL-9, the AI-CLI provider, and two
+rounds of food-search ranking fixes. All deployed and verified live on
+CT 104.
 
 Numeric task IDs are session-scoped. Use **mnemonics** (e.g. `FITBIT-2`)
 as the durable identifier. At the start of a new session, ask Claude to
 "rehydrate the task tracker from TODO.md + memory" and it'll re-verify
 each item against the code and re-instantiate via TaskCreate.
 
+**Carried items below were not re-verified on 2026-08-23.** They are
+reproduced as written on 2026-08-01; check each against the code before
+acting on it.
+
 ---
 
 ## Active — actionable now
+
+### SEARCH-MULTIAXIS — "pork chop" needs a pin the current tier cannot express
+Source: v0.26.9 catalog audit. The right row requires cut AND trim AND raw
+simultaneously (center loin ∧ lean-and-fat ∧ raw), and `_PREFERRED_VARIETY`
+is an any-of substring tier, so every single qualifier tested lands on a
+wrong axis — "center loin" resolves to the lean-only row (the exact silent
+fat-trim the audit was hunting), "lean and fat" to a cooked blade chop.
+Deliberately not fixed: the incumbent's error is modest (11.1 vs 9.0 g fat,
+cooked vs raw) and an all-of pin would need a near-full-name phrase that
+rots on the next catalog rebuild. Revisit only if the tier gains AND
+semantics. Same shape may exist for other multi-axis cuts.
+
+### MEAL-BARCODE — barcode scanning via Open Food Facts
+Phase 7 of `docs/MEALS_PLAN.md`, offered and not built. The label scanner
+(MEAL-8) covers the same intent by photo and is arguably better, since it
+works for products with no barcode entry. Worth doing only if typing
+friction is measurable after real food-log use.
+
+### MEAL-OBSERVED-TARGETS — derive energy targets from logged intake
+Phase 8 of `docs/MEALS_PLAN.md`. `analytics/targets.py` always reports
+`basis: "estimate"` (Mifflin-St Jeor is an equation applied to a profile,
+not a measurement) and `prep_plans.target_basis` is already stored per
+plan so the two can be told apart in hindsight. Open question is how many
+complete food-log days is enough for an observed figure to BEAT the
+equation rather than just be noisier. Blocked on there being enough
+complete days.
 
 ### PROG-STATE-1 — program progression state can be reverted by a stale equipment PUT
 Source: v0.7.342 adversarial review (see memory `myvitals-prog1-known-issue`).
@@ -164,6 +194,50 @@ rest/hold + missed-workout notifications, workout calendar-heatmap (both surface
 supersets, timed-hold countdown, double-progression plateau logic, per-set 1-5
 rating (RPE-ish). Not proposed: openGym plan-file *sharing*, passkey/multi-profile/
 i18n-UI (single-user self-host, irrelevant).
+
+---
+
+## Resolved — meals line, v0.15.0 → v0.26.9 (2026-08-23)
+
+Ten shipped items. Design record is in CLAUDE.md and
+`docs/MEALS_PLAN.md`; only the parts that constrain future work are
+repeated here.
+
+- **MEAL-1..MEAL-8** — foods, recipes, pantry, per-meal fat, weekly plan,
+  shopping list, AI suggestions, food log, ingredient concepts, one-tap
+  staples, pantry-from-a-photo, nutrition-label scanning. Both surfaces.
+- **AI-CLI (v0.23.0)** — every AI surface can route through headless
+  `claude -p` on the machine's subscription instead of API credits. The
+  $0 premise is one line: `ANTHROPIC_API_KEY` must be stripped from the
+  child environment, or the CLI bills per token.
+- **MEAL-9 (v0.26.0)** — weekend component prep planner. The AI proposes
+  what to cook; every gram, calorie and macro is computed server-side.
+  `PREP_PLAN_TOOL` has no nutrition field at all, and a test asserts it.
+- **v0.26.1** — a weight goal stored in **pounds** was read as kilograms,
+  so the planner concluded the user wanted to GAIN 86 kg and returned a
+  surplus target next to a weight-loss goal. Three duplicate `/ 2.20462`
+  conversions in `api/ai.py` now share `targets.goal_target_kg`.
+- **v0.26.2** — `models.FoodLogEntry.eaten_on` (the column is `day`)
+  reached production as a bare 500. `tests/test_model_attribute_references.py`
+  now AST-walks every source file and asserts each `models.X.attr`
+  resolves; SQLAlchemy resolves those at access time, so nothing else
+  catches it.
+- **v0.26.3 / v0.26.6** — two arithmetic repairs applied AFTER the model
+  answers, because the prompt rules were not enough twice over: portion
+  reconciliation (it cooked 6 portions and assigned 11.5) and energy
+  scaling (plans landed at 40-71% of budget). Sauce is excluded from
+  scaling — per-meal fat is a medical constraint here.
+- **v0.26.5 / v0.26.9** — food-search ranking. A row that is WRONG rather
+  than MISSING is the one failure the meals code's null-handling cannot
+  catch, because it returns confident nutrition with no error anywhere.
+  "sweet potato" resolved to the leaves, "tuna" to oil-packed, "salmon"
+  to wild Atlantic at half the fat of farmed, "steak" to "lean only".
+- **v0.26.8** — `MAX_LOOKBACK_DAYS = 14` clamped the Settings backfill
+  buttons, so "30 days", "1 year" and "All (10y)" all read a fortnight
+  and records older than that were permanently unreachable. Reads are now
+  sliced, because `HealthConnectGateway.read()` truncates silently at 100
+  pages. Also: `/meals/prep/targets` now reports `weight_age_days` and
+  `weight_stale`.
 
 ---
 

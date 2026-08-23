@@ -365,3 +365,36 @@ def test_real_system_prompts_do_instruct_tool_use():
     countermand breaks every CLI call."""
     src = (SRC / "integrations" / "claude.py").read_text()
     assert "via the `give_" in src or "via the tool" in src.lower()
+
+
+def test_provider_dirty_check_uses_a_snapshot_not_the_live_config():
+    """The provider setting reverted itself to "anthropic" after a page
+    load, silently moving every AI call back onto per-token billing.
+
+    `loadAiCfg` assigns `aiCfg` and only THEN consults `aiProviderDirty`.
+    While that computed compared the local ref to `aiCfg`, it was
+    comparing a stale ref against the freshly-loaded server value — so it
+    read "dirty" on every load, skipped the sync meant to seed the
+    editors, and left the dropdown showing "Anthropic" while the server
+    held `claude_cli`. The next save wrote the wrong value back. The
+    guard meant to protect an unsaved draft was discarding the saved
+    setting instead.
+    """
+    root = pathlib.Path(__file__).resolve().parents[2]
+    ui = (root / "frontend" / "src" / "views" / "Settings.vue").read_text()
+    fn = ui[ui.index("const aiProviderDirty = computed("):]
+    fn = fn[: fn.index(");") + 2]
+    assert "aiProviderLoaded" in fn
+    assert "aiCfg.value?.provider" not in fn, (
+        "dirty check compares against the live config again"
+    )
+
+
+def test_the_snapshot_is_taken_before_the_dirty_check_is_read():
+    """Order is the whole fix: reading the check after updating the
+    snapshot would make it always-clean instead of always-dirty."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    ui = (root / "frontend" / "src" / "views" / "Settings.vue").read_text()
+    fn = ui[ui.index("async function loadAiCfg("):]
+    fn = fn[: fn.index("async function aiSaveKey")]
+    assert fn.index("const wasDirty") < fn.index("aiProviderLoaded.value = {")

@@ -534,9 +534,17 @@ async function loadAiCfg() {
     if (!aiInstructionsDirty.value || aiInstructions.value === "") {
       aiInstructions.value = aiCfg.value.custom_instructions ?? "";
     }
-    if (!aiProviderDirty.value) {
-      aiProvider.value = aiCfg.value.provider ?? "anthropic";
-      aiBaseUrl.value = aiCfg.value.base_url ?? "";
+    // Snapshot first, THEN decide whether the editors may be reseeded.
+    // Order matters: the dirty check reads this snapshot, so updating it
+    // after the check would reintroduce the bug it exists to prevent.
+    const wasDirty = aiProviderDirty.value;
+    aiProviderLoaded.value = {
+      provider: aiCfg.value.provider ?? "anthropic",
+      base_url: aiCfg.value.base_url ?? "",
+    };
+    if (!wasDirty) {
+      aiProvider.value = aiProviderLoaded.value.provider;
+      aiBaseUrl.value = aiProviderLoaded.value.base_url;
     }
   } catch { /* ignore */ }
 }
@@ -653,9 +661,24 @@ async function aiSaveCliToken(clear = false) {
 const aiBaseUrl = ref("");
 const aiProviderSaving = ref(false);
 const aiProviderError = ref("");
+/** The last provider values the SERVER confirmed.
+ *
+ *  Dirtiness is measured against this snapshot rather than against
+ *  `aiCfg`, because `loadAiCfg` assigns `aiCfg` before consulting the
+ *  dirty flag. Comparing to `aiCfg` therefore compared the stale local
+ *  ref to the FRESH server value, read "dirty" on every single load, and
+ *  skipped the sync that was supposed to seed the editors — so the
+ *  dropdown showed "Anthropic" while the server held `claude_cli`, and
+ *  the next save wrote that wrong value back. The guard meant to protect
+ *  an unsaved draft was silently discarding the saved setting instead.
+ */
+const aiProviderLoaded = ref<{
+  provider: "anthropic" | "openai_compatible" | "ollama" | "claude_cli";
+  base_url: string;
+}>({ provider: "anthropic", base_url: "" });
 const aiProviderDirty = computed(
-  () => aiProvider.value !== (aiCfg.value?.provider ?? "anthropic")
-    || aiBaseUrl.value.trim() !== (aiCfg.value?.base_url ?? ""),
+  () => aiProvider.value !== aiProviderLoaded.value.provider
+    || aiBaseUrl.value.trim() !== aiProviderLoaded.value.base_url,
 );
 
 async function aiSaveProvider() {

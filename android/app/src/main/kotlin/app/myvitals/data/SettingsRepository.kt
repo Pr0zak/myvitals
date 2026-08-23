@@ -45,6 +45,28 @@ class SettingsRepository(context: Context) {
         get() = plain.getLong(KEY_LAST_DEEP_SWEEP, 0L)
         set(value) = plain.edit().putLong(KEY_LAST_DEEP_SWEEP, value).apply()
 
+    /**
+     * Start of a user-requested historical backfill, or 0 for none.
+     *
+     * Kept separate from [lastSyncEpochSeconds] because the two mean
+     * different things and need opposite treatment. A checkpoint that has
+     * drifted a long way into the past is a symptom — a crash, a long
+     * offline period — and reading an unbounded window off the back of it
+     * is how the sync jams, so SyncWorker clamps it to MAX_LOOKBACK_DAYS.
+     *
+     * A backfill is not drift. It is the user saying, explicitly, "go and
+     * fetch the last year", and applying the drift clamp to it made three
+     * of the four buttons in Settings do nothing but read a fortnight. The
+     * screen said "Backfilling 1 year", the log said "sync window clamped
+     * to 14d", and any record older than that was permanently unreachable.
+     *
+     * Cleared once the backfill has been read, so it is a one-shot request
+     * rather than a permanently widened window.
+     */
+    var backfillFromEpochSeconds: Long
+        get() = plain.getLong(KEY_BACKFILL_FROM, 0L)
+        set(value) = plain.edit().putLong(KEY_BACKFILL_FROM, value).apply()
+
     /** Last time the SyncWorker actually finished a successful upload (or no-op). */
     var lastSuccessEpochSeconds: Long
         get() = plain.getLong(KEY_LAST_SUCCESS, 0L)
@@ -137,6 +159,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_TOKEN = "bearer_token"
         private const val KEY_LAST_SYNC = "last_sync_epoch_s"
         private const val KEY_LAST_DEEP_SWEEP = "last_deep_sweep_epoch_s"
+        private const val KEY_BACKFILL_FROM = "backfill_from_epoch_s"
         private const val KEY_LAST_SUCCESS = "last_success_epoch_s"
         private const val KEY_PERMS_LOST = "perms_lost"
         private const val KEY_NEON_SHELL = "neon_shell_enabled"

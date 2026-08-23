@@ -4168,12 +4168,17 @@ async def compute_targets_for_user(db: AsyncSession) -> dict[str, Any]:
     from ..analytics.targets import compute_targets, goal_target_kg
 
     profile = await db.get(models.UserProfile, 1)
-    weight = (await db.execute(
-        _select(models.BodyMetric.weight_kg)
+    # The timestamp comes back with the value, because a target built on a
+    # three-month-old weight is worth flagging and the caller cannot know
+    # to flag it otherwise.
+    weight_row = (await db.execute(
+        _select(models.BodyMetric.weight_kg, models.BodyMetric.time)
         .where(models.BodyMetric.weight_kg.isnot(None))
         .order_by(models.BodyMetric.time.desc())
         .limit(1)
-    )).scalar_one_or_none()
+    )).first()
+    weight = weight_row[0] if weight_row else None
+    weighed_on = weight_row[1].date() if weight_row and weight_row[1] else None
 
     extra = (profile.extra if profile and profile.extra else {}) or {}
     goal_kg = None
@@ -4199,6 +4204,7 @@ async def compute_targets_for_user(db: AsyncSession) -> dict[str, Any]:
         goal_weight_kg=goal_kg,
         today=_local_today(),
         training_load_band=None,
+        weight_measured_on=weighed_on,
     )
 
 

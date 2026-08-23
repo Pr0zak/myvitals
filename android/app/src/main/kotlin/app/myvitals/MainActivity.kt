@@ -155,7 +155,13 @@ class MainActivity : ComponentActivity() {
             val onBackfill: (Int) -> Unit = { days ->
                 val newCheckpoint = System.currentTimeMillis() / 1000 - days * 24L * 3600L
                 settings.lastSyncEpochSeconds = newCheckpoint
-                Timber.i("Backfill: reset checkpoint to T-%dd (epoch=%d), enqueueing sync", days, newCheckpoint)
+                // Record the request explicitly as well. Moving the
+                // checkpoint alone is not enough: SyncWorker cannot tell a
+                // deliberate backfill from a checkpoint that drifted after
+                // an outage, and it clamps drift to a fortnight — so
+                // "1 year" and "All (10y)" both silently read 14 days.
+                settings.backfillFromEpochSeconds = newCheckpoint
+                Timber.i("Backfill: requested T-%dd (epoch=%d), enqueueing sync", days, newCheckpoint)
                 WorkManager.getInstance(applicationContext)
                     .enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
             }

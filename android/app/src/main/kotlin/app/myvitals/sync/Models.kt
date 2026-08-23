@@ -2490,6 +2490,13 @@ data class PrepTargetsOut(
     val caveat: String? = null,
     @Json(name = "override_kcal") val overrideKcal: Int? = null,
     @Json(name = "fat_per_meal_target_g") val fatPerMealTargetG: Double? = null,
+    // When the weight underneath these figures was measured, and whether
+    // that is old enough to matter. A stale weight is dangerous precisely
+    // because nothing downstream looks wrong — every derived number stays
+    // self-consistent while drifting together.
+    @Json(name = "weight_measured_on") val weightMeasuredOn: String? = null,
+    @Json(name = "weight_age_days") val weightAgeDays: Int? = null,
+    @Json(name = "weight_stale") val weightStale: Boolean = false,
 )
 
 @JsonClass(generateAdapter = true)

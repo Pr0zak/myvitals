@@ -2474,6 +2474,11 @@ export interface PrepTargets {
   caveat?: string;
   override_kcal?: number | null;
   fat_per_meal_target_g?: number | null;
+  /** When the weight these targets are built on was measured. */
+  weight_measured_on?: string | null;
+  weight_age_days?: number | null;
+  /** Old enough that every figure below inherits the drift. */
+  weight_stale?: boolean;
 }
 
 export const prepTargets = () =>

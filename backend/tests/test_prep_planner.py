@@ -728,3 +728,68 @@ def test_small_shortfalls_are_left_alone():
     regenerate for no benefit."""
     comps, meals = _scale_fixture()
     assert P.energy_scale_factor(comps, meals, 430) == 1.0
+
+
+# ------------------------------------------------- stale weight
+
+
+def test_a_stale_weight_is_reported_not_silently_used():
+    """Found live: the newest weight reading was 104 days old, and every
+    calorie and protein figure in the planner was built on it without
+    saying so.
+
+    A stale weight is dangerous precisely because nothing downstream
+    looks wrong. BMR, TDEE, the deficit and the projected loss rate all
+    stay perfectly consistent with each other while drifting together,
+    so there is no internal contradiction for the user to notice.
+    """
+    out = T.compute_targets(
+        weight_kg=114.3, height_cm=180, birth_date=date(1978, 8, 18),
+        sex="male", activity_level="light", goal_weight_kg=90.7,
+        today=date(2026, 8, 23), weight_measured_on=date(2026, 5, 11),
+    )
+    assert out["weight_age_days"] == 104
+    assert out["weight_stale"] is True
+    assert out["weight_measured_on"] == "2026-05-11"
+
+
+def test_a_recent_weight_is_not_flagged():
+    """Bodyweight moves slowly. A fortnight is nothing, and crying stale
+    at every reading would train the user to ignore the warning."""
+    out = T.compute_targets(
+        weight_kg=114.3, height_cm=180, birth_date=date(1978, 8, 18),
+        sex="male", activity_level="light", goal_weight_kg=90.7,
+        today=date(2026, 8, 23), weight_measured_on=date(2026, 8, 20),
+    )
+    assert out["weight_age_days"] == 3
+    assert out["weight_stale"] is False
+
+
+def test_an_unknown_measurement_date_is_not_reported_as_fresh():
+    """Absent is not zero, here as everywhere: no date means no claim
+    about age, not a claim that it was measured today."""
+    out = T.compute_targets(
+        weight_kg=114.3, height_cm=180, birth_date=date(1978, 8, 18),
+        sex="male", activity_level="light", goal_weight_kg=90.7,
+        today=date(2026, 8, 23),
+    )
+    assert out["weight_age_days"] is None
+    assert out["weight_stale"] is False
+    assert out["weight_measured_on"] is None
+
+
+def test_staleness_does_not_change_the_numbers():
+    """It is a caveat, not a correction. The app cannot know what the
+    user weighs today, and guessing would be worse than saying so."""
+    fresh = T.compute_targets(
+        weight_kg=114.3, height_cm=180, birth_date=date(1978, 8, 18),
+        sex="male", activity_level="light", goal_weight_kg=90.7,
+        today=date(2026, 8, 23), weight_measured_on=date(2026, 8, 20),
+    )
+    stale = T.compute_targets(
+        weight_kg=114.3, height_cm=180, birth_date=date(1978, 8, 18),
+        sex="male", activity_level="light", goal_weight_kg=90.7,
+        today=date(2026, 8, 23), weight_measured_on=date(2026, 5, 11),
+    )
+    assert fresh["target_kcal"] == stale["target_kcal"]
+    assert fresh["protein_g"] == stale["protein_g"]

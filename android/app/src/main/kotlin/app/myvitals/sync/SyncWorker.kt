@@ -25,6 +25,7 @@ import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
+import java.time.Duration
 import java.time.Instant
 import kotlin.reflect.KClass
 
@@ -265,102 +266,169 @@ class SyncWorker(
             checkpoint.isBefore(safetyFloor) -> checkpoint
             else -> safetyFloor
         }
-        // Clamp the lookback. Now that a failed delivery no longer advances
-        // the cursor, a long outage would otherwise grow the read window
-        // without bound — and HealthConnectGateway.read() caps at 100 pages
-        // and RETURNS THE PARTIAL LIST as if it were complete, so an
-        // oversized window fails silently rather than loudly.
+
+        // An explicit backfill is NOT checkpoint drift, and must not be
+        // clamped like it.
         //
-        // Anything older than this is either already sitting in the Room
-        // buffer waiting to replay, or was dropped and is unrecoverable
-        // regardless. Bounding the window keeps the app syncing.
-        val maxLookback = now.minusSeconds(MAX_LOOKBACK_DAYS * 86400L)
-        val since = if (rawSince.isBefore(maxLookback)) {
-            Timber.w(
-                "Sync window clamped: checkpoint %s is older than %d days; reading from %s",
-                rawSince, MAX_LOOKBACK_DAYS, maxLookback,
+        // The clamp below exists for drift: a checkpoint left far in the
+        // past by a crash or a long offline period would otherwise grow the
+        // read window without bound. But the Settings screen also offers
+        // "30 days", "1 year" and "All (10y)" buttons, and those set the
+        // same checkpoint — so all three were clamped to a fortnight. The
+        // screen said "Backfilling 1 year", the log said "sync window
+        // clamped to 14d", and anything older was permanently unreachable.
+        //
+        // That is how weight readings from two months ago stayed invisible:
+        // a watermark only moves forward, the 7-day sweep never reaches
+        // them, and the one control that should have rescued them silently
+        // read the last two weeks instead.
+        val backfillFrom = settings.backfillFromEpochSeconds
+            .takeIf { it > 0 }
+            ?.let(Instant::ofEpochSecond)
+
+        val since: Instant
+        if (backfillFrom != null) {
+            since = minOf(backfillFrom, rawSince)
+            Timber.i(
+                "Backfill requested: reading from %s (%d days) — clamp not applied",
+                since, Duration.between(since, now).toDays(),
             )
-            state.errors += "sync window clamped to ${MAX_LOOKBACK_DAYS}d"
-            maxLookback
         } else {
-            rawSince
+            // Anything older than this is either already sitting in the Room
+            // buffer waiting to replay, or was dropped and is unrecoverable
+            // regardless. Bounding the window keeps the app syncing.
+            val maxLookback = now.minusSeconds(MAX_LOOKBACK_DAYS * 86400L)
+            since = if (rawSince.isBefore(maxLookback)) {
+                Timber.w(
+                    "Sync window clamped: checkpoint %s is older than %d days; reading from %s",
+                    rawSince, MAX_LOOKBACK_DAYS, maxLookback,
+                )
+                state.errors += "sync window clamped to ${MAX_LOOKBACK_DAYS}d " +
+                    "(use Settings > Backfill to reach further back)"
+                maxLookback
+            } else {
+                rawSince
+            }
         }
         val until = now
 
-        // Per-type try/catch: a SecurityException on one record type should
-        // not block the others.
-        val hr = safeRead(HeartRateRecord::class, since, until)
-        val hrv = safeRead(HeartRateVariabilityRmssdRecord::class, since, until)
-        val steps = safeRead(StepsRecord::class, since, until)
-        val sleep = safeRead(SleepSessionRecord::class, since, until)
-        val exercise = safeRead(ExerciseSessionRecord::class, since, until)
-        val weight = safeRead(WeightRecord::class, since, until)
-        val bodyFat = safeRead(BodyFatRecord::class, since, until)
-        val leanMass = safeRead(LeanBodyMassRecord::class, since, until)
-        val bp = safeRead(BloodPressureRecord::class, since, until)
-        val skinTemp = safeRead(SkinTemperatureRecord::class, since, until)
-        Timber.i(
-            "HC reads since %s: hr=%d hrv=%d steps=%d sleep=%d exercise=%d weight=%d bodyFat=%d leanMass=%d bp=%d skinTemp=%d",
-            since, hr.size, hrv.size, steps.size, sleep.size, exercise.size,
-            weight.size, bodyFat.size, leanMass.size, bp.size, skinTemp.size,
-        )
-        state.recordsPulled = hr.size + hrv.size + steps.size + sleep.size + exercise.size +
-            weight.size + bodyFat.size + leanMass.size + bp.size + skinTemp.size
+        // Read and deliver in slices, oldest first.
+        //
+        // One read over a year-long window is not viable: Health Connect
+        // returns heart-rate samples by the hundred thousand,
+        // HealthConnectGateway.read() stops at 100 pages and RETURNS THE
+        // PARTIAL LIST as if it were complete, and holding a year of
+        // samples in memory on a phone is how the worker gets killed. So
+        // the window is walked in SLICE_DAYS chunks and each one is
+        // delivered before the next is read — bounded memory, bounded
+        // POST size, and no silent truncation.
+        //
+        // Ordinary syncs are a single slice, so this costs them nothing.
+        var earliestFailure: Instant? = null
+        var anyDelivered = false
+        var sliceStart = since
+        var sliceIndex = 0
+        val totalSlices = ((Duration.between(since, until).seconds /
+            (SLICE_DAYS * 86400L)) + 1).toInt()
 
-        val batch = DataMapper.toBatch(
-            hr, hrv, steps, sleep, exercise,
-            weight = weight, bodyFat = bodyFat, leanMass = leanMass,
-            bloodPressure = bp, skinTemp = skinTemp,
-        )
-
-        if (batch.isEmpty()) {
-            Timber.i("Nothing new to send; advancing checkpoint to %s", until)
-            settings.lastSyncEpochSeconds = until.epochSecond
-            if (needDeepSweep) settings.lastDeepSweepEpochSeconds = until.epochSecond
-            state.success = true
-            return Result.success()
-        }
-
-        return try {
-            ingestChunked(api, batch)
-            settings.lastSyncEpochSeconds = until.epochSecond
-            if (needDeepSweep) settings.lastDeepSweepEpochSeconds = until.epochSecond
-            state.success = true
-            Result.success()
-        } catch (e: Exception) {
-            Timber.e(e, "Ingest POST failed; buffering locally")
-            state.errors += "ingest POST: ${e.javaClass.simpleName}: ${e.message?.take(200)}"
-            // Split the failed batch using the same per-type slicing as
-            // ingestChunked. A single Room row holding the full multi-day
-            // deep-sweep JSON can exceed Android's ~2 MB CursorWindow and
-            // permanently jam every future buffer read.
-            for (sub in splitForBuffer(batch)) {
-                db.buffered().insert(
-                    BufferedBatch(
-                        json = batchAdapter.toJson(sub),
-                        createdAtEpochS = until.epochSecond,
-                    )
-                )
+        while (sliceStart.isBefore(until)) {
+            val sliceEnd = minOf(sliceStart.plusSeconds(SLICE_DAYS * 86400L), until)
+            sliceIndex++
+            if (totalSlices > 1) {
+                Timber.i("Slice %d/%d: %s .. %s", sliceIndex, totalSlices, sliceStart, sliceEnd)
             }
-            // DO NOT advance lastSyncEpochSeconds here.
-            //
-            // This used to advance on the failure path too, on the reasoning
-            // that the batch had been buffered to Room and would replay. But
-            // buffered batches can be DROPPED — oversized rows are deleted
-            // above, and flushBuffered gives up after MAX_BUFFER_ATTEMPTS —
-            // and once the cursor has moved past that window nothing can ever
-            // re-read it. That is silent, permanent loss of samples the watch
-            // recorded.
-            //
-            // Leaving the cursor where it is makes the next sync re-read the
-            // same window, which costs nothing: the server's _bulk_upsert
-            // uses on_conflict_do_nothing, so re-delivering rows that did
-            // land is a no-op. Re-reading is cheap; losing data is not.
-            //
-            // The deep-sweep checkpoint is likewise not advanced, so the
-            // sweep retries on the next periodic run.
-            Result.success()
+
+            // Per-type try/catch: a SecurityException on one record type
+            // should not block the others.
+            val hr = safeRead(HeartRateRecord::class, sliceStart, sliceEnd)
+            val hrv = safeRead(HeartRateVariabilityRmssdRecord::class, sliceStart, sliceEnd)
+            val steps = safeRead(StepsRecord::class, sliceStart, sliceEnd)
+            val sleep = safeRead(SleepSessionRecord::class, sliceStart, sliceEnd)
+            val exercise = safeRead(ExerciseSessionRecord::class, sliceStart, sliceEnd)
+            val weight = safeRead(WeightRecord::class, sliceStart, sliceEnd)
+            val bodyFat = safeRead(BodyFatRecord::class, sliceStart, sliceEnd)
+            val leanMass = safeRead(LeanBodyMassRecord::class, sliceStart, sliceEnd)
+            val bp = safeRead(BloodPressureRecord::class, sliceStart, sliceEnd)
+            val skinTemp = safeRead(SkinTemperatureRecord::class, sliceStart, sliceEnd)
+            Timber.i(
+                "HC reads %s..%s: hr=%d hrv=%d steps=%d sleep=%d exercise=%d weight=%d bodyFat=%d leanMass=%d bp=%d skinTemp=%d",
+                sliceStart, sliceEnd, hr.size, hrv.size, steps.size, sleep.size,
+                exercise.size, weight.size, bodyFat.size, leanMass.size, bp.size,
+                skinTemp.size,
+            )
+            state.recordsPulled += hr.size + hrv.size + steps.size + sleep.size +
+                exercise.size + weight.size + bodyFat.size + leanMass.size +
+                bp.size + skinTemp.size
+
+            val batch = DataMapper.toBatch(
+                hr, hrv, steps, sleep, exercise,
+                weight = weight, bodyFat = bodyFat, leanMass = leanMass,
+                bloodPressure = bp, skinTemp = skinTemp,
+            )
+
+            if (!batch.isEmpty()) {
+                try {
+                    ingestChunked(api, batch)
+                    anyDelivered = true
+                } catch (e: Exception) {
+                    Timber.e(e, "Ingest POST failed for slice %s..%s; buffering locally",
+                        sliceStart, sliceEnd)
+                    state.errors += "ingest POST: ${e.javaClass.simpleName}: " +
+                        "${e.message?.take(200)}"
+                    // Split the failed batch using the same per-type slicing
+                    // as ingestChunked. A single Room row holding a full
+                    // multi-day payload can exceed Android's ~2 MB
+                    // CursorWindow and permanently jam every future
+                    // buffered_batches read.
+                    for (sub in splitForBuffer(batch)) {
+                        db.buffered().insert(
+                            BufferedBatch(
+                                json = batchAdapter.toJson(sub),
+                                createdAtEpochS = sliceEnd.epochSecond,
+                            )
+                        )
+                    }
+                    if (earliestFailure == null) earliestFailure = sliceStart
+                }
+            }
+            sliceStart = sliceEnd
         }
+
+        // Where the cursor lands.
+        //
+        // It used to stay put on ANY ingest failure. That is right — a
+        // buffered batch can still be dropped (oversized rows are deleted,
+        // and flushBuffer gives up after MAX_BUFFER_ATTEMPTS), and once the
+        // cursor has moved past a window nothing can ever re-read it, which
+        // is silent permanent loss of samples the watch recorded.
+        //
+        // With slices there is a better answer than redoing everything:
+        // park the cursor at the START of the earliest slice that failed.
+        // Everything before it demonstrably landed, everything from there
+        // on is re-read next time. Re-reading costs nothing — the server's
+        // _bulk_upsert is on_conflict_do_nothing — while losing data does.
+        val newCheckpoint = earliestFailure ?: until
+        settings.lastSyncEpochSeconds = newCheckpoint.epochSecond
+        if (needDeepSweep && earliestFailure == null) {
+            settings.lastDeepSweepEpochSeconds = until.epochSecond
+        }
+        if (backfillFrom != null) {
+            if (earliestFailure == null) {
+                // One-shot: the request has been served, so it must not
+                // widen every subsequent sync forever.
+                settings.backfillFromEpochSeconds = 0L
+                Timber.i("Backfill complete (%d records pulled)", state.recordsPulled)
+            } else {
+                // Keep the request alive, narrowed to what is still missing.
+                settings.backfillFromEpochSeconds = earliestFailure.epochSecond
+                Timber.w("Backfill partially delivered; will resume from %s", earliestFailure)
+            }
+        }
+        if (!anyDelivered) {
+            Timber.i("Nothing new to send; checkpoint now %s", newCheckpoint)
+        }
+        state.success = true
+        return Result.success()
     }
 
     private fun persistFlags() {
@@ -587,6 +655,17 @@ class SyncWorker(
          *  partial list as though it were complete, which fails silently
          *  rather than loudly. 14 days is twice the deep-sweep window. */
         private const val MAX_LOOKBACK_DAYS = 14
+
+        /**
+         * Widest window handed to a single Health Connect read.
+         *
+         * Not a policy limit — a mechanical one. `read()` walks at most
+         * 100 pages of 5,000 and then returns what it has WITHOUT
+         * saying so, so any window big enough to exceed that truncates
+         * silently. Slicing keeps every individual read comfortably
+         * inside the cap, and bounds peak memory to one slice.
+         */
+        private const val SLICE_DAYS = 14L
         private const val BUFFER_ENTRY_TIMEOUT_MS = 240_000L
 
         // Android's CursorWindow ceiling is ~2 MB; any single buffered_batches

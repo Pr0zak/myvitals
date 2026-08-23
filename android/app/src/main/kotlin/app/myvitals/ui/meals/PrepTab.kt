@@ -342,6 +342,15 @@ private fun TargetsCard(t: PrepTargetsOut, expanded: Boolean, onToggle: () -> Un
                 BigStat("$it", "kg a week")
             }
         }
+        if (t.weightStale) {
+            Text(
+                "Built on your weight from ${t.weightMeasuredOn} — " +
+                    "${t.weightAgeDays} days ago. Everything above inherits " +
+                    "that drift, and will look consistent while being wrong.",
+                color = NeonMV.Amber, fontSize = 11.sp,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
         Text(
             if (expanded) "hide" else "how this was worked out",
             color = NeonMV.Cyan, fontSize = 11.sp,

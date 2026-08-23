@@ -248,6 +248,13 @@ onMounted(load);
           <small>kg a week</small>
         </div>
       </div>
+      <p v-if="targets.weight_stale" class="warn-line">
+        <AlertTriangle :size="13" />
+        These are built on your weight from {{ targets.weight_measured_on }} —
+        {{ targets.weight_age_days }} days ago. Everything above inherits that
+        drift, and it will look perfectly consistent while being wrong. Sync or
+        add a current weight to refresh it.
+      </p>
       <button class="link" @click="showTargets = !showTargets">
         <Info :size="12" /> {{ showTargets ? "Hide" : "How this was worked out" }}
       </button>

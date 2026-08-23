@@ -108,6 +108,14 @@ def bmr_mifflin(
     return base + (5.0 if (sex or "").lower().startswith("m") else -161.0)
 
 
+#: Beyond this, a weight reading is old enough that the targets built on
+#: it deserve a caveat. Bodyweight moves slowly, so a fortnight is
+#: nothing; three months of drift is several hundred kilocalories of
+#: error in the one number the whole meal plan is sized against, and it
+#: is invisible because every figure downstream stays self-consistent.
+WEIGHT_STALE_DAYS = 30
+
+
 def compute_targets(
     *,
     weight_kg: float | None,
@@ -118,6 +126,7 @@ def compute_targets(
     goal_weight_kg: float | None,
     today: date,
     training_load_band: str | None = None,
+    weight_measured_on: date | None = None,
 ) -> dict[str, Any]:
     """Daily kcal and protein targets, or a refusal explaining what is missing.
 
@@ -177,8 +186,21 @@ def compute_targets(
         round(applied_deficit * 7 / KCAL_PER_KG_FAT, 2) if applied_deficit else 0.0
     )
 
+    weight_age = (
+        (today - weight_measured_on).days if weight_measured_on else None
+    )
     return {
         "ok": True,
+        # How old the weight is, and whether that is old enough to matter.
+        # Reported rather than corrected: the app cannot know what the user
+        # weighs today, and silently carrying on is what makes a stale
+        # figure dangerous — every number derived from it stays perfectly
+        # self-consistent while being wrong together.
+        "weight_measured_on": (
+            weight_measured_on.isoformat() if weight_measured_on else None
+        ),
+        "weight_age_days": weight_age,
+        "weight_stale": bool(weight_age is not None and weight_age > WEIGHT_STALE_DAYS),
         # Always an estimate for now. Replaced by an observed derivation
         # once enough complete food-log days exist (MEALS_PLAN phase 8).
         "basis": "estimate",

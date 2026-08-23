@@ -354,3 +354,87 @@ def day_rollup(
             "off_plan": len(items) - len(live),
         })
     return rows
+
+
+#: Component kinds whose quantity may be scaled to reach an energy
+#: target. Sauce is excluded deliberately: it is a condiment, its size
+#: does not follow from how much energy the week needs, and for this
+#: user fat per meal is a MEDICAL constraint after a cholecystectomy.
+#: Uniformly tripling the olive oil to close a calorie gap would be the
+#: single worst way to close it.
+SCALABLE_KINDS: frozenset[str] = frozenset({"protein", "grain", "veg", "other"})
+
+#: Ceiling on the multiplier. A plan needing more than this is wrong in
+#: some way arithmetic will not fix, and quietly tripling a shopping list
+#: is worse than saying so. The factor is CLAMPED to it rather than
+#: abandoned, because getting a 28%-of-target week to 70% is still
+#: unambiguously closer to what the user asked for than leaving it — and
+#: the day totals still show the remaining gap.
+MAX_ENERGY_SCALE = 2.5
+
+
+def energy_scale_factor(
+    components: list[dict[str, Any]],
+    meals: list[dict[str, Any]],
+    budget_kcal_per_day: float | None,
+) -> float:
+    """How much to grow the batches so the week lands near its budget.
+
+    The model consistently undersizes batches — a 700 kcal dinner
+    rendered as a chicken breast and 50 g of grain — and a plan at 40% of
+    target does the opposite of what a weight-loss planner is for. Since
+    every quantity is already the server's to compute, the honest repair
+    is arithmetic rather than another prompt sentence.
+
+    Only `SCALABLE_KINDS` move. The energy already coming from sauce is
+    held out of both sides of the ratio, so the factor applies to what it
+    is actually multiplying.
+
+    Returns 1.0 — meaning leave it alone — when the plan is already at or
+    above budget and when there is nothing to scale. Never scales DOWN: a
+    rich week is visible in the day totals and is the user's call, while
+    silently cutting food is how an app talks someone into under-eating.
+    """
+    if not budget_kcal_per_day or budget_kcal_per_day <= 0:
+        return 1.0
+
+    by_id = {c["id"]: c for c in components}
+    days: set[Any] = set()
+    planned = 0.0
+    fixed = 0.0
+    for m in meals:
+        if m.get("status") in ("skipped", "eating_out"):
+            continue
+        days.add(m.get("day"))
+        for u in m.get("uses") or []:
+            comp = by_id.get(u.get("component_id"))
+            if comp is None or comp.get("unresolved"):
+                continue
+            per = (comp.get("per_portion") or {}).get("kcal")
+            if per is None:
+                continue
+            kcal = per * float(u.get("portions") or 1)
+            planned += kcal
+            if (comp.get("kind") or "other") not in SCALABLE_KINDS:
+                fixed += kcal
+
+    if not days or planned <= 0:
+        return 1.0
+    budget = budget_kcal_per_day * len(days)
+    # Deadband on the TOTAL, which is the number the user reads. A 3%
+    # shortfall is noise, and scaling for it would churn every shopping
+    # quantity on each regenerate. Measuring the deadband on the scalable
+    # part instead would trip on the same 3% whenever a sauce carries a
+    # meaningful share of the energy.
+    if planned >= budget * 0.95:
+        return 1.0
+    scalable = planned - fixed
+    # Nothing scalable, or the fixed part alone already covers the
+    # budget. Either way there is no honest multiplier.
+    if scalable <= 0 or budget <= fixed:
+        return 1.0
+
+    factor = (budget - fixed) / scalable
+    if factor <= 1.0:
+        return 1.0
+    return round(min(factor, MAX_ENERGY_SCALE), 3)

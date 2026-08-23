@@ -2759,6 +2759,7 @@ async def generate_prep_plan(
 
     # Components, in prep-sheet order: protein and grain go on first
     # because they take longest, sauce is made while they cook.
+    from ..analytics import prep as prep_lib
     from ..analytics.prep import COMPONENT_KINDS, KIND_ORDER, MEAL_STATUSES
 
     prepared: list[tuple[int, models.PrepComponent]] = []
@@ -2884,6 +2885,56 @@ async def generate_prep_plan(
 
     await db.flush()
     hydrated = await _prep_hydrate(db, plan)
+
+    # ── Grow the batches to reach the energy budget ──────────────────
+    #
+    # The model consistently undersizes: live plans came back at 40-63%
+    # of the budget for the slots they cover, a 700 kcal dinner rendered
+    # as a chicken breast and 50 g of grain. Two prompt revisions did not
+    # fix it. Since every quantity is already the server's to compute,
+    # the honest repair is arithmetic rather than a third prompt
+    # sentence, and a planner that lands at 40% of target does the
+    # opposite of what a weight-loss plan is for.
+    #
+    # Sauce is held out — see SCALABLE_KINDS. Uniformly tripling the
+    # olive oil to close a calorie gap is the single worst way to close
+    # it for someone whose per-meal fat is a medical constraint.
+    covered_share = hydrated.budgets.get("covered_share") or 1.0
+    day_budget = (target_kcal * covered_share) if target_kcal else None
+    factor = prep_lib.energy_scale_factor(
+        [
+            {
+                "id": c.id, "kind": c.kind,
+                "per_portion": (
+                    next(
+                        (h.per_portion for h in hydrated.components if h.id == c.id),
+                        None,
+                    )
+                ),
+                "unresolved": any(
+                    h.id == c.id and h.unresolved for h in hydrated.components
+                ),
+            }
+            for _, c in prepared
+        ],
+        [
+            {"day": m.day, "status": m.status, "uses": m.component_ids or []}
+            for m in meal_rows
+        ],
+        day_budget,
+    )
+    if factor > 1.0:
+        for _, row in prepared:
+            if row.kind in prep_lib.SCALABLE_KINDS and row.quantity is not None:
+                row.quantity = round(row.quantity * factor, 2)
+        await db.flush()
+        hydrated = await _prep_hydrate(db, plan)
+        extra_notes.append(
+            f"Portion sizes were scaled up {factor:g}x to reach your "
+            f"{round(day_budget)} kcal budget for these meals — the plan "
+            f"came back light. The sauce was left alone, since fat per "
+            f"meal is not something to scale."
+        )
 
     # ── Note an under-target week as a fact about the PLAN ───────────
     #

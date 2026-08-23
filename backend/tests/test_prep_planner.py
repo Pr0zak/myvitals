@@ -639,3 +639,92 @@ def test_the_prompt_forbids_multi_ingredient_components():
     sys = C._prep_plan_system("blunt").lower()
     assert "one ingredient per component" in sys
     assert "silently vanish" in sys
+
+
+# ------------------------------------------------- energy scaling
+
+
+def _scale_fixture(protein_kcal=120.0, sauce_kcal=177.0, portions=2.0):
+    comps = [
+        {"id": 1, "kind": "protein", "per_portion": {"kcal": protein_kcal},
+         "unresolved": False},
+        {"id": 2, "kind": "sauce", "per_portion": {"kcal": sauce_kcal},
+         "unresolved": False},
+    ]
+    meals = [{
+        "day": date(2026, 8, 24), "status": "suggested",
+        "uses": [{"component_id": 1, "portions": portions},
+                 {"component_id": 2, "portions": 1}],
+    }]
+    return comps, meals
+
+
+def test_a_light_plan_is_scaled_up():
+    """Live plans came back at 40-63% of the budget for the slots they
+    covered. Two prompt revisions did not fix it, and a planner that
+    lands at 40% of target does the opposite of what it is for."""
+    comps, meals = _scale_fixture()
+    # 240 scalable + 177 fixed = 417 against a 600 budget.
+    assert P.energy_scale_factor(comps, meals, 600) == pytest.approx(1.762, abs=0.01)
+
+
+def test_the_sauce_is_never_scaled():
+    """Fat per meal is a medical constraint here. Uniformly tripling the
+    olive oil to close a calorie gap is the single worst way to close it,
+    so sauce energy is held out of BOTH sides of the ratio and the factor
+    applies only to what it actually multiplies."""
+    assert "sauce" not in P.SCALABLE_KINDS
+    comps, meals = _scale_fixture()
+    factor = P.energy_scale_factor(comps, meals, 600)
+    # Scalable 240 -> 240*factor, plus the untouched 177, lands on 600.
+    assert 240 * factor + 177 == pytest.approx(600, abs=1.0)
+
+
+def test_a_plan_already_at_budget_is_left_alone():
+    comps, meals = _scale_fixture()
+    assert P.energy_scale_factor(comps, meals, 420) == 1.0
+
+
+def test_a_plan_over_budget_is_never_scaled_down():
+    """A rich week is visible in the day totals and is the user's call.
+    Silently cutting food is how an app talks someone into under-eating."""
+    comps, meals = _scale_fixture()
+    assert P.energy_scale_factor(comps, meals, 300) == 1.0
+
+
+def test_the_factor_is_clamped_not_abandoned():
+    """Getting a 28%-of-target week to 70% is still unambiguously closer
+    to what was asked for than leaving it, and the day totals still show
+    the remaining gap."""
+    comps, meals = _scale_fixture()
+    assert P.energy_scale_factor(comps, meals, 5000) == P.MAX_ENERGY_SCALE
+
+
+def test_no_budget_means_no_scaling():
+    """No target is unknown, not a licence to size portions freely."""
+    comps, meals = _scale_fixture()
+    assert P.energy_scale_factor(comps, meals, None) == 1.0
+    assert P.energy_scale_factor(comps, meals, 0) == 1.0
+
+
+def test_an_uncostable_component_cannot_drive_the_factor():
+    """Its energy is unknown, so counting it as zero would inflate the
+    apparent shortfall and scale everything else up to compensate."""
+    comps, meals = _scale_fixture()
+    comps[0]["unresolved"] = True
+    comps[0]["per_portion"] = None
+    # Only the sauce is costable, and it is not scalable.
+    assert P.energy_scale_factor(comps, meals, 600) == 1.0
+
+
+def test_skipped_meals_do_not_count_toward_the_budget():
+    comps, meals = _scale_fixture()
+    meals[0]["status"] = "skipped"
+    assert P.energy_scale_factor(comps, meals, 600) == 1.0
+
+
+def test_small_shortfalls_are_left_alone():
+    """Scaling for 3% would churn every shopping quantity on each
+    regenerate for no benefit."""
+    comps, meals = _scale_fixture()
+    assert P.energy_scale_factor(comps, meals, 430) == 1.0

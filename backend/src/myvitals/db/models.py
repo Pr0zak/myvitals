@@ -1117,3 +1117,106 @@ class FoodLogDay(Base):
     )
     note: Mapped[str | None] = mapped_column(String(255), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PrepPlan(Base):
+    """A week of component batch cooking (MEAL-9).
+
+    The model is COMPONENTS, not seven fixed dinners, and that choice is
+    what makes the plan survive contact with a real week. You cook a
+    protein, a grain, a tray of vegetables and a sauce at the weekend,
+    then assemble them into different meals — so a day you eat out
+    leaves components in the fridge rather than breaking a plan, and you
+    are not eating the identical container five times.
+
+    Targets are snapshotted onto the row rather than recomputed on read.
+    A plan is a record of what was decided at the time; if the profile
+    weight changes mid-week, last week's plan should still show the
+    numbers it was actually built against.
+    """
+
+    __tablename__ = "prep_plans"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    #: The LOCAL Monday this week starts on.
+    start_day: Mapped[date] = mapped_column(Date, index=True)
+    #: How many days the prep covers. 5 = weekdays, which is what most
+    #: batch cooking actually does.
+    days: Mapped[int] = mapped_column(Integer, default=5)
+    #: "draft" | "active" | "done"
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    #: Snapshot of the targets this plan was built against.
+    target_kcal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_protein_g: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: How the targets were arrived at — "estimate" today, "observed"
+    #: once enough complete food-log days exist to derive it. Stored so a
+    #: plan can say which, rather than implying more certainty than it had.
+    target_basis: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+    )
+
+
+class PrepComponent(Base):
+    """One thing to batch cook at the weekend.
+
+    `done` is the cook-day checkbox. It is on the component rather than
+    on the plan because a prep session is a list you work through, and
+    losing your place in it is the difference between using the feature
+    and abandoning it halfway.
+    """
+
+    __tablename__ = "prep_components"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plan_id: Mapped[int] = mapped_column(
+        ForeignKey("prep_plans.id", ondelete="CASCADE"), index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255))
+    #: "protein" | "grain" | "veg" | "sauce" | "other" — drives the
+    #: ordering of the prep sheet, since sauces are made while the
+    #: protein roasts.
+    kind: Mapped[str] = mapped_column(String(16), default="other")
+    food_id: Mapped[int | None] = mapped_column(
+        ForeignKey("foods.id", ondelete="SET NULL"), nullable=True,
+    )
+    #: Total raw quantity to cook, and what that is measured in.
+    quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: How many meal-portions this batch yields. The number that makes
+    #: the shopping quantity and the per-meal calories agree.
+    portions: Mapped[int] = mapped_column(Integer, default=1)
+    prep_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    done: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class PrepMeal(Base):
+    """One assembled meal on one day of the plan.
+
+    `status` is the whole flexibility story. A meal is SUGGESTED until
+    the user does something with it, and "did something" includes eating
+    out and skipping — both first-class outcomes rather than failures.
+    Nothing here is ever rendered as a missed target, because a plan that
+    turns red the moment life happens is a plan that gets deleted.
+    """
+
+    __tablename__ = "prep_meals"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plan_id: Mapped[int] = mapped_column(
+        ForeignKey("prep_plans.id", ondelete="CASCADE"), index=True,
+    )
+    day: Mapped[date] = mapped_column(Date, index=True)
+    slot: Mapped[str] = mapped_column(String(16), default="dinner")
+    name: Mapped[str] = mapped_column(String(255))
+    #: "suggested" | "accepted" | "eating_out" | "skipped"
+    status: Mapped[str] = mapped_column(String(16), default="suggested")
+    #: Which components this uses, by PrepComponent id, so a swap can
+    #: offer alternatives built from the same things already cooked.
+    component_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    est_kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    est_protein_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    est_fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    assembly_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    order_index: Mapped[int] = mapped_column(Integer, default=0)

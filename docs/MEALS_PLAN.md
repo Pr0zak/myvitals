@@ -319,6 +319,68 @@ sometimes, not for a household that logs daily.
    typing friction is measurable.
 8. **Derived energy balance**, once enough complete days exist to make it
    honest — and refusing with a reason until then.
+9. **Weekend component prep planner** (MEAL-9, shipped v0.26.0). Batch
+   cooking for the week ahead, sized to computed energy and protein
+   targets, with a shopping list built from the components.
+
+### 9. Why the prep planner is components rather than seven dinners
+
+This was the one design decision in the whole meals feature where the
+obvious implementation is actively worse than the alternative, so the
+reasoning is worth recording.
+
+A conventional meal-prep planner produces a grid: one named meal per day,
+each cooked separately or portioned into its own container. It demos
+beautifully and it fails in week two, for a reason that has nothing to do
+with the software. Eat out on Wednesday and the grid is broken —
+Wednesday's container is now a science experiment, and Thursday assumed
+you had already eaten it. The user is now behind a plan they cannot catch
+up on, and the rational move is to delete it.
+
+Component batch cooking inverts the unit of work. You cook four to six
+*parts* at the weekend — a protein, a grain, a tray of roast vegetables,
+a sauce — and assemble them into different meals through the week. A
+missed day does not break anything. It leaves portions in the fridge, and
+the app's job is to say so: `leftover_ledger` compares portions cooked
+against portions the live plan consumes, so skipping Wednesday produces
+"two portions of chicken spare, Thursday's bowl still works on Saturday"
+rather than silent drift away from a plan nobody is following any more.
+
+Three consequences that are load-bearing:
+
+- **`skipped` and `eating_out` are first-class outcomes, not failures.**
+  There is no adherence score, no completion percentage, no streak. A
+  test asserts those words do not appear in the module.
+- **Variety comes from assembly, not from more cooking.** The same
+  chicken and rice becomes a burrito bowl, a stir-fry, a salad and a wrap
+  depending on sauce and what is added fresh. Otherwise the feature just
+  prescribes the same container five times, which is the *other* reason
+  people quit meal prep.
+- **Cooked food has a shelf life and the planner checks it.** Protein
+  four days, grain and vegetables five, sauce seven. A language model
+  will assign day-five chicken cheerfully, because the grid still looks
+  balanced.
+
+### The AI in this phase proposes, it does not calculate
+
+Every other AI surface in this app narrates observations, and some of
+them accept a model estimate and then re-judge it (the suggestion card
+asks for `est_fat_g`). The prep planner does not, and the tool schema has
+no nutrition field at all.
+
+The difference is what the output is *for*. A suggestion card describes
+one hypothetical meal, and a rough estimate is honest as a rough
+estimate. A prep plan is a week of instructions aimed at a deliberate
+calorie deficit, rendered as a wall of numbers — and a wall of numbers a
+model made up looks exactly as authoritative as a real one. A 20% error
+does not stay a 20% error; it compounds across fifteen meals into a plan
+that does the opposite of what it claims to do.
+
+So the model returns a `food_search` term per component — a plain
+ingredient name, no brand, no cooking method — and the server resolves it
+through the same catalog search the food pickers use. The plan's chicken
+is the food log's chicken, and every gram, calorie and protein figure is
+computed from the catalog by `analytics/prep.py`.
 
 ## Decided
 
@@ -334,6 +396,12 @@ All confirmed 2026-08-22.
 
 ## Still open
 
+- Whether the prep planner's targets should switch from the Mifflin-St
+  Jeor estimate to a derivation from observed intake and weight change
+  once enough complete food-log days exist. `target_basis` is already
+  stored per plan so the two can be told apart in hindsight; the open
+  question is how many complete days is enough for the observed figure to
+  beat the equation rather than just be noisier.
 - Whether recipe URL import is wanted at all, given it only ever writes
   to the private install.
 - Whether to surface fat-soluble vitamins (A, D, E, K) as awareness,

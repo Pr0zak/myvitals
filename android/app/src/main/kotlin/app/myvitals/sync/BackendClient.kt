@@ -601,6 +601,58 @@ interface BackendApi {
     @DELETE("meals/shopping-list/{id}")
     suspend fun mealsDeleteShoppingList(@Path("id") id: Long): Response<Unit>
 
+    // ── Weekly component prep planner (MEAL-9) ───────────────────
+    //
+    // Every figure these return is computed server-side from the food
+    // catalog. The mutating calls all return the WHOLE rehydrated plan
+    // rather than the row they changed, because changing one component's
+    // quantity changes every meal that draws on it — one round trip, and
+    // the phone never recomputes a total.
+
+    @GET("meals/prep/targets")
+    suspend fun prepTargets(): PrepTargetsOut
+
+    // 200 with a null body when no plan covers today, which Retrofit
+    // surfaces as a successful Response with body() == null.
+    @GET("meals/prep/current")
+    suspend fun prepCurrent(): Response<PrepPlanOut>
+
+    @GET("meals/prep/{id}")
+    suspend fun prepPlan(@Path("id") id: Long): PrepPlanOut
+
+    @POST("meals/prep/generate")
+    suspend fun prepGenerate(@Body body: PrepGenerateIn): PrepPlanOut
+
+    @PATCH("meals/prep/{id}")
+    suspend fun prepPatchPlan(
+        @Path("id") id: Long, @Body body: PrepPlanPatch,
+    ): PrepPlanOut
+
+    @DELETE("meals/prep/{id}")
+    suspend fun prepDeletePlan(@Path("id") id: Long): Response<Unit>
+
+    @PATCH("meals/prep/component/{id}")
+    suspend fun prepPatchComponent(
+        @Path("id") id: Long, @Body body: PrepComponentPatch,
+    ): PrepPlanOut
+
+    @PATCH("meals/prep/meal/{id}")
+    suspend fun prepPatchMeal(
+        @Path("id") id: Long, @Body body: PrepMealPatch,
+    ): PrepPlanOut
+
+    @POST("meals/prep/{id}/shopping-list")
+    suspend fun prepShoppingList(
+        @Path("id") id: Long,
+        @Body body: Map<String, String> = emptyMap(),
+    ): ShoppingListOut
+
+    @POST("meals/prep/meal/{id}/log")
+    suspend fun prepLogMeal(
+        @Path("id") id: Long,
+        @Body body: Map<String, String> = emptyMap(),
+    ): PrepLogResult
+
     @POST("ai/meals/suggest")
     suspend fun mealsSuggest(@Body body: Map<String, String> = emptyMap()): MealSuggestEnvelope
 

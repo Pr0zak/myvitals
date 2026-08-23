@@ -258,6 +258,12 @@ function go(path: string): void {
     <!-- ── Personal & system ────────────────────────────────── -->
     <div class="cap">Personal &amp; system</div>
 
+    <button class="pill" @click="go('/meals/prep')">
+      <span class="pi bg-amber amber">🍳</span>
+      <span class="pn">Weekend prep<small>Cook once, eat all week</small></span>
+      <span class="chev">›</span>
+    </button>
+
     <button class="pill" @click="go('/meals/can-make')">
       <span class="pi bg-lime lime">🍽</span>
       <span class="pn">Meals<small>What can I make · pantry · log</small></span>

@@ -3768,3 +3768,463 @@ async def read_nutrition_label(
         input_tokens=resp.usage.input_tokens,
         output_tokens=resp.usage.output_tokens,
     )
+
+
+# ── Weekly component prep plan (MEAL-9) ──────────────────────────────
+#
+# The one AI surface in this app that produces a WEEK of instructions
+# rather than a card of observations, which changes what the model is
+# allowed to be trusted with.
+#
+# It proposes *what to cook* and *how to combine it*. It does not produce
+# a single number the user sees. Every gram, calorie, protein and fat
+# figure on the finished plan is computed by `analytics/prep.py` from the
+# food catalog after the tool call returns, against foods resolved from
+# the catalog by search term. A meal plan is a wall of numbers, and a
+# model-invented wall of numbers is worse than none at all — it looks
+# exactly as authoritative as a real one.
+#
+# Two consequences of that split show up in the schema below:
+#
+#   * Components carry a `food_search` term, not a food id and not a
+#     nutrition table. The server resolves the term against the same
+#     catalog search the pickers use, so the plan's chicken is the same
+#     chicken the food log costs.
+#   * There is no `est_kcal` field anywhere. Earlier AI surfaces here do
+#     accept model estimates (the meal-suggestion card asks for
+#     `est_fat_g` and then re-judges it), but those describe a single
+#     hypothetical meal. This describes a week of eating aimed at a
+#     deficit, and an estimate that is 20% out compounds across fifteen
+#     meals into a plan that does the opposite of what it claims.
+
+PREP_PLAN_TOOL = {
+    "name": "give_prep_plan",
+    "description": (
+        "Return one week of component batch cooking: a short list of "
+        "things to cook in bulk on prep day, and the meals to assemble "
+        "from them through the week."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "headline": {
+                "type": "string",
+                "description": (
+                    "One sentence describing the week's theme, e.g. "
+                    "'Roast chicken and rice bowls, four ways.'"
+                ),
+            },
+            "components": {
+                "type": "array",
+                "description": (
+                    "4-7 things to cook in bulk on prep day. Fewer, "
+                    "bigger batches beat many small ones — the whole "
+                    "point is one cooking session."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": (
+                                "What it is once cooked, as you would "
+                                "write it on the container lid, e.g. "
+                                "'Roast chicken breast'."
+                            ),
+                        },
+                        "kind": {
+                            "type": "string",
+                            "enum": [
+                                "protein", "grain", "veg", "sauce", "other",
+                            ],
+                        },
+                        "food_search": {
+                            "type": "string",
+                            "description": (
+                                "Plain search term for the underlying "
+                                "ingredient so the server can cost it "
+                                "from the food catalog: 'chicken "
+                                "breast', 'brown rice', 'broccoli'. Two "
+                                "or three words, no brand, no cooking "
+                                "method."
+                            ),
+                        },
+                        "quantity": {
+                            "type": "number",
+                            "description": "Total raw amount to buy and cook.",
+                        },
+                        "unit": {
+                            "type": "string",
+                            "description": (
+                                "Unit for quantity: g, kg, oz, lb, cup, "
+                                "tbsp. Use weight for anything sold by "
+                                "weight."
+                            ),
+                        },
+                        "portions": {
+                            "type": "integer",
+                            "description": (
+                                "How many meal-portions this batch "
+                                "yields. Must equal the total portions "
+                                "the meals below draw from it."
+                            ),
+                        },
+                        "prep_note": {
+                            "type": "string",
+                            "description": (
+                                "How to cook it, one line, with "
+                                "temperature and time if it matters."
+                            ),
+                        },
+                    },
+                    "required": ["name", "kind", "food_search", "quantity",
+                                 "unit", "portions"],
+                },
+            },
+            "meals": {
+                "type": "array",
+                "description": (
+                    "One entry per meal per day, for the slots and days "
+                    "requested. Vary the assembly — the same three "
+                    "components should not produce the same meal five "
+                    "times."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "day_index": {
+                            "type": "integer",
+                            "description": "0 = the first day of the plan.",
+                        },
+                        "slot": {
+                            "type": "string",
+                            "enum": ["breakfast", "lunch", "dinner", "snack"],
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "What this assembles into, e.g. 'Chicken burrito bowl'.",
+                        },
+                        "uses": {
+                            "type": "array",
+                            "description": "Which components, and how many portions of each.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "component": {
+                                        "type": "integer",
+                                        "description": (
+                                            "0-based index into the "
+                                            "components array above."
+                                        ),
+                                    },
+                                    "portions": {
+                                        "type": "number",
+                                        "description": (
+                                            "Portions of that component, "
+                                            "usually 1, 0.5 for a half."
+                                        ),
+                                    },
+                                },
+                                "required": ["component", "portions"],
+                            },
+                        },
+                        "assembly_note": {
+                            "type": "string",
+                            "description": (
+                                "How to put it together and anything "
+                                "fresh to add on the day, one line."
+                            ),
+                        },
+                    },
+                    "required": ["day_index", "slot", "name", "uses"],
+                },
+            },
+            "notes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "0-3 short notes: swaps if a component runs out, "
+                    "what to freeze, what to add fresh."
+                ),
+            },
+        },
+        "required": ["headline", "components", "meals"],
+    },
+}
+
+
+def _prep_plan_system(tone: str) -> str:
+    return (
+        "You plan a week of COMPONENT BATCH COOKING for a single "
+        "self-hosted user who cooks once at the weekend and eats from it "
+        "through the week.\n\n"
+        "## The model is components, not seven dinners\n"
+        "Cook a small number of parts in bulk — a protein, a grain or "
+        "starch, one or two vegetables, a sauce — and assemble them into "
+        "DIFFERENT meals across the week. This is the entire point. A "
+        "plan of seven separately-cooked dinners is not what was asked "
+        "for and is not what gets cooked.\n\n"
+        "Aim for 4-6 components. Fewer, larger batches beat many small "
+        "ones: it is one cooking session, not seven.\n\n"
+        "## Variety comes from assembly, not from more cooking\n"
+        "The same chicken and rice becomes a burrito bowl, a stir-fry, a "
+        "salad and a wrap depending on sauce, vegetable and what is "
+        "added fresh on the day. Give each meal a distinct name and a "
+        "distinct assembly note. Repeating the identical bowl five times "
+        "is the failure this feature exists to avoid.\n\n"
+        "## Cooked food does not keep forever\n"
+        "Cooked chicken and fish keep about 4 days in a fridge; grains "
+        "and roast vegetables about 5. Do not assign a component to a "
+        "day beyond that unless you say to freeze that portion in its "
+        "prep note.\n\n"
+        "## Portions must balance\n"
+        "Each component's `portions` must equal the total portions the "
+        "meals draw from it. A batch that yields 4 portions cannot feed "
+        "6 meals. Count before you answer.\n\n"
+        "## Do not state calories, protein or grams anywhere\n"
+        "You have no nutrition data and the server computes every number "
+        "from its own food catalog. Size the batches from the per-meal "
+        "energy budget you are given — that is what it is for — but do "
+        "not write a calorie or macro figure into any text field. If you "
+        "state one it will contradict the real number shown beside it.\n\n"
+        "## Search terms are for a database, not a menu\n"
+        "`food_search` must be a plain ingredient: 'chicken breast', "
+        "'brown rice', 'sweet potato', 'olive oil'. Not 'organic "
+        "free-range chicken', not 'perfectly roasted chicken breast'. "
+        "Two or three words. If the term does not match a plain "
+        "ingredient the component cannot be costed and the user sees a "
+        "gap.\n\n"
+        "## Use what is already in the house\n"
+        "Pantry items are listed with how close they are to expiring. "
+        "Building around what is about to go off is worth more than "
+        "theoretical optimality, and it shortens the shopping list.\n\n"
+        "## Training and fat constraints\n"
+        "Strength days need more protein and carbohydrate than rest "
+        "days; weight the larger portions onto them. If a per-meal fat "
+        "target is given it is MEDICAL — keep every meal under it. If "
+        "none is given, do not invent one.\n\n"
+        f"{_tone_line(tone)}\n"
+        "Answer only via the `give_prep_plan` tool."
+    )
+
+
+async def build_prep_plan_payload(
+    db: AsyncSession,
+    *,
+    start_day: date,
+    days: int,
+    slots: list[str],
+) -> dict[str, Any]:
+    """Bounded payload for the weekly prep planner.
+
+    Bounded in the same sense as every other surface here: names,
+    amounts and a handful of derived numbers. No nutrition tables, no
+    sample rows, no history beyond aggregates. The single largest thing
+    in here is the pantry, and it is capped.
+    """
+    from sqlalchemy import select as _select
+
+    from ..analytics.prep import slot_budgets
+    from ..analytics.strength import schedule_day_type
+    from ..analytics.targets import compute_targets
+    from ..api.meals import DIET_KEY, _DIET_DEFAULTS
+
+    profile = await db.get(models.UserProfile, 1)
+    extra = (profile.extra if profile and profile.extra else {}) or {}
+    diet = {**_DIET_DEFAULTS, **(extra.get(DIET_KEY) or {})}
+
+    targets = await compute_targets_for_user(db)
+    # An explicit diet target always wins over the equation — the user
+    # typing a number is a decision, not an input to be averaged.
+    target_kcal = diet.get("daily_kcal_target") or (
+        targets.get("target_kcal") if targets.get("ok") else None
+    )
+    target_protein = (
+        diet.get("daily_protein_target_g")
+        or (targets.get("protein_g") if targets.get("ok") else None)
+    )
+    budgets = slot_budgets(target_kcal, target_protein, slots)
+
+    # Pantry, soonest-to-expire first, capped. Same shape the suggestion
+    # card uses so the two surfaces build around the same food.
+    pantry_rows = (await db.execute(_select(models.PantryItem))).scalars().all()
+    food_ids = {p.food_id for p in pantry_rows if p.food_id is not None}
+    names: dict[int, str] = {}
+    if food_ids:
+        for fid, name in (await db.execute(
+            _select(models.Food.id, models.Food.name)
+            .where(models.Food.id.in_(food_ids))
+        )).all():
+            names[fid] = name
+    pantry = []
+    for p in pantry_rows:
+        label = names.get(p.food_id) if p.food_id else p.label
+        if not label:
+            continue
+        pantry.append({
+            "item": label,
+            "amount": (
+                f"{p.quantity:g} {p.unit}".strip()
+                if p.quantity is not None else (p.unit or "some")
+            ),
+            "days_to_expiry": (
+                (p.expires_on - start_day).days if p.expires_on else None
+            ),
+        })
+    pantry.sort(key=lambda x: (
+        x["days_to_expiry"] if x["days_to_expiry"] is not None else 10**6
+    ))
+    pantry = pantry[:50]
+
+    # The week's training, projected from the same deterministic
+    # schedule the workout generator uses, so the plan's "strength day"
+    # and the app's strength day are the same day.
+    training = (extra.get("training") or {}) if extra else {}
+    try:
+        s_per_week = int(training.get("days_per_week", 3))
+        c_per_week = int(training.get("cardio_days_per_week", 2))
+    except (TypeError, ValueError):
+        s_per_week, c_per_week = 3, 2
+    week = []
+    for i in range(days):
+        d = start_day + timedelta(days=i)
+        week.append({
+            "day_index": i,
+            "date": d.isoformat(),
+            "weekday": d.strftime("%A"),
+            "training": schedule_day_type(d, s_per_week, c_per_week),
+        })
+
+    # What was eaten recently, by name only — enough to avoid proposing
+    # the exact thing they had three times last week, and nothing more.
+    since = start_day - timedelta(days=14)
+    recent_names = [
+        n for (n,) in (await db.execute(
+            _select(models.FoodLogEntry.label)
+            .where(models.FoodLogEntry.label.isnot(None))
+            .where(models.FoodLogEntry.eaten_on >= since)
+            .distinct()
+            .limit(40)
+        )).all() if n
+    ]
+
+    return {
+        "start_day": start_day.isoformat(),
+        "days": days,
+        "week": week,
+        "profile": await _profile_ctx(db),
+        "targets": {
+            "daily_kcal": target_kcal,
+            "daily_protein_g": target_protein,
+            "basis": targets.get("basis") if targets.get("ok") else None,
+            "goal": (
+                "lose weight" if targets.get("ok")
+                and targets.get("deficit_kcal") else "maintain"
+            ),
+        },
+        "per_meal_budget": budgets,
+        # The medical constraint. A null target is NOT permission to
+        # guess a limit — same rule as the suggestion card.
+        "fat_per_meal_target_g": diet.get("fat_per_meal_target_g"),
+        "fat_target_source": diet.get("fat_target_source"),
+        "diet_preferences": {
+            k: v for k, v in diet.items()
+            if k in ("style", "avoid", "dislikes", "allergies")
+            and v
+        },
+        "pantry": pantry,
+        "pantry_size": len(pantry_rows),
+        "recently_eaten": recent_names,
+        "fasting_status": await _fasting_status(db),
+    }
+
+
+async def compute_targets_for_user(db: AsyncSession) -> dict[str, Any]:
+    """Run `analytics.targets.compute_targets` against the live profile.
+
+    Lives here rather than in the targets module because that module is
+    deliberately pure — it takes numbers and returns numbers, which is
+    what makes it testable without a database.
+    """
+    from sqlalchemy import select as _select
+
+    from ..analytics.targets import compute_targets
+
+    profile = await db.get(models.UserProfile, 1)
+    weight = (await db.execute(
+        _select(models.BodyMetric.weight_kg)
+        .where(models.BodyMetric.weight_kg.isnot(None))
+        .order_by(models.BodyMetric.time.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    extra = (profile.extra if profile and profile.extra else {}) or {}
+    goal_kg = None
+    goal_row = (await db.execute(
+        _select(models.AiGoal)
+        .where(models.AiGoal.kind == "weight")
+        .where(models.AiGoal.ended_at.is_(None))
+        .order_by(models.AiGoal.started_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if goal_row is not None and goal_row.target_value is not None:
+        goal_kg = float(goal_row.target_value)
+
+    return compute_targets(
+        weight_kg=float(weight) if weight is not None else None,
+        height_cm=float(profile.height_cm) if profile and profile.height_cm else None,
+        birth_date=profile.birth_date if profile else None,
+        sex=(profile.sex if profile else None),
+        activity_level=extra.get("activity_level"),
+        goal_weight_kg=goal_kg,
+        today=_local_today(),
+        training_load_band=None,
+    )
+
+
+async def prep_plan(
+    db: AsyncSession,
+    cfg: models.AiConfig,
+    *,
+    start_day: date,
+    days: int,
+    slots: list[str],
+) -> AiResult:
+    """Generate one week of component batch cooking."""
+    if not cfg.enabled or _credentials_missing(cfg):
+        raise RuntimeError("AI is disabled or no credentials configured")
+
+    payload = await build_prep_plan_payload(
+        db, start_day=start_day, days=days, slots=slots,
+    )
+    user_text = (
+        "Plan this user's week of batch cooking via the `give_prep_plan` "
+        "tool:\n\n"
+        f"{json.dumps(payload, indent=2, default=str)}\n"
+    )
+    client = get_provider(cfg)
+    resp = await client.messages.create(
+        model=cfg.model,
+        # A week of meals is the largest structured output in the app.
+        max_tokens=4000,
+        system=_cached_system(_prep_plan_system(cfg.tone), cfg),
+        tools=[PREP_PLAN_TOOL],
+        tool_choice={"type": "tool", "name": "give_prep_plan"},
+        messages=[{"role": "user", "content": user_text}],
+    )
+    tool_input: dict[str, Any] = {}
+    for block in resp.content:
+        if (getattr(block, "type", "") == "tool_use"
+                and block.name == "give_prep_plan"):
+            tool_input = block.input  # type: ignore[assignment]
+            break
+    if not tool_input:
+        tool_input = {"headline": "", "components": [], "meals": [], "notes": []}
+
+    _normalize_array_field(tool_input, "notes")
+    return AiResult(
+        content=json.dumps(tool_input),
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+    )

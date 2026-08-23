@@ -2343,3 +2343,187 @@ data class ImageIn(
 data class LabelIn(
     val images: List<ImageIn>,
 )
+
+// ── Weekly component prep planner (MEAL-9) ───────────────────────────
+//
+// Every number in these types is computed by the backend from the food
+// catalog. The AI that proposes the week never emits one, and nothing
+// here is re-derived on the phone — see the architecture rule in
+// CLAUDE.md and `analytics/prep.py` for why.
+//
+// Note the absence of an adherence or completion percentage anywhere.
+// Skipping a meal or eating out are ordinary outcomes that release their
+// portions back into `spare`, not failures to be scored.
+
+@JsonClass(generateAdapter = true)
+data class PrepComponentOut(
+    val id: Long = 0,
+    val name: String = "",
+    // protein | grain | veg | sauce | other
+    val kind: String = "other",
+    @Json(name = "food_id") val foodId: Long? = null,
+    @Json(name = "food_name") val foodName: String? = null,
+    val quantity: Double? = null,
+    val unit: String? = null,
+    val portions: Int = 1,
+    @Json(name = "prep_note") val prepNote: String? = null,
+    val done: Boolean = false,
+    @Json(name = "order_index") val orderIndex: Int = 0,
+    @Json(name = "grams_total") val gramsTotal: Double? = null,
+    @Json(name = "grams_per_portion") val gramsPerPortion: Double? = null,
+    // Null, never a map of zeroes, when the component could not be
+    // costed. A protein total that quietly omits the chicken is worse
+    // than one that admits it is partial.
+    @Json(name = "per_portion") val perPortion: Map<String, Double?>? = null,
+    val unresolved: Boolean = false,
+    @Json(name = "unresolved_reason") val unresolvedReason: String? = null,
+    // Portions cooked minus portions the live plan consumes.
+    val spare: Double? = null,
+    val short: Boolean = false,
+)
+
+@JsonClass(generateAdapter = true)
+data class PrepMealUse(
+    @Json(name = "component_id") val componentId: Long = 0,
+    val portions: Double = 1.0,
+)
+
+@JsonClass(generateAdapter = true)
+data class PrepMealOut(
+    val id: Long = 0,
+    val day: String = "",
+    val slot: String = "dinner",
+    val name: String = "",
+    // suggested | accepted | eating_out | skipped
+    val status: String = "suggested",
+    val uses: List<PrepMealUse> = emptyList(),
+    @Json(name = "est_kcal") val estKcal: Double? = null,
+    @Json(name = "est_protein_g") val estProteinG: Double? = null,
+    @Json(name = "est_fat_g") val estFatG: Double? = null,
+    @Json(name = "assembly_note") val assemblyNote: String? = null,
+    @Json(name = "order_index") val orderIndex: Int = 0,
+    @Json(name = "fat_assessment") val fatAssessment: FatAssessment? = null,
+    @Json(name = "unresolved_count") val unresolvedCount: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class PrepDayOut(
+    val day: String = "",
+    val weekday: String = "",
+    val meals: List<PrepMealOut> = emptyList(),
+    @Json(name = "planned_kcal") val plannedKcal: Double? = null,
+    @Json(name = "planned_protein_g") val plannedProteinG: Double? = null,
+    @Json(name = "planned_fat_g") val plannedFatG: Double? = null,
+    @Json(name = "budget_kcal") val budgetKcal: Double? = null,
+    @Json(name = "budget_protein_g") val budgetProteinG: Double? = null,
+    @Json(name = "off_plan") val offPlan: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class PrepSlotBudget(
+    val share: Double = 0.0,
+    val kcal: Int? = null,
+    @Json(name = "protein_g") val proteinG: Int? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class PrepBudgets(
+    val slots: List<String> = emptyList(),
+    @Json(name = "per_slot") val perSlot: Map<String, PrepSlotBudget> = emptyMap(),
+    // The share of the day these meals cover. NOT renormalised to 1.0 —
+    // a plan covering lunch and dinner is 65% of a day, and rescaling
+    // would prescribe a 1,150 kcal lunch.
+    @Json(name = "covered_share") val coveredShare: Double = 1.0,
+    @Json(name = "uncovered_share") val uncoveredShare: Double = 0.0,
+    // What the plan deliberately does not include. Surfaced so the UI
+    // can say so rather than showing the week as short of target.
+    @Json(name = "uncovered_kcal") val uncoveredKcal: Int? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class PrepPlanOut(
+    val id: Long = 0,
+    @Json(name = "start_day") val startDay: String = "",
+    val days: Int = 5,
+    val status: String = "draft",
+    @Json(name = "target_kcal") val targetKcal: Int? = null,
+    @Json(name = "target_protein_g") val targetProteinG: Int? = null,
+    @Json(name = "target_basis") val targetBasis: String? = null,
+    val notes: String? = null,
+    val headline: String? = null,
+    val components: List<PrepComponentOut> = emptyList(),
+    val schedule: List<PrepDayOut> = emptyList(),
+    val budgets: PrepBudgets = PrepBudgets(),
+    val warnings: List<String> = emptyList(),
+    @Json(name = "shopping_list_id") val shoppingListId: Long? = null,
+)
+
+/**
+ * Daily energy and protein targets, or a refusal naming what is missing.
+ *
+ * `ok` is false when the profile lacks a field the equation needs. That
+ * is a real answer and must render as "fill these in", never as a
+ * default number — a calorie target this app invented would be acted on.
+ */
+@JsonClass(generateAdapter = true)
+data class PrepTargetsOut(
+    val ok: Boolean = false,
+    val reason: String? = null,
+    val missing: List<String> = emptyList(),
+    // Always "estimate" today. Mifflin-St Jeor is an equation applied to
+    // a profile, not a measurement.
+    val basis: String? = null,
+    val method: String? = null,
+    val age: Int? = null,
+    @Json(name = "weight_kg") val weightKg: Double? = null,
+    @Json(name = "goal_weight_kg") val goalWeightKg: Double? = null,
+    @Json(name = "bmr_kcal") val bmrKcal: Int? = null,
+    @Json(name = "activity_level") val activityLevel: String? = null,
+    @Json(name = "activity_factor") val activityFactor: Double? = null,
+    @Json(name = "tdee_kcal") val tdeeKcal: Int? = null,
+    @Json(name = "deficit_kcal") val deficitKcal: Int? = null,
+    @Json(name = "target_kcal") val targetKcal: Int? = null,
+    @Json(name = "hit_floor") val hitFloor: Boolean = false,
+    @Json(name = "protein_g") val proteinG: Int? = null,
+    @Json(name = "protein_range_g") val proteinRangeG: List<Int> = emptyList(),
+    @Json(name = "expected_loss_kg_per_week") val expectedLossKgPerWeek: Double? = null,
+    val caveat: String? = null,
+    @Json(name = "override_kcal") val overrideKcal: Int? = null,
+    @Json(name = "fat_per_meal_target_g") val fatPerMealTargetG: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class PrepGenerateIn(
+    val start: String? = null,
+    val days: Int = 5,
+    val slots: List<String> = listOf("lunch", "dinner"),
+)
+
+@JsonClass(generateAdapter = true)
+data class PrepComponentPatch(
+    val done: Boolean? = null,
+    val quantity: Double? = null,
+    val unit: String? = null,
+    val portions: Int? = null,
+    val name: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class PrepMealPatch(
+    val status: String? = null,
+    val day: String? = null,
+    val name: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class PrepPlanPatch(
+    val status: String? = null,
+    val notes: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class PrepLogResult(
+    val logged: Int = 0,
+    val day: String = "",
+    val slot: String = "",
+)

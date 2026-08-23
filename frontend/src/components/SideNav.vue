@@ -265,6 +265,7 @@ const groups = computed<Group[]>(() => {
         ? `${expiringCount.value} to use` : undefined,
       badgeColor: "#fbbf24",
       children: [
+        { to: "/meals/prep",    icon: ChefHat,    label: "Weekend prep" },
         { to: "/meals/plan",    icon: Calendar,   label: "Plan" },
         { to: "/meals/log",     icon: ClipboardList, label: "Food log" },
         { to: "/meals/recipes", icon: BookOpen, label: "Recipes" },

@@ -2372,6 +2372,171 @@ export const mealsStats = () =>
 
 /** Namespace object, mirroring the `api` export's shape so views read
  *  the same way whichever surface they touch: `meals.listRecipes()`. */
+
+// ── Weekly component prep planner (MEAL-9) ───────────────────────────
+//
+// Every number in these types is computed by the backend from the food
+// catalog. The AI that proposes the week never emits one — see
+// `analytics/prep.py` for why. Nothing here is re-derived in Vue.
+
+export interface PrepComponent {
+  id: number;
+  name: string;
+  kind: "protein" | "grain" | "veg" | "sauce" | "other";
+  food_id: number | null;
+  food_name: string | null;
+  quantity: number | null;
+  unit: string | null;
+  portions: number;
+  prep_note: string | null;
+  done: boolean;
+  order_index: number;
+  grams_total: number | null;
+  grams_per_portion: number | null;
+  per_portion: Record<string, number | null> | null;
+  unresolved: boolean;
+  unresolved_reason: string | null;
+  /** Portions cooked minus portions the live plan consumes. */
+  spare: number | null;
+  short: boolean;
+}
+
+export interface PrepMeal {
+  id: number;
+  day: string;
+  slot: string;
+  name: string;
+  status: "suggested" | "accepted" | "eating_out" | "skipped";
+  uses: { component_id: number; portions: number }[];
+  est_kcal: number | null;
+  est_protein_g: number | null;
+  est_fat_g: number | null;
+  assembly_note: string | null;
+  order_index: number;
+  fat_assessment: FatAssessment | null;
+  unresolved_count: number;
+}
+
+export interface PrepDay {
+  day: string;
+  weekday: string;
+  meals: PrepMeal[];
+  planned_kcal: number | null;
+  planned_protein_g: number | null;
+  planned_fat_g: number | null;
+  budget_kcal: number | null;
+  budget_protein_g: number | null;
+  off_plan: number;
+}
+
+export interface PrepPlan {
+  id: number;
+  start_day: string;
+  days: number;
+  status: "draft" | "active" | "done";
+  target_kcal: number | null;
+  target_protein_g: number | null;
+  target_basis: string | null;
+  notes: string | null;
+  headline: string | null;
+  components: PrepComponent[];
+  schedule: PrepDay[];
+  budgets: {
+    slots: string[];
+    per_slot: Record<string, { share: number; kcal: number | null; protein_g: number | null }>;
+    covered_share: number;
+    uncovered_share: number;
+    uncovered_kcal: number | null;
+  };
+  warnings: string[];
+  shopping_list_id: number | null;
+}
+
+export interface PrepTargets {
+  ok: boolean;
+  reason?: string;
+  missing?: string[];
+  basis?: string;
+  method?: string;
+  age?: number;
+  weight_kg?: number;
+  goal_weight_kg?: number | null;
+  bmr_kcal?: number;
+  activity_level?: string;
+  activity_factor?: number;
+  tdee_kcal?: number;
+  deficit_kcal?: number;
+  target_kcal?: number;
+  hit_floor?: boolean;
+  protein_g?: number;
+  protein_range_g?: [number, number];
+  expected_loss_kg_per_week?: number;
+  caveat?: string;
+  override_kcal?: number | null;
+  fat_per_meal_target_g?: number | null;
+}
+
+export const prepTargets = () =>
+  http.get<PrepTargets>("/meals/prep/targets").then((r) => r.data);
+
+export const listPrepPlans = () =>
+  http
+    .get<
+      {
+        id: number; start_day: string; days: number; status: string;
+        headline: string | null; target_kcal: number | null;
+        components: number; meals: number;
+      }[]
+    >("/meals/prep")
+    .then((r) => r.data);
+
+export const currentPrepPlan = () =>
+  http.get<PrepPlan | null>("/meals/prep/current").then((r) => r.data);
+
+export const getPrepPlan = (id: number) =>
+  http.get<PrepPlan>(`/meals/prep/${id}`).then((r) => r.data);
+
+export const generatePrepPlan = (body: {
+  start?: string | null;
+  days?: number;
+  slots?: string[];
+}) => http.post<PrepPlan>("/meals/prep/generate", body).then((r) => r.data);
+
+export const updatePrepPlan = (
+  id: number,
+  body: { status?: string; notes?: string },
+) => http.patch<PrepPlan>(`/meals/prep/${id}`, body).then((r) => r.data);
+
+export const deletePrepPlan = (id: number) =>
+  http.delete(`/meals/prep/${id}`).then(() => undefined);
+
+export const updatePrepComponent = (
+  id: number,
+  body: {
+    done?: boolean; quantity?: number; unit?: string;
+    portions?: number; name?: string;
+  },
+) =>
+  http.patch<PrepPlan>(`/meals/prep/component/${id}`, body).then((r) => r.data);
+
+export const updatePrepMeal = (
+  id: number,
+  body: { status?: string; day?: string; name?: string },
+) => http.patch<PrepPlan>(`/meals/prep/meal/${id}`, body).then((r) => r.data);
+
+export const prepShoppingList = (planId: number) =>
+  http
+    .post<ShoppingList>(`/meals/prep/${planId}/shopping-list`, {})
+    .then((r) => r.data);
+
+export const logPrepMeal = (mealId: number) =>
+  http
+    .post<{ logged: number; day: string; slot: string }>(
+      `/meals/prep/meal/${mealId}/log`,
+      {},
+    )
+    .then((r) => r.data);
+
 export const meals = {
   searchFoods,
   getFood,
@@ -2413,4 +2578,15 @@ export const meals = {
   quickAddPantry,
   getStaples,
   putStaples,
+  prepTargets,
+  listPrepPlans,
+  currentPrepPlan,
+  getPrepPlan,
+  generatePrepPlan,
+  updatePrepPlan,
+  deletePrepPlan,
+  updatePrepComponent,
+  updatePrepMeal,
+  prepShoppingList,
+  logPrepMeal,
 };

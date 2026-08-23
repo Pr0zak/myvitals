@@ -96,6 +96,7 @@ private const val CACHE_RECIPES = "meals_recipes"
 private const val CACHE_PANTRY = "meals_pantry"
 
 private enum class MealsTab(val label: String) {
+    PREP("Prep"),
     PLAN("Plan"),
     CAN_MAKE("Can make"),
     LOG("Log"),
@@ -109,7 +110,7 @@ private enum class MealsTab(val label: String) {
 
 @Composable
 fun MealsScreen(settings: SettingsRepository) {
-    var tab by remember { mutableStateOf(MealsTab.PLAN) }
+    var tab by remember { mutableStateOf(MealsTab.PREP) }
 
     Column(Modifier.fillMaxSize().background(NeonMV.Bg)) {
         Text(
@@ -134,6 +135,7 @@ fun MealsScreen(settings: SettingsRepository) {
         }
         Box(Modifier.fillMaxSize().padding(top = 10.dp)) {
             when (tab) {
+                MealsTab.PREP -> PrepTab(settings)
                 MealsTab.PLAN -> PlanTab(settings)
                 MealsTab.CAN_MAKE -> CanMakeTab(settings)
                 MealsTab.LOG -> LogTab(settings)

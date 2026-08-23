@@ -1417,6 +1417,116 @@ def _shopping_out(
     )
 
 
+
+async def _shopping_from_lines(
+    db: AsyncSession,
+    lines: list[dict[str, Any]],
+    *,
+    name: str,
+    begin: date,
+    end: date,
+    source_count: int,
+) -> "ShoppingListOut":
+    """Turn planned ingredient lines into a persisted shopping list.
+
+    Shared by the recipe-plan list and the prep-plan list. It exists as
+    one function because pantry subtraction is subtle — food id, then
+    shared concept, then hand-typed label, and only a demonstrably
+    complete cancellation may drop a line — and two copies of that
+    would drift into telling the user to buy chicken on one screen and
+    not the other.
+    """
+    needs = shop.aggregate_needs(lines)
+
+    # Pantry, grouped by CONCEPT rather than by food id.
+    #
+    # This is the MEAL-6 correctness fix. Raw and grilled chicken breast
+    # are different USDA rows with genuinely different nutrition, but they
+    # are one thing to have in the house — so a pantry holding the raw row
+    # used to fail to cancel a recipe naming the cooked one, and the list
+    # told you to buy chicken you already had.
+    pantry_rows = (await db.execute(select(models.PantryItem))).scalars().all()
+    pantry_food_ids = {p.food_id for p in pantry_rows if p.food_id is not None}
+    concept_of: dict[int, str | None] = {}
+    if pantry_food_ids:
+        for fid, concept in (await db.execute(
+            select(models.Food.id, models.Food.concept)
+            .where(models.Food.id.in_(pantry_food_ids))
+        )).all():
+            concept_of[fid] = concept
+
+    pantry_by_food: dict[int, list[dict[str, Any]]] = {}
+    pantry_by_label: dict[str, list[dict[str, Any]]] = {}
+    pantry_by_concept: dict[str, list[dict[str, Any]]] = {}
+    for p in pantry_rows:
+        rec = {"quantity": p.quantity, "unit": p.unit}
+        if p.food_id is not None:
+            pantry_by_food.setdefault(p.food_id, []).append(rec)
+            c = concept_of.get(p.food_id)
+            if c:
+                pantry_by_concept.setdefault(c, []).append(rec)
+        elif p.label:
+            pantry_by_label.setdefault(p.label.lower(), []).append(rec)
+
+    all_food_ids = {n.food_id for n in needs.values() if n.food_id is not None}
+    need_foods: dict[int, models.Food] = {}
+    if all_food_ids:
+        for f in (await db.execute(
+            select(models.Food).where(models.Food.id.in_(all_food_ids))
+        )).scalars().all():
+            need_foods[f.id] = f
+
+    lst = models.ShoppingList(
+        name=name, start_day=begin, end_day=end, status="open",
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(lst)
+    await db.flush()
+
+    covered_count = 0
+    order = 0
+    kept: list[models.ShoppingListItem] = []
+    for need in sorted(needs.values(), key=lambda n: n.label.lower()):
+        food = need_foods.get(need.food_id) if need.food_id is not None else None
+        # Exact food id first (most precise), then the shared concept,
+        # then a hand-typed label. Concept matching is what makes a
+        # pantry of raw chicken cancel a recipe's cooked chicken.
+        if need.food_id is not None:
+            have = list(pantry_by_food.get(need.food_id, []))
+            concept = getattr(food, "concept", None) if food else None
+            if not have and concept:
+                have = list(pantry_by_concept.get(concept, []))
+        else:
+            have = list(pantry_by_label.get(need.label.lower(), []))
+            # A hand-typed recipe line can still match a stocked food
+            # whose concept is literally what was typed.
+            if not have:
+                have = list(pantry_by_concept.get(need.label.lower(), []))
+        row = shop.subtract_pantry(need, have, _food_dict(food))
+        if row["fully_covered"]:
+            # The ONLY case where a line is dropped: the arithmetic was
+            # complete and the pantry demonstrably covers it. Counted so
+            # the subtraction is visible rather than mysterious.
+            covered_count += 1
+            continue
+        item = models.ShoppingListItem(
+            list_id=lst.id, food_id=row["food_id"], label=row["label"],
+            grams=row["grams"], amount_text=row["amount_text"],
+            pantry_uncertain=row["pantry_uncertain"],
+            pantry_covered_g=row["pantry_covered_g"],
+            checked=False, order_index=order,
+        )
+        order += 1
+        db.add(item)
+        kept.append(item)
+
+    await db.commit()
+    for i in kept:
+        await db.refresh(i)
+    await db.refresh(lst)
+    return _shopping_out(lst, kept, need_foods, source_count, covered_count)
+
+
 @router.post("/shopping-list", response_model=ShoppingListOut, status_code=201)
 async def generate_shopping_list(
     body: ShoppingListIn, db: AsyncSession = Depends(get_session),
@@ -1480,95 +1590,10 @@ async def generate_shopping_list(
                     "multiplier": mult,
                 })
 
-    needs = shop.aggregate_needs(lines)
-
-    # Pantry, grouped by CONCEPT rather than by food id.
-    #
-    # This is the MEAL-6 correctness fix. Raw and grilled chicken breast
-    # are different USDA rows with genuinely different nutrition, but they
-    # are one thing to have in the house — so a pantry holding the raw row
-    # used to fail to cancel a recipe naming the cooked one, and the list
-    # told you to buy chicken you already had.
-    pantry_rows = (await db.execute(select(models.PantryItem))).scalars().all()
-    pantry_food_ids = {p.food_id for p in pantry_rows if p.food_id is not None}
-    concept_of: dict[int, str | None] = {}
-    if pantry_food_ids:
-        for fid, concept in (await db.execute(
-            select(models.Food.id, models.Food.concept)
-            .where(models.Food.id.in_(pantry_food_ids))
-        )).all():
-            concept_of[fid] = concept
-
-    pantry_by_food: dict[int, list[dict[str, Any]]] = {}
-    pantry_by_label: dict[str, list[dict[str, Any]]] = {}
-    pantry_by_concept: dict[str, list[dict[str, Any]]] = {}
-    for p in pantry_rows:
-        rec = {"quantity": p.quantity, "unit": p.unit}
-        if p.food_id is not None:
-            pantry_by_food.setdefault(p.food_id, []).append(rec)
-            c = concept_of.get(p.food_id)
-            if c:
-                pantry_by_concept.setdefault(c, []).append(rec)
-        elif p.label:
-            pantry_by_label.setdefault(p.label.lower(), []).append(rec)
-
-    all_food_ids = {n.food_id for n in needs.values() if n.food_id is not None}
-    need_foods: dict[int, models.Food] = {}
-    if all_food_ids:
-        for f in (await db.execute(
-            select(models.Food).where(models.Food.id.in_(all_food_ids))
-        )).scalars().all():
-            need_foods[f.id] = f
-
-    lst = models.ShoppingList(
-        name=body.name, start_day=begin, end_day=end, status="open",
-        created_at=datetime.now(timezone.utc),
+    return await _shopping_from_lines(
+        db, lines, name=body.name, begin=begin, end=end,
+        source_count=len(planned),
     )
-    db.add(lst)
-    await db.flush()
-
-    covered_count = 0
-    order = 0
-    kept: list[models.ShoppingListItem] = []
-    for need in sorted(needs.values(), key=lambda n: n.label.lower()):
-        food = need_foods.get(need.food_id) if need.food_id is not None else None
-        # Exact food id first (most precise), then the shared concept,
-        # then a hand-typed label. Concept matching is what makes a
-        # pantry of raw chicken cancel a recipe's cooked chicken.
-        if need.food_id is not None:
-            have = list(pantry_by_food.get(need.food_id, []))
-            concept = getattr(food, "concept", None) if food else None
-            if not have and concept:
-                have = list(pantry_by_concept.get(concept, []))
-        else:
-            have = list(pantry_by_label.get(need.label.lower(), []))
-            # A hand-typed recipe line can still match a stocked food
-            # whose concept is literally what was typed.
-            if not have:
-                have = list(pantry_by_concept.get(need.label.lower(), []))
-        row = shop.subtract_pantry(need, have, _food_dict(food))
-        if row["fully_covered"]:
-            # The ONLY case where a line is dropped: the arithmetic was
-            # complete and the pantry demonstrably covers it. Counted so
-            # the subtraction is visible rather than mysterious.
-            covered_count += 1
-            continue
-        item = models.ShoppingListItem(
-            list_id=lst.id, food_id=row["food_id"], label=row["label"],
-            grams=row["grams"], amount_text=row["amount_text"],
-            pantry_uncertain=row["pantry_uncertain"],
-            pantry_covered_g=row["pantry_covered_g"],
-            checked=False, order_index=order,
-        )
-        order += 1
-        db.add(item)
-        kept.append(item)
-
-    await db.commit()
-    for i in kept:
-        await db.refresh(i)
-    await db.refresh(lst)
-    return _shopping_out(lst, kept, need_foods, len(planned), covered_count)
 
 
 @router.get("/shopping-lists", response_model=list[ShoppingListOut])
@@ -2241,3 +2266,790 @@ async def meals_stats(db: AsyncSession = Depends(get_session)):
         "pantry_items": pantry_n,
         "expiring_soon": expiring,
     }
+
+
+# ── Weekly component prep planner (MEAL-9) ───────────────────────────
+#
+# "Make meals on the weekend for the week ahead" — one cooking session,
+# a handful of components, and the week assembled from them.
+#
+# The division of labour with the AI is the important part and is
+# documented at length in `analytics/prep.py`: the model proposes what to
+# cook and how to combine it; every number rendered next to that comes
+# from the food catalog through `analytics/prep.py`, computed here. The
+# model never emits a calorie.
+#
+# Nothing on this surface scores adherence. A meal can be accepted,
+# skipped or eaten out, and the last two are outcomes rather than
+# failures — they release their portions back into `leftover_ledger` so
+# the app can say "two portions of chicken spare, Thursday's bowl still
+# works on Saturday". A planner that turns red on Wednesday is a planner
+# that gets deleted in week two, which is the failure mode this whole
+# feature is shaped around avoiding.
+
+
+class PrepComponentOut(BaseModel):
+    id: int
+    name: str
+    kind: str
+    food_id: int | None = None
+    food_name: str | None = None
+    quantity: float | None = None
+    unit: str | None = None
+    portions: int
+    prep_note: str | None = None
+    done: bool
+    order_index: int
+    grams_total: float | None = None
+    grams_per_portion: float | None = None
+    #: Per-portion nutrition from the catalog. Null when the component
+    #: could not be costed — never zero.
+    per_portion: dict[str, float | None] | None = None
+    unresolved: bool = False
+    unresolved_reason: str | None = None
+    #: Portions cooked minus portions the live plan consumes.
+    spare: float | None = None
+    short: bool = False
+
+
+class PrepMealOut(BaseModel):
+    id: int
+    day: date
+    slot: str
+    name: str
+    status: str
+    uses: list[dict[str, Any]] = []
+    est_kcal: float | None = None
+    est_protein_g: float | None = None
+    est_fat_g: float | None = None
+    assembly_note: str | None = None
+    order_index: int
+    #: Same deterministic fat verdict every other surface uses, so the
+    #: planner cannot disagree with the recipe page about dinner.
+    fat_assessment: dict[str, Any] | None = None
+    unresolved_count: int = 0
+
+
+class PrepDayOut(BaseModel):
+    day: date
+    weekday: str
+    meals: list[PrepMealOut]
+    planned_kcal: float | None = None
+    planned_protein_g: float | None = None
+    planned_fat_g: float | None = None
+    budget_kcal: float | None = None
+    budget_protein_g: float | None = None
+    off_plan: int = 0
+
+
+class PrepPlanOut(BaseModel):
+    id: int
+    start_day: date
+    days: int
+    status: str
+    target_kcal: int | None = None
+    target_protein_g: int | None = None
+    target_basis: str | None = None
+    notes: str | None = None
+    headline: str | None = None
+    components: list[PrepComponentOut]
+    schedule: list[PrepDayOut]
+    #: Slot coverage. `uncovered_kcal` is what the plan deliberately does
+    #: NOT include (breakfast, usually) — surfaced so the client can say
+    #: so rather than presenting the week as short of target.
+    budgets: dict[str, Any] = {}
+    warnings: list[str] = []
+    shopping_list_id: int | None = None
+
+
+class PrepGenerateIn(BaseModel):
+    start: date | None = None
+    days: int = Field(default=5, ge=1, le=7)
+    slots: list[str] = Field(default_factory=lambda: ["lunch", "dinner"])
+
+
+class PrepPlanPatch(BaseModel):
+    status: str | None = None
+    notes: str | None = None
+
+
+class PrepComponentPatch(BaseModel):
+    done: bool | None = None
+    quantity: float | None = None
+    unit: str | None = None
+    portions: int | None = None
+    name: str | None = None
+
+
+class PrepMealPatch(BaseModel):
+    status: str | None = None
+    day: date | None = None
+    name: str | None = None
+
+
+def _prep_note_key(plan: models.PrepPlan) -> tuple[str | None, str | None]:
+    """Split the stored notes blob into headline and the rest.
+
+    The headline is the model's one-line description of the week and the
+    notes are its caveats. They live in one Text column because they are
+    always written and read together, and a second column would have
+    meant a second migration for one string.
+    """
+    if not plan.notes:
+        return None, None
+    head, _, rest = plan.notes.partition("\n\n")
+    return (head or None), (rest or None)
+
+
+async def _prep_hydrate(
+    db: AsyncSession, plan: models.PrepPlan,
+) -> PrepPlanOut:
+    """Load a plan and compute every number on it.
+
+    Called by every route that returns a plan, so a client never has to
+    re-derive anything and the two surfaces cannot disagree.
+    """
+    from ..analytics import prep as prep_lib
+
+    comps = (await db.execute(
+        select(models.PrepComponent)
+        .where(models.PrepComponent.plan_id == plan.id)
+        .order_by(models.PrepComponent.order_index)
+    )).scalars().all()
+    meals = (await db.execute(
+        select(models.PrepMeal)
+        .where(models.PrepMeal.plan_id == plan.id)
+        .order_by(models.PrepMeal.day, models.PrepMeal.order_index)
+    )).scalars().all()
+
+    food_ids = {c.food_id for c in comps if c.food_id is not None}
+    food_rows: dict[int, models.Food] = {}
+    if food_ids:
+        for f in (await db.execute(
+            select(models.Food).where(models.Food.id.in_(food_ids))
+        )).scalars().all():
+            food_rows[f.id] = f
+    food_dicts = {fid: _food_dict(f) for fid, f in food_rows.items()}
+
+    resolved = prep_lib.resolve_components(
+        [
+            {
+                "id": c.id, "name": c.name, "kind": c.kind,
+                "food_id": c.food_id, "quantity": c.quantity, "unit": c.unit,
+                "portions": c.portions, "prep_note": c.prep_note,
+                "done": c.done, "order_index": c.order_index,
+            }
+            for c in comps
+        ],
+        food_dicts,
+    )
+    by_id = {c["id"]: c for c in resolved}
+
+    diet = await _diet_settings(db)
+    fat_target = diet.get("fat_per_meal_target_g")
+
+    meal_dicts: list[dict[str, Any]] = []
+    for m in meals:
+        uses = m.component_ids or []
+        cost = prep_lib.cost_meal(uses, by_id)
+        nut = cost["nutrition"] or {}
+        est_kcal = nut.get("kcal")
+        est_protein = nut.get("protein_g")
+        est_fat = nut.get("fat_g")
+        meal_dicts.append({
+            "id": m.id, "day": m.day, "slot": m.slot, "name": m.name,
+            "status": m.status, "uses": uses,
+            "est_kcal": est_kcal, "est_protein_g": est_protein,
+            "est_fat_g": est_fat,
+            "assembly_note": m.assembly_note, "order_index": m.order_index,
+            "fat_assessment": nutri.assess_meal_fat(
+                est_fat, target_g=fat_target, history_fat_g=[],
+            ),
+            "unresolved_count": cost["unresolved_count"],
+        })
+
+    ledger = {
+        r["component_id"]: r
+        for r in prep_lib.leftover_ledger(resolved, meal_dicts)
+    }
+    budgets = prep_lib.slot_budgets(
+        plan.target_kcal, plan.target_protein_g,
+        sorted({m["slot"] for m in meal_dicts}, key=lambda s: prep_lib.SLOT_ORDER.get(s, 9))
+        or ["lunch", "dinner"],
+    )
+    rows = prep_lib.day_rollup(
+        meal_dicts, plan.target_kcal, plan.target_protein_g, budgets,
+    )
+
+    # Days with no meals at all still appear, so the week reads as a week
+    # rather than as a list that mysteriously skips Wednesday.
+    have = {r["day"] for r in rows}
+    for i in range(plan.days):
+        d = plan.start_day + timedelta(days=i)
+        if d not in have:
+            share = budgets.get("covered_share") or 1.0
+            rows.append({
+                "day": d, "meals": [], "planned_kcal": None,
+                "planned_protein_g": None, "planned_fat_g": None,
+                "budget_kcal": (
+                    round(plan.target_kcal * share) if plan.target_kcal else None
+                ),
+                "budget_protein_g": (
+                    round(plan.target_protein_g * share)
+                    if plan.target_protein_g else None
+                ),
+                "off_plan": 0,
+            })
+    rows.sort(key=lambda r: r["day"])
+
+    lst_id = (await db.execute(
+        select(models.ShoppingList.id)
+        .where(models.ShoppingList.start_day == plan.start_day)
+        .where(models.ShoppingList.name.ilike("%prep%"))
+        .order_by(models.ShoppingList.id.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    headline, rest = _prep_note_key(plan)
+    return PrepPlanOut(
+        id=plan.id, start_day=plan.start_day, days=plan.days,
+        status=plan.status, target_kcal=plan.target_kcal,
+        target_protein_g=plan.target_protein_g,
+        target_basis=plan.target_basis,
+        headline=headline, notes=rest,
+        components=[
+            PrepComponentOut(
+                **{k: v for k, v in c.items() if k != "per_portion"},
+                per_portion=c.get("per_portion"),
+                food_name=(
+                    food_rows[c["food_id"]].name
+                    if c.get("food_id") in food_rows else None
+                ),
+                spare=ledger.get(c["id"], {}).get("spare"),
+                short=ledger.get(c["id"], {}).get("short", False),
+            )
+            for c in resolved
+        ],
+        schedule=[
+            PrepDayOut(
+                day=r["day"],
+                weekday=r["day"].strftime("%A"),
+                meals=[PrepMealOut(**m) for m in r["meals"]],
+                planned_kcal=r["planned_kcal"],
+                planned_protein_g=r["planned_protein_g"],
+                planned_fat_g=r["planned_fat_g"],
+                budget_kcal=r["budget_kcal"],
+                budget_protein_g=r["budget_protein_g"],
+                off_plan=r["off_plan"],
+            )
+            for r in rows
+        ],
+        budgets=budgets,
+        warnings=prep_lib.keeps_until_warnings(
+            resolved, meal_dicts, plan.start_day,
+        ),
+        shopping_list_id=lst_id,
+    )
+
+
+@router.get("/prep/targets", response_model=dict)
+async def prep_targets(db: AsyncSession = Depends(get_session)):
+    """Daily energy and protein targets for this user, or why not.
+
+    Separate from plan generation because the numbers are useful on their
+    own, cost nothing to compute, and a user should be able to see and
+    sanity-check what a plan will be built against BEFORE spending an AI
+    call on it.
+    """
+    from ..integrations.claude import compute_targets_for_user
+
+    targets = await compute_targets_for_user(db)
+    diet = await _diet_settings(db)
+    override = diet.get("daily_kcal_target")
+    if override:
+        # An explicitly typed target is a decision, not another estimate
+        # to be averaged in. Both are returned so the UI can show that
+        # the equation was overridden rather than silently ignored.
+        targets["override_kcal"] = override
+    targets["fat_per_meal_target_g"] = diet.get("fat_per_meal_target_g")
+    return targets
+
+
+@router.get("/prep", response_model=list[dict])
+async def list_prep_plans(
+    limit: int = Query(default=12, ge=1, le=60),
+    db: AsyncSession = Depends(get_session),
+):
+    plans = (await db.execute(
+        select(models.PrepPlan)
+        .order_by(models.PrepPlan.start_day.desc())
+        .limit(limit)
+    )).scalars().all()
+    out = []
+    for p in plans:
+        head, _ = _prep_note_key(p)
+        n_comp = (await db.execute(
+            select(func.count(models.PrepComponent.id))
+            .where(models.PrepComponent.plan_id == p.id)
+        )).scalar_one()
+        n_meal = (await db.execute(
+            select(func.count(models.PrepMeal.id))
+            .where(models.PrepMeal.plan_id == p.id)
+        )).scalar_one()
+        out.append({
+            "id": p.id, "start_day": p.start_day.isoformat(), "days": p.days,
+            "status": p.status, "headline": head,
+            "target_kcal": p.target_kcal,
+            "components": n_comp, "meals": n_meal,
+        })
+    return out
+
+
+@router.get("/prep/current", response_model=PrepPlanOut | None)
+async def current_prep_plan(db: AsyncSession = Depends(get_session)):
+    """The plan covering today, or the next one starting.
+
+    Resolved against the LOCAL day. The container runs UTC and the user
+    does not; a planner that rolls over at 7pm would show tomorrow's
+    dinner at dinner time.
+    """
+    today = _local_today()
+    plan = (await db.execute(
+        select(models.PrepPlan)
+        .where(models.PrepPlan.start_day <= today)
+        .order_by(models.PrepPlan.start_day.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if plan is not None and (
+        plan.start_day + timedelta(days=plan.days - 1) >= today
+    ):
+        return await _prep_hydrate(db, plan)
+    upcoming = (await db.execute(
+        select(models.PrepPlan)
+        .where(models.PrepPlan.start_day > today)
+        .order_by(models.PrepPlan.start_day)
+        .limit(1)
+    )).scalar_one_or_none()
+    if upcoming is not None:
+        return await _prep_hydrate(db, upcoming)
+    return None
+
+
+@router.get("/prep/{plan_id}", response_model=PrepPlanOut)
+async def get_prep_plan(plan_id: int, db: AsyncSession = Depends(get_session)):
+    plan = await db.get(models.PrepPlan, plan_id)
+    if plan is None:
+        raise HTTPException(404, "Prep plan not found")
+    return await _prep_hydrate(db, plan)
+
+
+async def _resolve_food_term(
+    db: AsyncSession, term: str,
+) -> models.Food | None:
+    """Best catalog match for a plain ingredient name.
+
+    Ingredients first, because that is what a batch-cooking component is
+    — a search for "chicken breast" must land on the raw cut, not on a
+    restaurant entree. Falls back to the whole catalog so an unusual term
+    still resolves to something rather than to nothing.
+
+    Returns None rather than a poor guess. A component with no food is
+    rendered as uncosted and the user is told which one, which is far
+    better than a plan whose protein total quietly assumes the wrong
+    food.
+    """
+    if not term or not term.strip():
+        return None
+    for ingredients_only in (True, False):
+        ranked = food_lib.search(
+            term, ingredients_only=ingredients_only, limit=5,
+        )
+        if not ranked:
+            continue
+        slugs = [r["slug"] for r in ranked]
+        rows = {
+            f.slug: f for f in (await db.execute(
+                select(models.Food).where(models.Food.slug.in_(slugs))
+            )).scalars().all()
+        }
+        for s in slugs:
+            if s in rows:
+                return rows[s]
+    return None
+
+
+@router.post("/prep/generate", response_model=PrepPlanOut, status_code=201)
+async def generate_prep_plan(
+    body: PrepGenerateIn, db: AsyncSession = Depends(get_session),
+):
+    """Generate a week of batch cooking and persist it.
+
+    One AI call. The model returns components and assemblies; every
+    number attached to them is computed here from the catalog. See
+    `analytics/prep.py` for why that split is not negotiable.
+
+    Any existing plan for the same start day is replaced, because two
+    overlapping plans for one week is not a state a user ever wants and
+    silently stacking them is how the list view fills with drafts.
+    """
+    import json as _json
+
+    from ..api.ai import _check_and_bump_quota, _get_config
+    from ..integrations.claude import compute_targets_for_user, prep_plan
+
+    begin = body.start or _week_start(_local_today())
+    slots = [s for s in body.slots if s in ("breakfast", "lunch", "dinner", "snack")]
+    if not slots:
+        slots = ["lunch", "dinner"]
+
+    cfg = await _get_config(db)
+    await _check_and_bump_quota(db, cfg)
+    result = await prep_plan(
+        db, cfg, start_day=begin, days=body.days, slots=slots,
+    )
+    cfg.calls_today += 1
+    try:
+        data = _json.loads(result.content)
+    except ValueError:
+        raise HTTPException(502, "The planner returned an unreadable plan.")
+
+    raw_components = data.get("components") or []
+    raw_meals = data.get("meals") or []
+    if not raw_components or not raw_meals:
+        raise HTTPException(
+            502,
+            "The planner returned no meals. Try again — if it keeps "
+            "happening, check the AI provider under Settings → AI.",
+        )
+
+    targets = await compute_targets_for_user(db)
+    diet = await _diet_settings(db)
+    target_kcal = diet.get("daily_kcal_target") or (
+        targets.get("target_kcal") if targets.get("ok") else None
+    )
+    target_protein = (
+        diet.get("daily_protein_target_g")
+        or (targets.get("protein_g") if targets.get("ok") else None)
+    )
+    basis = (
+        "explicit" if diet.get("daily_kcal_target")
+        else (targets.get("basis") if targets.get("ok") else None)
+    )
+
+    # Replace rather than stack. CASCADE on the FKs takes the children.
+    for old in (await db.execute(
+        select(models.PrepPlan).where(models.PrepPlan.start_day == begin)
+    )).scalars().all():
+        await db.delete(old)
+    await db.flush()
+
+    headline = (data.get("headline") or "").strip()
+    notes = [str(n).strip() for n in (data.get("notes") or []) if str(n).strip()]
+    plan = models.PrepPlan(
+        start_day=begin, days=body.days, status="draft",
+        target_kcal=int(target_kcal) if target_kcal else None,
+        target_protein_g=int(target_protein) if target_protein else None,
+        target_basis=basis,
+        notes="\n\n".join([headline] + notes) if (headline or notes) else None,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(plan)
+    await db.flush()
+
+    # Components, in prep-sheet order: protein and grain go on first
+    # because they take longest, sauce is made while they cook.
+    from ..analytics.prep import COMPONENT_KINDS, KIND_ORDER, MEAL_STATUSES
+
+    prepared: list[tuple[int, models.PrepComponent]] = []
+    index_map: dict[int, models.PrepComponent] = {}
+    ordered = sorted(
+        enumerate(raw_components),
+        key=lambda p: KIND_ORDER.get(str(p[1].get("kind") or "other"), 9),
+    )
+    for order, (orig_index, c) in enumerate(ordered):
+        kind = str(c.get("kind") or "other")
+        if kind not in COMPONENT_KINDS:
+            kind = "other"
+        food = await _resolve_food_term(db, str(c.get("food_search") or ""))
+        try:
+            qty = float(c.get("quantity")) if c.get("quantity") is not None else None
+        except (TypeError, ValueError):
+            qty = None
+        try:
+            portions = max(1, int(c.get("portions") or 1))
+        except (TypeError, ValueError):
+            portions = 1
+        row = models.PrepComponent(
+            plan_id=plan.id,
+            name=str(c.get("name") or "Unnamed")[:255],
+            kind=kind,
+            food_id=food.id if food else None,
+            quantity=qty,
+            unit=food_lib.canonical_unit(c.get("unit")) or None,
+            portions=portions,
+            prep_note=(str(c["prep_note"])[:500] if c.get("prep_note") else None),
+            done=False,
+            order_index=order,
+        )
+        db.add(row)
+        prepared.append((orig_index, row))
+        index_map[orig_index] = row
+    await db.flush()
+
+    # Meals. `uses` arrives as indices into the model's own component
+    # array, which is why the original index is carried through the
+    # reorder above rather than the sorted position.
+    per_day_counter: dict[date, int] = {}
+    for m in raw_meals:
+        try:
+            di = int(m.get("day_index"))
+        except (TypeError, ValueError):
+            continue
+        if di < 0 or di >= body.days:
+            continue
+        day = begin + timedelta(days=di)
+        slot = str(m.get("slot") or "dinner")
+        if slot not in ("breakfast", "lunch", "dinner", "snack"):
+            slot = "dinner"
+        uses = []
+        for u in (m.get("uses") or []):
+            try:
+                ci = int(u.get("component"))
+                portions = float(u.get("portions") or 1)
+            except (TypeError, ValueError):
+                continue
+            comp = index_map.get(ci)
+            if comp is None:
+                continue
+            uses.append({"component_id": comp.id, "portions": portions})
+        idx = per_day_counter.get(day, 0)
+        per_day_counter[day] = idx + 1
+        db.add(models.PrepMeal(
+            plan_id=plan.id, day=day, slot=slot,
+            name=str(m.get("name") or "Meal")[:255],
+            status="suggested",
+            component_ids=uses,
+            assembly_note=(
+                str(m["assembly_note"])[:500] if m.get("assembly_note") else None
+            ),
+            order_index=idx,
+        ))
+
+    await db.commit()
+    await db.refresh(plan)
+    assert MEAL_STATUSES  # imported for the patch route's validation
+    return await _prep_hydrate(db, plan)
+
+
+@router.patch("/prep/{plan_id}", response_model=PrepPlanOut)
+async def patch_prep_plan(
+    plan_id: int, body: PrepPlanPatch, db: AsyncSession = Depends(get_session),
+):
+    plan = await db.get(models.PrepPlan, plan_id)
+    if plan is None:
+        raise HTTPException(404, "Prep plan not found")
+    if body.status is not None:
+        if body.status not in ("draft", "active", "done"):
+            raise HTTPException(422, "status must be draft, active or done")
+        plan.status = body.status
+    if body.notes is not None:
+        head, _ = _prep_note_key(plan)
+        plan.notes = "\n\n".join([p for p in (head, body.notes) if p]) or None
+    await db.commit()
+    await db.refresh(plan)
+    return await _prep_hydrate(db, plan)
+
+
+@router.delete("/prep/{plan_id}", status_code=204)
+async def delete_prep_plan(plan_id: int, db: AsyncSession = Depends(get_session)):
+    plan = await db.get(models.PrepPlan, plan_id)
+    if plan is None:
+        raise HTTPException(404, "Prep plan not found")
+    await db.delete(plan)
+    await db.commit()
+
+
+@router.patch("/prep/component/{component_id}", response_model=PrepPlanOut)
+async def patch_prep_component(
+    component_id: int,
+    body: PrepComponentPatch,
+    db: AsyncSession = Depends(get_session),
+):
+    """Tick a component off the prep sheet, or correct its amount.
+
+    Returns the whole rehydrated plan rather than the component, because
+    changing a quantity changes every meal that draws on it — the same
+    one-round-trip rule the workout skip endpoint follows.
+    """
+    comp = await db.get(models.PrepComponent, component_id)
+    if comp is None:
+        raise HTTPException(404, "Component not found")
+    if body.done is not None:
+        comp.done = body.done
+    if body.name is not None:
+        comp.name = body.name[:255]
+    if body.quantity is not None:
+        comp.quantity = body.quantity
+    if body.unit is not None:
+        comp.unit = food_lib.canonical_unit(body.unit) or None
+    if body.portions is not None:
+        comp.portions = max(1, body.portions)
+    await db.commit()
+    plan = await db.get(models.PrepPlan, comp.plan_id)
+    return await _prep_hydrate(db, plan)
+
+
+@router.patch("/prep/meal/{meal_id}", response_model=PrepPlanOut)
+async def patch_prep_meal(
+    meal_id: int, body: PrepMealPatch, db: AsyncSession = Depends(get_session),
+):
+    """Accept a meal, skip it, or say you ate out.
+
+    All three are ordinary outcomes. Skipping and eating out release the
+    meal's portions back into the ledger so the plan can tell you what is
+    spare, instead of leaving you with unexplained food in the fridge and
+    a week that has quietly gone wrong.
+    """
+    from ..analytics.prep import MEAL_STATUSES
+
+    meal = await db.get(models.PrepMeal, meal_id)
+    if meal is None:
+        raise HTTPException(404, "Meal not found")
+    if body.status is not None:
+        if body.status not in MEAL_STATUSES:
+            raise HTTPException(
+                422, "status must be one of " + ", ".join(sorted(MEAL_STATUSES)),
+            )
+        meal.status = body.status
+    if body.day is not None:
+        plan = await db.get(models.PrepPlan, meal.plan_id)
+        last = plan.start_day + timedelta(days=plan.days - 1)
+        if not (plan.start_day <= body.day <= last):
+            raise HTTPException(
+                422,
+                f"That day is outside the plan "
+                f"({plan.start_day.isoformat()} to {last.isoformat()}).",
+            )
+        meal.day = body.day
+    if body.name is not None:
+        meal.name = body.name[:255]
+    await db.commit()
+    plan = await db.get(models.PrepPlan, meal.plan_id)
+    return await _prep_hydrate(db, plan)
+
+
+@router.post("/prep/{plan_id}/shopping-list", response_model=ShoppingListOut,
+             status_code=201)
+async def prep_shopping_list(
+    plan_id: int, db: AsyncSession = Depends(get_session),
+):
+    """Everything to buy for the week, minus what is already in the house.
+
+    Runs through the SAME `_shopping_from_lines` the recipe planner uses,
+    so pantry subtraction, gram merging and the "some" fallback behave
+    identically on both. A second implementation here would eventually
+    disagree with the other one about whether you need chicken.
+    """
+    from ..analytics import prep as prep_lib
+
+    plan = await db.get(models.PrepPlan, plan_id)
+    if plan is None:
+        raise HTTPException(404, "Prep plan not found")
+
+    comps = (await db.execute(
+        select(models.PrepComponent)
+        .where(models.PrepComponent.plan_id == plan.id)
+        .order_by(models.PrepComponent.order_index)
+    )).scalars().all()
+    if not comps:
+        raise HTTPException(422, "This plan has nothing to cook yet.")
+
+    food_ids = {c.food_id for c in comps if c.food_id is not None}
+    food_dicts: dict[int, dict[str, Any]] = {}
+    if food_ids:
+        for f in (await db.execute(
+            select(models.Food).where(models.Food.id.in_(food_ids))
+        )).scalars().all():
+            food_dicts[f.id] = _food_dict(f)
+
+    resolved = prep_lib.resolve_components(
+        [
+            {
+                "id": c.id, "name": c.name, "kind": c.kind,
+                "food_id": c.food_id, "quantity": c.quantity,
+                "unit": c.unit, "portions": c.portions,
+            }
+            for c in comps
+        ],
+        food_dicts,
+    )
+    lines = prep_lib.component_shopping_lines(resolved)
+    end = plan.start_day + timedelta(days=plan.days - 1)
+    return await _shopping_from_lines(
+        db, lines,
+        name=f"Prep week of {plan.start_day.isoformat()}",
+        begin=plan.start_day, end=end, source_count=len(comps),
+    )
+
+
+@router.post("/prep/meal/{meal_id}/log", response_model=dict, status_code=201)
+async def log_prep_meal(
+    meal_id: int, db: AsyncSession = Depends(get_session),
+):
+    """Log a planned meal into the food diary and mark it accepted.
+
+    This closes the loop the rest of the meals feature already has —
+    without it the planner is a separate universe from the log, and the
+    user would be retyping a meal the app already knows the composition
+    of. One entry per component so the diary keeps the real per-food
+    breakdown rather than one opaque line.
+    """
+    meal = await db.get(models.PrepMeal, meal_id)
+    if meal is None:
+        raise HTTPException(404, "Meal not found")
+
+    comp_ids = [
+        u.get("component_id") for u in (meal.component_ids or [])
+        if u.get("component_id")
+    ]
+    comps: dict[int, models.PrepComponent] = {}
+    if comp_ids:
+        for c in (await db.execute(
+            select(models.PrepComponent)
+            .where(models.PrepComponent.id.in_(comp_ids))
+        )).scalars().all():
+            comps[c.id] = c
+
+    created = 0
+    for u in (meal.component_ids or []):
+        comp = comps.get(u.get("component_id"))
+        if comp is None:
+            continue
+        share = float(u.get("portions") or 1)
+        portions = max(1, comp.portions)
+        # The logged quantity is this meal's share of the whole batch,
+        # in the batch's own unit — so a quarter of a 1 kg tray of
+        # chicken logs as 250 g, not as "1 portion" of something the
+        # diary cannot cost.
+        qty = (
+            (comp.quantity / portions) * share
+            if comp.quantity is not None else None
+        )
+        db.add(models.FoodLogEntry(
+            day=meal.day,
+            slot=meal.slot,
+            food_id=comp.food_id,
+            label=comp.name if comp.food_id is None else None,
+            quantity=qty,
+            unit=comp.unit,
+            logged_at=datetime.now(timezone.utc),
+        ))
+        created += 1
+
+    if not created:
+        raise HTTPException(
+            422, "This meal has no components to log.",
+        )
+    meal.status = "accepted"
+    await db.commit()
+    return {"logged": created, "day": meal.day.isoformat(), "slot": meal.slot}

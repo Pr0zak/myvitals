@@ -75,6 +75,9 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/views/meals/CanMake.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/meals/CanMakeTab.kt",
      "What can I make — coverage ratio + missing-by-one (MEAL-6)"),
+    ("frontend/src/views/meals/Prep.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/meals/PrepTab.kt",
+     "Weekend component prep planner (MEAL-9)"),
     # ── Vitality Neon shell (opt-in 6-tab redesign) — web view ↔ phone screen ──
     ("frontend/src/components/NeonNav.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/neon/NeonAppShell.kt",

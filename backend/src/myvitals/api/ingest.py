@@ -27,6 +27,64 @@ def _chunked(items: list[Any], size: int = _CHUNK) -> Iterator[list[Any]]:
         yield items[i : i + size]
 
 
+def _dedupe_on_conflict_key(
+    rows: list[dict[str, Any]],
+    conflict_cols: list[str],
+    table_name: str,
+    keep_last: bool,
+) -> list[dict[str, Any]]:
+    """Collapse rows that share a conflict key, before they reach Postgres.
+
+    Postgres refuses an ``ON CONFLICT DO UPDATE`` whose statement would touch
+    the same row twice -- "cannot affect row a second time" -- so one batch
+    carrying two rows with a single conflict key fails outright. The phone
+    replays a failed batch out of its Room buffer indefinitely, which turns
+    that one bad batch into a permanent ingest outage rather than a dropped
+    upload. This is not hypothetical: Strava and the Fitbit/Google Health app
+    each wrote the same cycling session at the same instant, and because
+    `workouts` conflicts on `time` alone, every sync after it failed for
+    seventeen hours while WorkManager backed the retries off to hourly.
+
+    Which of the tied rows survives is deliberately whatever Postgres would
+    already have done had the pair arrived in separate statements: with
+    DO UPDATE the later row overwrites the earlier one, with DO NOTHING the
+    first row stands and the rest are skipped. The job here is to stop the
+    crash, not to change who wins -- that question belongs to whichever
+    table's key is too narrow to hold both readings, and is a schema
+    decision, not an ingest one.
+
+    A collapse is logged rather than performed quietly. Discarding a reading
+    the user's device genuinely recorded is exactly the kind of thing that
+    should leave a trace, and the count is the signal that some table's
+    conflict key cannot represent two writers.
+    """
+    if not rows:
+        return rows
+
+    seen: dict[tuple[Any, ...], int] = {}
+    out: list[dict[str, Any]] = []
+    collapsed = 0
+    for row in rows:
+        key = tuple(row.get(c) for c in conflict_cols)
+        prior = seen.get(key)
+        if prior is None:
+            seen[key] = len(out)
+            out.append(row)
+            continue
+        collapsed += 1
+        if keep_last:
+            out[prior] = row
+
+    if collapsed:
+        log.warning(
+            "ingest: collapsed %d duplicate row(s) on %s(%s) within one batch; "
+            "kept the %s of each tie",
+            collapsed, table_name, ", ".join(conflict_cols),
+            "last" if keep_last else "first",
+        )
+    return out
+
+
 async def _bulk_upsert(
     db: AsyncSession,
     table: type,
@@ -44,7 +102,10 @@ async def _bulk_upsert(
     legitimately update existing rows (e.g. workouts gained source/title
     columns post-hoc; we want re-syncs to populate them on existing rows).
     """
-    for chunk in _chunked(list(rows)):
+    deduped = _dedupe_on_conflict_key(
+        list(rows), conflict_cols, table.__tablename__, keep_last=bool(update_cols),
+    )
+    for chunk in _chunked(deduped):
         stmt = insert(table).values(chunk)
         if update_cols:
             excluded = {c: stmt.excluded[c] for c in update_cols}

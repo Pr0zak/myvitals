@@ -88,6 +88,28 @@ class ChartGeom(
 
     /** Slot width for an n-slot bar chart. */
     fun slot(n: Int): Float = if (n <= 0) width else width / n
+
+    /**
+     * Timestamp → x pixel across an explicit WINDOW, rather than across the
+     * points that happen to exist.
+     *
+     * [x] spreads n points evenly over the full width, which is right for a
+     * dense daily series and wrong for a sparse one: three weight readings
+     * from two days filled a 90-day chart edge to edge, so 7d, 30d and 90d
+     * drew the identical picture and the range picker looked broken. It was
+     * reported as exactly that. The axis should answer the question the user
+     * asked — "the last 90 days" — and show honestly that most of it is
+     * empty, which is what this mapping does and [x] cannot.
+     *
+     * Clamped, so a point outside the window lands on the edge rather than
+     * off-plot. A zero-or-negative window falls back to the left edge.
+     */
+    fun xAt(tMs: Long, startMs: Long, endMs: Long): Float {
+        val span = (endMs - startMs).toFloat()
+        if (span <= 0f) return left
+        val f = ((tMs - startMs).toFloat() / span).coerceIn(0f, 1f)
+        return left + f * width
+    }
 }
 
 fun DrawScope.chartGeom(domain: ChartDomain, insets: ChartInsets): ChartGeom =
@@ -305,6 +327,60 @@ fun DrawScope.drawXLabels(
  * — and a lone floating dot for "today" looks like a bug rather than a day
  * that follows a day with no reading.
  */
+/**
+ * A faint dashed run across a stretch of the window holding no data.
+ *
+ * Held FLAT at the nearest real reading's value, deliberately. The line has
+ * to sit at some height and any slope would assert a direction of travel
+ * across days that were never measured — the one thing a chart must not
+ * invent. Flat asserts less: it reads as "nothing here" rather than as a
+ * trend. It is still a drawn line where no measurement exists, so it is
+ * dashed, faint, and excluded from every statistic beside it.
+ *
+ * Distinct from [drawGapBridge], which spans the holes BETWEEN two readings.
+ * This one spans the window's empty head and tail, which that cannot see.
+ */
+fun DrawScope.drawNoDataSpan(fromX: Float, toX: Float, y: Float, color: Color) {
+    if (toX - fromX <= 0f) return
+    drawLine(
+        color = color.copy(alpha = 0.38f),
+        start = Offset(fromX, y),
+        end = Offset(toX, y),
+        strokeWidth = px(1.4f),
+        pathEffect = PathEffect.dashPathEffect(floatArrayOf(px(4f), px(4f))),
+    )
+}
+
+/**
+ * The smallest slice of a window worth drawing as a gap, as a fraction of it.
+ * Below this the emptiness is an artefact of when the last sample happened to
+ * land, not an absence worth pointing at.
+ */
+const val GAP_MIN_FRACTION = 0.03f
+
+/**
+ * One line naming what the window actually holds, or null when the data
+ * fills it. The chart can show an empty stretch; it cannot say how many
+ * readings the stats beside it were computed from, and that is the part
+ * that makes three identical windows legible rather than suspicious.
+ */
+fun coverageNote(
+    timesMs: List<Long>, startMs: Long, endMs: Long,
+    fmt: (Long) -> String,
+): String? {
+    if (timesMs.isEmpty()) return null
+    val span = (endMs - startMs).toFloat()
+    if (span <= 0f) return null
+    val sorted = timesMs.sorted()
+    val lead = (sorted.first() - startMs).toFloat()
+    val trail = (endMs - sorted.last()).toFloat()
+    if (lead <= GAP_MIN_FRACTION * span && trail <= GAP_MIN_FRACTION * span) return null
+    val n = sorted.size
+    if (n == 1) return "1 reading, ${fmt(sorted.first())} — nothing else in this range"
+    return "$n readings, ${fmt(sorted.first())} – ${fmt(sorted.last())} " +
+        "— nothing outside that in this range"
+}
+
 fun DrawScope.drawGapBridge(from: Offset, to: Offset, color: Color) {
     drawLine(
         color = color.copy(alpha = 0.35f),

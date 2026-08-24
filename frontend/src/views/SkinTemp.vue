@@ -18,6 +18,7 @@ import RangeTabs from "@/components/RangeTabs.vue";
 import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
 import { chartTheme, isNeon } from "@/theme";
+import { windowExtent, noDataSpans, daysToPoints } from "@/components/charts/chartHelpers";
 import { timeAxisFormatter } from "@/components/charts/chartHelpers";
 import PatternsLink from "@/components/PatternsLink.vue";
 
@@ -109,7 +110,10 @@ const dailyOption = computed(() => {
   const avgColor = isNeon.value ? "#ffb52e" : t.palette.violet;
   return {
     grid: { left: 48, right: 12, top: 24, bottom: 28 },
-    xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter }, splitLine: t.splitLine },
+    xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
+             splitLine: t.splitLine,
+             // Axis spans the SELECTED window, not just the days with data.
+             ...windowExtent(rangeSince.value?.getTime() ?? null), },
     yAxis: { type: "value", scale: true, name: "Δ °C", axisLabel: t.axisLabel, splitLine: t.splitLine },
     tooltip: { trigger: "axis", ...t.tooltip,
       formatter: (params: any[]) => {
@@ -118,6 +122,10 @@ const dailyOption = computed(() => {
       },
     },
     series: [
+      // The window's empty head and tail, dashed. gapBridge-style dashes for
+      // the holes BETWEEN readings are the bar/line series' own business.
+      ...noDataSpans(daysToPoints(data as Array<[string, number | null]>),
+                     rangeSince.value?.getTime() ?? null, Date.now(), neutralColor),
       {
         type: "bar", name: "Δ vs baseline",
         itemStyle: { color: (params: any) => {

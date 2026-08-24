@@ -18,6 +18,7 @@ import RangeTabs from "@/components/RangeTabs.vue";
 import { api } from "@/api/client";
 import type { StepsSeries, TodaySummary } from "@/api/types";
 import { chartTheme, isNeon } from "@/theme";
+import { windowExtent, noDataSpans, daysToPoints } from "@/components/charts/chartHelpers";
 import { timeAxisFormatter } from "@/components/charts/chartHelpers";
 import PatternsLink from "@/components/PatternsLink.vue";
 
@@ -156,7 +157,10 @@ const dailyOption = computed(() => {
   });
   return {
     grid: { left: 48, right: 12, top: 24, bottom: 28 },
-    xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter }, splitLine: t.splitLine },
+    xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
+             splitLine: t.splitLine,
+             // Axis spans the SELECTED window, not just the days with data.
+             ...windowExtent(rangeSince.value?.getTime() ?? null), },
     // ECharts will not widen an axis to contain a markLine, so on any window
     // where every day fell short of the goal the goal line was simply absent —
     // exactly the window where you most want to see how far short you were.
@@ -169,6 +173,10 @@ const dailyOption = computed(() => {
     },
     tooltip: { trigger: "axis", ...t.tooltip },
     series: [
+      // The window's empty head and tail, dashed. gapBridge-style dashes for
+      // the holes BETWEEN readings are the bar/line series' own business.
+      ...noDataSpans(daysToPoints(data as Array<[string, number | null]>),
+                     rangeSince.value?.getTime() ?? null, Date.now(), stepsColor.value),
       {
         type: "bar", name: "Steps",
         itemStyle: { color: stepsColor.value },

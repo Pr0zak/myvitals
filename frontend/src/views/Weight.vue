@@ -11,6 +11,7 @@ import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import { chartTheme, isNeon } from "@/theme";
+import { windowExtent, noDataSpans, coverageNote } from "@/components/charts/chartHelpers";
 import { weightVal, weightUnit, fmtWeight, isImperial } from "@/units";
 
 // RANGE-1: one vocabulary, and the range in the URL.
@@ -106,6 +107,18 @@ const stats = computed(() => {
     days_at_min: sorted.value.filter((p) => Math.abs((p.weight_kg as number) - min) < 0.05).length,
   };
 });
+
+/**
+ * What the window actually holds, when that is less than what was asked for.
+ * Null when the data fills the range, so the line only appears when it has
+ * something to say.
+ */
+const coverage = computed(() => coverageNote(
+  sorted.value
+    .filter((p) => p.weight_kg != null)
+    .map((p) => [new Date(p.time).getTime(), p.weight_kg as number] as [number, number]),
+  rangeSince.value?.getTime() ?? null,
+));
 
 // === 7-day rolling moving average ===
 function rolling7Avg(pts: { t: number; v: number }[]): { t: number; v: number }[] {
@@ -242,11 +255,24 @@ const mainOption = computed(() => {
     itemStyle: { color: fatColor }, yAxisIndex: 1,
   });
 
+  // Drawn last so it sits under the real series, and only where the window
+  // genuinely has nothing. Excluded from `stats` and from rolling7Avg above.
+  series.push(...noDataSpans(
+    pts as Array<[number, number]>, rangeSince.value?.getTime() ?? null,
+    Date.now(), weightColor,
+  ));
+
   return {
     grid: { left: 50, right: 50, top: 36, bottom: 28 },
     legend: { textStyle: t.axisLabel, top: 4 },
     tooltip: { trigger: "axis", ...t.tooltip },
-    xAxis: { type: "time", axisLabel: t.axisLabel, splitLine: t.splitLine },
+    xAxis: {
+      type: "time", axisLabel: t.axisLabel, splitLine: t.splitLine,
+      // Pin to the SELECTED window, not to the data. Three readings from
+      // the last two days used to draw a two-day chart no matter whether
+      // 30d, 90d or 1y was picked.
+      ...windowExtent(rangeSince.value?.getTime() ?? null),
+    },
     yAxis: [
       // `scale: true` fits the DATA, and ECharts does not widen an axis to
       // contain a markLine — so a goal below (or above) the plotted range
@@ -396,6 +422,8 @@ function deltaCls(kg: number | null, lowerIsBetter = true): string {
         </div>
       </div>
 
+      <p v-if="coverage" class="coverage-note">{{ coverage }}</p>
+
       <Card title="Trend">
         <div class="chart"><VChart :option="mainOption" autoresize/></div>
       </Card>
@@ -450,6 +478,7 @@ function deltaCls(kg: number | null, lowerIsBetter = true): string {
 .kpi-val { font-size: 1.6rem; font-weight: 600; margin: 0.2rem 0 0.1rem; font-family: ui-monospace, monospace; }
 .kpi-val.small { font-size: 1rem; }
 .kpi-sub { color: var(--muted); font-size: 0.8rem; }
+.coverage-note { color: var(--muted); font-size: 0.8rem; margin: -0.25rem 0 0.75rem; }
 .delta-good { color: #22c55e; }
 .delta-bad { color: #ef4444; }
 

@@ -12,6 +12,7 @@ import EmptyState from "@/components/EmptyState.vue";
 import LoadState from "@/components/LoadState.vue";
 import { api } from "@/api/client";
 import { chartTheme, isNeon } from "@/theme";
+import { windowExtent, noDataSpans, daysToPoints } from "@/components/charts/chartHelpers";
 import { fmtDateTime } from "@/format";
 
 // RANGE-1: one vocabulary, and the range in the URL. This view used
@@ -96,10 +97,15 @@ const trendOption = computed(() => {
   return {
     grid: { left: 52, right: 16, top: 20, bottom: 28 },
     tooltip: { trigger: "axis", ...t.tooltip },
-    xAxis: { type: "time", axisLabel: t.axisLabel },
+    xAxis: { type: "time", axisLabel: t.axisLabel,
+             // Axis spans the SELECTED window, not just the days with data.
+             ...windowExtent(rangeSince.value?.getTime() ?? null), },
     yAxis: { type: "value", name: "cm", scale: true,
              axisLabel: t.axisLabel, splitLine: t.splitLine },
-    series: [{
+    series: [
+      ...noDataSpans(daysToPoints(data as Array<[string, number | null]>),
+                     rangeSince.value?.getTime() ?? null, Date.now(), color),
+      {
       name: SITES.find((s) => s.key === site)!.label, type: "line",
       smooth: true, symbol: "circle", symbolSize: 5, data,
       lineStyle: { color, width: 2 }, itemStyle: { color },

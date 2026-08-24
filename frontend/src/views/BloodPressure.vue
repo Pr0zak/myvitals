@@ -10,6 +10,7 @@ import LoadState from "@/components/LoadState.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
 import { api } from "@/api/client";
 import { chartTheme, isNeon } from "@/theme";
+import { windowExtent, noDataSpans, daysToPoints } from "@/components/charts/chartHelpers";
 import { fmtDateTime } from "@/format";
 import { bpCategory, bpCategoryLabel } from "@/bp";
 
@@ -118,9 +119,15 @@ const trendOption = computed(() => {
     grid: { left: 50, right: 50, top: 36, bottom: 28 },
     legend: { textStyle: t.axisLabel, top: 4 },
     tooltip: { trigger: "axis", ...t.tooltip },
-    xAxis: { type: "time", axisLabel: t.axisLabel, splitLine: t.splitLine },
+    xAxis: { type: "time", axisLabel: t.axisLabel, splitLine: t.splitLine,
+             // Axis spans the SELECTED window, not just the days with data.
+             ...windowExtent(rangeSince.value?.getTime() ?? null), },
     yAxis: { type: "value", name: "mmHg", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
     series: [
+      // The window's empty head and tail, dashed. Systolic drives it — the
+      // two series share every timestamp, so one span covers both.
+      ...noDataSpans(daysToPoints(sys as Array<[string, number | null]>),
+                     rangeSince.value?.getTime() ?? null, Date.now(), cSys),
       { name: "Systolic", type: "line", data: sys, smooth: true, connectNulls: true,
         symbol: "circle", symbolSize: 5,
         lineStyle: { width: 2, color: cSys }, itemStyle: { color: cSys },

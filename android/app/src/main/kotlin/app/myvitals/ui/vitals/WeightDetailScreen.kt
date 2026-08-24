@@ -49,6 +49,7 @@ import org.json.JSONObject
 import timber.log.Timber
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import app.myvitals.ui.LocalAppTokens
 
 private data class WPoint(val ms: Long, val kg: Double)
@@ -139,8 +140,15 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     item { WeightHero(pts) }
-                    item { WeightChart(pts, Vital.WEIGHT.accent) }
-                    item { WeightStats(pts) }
+                    // The window the user asked for, not the span the data
+                    // happens to cover — the chart draws the former.
+                    val winStart = LocalDate.now()
+                        .minusDays(range.days.toLong() - 1)
+                        .atStartOfDay(ZoneId.systemDefault())
+                        .toInstant().toEpochMilli()
+                    val winEnd = System.currentTimeMillis()
+                    item { WeightChart(pts, Vital.WEIGHT.accent, winStart, winEnd) }
+                    item { WeightStats(pts, winStart, winEnd) }
                 }
             }
         }
@@ -177,7 +185,9 @@ private fun WeightHero(pts: List<WPoint>) {
 }
 
 @Composable
-private fun WeightChart(pts: List<WPoint>, color: Color) {
+private fun WeightChart(
+    pts: List<WPoint>, color: Color, winStart: Long, winEnd: Long,
+) {
     val tok = LocalAppTokens.current
     val measurer = androidx.compose.ui.text.rememberTextMeasurer()
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
@@ -223,8 +233,13 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
                 )
                 val path = androidx.compose.ui.graphics.Path()
                 val area = androidx.compose.ui.graphics.Path()
+                // Positioned by TIMESTAMP across the window. Spreading the
+                // points evenly (g.x) drew three readings from two days edge
+                // to edge, so 7d, 30d and 90d were the same picture.
+                val firstX = g.xAt(pts.first().ms, winStart, winEnd)
+                val lastX = g.xAt(pts.last().ms, winStart, winEnd)
                 for ((i, w) in lbs.withIndex()) {
-                    val x = g.x(i, n); val py = g.y(w.toFloat())
+                    val x = g.xAt(pts[i].ms, winStart, winEnd); val py = g.y(w.toFloat())
                     if (i == 0) {
                         path.moveTo(x, py); area.moveTo(x, g.bottom); area.lineTo(x, py)
                     } else { path.lineTo(x, py); area.lineTo(x, py) }
@@ -232,7 +247,7 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
                     if (n <= 31) drawCircle(color = color, radius = 2.5.dp.toPx(),
                         center = Offset(x, py))
                 }
-                area.lineTo(g.x(n - 1, n), g.bottom); area.close()
+                area.lineTo(lastX, g.bottom); area.close()
                 drawPath(area, brush = androidx.compose.ui.graphics.Brush.verticalGradient(
                     listOf(color.copy(alpha = 0.22f), color.copy(alpha = 0f)),
                     startY = g.top, endY = g.bottom,
@@ -242,14 +257,27 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
                     cap = androidx.compose.ui.graphics.StrokeCap.Round,
                     join = androidx.compose.ui.graphics.StrokeJoin.Round,
                 ))
+                // The stretches of the window with nothing in them, dashed and
+                // flat at the nearest real reading. Drawn after the series so
+                // it is visible, but it carries no value of its own and feeds
+                // neither the stats card nor the regression above.
+                val minGap = GAP_MIN_FRACTION * (winEnd - winStart)
+                if (pts.first().ms - winStart > minGap) {
+                    drawNoDataSpan(g.left, firstX, g.y(lbs.first().toFloat()), color)
+                }
+                if (winEnd - pts.last().ms > minGap) {
+                    drawNoDataSpan(lastX, g.right, g.y(lbs.last().toFloat()), color)
+                }
                 drawLatestMarker(
-                    Offset(g.x(n - 1, n), g.y(lbs.last().toFloat())),
+                    Offset(lastX, g.y(lbs.last().toFloat())),
                     color, tok.surfaceContainer,
                 )
+                // Labels mark the WINDOW now, not the first and last reading —
+                // the axis is the range that was asked for.
                 drawXLabels(g, measurer, tok.onSurfaceDim, buildList {
-                    pts.firstOrNull()?.let { add(0f to shortMdOf(it.ms)) }
-                    if (n >= 5) add(0.5f to shortMdOf(pts[n / 2].ms))
-                    pts.lastOrNull()?.let { add(1f to shortMdOf(it.ms)) }
+                    add(0f to shortMdOf(winStart))
+                    add(0.5f to shortMdOf(winStart + (winEnd - winStart) / 2))
+                    add(1f to shortMdOf(winEnd))
                 })
             }
         }
@@ -257,7 +285,7 @@ private fun WeightChart(pts: List<WPoint>, color: Color) {
 }
 
 @Composable
-private fun WeightStats(pts: List<WPoint>) {
+private fun WeightStats(pts: List<WPoint>, winStart: Long, winEnd: Long) {
     val tok = LocalAppTokens.current
     val lbs = pts.map { Units.weight(it.kg) ?: 0.0 }
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
@@ -271,6 +299,14 @@ private fun WeightStats(pts: List<WPoint>) {
                 Stat("Max", "%.1f lb".format(lbs.max()))
                 Stat("Readings", "${pts.size}")
             }
+            // Says what the window actually holds when that is less than what
+            // was asked for. Absent when the data fills the range, so the line
+            // only appears when it is telling the user something.
+            coverageNote(pts.map { it.ms }, winStart, winEnd) { shortMdOf(it) }
+                ?.let {
+                    Spacer(Modifier.height(6.dp))
+                    Text(it, color = tok.onSurfaceDim, fontSize = 11.sp)
+                }
         }
     }
 }

@@ -24,6 +24,7 @@ import type {
   Activity, Annotation, HeartRateSeries, HrvSeries, TodaySummary,
 } from "@/api/types";
 import { chartTheme, isNeon } from "@/theme";
+import { windowExtent, noDataSpans, daysToPoints } from "@/components/charts/chartHelpers";
 import {
   annotationMarkPoint, meanMarkLine, sleepMarkArea,
   soberResetMarkLine, timeAxisFormatter, workoutMarkArea,
@@ -353,7 +354,9 @@ function dailyLineOption(rows: TodaySummary[], color: string) {
   return {
     grid: { left: 44, right: 16, top: 24, bottom: 28 },
     xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
-             splitLine: t.splitLine },
+             splitLine: t.splitLine,
+             // Axis spans the SELECTED window, not just the days with data.
+             ...windowExtent(rangeSince.value?.getTime() ?? null), },
     // The band has to be inside the axis extent or ECharts clips it — a band
     // clipped at the top edge reads as "every reading is abnormal" when the
     // truth is the opposite. `scale: true` alone fits the DATA, not the band.
@@ -388,7 +391,11 @@ function dailyLineOption(rows: TodaySummary[], color: string) {
       markLine: profile.value?.resting_hr_baseline
         ? meanMarkLine(profile.value.resting_hr_baseline, "baseline")
         : undefined,
-    }, gapBridgeSeries(data, color)],
+    }, gapBridgeSeries(data, color),
+      // gapBridgeSeries dashes the holes BETWEEN readings; these dash the
+      // window's empty head and tail, which it cannot see.
+      ...noDataSpans(daysToPoints(data), rangeSince.value?.getTime() ?? null,
+                     Date.now(), color)],
   };
 }
 
@@ -467,7 +474,9 @@ const hrvOption = computed(() => {
   return {
     grid: { left: 44, right: 16, top: 24, bottom: 28 },
     xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
-             splitLine: t.splitLine },
+             splitLine: t.splitLine,
+             // Axis spans the SELECTED window, not just the days with data.
+             ...windowExtent(rangeSince.value?.getTime() ?? null), },
     yAxis: {
       type: "value", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine,
       ...bandAwareExtent(
@@ -486,7 +495,9 @@ const hrvOption = computed(() => {
       markArea: normalBandMarkArea(
         bands.value.hrv?.low, bands.value.hrv?.high, hrvColor,
       ),
-    }, gapBridgeSeries(data, hrvColor)],
+    }, gapBridgeSeries(data, hrvColor),
+      ...noDataSpans(daysToPoints(data), rangeSince.value?.getTime() ?? null,
+                     Date.now(), hrvColor)],
   };
 });
 

@@ -716,6 +716,27 @@ private fun RestingHrTrend(
                         style = Stroke(width = 2.dp.toPx(),
                             cap = androidx.compose.ui.graphics.StrokeCap.Round,
                             join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                    // drawGapBridge above dashes the holes BETWEEN readings;
+                    // it cannot see the window's empty head and tail, because
+                    // it only fires with a reading on each side. Without these
+                    // a series that stopped days ago just ends wherever it
+                    // ends, which looks identical to one that is up to date —
+                    // the exact shape a stalled sync takes.
+                    val firstIdx = pts.indexOfFirst { it != null }
+                    val lastRealIdx = pts.indexOfLast { it != null }
+                    val minGapDays = (GAP_MIN_FRACTION * pts.size).coerceAtLeast(1f)
+                    if (firstIdx > minGapDays) {
+                        drawNoDataSpan(
+                            g.left, g.x(firstIdx, pts.size),
+                            g.y(pts[firstIdx]!!), accent,
+                        )
+                    }
+                    if (pts.size - 1 - lastRealIdx > minGapDays) {
+                        drawNoDataSpan(
+                            g.x(lastRealIdx, pts.size), g.right,
+                            g.y(pts[lastRealIdx]!!), accent,
+                        )
+                    }
                     latest?.let { drawLatestMarker(it, accent, tok.surfaceContainer) }
 
                     drawXLabels(g, measurer, tok.onSurfaceDim, xTicks(rows))

@@ -284,3 +284,129 @@ export function targetMarkLineItem(value: number, label: string) {
     label: { show: true, formatter: label, color: t.axisLabel.color, fontSize: 9 },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Window coverage — the axis shows the range you asked for, and says where
+// it has nothing.
+// ---------------------------------------------------------------------------
+
+/**
+ * X-axis `min`/`max` pinned to the SELECTED window rather than to the data.
+ *
+ * ECharts fits a time axis to the points it is given, so picking 90d on a
+ * stream holding three readings from the last two days drew a two-day chart
+ * captioned 90d. Every range above 7d rendered identically and the picker
+ * looked broken — it was reported as exactly that. The axis is a statement
+ * about the question asked, not about the answer that came back.
+ *
+ * Returns `{}` for an open-ended range ("all"), where there is no window to
+ * pin to and the data genuinely is the extent.
+ */
+export function windowExtent(
+  sinceMs: number | null | undefined,
+  untilMs: number = Date.now(),
+): { min?: number; max?: number } {
+  if (sinceMs == null) return {};
+  return { min: sinceMs, max: untilMs };
+}
+
+/** Smallest slice of the window worth drawing as a gap, as a fraction. Below
+ *  this a gap is a rendering artefact of the last sample's timing, not an
+ *  absence worth pointing at. */
+const GAP_MIN_FRACTION = 0.03;
+
+/**
+ * A faint dashed line across the stretches of the window that hold no data.
+ *
+ * Held FLAT at the nearest real reading's value, deliberately. The line has
+ * to sit at some height, and any slope would assert a direction of travel
+ * across days that were never measured — the one thing the chart must not
+ * invent. Flat asserts less: it reads as "nothing was recorded here" rather
+ * than as a trend. It is still a drawn line where no measurement exists, so
+ * it is dashed, faint, excluded from the tooltip, and named "No data" in the
+ * legend; the stats card counts only real readings, and no moving average or
+ * regression may consume these points.
+ *
+ * Covers both ends. The trailing gap matters more than it looks: a stream
+ * that stopped days ago currently draws a line that ends wherever it ends,
+ * which is indistinguishable from a stream that is up to date.
+ */
+export function noDataSpans(
+  points: Array<[number, number]>,
+  sinceMs: number | null | undefined,
+  untilMs: number = Date.now(),
+  color = "#94a3b8",
+): Array<Record<string, unknown>> {
+  if (sinceMs == null || !points.length) return [];
+  const span = untilMs - sinceMs;
+  if (span <= 0) return [];
+  const min = GAP_MIN_FRACTION * span;
+
+  const sorted = [...points].sort((a, b) => a[0] - b[0]);
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const data: Array<[number, number] | null> = [];
+
+  if (first[0] - sinceMs > min) {
+    data.push([sinceMs, first[1]], [first[0], first[1]], null);
+  }
+  if (untilMs - last[0] > min) {
+    data.push([last[0], last[1]], [untilMs, last[1]]);
+  }
+  if (!data.length) return [];
+
+  return [{
+    name: "No data",
+    type: "line",
+    data,
+    symbol: "none",
+    connectNulls: false,
+    silent: true,
+    tooltip: { show: false },
+    z: 1,
+    lineStyle: { width: 1.5, color, type: "dashed" as const, opacity: 0.45 },
+  }];
+}
+
+/** `[[ms, value], ...]` from a daily series keyed by date string, dropping
+ *  the null days. The daily charts carry `[date, value | null]` so that
+ *  `gapBridgeSeries` can dash the interior holes; the window helpers want
+ *  only the readings that exist. */
+export function daysToPoints(
+  rows: Array<[string, number | null]>,
+): Array<[number, number]> {
+  return rows
+    .filter((r): r is [string, number] => r[1] != null)
+    .map((r) => [new Date(r[0]).getTime(), r[1]]);
+}
+
+/**
+ * One line describing what the window actually contains, for the stats card.
+ *
+ * The chart can show an empty stretch; it cannot say how many readings the
+ * numbers beside it were computed from, which is the part that makes three
+ * identical windows legible instead of suspicious. Returns null when the
+ * data fills the window, so the note appears only when it is telling the
+ * user something.
+ */
+export function coverageNote(
+  points: Array<[number, number]>,
+  sinceMs: number | null | undefined,
+  untilMs: number = Date.now(),
+): string | null {
+  if (!points.length) return null;
+  const n = points.length;
+  const reading = n === 1 ? "reading" : "readings";
+  if (sinceMs == null) return null;
+  const span = untilMs - sinceMs;
+  if (span <= 0) return null;
+  const sorted = [...points].sort((a, b) => a[0] - b[0]);
+  const oldest = new Date(sorted[0][0]);
+  const newest = new Date(sorted[sorted.length - 1][0]);
+  const lead = sorted[0][0] - sinceMs;
+  const trail = untilMs - sorted[sorted.length - 1][0];
+  if (lead <= GAP_MIN_FRACTION * span && trail <= GAP_MIN_FRACTION * span) return null;
+  const d = (x: Date) => x.toLocaleDateString([], { month: "numeric", day: "numeric" });
+  if (n === 1) return `1 reading, ${d(oldest)} — nothing else in this range`;
+  return `${n} ${reading}, ${d(oldest)} – ${d(newest)} — nothing outside that in this range`;
+}

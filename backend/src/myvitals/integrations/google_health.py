@@ -206,6 +206,23 @@ def _step_count(body: dict[str, Any]) -> float | None:
 
 
 def _weight_kg(body: dict[str, Any]) -> float | None:
+    """Google serves this as `weightGrams`, and as nothing else.
+
+    The three keys tried below were guesses, and every one of them missed.
+    That is worse than it sounds: a point whose value cannot be extracted is
+    skipped silently, so the ingest counter reported `weight: 0` for an
+    account that had five weight points sitting in it. Zero read identically
+    to "this account has no weight data", which is why it survived — the
+    probe reporting `points=5` while the ingest reported `0` is the only
+    place the two disagreed, and nothing compares them.
+
+    Grams are converted here rather than at the call site so the extractor
+    keeps its contract of returning kilograms, matching every other unit
+    decision in this module.
+    """
+    grams = body.get("weightGrams")
+    if grams not in (None, ""):
+        return float(grams) / 1000.0
     for key in ("weightKilograms", "kilograms", "value"):
         v = body.get(key)
         if v not in (None, ""):
@@ -266,8 +283,12 @@ INGEST_TYPES: tuple[DataTypeSpec, ...] = (
     # watch-source keywords, so a second source coexists rather than
     # double-counting.
     DataTypeSpec("steps", _step_count, "steps"),
-    # body_metrics also carries a source. Both return nothing on this
-    # account today; wired so they work the day a scale starts reporting.
+    # body_metrics also carries a source. Both DO return data on this
+    # account: a Garmin Index scale writes the weigh-in into Health Connect
+    # via com.garmin.android.apps.connectmobile, and it mirrors through to
+    # this API. The comment here used to claim both returned nothing, which
+    # was the ingest counter's `weight: 0` being read as a fact about the
+    # account rather than as the parser failure it actually was.
     DataTypeSpec("weight", _weight_kg, "weight"),
     DataTypeSpec("body-fat", _body_fat_pct, "body_fat"),
 )

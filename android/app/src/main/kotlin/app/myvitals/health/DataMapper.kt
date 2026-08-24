@@ -20,8 +20,23 @@ import app.myvitals.sync.SleepSessionSample
 import app.myvitals.sync.SleepStageSample
 import app.myvitals.sync.StepsSample
 import app.myvitals.sync.WorkoutSample
+import java.time.Duration
+import java.time.Instant
+import kotlin.math.abs
 
 object DataMapper {
+
+    /**
+     * How far apart a weight and its body-composition companions may
+     * be and still count as one weigh-in.
+     *
+     * Two minutes is loose enough for any plausible writer jitter
+     * between three records produced by a single step onto a scale,
+     * and far tighter than the gap between two genuine weigh-ins —
+     * nobody weighs themselves twice inside two minutes and expects
+     * the readings kept apart.
+     */
+    private const val COMPANION_TOLERANCE_S = 120L
 
     fun toBatch(
         heartRate: List<HeartRateRecord>,
@@ -35,29 +50,72 @@ object DataMapper {
         bloodPressure: List<BloodPressureRecord> = emptyList(),
         skinTemp: List<SkinTemperatureRecord> = emptyList(),
     ): IngestBatch {
-        // Body-fat and lean-mass usually arrive as separate HC records but typically
-        // share a timestamp (smart scale). Index them by ISO-instant so the matching
-        // weight row picks them up.
-        val fatByTs = bodyFat.associate { it.time.toString() to it.percentage.value }
-        val leanByTs = leanMass.associate { it.time.toString() to it.mass.inKilograms }
-        val weightSamples = weight.map { w ->
-            val ts = w.time.toString()
+        // A smart scale writes weight, body fat and lean mass as three
+        // separate Health Connect records from one step onto the scale.
+        // They are written at ~the same instant, but not necessarily the
+        // SAME instant — different writers stamp them milliseconds apart.
+        //
+        // This used to join them on an exact `Instant.toString()`. One
+        // millisecond of drift and the percentage never attached: it fell
+        // through to the orphan branch as its own body_metrics row with a
+        // null weight, and since the server upserts on `time` alone with
+        // ON CONFLICT DO NOTHING, the two could never be merged
+        // afterwards either. The reading was not lost, but the body
+        // composition was permanently divorced from the weight it
+        // belonged to — which for a body-composition scale is most of the
+        // point of owning one.
+        //
+        // Nearest match within a tolerance instead, and each companion
+        // record is CLAIMED once so it cannot attach to two different
+        // weigh-ins.
+        val fatPool = bodyFat.sortedBy { it.time }.toMutableList()
+        val leanPool = leanMass.sortedBy { it.time }.toMutableList()
+
+        fun <T> claimNearest(
+            pool: MutableList<T>, target: Instant, at: (T) -> Instant,
+        ): T? {
+            val best = pool.minByOrNull {
+                abs(Duration.between(at(it), target).seconds)
+            } ?: return null
+            if (abs(Duration.between(at(best), target).seconds) > COMPANION_TOLERANCE_S) {
+                return null
+            }
+            pool.remove(best)
+            return best
+        }
+
+        val weightSamples = weight.sortedBy { it.time }.map { w ->
+            val fat = claimNearest(fatPool, w.time) { it.time }
+            val lean = claimNearest(leanPool, w.time) { it.time }
             BodyMetricSample(
-                time = ts,
+                time = w.time.toString(),
                 weightKg = w.weight.inKilograms,
-                bodyFatPct = fatByTs[ts],
-                leanMassKg = leanByTs[ts],
+                bodyFatPct = fat?.percentage?.value,
+                leanMassKg = lean?.mass?.inKilograms,
+                // The pipe. Health Connect is a bus, so this alone does
+                // not say which app wrote the record — see `origin`.
                 source = "health_connect",
+                origin = w.metadata.dataOrigin.packageName.takeIf { it.isNotBlank() },
             )
         }
-        // Standalone body-fat / lean-mass rows that didn't share a timestamp with
-        // a weight reading still get persisted (so a manual % entry isn't lost).
-        val weightTs = weight.map { it.time.toString() }.toHashSet()
-        val orphanFat = bodyFat.filter { it.time.toString() !in weightTs }.map {
-            BodyMetricSample(time = it.time.toString(), bodyFatPct = it.percentage.value, source = "health_connect")
+
+        // Whatever went unclaimed is genuinely standalone — a body-fat
+        // percentage typed in by hand, say — and is still worth keeping.
+        val orphanFat = fatPool.map {
+            BodyMetricSample(
+                time = it.time.toString(),
+                bodyFatPct = it.percentage.value,
+                source = "health_connect",
+                origin = it.metadata.dataOrigin.packageName.takeIf { p -> p.isNotBlank() },
+            )
         }
-        val orphanLean = leanMass.filter { it.time.toString() !in weightTs }.map {
-            BodyMetricSample(time = it.time.toString(), leanMassKg = it.mass.inKilograms, source = "health_connect")
+        val orphanLean = leanPool.map {
+            BodyMetricSample(
+                time = it.time.toString(),
+                leanMassKg = it.mass.inKilograms,
+                source = "health_connect",
+                origin = it.metadata.dataOrigin.packageName.takeIf { p -> p.isNotBlank() },
+            )
         }
         return IngestBatch(
             heartrate = heartRate.flatMap { record ->

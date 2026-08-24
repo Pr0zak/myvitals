@@ -98,7 +98,11 @@ class BodyMetricSample(BaseModel):
     body_fat_pct: float | None = None
     bmi: float | None = None
     lean_mass_kg: float | None = None
+    #: The pipe, not the app. See the model.
     source: str = "manual"
+    #: The Android package that authored the record, when known. Optional
+    #: so an older phone build keeps posting successfully.
+    origin: str | None = None
 
 
 class SkinTempSample(BaseModel):

@@ -68,7 +68,15 @@ class BodyMetric(Base):
     body_fat_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     bmi: Mapped[float | None] = mapped_column(Float, nullable=True)
     lean_mass_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: The PIPE a reading came down: "health_connect", "garmin", "fitbit",
+    #: "manual". Two of those come from ZIP importers, so this is not and
+    #: must not become a package name.
     source: Mapped[str] = mapped_column(String(32), default="manual")
+    #: The app that actually authored the record, when there is one.
+    #: Health Connect is a bus — Google Health and Garmin Connect can both
+    #: write weight to it, and without this they are indistinguishable
+    #: once they land here. NULL for anything not from Health Connect.
+    origin: Mapped[str | None] = mapped_column(String(96), nullable=True)
 
 
 class BodyCircumference(Base):

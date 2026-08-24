@@ -49,7 +49,13 @@ data class BodyMetricSample(
     @Json(name = "body_fat_pct") val bodyFatPct: Double? = null,
     val bmi: Double? = null,
     @Json(name = "lean_mass_kg") val leanMassKg: Double? = null,
+    // The PIPE a reading came down, not the app that wrote it.
     val source: String = "watch",
+    // The Android package that authored the Health Connect record.
+    // Health Connect is a bus: Google Health and Garmin Connect can both
+    // write weight to it, and without this they are indistinguishable
+    // once they reach the server.
+    val origin: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

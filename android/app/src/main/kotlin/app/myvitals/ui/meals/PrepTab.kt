@@ -489,6 +489,7 @@ private fun PlanHeaderCard(
     onShoppingList: () -> Unit,
 ) {
     val done = plan.components.count { it.done }
+    var showWhy by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .background(NeonMV.Card).padding(12.dp),
@@ -498,32 +499,56 @@ private fun PlanHeaderCard(
             color = NeonMV.Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
         )
         Text(
-            "Week of ${plan.startDay} · ${plan.components.size} things to cook · " +
-                "$done/${plan.components.size} done",
+            "Week of ${prettyDay(plan.startDay)} · $done of " +
+                "${plan.components.size} cooked",
             color = NeonMV.Muted, fontSize = 11.sp,
             modifier = Modifier.padding(top = 4.dp),
         )
-        plan.budgets.uncoveredKcal?.takeIf { it > 0 }?.let {
-            Text(
-                "These meals cover about " +
-                    "${(plan.budgets.coveredShare * 100).roundToInt()}% of your day. " +
-                    "The remaining ~$it kcal is whatever you eat outside them — " +
-                    "it is not a shortfall.",
-                color = NeonMV.Muted, fontSize = 11.sp,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-        }
+
+        // Warnings stay out in the open. They are time-sensitive and
+        // actionable — "this portion is used on day 5, past what cooked
+        // chicken keeps" is a thing to do on prep day, not commentary —
+        // and they were previously buried mid-paragraph in the narrative.
         plan.warnings.forEach { w ->
             Text(
-                w, color = NeonMV.Amber, fontSize = 11.sp,
+                w, color = NeonMV.Amber, fontSize = 11.sp, lineHeight = 15.sp,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
-        plan.notes?.takeIf { it.isNotBlank() }?.let {
+
+        // The coverage explanation and the model's narrative are both
+        // TRUE and both worth reading once. Left expanded they filled the
+        // whole screen, so the four things to actually cook — the entire
+        // point of the plan — began below the fold. Collapsed by default;
+        // the components come first now.
+        val hasNotes = !plan.notes.isNullOrBlank() ||
+            (plan.budgets.uncoveredKcal ?: 0) > 0
+        if (hasNotes) {
             Text(
-                it, color = NeonMV.Muted, fontSize = 11.sp,
-                modifier = Modifier.padding(top = 6.dp),
+                if (showWhy) "Hide the reasoning" else "Why this plan",
+                color = NeonMV.Cyan, fontSize = 11.sp,
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .clickable { showWhy = !showWhy },
             )
+        }
+        if (showWhy) {
+            plan.budgets.uncoveredKcal?.takeIf { it > 0 }?.let {
+                Text(
+                    "These meals cover about " +
+                        "${(plan.budgets.coveredShare * 100).roundToInt()}% of your day. " +
+                        "The remaining ~$it kcal is whatever you eat outside them — " +
+                        "it is not a shortfall.",
+                    color = NeonMV.Muted, fontSize = 11.sp, lineHeight = 15.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            plan.notes?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    it, color = NeonMV.Muted, fontSize = 11.sp, lineHeight = 15.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
         }
         Row(
             Modifier.padding(top = 10.dp),
@@ -685,7 +710,16 @@ private fun DayCard(
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(day.weekday, color = NeonMV.Ink, fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold)
-                Text("  ${day.day}", color = NeonMV.Muted, fontSize = 10.sp)
+                // "24 Aug", not "2026-08-24". The weekday is already
+                // beside it, so the year is noise and the ISO form is a
+                // storage format wearing a label's clothes.
+                Text(
+                    "  " + runCatching {
+                        java.time.LocalDate.parse(day.day)
+                            .format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))
+                    }.getOrDefault(day.day),
+                    color = NeonMV.Muted, fontSize = 10.sp,
+                )
             }
             Text(
                 (day.plannedKcal?.let { "${it.roundToInt()} kcal" } ?: "—") +
@@ -799,3 +833,11 @@ private fun fmtPortions(v: Double?): String {
     val n = if (d == d.roundToInt().toDouble()) "${d.roundToInt()}" else "$d"
     return "$n portion" + (if (d == 1.0) "" else "s")
 }
+
+
+/** "Mon 24 Aug", not "2026-08-24". An ISO date is a storage format; it
+ *  is not what a week is called when someone is deciding what to cook. */
+private fun prettyDay(iso: String): String = runCatching {
+    java.time.LocalDate.parse(iso)
+        .format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM"))
+}.getOrDefault(iso)

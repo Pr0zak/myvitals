@@ -3322,7 +3322,11 @@ async def prep_shopping_list(
     end = plan.start_day + timedelta(days=plan.days - 1)
     return await _shopping_from_lines(
         db, lines,
-        name=f"Prep week of {plan.start_day.isoformat()}",
+        # "%-d" would be cleaner but is not portable; strip the zero.
+        # An ISO date is a storage format, not what a week is called
+        # when someone is standing in a shop reading the list.
+        name=("Prep week of "
+              + plan.start_day.strftime("%a %d %b").replace(" 0", " ")),
         begin=plan.start_day, end=end, source_count=len(comps),
     )
 

@@ -440,11 +440,19 @@ fun ShoppingTab(settings: SettingsRepository) {
                             fontWeight = FontWeight.Medium,
                         )
                         Text(
+                            // What a shopper needs, in the order they need
+                            // it. "0 planned meals" led a list of four real
+                            // items, because these came from a PREP plan
+                            // rather than from planned meals — technically
+                            // true and, at the top of the screen, simply
+                            // confusing.
                             buildString {
-                                append("${l.plannedMeals} planned meal")
-                                if (l.plannedMeals != 1) append("s")
+                                val ticked = l.items.count { it.checked }
+                                append("${l.items.size} item")
+                                if (l.items.size != 1) append("s")
+                                if (l.items.isNotEmpty()) append(" · $ticked ticked")
                                 if (l.coveredByPantry > 0) {
-                                    append(" · ${l.coveredByPantry} already covered")
+                                    append(" · ${l.coveredByPantry} already in the pantry")
                                 }
                             },
                             color = NeonMV.Muted, fontSize = 11.sp,

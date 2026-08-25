@@ -39,6 +39,25 @@ import { toLocalISO } from "@/dates";
 const plan = ref<PrepPlan | null>(null);
 const targets = ref<PrepTargets | null>(null);
 const loading = ref(true);
+const showWhy = ref(false);
+
+/** "24 Aug" for a row that already shows the weekday. */
+function shortDay(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
+/** "Mon 24 Aug", not "2026-08-24". An ISO date is a storage format; it is
+ *  not what a week is called when someone is deciding what to cook. */
+function prettyDay(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+}
+
 const generating = ref(false);
 const busy = ref<number | null>(null);
 const error = ref<string | null>(null);
@@ -337,8 +356,8 @@ onMounted(load);
         <div>
           <h2>{{ plan.headline || "This week" }}</h2>
           <p class="sub">
-            Week of {{ plan.start_day }} · {{ plan.components.length }} things to
-            cook · {{ doneCount }}/{{ plan.components.length }} done
+            Week of {{ prettyDay(plan.start_day) }} ·
+            {{ doneCount }} of {{ plan.components.length }} cooked
           </p>
         </div>
         <div class="head-actions">
@@ -351,18 +370,31 @@ onMounted(load);
         </div>
       </div>
 
-      <p v-if="plan.budgets.uncovered_kcal" class="sub coverage">
-        These meals cover about
-        {{ Math.round(plan.budgets.covered_share * 100) }}% of your day. The
-        remaining ~{{ plan.budgets.uncovered_kcal }} kcal is whatever you eat
-        outside them — it is not a shortfall.
-      </p>
-
+      <!-- Warnings stay out in the open. They are time-sensitive and
+           actionable — "this portion is used on day 5, past what cooked
+           chicken keeps" is a thing to do on prep day, not commentary. -->
       <p v-for="w in plan.warnings" :key="w" class="warn-line">
         <AlertTriangle :size="13" /> {{ w }}
       </p>
 
-      <p v-if="plan.notes" class="notes">{{ plan.notes }}</p>
+      <!-- The coverage explanation and the model's narrative are both true
+           and both worth reading once. Left expanded they filled the whole
+           screen, so the things to actually cook — the point of the plan —
+           began below the fold. -->
+      <button v-if="plan.notes || plan.budgets.uncovered_kcal"
+              class="link why" @click="showWhy = !showWhy">
+        {{ showWhy ? "Hide the reasoning" : "Why this plan" }}
+      </button>
+
+      <template v-if="showWhy">
+        <p v-if="plan.budgets.uncovered_kcal" class="sub coverage">
+          These meals cover about
+          {{ Math.round(plan.budgets.covered_share * 100) }}% of your day. The
+          remaining ~{{ plan.budgets.uncovered_kcal }} kcal is whatever you eat
+          outside them — it is not a shortfall.
+        </p>
+        <p v-if="plan.notes" class="notes">{{ plan.notes }}</p>
+      </template>
 
       <div class="tabs">
         <button :class="{ on: tab === 'prep' }" @click="tab = 'prep'">
@@ -454,7 +486,9 @@ onMounted(load);
         <div class="day-head">
           <div>
             <b>{{ d.weekday }}</b>
-            <span class="date">{{ d.day }}</span>
+            <!-- "24 Aug", not "2026-08-24". The weekday sits beside it,
+                 so the year is noise. -->
+            <span class="date">{{ shortDay(d.day) }}</span>
           </div>
           <span class="day-kcal">
             {{ d.planned_kcal == null ? "—" : `${d.planned_kcal} kcal` }}
@@ -596,6 +630,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .plan-head h2 { margin: 0; font-size: 1.05rem; }
 .head-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .coverage { border-left: 2px solid var(--line); padding-left: 0.6rem; }
+.why { display: block; margin-top: 0.7rem; font-size: 0.8rem; }
 .notes { margin: 0.7rem 0 0; font-size: 0.8rem; color: var(--muted-2); line-height: 1.55; white-space: pre-line; }
 .tabs { display: flex; gap: 0.4rem; margin-top: 0.9rem; }
 .tabs button {

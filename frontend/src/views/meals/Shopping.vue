@@ -150,10 +150,18 @@ function rangeLabel(l: ShoppingList): string {
           <div>
             <strong>{{ active.name ?? "Shopping list" }}</strong>
             <span class="sub">
-              {{ rangeLabel(active) }} · {{ active.planned_meals }} planned
-              meal{{ active.planned_meals === 1 ? "" : "s" }}
+              <!-- What a shopper needs, in the order they need it. "0
+                   planned meals" led a list of four real items, because
+                   those came from a PREP plan rather than from planned
+                   meals — true, and at the top of the screen simply
+                   confusing. -->
+              {{ rangeLabel(active) }} · {{ active.items.length }}
+              item{{ active.items.length === 1 ? "" : "s" }}
+              <template v-if="active.items.length">
+                · {{ active.items.filter((i) => i.checked).length }} ticked
+              </template>
               <template v-if="active.covered_by_pantry">
-                · {{ active.covered_by_pantry }} already covered by the pantry
+                · {{ active.covered_by_pantry }} already in the pantry
               </template>
             </span>
           </div>

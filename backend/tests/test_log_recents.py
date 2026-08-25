@@ -121,3 +121,20 @@ def test_recents_window_is_bounded() -> None:
     growing table on a screen the user opens constantly."""
     src = _fn_src("recent_log_entries")
     assert "FoodLogEntry.day >= since" in src, "no time predicate on the scan"
+
+
+def test_recents_flatten_a_pasted_label() -> None:
+    """Live data made this concrete: one entry's label is
+
+        "Calabrian Steak & Shrimp Bucatini\\nCalories (cal)\\n1,220\\n..."
+
+    — a whole nutrition block pasted into the name field. `add_log_entry`
+    collapses that on write, but entries made before that landed still
+    hold the raw text, and a horizontally scrolling chip row is the worst
+    possible place to render a wall of it. Flattening on read also merges
+    two entries differing only in whitespace, which would otherwise take
+    two slots for one meal.
+    """
+    src = _fn_src("recent_log_entries")
+    assert "_flatten_label(r.label)" in src, "labels are not flattened on read"
+    assert "(flat or '').lower()" in src, "the grouping key uses the raw label"

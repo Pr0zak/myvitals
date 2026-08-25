@@ -2005,7 +2005,14 @@ async def recent_log_entries(
     HALF_LIFE_DAYS = 21.0
     buckets: dict[tuple, dict[str, Any]] = {}
     for r in rows:
-        key = (r.food_id, r.recipe_id, (r.label or "").strip().lower(),
+        # Flatten on READ as well as on write. `add_log_entry` collapses a
+        # pasted nutrition block into one line, but entries made before
+        # that landed still hold the raw multi-line text — and a chip row
+        # is exactly where a wall of text does the most damage. Flattening
+        # here also merges two entries that differ only in whitespace,
+        # which would otherwise occupy two slots for the same meal.
+        flat = _flatten_label(r.label)
+        key = (r.food_id, r.recipe_id, (flat or "").lower(),
                r.quantity, r.unit, r.servings)
         age = (today - r.day).days
         weight = 0.5 ** (age / HALF_LIFE_DAYS)
@@ -2015,7 +2022,7 @@ async def recent_log_entries(
                 names.get(r.food_id) if r.food_id is not None
                 else names.get(-r.recipe_id) if r.recipe_id is not None
                 else None
-            ) or (r.label or "").strip() or "Unnamed"
+            ) or flat or "Unnamed"
             b = buckets[key] = {
                 "label": label, "food_id": r.food_id, "recipe_id": r.recipe_id,
                 "quantity": r.quantity, "unit": r.unit, "servings": r.servings,

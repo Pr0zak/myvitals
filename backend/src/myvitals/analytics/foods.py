@@ -221,6 +221,15 @@ _QUERY_ALIASES: dict[str, str] = {
     "bell pepper": "sweet pepper",
     "bell peppers": "sweet pepper",
     "breadcrumbs": "bread crumbs",
+    # Plain "water" answered with Water convolvulus — water spinach, a
+    # leafy green with calories — because the vegetable is an INGREDIENT
+    # and bottled water is a beverage, and `_resolve_food_term` tries the
+    # ingredients lens FIRST. A recipe asking for water was costed 29.58 g
+    # of a vegetable. A ranking hint cannot fix that: in the ingredients
+    # lens the right row is filtered out before ranking runs, so the query
+    # itself has to change. "water bottled" matches nothing in that lens
+    # and falls through to the full catalog, where it lands exactly.
+    "water": "water bottled",
     "green onion": "scallions",
     "green onions": "scallions",
     "spring onion": "scallions",

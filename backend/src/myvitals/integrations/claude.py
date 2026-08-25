@@ -3216,9 +3216,14 @@ MEAL_SUGGEST_TOOL = {
                                     "unit": {
                                         "type": "string",
                                         "description": (
-                                            "g, oz, cup, tbsp, tsp, piece, "
-                                            "slice — a unit the food is "
-                                            "normally measured in."
+                                            "Prefer g. Otherwise oz, cup, "
+                                            "tbsp or tsp. Avoid 'piece' and "
+                                            "'item': many foods are sized "
+                                            "rather than counted (an egg is "
+                                            "small/medium/large, not a "
+                                            "piece) and an amount that will "
+                                            "not convert is left out of the "
+                                            "nutrition entirely."
                                         ),
                                     },
                                 },
@@ -3308,7 +3313,11 @@ def _meal_suggest_system(tone: str) -> str:
         "estimate, so an ingredient list that is vague or incomplete "
         "produces a recipe with a wrong fat number — which for this user "
         "is the one number that matters. Give `servings` and a short "
-        "`method` too.\n\n"
+        "`method` too.\n"
+        "Use grams wherever you reasonably can. An amount the catalog "
+        "cannot convert is dropped from the nutrition entirely, so a "
+        "recipe whose main ingredient says '2 piece' reports a fraction "
+        "of its real calories and fat.\n\n"
         "Answer only via the `give_meal_suggestions` tool."
     )
 

@@ -285,3 +285,21 @@ def test_the_curated_staples_list_still_resolves_end_to_end():
             if not F.search(term, limit=1):
                 dead.append(f"{group}: {term}")
     assert not dead, "\n".join(dead)
+
+
+def test_water_is_not_a_leafy_green() -> None:
+    """From a saved AI recipe, verbatim: an ingredient of "2 tbsp Water"
+    was costed as 29.58 g of "Water convolvulus, raw" — water spinach.
+
+    A ranking hint cannot fix this. `_resolve_food_term` tries the
+    INGREDIENTS lens first, and in that lens bottled water is filtered
+    out as a beverage before ranking runs, so the vegetable is the only
+    candidate there is. The query itself has to change, which is what
+    `_QUERY_ALIASES` is for.
+    """
+    from myvitals.analytics import foods
+    assert foods.search("water", ingredients_only=True, limit=3) == [], \
+        "the ingredients lens should offer no 'water' rather than a vegetable"
+    top = foods.search("water", limit=1)
+    assert top and "convolvulus" not in top[0]["name"].lower()
+    assert top[0]["name"] == "Water, bottled, generic"

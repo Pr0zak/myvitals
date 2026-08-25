@@ -37,7 +37,11 @@ const ingredientsOnly = ref(true);
  *  typing plain names only appears to work — nine of twenty everyday
  *  staples match a concept when typed and the rest fail silently. */
 const common = ref<CommonItem[]>([]);
-const showCommon = ref(true);
+// Closed by default, and it now governs the WHOLE add-section rather
+// than only the staples grid. Open, the three add-methods and their
+// explanations stood between arriving here and seeing a single thing
+// you own.
+const showCommon = ref(false);
 const quickBusy = ref(false);
 
 const commonByCategory = computed(() => {
@@ -142,7 +146,12 @@ async function remove(item: PantryItem) {
 }
 
 function title(i: PantryItem): string {
-  return i.food_name ?? i.label ?? "Untitled";
+  // Concept first: "chicken breast", not "Chicken, broiler or fryers,
+  // breast, skinless, boneless, meat only, raw", which buried the one
+  // word that answers the question a pantry is for. The full USDA name
+  // stays on the row as its title attribute, so nothing is hidden.
+  const head = i.food_concept?.trim() || i.food_name || i.label || "Untitled";
+  return head.charAt(0).toUpperCase() + head.slice(1);
 }
 
 function amount(i: PantryItem): string | null {
@@ -233,35 +242,31 @@ function expiryClass(i: PantryItem): string {
       </div>
     </Card>
 
-    <p class="purpose">
-      What's actually in the house. This is what the shopping list
-      subtracts from and what
-      <RouterLink to="/meals/can-make">What can I make?</RouterLink>
-      matches your recipes against.
-    </p>
-
     <p v-if="error" class="err">{{ error }}</p>
 
-    <Card flat>
-      <PhotoPantry @added="load" />
-    </Card>
+    <!-- One row where three explained cards used to be. Everything under
+         it is a way of PUTTING things in the pantry, which is the rarer
+         job — the common one is reading it. -->
+    <button class="add-toggle" @click="showCommon = !showCommon">
+      <strong>{{ showCommon ? "Close" : "Add to pantry" }}</strong>
+      <span v-if="!showCommon" class="dim">staples · photo · scan a pack</span>
+    </button>
 
-    <Card flat>
-      <PackageScan stock @saved="load" />
-    </Card>
+    <template v-if="showCommon">
+      <Card flat>
+        <PhotoPantry @added="load" />
+      </Card>
 
-    <Card v-if="common.length" flat>
+      <Card flat>
+        <PackageScan stock @saved="load" />
+      </Card>
+    </template>
+
+    <Card v-if="common.length && showCommon" flat>
       <div class="common-head">
         <strong>Common staples</strong>
-        <button class="link" @click="showCommon = !showCommon">
-          {{ showCommon ? "hide" : "show" }}
-        </button>
       </div>
-      <p v-if="showCommon" class="common-sub">
-        Tap to add. No amounts needed — the pantry only has to know
-        whether you have something.
-      </p>
-      <div v-if="showCommon">
+      <div>
         <div v-for="(items, cat) in commonByCategory" :key="cat" class="cat-block">
           <span class="cat-label">{{ cat }}</span>
           <div class="chips">
@@ -362,6 +367,15 @@ button.ghost { background: transparent; color: var(--muted-2); }
 .alert-head { display: flex; align-items: center; gap: 0.4rem; color: #fbbf24; }
 .alert-body { margin: 0.35rem 0 0; font-size: 0.85rem; color: var(--muted-2); }
 .common-head { display: flex; align-items: baseline; justify-content: space-between; }
+.add-toggle {
+  display: flex; align-items: center; gap: 0.6rem;
+  width: 100%; text-align: left;
+  padding: 0.55rem 0.9rem; border: 1px solid var(--border);
+  border-radius: 999px; background: transparent; color: var(--accent);
+  cursor: pointer; font-size: 0.85rem;
+}
+.add-toggle:hover { border-color: var(--accent); }
+.add-toggle .dim { margin-left: auto; color: var(--muted); font-size: 0.78rem; }
 .common-sub { margin: 0.3rem 0 0.6rem; font-size: 0.78rem; color: var(--muted-2); }
 .cat-block { margin-bottom: 0.6rem; }
 .cat-label {

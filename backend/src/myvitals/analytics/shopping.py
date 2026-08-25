@@ -46,13 +46,30 @@ WALMART_SEARCH = "https://www.walmart.com/search?q={q}"
 _PREFERRED_UNITS = ("cup", "tbsp", "tsp")
 
 
+#: Above this many of a unit, the unit is the wrong one to shop in.
+#: A shopping list is read standing in an aisle: "19.4 cup" of broccoli
+#: is arithmetically correct and completely unusable, because nobody
+#: measures produce in cups at the shop and nobody can picture nineteen
+#: of them. Ten is the point where a count stops being something you can
+#: hold in your head and start needing a bigger unit.
+_MAX_UNIT_COUNT = 10.0
+
+
 def _fmt_qty(v: float) -> str:
-    """Trim a quantity for display. A shopping list says "2 cup", not
-    "2.0 cup", and "1.5 lb", not "1.4999999"."""
+    """Trim a quantity to SHOPPING precision, not arithmetic precision.
+
+    A shopping list says "2 cup", not "2.0 cup", and "1.8 kg", not
+    "1.7649999". Two decimals is false precision here: the amount is
+    already an estimate of a plan, the packet sizes in the shop are
+    whatever they are, and printing "3.04 kg" invites a care about the
+    last digit that nothing downstream deserves.
+    """
     r = round(v, 2)
-    if abs(r - round(r)) < 0.01:
+    if abs(r - round(r)) < 0.05:
         return str(int(round(r)))
-    return f"{r:g}"
+    # Ten or more of something: whole numbers. Below that one decimal is
+    # the most that can matter when a bag is 500 g anyway.
+    return str(int(round(r))) if r >= 10 else f"{round(r, 1):g}"
 
 
 def humanise(grams: float, food: dict[str, Any] | None) -> str:
@@ -61,13 +78,21 @@ def humanise(grams: float, food: dict[str, Any] | None) -> str:
     Uses the food's OWN measures, so a cup means 216 g for olive oil and
     227 g for butter. Falls back to grams, which is never wrong — only
     less convenient.
+
+    A unit has to fit from BOTH ends. The first version only checked that
+    the total was at least one of the unit, so any large amount kept
+    counting up in the smallest unit that qualified and a tray of
+    broccoli was billed as "19.4 cup". A unit is used only while the
+    count stays under [_MAX_UNIT_COUNT]; past that the next unit up is
+    tried, and kilograms are the last resort — which is also what the
+    scale in the produce aisle shows.
     """
     if grams <= 0:
         return "0 g"
     units = {canonical_unit(k): v for k, v in ((food or {}).get("unit_grams") or {}).items()}
     for name in _PREFERRED_UNITS:
         per = units.get(name)
-        if per and grams >= per:
+        if per and per <= grams < per * _MAX_UNIT_COUNT:
             return f"{_fmt_qty(grams / per)} {name}"
     if grams >= 1000:
         return f"{_fmt_qty(grams / 1000)} kg"

@@ -770,7 +770,12 @@ private fun PantryTab(settings: SettingsRepository) {
     // One-tap staples. Typing plain names only appears to work — nine of
     // twenty everyday staples match a concept and the rest fail silently.
     var common by remember { mutableStateOf<List<CommonItemOut>>(emptyList()) }
-    var showCommon by remember { mutableStateOf(true) }
+    // Closed by default, and it now governs the WHOLE add-section rather
+    // than just the staples grid. Open, the three add-methods and their
+    // explanations pushed the pantry itself off the bottom of the screen:
+    // eleven lines of permanent prose stood between opening this tab and
+    // seeing a single thing you own.
+    var showAdd by remember { mutableStateOf(false) }
 
     suspend fun fetch() {
         if (!settings.isConfigured()) {
@@ -818,50 +823,53 @@ private fun PantryTab(settings: SettingsRepository) {
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // One row where three explained cards used to be. Everything
+            // below it is a way of PUTTING things in the pantry, which is
+            // the rarer job — the common one is reading it.
             item {
-                Text(
-                    "What's actually in the house. This is what the shopping " +
-                        "list subtracts from, and what the Can-make tab matches " +
-                        "your recipes against.",
-                    color = NeonMV.Muted, fontSize = 11.sp, lineHeight = 16.sp,
-                )
-            }
-
-            item { PhotoPantry(settings = settings, onAdded = { scope.launch { fetch() } }) }
-            item {
-                PackageScan(
-                    settings = settings,
-                    // Scanning a pack in the PANTRY means "I just bought
-                    // this": define it AND stock it. In the Foods tab the
-                    // same photos mean only "define this product".
-                    stock = true,
-                    onSaved = { scope.launch { fetch() } },
-                )
-            }
-
-            if (common.isNotEmpty()) {
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "Common staples", color = NeonMV.Ink, fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            if (showCommon) "hide" else "show",
-                            color = NeonMV.Cyan, fontSize = 11.sp,
-                            modifier = Modifier.clickable { showCommon = !showCommon },
-                        )
-                    }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(NeonMV.CardHigh)
+                        .clickable { showAdd = !showAdd }
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (showAdd) "Close" else "Add to pantry",
+                        color = NeonMV.Cyan, fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        if (showAdd) "" else "staples · photo · scan a pack",
+                        color = NeonMV.Muted, fontSize = 11.sp,
+                    )
                 }
-                if (showCommon) {
-                    item {
-                        Text(
-                            "Tap to add. No amounts needed — the pantry only has " +
-                                "to know whether you have something.",
-                            color = NeonMV.Muted, fontSize = 10.sp, lineHeight = 14.sp,
-                        )
-                    }
+            }
+
+            if (showAdd) {
+                item { PhotoPantry(settings = settings, onAdded = { scope.launch { fetch() } }) }
+                item {
+                    PackageScan(
+                        settings = settings,
+                        // Scanning a pack in the PANTRY means "I just bought
+                        // this": define it AND stock it. In the Foods tab the
+                        // same photos mean only "define this product".
+                        stock = true,
+                        onSaved = { scope.launch { fetch() } },
+                    )
+                }
+            }
+
+            if (common.isNotEmpty() && showAdd) {
+                item {
+                    Text(
+                        "Common staples", color = NeonMV.Ink, fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                run {
                     common.groupBy { it.category }.forEach { (cat, entries) ->
                         item {
                             Column(Modifier.padding(top = 6.dp)) {
@@ -927,15 +935,30 @@ private fun PantryTab(settings: SettingsRepository) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
+                        // Concept first: "chicken breast", not "Chicken,
+                        // broiler or fryers, breast, skinless, boneless,
+                        // meat only, raw", which wrapped to two lines and
+                        // buried the one word that answers the question a
+                        // pantry is for. The full USDA name stays as the
+                        // second line, so nothing is hidden — it is just
+                        // no longer the headline.
+                        val head = p.foodConcept?.takeIf { it.isNotBlank() }
+                            ?: p.foodName ?: p.label ?: "Untitled"
                         Text(
-                            p.foodName ?: p.label ?: "Untitled",
-                            color = NeonMV.Ink, fontSize = 13.sp,
+                            head.replaceFirstChar { it.uppercase() },
+                            color = NeonMV.Ink, fontSize = 13.sp, maxLines = 1,
                         )
                         val amount = p.quantity?.let {
                             "${trimNum(it)}${p.unit?.let { u -> " $u" } ?: ""}"
                         } ?: p.unit
-                        amount?.let {
-                            Text(it, color = NeonMV.Muted, fontSize = 11.sp)
+                        val detail = p.foodName?.takeIf {
+                            !it.equals(head, ignoreCase = true)
+                        }
+                        listOfNotNull(amount, detail).takeIf { it.isNotEmpty() }?.let { parts ->
+                            Text(
+                                parts.joinToString(" · "),
+                                color = NeonMV.Muted, fontSize = 11.sp, maxLines = 1,
+                            )
                         }
                     }
                     expiryLabel(p.daysToExpiry)?.let { (text, colour) ->

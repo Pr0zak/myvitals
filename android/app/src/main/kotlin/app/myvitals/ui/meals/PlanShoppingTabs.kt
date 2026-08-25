@@ -181,20 +181,25 @@ fun PlanTab(settings: SettingsRepository) {
                             modifier = Modifier.weight(1f),
                         )
                         // "—" not "0": a day with nothing costable planned
-                        // has an unknown total, not an empty one.
-                        Text(
-                            (d.kcal?.let { "${it.roundToInt()}" } ?: "—") + " kcal · " +
-                                (d.fatG?.let { String.format("%.1f", it) } ?: "—") + " g fat",
-                            color = NeonMV.Muted, fontSize = 11.sp,
-                        )
+                        // has an unknown total, not an empty one. But an
+                        // EMPTY day has no total to be unknown about, and
+                        // printing "— kcal · — g fat" on all seven days
+                        // filled the screen with dashes that said nothing.
+                        // Silence is the honest rendering of nothing.
+                        if (d.entries.isNotEmpty()) {
+                            Text(
+                                (d.kcal?.let { "${it.roundToInt()}" } ?: "—") + " kcal · " +
+                                    (d.fatG?.let { String.format("%.1f", it) } ?: "—") + " g fat",
+                                color = NeonMV.Muted, fontSize = 11.sp,
+                            )
+                        }
                         IconButton(onClick = { addingFor = d.day }) {
                             Icon(Icons.Filled.Add, "Add", tint = NeonMV.Muted)
                         }
                     }
-
-                    if (d.entries.isEmpty()) {
-                        Text("Nothing planned.", color = NeonMV.Muted, fontSize = 11.sp)
-                    }
+                    // "Nothing planned." repeated seven times is not seven
+                    // pieces of information. An empty day is now just an
+                    // empty row, which reads as empty without saying so.
                     d.entries.forEach { e ->
                         Row(
                             Modifier.fillMaxWidth().padding(vertical = 3.dp),

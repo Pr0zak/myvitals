@@ -1908,6 +1908,10 @@ export interface PantryItem {
   food_id: number | null;
   label: string | null;
   food_name: string | null;
+  /** The MEAL-6 concept, the short shopping-shaped name. A pantry
+   *  answers whether you have something, and USDA's discriminating
+   *  detail is noise for that. Null for hand-typed and prepared food. */
+  food_concept: string | null;
   quantity: number | null;
   unit: string | null;
   expires_on: string | null;

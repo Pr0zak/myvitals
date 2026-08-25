@@ -335,3 +335,45 @@ def test_meal3_model_defaults_all_run():
             except Exception as e:  # noqa: BLE001
                 failures.append(f"{table.name}.{col.name}: {e}")
     assert failures == []
+
+
+# ---------------------------------------------------------------------------
+# A shopping list is read standing in an aisle (v0.27.1)
+# ---------------------------------------------------------------------------
+
+def test_a_big_amount_does_not_keep_counting_in_a_small_unit() -> None:
+    """The reported case, from a real generated list.
+
+    `humanise` only checked that the total was at LEAST one of a unit, so
+    any large amount kept counting up in the smallest qualifying unit. A
+    tray of broccoli came out as "19.4 cup" — arithmetically correct and
+    completely unusable, because nobody measures produce in cups at the
+    shop and nobody can picture nineteen of them.
+    """
+    from myvitals.analytics.shopping import humanise
+    out = humanise(1765, {"unit_grams": {"cup": 91.0}})
+    assert "cup" not in out, f"still counting in cups: {out}"
+    assert out == "1.8 kg"
+
+
+def test_a_unit_is_still_used_when_the_count_is_small() -> None:
+    """The ceiling must not push everything to grams. Two cups is exactly
+    what a recipe-shaped quantity should say."""
+    from myvitals.analytics.shopping import humanise
+    assert humanise(182, {"unit_grams": {"cup": 91.0}}) == "2 cup"
+    assert humanise(30, {"unit_grams": {"tbsp": 15.0}}) == "2 tbsp"
+
+
+def test_quantities_carry_shopping_precision_not_arithmetic_precision() -> None:
+    """"3.04 kg" invites a care about the last digit that nothing
+    downstream deserves: the amount is an estimate of a plan and the
+    packet in the shop is whatever size it is."""
+    from myvitals.analytics.shopping import humanise
+    assert humanise(3040, {"unit_grams": {"cup": 140.0}}) == "3 kg"
+
+
+def test_the_ceiling_is_a_named_constant_in_a_defensible_range() -> None:
+    """Somewhere a count stops being something you can hold in your head.
+    Too low and everything becomes grams; too high and this reverts."""
+    from myvitals.analytics import shopping
+    assert 5.0 <= shopping._MAX_UNIT_COUNT <= 20.0

@@ -173,7 +173,10 @@ function num(v: number | null, digits = 0, suffix = ""): string {
     <Card v-for="d in days" :key="d.day" flat class="day" :class="{ today: isToday(d.day) }">
       <div class="day-head">
         <strong>{{ dayLabel(d.day) }}</strong>
-        <span class="totals">
+        <!-- Only when there is something to total. "— kcal · — g fat" on
+             all seven days filled the screen with dashes that said
+             nothing; an empty day has no total to be unknown about. -->
+        <span v-if="d.entries.length" class="totals">
           {{ num(d.kcal) }} kcal · {{ num(d.fat_g, 1, " g") }} fat
         </span>
         <button class="ghost small" @click="startAdd(d.day)">
@@ -202,7 +205,8 @@ function num(v: number | null, digits = 0, suffix = ""): string {
           </button>
         </li>
       </ul>
-      <p v-else class="nothing">Nothing planned.</p>
+      <!-- "Nothing planned." repeated seven times is not seven pieces of
+           information. An empty day is simply an empty row. -->
 
       <div v-if="addingFor === d.day" class="adder">
         <select v-model="draftSlot">

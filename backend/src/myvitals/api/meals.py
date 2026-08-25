@@ -521,6 +521,9 @@ class PantryOut(BaseModel):
     food_id: int | None
     label: str | None
     food_name: str | None
+    #: The MEAL-6 concept for the food — the short, shopping-shaped name.
+    #: Null for a hand-typed item and for prepared food, which has none.
+    food_concept: str | None = None
     quantity: float | None
     unit: str | None
     expires_on: date | None

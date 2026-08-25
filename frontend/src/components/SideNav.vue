@@ -265,16 +265,21 @@ const groups = computed<Group[]>(() => {
         ? `${expiringCount.value} to use` : undefined,
       badgeColor: "#fbbf24",
       children: [
-        { to: "/meals/prep",    icon: ChefHat,    label: "Weekend prep" },
-        { to: "/meals/plan",    icon: Calendar,   label: "Plan" },
+        // Ordered by how often each is opened, not by the order they were
+        // built. The log is the only daily one and used to sit third.
+        // Labels name the task rather than the machinery: "What can I
+        // make?" and "Meal ideas" both read as questions the app is
+        // asking the user, which is backwards.
         { to: "/meals/log",     icon: ClipboardList, label: "Food log" },
-        { to: "/meals/recipes", icon: BookOpen, label: "Recipes" },
+        { to: "/meals/plan",    icon: Calendar,   label: "Plan" },
+        { to: "/meals/prep",    icon: ChefHat,    label: "Week prep" },
         { to: "/meals/shopping", icon: ShoppingCart, label: "Shopping" },
         { to: "/meals/pantry",  icon: Package,  label: "Pantry" },
-        { to: "/meals/foods",   icon: Apple,    label: "Foods" },
-        { to: "/meals/can-make", icon: ChefHat, label: "What can I make?" },
-        { to: "/meals/ideas",  icon: Sparkles,   label: "Meal ideas" },
-        { to: "/meals/nutrition", icon: HeartPulse, label: "Nutrition" },
+        { to: "/meals/can-make", icon: ChefHat, label: "Cook from pantry" },
+        { to: "/meals/recipes", icon: BookOpen, label: "Recipes" },
+        { to: "/meals/ideas",  icon: Sparkles,   label: "Suggest a meal" },
+        { to: "/meals/foods",   icon: Apple,    label: "Food catalog" },
+        { to: "/meals/nutrition", icon: HeartPulse, label: "Diet settings" },
       ],
     },
     { id: "trails", to: "/trails", icon: Mountain, label: "Trails" },

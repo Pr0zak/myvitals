@@ -29,6 +29,7 @@ import {
 } from "lucide-vue-next";
 import {
   meals, type Food, type LogDay, type LogStats, type Recipe,
+  type RecentEntry,
 } from "@/api/client";
 import { toLocalISO } from "@/dates";
 
@@ -60,15 +61,26 @@ function startOfWindow(end: string): string {
   return toLocalISO(d);
 }
 
+/**
+ * The things this user actually eats, ranked server-side by how often
+ * and how recently. Before this every entry began at an empty search
+ * box, which for a diet that repeats meant re-finding the same food
+ * several times a week.
+ */
+const recents = ref<RecentEntry[]>([]);
+
 async function load() {
   loading.value = true;
   error.value = null;
   try {
-    const [d, st, r] = await Promise.all([
+    const [d, st, r, rec] = await Promise.all([
       meals.getLog(startOfWindow(anchor.value), window),
       meals.logStats(30),
       recipes.value.length ? Promise.resolve(recipes.value) : meals.listRecipes(),
+      // A cold log has no recents and that is fine — the row hides.
+      meals.recentLogEntries(12).catch(() => [] as RecentEntry[]),
     ]);
+    recents.value = rec;
     // Newest first — you log what you just ate, not what you ate a week ago.
     days.value = [...d].reverse();
     stats.value = st;
@@ -80,6 +92,52 @@ async function load() {
   }
 }
 onMounted(load);
+
+/** One tap: the food AND the portion, straight in. No form, no search. */
+async function logRecent(day: string, r: RecentEntry) {
+  saving.value = true;
+  error.value = null;
+  try {
+    await meals.addLogEntry({
+      day,
+      slot: r.usual_slot,
+      food_id: r.food_id,
+      recipe_id: r.recipe_id,
+      label: r.food_id || r.recipe_id ? null : r.label,
+      quantity: r.quantity,
+      unit: r.unit,
+      servings: r.servings,
+      manual_kcal: r.manual_kcal,
+      manual_fat_g: r.manual_fat_g,
+    });
+    await load();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "could not log";
+  } finally {
+    saving.value = false;
+  }
+}
+
+/**
+ * Copy the previous day onto this one. Appends rather than replaces, so
+ * anything already logged today survives — the server enforces that too.
+ */
+async function repeatPrevious(day: string) {
+  const d = new Date(`${day}T00:00:00`);
+  d.setDate(d.getDate() - 1);
+  saving.value = true;
+  error.value = null;
+  try {
+    await meals.repeatLogDay(toLocalISO(d), day);
+    await load();
+  } catch (e) {
+    // A 404 here is informative, not a failure: it means the previous
+    // day was not logged either.
+    error.value = "nothing logged the day before, so there was nothing to copy";
+  } finally {
+    saving.value = false;
+  }
+}
 
 function shift(delta: number) {
   const d = new Date(`${anchor.value}T00:00:00`);
@@ -237,6 +295,29 @@ const rangeLabel = computed(() => {
         <button class="ghost small" @click="startAdd(d.day)">
           <Plus :size="13" />
         </button>
+        <button class="ghost small" :disabled="saving"
+                title="Copy every entry from the day before onto this one"
+                @click="repeatPrevious(d.day)">
+          Same as yesterday
+        </button>
+      </div>
+
+      <!-- One tap logs the food and the portion together. Re-finding the
+           food is only half the work; re-typing "1 piece" is the other. -->
+      <div v-if="recents.length" class="quick">
+        <button
+          v-for="r in recents"
+          :key="`${r.food_id}-${r.recipe_id}-${r.label}-${r.quantity}-${r.unit}`"
+          class="chip"
+          :disabled="saving"
+          :title="`${r.times}× · last on ${r.last_day} · logs as ${r.usual_slot}`"
+          @click="logRecent(d.day, r)"
+        >
+          {{ r.label }}
+          <span v-if="r.quantity" class="chip-qty">
+            {{ r.quantity }}{{ r.unit ? ` ${r.unit}` : "" }}
+          </span>
+        </button>
       </div>
 
       <p v-if="d.unresolved_count" class="warn">
@@ -346,6 +427,18 @@ button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .avgs .from { color: var(--muted-2); font-size: 0.78rem; }
 .meal-fat, .partial { margin: 0.6rem 0 0; font-size: 0.78rem; color: var(--muted-2); line-height: 1.5; }
 .day { margin-bottom: 0.5rem; }
+.quick { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0.25rem; }
+.chip {
+  display: inline-flex; align-items: baseline; gap: 0.35rem;
+  font-size: 0.8rem; line-height: 1.2;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--card-2, transparent); color: var(--fg);
+  cursor: pointer; max-width: 100%;
+}
+.chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.chip:disabled { opacity: 0.5; cursor: default; }
+.chip-qty { color: var(--muted); font-size: 0.72rem; }
 .day-head { display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; }
 .day-head strong { font-size: 0.9rem; }
 .totals { margin-left: auto; font-size: 0.75rem; color: var(--muted-2); font-variant-numeric: tabular-nums; }

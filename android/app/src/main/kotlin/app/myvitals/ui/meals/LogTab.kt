@@ -2,10 +2,13 @@ package app.myvitals.ui.meals
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -44,7 +47,9 @@ import app.myvitals.sync.LogDayOut
 import app.myvitals.sync.LogDayPatch
 import app.myvitals.sync.LogEntryIn
 import app.myvitals.sync.LogStatsOut
+import app.myvitals.sync.RecentEntryOut
 import app.myvitals.sync.RecipeOut
+import app.myvitals.sync.RepeatDayIn
 import app.myvitals.ui.common.PullableMetricBox
 import app.myvitals.ui.neon.NeonMV
 import kotlinx.coroutines.Dispatchers
@@ -84,6 +89,12 @@ fun LogTab(settings: SettingsRepository) {
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var addingFor by remember { mutableStateOf<String?>(null) }
+    // The foods this user actually eats, ranked server-side by how often
+    // and how recently. Before this, every entry began at an empty search
+    // box — and about half this diet is packaged or eaten out, so the
+    // same items recurred constantly and each had to be re-found.
+    var recents by remember { mutableStateOf<List<RecentEntryOut>>(emptyList()) }
+    var busy by remember { mutableStateOf(false) }
 
     suspend fun fetch() {
         if (!settings.isConfigured()) {
@@ -103,11 +114,63 @@ fun LogTab(settings: SettingsRepository) {
             if (recipes.isEmpty()) {
                 recipes = withContext(Dispatchers.IO) { api.mealsRecipes() }
             }
+            // A cold log has none, and the row simply hides — never an error.
+            recents = withContext(Dispatchers.IO) {
+                runCatching { api.mealsLogRecent(12) }.getOrDefault(emptyList())
+            }
             error = null
         } catch (e: Exception) {
             if (days.isEmpty()) error = e.message ?: "load failed"
         } finally {
             loading = false
+        }
+    }
+
+    /** One tap: the food AND the portion, straight in. No form, no search. */
+    fun logRecent(day: String, r: RecentEntryOut) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            runCatching {
+                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                withContext(Dispatchers.IO) {
+                    api.mealsAddLogEntry(
+                        LogEntryIn(
+                            day = day, slot = r.usualSlot,
+                            foodId = r.foodId, recipeId = r.recipeId,
+                            label = if (r.foodId == null && r.recipeId == null) r.label else null,
+                            quantity = r.quantity, unit = r.unit, servings = r.servings,
+                            manualKcal = r.manualKcal, manualFatG = r.manualFatG,
+                        ),
+                    )
+                }
+            }.onFailure { error = it.message ?: "could not log" }
+            fetch()
+            busy = false
+        }
+    }
+
+    /** Copy the previous day onto this one. The server appends rather than
+     *  replaces, so anything already logged today survives. */
+    fun repeatPrevious(day: String) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            runCatching {
+                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                withContext(Dispatchers.IO) {
+                    api.mealsRepeatDay(
+                        RepeatDayIn(source = LocalDate.parse(day).minusDays(1).toString(),
+                                    target = day),
+                    )
+                }
+            }.onFailure {
+                // A 404 is informative rather than a failure: it means the
+                // day before was not logged either.
+                error = "nothing logged the day before, so there was nothing to copy"
+            }
+            fetch()
+            busy = false
         }
     }
 
@@ -209,6 +272,50 @@ fun LogTab(settings: SettingsRepository) {
                                 "  ${d.unresolvedCount} not costed — totals understate",
                                 color = NeonMV.Amber, fontSize = 10.sp,
                             )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "Same as yesterday",
+                            color = if (busy) NeonMV.Muted else NeonMV.Cyan,
+                            fontSize = 10.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable(enabled = !busy) { repeatPrevious(d.day) }
+                                .padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
+
+                    // One tap logs the food and the portion together.
+                    if (recents.isNotEmpty()) {
+                        Row(
+                            Modifier
+                                .padding(top = 6.dp)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            recents.forEach { r ->
+                                Row(
+                                    Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(NeonMV.CardHigh)
+                                        .clickable(enabled = !busy) { logRecent(d.day, r) }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        r.label, color = NeonMV.Ink, fontSize = 11.sp,
+                                        maxLines = 1,
+                                    )
+                                    if (r.quantity != null) {
+                                        Text(
+                                            "  " + trimNum(r.quantity) +
+                                                (r.unit?.let { " $it" } ?: ""),
+                                            color = NeonMV.Muted, fontSize = 10.sp,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 

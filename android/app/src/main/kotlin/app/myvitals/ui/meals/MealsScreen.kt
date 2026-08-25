@@ -95,22 +95,29 @@ import kotlin.math.roundToInt
 private const val CACHE_RECIPES = "meals_recipes"
 private const val CACHE_PANTRY = "meals_pantry"
 
+/**
+ * Ordered by how often the screen is actually used, because the row
+ * scrolls and everything past the fourth chip is invisible on arrival.
+ * The log is daily; prep is once a week. It used to be the other way
+ * round, so every day you opened Meals to record lunch you landed on a
+ * screen about next Sunday.
+ */
 private enum class MealsTab(val label: String) {
-    PREP("Prep"),
-    PLAN("Plan"),
-    CAN_MAKE("Can make"),
     LOG("Log"),
-    IDEAS("Ideas"),
-    RECIPES("Recipes"),
+    PLAN("Plan"),
+    PREP("Prep"),
     SHOPPING("Shopping"),
     PANTRY("Pantry"),
-    FOODS("Foods"),
-    NUTRITION("Nutrition"),
+    CAN_MAKE("Cook from pantry"),
+    RECIPES("Recipes"),
+    IDEAS("Suggest a meal"),
+    FOODS("Food catalog"),
+    NUTRITION("Diet settings"),
 }
 
 @Composable
 fun MealsScreen(settings: SettingsRepository) {
-    var tab by remember { mutableStateOf(MealsTab.PREP) }
+    var tab by remember { mutableStateOf(MealsTab.LOG) }
 
     Column(Modifier.fillMaxSize().background(NeonMV.Bg)) {
         Text(
@@ -120,8 +127,10 @@ fun MealsScreen(settings: SettingsRepository) {
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 10.dp),
         )
-        // Six chips do not fit across a phone. Scrolling the row keeps
-        // every tab reachable rather than silently clipping the last two.
+        // Ten chips do not fit across a phone — about four are visible on
+        // arrival and the rest need a swipe to find. Scrolling keeps them
+        // all reachable, and the enum order above decides which four the
+        // user sees without looking for them.
         Row(
             Modifier
                 .fillMaxWidth()

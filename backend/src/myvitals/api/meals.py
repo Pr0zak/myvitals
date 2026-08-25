@@ -386,6 +386,41 @@ class StaplesOut(BaseModel):
     effective: list[str] = Field(default_factory=list)
 
 
+class RecentEntryOut(BaseModel):
+    """One thing you log often enough to be worth offering back.
+
+    Carries everything `LogEntryIn` needs, so re-logging is a single POST
+    of the same shape rather than a search that has to find the food
+    again. The portion travels with it: re-finding "chicken breast" is
+    only half the work, and re-typing "1 piece" is the other half.
+    """
+
+    label: str
+    food_id: int | None = None
+    recipe_id: int | None = None
+    quantity: float | None = None
+    unit: str | None = None
+    servings: float | None = None
+    manual_kcal: float | None = None
+    manual_fat_g: float | None = None
+    #: The slot it is usually eaten at, so a breakfast suggestion does not
+    #: default into dinner. The mode, not the latest — one late-night
+    #: cereal should not re-file porridge as a snack forever.
+    usual_slot: str = "dinner"
+    #: How many times it has been logged in the window, and when last.
+    #: Both are shown: "12 times, yesterday" and "12 times, in March" are
+    #: very different recommendations.
+    times: int
+    last_day: date
+
+
+class RepeatDayIn(BaseModel):
+    """Copy one day's entries onto another."""
+
+    source: date
+    target: date | None = None
+
+
 class LogEntryIn(BaseModel):
     day: date | None = None
     slot: str = Field(default="dinner", max_length=16)
@@ -1911,6 +1946,162 @@ async def add_log_entry(
         logged_at=e.logged_at, nutrition=nut, source=source,
         unresolved_reason=reason,
     )
+
+
+@router.get("/log/recent", response_model=list[RecentEntryOut])
+async def recent_log_entries(
+    limit: int = Query(default=12, ge=1, le=50),
+    days: int = Query(default=90, ge=7, le=365),
+    db: AsyncSession = Depends(get_session),
+):
+    """The things you actually eat, ranked so the common ones come back.
+
+    Until this existed every log entry began at an empty search box, and
+    then went through the ranked catalog search that exists precisely
+    because finding the right food is hard. About half this diet is
+    packaged or eaten out, which means the same items recur constantly,
+    so the app was making the user re-find each one every time. Nothing
+    new is recorded to support this — the log already holds it.
+
+    Identity is the whole PORTION, not the food: `(food, recipe, label,
+    quantity, unit, servings)`. Two eggs and six eggs are different
+    things to re-log, and collapsing them would hand back a quantity the
+    user then has to correct, which is most of the tap saving gone.
+
+    Ranking is frequency with a recency half-life rather than either
+    alone. Pure recency turns the list over completely after one unusual
+    day; pure frequency pins it to whatever was eaten most six months ago
+    and never surfaces a new staple. The half-life is 21 days: long
+    enough that a fortnight away does not erase a habit, short enough
+    that a genuinely dropped food falls off within a couple of months.
+    """
+    since = _local_today() - timedelta(days=days - 1)
+    rows = (await db.execute(
+        select(models.FoodLogEntry)
+        .where(models.FoodLogEntry.day >= since)
+        .order_by(models.FoodLogEntry.day.desc()),
+    )).scalars().all()
+    if not rows:
+        return []
+
+    # Resolve catalog names once. An entry keyed on a food carries no
+    # label of its own, and grouping on a null label would fold every
+    # catalog food into one bucket.
+    food_ids = {r.food_id for r in rows if r.food_id is not None}
+    names: dict[int, str] = {}
+    if food_ids:
+        for f in (await db.execute(
+            select(models.Food).where(models.Food.id.in_(food_ids)),
+        )).scalars().all():
+            names[f.id] = f.name
+    recipe_ids = {r.recipe_id for r in rows if r.recipe_id is not None}
+    if recipe_ids:
+        for rc in (await db.execute(
+            select(models.Recipe).where(models.Recipe.id.in_(recipe_ids)),
+        )).scalars().all():
+            names[-rc.id] = rc.name
+
+    today = _local_today()
+    HALF_LIFE_DAYS = 21.0
+    buckets: dict[tuple, dict[str, Any]] = {}
+    for r in rows:
+        key = (r.food_id, r.recipe_id, (r.label or "").strip().lower(),
+               r.quantity, r.unit, r.servings)
+        age = (today - r.day).days
+        weight = 0.5 ** (age / HALF_LIFE_DAYS)
+        b = buckets.get(key)
+        if b is None:
+            label = (
+                names.get(r.food_id) if r.food_id is not None
+                else names.get(-r.recipe_id) if r.recipe_id is not None
+                else None
+            ) or (r.label or "").strip() or "Unnamed"
+            b = buckets[key] = {
+                "label": label, "food_id": r.food_id, "recipe_id": r.recipe_id,
+                "quantity": r.quantity, "unit": r.unit, "servings": r.servings,
+                "manual_kcal": r.manual_kcal, "manual_fat_g": r.manual_fat_g,
+                "times": 0, "score": 0.0, "last_day": r.day,
+                "slots": {},
+            }
+        b["times"] += 1
+        b["score"] += weight
+        if r.day > b["last_day"]:
+            b["last_day"] = r.day
+        b["slots"][r.slot] = b["slots"].get(r.slot, 0) + 1
+
+    ranked = sorted(buckets.values(), key=lambda b: (-b["score"], -b["times"]))
+    out: list[RecentEntryOut] = []
+    for b in ranked[:limit]:
+        # The MODE slot, not the most recent one: a single late-night
+        # bowl of cereal should not re-file porridge as a snack forever.
+        usual = max(b["slots"].items(), key=lambda kv: kv[1])[0] if b["slots"] else "dinner"
+        out.append(RecentEntryOut(
+            label=b["label"], food_id=b["food_id"], recipe_id=b["recipe_id"],
+            quantity=b["quantity"], unit=b["unit"], servings=b["servings"],
+            manual_kcal=b["manual_kcal"], manual_fat_g=b["manual_fat_g"],
+            usual_slot=usual, times=b["times"], last_day=b["last_day"],
+        ))
+    return out
+
+
+@router.post("/log/repeat-day", response_model=list[LogEntryOut], status_code=201)
+async def repeat_day(
+    body: RepeatDayIn, db: AsyncSession = Depends(get_session),
+):
+    """Copy every entry from one day onto another — "same as yesterday".
+
+    Refuses when the source day is empty rather than silently succeeding
+    with nothing: "I copied yesterday" and "yesterday had nothing to
+    copy" are different answers, and the second one is the user's cue
+    that they did not log yesterday either.
+
+    It APPENDS. It does not replace what the target day already holds,
+    because the user may have logged breakfast before reaching for this,
+    and deleting that to make room would destroy a real record to save a
+    tap. Duplicates are the user's to remove, and are visible.
+    """
+    target = body.target or _local_today()
+    src = (await db.execute(
+        select(models.FoodLogEntry)
+        .where(models.FoodLogEntry.day == body.source)
+        .order_by(models.FoodLogEntry.id),
+    )).scalars().all()
+    if not src:
+        raise HTTPException(404, f"nothing logged on {body.source.isoformat()}")
+
+    now = datetime.now(timezone.utc)
+    made: list[models.FoodLogEntry] = []
+    for r in src:
+        e = models.FoodLogEntry(
+            day=target, slot=r.slot, food_id=r.food_id, recipe_id=r.recipe_id,
+            label=r.label, quantity=r.quantity, unit=r.unit,
+            servings=r.servings, manual_kcal=r.manual_kcal,
+            manual_fat_g=r.manual_fat_g, logged_at=now,
+        )
+        db.add(e)
+        made.append(e)
+    await db.commit()
+    for e in made:
+        await db.refresh(e)
+
+    out: list[LogEntryOut] = []
+    for e in made:
+        food = await db.get(models.Food, e.food_id) if e.food_id else None
+        rps = None
+        if e.recipe_id:
+            rc = await db.get(models.Recipe, e.recipe_id)
+            if rc is not None:
+                rps = (await _hydrate_recipe(db, rc, history=[])).per_serving
+        nut, source, reason = _entry_nutrition(e, food, rps)
+        out.append(LogEntryOut(
+            id=e.id, day=e.day, slot=e.slot, food_id=e.food_id,
+            recipe_id=e.recipe_id,
+            label=(food.name if food else (e.label or "Unnamed")),
+            quantity=e.quantity, unit=e.unit, servings=e.servings,
+            logged_at=e.logged_at, nutrition=nut, source=source,
+            unresolved_reason=reason,
+        ))
+    return out
 
 
 @router.delete("/log/{entry_id}", status_code=204)

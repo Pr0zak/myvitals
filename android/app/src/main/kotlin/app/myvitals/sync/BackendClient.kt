@@ -671,6 +671,17 @@ interface BackendApi {
     @POST("meals/log")
     suspend fun mealsAddLogEntry(@Body body: LogEntryIn): LogEntryOut
 
+    /** The foods this user actually eats, ranked server-side. Until this
+     *  existed every entry began at an empty search box. */
+    @GET("meals/log/recent")
+    suspend fun mealsLogRecent(
+        @Query("limit") limit: Int = 12,
+    ): List<RecentEntryOut>
+
+    /** "Same as yesterday" — appends, never replaces. */
+    @POST("meals/log/repeat-day")
+    suspend fun mealsRepeatDay(@Body body: RepeatDayIn): List<LogEntryOut>
+
     @DELETE("meals/log/{id}")
     suspend fun mealsDeleteLogEntry(@Path("id") id: Long): Response<Unit>
 

@@ -45,6 +45,9 @@ const router = createRouter({
     { path: "/watch", name: "watch", component: () => import("./views/Watch.vue") },
     { path: "/coach", name: "coach", component: () => import("./views/Coach.vue") },
     { path: "/goals", name: "goals", component: () => import("./views/Goals.vue") },
+    // Bare /meals lands on the log. It is the only daily screen here;
+    // everything else is weekly or occasional.
+    { path: "/meals", redirect: "/meals/log" },
     { path: "/meals/recipes", name: "meals-recipes", component: () => import("./views/meals/Recipes.vue") },
     { path: "/meals/pantry", name: "meals-pantry", component: () => import("./views/meals/Pantry.vue") },
     { path: "/meals/foods", name: "meals-foods", component: () => import("./views/meals/Foods.vue") },

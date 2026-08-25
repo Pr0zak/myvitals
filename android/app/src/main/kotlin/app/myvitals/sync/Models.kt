@@ -2183,6 +2183,32 @@ data class LogEntryIn(
     @Json(name = "manual_fat_g") val manualFatG: Double? = null,
 )
 
+/**
+ * One thing logged often enough to be worth offering back, with the
+ * portion attached. Re-finding the food is only half the work; re-typing
+ * "1 piece" is the other half, which is why the quantity travels with it.
+ */
+@JsonClass(generateAdapter = true)
+data class RecentEntryOut(
+    val label: String = "",
+    @Json(name = "food_id") val foodId: Long? = null,
+    @Json(name = "recipe_id") val recipeId: Long? = null,
+    val quantity: Double? = null,
+    val unit: String? = null,
+    val servings: Double? = null,
+    @Json(name = "manual_kcal") val manualKcal: Double? = null,
+    @Json(name = "manual_fat_g") val manualFatG: Double? = null,
+    @Json(name = "usual_slot") val usualSlot: String = "dinner",
+    val times: Int = 0,
+    @Json(name = "last_day") val lastDay: String = "",
+)
+
+@JsonClass(generateAdapter = true)
+data class RepeatDayIn(
+    val source: String,
+    val target: String? = null,
+)
+
 @JsonClass(generateAdapter = true)
 data class LogDayPatch(
     val complete: Boolean? = null,

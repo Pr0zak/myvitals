@@ -2298,6 +2298,30 @@ export const addLogEntry = (body: {
   manual_fat_g?: number | null;
 }) => http.post<LogEntry>("/meals/log", body).then((r) => r.data);
 
+/** One thing logged often enough to be worth offering back, with the
+ *  portion attached — re-finding the food is only half the work. */
+export interface RecentEntry {
+  label: string;
+  food_id: number | null;
+  recipe_id: number | null;
+  quantity: number | null;
+  unit: string | null;
+  servings: number | null;
+  manual_kcal: number | null;
+  manual_fat_g: number | null;
+  usual_slot: string;
+  times: number;
+  last_day: string;
+}
+
+export const recentLogEntries = (limit = 12) =>
+  http.get<RecentEntry[]>("/meals/log/recent", { params: { limit } })
+    .then((r) => r.data);
+
+export const repeatLogDay = (source: string, target?: string) =>
+  http.post<LogEntry[]>("/meals/log/repeat-day", { source, target })
+    .then((r) => r.data);
+
 export const deleteLogEntry = (id: number) =>
   http.delete(`/meals/log/${id}`).then(() => undefined);
 
@@ -2573,6 +2597,8 @@ export const meals = {
   deleteShoppingList,
   getLog,
   addLogEntry,
+  recentLogEntries,
+  repeatLogDay,
   deleteLogEntry,
   markLogDay,
   logStats,

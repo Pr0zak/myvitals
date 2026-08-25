@@ -109,7 +109,7 @@ private const val CACHE_PANTRY = "meals_pantry"
 private enum class MealsTab(val label: String) {
     LOG("Log"),
     PLAN("Plan"),
-    PREP("Prep"),
+    PREP("Week prep"),
     SHOPPING("Shopping"),
     PANTRY("Pantry"),
     CAN_MAKE("Cook from pantry"),
@@ -168,7 +168,7 @@ fun MealsScreen(settings: SettingsRepository) {
             when (here) {
                 MealsTab.PREP -> PrepTab(settings)
                 MealsTab.PLAN -> PlanTab(settings)
-                MealsTab.CAN_MAKE -> CanMakeTab(settings)
+                MealsTab.CAN_MAKE -> CanMakeTab(settings) { open = MealsTab.RECIPES }
                 MealsTab.LOG -> LogTab(settings)
                 MealsTab.IDEAS -> SuggestTab(settings)
                 MealsTab.SHOPPING -> ShoppingTab(settings)
@@ -209,23 +209,27 @@ private fun StapleChip(c: CommonItemOut, onClick: () -> Unit) {
  */
 @Composable
 private fun MoreList(onPick: (MealsTab) -> Unit) {
+    // Titles come from the enum, so the row you tap and the header you
+    // land on cannot say different things. They already had: the row read
+    // "Week prep" and opened a screen headed "Prep".
     val rows = listOf(
-        Triple(MealsTab.PLAN, "Plan", "What you intend to eat this week"),
-        Triple(MealsTab.PREP, "Week prep", "Cook components once, assemble all week"),
-        Triple(MealsTab.SHOPPING, "Shopping", "Built from the plan, minus the pantry"),
-        Triple(MealsTab.PANTRY, "Pantry", "What is in the house"),
-        Triple(MealsTab.CAN_MAKE, "Cook from pantry", "Recipes you can make right now"),
-        Triple(MealsTab.RECIPES, "Recipes", "Your own, with per-serving fat"),
-        Triple(MealsTab.IDEAS, "Suggest a meal", "Ask the AI for something new"),
-        Triple(MealsTab.FOODS, "Food catalog", "Look up a food, scan a label"),
-        Triple(MealsTab.NUTRITION, "Diet settings", "Fat target and what it is based on"),
+        MealsTab.PLAN to "What you intend to eat this week",
+        MealsTab.PREP to "Cook components once, assemble all week",
+        MealsTab.SHOPPING to "Built from the plan, minus the pantry",
+        MealsTab.PANTRY to "What is in the house",
+        MealsTab.CAN_MAKE to "Recipes you can make right now",
+        MealsTab.RECIPES to "Your own, with per-serving fat",
+        MealsTab.IDEAS to "Ask the AI for something new",
+        MealsTab.FOODS to "Look up a food, scan a label",
+        MealsTab.NUTRITION to "Fat target and what it is based on",
     )
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(rows.size) { i ->
-            val (tab, title, sub) = rows[i]
+            val (tab, sub) = rows[i]
+            val title = tab.label
             Row(
                 Modifier
                     .fillMaxWidth()

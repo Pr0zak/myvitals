@@ -221,7 +221,7 @@ function fmt(v: number | null, digits: number, suffix: string): string {
 
 <template>
   <div class="foods">
-    <PageHeader title="Foods">
+    <PageHeader title="Food catalog">
       <button class="ghost" :disabled="scanBusy" @click="labelInput?.click()">
         <component :is="scanBusy ? Loader2 : Camera" :size="14"
                    :class="{ spin: scanBusy }" />

@@ -89,7 +89,7 @@ const stamp = computed(() => {
 
 <template>
   <div class="suggest">
-    <PageHeader title="Meal ideas">
+    <PageHeader title="Suggest a meal">
       <button class="primary" :disabled="loading" @click="generate">
         <Sparkles :size="14" />
         {{ loading ? "Thinking…" : card ? "Refresh" : "Get suggestions" }}

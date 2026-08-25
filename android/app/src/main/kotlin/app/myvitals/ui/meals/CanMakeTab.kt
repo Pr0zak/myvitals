@@ -55,7 +55,12 @@ import kotlin.math.roundToInt
  * recipe at the top is where it would do the most damage.
  */
 @Composable
-fun CanMakeTab(settings: SettingsRepository) {
+fun CanMakeTab(
+    settings: SettingsRepository,
+    /** Lets the empty state hand the user straight to the fix it
+     *  names, instead of describing a place they must go find. */
+    onOpenRecipes: (() -> Unit)? = null,
+) {
     var data by remember { mutableStateOf<CanMakeOut?>(null) }
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
@@ -95,10 +100,27 @@ fun CanMakeTab(settings: SettingsRepository) {
             val d = data ?: return@LazyColumn
             if (d.summary.totalRecipes == 0) {
                 item {
-                    MutedText(
-                        "No recipes saved yet. Add some under Recipes and this " +
-                            "tab will tell you which ones you can cook.",
-                    )
+                    // "this tab" outlived the tabs. And an empty state that
+                    // names the fix without offering it is a dead end: the
+                    // user has to go back, find Recipes in the list and
+                    // start again. Direction A's rule applies here too —
+                    // the thing to do next is a button.
+                    Column {
+                        MutedText(
+                            "Nothing to check yet. Save a recipe and this " +
+                                "screen tells you which ones your pantry " +
+                                "already covers.",
+                        )
+                        onOpenRecipes?.let { go ->
+                            Text(
+                                "Go to Recipes",
+                                color = NeonMV.Cyan, fontSize = 12.sp,
+                                modifier = Modifier
+                                    .padding(top = 10.dp)
+                                    .clickable(onClick = go),
+                            )
+                        }
+                    }
                 }
                 return@LazyColumn
             }

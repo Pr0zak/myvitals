@@ -106,7 +106,7 @@ const basisNow = computed(() => {
 
 <template>
   <div class="nutrition">
-    <PageHeader title="Nutrition" />
+    <PageHeader title="Diet settings" />
 
     <p v-if="error" class="err">{{ error }}</p>
     <EmptyState v-if="loading" message="Loading…" />

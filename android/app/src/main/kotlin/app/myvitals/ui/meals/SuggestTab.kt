@@ -152,7 +152,9 @@ fun SuggestTab(settings: SettingsRepository) {
                     )
                     stamp?.let {
                         Text(
-                            it.take(16).replace("T", " "),
+                            // "Suggested Sun 23 Aug, 03:24", not the raw
+                            // "2026-08-23T03:24" with its T poked out.
+                            prettyStamp(it),
                             color = NeonMV.Muted, fontSize = 10.sp,
                             modifier = Modifier.padding(top = 4.dp),
                         )
@@ -311,4 +313,22 @@ private fun ChipRow(
             )
         }
     }
+}
+
+
+/** An ISO instant as a person reads it. Falls back to the raw string
+ *  rather than hiding a value that failed to parse. */
+private fun prettyStamp(iso: String): String = runCatching {
+    val t = java.time.OffsetDateTime.parse(iso)
+        .atZoneSameInstant(java.time.ZoneId.systemDefault())
+    "Suggested " + t.format(
+        java.time.format.DateTimeFormatter.ofPattern("EEE d MMM, HH:mm"),
+    )
+}.getOrElse {
+    runCatching {
+        val t = java.time.LocalDateTime.parse(iso.take(19))
+        "Suggested " + t.format(
+            java.time.format.DateTimeFormatter.ofPattern("EEE d MMM, HH:mm"),
+        )
+    }.getOrDefault(iso)
 }

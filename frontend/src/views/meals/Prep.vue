@@ -239,7 +239,7 @@ onMounted(load);
 </script>
 
 <template>
-  <PageHeader title="Weekend prep" subtitle="Cook once, eat all week">
+  <PageHeader title="Week prep" subtitle="Cook once, eat all week">
     <template #actions>
       <button class="ghost" @click="load" :disabled="loading">
         <RefreshCw :size="14" /> Refresh

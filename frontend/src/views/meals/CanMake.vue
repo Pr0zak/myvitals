@@ -59,7 +59,7 @@ const rest = computed(
 
 <template>
   <div class="canmake">
-    <PageHeader title="What can I make?">
+    <PageHeader title="Cook from pantry">
       <button class="ghost" :disabled="loading" @click="load">
         <RefreshCw :size="14" /> Refresh
       </button>
@@ -69,10 +69,12 @@ const rest = computed(
     <EmptyState v-if="loading && !data" message="Checking the pantry…" />
 
     <template v-else-if="data">
+      <!-- An empty state that names the fix should also offer it. -->
       <EmptyState v-if="!data.summary.total_recipes">
-        No recipes saved yet. Add some under
-        <RouterLink to="/meals/recipes">Recipes</RouterLink> and this page
-        will tell you which ones you can cook.
+        Nothing to check yet. Save a recipe and this screen tells you which
+        ones your pantry already covers.
+        <br />
+        <RouterLink to="/meals/recipes">Go to Recipes</RouterLink>
       </EmptyState>
 
       <template v-else>

@@ -153,8 +153,33 @@ class SuggestedIngredientIn(BaseModel):
     """
 
     food_search: str = Field(min_length=1, max_length=200)
-    quantity: float | None = None
+    #: Deliberately not `float | None`. A live run came back with
+    #: `{"food_search": "Salt, table", "quantity": "pinch", "unit": "tsp"}` —
+    #: which is a perfectly sensible thing for a person to write down, and
+    #: which a float field rejects with a 422 that loses the WHOLE recipe
+    #: over a pinch of salt. Anything non-numeric is carried through as
+    #: text and dealt with below, rather than failing the save.
+    quantity: float | str | None = None
     unit: str | None = Field(default=None, max_length=32)
+
+    @property
+    def numeric_quantity(self) -> float | None:
+        """The amount as a number, or None when it is a word."""
+        if isinstance(self.quantity, (int, float)):
+            return float(self.quantity)
+        try:
+            return float(str(self.quantity).strip())
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def quantity_word(self) -> str | None:
+        """The amount as the model wrote it, when it is not a number —
+        "pinch", "to taste", "a handful". Kept so the user sees what was
+        meant rather than a blank."""
+        return None if self.numeric_quantity is not None else (
+            str(self.quantity).strip() or None if self.quantity else None
+        )
 
 
 class SuggestionSaveIn(BaseModel):
@@ -1058,6 +1083,7 @@ async def save_suggestion_as_recipe(
     """
     lines: list[IngredientIn] = []
     unresolved: list[str] = []
+    unmeasured: list[str] = []
     for ing in body.ingredients:
         term = ing.food_search.strip()
         if not term:
@@ -1065,18 +1091,34 @@ async def save_suggestion_as_recipe(
         food = await _resolve_food_term(db, term)
         if food is None:
             unresolved.append(term)
+        qty = ing.numeric_quantity
+        word = ing.quantity_word
+        if word:
+            # "a pinch" has no number and inventing one would put a
+            # fabricated weight into a fat total. The line stays, uncosted
+            # and labelled, and is named in the notes below.
+            unmeasured.append(f"{word} {term}")
         lines.append(IngredientIn(
             food_id=food.id if food else None,
             # Keep the model's wording on an unmatched line so the user can
-            # see what was meant and fix it, rather than an empty row.
-            raw_text=None if food else term,
-            quantity=ing.quantity,
-            unit=food_lib.canonical_unit(ing.unit) if ing.unit else None,
+            # see what was meant and fix it, rather than an empty row. An
+            # unmeasured amount is carried the same way.
+            raw_text=(
+                term if food is None
+                else (f"{word} — amount not measurable" if word else None)
+            ),
+            quantity=qty,
+            unit=food_lib.canonical_unit(ing.unit) if ing.unit and qty is not None else None,
         ))
 
     provenance = f"Saved from an AI suggestion on {_local_today().isoformat()}."
     if body.why:
         provenance += f"\n\n{body.why.strip()}"
+    if unmeasured:
+        provenance += (
+            "\n\nThese amounts are not measurable and so are not costed: "
+            + ", ".join(unmeasured) + "."
+        )
     if unresolved:
         # Named, not hidden. The user is the only one who can say what
         # "smoked paprika" should have matched.

@@ -64,9 +64,11 @@ def test_an_unresolved_ingredient_is_kept_not_dropped() -> None:
     total look better than it is — wrong in the dangerous direction for
     the one constraint this app exists to respect."""
     src = _fn_src("save_suggestion_as_recipe")
-    assert "raw_text=None if food else term" in src, \
+    assert "term if food is None" in src, \
         "an unmatched ingredient must survive as a hand-typed line"
     assert "unresolved.append(term)" in src
+    # And it must still be APPENDED — a `continue` here would drop it.
+    assert src.count("lines.append(") == 1
 
 
 def test_unresolved_ingredients_are_named_to_the_user() -> None:
@@ -107,3 +109,38 @@ def test_the_prompt_warns_against_multi_food_ingredients() -> None:
     total, and none of the unresolved machinery fires because a food DID
     match."""
     assert "broccoli" in CLAUDE and "peppers vanish" in CLAUDE
+
+
+def test_a_word_where_a_number_was_asked_for_does_not_lose_the_recipe() -> None:
+    """From a live run, verbatim:
+
+        {"food_search": "Salt, table", "quantity": "pinch", "unit": "tsp"}
+
+    "A pinch" is a perfectly sensible thing to write down, and a strict
+    float field rejects it with a 422 that loses the WHOLE recipe over a
+    pinch of salt — every other ingredient with it. The amount is carried
+    through as text instead.
+    """
+    from myvitals.api.meals import SuggestedIngredientIn
+    i = SuggestedIngredientIn(food_search="Salt, table", quantity="pinch", unit="tsp")
+    assert i.numeric_quantity is None
+    assert i.quantity_word == "pinch"
+
+
+def test_numeric_quantities_still_parse_including_numeric_strings() -> None:
+    from myvitals.api.meals import SuggestedIngredientIn
+    for raw, want in ((2, 2.0), (0.5, 0.5), ("1.5", 1.5)):
+        i = SuggestedIngredientIn(food_search="x", quantity=raw, unit="g")
+        assert i.numeric_quantity == want
+        assert i.quantity_word is None
+
+
+def test_an_unmeasurable_amount_is_never_given_an_invented_number() -> None:
+    """Inventing a gram figure for "a pinch" would put a fabricated weight
+    into a fat total. The line is kept, uncosted, and named in the notes."""
+    src = _fn_src("save_suggestion_as_recipe")
+    assert "unmeasured.append" in src
+    assert "not measurable and so are not costed" in src
+    # The unit is dropped along with the number: "tsp" with no quantity
+    # would let a later edit multiply by a phantom amount.
+    assert "if ing.unit and qty is not None" in src

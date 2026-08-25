@@ -2108,6 +2108,31 @@ data class MealSuggestion(
     @Json(name = "est_kcal") val estKcal: Double? = null,
     @Json(name = "based_on_saved_recipe") val basedOnSavedRecipe: String? = null,
     @Json(name = "fat_assessment") val fatAssessment: FatAssessment? = null,
+    // Structured ingredients, which is what lets a suggestion be SAVED as
+    // a real recipe. Empty on cards generated before this shipped, so the
+    // save action hides rather than producing an ingredient-less recipe.
+    val ingredients: List<SuggestedIngredient> = emptyList(),
+    val servings: Int = 1,
+    val method: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class SuggestedIngredient(
+    @Json(name = "food_search") val foodSearch: String = "",
+    val quantity: Double? = null,
+    val unit: String? = null,
+)
+
+/** The body of a save — the server resolves every term and computes the
+ *  nutrition itself, so nothing here carries a number the model made up. */
+@JsonClass(generateAdapter = true)
+data class SuggestionSaveIn(
+    val name: String,
+    val servings: Int = 1,
+    val method: String? = null,
+    val why: String? = null,
+    @Json(name = "est_prep_min") val estPrepMin: Int? = null,
+    val ingredients: List<SuggestedIngredient> = emptyList(),
 )
 
 @JsonClass(generateAdapter = true)

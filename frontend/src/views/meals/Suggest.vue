@@ -23,8 +23,10 @@ import PageHeader from "@/components/PageHeader.vue";
 import Card from "@/components/Card.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import FatAssessment from "@/components/FatAssessment.vue";
-import { Sparkles, Clock, ShoppingBasket, Info, CalendarPlus } from "lucide-vue-next";
-import { api, meals, type MealSuggestionCard } from "@/api/client";
+import { Sparkles, Clock, ShoppingBasket, Info, CalendarPlus, BookOpen } from "lucide-vue-next";
+import {
+  api, meals, type MealSuggestionCard, type SuggestedIngredient,
+} from "@/api/client";
 import { toLocalISO } from "@/dates";
 
 const card = ref<MealSuggestionCard | null>(null);
@@ -33,6 +35,38 @@ const model = ref<string | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const planned = ref<Record<string, boolean>>({});
+const savedRecipes = ref<Record<string, boolean>>({});
+const savingRecipe = ref<string | null>(null);
+
+/**
+ * Save a suggestion as a real, costed recipe.
+ *
+ * Sends terms and amounts only. The server resolves each against the food
+ * catalog and computes the nutrition, so nothing the model estimated ever
+ * becomes a number on the recipe page — if the two disagree, the catalog
+ * is the one that is right.
+ */
+async function saveAsRecipe(s: {
+  name: string; why?: string; servings?: number; method?: string | null;
+  est_prep_min?: number | null; ingredients?: SuggestedIngredient[];
+}) {
+  savingRecipe.value = s.name;
+  try {
+    await meals.saveSuggestionAsRecipe({
+      name: s.name,
+      servings: s.servings ?? 1,
+      method: s.method ?? null,
+      why: s.why ?? null,
+      est_prep_min: s.est_prep_min ?? null,
+      ingredients: s.ingredients ?? [],
+    });
+    savedRecipes.value = { ...savedRecipes.value, [s.name]: true };
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "could not save the recipe";
+  } finally {
+    savingRecipe.value = null;
+  }
+}
 
 async function loadCached() {
   try {
@@ -126,14 +160,30 @@ const stamp = computed(() => {
               </template>
             </span>
           </div>
-          <button
-            class="ghost"
-            :disabled="planned[s.name]"
-            @click="addToPlan(s.name, s.slot)"
-          >
-            <CalendarPlus :size="13" />
-            {{ planned[s.name] ? "Planned" : "Plan today" }}
-          </button>
+          <div class="card-actions">
+            <button
+              class="ghost"
+              :disabled="planned[s.name]"
+              @click="addToPlan(s.name, s.slot)"
+            >
+              <CalendarPlus :size="13" />
+              {{ planned[s.name] ? "Planned" : "Plan today" }}
+            </button>
+            <!-- Only when the model actually gave ingredients. A card from
+                 before the schema carried them would otherwise save a
+                 recipe with no ingredients and so no nutrition — an empty
+                 recipe wearing a real one's clothes. -->
+            <button
+              v-if="s.ingredients?.length"
+              class="ghost"
+              :disabled="savedRecipes[s.name] || savingRecipe === s.name"
+              @click="saveAsRecipe(s)"
+            >
+              <BookOpen :size="13" />
+              {{ savedRecipes[s.name] ? "Saved to Recipes"
+                 : savingRecipe === s.name ? "Saving…" : "Save as recipe" }}
+            </button>
+          </div>
         </div>
 
         <p class="why">{{ s.why }}</p>
@@ -194,6 +244,7 @@ button.ghost { background: transparent; color: var(--muted-2); }
   display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap;
   font-size: 0.74rem; color: var(--muted-2); margin-top: 0.15rem;
 }
+.card-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .why { margin: 0.55rem 0 0; font-size: 0.85rem; line-height: 1.5; color: var(--muted-2); }
 .fat { margin-top: 0.6rem; }
 .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; margin-top: 0.55rem; }

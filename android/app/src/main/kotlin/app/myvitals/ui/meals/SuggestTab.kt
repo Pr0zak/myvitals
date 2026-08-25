@@ -1,6 +1,7 @@
 package app.myvitals.ui.meals
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.MealSuggestion
+import app.myvitals.sync.SuggestionSaveIn
 import app.myvitals.sync.MealSuggestionCard
 import app.myvitals.sync.PlanEntryIn
 import app.myvitals.ui.neon.NeonMV
@@ -67,6 +69,8 @@ fun SuggestTab(settings: SettingsRepository) {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var planned by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var savedRecipes by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var savingRecipe by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         if (!settings.isConfigured()) {
@@ -166,6 +170,39 @@ fun SuggestTab(settings: SettingsRepository) {
                 SuggestionCard(
                     s = s,
                     planned = s.name in planned,
+                    savedRecipe = s.name in savedRecipes,
+                    saving = savingRecipe == s.name,
+                    onSaveRecipe = {
+                        savingRecipe = s.name
+                        scope.launch {
+                            runCatching {
+                                val api = BackendClient.create(
+                                    settings.backendUrl, settings.bearerToken,
+                                )
+                                withContext(Dispatchers.IO) {
+                                    // Terms and amounts only. The server
+                                    // resolves each against the catalog and
+                                    // computes the nutrition, so nothing the
+                                    // model estimated reaches the recipe.
+                                    api.mealsSaveSuggestionAsRecipe(
+                                        SuggestionSaveIn(
+                                            name = s.name,
+                                            servings = s.servings,
+                                            method = s.method,
+                                            why = s.why,
+                                            estPrepMin = s.estPrepMin,
+                                            ingredients = s.ingredients,
+                                        ),
+                                    )
+                                }
+                            }.onSuccess {
+                                savedRecipes = savedRecipes + s.name
+                            }.onFailure {
+                                error = it.message ?: "could not save the recipe"
+                            }
+                            savingRecipe = null
+                        }
+                    },
                     onPlan = {
                         scope.launch {
                             try {
@@ -233,6 +270,9 @@ private fun SuggestionCard(
     s: MealSuggestion,
     planned: Boolean,
     onPlan: () -> Unit,
+    savedRecipe: Boolean = false,
+    saving: Boolean = false,
+    onSaveRecipe: () -> Unit = {},
 ) {
     Column(
         Modifier
@@ -260,6 +300,25 @@ private fun SuggestionCard(
                 Icon(Icons.Filled.EventAvailable, contentDescription = null)
                 Text(if (planned) " Planned" else " Plan today")
             }
+        }
+
+        // Only offered when the model actually gave ingredients. A card
+        // generated before the schema carried them would otherwise save a
+        // recipe with no ingredients and therefore no nutrition — an empty
+        // recipe that looks like a real one.
+        if (s.ingredients.isNotEmpty()) {
+            Text(
+                when {
+                    savedRecipe -> "Saved to Recipes"
+                    saving -> "Saving…"
+                    else -> "Save as recipe"
+                },
+                color = if (savedRecipe || saving) NeonMV.Muted else NeonMV.Cyan,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .clickable(enabled = !savedRecipe && !saving, onClick = onSaveRecipe),
+            )
         }
 
         Text(

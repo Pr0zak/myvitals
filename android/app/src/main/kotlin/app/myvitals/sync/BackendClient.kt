@@ -540,6 +540,11 @@ interface BackendApi {
     @GET("meals/recipes/{id}")
     suspend fun mealsRecipe(@Path("id") id: Long): RecipeOut
 
+    /** Turn a suggestion into a costed recipe. Ingredients are resolved
+     *  server-side against the catalog; nutrition is computed there. */
+    @POST("meals/recipes/from-suggestion")
+    suspend fun mealsSaveSuggestionAsRecipe(@Body body: SuggestionSaveIn): RecipeOut
+
     @POST("meals/recipes")
     suspend fun mealsCreateRecipe(@Body body: RecipeIn): RecipeOut
 

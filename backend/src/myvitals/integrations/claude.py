@@ -3179,6 +3179,65 @@ MEAL_SUGGEST_TOOL = {
                             "items": {"type": "string"},
                             "description": "Anything not already in the pantry.",
                         },
+                        # Structured ingredients exist so a suggestion can be
+                        # SAVED as a real recipe. `uses_from_pantry` and
+                        # `also_needs` above are prose for the card and cannot
+                        # be resolved into food rows or costed.
+                        #
+                        # Deliberately no nutrition field here, matching
+                        # PREP_PLAN_TOOL: the model names a food and an
+                        # amount, and every gram, calorie and fat figure is
+                        # computed from the catalog server-side. `est_fat_g`
+                        # below survives only because the card shows it before
+                        # anything is saved, and it is re-judged in code.
+                        "ingredients": {
+                            "type": "array",
+                            "description": (
+                                "Every ingredient, as a plain searchable "
+                                "food name plus an amount. Include ALL of "
+                                "them, pantry and not — this is what the "
+                                "meal is made of, not what is missing. One "
+                                "food per entry: 'broccoli and peppers' "
+                                "resolves to broccoli and loses the peppers."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "food_search": {
+                                        "type": "string",
+                                        "description": (
+                                            "A plain ingredient name to look "
+                                            "up, e.g. 'chicken breast', "
+                                            "'olive oil', 'brown rice'. No "
+                                            "brand, no preparation."
+                                        ),
+                                    },
+                                    "quantity": {"type": "number"},
+                                    "unit": {
+                                        "type": "string",
+                                        "description": (
+                                            "g, oz, cup, tbsp, tsp, piece, "
+                                            "slice — a unit the food is "
+                                            "normally measured in."
+                                        ),
+                                    },
+                                },
+                                "required": ["food_search", "quantity", "unit"],
+                            },
+                        },
+                        "servings": {
+                            "type": "integer",
+                            "description": (
+                                "How many servings the ingredient amounts "
+                                "make. Usually 1 — this is a meal."
+                            ),
+                        },
+                        "method": {
+                            "type": "string",
+                            "description": (
+                                "How to make it, in a few short sentences."
+                            ),
+                        },
                         "est_prep_min": {"type": "integer"},
                         "est_fat_g": {
                             "type": "number",
@@ -3236,6 +3295,20 @@ def _meal_suggest_system(tone: str) -> str:
         "If the pantry is nearly empty, say so in `notes` and suggest few "
         "things rather than inventing a full week. Anything the user does "
         "not have goes in `also_needs` — do not quietly assume staples.\n\n"
+        "## Ingredients are what makes a suggestion keepable\n"
+        "Fill `ingredients` for every suggestion: each entry is ONE food, "
+        "named as it would be looked up in a food catalog — 'chicken "
+        "breast', 'olive oil', 'brown rice' — with a quantity and a unit. "
+        "No brands, no preparation in the name, and never two foods in one "
+        "entry: 'broccoli and peppers' resolves to broccoli and the "
+        "peppers vanish from every total. Include everything the meal is "
+        "made of, whether or not the pantry has it.\n"
+        "This is what lets the user SAVE a suggestion as a real recipe. "
+        "Its nutrition is then computed from the catalog, not from your "
+        "estimate, so an ingredient list that is vague or incomplete "
+        "produces a recipe with a wrong fat number — which for this user "
+        "is the one number that matters. Give `servings` and a short "
+        "`method` too.\n\n"
         "Answer only via the `give_meal_suggestions` tool."
     )
 

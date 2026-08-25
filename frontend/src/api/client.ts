@@ -1823,6 +1823,12 @@ export interface MealSuggestion {
   est_kcal?: number;
   based_on_saved_recipe?: string;
   fat_assessment?: FatAssessment;
+  /** Structured ingredients, which is what lets a suggestion be SAVED as a
+   *  real recipe. Absent on cards generated before the schema carried
+   *  them, so the save action hides rather than producing an empty one. */
+  ingredients?: SuggestedIngredient[];
+  servings?: number;
+  method?: string | null;
 }
 
 export interface MealSuggestionCard {
@@ -2326,6 +2332,23 @@ export const repeatLogDay = (source: string, target?: string) =>
   http.post<LogEntry[]>("/meals/log/repeat-day", { source, target })
     .then((r) => r.data);
 
+/** One ingredient as the model named it — a search term and an amount,
+ *  never nutrition. The server resolves and costs it. */
+export interface SuggestedIngredient {
+  food_search: string;
+  quantity: number | null;
+  unit: string | null;
+}
+
+export const saveSuggestionAsRecipe = (body: {
+  name: string;
+  servings?: number;
+  method?: string | null;
+  why?: string | null;
+  est_prep_min?: number | null;
+  ingredients: SuggestedIngredient[];
+}) => http.post<Recipe>("/meals/recipes/from-suggestion", body).then((r) => r.data);
+
 export const deleteLogEntry = (id: number) =>
   http.delete(`/meals/log/${id}`).then(() => undefined);
 
@@ -2603,6 +2626,7 @@ export const meals = {
   addLogEntry,
   recentLogEntries,
   repeatLogDay,
+  saveSuggestionAsRecipe,
   deleteLogEntry,
   markLogDay,
   logStats,

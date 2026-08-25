@@ -145,6 +145,30 @@ class RecipeIn(BaseModel):
     ingredients: list[IngredientIn] | None = None
 
 
+class SuggestedIngredientIn(BaseModel):
+    """One ingredient as the model named it: a search term and an amount.
+
+    Never nutrition. The same split as `PREP_PLAN_TOOL` — the model says
+    what the meal is made of, the server says what that costs.
+    """
+
+    food_search: str = Field(min_length=1, max_length=200)
+    quantity: float | None = None
+    unit: str | None = Field(default=None, max_length=32)
+
+
+class SuggestionSaveIn(BaseModel):
+    """An AI meal suggestion, on its way to becoming a real recipe."""
+
+    name: str = Field(min_length=1, max_length=255)
+    servings: int = Field(default=1, ge=1, le=100)
+    method: str | None = None
+    #: The model's reasoning, kept as provenance on the saved recipe.
+    why: str | None = None
+    est_prep_min: int | None = Field(default=None, ge=0, le=1440)
+    ingredients: list[SuggestedIngredientIn] = Field(default_factory=list)
+
+
 class RecipePatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     servings: int | None = Field(default=None, ge=1, le=100)
@@ -993,6 +1017,89 @@ async def create_recipe(body: RecipeIn, db: AsyncSession = Depends(get_session))
     await db.flush()
     if body.ingredients:
         await _replace_ingredients(db, r.id, body.ingredients)
+    await db.commit()
+    await db.refresh(r)
+    return await _hydrate_recipe(
+        db, r,
+        diet=await _diet_settings(db),
+        history=await _fat_history(db, exclude_id=r.id),
+    )
+
+
+@router.post("/recipes/from-suggestion", response_model=RecipeOut, status_code=201)
+async def save_suggestion_as_recipe(
+    body: SuggestionSaveIn, db: AsyncSession = Depends(get_session),
+):
+    """Turn an AI meal suggestion into a real, costed recipe.
+
+    This exists because the recipe book could not fill itself. Suggestions
+    were the only feature generating meal ideas, and a planned suggestion
+    goes into the plan as a NOTE rather than a recipe — deliberately,
+    since the model's `est_fat_g` is an estimate and a recipe carrying
+    invented nutrition is worse than no recipe. The consequence was that
+    the book stayed empty, and everything downstream of it stayed empty
+    too: "cook from pantry" had nothing to check and the plan had nothing
+    to plan.
+
+    The way out is the prep planner's, not an exception to the rule. The
+    model proposes ingredients as SEARCH TERMS with amounts; every one is
+    resolved through `_resolve_food_term` — the same ranked catalog search
+    the pickers use — and the recipe's nutrition is then computed from the
+    catalog rows by the ordinary hydration path. The model's own
+    `est_fat_g` and `est_kcal` are discarded here rather than carried
+    across: if the two disagree, the catalog is right, and keeping both
+    would leave the app showing two different numbers for one meal.
+
+    An ingredient that does not resolve is kept as a hand-typed line, not
+    dropped. That is what makes the saved recipe honest about itself — the
+    recipe page already reports uncosted lines and marks the totals as
+    partial, and a silently shorter ingredient list would hide the gap
+    while making the fat total look better than it is.
+    """
+    lines: list[IngredientIn] = []
+    unresolved: list[str] = []
+    for ing in body.ingredients:
+        term = ing.food_search.strip()
+        if not term:
+            continue
+        food = await _resolve_food_term(db, term)
+        if food is None:
+            unresolved.append(term)
+        lines.append(IngredientIn(
+            food_id=food.id if food else None,
+            # Keep the model's wording on an unmatched line so the user can
+            # see what was meant and fix it, rather than an empty row.
+            raw_text=None if food else term,
+            quantity=ing.quantity,
+            unit=food_lib.canonical_unit(ing.unit) if ing.unit else None,
+        ))
+
+    provenance = f"Saved from an AI suggestion on {_local_today().isoformat()}."
+    if body.why:
+        provenance += f"\n\n{body.why.strip()}"
+    if unresolved:
+        # Named, not hidden. The user is the only one who can say what
+        # "smoked paprika" should have matched.
+        provenance += (
+            "\n\nThese ingredients did not match a catalog food and are "
+            "not costed: " + ", ".join(unresolved) + "."
+        )
+
+    r = models.Recipe(
+        name=body.name.strip(),
+        servings=body.servings,
+        prep_min=body.est_prep_min,
+        cook_min=None,
+        method=(body.method or None),
+        notes=provenance,
+        tags=["ai-suggested"],
+        source_url=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(r)
+    await db.flush()
+    if lines:
+        await _replace_ingredients(db, r.id, lines)
     await db.commit()
     await db.refresh(r)
     return await _hydrate_recipe(

@@ -846,13 +846,21 @@ private fun PantryTab(settings: SettingsRepository) {
                         fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
                     )
                     Text(
-                        if (showAdd) "" else "staples · photo · scan a pack",
+                        if (showAdd) "" else "barcode · photo · staples",
                         color = NeonMV.Muted, fontSize = 11.sp,
                     )
                 }
             }
 
             if (showAdd) {
+                // First, because for a packaged item it is the shortest
+                // path there is: one scan against two lookups.
+                item {
+                    BarcodeAdd(
+                        settings = settings, stock = true,
+                        onAdded = { scope.launch { fetch() } },
+                    )
+                }
                 item { PhotoPantry(settings = settings, onAdded = { scope.launch { fetch() } }) }
                 item {
                     PackageScan(

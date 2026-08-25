@@ -864,6 +864,10 @@ class Food(Base):
     #: the house. Matching a pantry item to a recipe ingredient happens on
     #: this, never on `id`. NULL means "not a pantry ingredient" — a
     #: prepared dish — so `concept IS NOT NULL` is the stockable test.
+    #: The pack's barcode, for foods that came from one. Null for the
+    #: bundled USDA rows — those are generic foods and a generic food has
+    #: no pack. Not unique: regional variants of a product share an EAN.
+    barcode: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     concept: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
 
     #: Grams per common household unit, e.g. {"cup": 240, "tbsp": 15}.

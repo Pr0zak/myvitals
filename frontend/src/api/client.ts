@@ -2340,6 +2340,25 @@ export interface SuggestedIngredient {
   unit: string | null;
 }
 
+/** What a barcode lookup found, and where it came from. */
+export interface BarcodeHit {
+  barcode: string;
+  /** Set when this barcode is already a food here — nothing to confirm. */
+  food_id: number | null;
+  name: string;
+  /** "local" | "openfoodfacts". Rendered: a crowd-sourced figure and one
+   *  already in this catalog deserve different confidence. */
+  origin: string;
+  nutrition: Record<string, number | null>;
+  ingredients: string | null;
+  package_size: string | null;
+  serving_size_text: string | null;
+}
+
+export const lookupBarcode = (code: string) =>
+  http.get<BarcodeHit>(`/meals/foods/barcode/${encodeURIComponent(code)}`)
+    .then((r) => r.data);
+
 export const saveSuggestionAsRecipe = (body: {
   name: string;
   servings?: number;
@@ -2626,6 +2645,7 @@ export const meals = {
   addLogEntry,
   recentLogEntries,
   repeatLogDay,
+  lookupBarcode,
   saveSuggestionAsRecipe,
   deleteLogEntry,
   markLogDay,

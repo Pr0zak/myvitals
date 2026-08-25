@@ -678,6 +678,11 @@ interface BackendApi {
 
     /** The foods this user actually eats, ranked server-side. Until this
      *  existed every entry began at an empty search box. */
+    /** Look a packaged food up by barcode. 404 means neither this
+     *  catalog nor Open Food Facts knows it, which is ordinary. */
+    @GET("meals/foods/barcode/{code}")
+    suspend fun mealsBarcode(@Path("code") code: String): BarcodeHit
+
     @GET("meals/log/recent")
     suspend fun mealsLogRecent(
         @Query("limit") limit: Int = 12,

@@ -92,6 +92,11 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.navigation:navigation-compose:2.8.5")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // MEAL-BARCODE. The Google Code Scanner, not raw ML Kit: it
+    // provides its own scanning UI, needs no CAMERA permission (so no
+    // runtime prompt), and downloads its model through Play Services
+    // rather than adding several MB to the APK.
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 
     implementation("androidx.health.connect:connect-client:1.1.0-alpha11")
     implementation("androidx.work:work-runtime-ktx:2.10.0")

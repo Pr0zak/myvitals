@@ -1834,6 +1834,9 @@ data class FoodIn(
     // Verbatim from the packaging, in its original order — items are
     // declared by descending weight, so it is never re-sorted.
     val ingredients: String? = null,
+    // Stored so a second scan of the same pack finds this food rather
+    // than re-fetching whatever Open Food Facts currently says.
+    val barcode: String? = null,
 )
 
 /** One line of a recipe as the server returns it, already costed. */
@@ -2114,6 +2117,22 @@ data class MealSuggestion(
     val ingredients: List<SuggestedIngredient> = emptyList(),
     val servings: Int = 1,
     val method: String? = null,
+)
+
+/** What a barcode scan found, and where it came from. */
+@JsonClass(generateAdapter = true)
+data class BarcodeHit(
+    val barcode: String = "",
+    // Set when this barcode is already a food here — nothing to confirm.
+    @Json(name = "food_id") val foodId: Long? = null,
+    val name: String = "",
+    // "local" | "openfoodfacts". Rendered, because a crowd-sourced figure
+    // and one already in this catalog deserve different confidence.
+    val origin: String = "openfoodfacts",
+    val nutrition: Map<String, Double?> = emptyMap(),
+    val ingredients: String? = null,
+    @Json(name = "package_size") val packageSize: String? = null,
+    @Json(name = "serving_size_text") val servingSizeText: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

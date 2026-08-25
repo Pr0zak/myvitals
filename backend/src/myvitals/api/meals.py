@@ -36,6 +36,7 @@ from ..analytics import shopping as shop
 from ..analytics import staples as stap
 from ..auth import require_any
 from ..db import models
+from ..integrations import openfoodfacts
 from ..db.session import get_session
 
 log = logging.getLogger(__name__)
@@ -109,6 +110,12 @@ class FoodIn(BaseModel):
     #: original ORDER, which is meaningful — items are declared by
     #: descending weight — so it is never re-sorted or summarised.
     ingredients: str | None = None
+    #: The pack's barcode, when the food came from a scan. Without this
+    #: stored, the "look here before the network" path in
+    #: `lookup_barcode` never matches and every scan is a fresh fetch of
+    #: whatever Open Food Facts currently says — including undoing any
+    #: correction the user made.
+    barcode: str | None = Field(default=None, max_length=20)
 
 
 class IngredientIn(BaseModel):
@@ -933,6 +940,8 @@ async def create_food(body: FoodIn, db: AsyncSession = Depends(get_session)):
 
     f = models.Food(
         slug=slug, name=body.name.strip(), source="user",
+        barcode=("".join(c for c in body.barcode if c.isdigit()) or None)
+        if body.barcode else None,
         category=body.category, unit_grams=body.unit_grams,
         ingredients=(body.ingredients or None),
         # Set explicitly as well as relying on the column's server
@@ -1048,6 +1057,96 @@ async def create_recipe(body: RecipeIn, db: AsyncSession = Depends(get_session))
         db, r,
         diet=await _diet_settings(db),
         history=await _fat_history(db, exclude_id=r.id),
+    )
+
+
+class BarcodeHit(BaseModel):
+    """What a scan found, and where it came from."""
+
+    barcode: str
+    #: Set when this barcode is already a food here — nothing to confirm,
+    #: the client can use it straight away.
+    food_id: int | None = None
+    name: str
+    #: "local" | "openfoodfacts". Rendered, because a crowd-sourced figure
+    #: and one already in this catalog deserve different confidence.
+    origin: str
+    #: Per 100 g, the shape `foods` stores. Absent nutrients stay null.
+    nutrition: dict[str, float | None] = Field(default_factory=dict)
+    ingredients: str | None = None
+    #: Verbatim from the pack — "1 oz (28.3 g)" — so the user can tell at
+    #: a glance whether the entry matches the thing in their hand.
+    package_size: str | None = None
+    serving_size_text: str | None = None
+
+
+@router.get("/foods/barcode/{code}", response_model=BarcodeHit | None)
+async def lookup_barcode(code: str, db: AsyncSession = Depends(get_session)):
+    """Find a packaged food by its barcode.
+
+    MEALS_PLAN phase 7, deferred until the typing friction was measurable
+    rather than predicted. It is: roughly half this diet is packaged and
+    the bundled catalog is USDA, which carries generic foods and no
+    brands — so every packaged entry began by typing a product name into
+    a catalog that does not contain it.
+
+    Looks here FIRST. A barcode scanned twice should return the food the
+    user already corrected, not a fresh copy of whatever Open Food Facts
+    currently says. That also means a scan costs no network call at all
+    once the product is known.
+
+    Returns 404 for a barcode neither source knows, which is an ordinary
+    outcome rather than a failure — Open Food Facts is strong on European
+    and own-brand products and thinner on US regional ones. The client
+    offers the label scanner instead, which needs no database at all.
+
+    NOTHING IS SAVED HERE. The result is a candidate; the user confirms
+    it through the ordinary food-create path. Same rule as the photo
+    features: a catalog that grows entries the user did not put there
+    stops being trustworthy, and everything built on it goes with it.
+    """
+    digits = "".join(ch for ch in code if ch.isdigit())
+    if not (7 <= len(digits) <= 14):
+        raise HTTPException(422, "that is not a barcode")
+
+    existing = (await db.execute(
+        select(models.Food).where(models.Food.barcode == digits).limit(1),
+    )).scalars().first()
+    if existing is not None:
+        return BarcodeHit(
+            barcode=digits, food_id=existing.id, name=existing.name,
+            origin="local",
+            nutrition={
+                "kcal": existing.kcal, "protein_g": existing.protein_g,
+                "carbs_g": existing.carbs_g, "fat_g": existing.fat_g,
+                "saturated_fat_g": existing.saturated_fat_g,
+                "fiber_g": existing.fiber_g, "sugar_g": existing.sugar_g,
+                "sodium_mg": existing.sodium_mg,
+            },
+            ingredients=existing.ingredients,
+        )
+
+    try:
+        hit = await openfoodfacts.lookup(digits)
+    except openfoodfacts.BarcodeLookupError as e:
+        # A lookup that could not be COMPLETED is different from a barcode
+        # that is not in the database, and the user can act on the first
+        # (try again, or use the label scanner) but not the second.
+        raise HTTPException(502, str(e)) from e
+    if hit is None:
+        raise HTTPException(404, "no product with that barcode")
+
+    return BarcodeHit(
+        barcode=digits, food_id=None, name=hit["name"], origin="openfoodfacts",
+        nutrition={
+            k: hit.get(k) for k in (
+                "kcal", "protein_g", "carbs_g", "fat_g", "saturated_fat_g",
+                "fiber_g", "sugar_g", "sodium_mg",
+            )
+        },
+        ingredients=hit.get("ingredients"),
+        package_size=hit.get("package_size"),
+        serving_size_text=hit.get("serving_size_text"),
     )
 
 

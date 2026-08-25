@@ -14,9 +14,41 @@ import EmptyState from "@/components/EmptyState.vue";
 import FoodPicker from "@/components/FoodPicker.vue";
 import PackageScan from "@/components/PackageScan.vue";
 import { Plus, Trash2, Pencil, Camera, Loader2 } from "lucide-vue-next";
-import { meals, type Food, type MealsStats } from "@/api/client";
+import { meals, type Food, type MealsStats, type BarcodeHit
+} from "@/api/client";
 
 const selected = ref<Food | null>(null);
+const barcode = ref("");
+const barcodeBusy = ref(false);
+const barcodeError = ref<string | null>(null);
+const barcodeHit = ref<BarcodeHit | null>(null);
+
+/**
+ * Look a pack up by its number. Nothing is saved — the result is shown
+ * for the user to check against the thing in their hand, because Open
+ * Food Facts is crowd-sourced and its entries are sometimes wrong in
+ * ways only they can see.
+ */
+async function doBarcode() {
+  const code = barcode.value.trim();
+  if (!code) return;
+  barcodeBusy.value = true;
+  barcodeError.value = null;
+  barcodeHit.value = null;
+  try {
+    barcodeHit.value = await meals.lookupBarcode(code);
+  } catch (e) {
+    // Not found is an ordinary outcome with a good next step, so it is
+    // not phrased as a failure.
+    const msg = e instanceof Error ? e.message : "";
+    barcodeError.value = msg.includes("404")
+      ? "Nothing found for that barcode. Scan the label below instead — it needs no database."
+      : msg || "could not look that up";
+  } finally {
+    barcodeBusy.value = false;
+  }
+}
+
 const stats = ref<MealsStats | null>(null);
 const error = ref<string | null>(null);
 const ingredientsOnly = ref(false);
@@ -251,6 +283,50 @@ function fmt(v: number | null, digits: number, suffix: string): string {
     <p v-if="error" class="err">{{ error }}</p>
 
     <Card flat>
+      <!-- A browser cannot scan a barcode without shipping a decoder,
+           and the phone has one. Typing the number is the honest web
+           equivalent, and reaches the same lookup. -->
+      <Card flat>
+        <div class="barcode-row">
+          <input
+            v-model="barcode"
+            inputmode="numeric"
+            placeholder="Barcode number"
+            @keyup.enter="doBarcode"
+          />
+          <button class="primary" :disabled="barcodeBusy || !barcode.trim()"
+                  @click="doBarcode">
+            {{ barcodeBusy ? "Looking up…" : "Look up" }}
+          </button>
+        </div>
+        <p v-if="barcodeError" class="err">{{ barcodeError }}</p>
+        <div v-if="barcodeHit" class="barcode-hit">
+          <strong>{{ barcodeHit.name }}</strong>
+          <span :class="barcodeHit.origin === 'local' ? 'ok' : 'dim'">
+            {{ barcodeHit.origin === "local"
+               ? "already in your catalog"
+               : "from Open Food Facts" }}
+            <template v-if="barcodeHit.package_size">
+              · {{ barcodeHit.package_size }}
+            </template>
+          </span>
+          <!-- Per 100 g, verbatim. A wrong crowd-sourced entry is usually
+               obvious from these, which is why they are shown before
+               anything is saved rather than after. -->
+          <span class="dim mono">
+            {{ [
+                 barcodeHit.nutrition.kcal != null
+                   ? `${Math.round(barcodeHit.nutrition.kcal)} kcal` : null,
+                 barcodeHit.nutrition.fat_g != null
+                   ? `${Math.round(barcodeHit.nutrition.fat_g)} g fat` : null,
+                 barcodeHit.nutrition.protein_g != null
+                   ? `${Math.round(barcodeHit.nutrition.protein_g)} g protein` : null,
+               ].filter(Boolean).join(" · ") || "no nutrition published" }}
+            per 100 g
+          </span>
+        </div>
+      </Card>
+
       <PackageScan @saved="loadStats" />
     </Card>
 
@@ -433,4 +509,10 @@ h4 { font-size: 0.78rem; color: var(--muted-2); margin: 0.9rem 0 0.35rem; font-w
 .ingredients { margin: 0; font-size: 0.8rem; line-height: 1.5; color: var(--muted-2); }
 .units { list-style: none; margin: 0; padding: 0; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
 .units li { display: flex; justify-content: space-between; padding: 0.2rem 0; border-bottom: 1px solid var(--line); }
+.barcode-row { display: flex; gap: 0.5rem; }
+.barcode-row input { flex: 1; }
+.barcode-hit { display: flex; flex-direction: column; gap: 0.2rem; margin-top: 0.7rem; }
+.barcode-hit .ok { color: var(--good, #5dff3b); font-size: 0.8rem; }
+.barcode-hit .dim { color: var(--muted); font-size: 0.8rem; }
+.mono { font-variant-numeric: tabular-nums; }
 </style>

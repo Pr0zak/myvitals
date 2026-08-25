@@ -1176,18 +1176,27 @@ async def list_pantry(db: AsyncSession = Depends(get_session)):
     rows = (await db.execute(select(models.PantryItem))).scalars().all()
     food_ids = {p.food_id for p in rows if p.food_id is not None}
     names: dict[int, str] = {}
+    concepts: dict[int, str | None] = {}
     if food_ids:
-        for fid, name in (await db.execute(
-            select(models.Food.id, models.Food.name)
+        for fid, name, concept in (await db.execute(
+            select(models.Food.id, models.Food.name, models.Food.concept)
             .where(models.Food.id.in_(food_ids))
         )).all():
             names[fid] = name
+            concepts[fid] = concept
 
     today = _local_today()
     out = [
         PantryOut(
             id=p.id, food_id=p.food_id, label=p.label,
             food_name=names.get(p.food_id) if p.food_id else None,
+            # MEAL-6's concept is already the key this list is MATCHED on,
+            # and it is also the right thing to READ it by. A pantry answers
+            # "do I have this", and USDA's discriminating detail is noise
+            # for that question: "Chicken, broiler or fryers, breast,
+            # skinless, boneless, meat only, raw" buried the one word that
+            # mattered. The full name is still sent alongside.
+            food_concept=concepts.get(p.food_id) if p.food_id else None,
             quantity=p.quantity, unit=p.unit, expires_on=p.expires_on,
             updated_at=p.updated_at,
             days_to_expiry=((p.expires_on - today).days if p.expires_on else None),

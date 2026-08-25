@@ -817,3 +817,28 @@ def test_user_foods_are_matched_term_by_term():
     fn = fn[: fn.index("@router.get")]
     assert "for t in terms:" in fn
     assert 'ilike(f"%{q}%")' not in fn, "still a whole-query substring match"
+
+
+def test_pantry_rows_carry_the_concept_not_only_the_usda_name() -> None:
+    """A pantry answers "do I have this", and the USDA name answers a
+    different question.
+
+    "Chicken, broiler or fryers, breast, skinless, boneless, meat only,
+    raw" wrapped to two lines on a phone and buried the one word that
+    mattered. `foods.concept` has been the key this list is MATCHED on
+    since MEAL-6 — "chicken breast", "butter", "cheddar cheese" — and it
+    is the right thing to READ it by too.
+
+    This is pinned because the field shipped once WITHOUT the query that
+    populates it: the schema carried `food_concept` while `list_pantry`
+    still selected only id and name, so every row returned null and the
+    clients silently fell back to the long name. A response field that
+    nothing populates looks exactly like a feature that works.
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "src" / "myvitals" / "api" / "meals.py").read_text()
+    body = src[src.index("async def list_pantry("):]
+    body = body[:body.index("@router.")]
+    assert "models.Food.concept" in body, "list_pantry does not select the concept"
+    assert "food_concept=" in body, "list_pantry does not return the concept"

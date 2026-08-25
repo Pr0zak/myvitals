@@ -18,10 +18,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -117,9 +119,28 @@ fun PhotoPantry(settings: SettingsRepository, onAdded: () -> Unit) {
         }
     }
 
-    val camera = rememberLauncherForActivityResult(
+    // Two launchers, because they are two different things. The old code
+    // had one — a document picker named `camera` — behind a button that
+    // said "Choose or take a photo", so the second half was never true.
+    val pickPhoto = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
     ) { identify(it) }
+
+    var pending by remember { mutableStateOf<java.io.File?>(null) }
+    var pendingUri by remember { mutableStateOf<Uri?>(null) }
+    val takePhoto = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture(),
+    ) { ok ->
+        val file = pending
+        if (ok) identify(pendingUri) else CameraCapture.discard(file)
+        // The read happens off this callback, so the file cannot be
+        // deleted here — `identify` copies the bytes out first. Anything
+        // an earlier run left behind is swept on entry instead.
+        pending = null
+        pendingUri = null
+    }
+
+    LaunchedEffect(Unit) { CameraCapture.sweep(context) }
 
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
@@ -137,13 +158,32 @@ fun PhotoPantry(settings: SettingsRepository, onAdded: () -> Unit) {
             modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
         )
 
-        Button(
-            enabled = !busy,
-            onClick = { camera.launch("image/*") },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Icon(Icons.Filled.PhotoCamera, contentDescription = null)
-            Text(if (busy) "  Reading…" else "  Choose or take a photo")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                enabled = !busy,
+                onClick = {
+                    val (file, uri) = CameraCapture.newTarget(context)
+                    pending = file
+                    pendingUri = uri
+                    // A device with no camera app throws rather than
+                    // silently doing nothing, so say so.
+                    runCatching { takePhoto.launch(uri) }.onFailure {
+                        CameraCapture.discard(file)
+                        pending = null
+                        pendingUri = null
+                        error = "No camera app on this device — choose a photo instead."
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.Filled.PhotoCamera, contentDescription = null)
+                Text(if (busy) "  Reading…" else "  Take a photo")
+            }
+            OutlinedButton(
+                enabled = !busy,
+                onClick = { pickPhoto.launch("image/*") },
+                modifier = Modifier.weight(1f),
+            ) { Text("Choose") }
         }
 
         error?.let {

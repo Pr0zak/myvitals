@@ -2,4 +2,8 @@
 <paths>
     <!-- /Android/data/app.myvitals/files/Download/ — where DownloadManager writes the APK -->
     <external-files-path name="downloads" path="Download" />
+    <!-- Where a camera capture is written before it is read and deleted.
+         The camera app writes to a URI we hand it, so the path has to be
+         shareable; the app's own cache is not, without this. -->
+    <cache-path name="captures" path="captures/" />
 </paths>

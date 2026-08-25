@@ -41,6 +41,7 @@ const scan = ref<LabelScan | null>(null);
 const name = ref("");
 const servingG = ref("");
 const fileInput = ref<HTMLInputElement | null>(null);
+const cameraInput = ref<HTMLInputElement | null>(null);
 
 /** Downscale in the browser: the server limit exists to stop a huge
  *  upload being billed, and re-encoding also strips EXIF. Labels are
@@ -138,10 +139,21 @@ function fmt(v: number | null | undefined, d = 1, s = ""): string {
       </template>
     </p>
 
-    <button class="primary" :disabled="busy" @click="fileInput?.click()">
-      <component :is="busy ? Loader2 : Camera" :size="14" :class="{ spin: busy }" />
-      {{ busy ? "Reading…" : "Choose photos" }}
-    </button>
+    <!-- Two inputs, because `capture` and a plain picker are different
+         things and one input cannot be both. On a phone the capture input
+         opens the camera directly; on a desktop browser it falls back to
+         the file dialog, which is why it is still offered there. -->
+    <div class="scan-actions">
+      <button class="primary" :disabled="busy" @click="cameraInput?.click()">
+        <component :is="busy ? Loader2 : Camera" :size="14" :class="{ spin: busy }" />
+        {{ busy ? "Reading…" : "Take a photo" }}
+      </button>
+      <button class="ghost" :disabled="busy" @click="fileInput?.click()">
+        Choose
+      </button>
+    </div>
+    <input ref="cameraInput" type="file" accept="image/*" capture="environment"
+           multiple hidden @change="onFiles" />
     <input ref="fileInput" type="file" accept="image/*" multiple hidden
            @change="onFiles" />
 
@@ -211,6 +223,7 @@ button.primary {
 }
 button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 button.wide { width: 100%; justify-content: center; margin-top: 0.7rem; align-self: stretch; }
+.scan-actions { display: flex; gap: 0.5rem; }
 .err { color: #f87171; font-size: 0.8rem; margin: 0.5rem 0 0; }
 .result { margin-top: 0.8rem; }
 .field { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.6rem; }

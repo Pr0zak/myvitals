@@ -1,17 +1,21 @@
 package app.myvitals.ui.meals
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import android.net.Uri
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,14 +76,19 @@ fun PackageScan(
     var name by remember { mutableStateOf("") }
     var servingG by remember { mutableStateOf("") }
 
-    val picker = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetMultipleContents(),
-    ) { uris ->
-        if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
+    // Shots taken with the camera, accumulating until the user submits.
+    // A pack needs several photos — front for the name, panel for the
+    // numbers, optionally the ingredients — and a capture intent returns
+    // exactly one, so they are gathered rather than read one at a time.
+    var shots by remember { mutableStateOf<List<Pair<java.io.File, Uri>>>(emptyList()) }
+    var pending by remember { mutableStateOf<Pair<java.io.File, Uri>?>(null) }
+
+    fun read(uris: List<Uri>) {
+        if (uris.isEmpty()) return
         if (uris.size > 4) {
-            error = "Pick at most 4 photos — the front, the panel and the " +
+            error = "At most 4 photos — the front, the panel and the " +
                 "ingredients is all it can use."
-            return@rememberLauncherForActivityResult
+            return
         }
         scope.launch {
             busy = true
@@ -111,9 +120,29 @@ fun PackageScan(
                 error = e.message ?: "could not read those photos"
             } finally {
                 busy = false
+                // The bytes are copied out by `downscaleUriToBase64`, so the
+                // captures can go now. A photo left in the cache is the one
+                // thing this screen promises not to do.
+                shots.forEach { CameraCapture.discard(it.first) }
+                shots = emptyList()
             }
         }
     }
+
+    val picker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetMultipleContents(),
+    ) { uris -> read(uris.orEmpty()) }
+
+    val takePhoto = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture(),
+    ) { ok ->
+        val shot = pending
+        if (ok && shot != null) shots = shots + shot
+        else CameraCapture.discard(shot?.first)
+        pending = null
+    }
+
+    LaunchedEffect(Unit) { CameraCapture.sweep(context) }
 
     Column(
         modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
@@ -125,18 +154,71 @@ fun PackageScan(
         )
         Text(
             "Photograph the front, the Nutrition Facts panel and, if you " +
-                "like, the ingredients — select them together. The panel has " +
-                "the numbers but no product name; the front has the name." +
+                "like, the ingredients. The panel has the numbers but no " +
+                "product name; the front has the name." +
                 if (stock) " Saving adds it to your pantry too." else "",
             color = NeonMV.Muted, fontSize = 10.sp, lineHeight = 14.sp,
             modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
         )
 
-        Button(
-            enabled = !busy,
-            onClick = { picker.launch("image/*") },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (busy) "Reading…" else "Choose photos") }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                enabled = !busy && shots.size < 4,
+                onClick = {
+                    val shot = CameraCapture.newTarget(context)
+                    pending = shot
+                    runCatching { takePhoto.launch(shot.second) }.onFailure {
+                        CameraCapture.discard(shot.first)
+                        pending = null
+                        error = "No camera app on this device — choose photos instead."
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    when {
+                        busy -> "Reading…"
+                        shots.isEmpty() -> "Take a photo"
+                        else -> "Take another"
+                    },
+                )
+            }
+            OutlinedButton(
+                enabled = !busy,
+                onClick = { picker.launch("image/*") },
+                modifier = Modifier.weight(1f),
+            ) { Text("Choose") }
+        }
+
+        // A capture returns one photo, so several are gathered before the
+        // read. The count is shown because the user is the only one who
+        // knows whether they have got the panel yet.
+        if (shots.isNotEmpty()) {
+            Text(
+                "${shots.size} photo${if (shots.size == 1) "" else "s"} ready" +
+                    if (shots.size < 4) " — add the panel and the front, then scan." else "",
+                color = NeonMV.Muted, fontSize = 10.sp,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Row(
+                Modifier.padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    enabled = !busy,
+                    onClick = { read(shots.map { it.second }) },
+                    modifier = Modifier.weight(1f),
+                ) { Text("Scan ${shots.size}") }
+                OutlinedButton(
+                    enabled = !busy,
+                    onClick = {
+                        shots.forEach { CameraCapture.discard(it.first) }
+                        shots = emptyList()
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text("Discard") }
+            }
+        }
 
         error?.let {
             Text(

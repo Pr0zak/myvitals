@@ -69,6 +69,10 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/views/meals/Suggest.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/meals/SuggestTab.kt",
      "AI meal suggestions (MEAL-4)"),
+    # Direction A — the daily screen, paired across surfaces.
+    ("frontend/src/views/meals/Today.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/meals/TodayTab.kt",
+     "Today — totals, recents, meal slots, one door to the rest"),
     ("frontend/src/views/meals/Log.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/meals/LogTab.kt",
      "Food log — per-meal fat, complete/partial days (MEAL-5)"),

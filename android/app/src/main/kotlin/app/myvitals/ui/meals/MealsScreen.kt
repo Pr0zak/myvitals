@@ -17,6 +17,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -115,35 +119,53 @@ private enum class MealsTab(val label: String) {
     NUTRITION("Diet settings"),
 }
 
+/**
+ * Direction A — Meals is Today, and everything else is behind one door.
+ *
+ * This replaced a horizontally scrolling row of ten chips of which about
+ * five fit on a phone. The row put the one task done twice a day in
+ * competition with nine that are weekly or occasional, and hid four of
+ * them off the right edge entirely. Now the daily task IS the screen and
+ * the rest are a list one tap away, which costs a planning session one
+ * tap and saves the logging case all of them.
+ *
+ * The ten screens themselves are unchanged — this is a routing change,
+ * not a rewrite of what each one does.
+ */
 @Composable
 fun MealsScreen(settings: SettingsRepository) {
-    var tab by remember { mutableStateOf(MealsTab.LOG) }
+    var open by remember { mutableStateOf<MealsTab?>(null) }
+    var showMore by remember { mutableStateOf(false) }
+
+    val here = open
+    if (here == null && !showMore) {
+        Column(Modifier.fillMaxSize().background(NeonMV.Bg)) {
+            TodayTab(settings) { showMore = true }
+        }
+        return
+    }
 
     Column(Modifier.fillMaxSize().background(NeonMV.Bg)) {
-        Text(
-            "Meals",
-            color = NeonMV.Ink,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 10.dp),
-        )
-        // Ten chips do not fit across a phone — about four are visible on
-        // arrival and the rest need a swipe to find. Scrolling keeps them
-        // all reachable, and the enum order above decides which four the
-        // user sees without looking for them.
         Row(
-            Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxWidth().padding(start = 8.dp, top = 12.dp, end = 16.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            MealsTab.entries.forEach { t ->
-                TabChip(t.label, t == tab) { tab = t }
+            IconButton(onClick = { if (here != null) open = null else showMore = false }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = NeonMV.Ink)
             }
+            Text(
+                here?.label ?: "Plan & kitchen",
+                color = NeonMV.Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
+            )
         }
-        Box(Modifier.fillMaxSize().padding(top = 10.dp)) {
-            when (tab) {
+
+        if (here == null) {
+            MoreList { open = it }
+            return@Column
+        }
+
+        Box(Modifier.fillMaxSize()) {
+            when (here) {
                 MealsTab.PREP -> PrepTab(settings)
                 MealsTab.PLAN -> PlanTab(settings)
                 MealsTab.CAN_MAKE -> CanMakeTab(settings)
@@ -175,6 +197,55 @@ private fun StapleChip(c: CommonItemOut, onClick: () -> Unit) {
             )
             .padding(horizontal = 10.dp, vertical = 6.dp),
     )
+}
+
+/**
+ * The nine screens that are not today, as a plain list with subtitles.
+ *
+ * A list rather than a grid of icons because the labels are what
+ * disambiguate these — "Plan" and "Prep" are one word apart and mean
+ * different things, and an icon cannot carry that. The subtitle says
+ * what each one is FOR, which the old one-word chips never did.
+ */
+@Composable
+private fun MoreList(onPick: (MealsTab) -> Unit) {
+    val rows = listOf(
+        Triple(MealsTab.PLAN, "Plan", "What you intend to eat this week"),
+        Triple(MealsTab.PREP, "Week prep", "Cook components once, assemble all week"),
+        Triple(MealsTab.SHOPPING, "Shopping", "Built from the plan, minus the pantry"),
+        Triple(MealsTab.PANTRY, "Pantry", "What is in the house"),
+        Triple(MealsTab.CAN_MAKE, "Cook from pantry", "Recipes you can make right now"),
+        Triple(MealsTab.RECIPES, "Recipes", "Your own, with per-serving fat"),
+        Triple(MealsTab.IDEAS, "Suggest a meal", "Ask the AI for something new"),
+        Triple(MealsTab.FOODS, "Food catalog", "Look up a food, scan a label"),
+        Triple(MealsTab.NUTRITION, "Diet settings", "Fat target and what it is based on"),
+    )
+    LazyColumn(
+        Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(rows.size) { i ->
+            val (tab, title, sub) = rows[i]
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(NeonMV.Card)
+                    .clickable { onPick(tab) }
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, color = NeonMV.Ink, fontSize = 14.sp,
+                         fontWeight = FontWeight.SemiBold)
+                    Text(sub, color = NeonMV.Muted, fontSize = 11.sp,
+                         modifier = Modifier.padding(top = 2.dp))
+                }
+                Icon(Icons.Filled.ChevronRight, null, tint = NeonMV.Muted)
+            }
+        }
+        item { Spacer(Modifier.height(24.dp)) }
+    }
 }
 
 @Composable

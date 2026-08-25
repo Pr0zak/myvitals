@@ -265,12 +265,13 @@ const groups = computed<Group[]>(() => {
         ? `${expiringCount.value} to use` : undefined,
       badgeColor: "#fbbf24",
       children: [
-        // Ordered by how often each is opened, not by the order they were
-        // built. The log is the only daily one and used to sit third.
-        // Labels name the task rather than the machinery: "What can I
-        // make?" and "Meal ideas" both read as questions the app is
-        // asking the user, which is backwards.
-        { to: "/meals/log",     icon: ClipboardList, label: "Food log" },
+        // Direction A: Today leads and is where /meals lands. The rest are
+        // weekly or occasional and follow it, in the order they are opened
+        // rather than the order they were built. Labels name the task, not
+        // the machinery — "What can I make?" and "Meal ideas" both read as
+        // questions the app is asking the user, which is backwards.
+        { to: "/meals/today",   icon: ClipboardList, label: "Today" },
+        { to: "/meals/log",     icon: ClipboardList, label: "Food log history" },
         { to: "/meals/plan",    icon: Calendar,   label: "Plan" },
         { to: "/meals/prep",    icon: ChefHat,    label: "Week prep" },
         { to: "/meals/shopping", icon: ShoppingCart, label: "Shopping" },

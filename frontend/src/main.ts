@@ -47,7 +47,10 @@ const router = createRouter({
     { path: "/goals", name: "goals", component: () => import("./views/Goals.vue") },
     // Bare /meals lands on the log. It is the only daily screen here;
     // everything else is weekly or occasional.
-    { path: "/meals", redirect: "/meals/log" },
+    // Direction A: Meals IS today. Everything weekly or occasional is
+    // reachable from the one "Plan & kitchen" door on it.
+    { path: "/meals", redirect: "/meals/today" },
+    { path: "/meals/today", name: "meals-today", component: () => import("./views/meals/Today.vue") },
     { path: "/meals/recipes", name: "meals-recipes", component: () => import("./views/meals/Recipes.vue") },
     { path: "/meals/pantry", name: "meals-pantry", component: () => import("./views/meals/Pantry.vue") },
     { path: "/meals/foods", name: "meals-foods", component: () => import("./views/meals/Foods.vue") },

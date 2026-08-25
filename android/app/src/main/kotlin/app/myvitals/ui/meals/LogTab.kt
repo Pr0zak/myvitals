@@ -76,7 +76,7 @@ import kotlin.math.roundToInt
  * after a cholecystectomy.
  */
 
-private val LOG_SLOTS = listOf("breakfast", "lunch", "dinner", "snack")
+internal val LOG_SLOTS = listOf("breakfast", "lunch", "dinner", "snack")
 private val LOG_DAY_FMT = DateTimeFormatter.ofPattern("EEE d MMM")
 
 @Composable
@@ -449,7 +449,7 @@ private fun StatsCard(s: LogStatsOut) {
 }
 
 @Composable
-private fun LogEntryDialog(
+internal fun LogEntryDialog(
     settings: SettingsRepository,
     day: String,
     recipes: List<RecipeOut>,

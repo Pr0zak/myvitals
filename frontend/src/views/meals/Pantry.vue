@@ -181,11 +181,7 @@ function expiryClass(i: PantryItem): string {
 
 <template>
   <div class="pantry">
-    <PageHeader title="Pantry">
-      <button class="primary" @click="adding = !adding">
-        <Plus :size="14" /> Add item
-      </button>
-    </PageHeader>
+    <PageHeader title="Pantry" />
 
     <Card v-if="adding" flat title="Add to pantry">
       <template v-if="!draftFood">
@@ -249,10 +245,21 @@ function expiryClass(i: PantryItem): string {
          job — the common one is reading it. -->
     <button class="add-toggle" @click="showCommon = !showCommon">
       <strong>{{ showCommon ? "Close" : "Add to pantry" }}</strong>
-      <span v-if="!showCommon" class="dim">staples · photo · scan a pack</span>
+      <span v-if="!showCommon" class="dim">search · photo · scan a pack</span>
     </button>
 
     <template v-if="showCommon">
+      <!-- Search first: it is the only one of these that works for
+           anything. The others each need a pack, a camera, or the food to
+           already be on the staples list. -->
+      <Card flat>
+        <strong>Search the catalog</strong>
+        <p class="dim">Type a food name. Works for anything, packaged or not.</p>
+        <button class="primary" @click="adding = true">
+          <Plus :size="14" /> Find a food
+        </button>
+      </Card>
+
       <Card flat>
         <PhotoPantry @added="load" />
       </Card>

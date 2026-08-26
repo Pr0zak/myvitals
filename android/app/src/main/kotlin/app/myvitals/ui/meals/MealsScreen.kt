@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
@@ -846,15 +847,41 @@ private fun PantryTab(settings: SettingsRepository) {
                         fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
                     )
                     Text(
-                        if (showAdd) "" else "barcode · photo · staples",
+                        if (showAdd) "" else "search · barcode · photo · staples",
                         color = NeonMV.Muted, fontSize = 11.sp,
                     )
                 }
             }
 
             if (showAdd) {
-                // First, because for a packaged item it is the shortest
-                // path there is: one scan against two lookups.
+                // Search first: it is the only one of the four that works
+                // for anything. The others each need a pack, a camera, or
+                // the food to already be on the staples list.
+                item {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(NeonMV.Card)
+                            .padding(12.dp),
+                    ) {
+                        Text(
+                            "Search the catalog", color = NeonMV.Ink,
+                            fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Type a food name. Works for anything, packaged or not.",
+                            color = NeonMV.Muted, fontSize = 10.sp, lineHeight = 14.sp,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                        )
+                        Button(
+                            onClick = { adding = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Find a food") }
+                    }
+                }
+                // Then barcode, because for a packaged item it is the
+                // shortest path there is: one scan against two lookups.
                 item {
                     BarcodeAdd(
                         settings = settings, stock = true,
@@ -918,12 +945,6 @@ private fun PantryTab(settings: SettingsRepository) {
                             }
                         }
                     }
-                }
-            }
-            item {
-                Button(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Filled.Add, contentDescription = null)
-                    Text("  Add item")
                 }
             }
             error?.let { item { ErrorText(it) } }

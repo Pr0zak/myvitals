@@ -19,7 +19,7 @@ import FoodPicker from "@/components/FoodPicker.vue";
 import PhotoPantry from "@/components/PhotoPantry.vue";
 import PackageScan from "@/components/PackageScan.vue";
 import QuantityPicker from "@/components/QuantityPicker.vue";
-import { Plus, Trash2, AlertTriangle } from "lucide-vue-next";
+import { Plus, Trash2, AlertTriangle, X, Search } from "lucide-vue-next";
 import { meals, type CommonItem, type Food, type PantryItem } from "@/api/client";
 
 const items = ref<PantryItem[]>([]);
@@ -243,9 +243,13 @@ function expiryClass(i: PantryItem): string {
     <!-- One row where three explained cards used to be. Everything under
          it is a way of PUTTING things in the pantry, which is the rarer
          job — the common one is reading it. -->
-    <button class="add-toggle" @click="showCommon = !showCommon">
-      <strong>{{ showCommon ? "Close" : "Add to pantry" }}</strong>
-      <span v-if="!showCommon" class="dim">search · photo · scan a pack</span>
+    <!-- A filled button with a plus, not a muted pill. This is the
+         screen's one action and should look like one — and "+" says
+         "add" without a caption, which is why the cards below carry
+         titles and no explanation of what adding means. -->
+    <button class="primary add-btn" @click="showCommon = !showCommon">
+      <component :is="showCommon ? X : Plus" :size="16" />
+      {{ showCommon ? "Close" : "Add" }}
     </button>
 
     <template v-if="showCommon">
@@ -254,9 +258,8 @@ function expiryClass(i: PantryItem): string {
            already be on the staples list. -->
       <Card flat>
         <strong>Search the catalog</strong>
-        <p class="dim">Type a food name. Works for anything, packaged or not.</p>
         <button class="primary" @click="adding = true">
-          <Plus :size="14" /> Find a food
+          <Search :size="14" /> Find a food
         </button>
       </Card>
 
@@ -374,6 +377,7 @@ button.ghost { background: transparent; color: var(--muted-2); }
 .alert-head { display: flex; align-items: center; gap: 0.4rem; color: #fbbf24; }
 .alert-body { margin: 0.35rem 0 0; font-size: 0.85rem; color: var(--muted-2); }
 .common-head { display: flex; align-items: baseline; justify-content: space-between; }
+.add-btn { width: 100%; justify-content: center; }
 .add-toggle {
   display: flex; align-items: center; gap: 0.6rem;
   width: 100%; text-align: left;

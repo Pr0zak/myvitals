@@ -135,10 +135,13 @@ function toggleAll(on: boolean) {
       <Camera :size="15" />
       <strong>Add from a photo</strong>
     </div>
+    <!-- "Photograph a shelf, a fridge or a receipt" is what the button
+         plainly does, and went. Where the photo GOES stays: it is the one
+         thing here nobody can infer from the interface, and it is the
+         reason to trust the button. -->
     <p class="sub">
-      Photograph a shelf, a fridge or a receipt. The photo is sent to your
-      AI provider to be read, then discarded — it is never stored here.
-      Nothing is added until you confirm it.
+      Sent to your AI provider to be read, then discarded — never stored
+      here. Nothing is added until you confirm it.
     </p>
 
     <div class="buttons">

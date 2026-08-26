@@ -129,14 +129,13 @@ function fmt(v: number | null | undefined, d = 1, s = ""): string {
       <Camera :size="15" />
       <strong>Scan a package</strong>
     </div>
+    <!-- Kept, because which photos to take is genuinely not obvious, and
+         getting it wrong yields a perfect transcription attached to
+         nothing — a Nutrition Facts panel carries no product name. -->
     <p class="sub">
-      Photograph the <strong>front</strong>, the <strong>Nutrition Facts
-      panel</strong> and, if you like, the <strong>ingredients</strong> —
-      select them together. The panel has the numbers but no product name;
-      the front has the name.
-      <template v-if="stock">
-        Saving adds it to your pantry as well as the catalog.
-      </template>
+      <strong>Front</strong> for the name, the <strong>panel</strong> for
+      the numbers, <strong>ingredients</strong> if you like.
+      <template v-if="stock">Saving stocks it too.</template>
     </p>
 
     <!-- Two inputs, because `capture` and a plain picker are different

@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -153,10 +156,12 @@ fun PackageScan(
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            "Photograph the front, the Nutrition Facts panel and, if you " +
-                "like, the ingredients. The panel has the numbers but no " +
-                "product name; the front has the name." +
-                if (stock) " Saving adds it to your pantry too." else "",
+            // Kept: which photos to take is genuinely not obvious, and
+            // getting it wrong means a perfect transcription attached to
+            // nothing, because a Nutrition Facts panel carries no name.
+            "Front for the name, the panel for the numbers, ingredients " +
+                "if you like." +
+                if (stock) " Saving stocks it too." else "",
             color = NeonMV.Muted, fontSize = 10.sp, lineHeight = 14.sp,
             modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
         )
@@ -175,11 +180,15 @@ fun PackageScan(
                 },
                 modifier = Modifier.weight(1f),
             ) {
+                // Same camera icon as the other "Take a photo" button. Two
+                // buttons with the same label and different chrome read as
+                // two different actions.
+                Icon(Icons.Filled.PhotoCamera, contentDescription = null)
                 Text(
                     when {
-                        busy -> "Reading…"
-                        shots.isEmpty() -> "Take a photo"
-                        else -> "Take another"
+                        busy -> "  Reading…"
+                        shots.isEmpty() -> "  Take a photo"
+                        else -> "  Take another"
                     },
                 )
             }

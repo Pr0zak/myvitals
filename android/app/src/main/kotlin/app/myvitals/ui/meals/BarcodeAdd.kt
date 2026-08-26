@@ -133,9 +133,11 @@ internal fun BarcodeAdd(
             "Scan a barcode", color = NeonMV.Ink, fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
         )
+        // "Looks the pack up by its barcode" restated the title, and went.
+        // What stays is the promise, which the user cannot infer and which
+        // is the reason to trust the button at all.
         Text(
-            "Looks the pack up by its barcode. Nothing is added until you " +
-                "confirm what it found.",
+            "Nothing is added until you confirm it.",
             color = NeonMV.Muted, fontSize = 10.sp, lineHeight = 14.sp,
             modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
         )

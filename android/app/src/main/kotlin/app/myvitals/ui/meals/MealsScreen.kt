@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
@@ -831,25 +832,21 @@ private fun PantryTab(settings: SettingsRepository) {
             // One row where three explained cards used to be. Everything
             // below it is a way of PUTTING things in the pantry, which is
             // the rarer job — the common one is reading it.
+            //
+            // A filled button with a plus, not a muted pill: this is the
+            // screen's one action and it should look like one. A "+" also
+            // says "add" without a caption, which is why the cards below
+            // carry titles and no explanations of what adding means.
             item {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(NeonMV.CardHigh)
-                        .clickable { showAdd = !showAdd }
-                        .padding(horizontal = 14.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                Button(
+                    onClick = { showAdd = !showAdd },
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(
-                        if (showAdd) "Close" else "Add to pantry",
-                        color = NeonMV.Cyan, fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                    Icon(
+                        if (showAdd) Icons.Filled.Close else Icons.Filled.Add,
+                        contentDescription = null,
                     )
-                    Text(
-                        if (showAdd) "" else "search · barcode · photo · staples",
-                        color = NeonMV.Muted, fontSize = 11.sp,
-                    )
+                    Text(if (showAdd) "  Close" else "  Add")
                 }
             }
 
@@ -868,16 +865,15 @@ private fun PantryTab(settings: SettingsRepository) {
                         Text(
                             "Search the catalog", color = NeonMV.Ink,
                             fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            "Type a food name. Works for anything, packaged or not.",
-                            color = NeonMV.Muted, fontSize = 10.sp, lineHeight = 14.sp,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                            modifier = Modifier.padding(bottom = 8.dp),
                         )
                         Button(
                             onClick = { adding = true },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Find a food") }
+                        ) {
+                            Icon(Icons.Filled.Search, contentDescription = null)
+                            Text("  Find a food")
+                        }
                     }
                 }
                 // Then barcode, because for a packaged item it is the

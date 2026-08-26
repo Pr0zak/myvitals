@@ -150,9 +150,12 @@ fun PhotoPantry(settings: SettingsRepository, onAdded: () -> Unit) {
             "Add from a photo", color = NeonMV.Ink, fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
         )
+        // "Photograph a shelf, a fridge or a receipt" is what the button
+        // plainly does, and went. The disclosure stays: where the photo
+        // goes is the one thing here nobody can infer from the interface,
+        // and it is the category of text this app does not trim away.
         Text(
-            "Photograph a shelf, a fridge or a receipt. The photo is sent to " +
-                "your AI provider to be read, then discarded — it is never " +
+            "Sent to your AI provider to be read, then discarded — never " +
                 "stored here. Nothing is added until you confirm it.",
             color = NeonMV.Muted, fontSize = 10.sp, lineHeight = 14.sp,
             modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),

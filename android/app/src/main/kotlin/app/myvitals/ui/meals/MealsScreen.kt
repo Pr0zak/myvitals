@@ -33,6 +33,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -838,15 +839,27 @@ private fun PantryTab(settings: SettingsRepository) {
             // says "add" without a caption, which is why the cards below
             // carry titles and no explanations of what adding means.
             item {
-                Button(
-                    onClick = { showAdd = !showAdd },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(
-                        if (showAdd) Icons.Filled.Close else Icons.Filled.Add,
-                        contentDescription = null,
-                    )
-                    Text(if (showAdd) "  Close" else "  Add")
+                // Filled to open, outlined to close. They were the same
+                // filled button, which gave a dismissal the same weight as
+                // the screen's primary action and made a full-width slab
+                // of accent colour the first thing above an open panel.
+                // Closing is never the thing you came here to do.
+                if (showAdd) {
+                    OutlinedButton(
+                        onClick = { showAdd = false },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Filled.Close, contentDescription = null)
+                        Text("  Close")
+                    }
+                } else {
+                    Button(
+                        onClick = { showAdd = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = null)
+                        Text("  Add")
+                    }
                 }
             }
 

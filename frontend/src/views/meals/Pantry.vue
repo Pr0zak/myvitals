@@ -247,7 +247,11 @@ function expiryClass(i: PantryItem): string {
          screen's one action and should look like one — and "+" says
          "add" without a caption, which is why the cards below carry
          titles and no explanation of what adding means. -->
-    <button class="primary add-btn" @click="showCommon = !showCommon">
+    <button
+      class="add-btn"
+      :class="showCommon ? 'ghost' : 'primary'"
+      @click="showCommon = !showCommon"
+    >
       <component :is="showCommon ? X : Plus" :size="16" />
       {{ showCommon ? "Close" : "Add" }}
     </button>

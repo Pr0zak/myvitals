@@ -970,3 +970,25 @@ def test_a_hand_typed_line_is_shelved_by_the_curated_list() -> None:
     assert k(None, "unsweetened almond milk") == "Dairy"
     assert k(None, "flower") == "Other"
     assert k(None, "") == "Other"
+
+
+def test_a_useless_category_does_not_outrank_a_clear_name() -> None:
+    """Open Food Facts gives "Great Value Traditional Pasta Sauce" the
+    tag "en:Groceries", which says nothing at all while the product's own
+    name says exactly where it goes. An unrecognised category is no
+    information, so it falls through to the name rather than to "Other".
+    """
+    from myvitals.analytics.common_pantry import kitchen_group as k
+    assert k("en:Groceries", "Great Value Traditional Pasta Sauce") \
+        == "Oils & condiments"
+    assert k("Some Category USDA Never Had", "olive oil spray") \
+        == "Oils & condiments"
+
+
+def test_pasta_sauce_is_not_filed_under_pasta() -> None:
+    """The loose name match found "pasta" inside "Pasta Sauce" and filed
+    a jar under Grains & pasta. The noun that decides a shelf is the last
+    one — and dry pasta must still go where it belongs."""
+    from myvitals.analytics.common_pantry import kitchen_group as k
+    assert k(None, "Traditional Pasta Sauce") == "Oils & condiments"
+    assert k("Cereal Grains and Pasta", "Pasta, dry, enriched") == "Grains & pasta"

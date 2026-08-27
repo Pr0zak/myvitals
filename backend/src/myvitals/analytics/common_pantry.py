@@ -205,6 +205,10 @@ GROUP_ORDER: tuple[str, ...] = (
 #: demonstrably holding two different kitchen sections.
 _NAME_OVERRIDES: tuple[tuple[str, str], ...] = (
     ("leavening agent", "Baking & spices"),
+    # "Great Value Traditional Pasta Sauce" contains "pasta", so the
+    # curated-name match filed a jar of sauce under Grains & pasta. The
+    # noun that decides the shelf is the last one, and here it is sauce.
+    ("sauce", "Oils & condiments"),
 )
 
 
@@ -297,9 +301,16 @@ def kitchen_group(usda_category: str | None, name: str | None = None) -> str:
         for marker, group in _OFF_TO_GROUP:
             if marker in tag:
                 return group
-        return "Other"
-    if cat:
-        return _USDA_TO_GROUP.get(cat, "Other")
+        # Unrecognised, so no information — fall through to the name.
+        # A real case: OFF gives "Great Value Traditional Pasta Sauce"
+        # the tag "en:Groceries", which says nothing, while the product's
+        # own name says exactly where it goes. Returning "Other" here
+        # would let a useless category outrank a clear name.
+    elif cat:
+        mapped = _USDA_TO_GROUP.get(cat)
+        if mapped is not None:
+            return mapped
+        # Same reasoning for an unmapped USDA category.
 
     # No category at all — a hand-typed pantry line. The curated staples
     # list already says which shelf "eggs" or "flour" belongs on, so it

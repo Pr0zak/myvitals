@@ -876,11 +876,47 @@ def test_an_unknown_or_missing_category_is_other_not_a_crash() -> None:
 
 def test_grouping_is_decided_server_side() -> None:
     """Two clients deriving sections independently is how they end up
-    disagreeing about which shelf something lives on."""
+    disagreeing about which shelf something lives on.
+
+    Checked by RESOLVING the names `list_pantry` actually calls, not by
+    grepping for them. The first version of this test grepped, passed,
+    and shipped a `NameError` to production: the module imports
+    `common_pantry as common`, the code said `common_pantry.kitchen_group`,
+    and every request to `GET /meals/pantry` returned 500. Importing a
+    module does not execute its endpoints, so nothing else caught it
+    either.
+    """
+    import ast
     import pathlib
+
+    import myvitals.api.meals as meals_mod
+
     src = (pathlib.Path(__file__).resolve().parents[1]
            / "src" / "myvitals" / "api" / "meals.py").read_text()
-    body = src[src.index("async def list_pantry("):]
-    body = body[:body.index("@router.")]
-    assert "common_pantry.kitchen_group" in body
-    assert "common_pantry.GROUP_ORDER" in body
+    tree = ast.parse(src)
+    fn = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "list_pantry"
+    )
+    # Every `x.y` where `x` is a bare module-level name must resolve.
+    roots = {
+        n.value.id for n in ast.walk(fn)
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+    }
+    local = {a.arg for a in fn.args.args} | {
+        t.id for n in ast.walk(fn) for t in ast.walk(n)
+        if isinstance(t, ast.Name) and isinstance(t.ctx, ast.Store)
+    }
+    for root in roots - local:
+        assert hasattr(meals_mod, root), (
+            f"list_pantry uses `{root}.…` but meals.py has no `{root}` — "
+            "this is the NameError that shipped once already"
+        )
+
+    called = {
+        f"{n.func.value.id}.{n.func.attr}" for n in ast.walk(fn)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and isinstance(n.func.value, ast.Name)
+    }
+    assert any(c.endswith(".kitchen_group") for c in called), \
+        "list_pantry does not derive the kitchen section"

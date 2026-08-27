@@ -1453,7 +1453,7 @@ async def list_pantry(db: AsyncSession = Depends(get_session)):
             # skinless, boneless, meat only, raw" buried the one word that
             # mattered. The full name is still sent alongside.
             food_concept=concepts.get(p.food_id) if p.food_id else None,
-            group=common_pantry.kitchen_group(
+            group=common.kitchen_group(
                 categories.get(p.food_id) if p.food_id else None,
             ),
             quantity=p.quantity, unit=p.unit, expires_on=p.expires_on,
@@ -1473,7 +1473,7 @@ async def list_pantry(db: AsyncSession = Depends(get_session)):
     # Expiry is not lost — `days_to_expiry` is still on every row and the
     # clients surface anything urgent above the sections, so the one
     # thing the old sort was protecting still comes first.
-    order = {g: i for i, g in enumerate(common_pantry.GROUP_ORDER)}
+    order = {g: i for i, g in enumerate(common.GROUP_ORDER)}
     out.sort(key=lambda p: (
         order.get(p.group, len(order)),
         (p.food_concept or p.food_name or p.label or "").lower(),

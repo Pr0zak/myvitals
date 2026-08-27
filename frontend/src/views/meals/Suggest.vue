@@ -37,6 +37,8 @@ const error = ref<string | null>(null);
 const planned = ref<Record<string, boolean>>({});
 const savedRecipes = ref<Record<string, boolean>>({});
 const savingRecipe = ref<string | null>(null);
+const headlineOpen = ref(false);
+const expanded = ref<Record<string, boolean>>({});
 
 /**
  * Save a suggestion as a real, costed recipe.
@@ -140,73 +142,105 @@ const stamp = computed(() => {
 
     <template v-if="card">
       <Card flat>
-        <p class="headline">{{ card.headline }}</p>
+        <!-- Two lines, then "more". Worth reading once; it was six lines
+             tall above every visit. -->
+        <p class="headline" :class="{ clamped: !headlineOpen }"
+           @click="headlineOpen = !headlineOpen">{{ card.headline }}</p>
+        <button v-if="!headlineOpen" class="link"
+                @click="headlineOpen = true">more</button>
         <p v-if="stamp" class="stamp">
           {{ stamp }}<template v-if="model"> · {{ model }}</template>
         </p>
       </Card>
 
+      <!-- Collapsed by default. One card used to fill a screen — a
+           wrapping title with a button beside it, a four-line rationale,
+           a fat row and two rows of chips — so comparing four
+           suggestions meant scrolling four screens of prose. Everything
+           needed to CHOOSE is on the face; everything that explains the
+           choice is one click away. -->
       <Card v-for="s in card.suggestions" :key="s.name" flat class="sug">
-        <div class="head">
-          <div class="titles">
-            <strong>{{ s.name }}</strong>
-            <span class="meta">
-              {{ s.slot }}
-              <template v-if="s.est_prep_min">
-                · <Clock :size="11" /> {{ s.est_prep_min }} min
-              </template>
-              <template v-if="s.est_kcal">
-                · {{ Math.round(s.est_kcal) }} kcal
-              </template>
+        <strong class="sug-name">{{ s.name }}</strong>
+
+        <p class="meta">
+          {{ s.slot }}
+          <template v-if="s.est_prep_min">
+            · <Clock :size="11" /> {{ s.est_prep_min }} min
+          </template>
+          <template v-if="s.est_fat_g">
+            ·
+            <!-- Coloured by the server's verdict, never a threshold
+                 invented here. Grey when it cannot be judged: "unknown"
+                 must not borrow the reassurance of "fine". -->
+            <span :class="['fat-inline', s.fat_assessment?.verdict ?? 'unknown']">
+              {{ Math.round(s.est_fat_g * 10) / 10 }} g fat
             </span>
-          </div>
-          <div class="card-actions">
-            <button
-              class="ghost"
-              :disabled="planned[s.name]"
-              @click="addToPlan(s.name, s.slot)"
-            >
-              <CalendarPlus :size="13" />
-              {{ planned[s.name] ? "Planned" : "Plan today" }}
-            </button>
-            <!-- Only when the model actually gave ingredients. A card from
-                 before the schema carried them would otherwise save a
-                 recipe with no ingredients and so no nutrition — an empty
-                 recipe wearing a real one's clothes. -->
-            <button
-              v-if="s.ingredients?.length"
-              class="ghost"
-              :disabled="savedRecipes[s.name] || savingRecipe === s.name"
-              @click="saveAsRecipe(s)"
-            >
-              <BookOpen :size="13" />
-              {{ savedRecipes[s.name] ? "Saved to Recipes"
-                 : savingRecipe === s.name ? "Saving…" : "Save as recipe" }}
-            </button>
-          </div>
-        </div>
-
-        <p class="why">{{ s.why }}</p>
-
-        <FatAssessment
-          v-if="s.fat_assessment"
-          :assessment="s.fat_assessment"
-          compact
-          class="fat"
-        />
-
-        <div v-if="s.uses_from_pantry?.length" class="chips">
-          <span class="chip-label"><ShoppingBasket :size="11" /> from pantry</span>
-          <span v-for="p in s.uses_from_pantry" :key="p" class="chip have">{{ p }}</span>
-        </div>
-        <div v-if="s.also_needs?.length" class="chips">
-          <span class="chip-label">also needs</span>
-          <span v-for="p in s.also_needs" :key="p" class="chip need">{{ p }}</span>
-        </div>
-
-        <p v-if="s.based_on_saved_recipe" class="based">
-          Based on your saved recipe “{{ s.based_on_saved_recipe }}”.
+          </template>
         </p>
+
+        <p
+          v-if="s.uses_from_pantry?.length || s.also_needs?.length"
+          class="coverage"
+          :class="{ all: !s.also_needs?.length }"
+        >
+          {{ !s.also_needs?.length
+             ? "everything from your pantry"
+             : `${s.uses_from_pantry?.length ?? 0} from your pantry · ${s.also_needs.length} to buy` }}
+        </p>
+
+        <template v-if="expanded[s.name]">
+          <p class="why">{{ s.why }}</p>
+
+          <FatAssessment
+            v-if="s.fat_assessment"
+            :assessment="s.fat_assessment"
+            compact
+            class="fat"
+          />
+
+          <div v-if="s.uses_from_pantry?.length" class="chips">
+            <span class="chip-label"><ShoppingBasket :size="11" /> have</span>
+            <span v-for="p in s.uses_from_pantry" :key="p" class="chip have">{{ p }}</span>
+          </div>
+          <div v-if="s.also_needs?.length" class="chips">
+            <span class="chip-label">need</span>
+            <span v-for="p in s.also_needs" :key="p" class="chip need">{{ p }}</span>
+          </div>
+
+          <p v-if="s.based_on_saved_recipe" class="based">
+            Based on your saved recipe “{{ s.based_on_saved_recipe }}”.
+          </p>
+        </template>
+
+        <!-- Both actions together, below the content, as peers. -->
+        <div class="card-actions">
+          <button
+            class="ghost"
+            :disabled="planned[s.name]"
+            @click="addToPlan(s.name, s.slot)"
+          >
+            <CalendarPlus :size="13" />
+            {{ planned[s.name] ? "Planned" : "Plan today" }}
+          </button>
+          <!-- Only when the model actually gave ingredients. A card from
+               before the schema carried them would otherwise save a
+               recipe with no ingredients and so no nutrition — an empty
+               recipe wearing a real one's clothes. -->
+          <button
+            v-if="s.ingredients?.length"
+            class="ghost"
+            :disabled="savedRecipes[s.name] || savingRecipe === s.name"
+            @click="saveAsRecipe(s)"
+          >
+            <BookOpen :size="13" />
+            {{ savedRecipes[s.name] ? "Saved"
+               : savingRecipe === s.name ? "Saving…" : "Save as recipe" }}
+          </button>
+          <button class="link why-toggle"
+                  @click="expanded[s.name] = !expanded[s.name]">
+            {{ expanded[s.name] ? "Less" : "Why this" }}
+          </button>
+        </div>
       </Card>
 
       <Card v-if="card.notes?.length" flat>
@@ -215,11 +249,12 @@ const stamp = computed(() => {
         </p>
       </Card>
 
+      <!-- Shortened, not removed. That these numbers are guesses is not
+           inferable from a confident-looking figure, and it is the
+           category of text this app keeps. -->
       <p class="disclaimer">
-        Fat and calorie figures on this page are the model's estimates, not
-        measured values. The high / in-range verdict beside each one is
-        computed from your own target, but the number it judges is a guess —
-        check the label if it matters.
+        Fat and calorie figures are the model's estimates, not measured
+        values.
       </p>
     </template>
   </div>
@@ -245,6 +280,17 @@ button.ghost { background: transparent; color: var(--muted-2); }
   font-size: 0.74rem; color: var(--muted-2); margin-top: 0.15rem;
 }
 .card-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.sug-name { font-size: 1rem; line-height: 1.35; display: block; }
+.headline.clamped {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; cursor: pointer;
+}
+.coverage { font-size: 0.8rem; color: var(--muted); margin: 0.2rem 0 0; }
+.coverage.all { color: #5dff3b; }
+.fat-inline.high, .fat-inline.very_high { color: #ff5d7a; }
+.fat-inline.approaching { color: #ffb52e; }
+.fat-inline.ok { color: #5dff3b; }
+.why-toggle { margin-left: auto; }
 .why { margin: 0.55rem 0 0; font-size: 0.85rem; line-height: 1.5; color: var(--muted-2); }
 .fat { margin-top: 0.6rem; }
 .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; margin-top: 0.55rem; }

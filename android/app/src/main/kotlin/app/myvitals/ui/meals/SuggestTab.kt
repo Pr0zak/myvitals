@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -71,6 +72,7 @@ fun SuggestTab(settings: SettingsRepository) {
     var planned by remember { mutableStateOf<Set<String>>(emptySet()) }
     var savedRecipes by remember { mutableStateOf<Set<String>>(emptySet()) }
     var savingRecipe by remember { mutableStateOf<String?>(null) }
+    var headlineOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         if (!settings.isConfigured()) {
@@ -150,10 +152,25 @@ fun SuggestTab(settings: SettingsRepository) {
                         .background(NeonMV.Card)
                         .padding(12.dp),
                 ) {
+                    // Two lines, then "more". The model writes a
+                    // paragraph tying today's readiness and sleep to what
+                    // to eat; it is worth reading once and it was six
+                    // lines tall above every visit.
                     Text(
                         data.headline, color = NeonMV.Ink, fontSize = 14.sp,
                         lineHeight = 20.sp,
+                        maxLines = if (headlineOpen) Int.MAX_VALUE else 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable { headlineOpen = !headlineOpen },
                     )
+                    if (!headlineOpen) {
+                        Text(
+                            "more", color = NeonMV.Cyan, fontSize = 11.sp,
+                            modifier = Modifier
+                                .padding(top = 2.dp)
+                                .clickable { headlineOpen = true },
+                        )
+                    }
                     stamp?.let {
                         Text(
                             // "Suggested Sun 23 Aug, 03:24", not the raw
@@ -251,11 +268,13 @@ fun SuggestTab(settings: SettingsRepository) {
             }
 
             item {
+                // Shortened, not removed. That these numbers are guesses
+                // is the kind of thing a person cannot infer from a
+                // confident-looking figure, and it is the category of
+                // text this app keeps. Four sentences said it once.
                 Text(
-                    "Fat and calorie figures here are the model's estimates, " +
-                        "not measured values. The verdict beside each one is " +
-                        "computed from your own target, but the number it " +
-                        "judges is a guess — check the label if it matters.",
+                    "Fat and calorie figures are the model's estimates, not " +
+                        "measured values.",
                     color = NeonMV.Muted, fontSize = 10.sp, lineHeight = 15.sp,
                     modifier = Modifier.padding(vertical = 8.dp),
                 )
@@ -274,78 +293,135 @@ private fun SuggestionCard(
     saving: Boolean = false,
     onSaveRecipe: () -> Unit = {},
 ) {
+    // Collapsed by default. One card used to fill a whole phone screen —
+    // a two-line title with a button embedded in it, a four-line
+    // rationale, a fat row, and two rows of chips carrying full USDA
+    // names — so comparing four suggestions meant scrolling through four
+    // screens of prose. Everything needed to CHOOSE is now on the face;
+    // everything that explains the choice is one tap away.
+    var open by remember(s.name) { mutableStateOf(false) }
+
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(NeonMV.Card)
+            .clickable { open = !open }
             .padding(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
+        // The title gets the full width. The action used to sit beside it
+        // and a two-line name wrapped around the button.
+        Text(
+            s.name, color = NeonMV.Ink, fontSize = 15.sp,
+            fontWeight = FontWeight.Medium, lineHeight = 20.sp,
+        )
+
+        // The three things a choice is actually made on, in one line.
+        Row(
+            Modifier.padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                buildString {
+                    append(s.slot)
+                    s.estPrepMin?.let { append(" · $it min") }
+                    s.estKcal?.let { append(" · ${it.roundToInt()} kcal") }
+                },
+                color = NeonMV.Muted, fontSize = 11.sp,
+            )
+            s.estFatG?.let { fat ->
                 Text(
-                    s.name, color = NeonMV.Ink, fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    buildString {
-                        append(s.slot)
-                        s.estPrepMin?.let { append(" · $it min") }
-                        s.estKcal?.let { append(" · ${it.roundToInt()} kcal") }
+                    "  ·  ${trimNum(fat)} g fat",
+                    // Coloured by the server's verdict, never by a
+                    // threshold invented here. Grey when it cannot be
+                    // judged — "unknown" must not borrow the reassurance
+                    // of "fine".
+                    color = when (s.fatAssessment?.verdict) {
+                        "very_high", "high" -> NeonMV.Bad
+                        "approaching" -> NeonMV.Amber
+                        "ok" -> NeonMV.Lime
+                        else -> NeonMV.Muted
                     },
-                    color = NeonMV.Muted, fontSize = 11.sp,
+                    fontSize = 11.sp,
                 )
             }
+        }
+
+        // How much of it you already have — the other thing worth knowing
+        // before opening anything.
+        if (s.usesFromPantry.isNotEmpty() || s.alsoNeeds.isNotEmpty()) {
+            val have = s.usesFromPantry.size
+            val need = s.alsoNeeds.size
+            Text(
+                if (need == 0) "everything from your pantry"
+                else "$have from your pantry · $need to buy",
+                color = if (need == 0) NeonMV.Lime else NeonMV.Muted,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 3.dp),
+            )
+        }
+
+        if (open) {
+            Text(
+                s.why, color = NeonMV.Muted, fontSize = 12.sp, lineHeight = 17.sp,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+
+            s.fatAssessment?.let {
+                Box(Modifier.padding(top = 8.dp)) { FatAssessmentCard(it, compact = true) }
+            }
+
+            if (s.usesFromPantry.isNotEmpty()) {
+                ChipRow("have", s.usesFromPantry, NeonMV.Lime)
+            }
+            if (s.alsoNeeds.isNotEmpty()) {
+                ChipRow("need", s.alsoNeeds, NeonMV.Amber)
+            }
+
+            s.basedOnSavedRecipe?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    "Based on your saved recipe “$it”.",
+                    color = NeonMV.Muted, fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+        }
+
+        // Both actions together, below the content, as peers. "Save as
+        // recipe" was a bare text link floating between the meta line and
+        // the rationale, which read as neither a label nor a button.
+        Row(
+            Modifier.padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             TextButton(enabled = !planned, onClick = onPlan) {
                 Icon(Icons.Filled.EventAvailable, contentDescription = null)
                 Text(if (planned) " Planned" else " Plan today")
             }
-        }
-
-        // Only offered when the model actually gave ingredients. A card
-        // generated before the schema carried them would otherwise save a
-        // recipe with no ingredients and therefore no nutrition — an empty
-        // recipe that looks like a real one.
-        if (s.ingredients.isNotEmpty()) {
+            if (s.ingredients.isNotEmpty()) {
+                TextButton(
+                    enabled = !savedRecipe && !saving,
+                    onClick = onSaveRecipe,
+                ) {
+                    Text(
+                        when {
+                            savedRecipe -> "Saved"
+                            saving -> "Saving…"
+                            else -> "Save as recipe"
+                        },
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
             Text(
-                when {
-                    savedRecipe -> "Saved to Recipes"
-                    saving -> "Saving…"
-                    else -> "Save as recipe"
-                },
-                color = if (savedRecipe || saving) NeonMV.Muted else NeonMV.Cyan,
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .padding(top = 4.dp)
-                    .clickable(enabled = !savedRecipe && !saving, onClick = onSaveRecipe),
-            )
-        }
-
-        Text(
-            s.why, color = NeonMV.Muted, fontSize = 12.sp, lineHeight = 17.sp,
-            modifier = Modifier.padding(top = 6.dp),
-        )
-
-        s.fatAssessment?.let {
-            Box(Modifier.padding(top = 8.dp)) { FatAssessmentCard(it, compact = true) }
-        }
-
-        if (s.usesFromPantry.isNotEmpty()) {
-            ChipRow("from pantry", s.usesFromPantry, NeonMV.Lime)
-        }
-        if (s.alsoNeeds.isNotEmpty()) {
-            ChipRow("also needs", s.alsoNeeds, NeonMV.Amber)
-        }
-
-        s.basedOnSavedRecipe?.takeIf { it.isNotBlank() }?.let {
-            Text(
-                "Based on your saved recipe “$it”.",
-                color = NeonMV.Muted, fontSize = 10.sp,
-                modifier = Modifier.padding(top = 6.dp),
+                if (open) "Less" else "Why this",
+                color = NeonMV.Cyan, fontSize = 11.sp,
             )
         }
     }
 }
+
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

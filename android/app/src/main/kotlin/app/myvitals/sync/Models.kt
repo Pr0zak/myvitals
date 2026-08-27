@@ -2134,6 +2134,9 @@ data class BarcodeHit(
     val origin: String = "openfoodfacts",
     val nutrition: Map<String, Double?> = emptyMap(),
     val ingredients: String? = null,
+    // OFF's category tag, carried so a saved product lands on a shelf
+    // rather than in "Other".
+    val category: String? = null,
     @Json(name = "package_size") val packageSize: String? = null,
     @Json(name = "serving_size_text") val servingSizeText: String? = null,
 )

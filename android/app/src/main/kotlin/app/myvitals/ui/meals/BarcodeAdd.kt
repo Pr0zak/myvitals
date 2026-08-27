@@ -113,6 +113,7 @@ internal fun BarcodeAdd(
                             sodiumMg = h.nutrition["sodium_mg"],
                             ingredients = h.ingredients,
                             barcode = h.barcode,
+                            category = h.category,
                         ),
                     ).id
                     if (stock) api.mealsAddPantry(PantryItemIn(foodId = id))

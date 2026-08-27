@@ -19,7 +19,7 @@ import FoodPicker from "@/components/FoodPicker.vue";
 import PhotoPantry from "@/components/PhotoPantry.vue";
 import PackageScan from "@/components/PackageScan.vue";
 import QuantityPicker from "@/components/QuantityPicker.vue";
-import { Plus, Trash2, AlertTriangle, X, Search } from "lucide-vue-next";
+import { Plus, Trash2, AlertTriangle, X, Search, ChevronDown, ChevronRight } from "lucide-vue-next";
 import { meals, type CommonItem, type Food, type PantryItem } from "@/api/client";
 
 const items = ref<PantryItem[]>([]);
@@ -155,6 +155,17 @@ const urgent = computed(() =>
  * server-supplied `group` rather than re-deriving it here is what keeps
  * the phone and the web from sectioning the same pantry differently.
  */
+/**
+ * Which sections are open. Session-scoped on purpose: it is a reading
+ * position, not a setting, and a pantry opened tomorrow for a different
+ * reason wants a different section. "Use soon" is never collapsible —
+ * it exists because something needs doing about it.
+ */
+const openGroups = ref<Record<string, boolean>>({});
+function toggleGroup(g: string) {
+  openGroups.value = { ...openGroups.value, [g]: !openGroups.value[g] };
+}
+
 const grouped = computed(() => {
   const out = new Map<string, typeof items.value>();
   for (const i of items.value) {
@@ -365,9 +376,20 @@ function expiryClass(i: PantryItem): string {
 
       <!-- Grouped in the order the server sends, so the two surfaces
            cannot section the same pantry differently. -->
+      <!-- Collapsed by default, with counts. At fifty items the sections
+           are more useful as an index than as headings over a list you
+           still have to scroll: "Baking & spices 14" answers "roughly
+           what do I have" in one screen, and opening one answers "do I
+           have paprika". -->
       <template v-for="[group, rows] in grouped" :key="group">
-        <h3 class="section">{{ group }}</h3>
-        <ul class="list">
+        <button class="section toggle" @click="toggleGroup(group)">
+          <component :is="openGroups[group] ? ChevronDown : ChevronRight" :size="13" />
+          {{ group }}
+          <!-- The count is what makes a closed section informative
+               rather than merely shorter. -->
+          <span class="count">{{ rows.length }}</span>
+        </button>
+        <ul v-if="openGroups[group]" class="list">
           <li v-for="i in rows" :key="i.id" :class="expiryClass(i)">
             <div class="main">
               <span class="name">{{ title(i) }}</span>
@@ -484,4 +506,13 @@ button.ghost { background: transparent; color: var(--muted-2); }
   margin: 1rem 0 0.3rem;
 }
 .section.urgent { color: #ffb52e; }
+.section.toggle {
+  display: flex; align-items: center; gap: 0.4rem;
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font: inherit; color: var(--muted);
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; margin: 1rem 0 0.3rem;
+}
+.section.toggle:hover { color: var(--fg); }
+.section .count { letter-spacing: 0; font-weight: 400; opacity: 0.7; }
 </style>

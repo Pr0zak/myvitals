@@ -49,7 +49,7 @@ _BASE = "https://world.openfoodfacts.org/api/v2/product"
 #: images, tags and translations that are megabytes for one lookup.
 _FIELDS = (
     "code,product_name,brands,quantity,serving_size,nutriments,"
-    "ingredients_text"
+    "ingredients_text,categories_tags"
 )
 
 #: OFF key -> our column. Everything absent stays NULL: a product whose
@@ -140,6 +140,15 @@ async def lookup(code: str, timeout: float = 12.0) -> dict[str, Any] | None:
         # inventing "Unknown product" would put it in the catalog forever.
         return None
 
+    # OFF's own taxonomy, most general first ("plant-based-foods" before
+    # "spreads"). The LAST recognised tag is kept because it is the most
+    # specific, and specificity is what decides a kitchen shelf: peanut
+    # butter is a spread, not merely a plant-based food.
+    tags = [
+        t for t in (product.get("categories_tags") or [])
+        if isinstance(t, str) and t.startswith("en:")
+    ]
+
     nutriments = product.get("nutriments") or {}
     out: dict[str, Any] = {
         "barcode": code,
@@ -149,6 +158,11 @@ async def lookup(code: str, timeout: float = 12.0) -> dict[str, Any] | None:
         # Kept verbatim for the confirm screen: "1 oz (28.3 g)" tells the
         # user which pack they are looking at, which is the only reliable
         # way to catch a wrong OFF entry before it is saved.
+        # Stored so the pantry can shelve it. Without this every scanned
+        # product landed in "Other" — twelve of one user's fifteen
+        # uncategorised pantry rows were barcode scans.
+        "category": (tags[-1] if tags else None),
+        "category_tags": tags,
         "package_size": (product.get("quantity") or "").strip()[:120] or None,
         "serving_size_text": (product.get("serving_size") or "").strip()[:120] or None,
     }

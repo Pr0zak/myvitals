@@ -17,6 +17,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material.icons.filled.ChevronRight
@@ -265,12 +267,38 @@ private fun PantryRow(p: PantryItemOut, onDelete: (Long) -> Unit) {
 /** A kitchen-section heading. Uppercase and small: it labels the rows
  *  below it and must not read as one of them. */
 @Composable
-private fun PantrySection(label: String, colour: androidx.compose.ui.graphics.Color) {
-    Text(
-        label.uppercase(), color = colour, fontSize = 10.sp,
-        fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
-        modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
-    )
+private fun PantrySection(
+    label: String,
+    count: Int,
+    colour: androidx.compose.ui.graphics.Color,
+    /** Null for a section that cannot be collapsed. */
+    open: Boolean?,
+    onToggle: () -> Unit = {},
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .then(if (open != null) Modifier.clickable(onClick = onToggle) else Modifier)
+            .padding(top = 12.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (open != null) {
+            Icon(
+                if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = null, tint = colour,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+        }
+        Text(
+            label.uppercase(), color = colour, fontSize = 10.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
+        )
+        Spacer(Modifier.width(6.dp))
+        // The count is what makes a closed section informative rather
+        // than merely shorter.
+        Text("$count", color = NeonMV.Muted, fontSize = 10.sp)
+    }
 }
 
 @Composable
@@ -846,6 +874,10 @@ private fun PantryTab(settings: SettingsRepository) {
     // eleven lines of permanent prose stood between opening this tab and
     // seeing a single thing you own.
     var showAdd by remember { mutableStateOf(false) }
+    // Which sections are open. Session-scoped on purpose: it is a
+    // reading position, not a setting, and a pantry opened tomorrow for a
+    // different reason wants a different section.
+    var openGroups by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     suspend fun fetch() {
         if (!settings.isConfigured()) {
@@ -1050,19 +1082,36 @@ private fun PantryTab(settings: SettingsRepository) {
             val urgent = items.filter {
                 it.daysToExpiry != null && it.daysToExpiry!! <= 3
             }
+            // "Use soon" is never collapsed. It is the one section that
+            // exists because something needs doing about it, and hiding
+            // it behind a tap would defeat the reason it is pinned above
+            // everything else.
             if (urgent.isNotEmpty()) {
-                item { PantrySection("Use soon", NeonMV.Amber) }
+                item { PantrySection("Use soon", urgent.size, NeonMV.Amber, null) }
                 items(urgent, key = { "urgent-${it.id}" }) { p ->
                     PantryRow(p) { id -> onDeleteItem(id) }
                 }
             }
 
-            // Grouped in the order the server sends. An empty section is
-            // simply absent — a heading over nothing is noise.
+            // Collapsed by default, with counts. At forty-nine items the
+            // sections are more useful as an index than as headings over
+            // a list you still have to scroll — "Baking & spices 14" answers
+            // "roughly what do I have" in one screen, and opening one
+            // answers "do I have paprika".
+            //
+            // An empty section is simply absent; a heading over nothing
+            // is noise.
             items.groupBy { it.group }.forEach { (group, rows) ->
-                item { PantrySection(group, NeonMV.Muted) }
-                items(rows, key = { it.id }) { p ->
-                    PantryRow(p) { id -> onDeleteItem(id) }
+                val open = group in openGroups
+                item {
+                    PantrySection(group, rows.size, NeonMV.Muted, open) {
+                        openGroups = if (open) openGroups - group else openGroups + group
+                    }
+                }
+                if (open) {
+                    items(rows, key = { it.id }) { p ->
+                        PantryRow(p) { id -> onDeleteItem(id) }
+                    }
                 }
             }
         }

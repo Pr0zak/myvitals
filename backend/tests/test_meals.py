@@ -920,3 +920,53 @@ def test_grouping_is_decided_server_side() -> None:
     }
     assert any(c.endswith(".kitchen_group") for c in called), \
         "list_pantry does not derive the kitchen section"
+
+
+def test_a_mixed_usda_category_is_settled_by_the_name() -> None:
+    """Reported: baking soda and baking powder appeared under "Grains &
+    pasta".
+
+    USDA files "Leavening agents, baking powder" under **Baked
+    Products** — the same category as bread and tortillas — so no
+    category map can separate them. The curated staples list settles it:
+    flour, oats, bread and tortillas are Grains & pasta, baking powder
+    and soda are Baking & spices, which is how a person stores them.
+    """
+    from myvitals.analytics.common_pantry import kitchen_group as k
+    assert k("Baked Products", "Leavening agents, baking soda") == "Baking & spices"
+    assert k("Baked Products", "Leavening agents, baking powder") == "Baking & spices"
+    # And the override must not swallow the rest of the category.
+    assert k("Baked Products", "Tortillas, ready-to-bake") == "Grains & pasta"
+    assert k("Baked Products", "Bread, pita, whole-wheat") == "Grains & pasta"
+
+
+def test_a_scanned_product_lands_on_a_shelf() -> None:
+    """Every barcode scan used to land in "Other" — the lookup never read
+    Open Food Facts' categories, so nothing was stored to shelve it by.
+    Twelve of one user's fifteen uncategorised pantry rows were scans."""
+    from myvitals.analytics.common_pantry import kitchen_group as k
+    assert k("en:rolled-oats", "Quick Oats") == "Grains & pasta"
+    assert k("en:nut-butters", "Jif Creamy Peanut Butter") == "Oils & condiments"
+    assert k("en:honeys", "clover honey") == "Baking & spices"
+    assert k("en:instant-noodles", "Ramen") == "Grains & pasta"
+
+
+def test_the_off_lookup_actually_reads_the_category() -> None:
+    """The mapping is useless if nothing is stored to map."""
+    import pathlib
+    off = (pathlib.Path(__file__).resolve().parents[1] / "src" / "myvitals"
+           / "integrations" / "openfoodfacts.py").read_text()
+    assert "categories_tags" in off, "the request does not ask for categories"
+    assert '"category":' in off, "the result does not carry one"
+
+
+def test_a_hand_typed_line_is_shelved_by_the_curated_list() -> None:
+    """A typed "eggs" with no food behind it still belongs somewhere, and
+    the staples list already knows where. A typo cannot be rescued and is
+    left in Other rather than guessed at."""
+    from myvitals.analytics.common_pantry import kitchen_group as k
+    assert k(None, "eggs") == "Meat & fish"
+    assert k(None, "pepper") == "Baking & spices"
+    assert k(None, "unsweetened almond milk") == "Dairy"
+    assert k(None, "flower") == "Other"
+    assert k(None, "") == "Other"

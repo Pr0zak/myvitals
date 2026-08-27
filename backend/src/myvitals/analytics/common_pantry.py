@@ -187,7 +187,91 @@ GROUP_ORDER: tuple[str, ...] = (
 )
 
 
-def kitchen_group(usda_category: str | None) -> str:
+#: Name markers that beat the category, for categories that are
+#: internally mixed.
+#:
+#: USDA files "Leavening agents, baking powder" and "Leavening agents,
+#: baking soda" under **Baked Products** — the same category as bread
+#: and tortillas. Both belong there by USDA's logic and neither belongs
+#: in a "Grains & pasta" section on a kitchen shelf. The curated list
+#: above settles the disagreement: it puts flour, oats, bread and
+#: tortillas in Grains & pasta and baking powder and soda in Baking &
+#: spices, which is how a person actually stores them.
+#:
+#: Deliberately tiny, and it stays tiny. This is the same trap as the
+#: concept extractor's drop list: every entry added is a rule applied to
+#: foods nobody checked, and the failure is silent — a thing filed on the
+#: wrong shelf, found by not finding it. Add one only for a category
+#: demonstrably holding two different kitchen sections.
+_NAME_OVERRIDES: tuple[tuple[str, str], ...] = (
+    ("leavening agent", "Baking & spices"),
+)
+
+
+#: Open Food Facts' taxonomy -> kitchen group, matched as SUBSTRINGS of
+#: the `en:` tag because that taxonomy is deep and specific — a jar of
+#: peanut butter comes back "en:nut-butters", oats as "en:rolled-oats".
+#:
+#: Matching on substrings rather than exact tags is what makes this
+#: tractable: OFF has thousands of leaf categories and roughly a dozen
+#: words carry the shelf. Ordered most specific first, because
+#: "en:nut-butters" contains both "butter" and "nut" and only one of
+#: those is right.
+_OFF_TO_GROUP: tuple[tuple[str, str], ...] = (
+    ("nut-butter", "Oils & condiments"),
+    ("peanut-butter", "Oils & condiments"),
+    ("noodle", "Grains & pasta"),
+    ("pasta", "Grains & pasta"),
+    ("oat", "Grains & pasta"),
+    ("cereal", "Grains & pasta"),
+    ("bread", "Grains & pasta"),
+    ("tortilla", "Grains & pasta"),
+    ("rice", "Grains & pasta"),
+    ("flour", "Grains & pasta"),
+    ("granola", "Grains & pasta"),
+    ("yogurt", "Dairy"),
+    ("yoghurt", "Dairy"),
+    ("cheese", "Dairy"),
+    ("milk", "Dairy"),
+    ("cream", "Dairy"),
+    ("butter", "Dairy"),
+    ("egg", "Dairy"),
+    ("poultry", "Meat & fish"),
+    ("chicken", "Meat & fish"),
+    ("beef", "Meat & fish"),
+    ("pork", "Meat & fish"),
+    ("meat", "Meat & fish"),
+    ("seafood", "Meat & fish"),
+    ("fish", "Meat & fish"),
+    ("fruit", "Fruit"),
+    ("berries", "Fruit"),
+    ("vegetable", "Vegetables"),
+    ("legume", "Tins & jars"),
+    ("canned", "Tins & jars"),
+    ("soup", "Tins & jars"),
+    ("sauce", "Oils & condiments"),
+    ("condiment", "Oils & condiments"),
+    ("dressing", "Oils & condiments"),
+    ("spread", "Oils & condiments"),
+    ("oil", "Oils & condiments"),
+    ("beverage", "Drinks"),
+    ("drink", "Drinks"),
+    ("water", "Drinks"),
+    ("juice", "Drinks"),
+    ("coffee", "Drinks"),
+    ("tea", "Drinks"),
+    ("honey", "Baking & spices"),
+    ("sugar", "Baking & spices"),
+    ("spice", "Baking & spices"),
+    ("herb", "Baking & spices"),
+    ("baking", "Baking & spices"),
+    ("snack", "Baking & spices"),
+    ("sweet", "Baking & spices"),
+    ("protein-powder", "Drinks"),
+)
+
+
+def kitchen_group(usda_category: str | None, name: str | None = None) -> str:
     """Which section of a kitchen a food belongs to.
 
     Returns "Other" for anything unmapped, which covers two real cases:
@@ -198,6 +282,47 @@ def kitchen_group(usda_category: str | None) -> str:
     section, not a rounding error, and it is placed last rather than
     hidden.
     """
-    if not usda_category:
+    # The name is checked FIRST, because it is only consulted for cases
+    # where the category is known to be mixed — so where it matches, it
+    # is the more specific signal of the two.
+    lowered = (name or "").lower()
+    for marker, group in _NAME_OVERRIDES:
+        if marker in lowered:
+            return group
+    cat = (usda_category or "").strip()
+    # Open Food Facts categories arrive as "en:rolled-oats". Its taxonomy
+    # is not USDA's, so it gets its own map.
+    if cat.startswith("en:"):
+        tag = cat[3:]
+        for marker, group in _OFF_TO_GROUP:
+            if marker in tag:
+                return group
         return "Other"
-    return _USDA_TO_GROUP.get(usda_category.strip(), "Other")
+    if cat:
+        return _USDA_TO_GROUP.get(cat, "Other")
+
+    # No category at all — a hand-typed pantry line. The curated staples
+    # list already says which shelf "eggs" or "flour" belongs on, so it
+    # is asked rather than a third set of rules being written. A typo
+    # like "flower" simply misses and lands in Other, which is honest:
+    # the app cannot know what was meant.
+    if lowered:
+        best: tuple[int, str] | None = None
+        for group, entries in COMMON_PANTRY.items():
+            for entry in entries:
+                label = (entry[0] if isinstance(entry, (tuple, list)) else str(entry))
+                low = label.lower()
+                if low == lowered:
+                    return group
+                # People type "pepper" for "Black pepper" and "unsweetened
+                # almond milk" for "Almond milk", so containment either
+                # way counts — but only for labels long enough that a
+                # chance substring is unlikely. "Oats" inside "goats" is
+                # the shape of mistake this guards against.
+                if len(low) >= 4 and (low in lowered or lowered in low):
+                    # Longest match wins: "almond milk" must beat "milk".
+                    if best is None or len(low) > best[0]:
+                        best = (len(low), group)
+        if best is not None:
+            return best[1]
+    return "Other"

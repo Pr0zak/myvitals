@@ -1079,6 +1079,9 @@ class BarcodeHit(BaseModel):
     #: Per 100 g, the shape `foods` stores. Absent nutrients stay null.
     nutrition: dict[str, float | None] = Field(default_factory=dict)
     ingredients: str | None = None
+    #: Open Food Facts' own category tag, e.g. "en:rolled-oats". Carried
+    #: so a saved product lands on a pantry shelf instead of in "Other".
+    category: str | None = None
     #: Verbatim from the pack — "1 oz (28.3 g)" — so the user can tell at
     #: a glance whether the entry matches the thing in their hand.
     package_size: str | None = None
@@ -1129,6 +1132,7 @@ async def lookup_barcode(code: str, db: AsyncSession = Depends(get_session)):
                 "sodium_mg": existing.sodium_mg,
             },
             ingredients=existing.ingredients,
+            category=existing.category,
         )
 
     try:
@@ -1150,6 +1154,7 @@ async def lookup_barcode(code: str, db: AsyncSession = Depends(get_session)):
             )
         },
         ingredients=hit.get("ingredients"),
+        category=hit.get("category"),
         package_size=hit.get("package_size"),
         serving_size_text=hit.get("serving_size_text"),
     )
@@ -1455,6 +1460,7 @@ async def list_pantry(db: AsyncSession = Depends(get_session)):
             food_concept=concepts.get(p.food_id) if p.food_id else None,
             group=common.kitchen_group(
                 categories.get(p.food_id) if p.food_id else None,
+                names.get(p.food_id) if p.food_id else p.label,
             ),
             quantity=p.quantity, unit=p.unit, expires_on=p.expires_on,
             updated_at=p.updated_at,

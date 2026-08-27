@@ -842,3 +842,45 @@ def test_pantry_rows_carry_the_concept_not_only_the_usda_name() -> None:
     body = body[:body.index("@router.")]
     assert "models.Food.concept" in body, "list_pantry does not select the concept"
     assert "food_concept=" in body, "list_pantry does not return the concept"
+
+
+def test_a_pantry_row_carries_its_kitchen_section() -> None:
+    """USDA's names are a database taxonomy, not kitchen sections.
+
+    "Legumes and Legume Products", "Soups, Sauces, and Gravies", "Cereal
+    Grains and Pasta" — useful for classification, unreadable as headings
+    over the things in your cupboard. The eight curated groups in
+    `common_pantry` already speak the right language for exactly this
+    job, so they are the vocabulary and USDA maps onto them rather than a
+    second set being invented.
+    """
+    from myvitals.analytics.common_pantry import GROUP_ORDER, kitchen_group
+    assert kitchen_group("Dairy and Egg Products") == "Dairy"
+    assert kitchen_group("Poultry Products") == "Meat & fish"
+    assert kitchen_group("Legumes and Legume Products") == "Tins & jars"
+    assert all(g in GROUP_ORDER for g in
+               ("Dairy", "Meat & fish", "Tins & jars", "Other"))
+
+
+def test_an_unknown_or_missing_category_is_other_not_a_crash() -> None:
+    """Fifteen of this user's forty-nine pantry rows are hand-typed names
+    with no food behind them at all, so "Other" is a populated section
+    rather than a rounding error — which is why it is last in the order
+    and not hidden."""
+    from myvitals.analytics.common_pantry import GROUP_ORDER, kitchen_group
+    assert kitchen_group(None) == "Other"
+    assert kitchen_group("") == "Other"
+    assert kitchen_group("A Category USDA Has Never Heard Of") == "Other"
+    assert GROUP_ORDER[-1] == "Other"
+
+
+def test_grouping_is_decided_server_side() -> None:
+    """Two clients deriving sections independently is how they end up
+    disagreeing about which shelf something lives on."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "src" / "myvitals" / "api" / "meals.py").read_text()
+    body = src[src.index("async def list_pantry("):]
+    body = body[:body.index("@router.")]
+    assert "common_pantry.kitchen_group" in body
+    assert "common_pantry.GROUP_ORDER" in body

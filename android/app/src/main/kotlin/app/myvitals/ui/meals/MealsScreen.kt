@@ -210,6 +210,69 @@ private fun StapleChip(c: CommonItemOut, onClick: () -> Unit) {
  * different things, and an icon cannot carry that. The subtitle says
  * what each one is FOR, which the old one-word chips never did.
  */
+
+/**
+ * One pantry line. Extracted so the list can be grouped into kitchen
+ * sections — a LazyColumn interleaves headers and rows by emitting them
+ * separately, which an inline body cannot do.
+ */
+@Composable
+private fun PantryRow(p: PantryItemOut, onDelete: (Long) -> Unit) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(NeonMV.Card)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    // Concept first: "chicken breast", not "Chicken,
+                    // broiler or fryers, breast, skinless, boneless,
+                    // meat only, raw", which wrapped to two lines and
+                    // buried the one word that answers the question a
+                    // pantry is for. The full USDA name stays as the
+                    // second line, so nothing is hidden — it is just
+                    // no longer the headline.
+                    val head = p.foodConcept?.takeIf { it.isNotBlank() }
+                        ?: p.foodName ?: p.label ?: "Untitled"
+                    Text(
+                        head.replaceFirstChar { it.uppercase() },
+                        color = NeonMV.Ink, fontSize = 13.sp, maxLines = 1,
+                    )
+                    val amount = p.quantity?.let {
+                        "${trimNum(it)}${p.unit?.let { u -> " $u" } ?: ""}"
+                    } ?: p.unit
+                    val detail = p.foodName?.takeIf {
+                        !it.equals(head, ignoreCase = true)
+                    }
+                    listOfNotNull(amount, detail).takeIf { it.isNotEmpty() }?.let { parts ->
+                        Text(
+                            parts.joinToString(" · "),
+                            color = NeonMV.Muted, fontSize = 11.sp, maxLines = 1,
+                        )
+                    }
+                }
+                expiryLabel(p.daysToExpiry)?.let { (text, colour) ->
+                    Text(text, color = colour, fontSize = 11.sp)
+                }
+                IconButton(onClick = { onDelete(p.id) }) {
+                    Icon(Icons.Filled.Delete, "Remove", tint = NeonMV.Muted)
+                }
+            }
+}
+
+/** A kitchen-section heading. Uppercase and small: it labels the rows
+ *  below it and must not read as one of them. */
+@Composable
+private fun PantrySection(label: String, colour: androidx.compose.ui.graphics.Color) {
+    Text(
+        label.uppercase(), color = colour, fontSize = 10.sp,
+        fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
+        modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+    )
+}
+
 @Composable
 private fun MoreList(onPick: (MealsTab) -> Unit) {
     // Titles come from the enum, so the row you tap and the header you
@@ -806,6 +869,18 @@ private fun PantryTab(settings: SettingsRepository) {
         }
     }
 
+    // Hoisted out of the row so the row can be a plain composable, which
+    // is what lets the list interleave section headings with items.
+    fun onDeleteItem(id: Long) {
+        scope.launch {
+            runCatching {
+                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                withContext(Dispatchers.IO) { api.mealsDeletePantry(id) }
+            }
+            fetch()
+        }
+    }
+
     LaunchedEffect(Unit) {
         JsonCache.read<List<PantryItemOut>>(context, CACHE_PANTRY, type)?.let {
             items = it.value
@@ -967,58 +1042,27 @@ private fun PantryTab(settings: SettingsRepository) {
                     )
                 }
             }
-            items(items, key = { it.id }) { p ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(NeonMV.Card)
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        // Concept first: "chicken breast", not "Chicken,
-                        // broiler or fryers, breast, skinless, boneless,
-                        // meat only, raw", which wrapped to two lines and
-                        // buried the one word that answers the question a
-                        // pantry is for. The full USDA name stays as the
-                        // second line, so nothing is hidden — it is just
-                        // no longer the headline.
-                        val head = p.foodConcept?.takeIf { it.isNotBlank() }
-                            ?: p.foodName ?: p.label ?: "Untitled"
-                        Text(
-                            head.replaceFirstChar { it.uppercase() },
-                            color = NeonMV.Ink, fontSize = 13.sp, maxLines = 1,
-                        )
-                        val amount = p.quantity?.let {
-                            "${trimNum(it)}${p.unit?.let { u -> " $u" } ?: ""}"
-                        } ?: p.unit
-                        val detail = p.foodName?.takeIf {
-                            !it.equals(head, ignoreCase = true)
-                        }
-                        listOfNotNull(amount, detail).takeIf { it.isNotEmpty() }?.let { parts ->
-                            Text(
-                                parts.joinToString(" · "),
-                                color = NeonMV.Muted, fontSize = 11.sp, maxLines = 1,
-                            )
-                        }
-                    }
-                    expiryLabel(p.daysToExpiry)?.let { (text, colour) ->
-                        Text(text, color = colour, fontSize = 11.sp)
-                    }
-                    IconButton(onClick = {
-                        scope.launch {
-                            runCatching {
-                                val api = BackendClient.create(
-                                    settings.backendUrl, settings.bearerToken,
-                                )
-                                withContext(Dispatchers.IO) { api.mealsDeletePantry(p.id) }
-                            }
-                            fetch()
-                        }
-                    }) {
-                        Icon(Icons.Filled.Delete, "Remove", tint = NeonMV.Muted)
-                    }
+            // Anything urgent sits ABOVE the sections. The list used to be
+            // sorted expiring-first, which was right when the pantry was
+            // small; at forty-nine items a flat list ordered by a date
+            // most rows do not have is just an arbitrary order. Sections
+            // make it readable; this keeps what that sort was protecting.
+            val urgent = items.filter {
+                it.daysToExpiry != null && it.daysToExpiry!! <= 3
+            }
+            if (urgent.isNotEmpty()) {
+                item { PantrySection("Use soon", NeonMV.Amber) }
+                items(urgent, key = { "urgent-${it.id}" }) { p ->
+                    PantryRow(p) { id -> onDeleteItem(id) }
+                }
+            }
+
+            // Grouped in the order the server sends. An empty section is
+            // simply absent — a heading over nothing is noise.
+            items.groupBy { it.group }.forEach { (group, rows) ->
+                item { PantrySection(group, NeonMV.Muted) }
+                items(rows, key = { it.id }) { p ->
+                    PantryRow(p) { id -> onDeleteItem(id) }
                 }
             }
         }

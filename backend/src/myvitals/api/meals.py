@@ -580,6 +580,11 @@ class PantryOut(BaseModel):
     #: The MEAL-6 concept for the food — the short, shopping-shaped name.
     #: Null for a hand-typed item and for prepared food, which has none.
     food_concept: str | None = None
+    #: Kitchen section — "Dairy", "Baking & spices", "Other". Derived
+    #: server-side so the two clients cannot group the same pantry
+    #: differently, and from the same eight-group vocabulary the staples
+    #: picker already uses rather than a second one.
+    group: str = "Other"
     quantity: float | None
     unit: str | None
     expires_on: date | None
@@ -1425,13 +1430,16 @@ async def list_pantry(db: AsyncSession = Depends(get_session)):
     food_ids = {p.food_id for p in rows if p.food_id is not None}
     names: dict[int, str] = {}
     concepts: dict[int, str | None] = {}
+    categories: dict[int, str | None] = {}
     if food_ids:
-        for fid, name, concept in (await db.execute(
-            select(models.Food.id, models.Food.name, models.Food.concept)
+        for fid, name, concept, category in (await db.execute(
+            select(models.Food.id, models.Food.name, models.Food.concept,
+                   models.Food.category)
             .where(models.Food.id.in_(food_ids))
         )).all():
             names[fid] = name
             concepts[fid] = concept
+            categories[fid] = category
 
     today = _local_today()
     out = [
@@ -1445,18 +1453,30 @@ async def list_pantry(db: AsyncSession = Depends(get_session)):
             # skinless, boneless, meat only, raw" buried the one word that
             # mattered. The full name is still sent alongside.
             food_concept=concepts.get(p.food_id) if p.food_id else None,
+            group=common_pantry.kitchen_group(
+                categories.get(p.food_id) if p.food_id else None,
+            ),
             quantity=p.quantity, unit=p.unit, expires_on=p.expires_on,
             updated_at=p.updated_at,
             days_to_expiry=((p.expires_on - today).days if p.expires_on else None),
         )
         for p in rows
     ]
-    # Expiring first — that is the only ordering the list is ever read
-    # for. Items with no date sort last rather than pretending to be
-    # urgent.
+    # By kitchen section, then alphabetically inside it.
+    #
+    # This used to be expiring-first, on the reasoning that expiry is the
+    # only ordering the list is ever read for. That held at a handful of
+    # items and stopped holding at forty-nine: a flat list sorted by a
+    # date most rows do not have is just an arbitrary order, and finding
+    # out whether you have paprika means reading all of it.
+    #
+    # Expiry is not lost — `days_to_expiry` is still on every row and the
+    # clients surface anything urgent above the sections, so the one
+    # thing the old sort was protecting still comes first.
+    order = {g: i for i, g in enumerate(common_pantry.GROUP_ORDER)}
     out.sort(key=lambda p: (
-        p.days_to_expiry if p.days_to_expiry is not None else 10**6,
-        (p.food_name or p.label or "").lower(),
+        order.get(p.group, len(order)),
+        (p.food_concept or p.food_name or p.label or "").lower(),
     ))
     return out
 

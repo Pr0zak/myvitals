@@ -133,3 +133,71 @@ def flat() -> list[tuple[str, str, str]]:
         for cat, items in COMMON_PANTRY.items()
         for label, term in items
     ]
+
+
+# ---------------------------------------------------------------------------
+# Grouping a pantry for reading
+# ---------------------------------------------------------------------------
+
+#: USDA's category -> the kitchen group this module already uses for its
+#: staples. Two vocabularies for one idea would be worse than either, so
+#: the curated eight above are the vocabulary and this maps onto them.
+#:
+#: USDA's names are a database taxonomy, not kitchen sections: "Legumes
+#: and Legume Products", "Soups, Sauces, and Gravies", "Cereal Grains and
+#: Pasta". Useful for classification, unreadable as headings over the
+#: things in your cupboard.
+_USDA_TO_GROUP: dict[str, str] = {
+    "Poultry Products": "Meat & fish",
+    "Beef Products": "Meat & fish",
+    "Pork Products": "Meat & fish",
+    "Lamb, Veal, and Game Products": "Meat & fish",
+    "Finfish and Shellfish Products": "Meat & fish",
+    "Sausages and Luncheon Meats": "Meat & fish",
+    "Dairy and Egg Products": "Dairy",
+    "Vegetables and Vegetable Products": "Vegetables",
+    "Fruits and Fruit Juices": "Fruit",
+    "Cereal Grains and Pasta": "Grains & pasta",
+    "Baked Products": "Grains & pasta",
+    "Breakfast Cereals": "Grains & pasta",
+    "Spices and Herbs": "Baking & spices",
+    "Sweets": "Baking & spices",
+    "Nut and Seed Products": "Baking & spices",
+    "Fats and Oils": "Oils & condiments",
+    "Soups, Sauces, and Gravies": "Oils & condiments",
+    "Legumes and Legume Products": "Tins & jars",
+    "Beverages": "Drinks",
+}
+
+#: The order sections appear in. Roughly how a shop is walked and how a
+#: kitchen is arranged — fresh first, cupboard staples after, the
+#: uncategorised remainder last so it never sits between two real
+#: sections.
+GROUP_ORDER: tuple[str, ...] = (
+    "Meat & fish",
+    "Dairy",
+    "Vegetables",
+    "Fruit",
+    "Grains & pasta",
+    "Tins & jars",
+    "Oils & condiments",
+    "Baking & spices",
+    "Drinks",
+    "Other",
+)
+
+
+def kitchen_group(usda_category: str | None) -> str:
+    """Which section of a kitchen a food belongs to.
+
+    Returns "Other" for anything unmapped, which covers two real cases:
+    a USDA category nobody has classified yet, and a hand-typed pantry
+    item with no food behind it at all. Fifteen of this user's
+    forty-nine pantry rows are the second kind — they are typed names
+    like "Flower" with no catalog match — so "Other" is a populated
+    section, not a rounding error, and it is placed last rather than
+    hidden.
+    """
+    if not usda_category:
+        return "Other"
+    return _USDA_TO_GROUP.get(usda_category.strip(), "Other")

@@ -1918,6 +1918,9 @@ export interface PantryItem {
    *  answers whether you have something, and USDA's discriminating
    *  detail is noise for that. Null for hand-typed and prepared food. */
   food_concept: string | null;
+  /** Kitchen section, derived server-side so both clients group
+   *  the same pantry the same way. */
+  group: string;
   quantity: number | null;
   unit: string | null;
   expires_on: string | null;

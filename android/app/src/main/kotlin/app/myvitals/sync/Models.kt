@@ -1981,6 +1981,9 @@ data class PantryItemOut(
     // The short, shopping-shaped name. A pantry answers "do I have this",
     // and USDA's discriminating detail is noise for that question.
     @Json(name = "food_concept") val foodConcept: String? = null,
+    // Kitchen section, derived server-side so both clients group the
+    // same pantry the same way.
+    val group: String = "Other",
     val quantity: Double? = null,
     val unit: String? = null,
     @Json(name = "expires_on") val expiresOn: String? = null,

@@ -145,6 +145,26 @@ async function remove(item: PantryItem) {
   }
 }
 
+/** Expiring within three days, surfaced above the sections. */
+const urgent = computed(() =>
+  items.value.filter((i) => i.days_to_expiry != null && i.days_to_expiry <= 3),
+);
+
+/**
+ * Kitchen sections, in the order the server sent them. Grouping on the
+ * server-supplied `group` rather than re-deriving it here is what keeps
+ * the phone and the web from sectioning the same pantry differently.
+ */
+const grouped = computed(() => {
+  const out = new Map<string, typeof items.value>();
+  for (const i of items.value) {
+    const g = i.group || "Other";
+    if (!out.has(g)) out.set(g, []);
+    out.get(g)!.push(i);
+  }
+  return [...out.entries()];
+});
+
 function title(i: PantryItem): string {
   // Concept first: "chicken breast", not "Chicken, broiler or fryers,
   // breast, skinless, boneless, meat only, raw", which buried the one
@@ -317,22 +337,54 @@ function expiryClass(i: PantryItem): string {
       matched against it.
     </EmptyState>
 
-    <ul v-else class="list">
-      <li v-for="i in items" :key="i.id" :class="expiryClass(i)">
-        <div class="main">
-          <span class="name">{{ title(i) }}</span>
-          <span v-if="amount(i)" class="qty">{{ amount(i) }}</span>
-        </div>
-        <div class="right">
-          <span v-if="expiryLabel(i)" class="exp" :class="expiryClass(i)">
-            {{ expiryLabel(i) }}
-          </span>
-          <button class="icon-btn" title="Remove" @click="remove(i)">
-            <Trash2 :size="14" />
-          </button>
-        </div>
-      </li>
-    </ul>
+    <template v-else>
+      <!-- Anything urgent sits ABOVE the sections. The list used to be
+           sorted expiring-first, which was right when the pantry was
+           small; at fifty items a flat list ordered by a date most rows
+           do not have is just an arbitrary order. Sections make it
+           readable; this keeps what that sort was protecting. -->
+      <template v-if="urgent.length">
+        <h3 class="section urgent">Use soon</h3>
+        <ul class="list">
+          <li v-for="i in urgent" :key="`u-${i.id}`" :class="expiryClass(i)">
+            <div class="main">
+              <span class="name">{{ title(i) }}</span>
+              <span v-if="amount(i)" class="qty">{{ amount(i) }}</span>
+            </div>
+            <div class="right">
+              <span v-if="expiryLabel(i)" class="exp" :class="expiryClass(i)">
+                {{ expiryLabel(i) }}
+              </span>
+              <button class="icon-btn" title="Remove" @click="remove(i)">
+                <Trash2 :size="14" />
+              </button>
+            </div>
+          </li>
+        </ul>
+      </template>
+
+      <!-- Grouped in the order the server sends, so the two surfaces
+           cannot section the same pantry differently. -->
+      <template v-for="[group, rows] in grouped" :key="group">
+        <h3 class="section">{{ group }}</h3>
+        <ul class="list">
+          <li v-for="i in rows" :key="i.id" :class="expiryClass(i)">
+            <div class="main">
+              <span class="name">{{ title(i) }}</span>
+              <span v-if="amount(i)" class="qty">{{ amount(i) }}</span>
+            </div>
+            <div class="right">
+              <span v-if="expiryLabel(i)" class="exp" :class="expiryClass(i)">
+                {{ expiryLabel(i) }}
+              </span>
+              <button class="icon-btn" title="Remove" @click="remove(i)">
+                <Trash2 :size="14" />
+              </button>
+            </div>
+          </li>
+        </ul>
+      </template>
+    </template>
   </div>
 </template>
 
@@ -426,4 +478,10 @@ button.ghost { background: transparent; color: var(--muted-2); }
   cursor: pointer; display: flex; padding: 0.2rem;
 }
 .icon-btn:hover { color: #f87171; }
+.section {
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--muted);
+  margin: 1rem 0 0.3rem;
+}
+.section.urgent { color: #ffb52e; }
 </style>

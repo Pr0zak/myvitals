@@ -982,14 +982,26 @@ async def goal_check(
     elif goal.kind == "steps":
         relevant = [{"date": r["date"], "steps": r["steps"]} for r in rows]
 
+    goal_block: dict[str, Any] = {
+        "kind": goal.kind, "title": goal.title,
+        "target_value": goal.target_value, "target_unit": goal.target_unit,
+        "target_date": str(goal.target_date) if goal.target_date else None,
+        "started_at": str(goal.started_at),
+        "notes": goal.notes,
+    }
+    if goal.kind == "weight":
+        # The readings above are keyed `weight_kg`; the target is in
+        # whatever unit the user typed. Sending the target in kilograms
+        # too means the comparison needs no conversion, and a conversion
+        # nobody has to do is a conversion nobody can get wrong.
+        from ..analytics.targets import goal_target_kg
+
+        goal_block["target_kg"] = goal_target_kg(
+            goal.target_value, goal.target_unit,
+        )
+
     payload = {
-        "goal": {
-            "kind": goal.kind, "title": goal.title,
-            "target_value": goal.target_value, "target_unit": goal.target_unit,
-            "target_date": str(goal.target_date) if goal.target_date else None,
-            "started_at": str(goal.started_at),
-            "notes": goal.notes,
-        },
+        "goal": goal_block,
         "relevant_data": relevant,
         "context_last_30_days": rows,
     }
@@ -2849,8 +2861,9 @@ def _fasting_coach_system(tone: str) -> str:
 - 14d fasting history — per-fast started_at, duration_h, protocol
 - 14d in-fast logs — hunger (1-5), mood (1-5), hydration_ml, notes
 - Today's planned strength split + recovery_score (when there is one)
-- Active weight goal — current_value, target_value, progress_pct,
-  direction (loss-oriented)
+- Active weight goal — target_kg, current_kg, to_lose_kg, and the
+  target as the user typed it. Every weight is in kilograms and says so
+  in its key; see `_active_weight_goal_ctx` for why.
 - Active fasting goal — target_value (hours/week)
 - recent_alerts the anomaly scanner already raised
 - top_correlations, wow_deltas
@@ -2926,11 +2939,37 @@ async def _active_weight_goal_ctx(db: AsyncSession) -> dict[str, Any] | None:
         .order_by(models.BodyMetric.time.desc())
         .limit(1)
     )).scalar_one_or_none()
+    # Every number carries its unit in the KEY, and both are kilograms.
+    #
+    # This used to send `{"target_value": 200, "target_unit": "lb",
+    # "current_value": 115.3}` — the target in pounds, the current weight
+    # in kilograms, and one unit label between them. A model reading two
+    # adjacent numbers with a single "lb" beside them takes both as
+    # pounds, concludes this user is 85 lb UNDER a weight-loss goal, and
+    # advises accordingly. That is the failure direction that matters: it
+    # tells someone trying to lose weight to eat more.
+    #
+    # Same bug class as v0.26.1, where a goal stored in pounds was read
+    # as kilograms and the planner returned a surplus next to a
+    # weight-loss goal. `goal_target_kg` is the shared conversion that
+    # fixed it; this call site never used it.
+    from ..analytics.targets import goal_target_kg
+
+    target_kg = goal_target_kg(g.target_value, g.target_unit)
     return {
         "title": g.title,
-        "target_value": g.target_value,
-        "target_unit": g.target_unit,
-        "current_value": latest_kg,
+        "target_kg": round(target_kg, 1) if target_kg is not None else None,
+        "current_kg": round(latest_kg, 1) if latest_kg is not None else None,
+        "to_lose_kg": (
+            round(latest_kg - target_kg, 1)
+            if latest_kg is not None and target_kg is not None else None
+        ),
+        # What the user actually typed, kept so the model can echo their
+        # own units back at them rather than translating for them.
+        "target_as_entered": (
+            f"{g.target_value:g} {g.target_unit}"
+            if g.target_value is not None and g.target_unit else None
+        ),
         "started_at": g.started_at.isoformat() if g.started_at else None,
     }
 

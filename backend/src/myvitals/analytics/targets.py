@@ -92,6 +92,24 @@ def goal_target_kg(
     return float(target_value)
 
 
+def kg_to_goal_unit(kg: float | None, target_unit: str | None) -> float | None:
+    """A weight in kilograms, expressed in the unit a goal was set in.
+
+    The inverse of [goal_target_kg], and it exists for the same reason:
+    every weight comparison in this app has one side stored in kilograms
+    and the other in whatever the user typed. Doing the conversion in one
+    place is what stops the two halves being rendered in different units
+    beside each other — which is exactly how a 115.3 kg user came to see
+    "115.2 / 200 lb" on their goals card.
+    """
+    if kg is None:
+        return None
+    unit = (target_unit or "").strip().lower()
+    if unit in _LB_UNITS:
+        return float(kg) / KG_PER_LB
+    return float(kg)
+
+
 def _age(birth: date | None, today: date) -> int | None:
     if not birth:
         return None

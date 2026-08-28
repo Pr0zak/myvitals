@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics import projection
-from ..analytics.targets import goal_target_kg
+from ..analytics.targets import goal_target_kg, kg_to_goal_unit
 from ..analytics.trends import compute_badges
 from ..auth import require_any
 from ..config import settings
@@ -1005,7 +1005,22 @@ def _goal_progress(
         else:
             pct = (start - current) / denom * 100.0
         pct = max(0.0, min(100.0, pct))
-        return {"current_value": round(current, 2), "progress_pct": round(pct, 1)}
+        # Reported in the GOAL'S unit, not in the storage unit.
+        #
+        # The arithmetic above is right — it converts the target to
+        # kilograms and compares like with like. What shipped wrong was
+        # the OUTPUT: `current_value` was the raw kilogram figure, while
+        # the same response carries `target_value: 200` and
+        # `target_unit: "lb"`, and every client renders the two side by
+        # side. A user weighing 115.3 kg read "115.2 / 200 lb" on their
+        # goals card — a number that is not their weight in any unit the
+        # label claims.
+        return {
+            "current_value": round(
+                kg_to_goal_unit(current, g.target_unit) or current, 2,
+            ),
+            "progress_pct": round(pct, 1),
+        }
     # Gain-oriented kinds
     pct = (current / target * 100.0) if target > 0 else 0.0
     pct = max(0.0, min(100.0, pct))

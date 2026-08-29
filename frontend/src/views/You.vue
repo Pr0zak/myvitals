@@ -13,6 +13,7 @@
 import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
+import { goalTone, goalMovedAway, goalDeltaLabel } from "@/goalState";
 
 const router = useRouter();
 const loading = ref(true);
@@ -44,6 +45,15 @@ interface GoalRow {
   /** Real progress from the server. This screen used to fabricate it. */
   current_value?: number | null;
   progress_pct?: number | null;
+  /** GOAL-STATE: "achieved" | "advancing" | "at_start" | "moved_away" |
+   *  "no_data". A 0% bar cannot tell the last three apart. */
+  progress_state?: string | null;
+  /** Server-owned tone. Never derived here — see `goalState.ts`. */
+  state_tone?: string | null;
+  /** Signed, in the goal's own unit; exactly current - baseline. */
+  delta_value?: number | null;
+  baseline_value?: number | null;
+
   projection?: GoalProjection | null;
 }
 const goals = ref<GoalRow[]>([]);
@@ -238,11 +248,17 @@ function go(path: string): void {
               <div class="gname">{{ g.title }}</div>
               <div class="gval cyan">{{ goalValue(g) }}</div>
             </div>
-            <div class="bar" :class="{ unknown: goalUnknown(g) }">
-              <i v-if="!goalUnknown(g)"
+            <div class="bar" :class="{ unknown: goalUnknown(g), away: goalMovedAway(g) }">
+              <!-- The neon gradients read as achievement. A goal that has
+                   gone backwards gets the amber track instead, rather than
+                   a sliver of celebratory green. -->
+              <i v-if="!goalUnknown(g) && !goalMovedAway(g)"
                  :style="{ width: goalPct(g) + '%', background: goalGradient(i), boxShadow: goalGlow(i) }"></i>
             </div>
             <div v-if="goalUnknown(g)" class="geta mut">No reading yet</div>
+            <div v-else-if="goalMovedAway(g)" class="geta away-txt">
+              {{ goalDeltaLabel(g) }}
+            </div>
             <div v-else-if="goalEta(g)" class="geta"
                  :class="{ mut: g.projection?.is_fallback }">{{ goalEta(g) }}</div>
           </template>
@@ -303,6 +319,11 @@ function go(path: string): void {
 </template>
 
 <style scoped>
+/* No neon gradient on a goal that has gone the wrong way: the palette on
+   this shell reads as achievement, and a bright sliver on a regression is
+   the same lie the empty bar was telling, in a louder voice. */
+.bar.away { background: rgba(255, 181, 46, 0.18); }
+.geta.away-txt { color: #ffb52e; }
 .you-view {
   --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
   --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-cyan: #28e6ff; --rn-amber: #ffb52e;

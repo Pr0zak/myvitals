@@ -5,6 +5,7 @@ import { Plus, Pencil, Trash2, Check, X as XIcon, Sparkles } from "lucide-vue-ne
 import { api } from "@/api/client";
 import { renderMarkdown } from "@/markdown";
 import { fmtDateTime } from "@/format";
+import { goalTone, goalMovedAway, goalDeltaLabel } from "@/goalState";
 
 interface Goal {
   id: number;
@@ -18,6 +19,15 @@ interface Goal {
   notes: string | null;
   current_value?: number | null;
   progress_pct?: number | null;
+  /** GOAL-STATE: "achieved" | "advancing" | "at_start" | "moved_away" |
+   *  "no_data". A 0% bar cannot tell the last three apart. */
+  progress_state?: string | null;
+  /** Server-owned tone. Never derived here — see `goalState.ts`. */
+  state_tone?: string | null;
+  /** Signed, in the goal's own unit; exactly current - baseline. */
+  delta_value?: number | null;
+  baseline_value?: number | null;
+
 }
 
 const goals = ref<Goal[]>([]);
@@ -175,18 +185,29 @@ onMounted(load);
         <span class="muted">started {{ fmtDateTime(g.started_at) }}</span>
       </div>
       <div v-if="g.progress_pct != null && g.ended_at == null" class="progress-row">
-        <div class="progress-bar">
-          <div class="progress-fill"
-               :class="{ done: g.progress_pct >= 100 }"
-               :style="{ width: Math.min(100, g.progress_pct) + '%' }"/>
+        <!-- Math.max as well as Math.min. A negative width is an invalid
+             declaration, gets dropped, and a block div with no width falls
+             back to auto — a FULL bar on the goal doing worst. The server
+             clamps; this is the guard against the worst failure mode. -->
+        <div class="progress-bar" :class="`tone-${goalTone(g)}`">
+          <div class="progress-fill" :class="[{ done: g.progress_pct >= 100 }, `tone-${goalTone(g)}`]"
+               :style="{ width: Math.max(0, Math.min(100, g.progress_pct)) + '%' }"/>
         </div>
         <span class="progress-text mono">
           {{ g.current_value != null ? g.current_value.toFixed(1) : '—' }}
           <span class="dim">/ {{ g.target_value }} {{ g.target_unit ?? '' }}</span>
           <span class="dim">·</span>
-          {{ g.progress_pct.toFixed(0) }}%
+          <!-- A percentage is only meaningful while moving toward the
+               target. Backwards it reads 0, which is also what "not
+               started" reads, so say the distance instead. -->
+          <span v-if="goalMovedAway(g)" class="away">{{ goalDeltaLabel(g) }}</span>
+          <span v-else>{{ g.progress_pct.toFixed(0) }}%</span>
         </span>
       </div>
+      <p v-if="goalMovedAway(g) && g.baseline_value != null" class="away-note">
+        Moved away from this goal since
+        {{ g.baseline_value.toFixed(1) }} {{ g.target_unit ?? '' }} at the start.
+      </p>
       <p v-if="g.notes" class="notes">{{ g.notes }}</p>
       <div class="goal-actions">
         <button class="primary" :disabled="checking === g.id" @click="checkGoal(g)">
@@ -204,6 +225,13 @@ onMounted(load);
 </template>
 
 <style scoped>
+/* Amber, never rose. Rose belongs to the crisis surfaces; spending it on a
+   body weight that drifted over a quarter is how it comes to mean nothing
+   the day it fires for something that does. */
+.progress-bar.tone-caution { background: rgba(255, 181, 46, 0.16); }
+.progress-fill.tone-caution { background: #ffb52e; }
+.progress-text .away { color: #ffb52e; }
+.away-note { margin: 0.2rem 0 0; font-size: 0.75rem; color: #ffb52e; opacity: 0.9; }
 .goals { max-width: 800px; }
 .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
 h1 { margin: 0; }

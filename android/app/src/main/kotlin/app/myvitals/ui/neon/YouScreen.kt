@@ -55,6 +55,9 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.math.floor
 import kotlin.math.roundToInt
+import app.myvitals.ui.common.GoalAway
+import app.myvitals.ui.common.goalDeltaLabel
+import app.myvitals.ui.common.goalMovedAway
 
 /**
  * You — neon personal hub. Mirrors web `You.vue`: a fasting habit card (cyan
@@ -462,9 +465,15 @@ private fun GoalRow(g: AiGoal, accent: Color) {
     val pct: Float? = when {
         g.progressPct != null -> (g.progressPct / 100.0).toFloat().coerceIn(0f, 1f)
         g.currentValue != null && g.targetValue != null && g.targetValue != 0.0 ->
+            // Last-resort ratio for a server that predates GOALS-3. It is
+            // wrong for a weight goal being APPROACHED FROM ABOVE — 253.9
+            // against 200 is 1.27, clamped to a full bar on the goal doing
+            // worst — which is why the server never nulls progressPct to
+            // signal "no progress", and why nothing new may make it do so.
             (g.currentValue / g.targetValue).toFloat().coerceIn(0f, 1f)
         else -> null
     }
+    val away = goalMovedAway(g)
     val valueText: String = when {
         g.currentValue != null && g.targetValue != null ->
             "${trimNum(g.currentValue)} / ${trimNum(g.targetValue)}" +
@@ -507,11 +516,20 @@ private fun GoalRow(g: AiGoal, accent: Color) {
                         .height(7.dp)
                         .clip(RoundedCornerShape(7.dp))
                         .background(
-                            Brush.horizontalGradient(
+                            // The neon gradients read as achievement. A
+                            // goal that has gone the wrong way gets flat
+                            // amber instead — a bright sliver on a
+                            // regression is the empty bar's lie, louder.
+                            if (away) Brush.horizontalGradient(listOf(GoalAway, GoalAway))
+                            else Brush.horizontalGradient(
                                 listOf(accent, accent.copy(alpha = 0.75f)),
                             ),
                         ),
                 )
+            }
+            goalDeltaLabel(g)?.takeIf { away }?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, color = GoalAway, fontSize = 11.sp)
             }
         }
     }

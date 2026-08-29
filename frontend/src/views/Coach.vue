@@ -13,6 +13,7 @@ import { onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import { api, type CoachCardOut } from "@/api/client";
 import { Activity, Bed, Dumbbell, HeartPulse, Hourglass, RefreshCw, Target } from "lucide-vue-next";
+import { goalTone, goalMovedAway, goalDeltaLabel } from "@/goalState";
 
 interface GoalProgress {
   id: number;
@@ -22,6 +23,14 @@ interface GoalProgress {
   target_unit: string | null;
   current_value: number | null;
   progress_pct: number | null;
+  /** GOAL-STATE: "achieved" | "advancing" | "at_start" | "moved_away" |
+   *  "no_data". A 0% bar cannot tell the last three apart. */
+  progress_state?: string | null;
+  /** Server-owned tone. Never derived here — see `goalState.ts`. */
+  state_tone?: string | null;
+  /** Signed, in the goal's own unit; exactly current - baseline. */
+  delta_value?: number | null;
+  baseline_value?: number | null;
 }
 
 const goals = ref<GoalProgress[]>([]);
@@ -224,14 +233,16 @@ onMounted(() => { preload(); loadGoals(); });
           <div class="goal-row-head">
             <span class="goal-kind-pill">{{ g.kind }}</span>
             <span class="goal-title">{{ g.title }}</span>
-            <span v-if="g.progress_pct != null" class="goal-pct mono">
+            <span v-if="goalMovedAway(g)" class="goal-pct mono away">
+              {{ goalDeltaLabel(g) }}
+            </span>
+            <span v-else-if="g.progress_pct != null" class="goal-pct mono">
               {{ g.progress_pct.toFixed(0) }}%
             </span>
           </div>
-          <div class="bar">
-            <div class="bar-fill"
-                 :class="{ done: (g.progress_pct ?? 0) >= 100 }"
-                 :style="{ width: Math.min(100, g.progress_pct ?? 0) + '%' }"/>
+          <div class="bar" :class="`tone-${goalTone(g)}`">
+            <div class="bar-fill" :class="[{ done: (g.progress_pct ?? 0) >= 100 }, `tone-${goalTone(g)}`]"
+                 :style="{ width: Math.max(0, Math.min(100, g.progress_pct ?? 0)) + '%' }"/>
           </div>
           <div v-if="g.current_value != null && g.target_value != null"
                class="goal-row-foot mono">
@@ -457,6 +468,10 @@ onMounted(() => { preload(); loadGoals(); });
 </template>
 
 <style scoped>
+/* Amber, never rose — rose is the crisis colour and must keep meaning that. */
+.bar.tone-caution { background: rgba(255, 181, 46, 0.16); }
+.bar-fill.tone-caution { background: #ffb52e; box-shadow: none; }
+.away { color: #ffb52e; }
 .coach { max-width: 760px; margin: 0 auto; padding: 1rem; }
 .hdr { margin-bottom: 1rem; }
 h1 { margin: 0 0 0.4rem; }

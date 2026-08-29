@@ -982,49 +982,137 @@ async def _current_values_for_goals(
     return out
 
 
+#: How far a weight may drift from the starting line before the app calls
+#: it a direction rather than noise.
+#:
+#: A figure, not a measurement — and per HEALTH-1's lesson it should be
+#: re-derived from this user's own within-week spread once there are
+#: enough weigh-ins to compute one. A card that fires on water weight is
+#: wrong most weeks, and a card that is wrong most weeks is one you learn
+#: to ignore before the week it matters. Until then the band absorbs the
+#: error in the safe direction: a genuine small regression reads as
+#: "at the starting line", never the reverse.
+WEIGHT_NOISE_BAND_KG = 1.0
+
+
 def _goal_progress(
     g: models.AiGoal, current: float | None, baseline: float | None = None,
 ) -> dict[str, Any]:
-    """Direction-aware progress for a goal (GOALS-3).
+    """Direction-aware progress for a goal (GOALS-3), and which STATE it
+    is in (GOAL-STATE).
 
-    - weight: loss-oriented. Progress measured against `baseline` (the
-      weight at goal-start). Falls back to `current + 1` so the bar
-      shows ~0% until real progress is made, rather than a confusing
-      negative pct.
-    - sleep / steps / sober: gain-oriented. Progress = current / target.
+    `progress_pct` keeps exactly the meaning it has always had: 0..100,
+    null when there is no current value. It is deliberately unchanged,
+    because clients that read only that field must keep working — a phone
+    one release behind, or a stale `coach_goals` cache row, is such a
+    client, and `YouScreen.kt` falls back to `current / target` when the
+    pct is absent. For a 253.9 lb user against a 200 lb goal that ratio
+    is 1.27, clamped to a FULL bar. Nulling the pct to signal "no
+    progress" would therefore paint the most emphatic possible success on
+    the exact goal that has gone backwards.
+
+    So every new fact goes in a new field. An un-updated surface renders
+    what it renders today: incomplete, never wrong.
+
+    `progress_state` is what surfaces branch on:
+
+      achieved   target met
+      advancing  moving toward the target
+      at_start   on the starting line, or inside the noise band
+      moved_away past the starting line by more than the noise band
+      no_data    no current reading, or no baseline to measure from
+
+    `state_tone` is separate and server-owned, for the same reason
+    `analytics/compare.py` owns `better`: a client left to infer colour
+    from the state would eventually paint a broken sober streak as a
+    warning. Tone is decided here so that cannot happen.
     """
     if current is None or g.target_value is None:
-        return {"current_value": None, "progress_pct": None}
+        return {
+            "current_value": None, "progress_pct": None,
+            "baseline_value": None, "delta_value": None,
+            "progress_state": "no_data", "state_tone": "unknown",
+        }
+
     target = g.target_value
     if g.kind == "weight":
         target_kg = goal_target_kg(target, g.target_unit)
-        start = baseline if baseline is not None else (current + 1.0)
+        # The signed formula is already general. It used to be guarded by
+        # `if denom <= 0: pct = 100 if current <= target else 0`, which
+        # is wrong for a weight-GAIN goal: baseline 70 kg, target 80 kg
+        # gives denom = -10, so at 75 kg — exactly halfway — `current <=
+        # target` held and the bar read 100%. Losing the special case
+        # fixes gain goals by deletion: (70-75)/(70-80) = +50%.
+        start = baseline if baseline is not None else current
         denom = start - target_kg
-        if denom <= 0:
-            pct = 100.0 if current <= target_kg else 0.0
+        raw_pct = 0.0 if denom == 0 else (start - current) / denom * 100.0
+        pct = max(0.0, min(100.0, raw_pct))
+
+        # Reported in the GOAL'S unit, not the storage unit. `baseline`
+        # is converted HERE rather than by the caller — it used to be
+        # emitted one line later as raw kilograms beside a pounds target,
+        # and the test guarding this walks the AST of THIS function, so a
+        # conversion in the caller was outside its reach. Two conversions
+        # in two places is the bug; there is now one.
+        cur_out = kg_to_goal_unit(current, g.target_unit)
+        base_out = kg_to_goal_unit(baseline, g.target_unit)
+
+        # Signed, in the goal's unit, and always exactly
+        # `current_value - baseline_value` so the subtraction a user can
+        # do on screen agrees with the state shown.
+        delta = None if base_out is None else round(cur_out - base_out, 2)
+
+        losing = target_kg is not None and start > target_kg
+        if target_kg is not None and (
+            (losing and current <= target_kg) or (not losing and current >= target_kg)
+        ):
+            state, tone = "achieved", "positive"
+        elif baseline is None:
+            # A goal with no weigh-in since it started cannot be measured
+            # against anything. That is not zero progress; it is no
+            # answer, and it says so.
+            state, tone = "no_data", "unknown"
+        elif abs(current - baseline) < WEIGHT_NOISE_BAND_KG:
+            state, tone = "at_start", "neutral"
+        elif raw_pct > 0:
+            state, tone = "advancing", "positive"
         else:
-            pct = (start - current) / denom * 100.0
-        pct = max(0.0, min(100.0, pct))
-        # Reported in the GOAL'S unit, not in the storage unit.
-        #
-        # The arithmetic above is right — it converts the target to
-        # kilograms and compares like with like. What shipped wrong was
-        # the OUTPUT: `current_value` was the raw kilogram figure, while
-        # the same response carries `target_value: 200` and
-        # `target_unit: "lb"`, and every client renders the two side by
-        # side. A user weighing 115.3 kg read "115.2 / 200 lb" on their
-        # goals card — a number that is not their weight in any unit the
-        # label claims.
+            # Amber, and only amber. Rose is reserved for the crisis
+            # surfaces; spending it on a body weight that drifted over a
+            # quarter is how it comes to mean nothing when it fires for
+            # something that matters.
+            state, tone = "moved_away", "caution"
+
         return {
-            "current_value": round(
-                kg_to_goal_unit(current, g.target_unit) or current, 2,
-            ),
+            "current_value": round(cur_out, 2) if cur_out is not None else None,
+            "baseline_value": round(base_out, 2) if base_out is not None else None,
+            "delta_value": delta,
             "progress_pct": round(pct, 1),
+            "progress_state": state,
+            "state_tone": tone,
         }
-    # Gain-oriented kinds
+
+    # Gain-oriented kinds: sleep, steps, sober, fast_streak.
     pct = (current / target * 100.0) if target > 0 else 0.0
     pct = max(0.0, min(100.0, pct))
-    return {"current_value": round(current, 2), "progress_pct": round(pct, 1)}
+    if target > 0 and current >= target:
+        state, tone = "achieved", "positive"
+    elif current > 0:
+        state, tone = "advancing", "positive"
+    else:
+        # Zero on a gain goal is the starting line, not a regression —
+        # and for a sober streak specifically it means the streak reset.
+        # Neutral, never caution: a relapse is the one thing this app
+        # must not colour like a warning.
+        state, tone = "at_start", "neutral"
+    return {
+        "current_value": round(current, 2),
+        "baseline_value": None,
+        "delta_value": None,
+        "progress_pct": round(pct, 1),
+        "progress_state": state,
+        "state_tone": tone,
+    }
 
 
 async def _goal_series(
@@ -1099,7 +1187,23 @@ async def _goal_projection(
         ).to_dict()
 
     series = await _goal_series(db, g.kind, today)
-    return projection.project(series, target=target, today=today).to_dict()
+    out = projection.project(series, target=target, today=today).to_dict()
+
+    # The fit runs in the storage unit. For a weight goal the series is
+    # `body_metrics.weight_kg` and the target was converted to kilograms
+    # above, so the slope is kg/day — but `target_unit` says "lb" and
+    # `You.vue` renders the rate as a bare "+0.25/wk" with no unit at
+    # all. Left alone that is a figure 2.2x off under a pounds goal:
+    # the fourth unit confusion in this one response, and the same shape
+    # as the three before it. Dates and confidence are unit-free and are
+    # not touched.
+    if g.kind == "weight":
+        for key in ("per_day", "per_week"):
+            if out.get(key) is not None:
+                out[key] = round(
+                    kg_to_goal_unit(out[key], g.target_unit) or out[key], 3,
+                )
+    return out
 
 
 @router.get("/goals")
@@ -1119,8 +1223,12 @@ async def list_goals(
             baseline = None
             if g.kind == "weight":
                 baseline = await _baseline_weight_kg_for_goal(db, g.started_at)
+            # `_goal_progress` emits `baseline_value` itself, converted.
+            # It used to be added here as raw kilograms next to a pounds
+            # target — the third unit bug in this area, and invisible to
+            # the test that guards the conversion because that test walks
+            # `_goal_progress` and this line is in its caller.
             d.update(_goal_progress(g, currents[g.kind], baseline))
-            d["baseline_value"] = round(baseline, 2) if baseline is not None else None
             # GOAL-1: rate + ETA, or an explicit reason there isn't one.
             d["projection"] = await _goal_projection(
                 db, g, currents[g.kind], _local_today_ai(),
@@ -1129,6 +1237,9 @@ async def list_goals(
             d["current_value"] = None
             d["progress_pct"] = None
             d["baseline_value"] = None
+            d["delta_value"] = None
+            d["progress_state"] = "no_data"
+            d["state_tone"] = "unknown"
             d["projection"] = None
         out.append(d)
     return out

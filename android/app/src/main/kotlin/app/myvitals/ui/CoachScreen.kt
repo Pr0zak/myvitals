@@ -53,6 +53,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import app.myvitals.ui.common.GoalAway
+import app.myvitals.ui.common.goalDeltaLabel
+import app.myvitals.ui.common.goalMovedAway
 
 /**
  * Coach — phone mirror of /coach. Two lazy-loaded AI cards (workout
@@ -819,11 +822,14 @@ private fun GoalsCard(goals: List<app.myvitals.sync.AiGoal>, neon: Boolean) {
 @Composable
 private fun GoalRow(g: app.myvitals.sync.AiGoal, neon: Boolean) {
     val pct = (g.progressPct ?: 0.0).coerceIn(0.0, 100.0)
-    // Completed=Lime, in-progress=Cyan under neon; sky-blue classic.
-    val barColor = if (pct >= 100.0) {
-        if (neon) NeonMV.Lime else Color(0xFF22C55E)
-    } else {
-        if (neon) NeonMV.Cyan else Color(0xFF38BDF8)
+    val away = goalMovedAway(g)
+    // Completed=Lime, in-progress=Cyan under neon; sky-blue classic. A goal
+    // that has gone BACKWARDS gets amber — never rose, which belongs to the
+    // crisis surfaces and stops meaning anything if spent here.
+    val barColor = when {
+        away -> GoalAway
+        pct >= 100.0 -> if (neon) NeonMV.Lime else Color(0xFF22C55E)
+        else -> if (neon) NeonMV.Cyan else Color(0xFF38BDF8)
     }
     val pillFg = if (neon) NeonMV.Cyan else Color(0xFF38BDF8)
     val pillBg = if (neon) NeonMV.Cyan.copy(alpha = 0.10f) else Color(0x1A38BDF8)
@@ -842,7 +848,14 @@ private fun GoalRow(g: app.myvitals.sync.AiGoal, neon: Boolean) {
             Spacer(Modifier.width(8.dp))
             Text(g.title, color = ink, fontSize = 13.sp,
                 modifier = Modifier.weight(1f))
-            if (g.progressPct != null) {
+            // A percentage only means something while moving toward the
+            // target. Backwards it pins to 0, which is also what "not
+            // started" shows, so the distance is stated instead.
+            val delta = goalDeltaLabel(g)
+            if (away && delta != null) {
+                Text(delta, color = GoalAway,
+                    fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            } else if (g.progressPct != null) {
                 Text("${pct.toInt()}%", color = ink,
                     fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }

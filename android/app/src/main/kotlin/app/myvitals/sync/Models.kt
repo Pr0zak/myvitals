@@ -1632,6 +1632,28 @@ data class AiGoal(
     @Json(name = "current_value") val currentValue: Double? = null,
     @Json(name = "progress_pct") val progressPct: Double? = null,
     @Json(name = "baseline_value") val baselineValue: Double? = null,
+    /**
+     * GOAL-STATE — which of the three things a 0% bar could mean.
+     *
+     * "achieved" | "advancing" | "at_start" | "moved_away" | "no_data".
+     * `progressPct` alone reads 0 for "not started yet", "on the starting
+     * line" and "five pounds the wrong way", and the last is the only one
+     * worth telling someone about.
+     *
+     * Null on a server that predates this field; every surface treats an
+     * unrecognised value the same as null and renders as it did before.
+     */
+    @Json(name = "progress_state") val progressState: String? = null,
+    /**
+     * Server-owned tone: "positive" | "neutral" | "caution" | "unknown".
+     *
+     * NOT derived on the client, deliberately. A phone inferring "the
+     * number went down, so warn" would eventually paint a broken sober
+     * streak amber, which is the one thing this app must never do.
+     */
+    @Json(name = "state_tone") val stateTone: String? = null,
+    /** Signed, in the goal's own unit; exactly currentValue - baselineValue. */
+    @Json(name = "delta_value") val deltaValue: Double? = null,
     /** GOAL-1: where this is heading, or why the data will not say. */
     val projection: GoalProjection? = null,
 )

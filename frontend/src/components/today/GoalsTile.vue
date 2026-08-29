@@ -11,6 +11,7 @@
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import { Target } from "lucide-vue-next";
+import { goalTone, goalMovedAway, goalDeltaLabel } from "@/goalState";
 
 interface GoalProgress {
   id: number;
@@ -20,6 +21,14 @@ interface GoalProgress {
   target_unit: string | null;
   current_value: number | null;
   progress_pct: number | null;
+  /** GOAL-STATE: "achieved" | "advancing" | "at_start" | "moved_away" |
+   *  "no_data". A 0% bar cannot tell the last three apart. */
+  progress_state?: string | null;
+  /** Server-owned tone. Never derived here — see `goalState.ts`. */
+  state_tone?: string | null;
+  /** Signed, in the goal's own unit; exactly current - baseline. */
+  delta_value?: number | null;
+  baseline_value?: number | null;
 }
 
 const props = defineProps<{ goals: GoalProgress[] }>();
@@ -39,14 +48,16 @@ const visible = computed(() => props.goals.slice(0, 4));
         <div class="row-head">
           <span class="kind-pill">{{ g.kind }}</span>
           <span class="row-title">{{ g.title }}</span>
-          <span v-if="g.progress_pct != null" class="pct mono">
+          <span v-if="goalMovedAway(g)" class="pct mono away">
+            {{ goalDeltaLabel(g) }}
+          </span>
+          <span v-else-if="g.progress_pct != null" class="pct mono">
             {{ g.progress_pct.toFixed(0) }}%
           </span>
         </div>
-        <div class="bar">
-          <div class="bar-fill"
-               :class="{ done: (g.progress_pct ?? 0) >= 100 }"
-               :style="{ width: Math.min(100, g.progress_pct ?? 0) + '%' }"/>
+        <div class="bar" :class="`tone-${goalTone(g)}`">
+          <div class="bar-fill" :class="[{ done: (g.progress_pct ?? 0) >= 100 }, `tone-${goalTone(g)}`]"
+               :style="{ width: Math.max(0, Math.min(100, g.progress_pct ?? 0)) + '%' }"/>
         </div>
         <div v-if="g.current_value != null && g.target_value != null"
              class="row-foot mono dim">
@@ -58,6 +69,10 @@ const visible = computed(() => props.goals.slice(0, 4));
 </template>
 
 <style scoped>
+/* Amber, never rose — rose is the crisis colour and must keep meaning that. */
+.bar.tone-caution { background: rgba(255, 181, 46, 0.16); }
+.bar-fill.tone-caution { background: #ffb52e; box-shadow: none; }
+.away { color: #ffb52e; }
 .goals-card { padding: 14px 16px; }
 .head-row {
   display: flex; align-items: center; gap: 10px;

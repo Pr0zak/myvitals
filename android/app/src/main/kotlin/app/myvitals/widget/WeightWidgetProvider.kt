@@ -10,6 +10,8 @@ import app.myvitals.sync.BackendClient
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
+import app.myvitals.ui.common.goalDeltaLabel
+import app.myvitals.ui.common.goalMovedAway
 
 /** WIDGET-4 — active weight goal progress (current / target + bar). */
 class WeightWidgetProvider : AppWidgetProvider() {
@@ -51,11 +53,21 @@ class WeightWidgetProvider : AppWidgetProvider() {
                 val unit = goal.targetUnit ?: ""
                 rv.setTextViewText(R.id.widget_value,
                     cur?.let { "%.1f".format(it) } ?: "—")
-                rv.setTextViewText(R.id.widget_unit, "kg")
+                // `current_value` has been in the GOAL'S unit since the
+                // v0.31.x conversion fix; this label was still hard-coded
+                // "kg", so a pounds goal read "253.9 kg" — a weight that
+                // is the user's in no unit the label claims. Same family
+                // as the "115 lb" the conversion fix was for.
+                rv.setTextViewText(R.id.widget_unit, unit)
+                // Backwards, the percentage is 0 and says nothing the
+                // empty bar has not already said wrongly. State the
+                // distance from the start instead.
+                val delta = goalDeltaLabel(goal)
+                val tail = if (goalMovedAway(goal) && delta != null) delta
+                           else "%d%%".format((goal.progressPct ?: 0.0).toInt())
                 rv.setTextViewText(R.id.widget_sub,
-                    target?.let { "target %s %s  ·  %d%%".format(
-                        it.toString(), unit,
-                        (goal.progressPct ?: 0.0).toInt(),
+                    target?.let { "target %s %s  ·  %s".format(
+                        it.toString(), unit, tail,
                     ) } ?: "no target")
                 rv.setProgressBar(R.id.widget_progress, 100,
                     (goal.progressPct ?: 0.0).toInt().coerceIn(0, 100), false)

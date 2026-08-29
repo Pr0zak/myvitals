@@ -70,7 +70,6 @@ const visible = computed(() => props.goals.slice(0, 4));
 
 <style scoped>
 /* Amber, never rose — rose is the crisis colour and must keep meaning that. */
-.bar.tone-caution { background: rgba(255, 181, 46, 0.16); }
 .bar-fill.tone-caution { background: #ffb52e; box-shadow: none; }
 .away { color: #ffb52e; }
 .goals-card { padding: 14px 16px; }

@@ -227,8 +227,13 @@ onMounted(load);
 <style scoped>
 /* Amber, never rose. Rose belongs to the crisis surfaces; spending it on a
    body weight that drifted over a quarter is how it comes to mean nothing
-   the day it fires for something that does. */
-.progress-bar.tone-caution { background: rgba(255, 181, 46, 0.16); }
+   the day it fires for something that does.
+
+   The TRACK is deliberately not tinted. Tinting it put a solid amber band
+   across a third of the row — the width the flex track happens to occupy —
+   which reads as a bar filled to 33%, on the one goal whose whole message
+   is that nothing has been filled. The words carry it instead, as they do
+   on the phone. */
 .progress-fill.tone-caution { background: #ffb52e; }
 .progress-text .away { color: #ffb52e; }
 .away-note { margin: 0.2rem 0 0; font-size: 0.75rem; color: #ffb52e; opacity: 0.9; }

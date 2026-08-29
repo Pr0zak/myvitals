@@ -496,7 +496,15 @@ private fun GoalRow(g: AiGoal, accent: Color) {
             Spacer(Modifier.width(8.dp))
             Text(
                 valueText,
-                color = if (pct != null) accent else NeonMV.Muted,
+                // The number is what the eye lands on first. Leaving it in
+                // the accent — a colour this shell uses for achievement —
+                // beside an amber "above start" line makes the row argue
+                // with itself.
+                color = when {
+                    away -> GoalAway
+                    pct != null -> accent
+                    else -> NeonMV.Muted
+                },
                 fontFamily = NeonNumberFamily,
                 fontSize = 13.sp, fontWeight = FontWeight.Bold,
             )

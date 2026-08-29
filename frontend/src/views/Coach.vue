@@ -469,7 +469,6 @@ onMounted(() => { preload(); loadGoals(); });
 
 <style scoped>
 /* Amber, never rose — rose is the crisis colour and must keep meaning that. */
-.bar.tone-caution { background: rgba(255, 181, 46, 0.16); }
 .bar-fill.tone-caution { background: #ffb52e; box-shadow: none; }
 .away { color: #ffb52e; }
 .coach { max-width: 760px; margin: 0 auto; padding: 1rem; }

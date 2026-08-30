@@ -1575,7 +1575,8 @@ async def _advance_program_on_complete(
             int(r) for r in (await db.execute(
                 select(models.StrengthSet.actual_reps)
                 .where(models.StrengthSet.workout_exercise_id == wex_id)
-                .where(models.StrengthSet.set_type.notin_(("warmup", "drop")))
+                .where(models.StrengthSet.set_type.notin_(
+                    strength_algo.PROGRESSION_EXCLUDED_SET_TYPES))
                 .where(models.StrengthSet.actual_reps.is_not(None))
                 .order_by(models.StrengthSet.set_number)
             )).scalars().all()

@@ -54,6 +54,7 @@ Report artifact: `https://claude.ai/code/artifact/bb1f86ee-8e76-4c9c-a776-beeb1a
 | OG2-A7 | Rest timer drifts on web, and both surfaces count down after the final set of the session | M | both |
 | OG2-A8 | Wake lock absent on web; on phone it is keyed to the composable, not to the workout | S | both |
 | OG2-A9 | A logged set cannot be corrected or removed from either client | M | both |
+| OG2-A10 | Health Connect never deduped against itself, so one ride promoted twice | S | backend |
 
 ### Phase B — structure
 

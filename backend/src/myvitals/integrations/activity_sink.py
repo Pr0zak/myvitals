@@ -42,7 +42,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,6 +101,43 @@ HC_TYPE_MAP: dict[str, str] = {
 HC_SOURCE = "healthconnect"
 
 
+def is_duplicate_recording(
+    start: datetime,
+    end: datetime,
+    activity_type: str,
+    kept: list[tuple[datetime, datetime, str]],
+) -> datetime | None:
+    """The start of an earlier session this one is a second recording of.
+
+    Pure so the rule can be tested directly; the database half of the same
+    question is the identical predicate expressed in SQL.
+
+    Two conditions, both required:
+
+    * **The intervals overlap.** Not a ± window around the start, because
+      each recorder stamps its own start instant — the pair that prompted
+      this began 4.4 s apart and ended 0.6 s apart.
+    * **The type matches.** A strength session logged during a long walk
+      overlaps legitimately, and merging those loses real work.
+
+    Only a strictly EARLIER session can claim a later one, and that
+    asymmetry is load-bearing rather than a tidy-up: a symmetric test would
+    have each of a pair block the other, so both would be dropped and the
+    duplicate could never be resolved. Earliest wins is also stable across
+    runs, which is what stops the feed reordering itself between syncs.
+    """
+    best: datetime | None = None
+    for k_start, k_end, k_type in kept:
+        if k_type != activity_type:
+            continue
+        if k_start >= start:
+            continue
+        if k_start < end and start < k_end:
+            if best is None or k_start < best:
+                best = k_start
+    return best
+
+
 async def promote_health_connect_workouts(
     db: AsyncSession, since: datetime | None = None,
 ) -> dict[str, int]:
@@ -117,6 +154,27 @@ async def promote_health_connect_workouts(
     both have a session, the existing one wins and this does nothing. This
     fills gaps; it never overwrites.
 
+    That same reasoning applies WITHIN Health Connect, which the first cut
+    missed: the cross-provider clash query excludes `HC_SOURCE`, so two HC
+    sessions describing one ride each promoted independently. A ride on
+    2026-08-30 arrived twice from `com.fitbit.FitbitMobile`, starting 4.4 s
+    apart and ending 0.6 s apart, and appeared twice in the feed. Because
+    `source_id` is the start instant, the two never collided on the primary
+    key. This is the same shape as the multi-source step over-count that
+    `pick_canonical_steps_source` exists to solve — several Health Connect
+    writers publishing one underlying event.
+
+    So a session is also skipped when it overlaps an EARLIER session of the
+    same type already kept in this scan. Earliest start wins, which is
+    arbitrary between near-identical rows but is deterministic, and
+    determinism is what makes re-running produce the same feed. Sessions are
+    read oldest-first for exactly that reason.
+
+    Matching on type as well as interval is deliberate. Two different
+    activities can legitimately overlap — a strength session logged during a
+    long walk — and merging those would lose real work. Two sessions of the
+    SAME type covering the same minutes are one event seen twice.
+
     Idempotent — re-running promotes nothing new. Safe to call on every
     ingest and to re-run over history.
     """
@@ -126,6 +184,10 @@ async def promote_health_connect_workouts(
     sessions = (await db.execute(stmt)).scalars().all()
 
     promoted = already_present = skipped_overlap = skipped_untimed = 0
+    skipped_duplicate = removed_duplicate = 0
+    # (start, end, type) for every session kept in this scan, so a later
+    # session can be recognised as a second recording of one already taken.
+    kept: list[tuple[datetime, datetime, str]] = []
 
     for w in sessions:
         if not w.duration_s or w.duration_s <= 0:
@@ -162,11 +224,70 @@ async def promote_health_connect_workouts(
             skipped_overlap += 1
             continue
 
+        hc_type = HC_TYPE_MAP.get(
+            (w.type or "").lower(), (w.type or "workout").lower(),
+        )
+        source_id = start.isoformat()
+
+        # A second Health Connect recording of a session already taken in
+        # this scan. Same type, overlapping minutes.
+        twin = is_duplicate_recording(start, end, hc_type, kept)
+        # The in-memory list only covers the scan window, and `since` is the
+        # earliest workout in an ingest batch — so a batch carrying only the
+        # LATER of the pair would start its scan past the winner and promote
+        # the loser again. Ask the table too.
+        #
+        # Strictly earlier, never merely overlapping, and that asymmetry is
+        # the whole point: a mutual test would have each row block the other
+        # once both exist, so both would be skipped and the duplicate would
+        # become permanent. An earliest-wins test can never block the winner,
+        # because nothing precedes it.
+        if twin is None:
+            twin = (await db.execute(
+                select(models.Activity.start_at)
+                .where(models.Activity.source == HC_SOURCE)
+                .where(models.Activity.type == hc_type)
+                .where(models.Activity.start_at < start)
+                .where(models.Activity.start_at < end)
+                .where(
+                    func.extract("epoch", start - models.Activity.start_at)
+                    < func.coalesce(models.Activity.duration_s, 0)
+                )
+                .limit(1)
+            )).scalar_one_or_none()
+        if twin is not None:
+            skipped_duplicate += 1
+            # Self-heal a duplicate promoted before this rule existed —
+            # but only when there is demonstrably nothing to lose. `notes`,
+            # `tags` and `trail_id` belong to the user, and a row carrying
+            # any of them records a decision this function did not make and
+            # must not silently discard. Such a row is left in place and
+            # reported, not deleted.
+            stale = (await db.execute(
+                select(models.Activity)
+                .where(models.Activity.source == HC_SOURCE)
+                .where(models.Activity.source_id == source_id)
+                .limit(1)
+            )).scalar_one_or_none()
+            if stale is not None and not (
+                stale.notes or stale.tags or stale.trail_id
+            ):
+                await db.execute(
+                    delete(models.Activity)
+                    .where(models.Activity.source == HC_SOURCE)
+                    .where(models.Activity.source_id == source_id)
+                )
+                removed_duplicate += 1
+                log.info(
+                    "activity_sink: removed duplicate HC promotion %s "
+                    "(same %s as %s)", source_id, hc_type, twin.isoformat(),
+                )
+            continue
+
         # Distinguish a new promotion from a re-promotion. The upsert
         # below is idempotent either way, but a run that created nothing
         # must not report that it promoted twelve sessions — this endpoint
         # exists to say what it did, so the count has to be true.
-        source_id = start.isoformat()
         exists = (await db.execute(
             select(models.Activity.source_id)
             .where(models.Activity.source == HC_SOURCE)
@@ -182,9 +303,7 @@ async def promote_health_connect_workouts(
                 # natural key: re-promoting the same session updates its
                 # row rather than creating a second one.
                 "source_id": source_id,
-                "type": HC_TYPE_MAP.get(
-                    (w.type or "").lower(), (w.type or "workout").lower(),
-                ),
+                "type": hc_type,
                 "start_at": start,
                 "duration_s": int(w.duration_s),
                 "avg_hr": w.avg_hr,
@@ -198,6 +317,7 @@ async def promote_health_connect_workouts(
             # No GPS on these, so there is no trail to match.
             link_trail=False,
         )
+        kept.append((start, end, hc_type))
         if exists is None:
             promoted += 1
         else:
@@ -207,6 +327,8 @@ async def promote_health_connect_workouts(
         "promoted": promoted,
         "already_present": already_present,
         "skipped_overlap": skipped_overlap,
+        "skipped_duplicate": skipped_duplicate,
+        "removed_duplicate": removed_duplicate,
         "skipped_untimed": skipped_untimed,
         "considered": len(sessions),
     }

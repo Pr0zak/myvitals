@@ -212,43 +212,42 @@ class TestTheWinnerIsDeterministic:
 
 
 class TestSelfHealingIsConservative:
-    def test_a_stale_duplicate_row_is_removed(self):
-        """The rows promoted before this rule existed are still in the feed.
+    """The retire path, shared by both skip rules.
 
-        Fixing only the write path would leave the reported duplicate on
-        screen forever, so a scan that recognises a loser also clears the row
-        it created.
-        """
+    Promotion decides once, and BOTH of its skip rules can become true after
+    the fact: a second Health Connect recording arrives, or a richer provider
+    finally syncs. Skipping a session already promoted changes nothing on
+    screen, so the scan has to be able to take a row back.
+    """
+
+    def test_a_stale_row_is_removed(self):
         src = _promoter_source()
         assert "removed_duplicate" in src
-        assert "delete(models.Activity)" in src
+        assert "removed_superseded" in src
+        assert "_retire_promotion" in src
 
     def test_user_owned_columns_veto_the_delete(self):
         """`notes`, `tags` and `trail_id` belong to the user.
 
         A duplicate the user has annotated or linked to a trail records a
-        decision this function did not make. It is left in place and
-        reported rather than deleted — the same discipline as MEAL-3, where
-        only a demonstrably complete cancellation may drop a line.
+        decision this function did not make. It is left in place and reported
+        rather than deleted — the same discipline as MEAL-3, where only a
+        demonstrably complete cancellation may drop a line.
         """
-        src = _promoter_source()
-        assert "stale.notes" in src
-        assert "stale.tags" in src
-        assert "stale.trail_id" in src
+        src = inspect.getsource(activity_sink._retire_promotion)
+        assert "USER_OWNED_COLUMNS" in src
+        assert "return False" in src
 
-    def test_the_deleted_columns_are_exactly_the_user_owned_ones(self):
-        """Pinned against the module's own declared list.
+    def test_the_veto_reads_the_declared_list_rather_than_naming_columns(self):
+        """Pinned against the module's own declaration.
 
-        If a fourth user-owned column is added, the veto above stops being
-        complete and this test says so rather than letting a silent data
-        loss ship.
+        Spelling the three columns out by hand means a fourth user-owned
+        column added later is silently deletable. Reading the tuple the
+        module already declares makes that impossible.
         """
-        src = _promoter_source()
-        for column in activity_sink.USER_OWNED_COLUMNS:
-            assert f"stale.{column}" in src, (
-                f"{column} is declared user-owned but does not veto the "
-                "duplicate delete"
-            )
+        src = inspect.getsource(activity_sink._retire_promotion)
+        assert "for col in USER_OWNED_COLUMNS" in src
+        assert activity_sink.USER_OWNED_COLUMNS == ("notes", "tags", "trail_id")
 
     def test_the_delete_is_scoped_to_health_connect(self):
         """A DELETE in an ingest path is worth reading twice.
@@ -266,11 +265,59 @@ class TestSelfHealingIsConservative:
         assert len(deletes) == 1, (
             f"expected exactly one delete() in the sink, found {len(deletes)}"
         )
-        src = _promoter_source()
+        src = inspect.getsource(activity_sink._retire_promotion)
         head = src[src.index("delete(models.Activity)"):]
-        head = head[:head.index(")\n", head.index("source_id"))]
         assert "Activity.source == HC_SOURCE" in head
         assert "Activity.source_id == source_id" in head
+
+    def test_retiring_reports_whether_it_acted(self):
+        """The caller increments a counter off the return value.
+
+        Returning None and letting the caller assume success is how a
+        vetoed row would get counted as removed, which would report a
+        cleanup that did not happen.
+        """
+        src = inspect.getsource(activity_sink._retire_promotion)
+        assert "-> bool" in src
+        assert "return True" in src
+
+
+class TestARicherProviderArrivingLate:
+    """The reported second failure, one day after the first.
+
+    Health Connect had already promoted the ride when Strava synced two days
+    later, so the cross-provider skip — which only ever ran at promotion
+    time — had nothing left to prevent. The feed ended up holding three rows
+    for one ride: two Health Connect recordings and the Strava one.
+    """
+
+    def test_the_clash_branch_retires_the_row_it_promoted(self):
+        src = _promoter_source()
+        clash = src[src.index("if clash is not None:"):]
+        clash = clash[:clash.index("continue")]
+        assert "_retire_promotion" in clash
+        assert "removed_superseded += 1" in clash
+
+    def test_the_type_is_resolved_before_the_clash_branch(self):
+        """`source_id` is needed to retire, and it is derived from the start.
+
+        Ordering regression risk: the clash branch used to `continue` before
+        `source_id` existed, so moving the retire call in without hoisting
+        that would raise NameError on the one path that matters.
+        """
+        src = _promoter_source()
+        assert src.index("source_id = start.isoformat()") < src.index("if clash is not None:")
+
+    def test_superseded_and_duplicate_are_counted_separately(self):
+        """Two different faults, and only one of them is Health Connect's.
+
+        A ride superseded by a late Strava sync is the system working as
+        designed; two Health Connect recordings of one ride is a fault in the
+        source data. Folding them into one counter would hide the second.
+        """
+        src = _promoter_source()
+        assert '"removed_superseded": removed_superseded' in src
+        assert '"removed_duplicate": removed_duplicate' in src
 
 
 class TestTheCountsStayHonest:

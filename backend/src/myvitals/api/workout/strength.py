@@ -1874,24 +1874,34 @@ async def upcoming_workouts(
     per_day_count: int = 4,
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Project the next `days` calendar days. For each one that maps to a
-    workout day (per training.days_per_week), simulate the split + exercise
-    selection and return a preview. Does NOT persist anything; this is a
-    pure read-only forecast that lets the user see what's coming up."""
+    """Project the next `days` calendar days: what the generator will make,
+    simulated. Does NOT persist anything; this is a pure read-only forecast.
+
+    OG2-A4: this used to carry its own weekday table, introduced with the
+    comment "Mon-first weekday pattern matching the web/Android strip". It
+    matched the strips and disagreed with the generator, which is the thing
+    that actually decides what you train. At `days_per_week=2` the table said
+    Mon/Thu while `_STRENGTH_WEEKDAYS_BY_COUNT` says Mon/Fri, so the forecast
+    promised a session on a day no plan would ever be generated for.
+
+    The endpoint now asks `schedule_day_type`, which is the same function
+    `generate_plan` consults, so a disagreement is no longer expressible.
+    That also fixes a second fault the local table could not even represent:
+    it knew only "workout day or not", so cardio and yoga days were skipped
+    entirely and the forecast showed nothing for them. At this user's 6
+    strength + 2 cardio days that hid a real Sunday cardio session from the
+    week ahead. Only genuine rest days are omitted now.
+    """
     from datetime import date as _date, timedelta as _td
     import random as _random
 
     equip = await _equipment_payload(db)
     training = equip.get("training") or {}
     dpw = int(training.get("days_per_week", strength_algo.DEFAULT_DAYS_PER_WEEK))
+    cardio_pw = int(training.get("cardio_days_per_week", 0) or 0)
     pref = training.get("split_preference", strength_algo.DEFAULT_SPLIT_PREFERENCE)
     level = training.get("level", strength_algo.DEFAULT_LEVEL)
     exercise_prefs = equip.get("exercise_prefs") or {}
-
-    # Mon-first weekday pattern matching the web/Android strip
-    PATTERN = {2: {0, 3}, 3: {0, 2, 4}, 4: {0, 1, 3, 4},
-               5: {0, 1, 2, 3, 4}, 6: {0, 1, 2, 3, 4, 5}}
-    workout_dows = PATTERN.get(dpw, PATTERN[3])
 
     catalog_filtered = strength_algo.filter_catalog_for_equipment(
         strength_algo.CATALOG, equip,
@@ -1957,9 +1967,23 @@ async def upcoming_workouts(
 
     for offset in range(start_offset, days + 1):
         d = today + _td(days=offset)
-        # Mon-first index
-        mon_first = (d.weekday())  # Python's weekday(): Mon=0..Sun=6 ✓
-        if mon_first not in workout_dows:
+        day_type = strength_algo.schedule_day_type(d, dpw, cardio_pw)
+        if day_type == "rest":
+            continue
+        if day_type != "strength":
+            # A cardio or yoga day is a real scheduled day with no strength
+            # rotation behind it. Emit it — omitting it was what made the
+            # week ahead look emptier than it is — but do not advance
+            # `cursor_split` or `last_done`, because neither a ride nor a
+            # yoga flow is a strength session for rotation or spacing
+            # purposes. `generate_plan` reasons the same way.
+            out.append({
+                "date": d.isoformat(),
+                "is_today": offset == 0,
+                "split_focus": day_type,
+                "preview_exercises": [],
+                "exercise_count": 0,
+            })
             continue
         # Spacing: if this scheduled day lands the day after the last training
         # day, push it back one day when possible so the user doesn't hit two
@@ -1969,9 +1993,9 @@ async def upcoming_workouts(
         # was the rotation-misalignment bug).
         if last_done is not None and (d - last_done).days == 1:
             shifted = d + _td(days=1)
-            if shifted.weekday() not in workout_dows:
+            if strength_algo.schedule_day_type(shifted, dpw, cardio_pw) != "strength":
                 d = shifted
-            # else: next day is already a workout day — leave both alone.
+            # else: next day is already a strength day — leave both alone.
 
         focus = strength_algo.select_split(dpw, pref, cursor_split)
         cursor_split = focus

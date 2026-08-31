@@ -12,6 +12,7 @@ import app.myvitals.sync.StrengthRecoveryResponse
 import app.myvitals.sync.StrengthSetRow
 import app.myvitals.sync.StrengthWorkoutDetail
 import app.myvitals.sync.StrengthWorkoutSummary
+import app.myvitals.sync.UpcomingDay
 import app.myvitals.sync.WorkoutExercisePatchRequest
 import app.myvitals.sync.WorkoutPatchRequest
 import com.squareup.moshi.JsonAdapter
@@ -90,6 +91,24 @@ class StrengthRepository(
     suspend fun history(): List<StrengthWorkoutSummary> = withContext(Dispatchers.IO) {
         try { api().strengthWorkouts().workouts } catch (e: Exception) {
             Timber.w(e, "strengthWorkouts failed"); emptyList()
+        }
+    }
+
+    /** The generator's own schedule for the days ahead (OG2-A4).
+     *
+     * The week strip used to decide which days were training days from a
+     * copy of the weekday table. There were four copies, and the three on
+     * the read side agreed with each other while disagreeing with the
+     * generator that actually decides. Asking the server removes the
+     * question. Rest days are absent from the response by construction, so
+     * membership of this list is the whole test.
+     *
+     * Failing soft matters here: an unreachable backend must leave the strip
+     * showing history without projections, not blank it or crash the screen.
+     */
+    suspend fun upcoming(): List<UpcomingDay> = withContext(Dispatchers.IO) {
+        try { api().upcomingWorkouts().upcoming } catch (e: Exception) {
+            Timber.w(e, "upcomingWorkouts failed"); emptyList()
         }
     }
 

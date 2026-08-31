@@ -2391,17 +2391,51 @@ async def strength_stats(
     per_muscle: dict[str, float] = {}
     progression: dict[str, list[dict[str, Any]]] = {}
     workout_dates: set[str] = set()
+    # OG2-A3: sets that were performed but carry no poundage, so the
+    # volume figures cannot speak for them. Reported rather than hidden.
+    unweighted_sets = 0
 
     for d, ex_id, _setn, w_lb, reps, rating, skipped, set_type in rows:
-        if skipped or w_lb is None or reps is None or set_type == "warmup":
+        # OG2-A3: the null-weight test used to live here, one line above
+        # `workout_dates.add`, so a pull-up, a plank and a push-up were
+        # dropped before ANYTHING was counted — n_workouts, n_sets, the
+        # daily series, the ratings and the muscle split all excluded them,
+        # and a calisthenics-only day read as no session at all. That is 233
+        # of 760 logged sets on this database and 101 of 275 catalog
+        # exercises, on a home gym whose equipment is dumbbells, a bench and
+        # a pull-up bar.
+        #
+        # `/records` fixed exactly this in PR-1b and the fix was never
+        # carried across; `list_workouts` (:1358) has always had it right,
+        # filtering on `actual_reps` alone. So the app contained both the
+        # right and the wrong version of one query, twenty sections apart,
+        # and disagreed with itself on screen.
+        #
+        # A set counts as performed when it has reps and was not skipped or
+        # tagged as a warm-up. Whether it carries poundage decides only
+        # whether it can contribute to a POUNDS total.
+        kind = strength_algo.classify_set_row(skipped, reps, set_type, w_lb)
+        if kind == strength_algo.SET_EXCLUDED:
             continue
         date_iso = d.isoformat()
         workout_dates.add(date_iso)
-        vol = float(w_lb) * float(reps)
-        daily_vol[date_iso] = daily_vol.get(date_iso, 0.0) + vol
         daily_sets[date_iso] = daily_sets.get(date_iso, 0) + 1
         if rating is not None:
             rpe_vals.append(float(rating))
+
+        if kind == strength_algo.SET_UNWEIGHTED:
+            # Real work, no poundage. Deliberately NOT costed at zero: a
+            # volume total that quietly absorbs a set of pull-ups as 0 lb is
+            # worse than one that admits it is partial, which is the rule
+            # `_sum_nutrition` follows for an uncostable ingredient. It has
+            # already been counted as a set above, and `daily_sets` minus
+            # the weighted rows is what lets a client say which fraction of
+            # the work the volume figure speaks for.
+            unweighted_sets += 1
+            continue
+
+        vol = float(w_lb) * float(reps)
+        daily_vol[date_iso] = daily_vol.get(date_iso, 0.0) + vol
 
         # Muscle group from catalog
         meta = strength_algo.CATALOG_BY_ID.get(ex_id, {})
@@ -2411,6 +2445,11 @@ async def strength_stats(
         # Track top weight + top e1RM per (exercise, date) for the
         # progression series (e1RM-1). e1RM is the canonical strength signal;
         # a light warmup can't beat a working set's e1RM anyway.
+        #
+        # Still weight-keyed, deliberately: a reps-over-time series for
+        # bodyweight work is a different metric with a different axis and
+        # caption, and inventing one here would put reps and pounds on one
+        # scale. That is OG2-C3.
         e1 = strength_algo.estimate_1rm(w_lb, reps) or 0.0
         prog = progression.setdefault(ex_id, [])
         existing = next((p for p in prog if p["date"] == date_iso), None)
@@ -2466,6 +2505,12 @@ async def strength_stats(
         "n_workouts": len(workout_dates),
         "n_sets": sum(daily_sets.values()),
         "total_volume_lb": round(sum(daily_vol.values()), 1),
+        # OG2-A3: the denominator for the pounds figures. `n_sets` counts
+        # every working set; `total_volume_lb` can only speak for the ones
+        # carrying poundage. Emitting the gap lets a client caption the
+        # total honestly instead of implying it covers the session.
+        "unweighted_sets": unweighted_sets,
+        "weighted_sets": sum(daily_sets.values()) - unweighted_sets,
         "rpe_avg": round(sum(rpe_vals) / len(rpe_vals), 2) if rpe_vals else None,
         "daily": daily,
         "per_muscle": [
@@ -2533,23 +2578,41 @@ async def strength_volume_trend(
 
     vol: dict[_date, float] = {}
     setc: dict[_date, int] = {}
+    unweighted: dict[_date, int] = {}
     wkos: dict[_date, set] = {}
     for d, wid, w_lb, reps, skipped, set_type in rows:
-        if skipped or w_lb is None or reps is None or set_type == "warmup":
+        # OG2-A3, the same fault as in `/stats` and fixed the same way: a
+        # week of calisthenics used to report zero sets and zero workouts,
+        # so the mesocycle chart showed a gap where training had happened.
+        # Reps and not-skipped-or-warmup is what makes a set performed;
+        # poundage decides only what can enter a pounds total.
+        kind = strength_algo.classify_set_row(skipped, reps, set_type, w_lb)
+        if kind == strength_algo.SET_EXCLUDED:
             continue
         wk = d - _td(days=d.weekday())
-        vol[wk] = vol.get(wk, 0.0) + float(w_lb) * float(reps)
         setc[wk] = setc.get(wk, 0) + 1
         wkos.setdefault(wk, set()).add(wid)
+        if kind == strength_algo.SET_UNWEIGHTED:
+            unweighted[wk] = unweighted.get(wk, 0) + 1
+            continue
+        vol[wk] = vol.get(wk, 0.0) + float(w_lb) * float(reps)
 
     trend: list[dict[str, Any]] = []
     wk = since
     while wk <= this_monday:
+        n_sets = setc.get(wk, 0)
+        n_unweighted = unweighted.get(wk, 0)
         trend.append({
             "week_start": wk.isoformat(),
             "volume_lb": round(vol.get(wk, 0.0), 1),
-            "sets": setc.get(wk, 0),
+            "sets": n_sets,
             "workouts": len(wkos.get(wk, ())),
+            # The denominator for `volume_lb`, per week. A week that is all
+            # bodyweight work now reports its sets and workouts truthfully
+            # while its volume stays 0 lb, and these two say why rather than
+            # leaving the reader to infer a rest week.
+            "unweighted_sets": n_unweighted,
+            "weighted_sets": n_sets - n_unweighted,
         })
         wk += _td(days=7)
     return {"weeks": weeks, "since": since.isoformat(), "trend": trend}

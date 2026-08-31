@@ -730,6 +730,51 @@ def starting_weight_lb(movement_pattern: str, level: str) -> float | None:
     return table[LEVEL_INDEX.get(level, 1)]
 
 
+#: What one logged set contributes to an aggregate (OG2-A3).
+#:
+#: ``excluded``   not work: skipped, a warm-up, or never actually logged.
+#: ``unweighted`` real work carrying no poundage — a pull-up, a plank.
+#: ``weighted``   real work with a load, so it can enter a pounds total.
+SET_EXCLUDED = "excluded"
+SET_UNWEIGHTED = "unweighted"
+SET_WEIGHTED = "weighted"
+
+
+def classify_set_row(
+    skipped: bool, reps: int | None, set_type: str | None,
+    weight_lb: float | None,
+) -> str:
+    """Sort one logged set into what it may contribute to.
+
+    The distinction this draws is the whole of OG2-A3. Two aggregates asked
+    "does this set have poundage" when they meant "was this set performed",
+    and dropped every null-weight row before counting anything — so
+    ``n_workouts``, ``n_sets``, the daily series, the ratings and the muscle
+    split all excluded pull-ups, planks and push-ups, and a calisthenics-only
+    day read as no session at all. On this database that is 233 of 760 logged
+    sets and 101 of 275 catalog exercises, on a home gym of dumbbells, a
+    bench and a pull-up bar.
+
+    Being performed and being costable in pounds are separate questions, and
+    conflating them is what made a whole training day disappear. An
+    unweighted set is counted as work and withheld from the pounds figures —
+    never costed at zero, because a volume total that quietly absorbs a set
+    of pull-ups as 0 lb is worse than one that admits it is partial. That is
+    the same rule ``_sum_nutrition`` follows for an ingredient it cannot
+    cost, and the same reason ``/records`` reports bodyweight bests on their
+    own metric rather than as a weight of nothing.
+
+    ``/records`` already fixed this in PR-1b and ``list_workouts`` always had
+    it right; the two remaining sites did not. Sharing the predicate is what
+    stops a third reader inventing a fourth answer.
+    """
+    if skipped or reps is None or set_type == "warmup":
+        return SET_EXCLUDED
+    if weight_lb is None:
+        return SET_UNWEIGHTED
+    return SET_WEIGHTED
+
+
 def weight_from_history(
     avg_weight_lb: float | None,
     avg_rating: float | None,

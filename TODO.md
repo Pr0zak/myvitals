@@ -20,6 +20,97 @@ acting on it.
 
 ## Active — actionable now
 
+## #OG2 — openGym second-pass teardown (2026-08-29)
+
+A second teardown of `gitlab.com/DuarteSantos8/opengym`, run because the
+first one (`#ENHANCE`, researched 2026-07-25, shipped v0.7.322→342) saw
+openGym only up to ~v1.2.5. Everything since — v1.2.6 through v1.2.11 plus
+the unreleased drop-set/rest-pause work in its `PROJECT_CONTEXT.md` — was
+unexamined. 110 elements studied, 86 survived an adversarial refutation
+pass, 24 confirmed already shipped.
+
+The licensing rule from the first pass still binds: **openGym is AGPL-3.0
+and myvitals is not. Reimplement behaviour from the described design; never
+copy source.** Where a constant is recorded below it is recorded so the
+decision can be judged, and in every case the recommendation is to
+re-derive it against this user's own data rather than adopt it.
+
+Ten of these are defects rather than missing features — the app is
+currently telling the user something untrue — so Phase A runs first
+regardless of how appealing anything below it looks.
+
+Report artifact: `https://claude.ai/code/artifact/bb1f86ee-8e76-4c9c-a776-beeb1a6968c8`
+
+### Phase A — correctness (the app is currently wrong)
+
+| ID | Task | Size | Surface |
+|---|---|---|---|
+| OG2-A1 | `last_target_weight_for_exercise` averages warm-up and drop sets into the next prescription | S | backend |
+| OG2-A2 | A session logged without ratings falls through to `starting_weight_lb`, discarding real history | S | backend |
+| OG2-A3 | `/stats` + `/volume-trend` drop every null-weight set, so a bodyweight day counts as zero | M | backend |
+| OG2-A4 | `/upcoming` carries its own weekday table that disagrees with the generator at `days_per_week=2` | S | backend |
+| OG2-A5 | Weight deltas hard-code down-is-green, on `/weight` and again on Today | S | web |
+| OG2-A6 | An equipment change neither regenerates today's plan nor warns that it prescribes kit you no longer own | M | backend + both |
+| OG2-A7 | Rest timer drifts on web, and both surfaces count down after the final set of the session | M | both |
+| OG2-A8 | Wake lock absent on web; on phone it is keyed to the composable, not to the workout | S | both |
+| OG2-A9 | A logged set cannot be corrected or removed from either client | M | both |
+| OG2-A10 | Health Connect never deduped against itself, so one ride promoted twice | S | backend |
+
+### Phase B — structure
+
+| ID | Task | Size | Surface |
+|---|---|---|---|
+| OG2-B1 | One shared session reducer (`ok`/`enough`/`low`/`count`/`stalls`) for the thirteen readers of `strength_sets` | L | backend |
+| OG2-B2 | One `next_prescription()` entry point; generate/swap/ad-hoc currently disagree | M | backend |
+| OG2-B3 | Every target carries its own reason as structured data, not prose behind a tap | M | both |
+
+### Phase C — the feature
+
+| ID | Task | Size | Surface |
+|---|---|---|---|
+| OG2-C1 | Per-muscle fatigue, crossed with the systemic recovery signal openGym does not have | L | backend + both |
+| OG2-C2 | The muscle silhouette shown at planning time, not only in review | M | both |
+| OG2-C3 | The progression chart picks its metric, unit and caption from what was logged | M | both |
+| OG2-C4 | Every rated average shows its denominator; e1RM names its source set | M | both |
+
+### Phase D — follow-ons
+
+`OG2-D1` bodyweight rep ladder (reps → sets → refuse) ·
+`OG2-D2` session notes in three lifetimes, one pinned ·
+`OG2-D3` tap-to-read markers on the phone's charts ·
+`OG2-D4` goal line on the phone weight chart ·
+`OG2-D5` effort encoded on the progression dot ·
+`OG2-D6` year strip shaded by time, opening on today, tappable ·
+`OG2-D7` one muscle vocabulary and one reused intensity ramp ·
+`OG2-D8` warm-up ramp derived after the prescription ·
+`OG2-D9` pair / unpair / reorder mid-session ·
+`OG2-D10` sparse date → day-type override ·
+`OG2-D11` program state replayed from the log (closes PROG-STATE-1) ·
+`OG2-D12` snapshot muscle attribution at log time ·
+`OG2-D13` retained strength, named honestly ·
+`OG2-D14` curated import alias table ·
+`OG2-D15` the "Log weight" button actually logs weight ·
+`OG2-D16` light theme on the phone
+
+### Considered and rejected
+
+"Expected current 1RM" (openGym's own weakest number — a decay constant
+with no evidence basis, a floor that reports half your best forever, and a
+reset from one light set; fights `projection.py`'s refuse-rather-than-guess
+rule). openGym's fatigue reference EWMA ported as-is (dragged down by a
+light week, so post-deload training reads as more fatiguing than the same
+work before it — myvitals labels deloads explicitly and can exclude them).
+Drop-set / rest-pause as nested set shapes (`StrengthSet` is flat, `log_set`
+is idempotent on `(workout_exercise_id, set_number)`, and the phone's
+offline replay depends on that). Freestyle sessions, plan-file sharing,
+passkeys, multi-profile, UI i18n, PWA demo and guest mode (all solve
+openGym's problem of being software other people install). Multi-gym
+equipment profiles. Hand-rolled SVG charts and a replacement icon set
+(downstream of a dependency-light constraint myvitals does not share).
+Sheet-stack back handling (not applicable — native Compose already owns it).
+
+---
+
 ### SEARCH-MULTIAXIS — "pork chop" needs a pin the current tier cannot express
 Source: v0.26.9 catalog audit. The right row requires cut AND trim AND raw
 simultaneously (center loin ∧ lean-and-fat ∧ raw), and `_PREFERRED_VARIETY`

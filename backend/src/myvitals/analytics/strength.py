@@ -147,6 +147,22 @@ DEFAULT_REST_S_SUPERSET_AFTER = 120   # was 90; rest after a full superset round
 # workout flow when alternating between A and B mid-round.
 DEFAULT_REST_S_SUPERSET_WITHIN = 35
 
+# Set types that must never influence what to lift NEXT time (OG2-A1).
+#
+# Both are logged at a deliberately reduced load, so averaging them into the
+# next prescription walks the working weight down a little every session: a
+# ramp row drags the mean weight, and an easy warm-up drags the mean rating
+# toward "add weight" at the same moment. `failure` is deliberately absent —
+# Greyskull's last set is taken to failure and is precisely the set that
+# should drive the next jump.
+#
+# This is a narrower question than "was this real work". The volume audit,
+# the PR scan and the tonnage total exclude only `warmup`, because a drop set
+# IS work performed; it simply is not evidence about the load to prescribe.
+# Every reader that answers the progression question imports this tuple, so
+# the two cannot drift apart again — they already had, for one release.
+PROGRESSION_EXCLUDED_SET_TYPES: tuple[str, ...] = ("warmup", "drop")
+
 # Per-movement-pattern starting weights (lb on each dumbbell, or single
 # weight for goblet-style). Tuned for dumbbell-only home gym.
 STARTING_WEIGHTS_DB_LB: dict[str, tuple[float, float, float]] = {
@@ -2337,6 +2353,11 @@ async def last_target_weight_for_exercise(
     Used to compute next-session prescription: if you crushed 25 lb x 8
     last session (avg_rating 4.8), this session should prescribe ~30 lb;
     avg_reps feeds the double-progression rep ladder.
+
+    Filters `PROGRESSION_EXCLUDED_SET_TYPES` — see that constant for why
+    (OG2-A1). Reachable two ways today: the web set logger has a set-type
+    picker, and imported Strong/Hevy history carries the source file's own
+    set types.
     """
     wex = (await db.execute(
         select(models.StrengthWorkoutExercise)
@@ -2356,6 +2377,7 @@ async def last_target_weight_for_exercise(
         select(models.StrengthSet)
         .where(models.StrengthSet.workout_exercise_id == wex.id)
         .where(models.StrengthSet.skipped.is_(False))
+        .where(models.StrengthSet.set_type.notin_(PROGRESSION_EXCLUDED_SET_TYPES))
     )).scalars().all()
     if not sets:
         return None, None, None

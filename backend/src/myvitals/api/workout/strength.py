@@ -2105,11 +2105,10 @@ async def add_exercise(
     avg_rating, avg_weight, _avg_reps = await strength_algo.last_target_weight_for_exercise(
         db, body.exercise_id,
     )
-    if avg_rating is not None and avg_weight is not None:
-        target = strength_algo.progress_from_rating(
-            avg_weight, avg_rating, new_ex["is_compound"],
-        )
-    else:
+    target, _why = strength_algo.weight_from_history(
+        avg_weight, avg_rating, new_ex["is_compound"],
+    )
+    if target is None:
         target = strength_algo.starting_weight_lb(new_ex["movement_pattern"], level)
     if target is not None and "dumbbell" in new_ex["equipment"]:
         target = strength_algo.round_weight(target, pairs, wrist)
@@ -2261,11 +2260,10 @@ async def swap_exercise(
     avg_rating, avg_weight, _avg_reps = await strength_algo.last_target_weight_for_exercise(
         db, body.exercise_id,
     )
-    if avg_rating is not None and avg_weight is not None:
-        target = strength_algo.progress_from_rating(
-            avg_weight, avg_rating, new_ex["is_compound"],
-        )
-    else:
+    target, _why = strength_algo.weight_from_history(
+        avg_weight, avg_rating, new_ex["is_compound"],
+    )
+    if target is None:
         target = strength_algo.starting_weight_lb(new_ex["movement_pattern"], level)
 
     if target is not None and "dumbbell" in new_ex["equipment"]:

@@ -56,6 +56,55 @@ Report artifact: `https://claude.ai/code/artifact/bb1f86ee-8e76-4c9c-a776-beeb1a
 | OG2-A9 | A logged set cannot be corrected or removed from either client | M | both |
 | OG2-A10 | Health Connect never deduped against itself, so one ride promoted twice | S | backend |
 
+### GH-EXPIRY — Google Health dies every 7 days (tabled 2026-08-31)
+
+The server-side Google Health OAuth poll has been failing since 2026-08-28
+with `invalid_grant` / "Token has been expired or revoked". Not a myvitals
+bug, and the timestamps settle it to the second:
+
+```
+connected_at  2026-08-21 16:39:44.099
+expires_at    2026-08-28 16:39:43.200      -> 6d 23:59:59.1
+```
+
+The hourly refreshes stayed phase-locked to the connect instant and drifted
+under a second across the week; the one due at exactly the 7-day mark was
+refused. That is the signature of an OAuth client left in **Testing**
+publishing status, whose refresh tokens Google expires after 7 days no
+matter how recently they were used.
+
+Ruled out: token rotation. `valid_access_token`
+(`integrations/google_health.py:434`) does persist a rotated refresh token
+when Google returns one, so the usual "forgot to save the new token" bug is
+not what happened.
+
+**Recovery** is entirely on Google's side and needs no code. Publish the
+OAuth client to *In production* on the consent screen — unverified is fine
+for a single user, showing an interstitial and capping at 100 users — then
+Settings -> Google -> **Reconnect**, approve, let the `localhost` page fail
+to load, and paste that whole URL into *2. Finish connecting*. Reconnecting
+without publishing restores service for exactly seven more days.
+
+Three things this exposed that ARE ours, none yet done:
+
+- The setup copy we ship tells the user to add themselves as a test user
+  (`frontend/src/views/Settings.vue:2745`, and the module docstring at
+  `integrations/google_health.py:13-17`). That reasoning checked the
+  verification gate — the 100-user cap — and missed the separate
+  testing-mode gate, so the weekly expiry was baked in at design time.
+  Nothing in the repo mentions it. The setup text should.
+- The failure handler records `last_error` and re-raises without clearing
+  the token, disabling the poll, or backing off, so a dead grant is retried
+  every 15 minutes indefinitely. An auth failure will never recover on its
+  own and is a different class from a transient network failure; the poll
+  does not distinguish them.
+- Nothing surfaced it. `data_health.py` reports the integration as `status:
+  "error"` with the message, and it went unnoticed for two days until
+  someone ran a manual check. Strava got a reconnect banner in v0.7.319
+  after the identical silent-failure shape; Google Health has no
+  equivalent. Note the HEALTH-1 restraint applies to *stale streams*, and a
+  revoked grant is not one — it is a fault that needs a human.
+
 ### Phase B — structure
 
 | ID | Task | Size | Surface |

@@ -730,6 +730,48 @@ def starting_weight_lb(movement_pattern: str, level: str) -> float | None:
     return table[LEVEL_INDEX.get(level, 1)]
 
 
+def weight_from_history(
+    avg_weight_lb: float | None,
+    avg_rating: float | None,
+    is_compound: bool,
+    goal: str = "hypertrophy",
+) -> tuple[float | None, str]:
+    """Next session's load from the last one, and the reason for it.
+
+    Three outcomes, and the middle one is the fix (OG2-A2). Every call site
+    used to test `avg_rating is not None and avg_weight is not None` and fall
+    all the way through to `starting_weight_lb` otherwise — a table indexed by
+    declared experience level. So a session logged with real weights but no
+    rating threw its own history away: press 40 lb, forget to tap
+    Hard/Good/Easy, get re-prescribed 25 lb. `avg_weight` was in scope on that
+    line and discarded.
+
+    Reachable because a rating is optional on the way in. The phone requires
+    one before a set can be logged, but the web logger does not, and imported
+    Strong/Hevy history carries a rating only when the source file had an RPE
+    column.
+
+    * Both known — the rating says how the load felt, so `progress_from_rating`
+      decides: fail backs off, the middle holds, easy advances.
+    * Weight known, rating absent — hold at what was actually lifted. "Same as
+      last time" is the honest reading of an unrated session. It is not
+      evidence to advance on, and it is certainly not evidence that the lifter
+      has reverted to a beginner's table.
+    * Neither — return None so the caller falls back to the starting table,
+      which is the right answer only when there is genuinely no history.
+
+    Returns the reason alongside the number because three code paths produce a
+    weight and, until now, two of them were indistinguishable on inspection.
+    """
+    if avg_weight_lb is None:
+        return None, "no_history"
+    if avg_rating is None:
+        return avg_weight_lb, "held_unrated"
+    return progress_from_rating(
+        avg_weight_lb, avg_rating, is_compound, goal=goal,
+    ), "rated"
+
+
 def progress_from_rating(
     last_weight_lb: float, avg_rating: float, is_compound: bool,
     goal: str = "hypertrophy",
@@ -3103,16 +3145,16 @@ async def generate_plan(
             )
             if advisory:
                 dp_advisories.append((ex["name"], advisory))
-        elif avg_rating is not None and avg_weight is not None:
-            # Non-dumbbell-but-rated (e.g. timed holds carrying a load) —
-            # keep the weight-only policy; reps/seconds handled elsewhere.
-            target = deload_round(
-                progress_from_rating(
-                    avg_weight, avg_rating, ex["is_compound"], goal=goal,
-                ), deload, pairs_lb, wrist,
-            )
         else:
-            target = starting_weight_lb(ex["movement_pattern"], level)
+            # Weight-only policy: non-dumbbell but rated (a timed hold
+            # carrying a load), and the unrated case that used to fall
+            # through to the starting table with a known weight in scope.
+            # reps/seconds are handled elsewhere.
+            target, _why = weight_from_history(
+                avg_weight, avg_rating, ex["is_compound"], goal=goal,
+            )
+            if target is None:
+                target = starting_weight_lb(ex["movement_pattern"], level)
             if target is not None:
                 target = deload_round(target, deload, pairs_lb, wrist)
 

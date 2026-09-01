@@ -356,6 +356,9 @@ export interface StrengthWorkoutExercise {
   // prescribe it. Rendered with a small marker so a session's plan and its
   // improvisations stay distinguishable after the fact.
   added_ad_hoc?: boolean;
+  /** OG2-A6: needs equipment no longer owned. Only ever set on a plan that
+   *  could not be regenerated (in progress, or with logged sets). */
+  equipment_missing?: boolean;
   // TD-6: one row per prescribed set, with the prefill resolved server-side.
   // Render these — do NOT derive starting values locally. The two surfaces
   // used to seed the inputs differently for the same workout.

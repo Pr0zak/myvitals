@@ -1,0 +1,239 @@
+"""A weight gain is not automatically bad news — OG2-A5.
+
+Two web surfaces decided that down is good, in opposite corners of the app
+and with the same wrong answer:
+
+* ``Weight.vue`` declared ``deltaCls(kg, lowerIsBetter = true)`` and called it
+  bare for the 7-day, 30-day and range figures.
+* ``BodyMetrics.vue`` passed a hard-coded ``invert`` to ``Delta.vue`` on the
+  Today screen, which is opened far more often than /weight.
+
+So a user gaining toward a goal had their progress painted red on both.
+
+The server already had a position and neither screen asked for it. The
+``MetricSpec`` for bodyweight in ``analytics/compare.py`` is
+``better="context"``, and its docstring says why in as many words: whether
++2 lb is good depends entirely on whether the user is cutting or bulking,
+"and the app does not get to assume". ``context`` means render neutral — not
+"pick lower and hope".
+
+``goalState.ts`` had already settled the principle for the goals surface: the
+tone comes from the server and is not derived client-side, because a client
+inferring "went down, therefore bad" would eventually paint a broken sobriety
+streak as a warning. The same reasoning applies here and had not reached
+these two files.
+
+The only thing that can settle the direction is the user's own goal, so the
+rule now takes one, and with no goal set the figure renders uncoloured.
+
+There is no test runner on the frontend — ``frontend/package.json`` has no
+vitest and there are no ``*.test.*`` files under ``frontend/src`` — so this
+guards the rule by reading the sources, the way
+``test_local_day_boundary.py`` guards the UTC-date bug. That is a weaker
+check than executing the helper and it is worth replacing when a runner
+lands.
+"""
+
+from __future__ import annotations
+
+import pathlib
+import re
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
+FRONTEND = REPO / "frontend" / "src"
+HELPER = FRONTEND / "weightDirection.ts"
+WEIGHT_VIEW = FRONTEND / "views" / "Weight.vue"
+BODY_CARD = FRONTEND / "components" / "today" / "BodyMetrics.vue"
+DELTA = FRONTEND / "components" / "today" / "Delta.vue"
+PHONE_WEIGHT = (
+    REPO / "android" / "app" / "src" / "main" / "kotlin" / "app" / "myvitals"
+    / "ui" / "vitals" / "WeightDetailScreen.kt"
+)
+PHONE_TOKENS = (
+    REPO / "android" / "app" / "src" / "main" / "kotlin" / "app" / "myvitals"
+    / "ui" / "AppTokens.kt"
+)
+
+
+class TestTheRuleExistsInOnePlace:
+    def test_the_helper_is_present(self):
+        assert HELPER.exists(), "the shared weight-direction rule is gone"
+
+    def test_it_refuses_without_a_goal(self):
+        """The heart of it. No goal means no direction, so no colour."""
+        src = HELPER.read_text()
+        assert "goal == null" in src or "goal == null) return \"neutral\"" in src
+        assert '"neutral"' in src
+
+    def test_it_carries_a_noise_band(self):
+        """A card that fires on water weight is wrong most weeks.
+
+        GOAL-STATE measured this and recorded the reasoning; openGym's
+        equivalent notably lacks one, and a 0.1 kg scale wobble in the wrong
+        direction painted it red.
+        """
+        src = HELPER.read_text()
+        assert "WEIGHT_NOISE_BAND_KG" in src
+        assert "1.0" in src
+
+    def test_the_two_unit_variants_are_named_not_guessed(self):
+        """Two callers work in pounds and one in kilograms.
+
+        The GOAL-STATE note closes by saying that when adding a field here,
+        ask which unit it is in — three bugs in that release were sign or
+        unit errors of this exact shape. A single unit-blind helper taking
+        whatever the caller had would reproduce them.
+        """
+        src = HELPER.read_text()
+        assert "weightDeltaTone" in src
+        assert "weightDeltaToneLb" in src
+        assert "WEIGHT_NOISE_BAND_LB" in src
+
+
+class TestNeitherSurfaceAssumesADirection:
+    def test_the_weight_view_no_longer_defaults_to_lower_is_better(self):
+        src = WEIGHT_VIEW.read_text()
+        # Only the signature matters; the phrase also appears in the comment
+        # explaining what was removed, which should stay.
+        assert not re.search(r"function deltaCls\([^)]*lowerIsBetter", src), (
+            "the down-is-good default is back in Weight.vue"
+        )
+        assert "weightDeltaTone" in src
+
+    def test_the_today_card_no_longer_hard_codes_invert(self):
+        src = BODY_CARD.read_text()
+        assert not re.search(r'suffix=" lb"\s+invert', src), (
+            "BodyMetrics still hard-codes invert on the weight delta"
+        )
+        assert "weightDeltaToneLb" in src
+
+    def test_the_remaining_gap_to_goal_is_not_judged(self):
+        """"12 lb to go" is a distance, not progress.
+
+        It was coloured green whenever the user was ABOVE their goal, which
+        is backwards for anyone cutting and meaningless for anyone else. A
+        distance does not improve or worsen, so it takes no tone.
+        """
+        src = WEIGHT_VIEW.read_text()
+        assert "to go" in src
+        assert "deltaCls(stats.latest - goalKg" not in src
+
+
+class TestTheGenericDeltaKeepsItsHonestUses:
+    def test_invert_still_exists_for_metrics_that_have_a_direction(self):
+        """Resting HR genuinely is better lower. The prop is not the bug.
+
+        Removing it would push those callers into inventing their own rule,
+        which is the failure this whole task is about.
+        """
+        src = DELTA.read_text()
+        assert "invert?: boolean" in src
+
+    def test_an_explicit_tone_overrides_the_sign(self):
+        """A caller that worked the direction out must not be second-guessed."""
+        src = DELTA.read_text()
+        assert "tone?:" in src
+        i_tone = src.index("if (props.tone)")
+        i_invert = src.index("props.invert ?")
+        assert i_tone < i_invert, "the sign heuristic must not run first"
+
+    def test_a_data_driven_invert_is_left_alone(self):
+        """Hero.vue passes `:invert="a.invert"` from its data and is correct.
+
+        This task removes assumptions, not the mechanism — a sweep that
+        stripped every invert would break the metrics that legitimately have
+        a direction.
+        """
+        hero = FRONTEND / "components" / "today" / "Hero.vue"
+        if hero.exists():
+            assert ':invert="a.invert"' in hero.read_text()
+
+
+class TestToneVocabulary:
+    def test_away_from_goal_is_amber_not_rose(self):
+        """GOAL-STATE: amber, never rose — rose is for the crisis surfaces.
+
+        Being two pounds off a target is worth noticing and is not a crisis,
+        and the previous class was #ef4444.
+        """
+        src = WEIGHT_VIEW.read_text()
+        assert ".delta-bad" not in src
+        assert ".delta-warn" in src
+        # Scoped to the delta rule. #ef4444 also appears in the multi-year
+        # line palette and in `.recomp.bad`, neither of which is this.
+        assert ".delta-warn { color: #ef4444" not in src
+
+    def test_neutral_styles_nothing(self):
+        """An unjudgeable figure must not borrow the reassurance of green.
+
+        Same rule as MEAL-2's `unknown` fat verdict rendering grey: "cannot
+        judge" and "fine" are different answers and must not look alike.
+        """
+        src = HELPER.read_text()
+        tail = src[src.index("export function weightDeltaClass"):]
+        assert ': ""' in tail
+
+
+class TestThePhoneAgrees:
+    """OG2-D4, pulled forward because A5 left the two surfaces disagreeing.
+
+    The phone painted a gain amber and a loss blue. Softer than the web's
+    red, but amber is this app's caution colour, so it was still a verdict —
+    and one reached without knowing which way the user was trying to move,
+    because the screen had no goal at all. It is also the device you stand
+    next to the scale with, which is the one place the target should be
+    visible.
+    """
+
+    def test_the_phone_fetches_the_goal(self):
+        assert "weightGoalKg" in PHONE_WEIGHT.read_text()
+
+    def test_the_goal_fetch_fails_soft(self):
+        """A profile that will not load should cost the goal line, not the
+        chart. Separate requests, separate failures."""
+        assert "runCatching { goalKg" in PHONE_WEIGHT.read_text()
+
+    def test_the_phone_uses_the_same_three_way_rule(self):
+        src = PHONE_WEIGHT.read_text()
+        assert "weightDeltaTone" in src
+        assert "WeightTone.NEUTRAL" in src
+
+    def test_the_phone_band_is_in_pounds(self):
+        """Everything on that screen is in pounds, so the band is too.
+
+        Reusing the kg value would be a factor-of-2.2 error that still looks
+        plausible on screen — the exact unit trap the GOAL-STATE note closes
+        by warning about.
+        """
+        assert "WEIGHT_NOISE_BAND_LB" in PHONE_WEIGHT.read_text()
+
+    def test_the_goal_is_folded_into_the_chart_domain(self):
+        """A goal outside the plotted range does not widen an axis on its own.
+
+        It then vanishes precisely when the user is furthest from the target,
+        which is when they most want to see the gap. Web left a note about
+        hitting this; `niceDomain` has taken includeLo/includeHi since it was
+        written and nothing had passed them.
+        """
+        src = PHONE_WEIGHT.read_text()
+        assert "includeLo = goalLbF" in src
+        assert "includeHi = goalLbF" in src
+
+    def test_the_verdict_colours_are_tokens_not_literals(self):
+        """The two shells disagree about which green means good.
+
+        A shared screen reaching for a hex literal is what AppTokens exists
+        to stop, and both palettes now carry the pair.
+        """
+        src = PHONE_WEIGHT.read_text()
+        assert "tok.good" in src
+        assert "tok.caution" in src
+        assert "0xFFFBBF24" not in src, "the hard-coded amber is back"
+        assert "0xFF60A5FA" not in src, "the hard-coded blue is back"
+
+        tokens = PHONE_TOKENS.read_text()
+        assert "val good: Color" in tokens
+        assert "val caution: Color" in tokens
+        # Both palettes, or a neon user gets a classic-theme colour.
+        assert tokens.count("good =") == 2
+        assert tokens.count("caution =") == 2

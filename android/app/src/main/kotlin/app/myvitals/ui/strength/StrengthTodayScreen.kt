@@ -207,7 +207,10 @@ fun StrengthTodayScreen(
         }
     }
     var history by remember { mutableStateOf<List<app.myvitals.sync.StrengthWorkoutSummary>>(emptyList()) }
-    var daysPerWeek by remember { mutableStateOf(3) }
+    // OG2-A4: the dates the generator will actually train on, from the
+    // server. Replaces a local copy of the weekday table that disagreed
+    // with the generator and could not represent a cardio or yoga day.
+    var projectedDates by remember { mutableStateOf<Set<String>>(emptySet()) }
     var loading by remember { mutableStateOf(true) }
     var generating by remember { mutableStateOf(false) }
     var deferring by remember { mutableStateOf(false) }
@@ -278,7 +281,7 @@ fun StrengthTodayScreen(
             recoveryReason = rec?.restDayReason
             if (catalog.isEmpty()) catalog = repo.catalog()
             history = repo.listHistory()
-            try { daysPerWeek = repo.equipment().payload.training.daysPerWeek } catch (_: Exception) {}
+            projectedDates = repo.upcoming().map { it.date }.toSet()
         } catch (e: Exception) {
             Timber.w(e, "today reload failed")
             error = e.message?.take(160)
@@ -847,7 +850,7 @@ fun StrengthTodayScreen(
         // 7-day strip
         WeekStrip(
             history = history,
-            daysPerWeek = daysPerWeek,
+            projectedDates = projectedDates,
             todayStatus = plan.status,
             onDayClick = { dateIso -> onOpenDay(dateIso) },
         )
@@ -2936,6 +2939,17 @@ private fun ExerciseCard(
                             fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
                         )
                     }
+                    // OG2-A6: the equipment changed after this plan was made
+                    // and it was too late to regenerate. Flagged, never
+                    // removed — deleting work from a session already in front
+                    // of the user is worse than saying it cannot be done.
+                    if (wex.equipmentMissing) {
+                        Text(
+                            "NEEDS KIT YOU NO LONGER HAVE",
+                            color = pal.caution, fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
+                        )
+                    }
                     val rep = if (wex.targetRepsLow == wex.targetRepsHigh)
                         "${wex.targetRepsLow}" else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
                     val w = wex.targetWeightLb?.let { " @ ${it}lb" } ?: ""
@@ -3721,20 +3735,13 @@ private fun ReviewBlock(
 @Composable
 private fun WeekStrip(
     history: List<app.myvitals.sync.StrengthWorkoutSummary>,
-    daysPerWeek: Int,
+    projectedDates: Set<String>,
     todayStatus: String,
     onDayClick: (dateIso: String) -> Unit = {},
 ) {
     val pal = LocalStrengthPalette.current
     val today = java.time.LocalDate.now()
     val statusByDate = history.associate { it.date to it.status }
-    // Mon-first weekday pattern; mirrors web strip
-    val pattern = when (daysPerWeek) {
-        2 -> setOf(0, 3); 3 -> setOf(0, 2, 4); 4 -> setOf(0, 1, 3, 4)
-        5 -> setOf(0, 1, 2, 3, 4); 6 -> setOf(0, 1, 2, 3, 4, 5)
-        else -> setOf(0, 2, 4)
-    }
-    fun monFirst(jsDow: Int) = (jsDow + 6) % 7
 
     Row(
         Modifier.fillMaxWidth(),
@@ -3748,7 +3755,7 @@ private fun WeekStrip(
             val effectiveStatus = if (isToday) todayStatus else historyStatus
             val isPast = d.isBefore(today)
             val projected = !isPast && effectiveStatus == null
-                && pattern.contains(monFirst(d.dayOfWeek.value % 7))
+                && projectedDates.contains(iso)
 
             val dotColor = when {
                 effectiveStatus == "completed" -> pal.good

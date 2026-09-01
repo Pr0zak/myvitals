@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useDateRange } from "@/useDateRange";
+import { weightDeltaClass, weightDeltaTone } from "@/weightDirection";
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
 import Card from "@/components/Card.vue";
@@ -352,11 +353,14 @@ function fmtDelta(kg: number | null): string {
   const v = weightVal(kg) as number;
   return `${v >= 0 ? "+" : ""}${v.toFixed(1)} ${weightUnit.value}`;
 }
-function deltaCls(kg: number | null, lowerIsBetter = true): string {
-  if (kg == null) return "";
-  if (Math.abs(kg) < 0.05) return "";
-  const good = lowerIsBetter ? kg < 0 : kg > 0;
-  return good ? "delta-good" : "delta-bad";
+// OG2-A5: which way is good is the GOAL's answer, not this component's.
+// `deltaCls` used to default `lowerIsBetter = true` and every trend figure
+// called it bare, so a user gaining toward a goal read their progress in
+// red. `analytics/compare.py` already classes bodyweight as
+// better="context" — the app does not get to assume — and with no goal set
+// the honest render is a plain number.
+function deltaCls(kg: number | null): string {
+  return weightDeltaClass(weightDeltaTone(kg, stats.value?.latest, goalKg.value));
 }
 </script>
 
@@ -393,9 +397,10 @@ function deltaCls(kg: number | null, lowerIsBetter = true): string {
           <div class="kpi-val">{{ fmtWeight(stats.latest) }}</div>
           <div v-if="goalKg" class="kpi-sub">
             Goal: <strong>{{ fmtWeight(goalKg) }}</strong>
-            <span :class="deltaCls(stats.latest - goalKg, false)">
-              ({{ fmtDelta(stats.latest - goalKg) }} to go)
-            </span>
+            <!-- The remaining gap is a distance, not progress: it does not
+                 improve or worsen, so it takes no tone. It was previously
+                 coloured green whenever the user was ABOVE their goal. -->
+            <span>({{ fmtDelta(stats.latest - goalKg) }} to go)</span>
           </div>
         </div>
         <div class="kpi">
@@ -480,7 +485,9 @@ function deltaCls(kg: number | null, lowerIsBetter = true): string {
 .kpi-sub { color: var(--muted); font-size: 0.8rem; }
 .coverage-note { color: var(--muted); font-size: 0.8rem; margin: -0.25rem 0 0.75rem; }
 .delta-good { color: #22c55e; }
-.delta-bad { color: #ef4444; }
+/* Amber, not rose. A weight change away from a goal is worth noticing and
+   is not a crisis; rose is reserved for the crisis surfaces (GOAL-STATE). */
+.delta-warn { color: #d97706; }
 
 .chart { width: 100%; height: 380px; }
 .chart.small { height: 220px; }
@@ -506,7 +513,7 @@ html[data-theme="neon"] .weight {
 html[data-theme="neon"] .recomp.good,
 html[data-theme="neon"] .delta-good { color: var(--rn-lime); }
 html[data-theme="neon"] .recomp.bad,
-html[data-theme="neon"] .delta-bad { color: var(--rn-red); }
+html[data-theme="neon"] .delta-warn { color: var(--rn-amber); }
 
 /* KPI cards → neon surface + glanceable monospace numerics */
 html[data-theme="neon"] .kpi {

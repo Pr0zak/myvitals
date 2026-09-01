@@ -259,6 +259,9 @@ data class StrengthWorkoutExerciseRow(
     // prescribe it. False-by-default so a cached plan from before the field
     // existed reads as "planned" rather than claiming the user added it.
     @Json(name = "added_ad_hoc") val addedAdHoc: Boolean = false,
+    // OG2-A6: needs equipment no longer owned. Defaults false so an older
+    // server that omits the key reads as "fine" rather than crashing Moshi.
+    @Json(name = "equipment_missing") val equipmentMissing: Boolean = false,
     // TD-6: one row per prescribed set, with the prefill resolved
     // server-side. Render these — do NOT derive starting values here. This
     // screen and StrengthToday.vue used to seed the inputs from different

@@ -20,9 +20,12 @@ import app.myvitals.ui.neon.NeonMV
  * and it is the default, so a screen rendered outside the neon shell is
  * unchanged — the risk of this migration is confined to the neon shell.
  *
- * Only the six tokens those screens actually use are modelled. This is a
- * bridge for shared screens, not a second theme system; NeonMV and MV
- * remain the sources of truth for their own shells.
+ * Only the tokens those screens actually use are modelled. This is a bridge
+ * for shared screens, not a second theme system; NeonMV and MV remain the
+ * sources of truth for their own shells. `good` and `caution` joined `red`
+ * when the weight chart needed to render a verdict (OG2-D4) — a shared
+ * screen reaching for a hex literal is precisely what this file exists to
+ * stop, since the two shells disagree about which green means good.
  */
 @Immutable
 data class AppTokens(
@@ -38,6 +41,14 @@ data class AppTokens(
     val onSurfaceDim: Color,
     /** Error / destructive. */
     val red: Color,
+    /** A verdict of "this went the way you wanted". */
+    val good: Color,
+    /**
+     * A verdict of "worth noticing". Deliberately distinct from `red`:
+     * GOAL-STATE settled that rose belongs to the crisis surfaces, so a
+     * weight drifting away from a target is amber, not an error.
+     */
+    val caution: Color,
 )
 
 /** Byte-identical to the `MV` values these screens hard-coded before. */
@@ -48,6 +59,8 @@ val ClassicTokens = AppTokens(
     onSurfaceVariant = Color(0xFF94A3B8),
     onSurfaceDim = Color(0xFF6B7689),
     red = Color(0xFFEF4444),
+    good = MV.Green,
+    caution = MV.Amber,
 )
 
 /**
@@ -62,6 +75,9 @@ val NeonTokens = AppTokens(
     onSurfaceVariant = NeonMV.Muted,
     onSurfaceDim = Color(0xFF6E6E82),
     red = NeonMV.Bad,
+    // Neon's own vocabulary: lime is move/good, amber is caution.
+    good = NeonMV.Lime,
+    caution = NeonMV.Amber,
 )
 
 /**

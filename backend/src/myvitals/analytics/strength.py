@@ -730,6 +730,93 @@ def starting_weight_lb(movement_pattern: str, level: str) -> float | None:
     return table[LEVEL_INDEX.get(level, 1)]
 
 
+#: What one logged set contributes to an aggregate (OG2-A3).
+#:
+#: ``excluded``   not work: skipped, a warm-up, or never actually logged.
+#: ``unweighted`` real work carrying no poundage — a pull-up, a plank.
+#: ``weighted``   real work with a load, so it can enter a pounds total.
+SET_EXCLUDED = "excluded"
+SET_UNWEIGHTED = "unweighted"
+SET_WEIGHTED = "weighted"
+
+
+def classify_set_row(
+    skipped: bool, reps: int | None, set_type: str | None,
+    weight_lb: float | None,
+) -> str:
+    """Sort one logged set into what it may contribute to.
+
+    The distinction this draws is the whole of OG2-A3. Two aggregates asked
+    "does this set have poundage" when they meant "was this set performed",
+    and dropped every null-weight row before counting anything — so
+    ``n_workouts``, ``n_sets``, the daily series, the ratings and the muscle
+    split all excluded pull-ups, planks and push-ups, and a calisthenics-only
+    day read as no session at all. On this database that is 233 of 760 logged
+    sets and 101 of 275 catalog exercises, on a home gym of dumbbells, a
+    bench and a pull-up bar.
+
+    Being performed and being costable in pounds are separate questions, and
+    conflating them is what made a whole training day disappear. An
+    unweighted set is counted as work and withheld from the pounds figures —
+    never costed at zero, because a volume total that quietly absorbs a set
+    of pull-ups as 0 lb is worse than one that admits it is partial. That is
+    the same rule ``_sum_nutrition`` follows for an ingredient it cannot
+    cost, and the same reason ``/records`` reports bodyweight bests on their
+    own metric rather than as a weight of nothing.
+
+    ``/records`` already fixed this in PR-1b and ``list_workouts`` always had
+    it right; the two remaining sites did not. Sharing the predicate is what
+    stops a third reader inventing a fourth answer.
+    """
+    if skipped or reps is None or set_type == "warmup":
+        return SET_EXCLUDED
+    if weight_lb is None:
+        return SET_UNWEIGHTED
+    return SET_WEIGHTED
+
+
+def weight_from_history(
+    avg_weight_lb: float | None,
+    avg_rating: float | None,
+    is_compound: bool,
+    goal: str = "hypertrophy",
+) -> tuple[float | None, str]:
+    """Next session's load from the last one, and the reason for it.
+
+    Three outcomes, and the middle one is the fix (OG2-A2). Every call site
+    used to test `avg_rating is not None and avg_weight is not None` and fall
+    all the way through to `starting_weight_lb` otherwise — a table indexed by
+    declared experience level. So a session logged with real weights but no
+    rating threw its own history away: press 40 lb, forget to tap
+    Hard/Good/Easy, get re-prescribed 25 lb. `avg_weight` was in scope on that
+    line and discarded.
+
+    Reachable because a rating is optional on the way in. The phone requires
+    one before a set can be logged, but the web logger does not, and imported
+    Strong/Hevy history carries a rating only when the source file had an RPE
+    column.
+
+    * Both known — the rating says how the load felt, so `progress_from_rating`
+      decides: fail backs off, the middle holds, easy advances.
+    * Weight known, rating absent — hold at what was actually lifted. "Same as
+      last time" is the honest reading of an unrated session. It is not
+      evidence to advance on, and it is certainly not evidence that the lifter
+      has reverted to a beginner's table.
+    * Neither — return None so the caller falls back to the starting table,
+      which is the right answer only when there is genuinely no history.
+
+    Returns the reason alongside the number because three code paths produce a
+    weight and, until now, two of them were indistinguishable on inspection.
+    """
+    if avg_weight_lb is None:
+        return None, "no_history"
+    if avg_rating is None:
+        return avg_weight_lb, "held_unrated"
+    return progress_from_rating(
+        avg_weight_lb, avg_rating, is_compound, goal=goal,
+    ), "rated"
+
+
 def progress_from_rating(
     last_weight_lb: float, avg_rating: float, is_compound: bool,
     goal: str = "hypertrophy",
@@ -1165,6 +1252,18 @@ def filter_catalog_for_equipment(
     function) while CATALOG itself stays complete for history lookups.
     """
     catalog = [e for e in catalog if e["id"] not in SUPERSEDED_EXERCISE_IDS]
+    return [e for e in catalog if can_do_exercise(e, equipment)]
+
+
+def can_do_exercise(ex: dict[str, Any], equipment: dict[str, Any]) -> bool:
+    """Can this one exercise be performed with the equipment owned?
+
+    Extracted from `filter_catalog_for_equipment` (OG2-A6) so the same
+    question can be asked about an exercise that is ALREADY in a plan, not
+    only about candidates for a new one. Selling a bench does not un-write
+    yesterday's prescription, and until this existed nothing could tell the
+    user that a slot in front of them had become undoable.
+    """
     bench_owned = (
         equipment.get("bench", {}).get("flat")
         or equipment.get("bench", {}).get("incline")
@@ -1181,31 +1280,28 @@ def filter_catalog_for_equipment(
         or equipment.get("pull_up_bar")
     )
 
-    def can_do(ex: dict[str, Any]) -> bool:
-        if not bar_owned and ex["id"] in _BAR_REQUIRED_EXERCISES:
+    if not bar_owned and ex["id"] in _BAR_REQUIRED_EXERCISES:
+        return False
+    if not low_bar_owned and ex["id"] in _LOW_BAR_REQUIRED_EXERCISES:
+        return False
+    if not partner_owned and ex["id"] in _PARTNER_REQUIRED_EXERCISES:
+        return False
+    for tag in ex["equipment"]:
+        if tag == "bodyweight":
+            continue
+        if tag == "bench" and not bench_owned:
             return False
-        if not low_bar_owned and ex["id"] in _LOW_BAR_REQUIRED_EXERCISES:
+        if tag == "dumbbell" and not db_owned:
             return False
-        if not partner_owned and ex["id"] in _PARTNER_REQUIRED_EXERCISES:
+        if tag == "barbell" and not equipment.get("barbell"):
             return False
-        for tag in ex["equipment"]:
-            if tag == "bodyweight":
-                continue
-            if tag == "bench" and not bench_owned:
-                return False
-            if tag == "dumbbell" and not db_owned:
-                return False
-            if tag == "barbell" and not equipment.get("barbell"):
-                return False
-            if tag == "cable" and not equipment.get("cable_stack"):
-                return False
-            if tag == "kettlebell" and not equipment.get("kettlebells_lb"):
-                return False
-            if tag == "bands" and not equipment.get("resistance_bands"):
-                return False
-        return True
-
-    return [e for e in catalog if can_do(e)]
+        if tag == "cable" and not equipment.get("cable_stack"):
+            return False
+        if tag == "kettlebell" and not equipment.get("kettlebells_lb"):
+            return False
+        if tag == "bands" and not equipment.get("resistance_bands"):
+            return False
+    return True
 
 
 # ------------------------------------------------------------------
@@ -3103,16 +3199,16 @@ async def generate_plan(
             )
             if advisory:
                 dp_advisories.append((ex["name"], advisory))
-        elif avg_rating is not None and avg_weight is not None:
-            # Non-dumbbell-but-rated (e.g. timed holds carrying a load) —
-            # keep the weight-only policy; reps/seconds handled elsewhere.
-            target = deload_round(
-                progress_from_rating(
-                    avg_weight, avg_rating, ex["is_compound"], goal=goal,
-                ), deload, pairs_lb, wrist,
-            )
         else:
-            target = starting_weight_lb(ex["movement_pattern"], level)
+            # Weight-only policy: non-dumbbell but rated (a timed hold
+            # carrying a load), and the unrated case that used to fall
+            # through to the starting table with a known weight in scope.
+            # reps/seconds are handled elsewhere.
+            target, _why = weight_from_history(
+                avg_weight, avg_rating, ex["is_compound"], goal=goal,
+            )
+            if target is None:
+                target = starting_weight_lb(ex["movement_pattern"], level)
             if target is not None:
                 target = deload_round(target, deload, pairs_lb, wrist)
 

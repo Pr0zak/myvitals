@@ -73,7 +73,13 @@ def test_the_prescription_is_server_computed_from_the_shared_chain():
     """
     src = inspect.getsource(strength.add_exercise)
     assert "last_target_weight_for_exercise" in src
-    assert "progress_from_rating" in src
+    # OG2-A2: the rating/weight decision moved behind `weight_from_history`,
+    # which calls `progress_from_rating` when a rating exists and holds at
+    # the logged weight when one does not. Asserting the shared entry point
+    # rather than the inner helper is the stronger check — a site that
+    # reached past it to `progress_from_rating` would have reintroduced the
+    # three-way branch this consolidated.
+    assert "weight_from_history" in src
     assert "starting_weight_lb" in src
     assert "round_weight" in src
     assert "prescribe_slot" in src

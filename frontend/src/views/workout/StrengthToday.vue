@@ -276,9 +276,10 @@ function addRest(s: number) {
 }
 onUnmounted(stopRest);
 
-// Week-strip + training prefs (drives the projected workout-day pattern)
+// Week strip. The projected-day pattern is no longer derived here — see
+// the OG2-A4 note in weekStrip; it comes from `upcoming`, which is the
+// generator's own schedule.
 const recentWorkouts = ref<Array<{ date: string; status: string }>>([]);
-const trainingPrefs = ref<{ days_per_week: number } | null>(null);
 const upcoming = ref<Awaited<ReturnType<typeof api.strengthUpcoming>>["upcoming"]>([]);
 
 async function loadAll() {
@@ -290,20 +291,20 @@ async function loadAll() {
   // sitting on the card for the rest of the session.
   skipError.value = null;
   try {
-    const [w, r, cat, hist, eq, up] = await Promise.all([
+    // The equipment payload was fetched only to read days_per_week for the
+    // week strip's projected-day pattern; the strip now reads the server's
+    // schedule via `upcoming`, so the request is gone with it (OG2-A4).
+    const [w, r, cat, hist, up] = await Promise.all([
       api.strengthToday(),
       api.strengthRecovery().catch(() => null),
       api.strengthExercises().catch(() => ({ count: 0, exercises: [] as StrengthExercise[] })),
       api.strengthWorkouts({ limit: 30 }).catch(() => ({ count: 0, workouts: [] })),
-      api.strengthEquipment().catch(() => null),
       api.strengthUpcoming(7, 4).catch(() => ({ count: 0, upcoming: [] })),
     ]);
     workout.value = w;
     recovery.value = r;
     catalogById.value = Object.fromEntries(cat.exercises.map((e) => [e.id, e]));
     recentWorkouts.value = hist.workouts.map((x) => ({ date: x.date, status: x.status }));
-    trainingPrefs.value = (eq?.payload as unknown as { training?: { days_per_week: number } })
-      ?.training ?? { days_per_week: 3 };
     upcoming.value = up.upcoming;
     // Pre-fill set entries from any already-logged sets so the user can
     // resume without losing data
@@ -670,16 +671,19 @@ const weekStrip = computed<DayCell[]>(() => {
   const histByDate: Record<string, string> = {};
   for (const w of recentWorkouts.value) histByDate[w.date] = w.status;
 
-  // Workout-day pattern (Mon..Sun = 0..6 in our local-Mon-first model).
-  // 3 days/week → Mon/Wed/Fri; 4 → Mon/Tue/Thu/Fri; 5 → Mon-Fri; 6 → Mon-Sat.
-  const dpw = trainingPrefs.value?.days_per_week ?? 3;
-  const PATTERN: Record<number, number[]> = {
-    2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4],
-    5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5],
-  };
-  const pattern = new Set(PATTERN[dpw] ?? PATTERN[3]);
-  // Map JS dow (0=Sun..6=Sat) to our Mon-first index (0=Mon..6=Sun)
-  const monFirst = (jsDow: number) => (jsDow + 6) % 7;
+  // OG2-A4: which days are training days is the SERVER's answer, not one
+  // this component works out. There were four copies of the weekday table —
+  // the generator's, the /upcoming endpoint's, this one and the phone's —
+  // and the last three agreed with each other while disagreeing with the
+  // generator, which is the only one that decides what actually gets made.
+  // At days_per_week=2 they promised Thursday against the generator's
+  // Friday. They also knew only "training day or not", so a cardio or yoga
+  // day read as a blank.
+  //
+  // `upcoming` is the generator's own schedule, simulated, and already
+  // fetched for the cards at the bottom of this screen. Rest days are
+  // absent from it by construction, so membership is the whole test.
+  const projectedDates = new Set(upcoming.value.map((u) => u.date));
 
   for (let offset = -3; offset <= 3; offset++) {
     const d = new Date(today);
@@ -692,7 +696,7 @@ const weekStrip = computed<DayCell[]>(() => {
       : d.toLocaleDateString(undefined, { weekday: "short" });
     const past = d.getTime() < todayMs;
     const status = histByDate[iso] ?? null;
-    const projected = !past && status === null && pattern.has(monFirst(d.getDay()));
+    const projected = !past && status === null && projectedDates.has(iso);
     out.push({
       iso, label, dow: d.getDay(),
       isToday: offset === 0,
@@ -1504,6 +1508,12 @@ useVisibilityRefresh(loadAll);
                  after the fact. The AI reviewer makes the same distinction. -->
             <span v-if="wex.added_ad_hoc" class="adhoc-tag"
                   title="You added this — the planner didn't prescribe it">added</span>
+            <!-- OG2-A6: the equipment changed after this plan was made, and
+                 it was too late to regenerate. Flagged, never removed:
+                 deleting work from a session already in front of the user
+                 is worse than saying it cannot be done. -->
+            <span v-if="wex.equipment_missing" class="kit-tag"
+                  title="Needs equipment your profile no longer lists — swap it or regenerate">no kit</span>
             <button v-if="wex.added_ad_hoc && !isSlotClosed(wex) && wex.sets.length === 0"
                     class="ghost tiny" title="Remove this exercise"
                     @click="removeExercise(wex.id)">remove</button>
@@ -2985,6 +2995,12 @@ html[data-theme="neon"] .big { color: var(--rn-ink); }
   background: var(--surface);
   color: var(--text);
 }
+.kit-tag {
+  font-size: 10px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; padding: 1px 5px; border-radius: 3px;
+  background: rgba(217, 119, 6, .14); color: #b45309; vertical-align: middle;
+}
+html[data-theme="neon"] .kit-tag { background: rgba(255,176,32,.16); color: var(--rn-amber); }
 .adhoc-tag {
   font-size: 0.62rem;
   letter-spacing: 0.05em;

@@ -260,17 +260,22 @@ async def put_equipment(
 ) -> EquipmentOut:
     now = datetime.now(timezone.utc)
     row = await db.get(models.UserEquipment, 1)
-    # Capture the prior training prefs so we can detect a meaningful
-    # change after the write and auto-regenerate today's plan. Only
-    # fields that actually change the workout shape trigger this:
-    # level, days_per_week, split_preference, workout_minutes,
-    # cardio_days_per_week, include_mobility, yoga_on_rest_days.
-    # Equipment-only changes (e.g. flipping a cardio_rower flag) do
-    # NOT trigger a strength regen since the strength plan is
-    # unaffected.
+    # Capture the prior state so a meaningful change can auto-regenerate
+    # today's plan after the write. Two things count as meaningful, and
+    # until OG2-A6 only the first did.
+    #
+    # The old comment claimed "equipment-only changes do NOT trigger a
+    # strength regen since the strength plan is unaffected". That is not
+    # true: `filter_catalog_for_equipment` keeps only exercises whose every
+    # required tag is owned, so the plan is built FROM the equipment. Untick
+    # the bench and today's plan went on prescribing bench work — nothing
+    # regenerated, nothing warned, and no row was marked. The user finds out
+    # at the rack.
     prior_training: dict[str, Any] = {}
+    prior_payload: dict[str, Any] = {}
     if row is not None:
-        prior_training = (row.payload or {}).get("training") or {}
+        prior_payload = row.payload or {}
+        prior_training = prior_payload.get("training") or {}
 
     if row is None:
         row = models.UserEquipment(
@@ -299,7 +304,28 @@ async def put_equipment(
     training_changed = any(
         prior_training.get(f) != new_training.get(f) for f in watched_fields
     )
-    if training_changed:
+    # Ask the question directly rather than maintaining a second field list:
+    # did this edit change WHICH EXERCISES ARE POSSIBLE? A named-field list
+    # has to be updated by hand every time `EquipmentPayload` grows — the
+    # payload is JSON precisely so it can grow without a migration — and the
+    # field that gets forgotten fails silently. Comparing the two filtered
+    # catalogs cannot drift, and it is exact: it is the same function the
+    # generator selects from.
+    equipment_changed = False
+    if row is not None and prior_payload:
+        before = {
+            e["id"] for e in strength_algo.filter_catalog_for_equipment(
+                strength_algo.CATALOG, prior_payload,
+            )
+        }
+        after = {
+            e["id"] for e in strength_algo.filter_catalog_for_equipment(
+                strength_algo.CATALOG, row.payload or {},
+            )
+        }
+        equipment_changed = before != after
+
+    if training_changed or equipment_changed:
         today_d = _local_today()
         existing = await _existing_workout_for(db, today_d)
         if existing is not None and existing.status == "planned":
@@ -713,6 +739,14 @@ class WorkoutExerciseOut(BaseModel):
     # user chose, and the AI reviewer reads a self-added accessory
     # differently from a planned one.
     added_ad_hoc: bool = False
+    # OG2-A6: this slot needs equipment the user no longer owns. An untouched
+    # plan regenerates on an equipment change, so this only appears on a plan
+    # that could not be — one already in progress, or one with logged sets.
+    # Flagged rather than removed: silently deleting work from a session the
+    # user has already read is worse than saying it cannot be done, which is
+    # openGym's rule for the same case and the same reason the shopping list
+    # flags an uncostable line instead of dropping it.
+    equipment_missing: bool = False
     # TD-6 — the per-set prescription, with server-resolved prefills. Clients
     # render these verbatim; they must not derive their own starting values.
     planned_sets: list[PlannedSetOut] = []
@@ -1036,8 +1070,16 @@ def _wex_to_out(
     wrist_lb: list[float] | None = None,
     last_sets: list[LastSetOut] | None = None,
     program_by_id: dict[str, dict] | None = None,
+    equipment: dict[str, Any] | None = None,
 ) -> WorkoutExerciseOut:
     prog = (program_by_id or {}).get(wex.exercise_id)
+    meta = _CATALOG_BY_ID.get(wex.exercise_id)
+    # Unknown to the catalog means unjudgeable, not undoable — an imported or
+    # superseded id must not be painted as missing kit.
+    missing_kit = bool(
+        equipment is not None and meta is not None
+        and not strength_algo.can_do_exercise(meta, equipment)
+    )
     return WorkoutExerciseOut(
         id=wex.id,
         workout_id=wex.workout_id,
@@ -1058,6 +1100,7 @@ def _wex_to_out(
         last_sets=last_sets or [],
         skipped=bool(wex.skipped),
         added_ad_hoc=bool(getattr(wex, "added_ad_hoc", False)),
+        equipment_missing=missing_kit,
         planned_sets=_planned_sets(wex, sets, last_sets, prog),
         sets=[_set_to_out(s) for s in sorted(sets, key=lambda x: x.set_number)],
     )
@@ -1297,7 +1340,8 @@ async def _hydrate_workout(
         deload_reason = ("low " + " / ".join(bits)) if bits else "low recovery"
     ex_out = [
         _wex_to_out(wex, sets_by_wex.get(wex.id, []), pairs_lb, wrist_lb,
-                    last_by_ex.get(wex.exercise_id), program_by_id)
+                    last_by_ex.get(wex.exercise_id), program_by_id,
+                    equipment=equip)
         for wex in wex_rows
     ]
     return WorkoutOut(
@@ -1874,24 +1918,34 @@ async def upcoming_workouts(
     per_day_count: int = 4,
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Project the next `days` calendar days. For each one that maps to a
-    workout day (per training.days_per_week), simulate the split + exercise
-    selection and return a preview. Does NOT persist anything; this is a
-    pure read-only forecast that lets the user see what's coming up."""
+    """Project the next `days` calendar days: what the generator will make,
+    simulated. Does NOT persist anything; this is a pure read-only forecast.
+
+    OG2-A4: this used to carry its own weekday table, introduced with the
+    comment "Mon-first weekday pattern matching the web/Android strip". It
+    matched the strips and disagreed with the generator, which is the thing
+    that actually decides what you train. At `days_per_week=2` the table said
+    Mon/Thu while `_STRENGTH_WEEKDAYS_BY_COUNT` says Mon/Fri, so the forecast
+    promised a session on a day no plan would ever be generated for.
+
+    The endpoint now asks `schedule_day_type`, which is the same function
+    `generate_plan` consults, so a disagreement is no longer expressible.
+    That also fixes a second fault the local table could not even represent:
+    it knew only "workout day or not", so cardio and yoga days were skipped
+    entirely and the forecast showed nothing for them. At this user's 6
+    strength + 2 cardio days that hid a real Sunday cardio session from the
+    week ahead. Only genuine rest days are omitted now.
+    """
     from datetime import date as _date, timedelta as _td
     import random as _random
 
     equip = await _equipment_payload(db)
     training = equip.get("training") or {}
     dpw = int(training.get("days_per_week", strength_algo.DEFAULT_DAYS_PER_WEEK))
+    cardio_pw = int(training.get("cardio_days_per_week", 0) or 0)
     pref = training.get("split_preference", strength_algo.DEFAULT_SPLIT_PREFERENCE)
     level = training.get("level", strength_algo.DEFAULT_LEVEL)
     exercise_prefs = equip.get("exercise_prefs") or {}
-
-    # Mon-first weekday pattern matching the web/Android strip
-    PATTERN = {2: {0, 3}, 3: {0, 2, 4}, 4: {0, 1, 3, 4},
-               5: {0, 1, 2, 3, 4}, 6: {0, 1, 2, 3, 4, 5}}
-    workout_dows = PATTERN.get(dpw, PATTERN[3])
 
     catalog_filtered = strength_algo.filter_catalog_for_equipment(
         strength_algo.CATALOG, equip,
@@ -1957,9 +2011,23 @@ async def upcoming_workouts(
 
     for offset in range(start_offset, days + 1):
         d = today + _td(days=offset)
-        # Mon-first index
-        mon_first = (d.weekday())  # Python's weekday(): Mon=0..Sun=6 ✓
-        if mon_first not in workout_dows:
+        day_type = strength_algo.schedule_day_type(d, dpw, cardio_pw)
+        if day_type == "rest":
+            continue
+        if day_type != "strength":
+            # A cardio or yoga day is a real scheduled day with no strength
+            # rotation behind it. Emit it — omitting it was what made the
+            # week ahead look emptier than it is — but do not advance
+            # `cursor_split` or `last_done`, because neither a ride nor a
+            # yoga flow is a strength session for rotation or spacing
+            # purposes. `generate_plan` reasons the same way.
+            out.append({
+                "date": d.isoformat(),
+                "is_today": offset == 0,
+                "split_focus": day_type,
+                "preview_exercises": [],
+                "exercise_count": 0,
+            })
             continue
         # Spacing: if this scheduled day lands the day after the last training
         # day, push it back one day when possible so the user doesn't hit two
@@ -1969,9 +2037,9 @@ async def upcoming_workouts(
         # was the rotation-misalignment bug).
         if last_done is not None and (d - last_done).days == 1:
             shifted = d + _td(days=1)
-            if shifted.weekday() not in workout_dows:
+            if strength_algo.schedule_day_type(shifted, dpw, cardio_pw) != "strength":
                 d = shifted
-            # else: next day is already a workout day — leave both alone.
+            # else: next day is already a strength day — leave both alone.
 
         focus = strength_algo.select_split(dpw, pref, cursor_split)
         cursor_split = focus
@@ -2105,11 +2173,10 @@ async def add_exercise(
     avg_rating, avg_weight, _avg_reps = await strength_algo.last_target_weight_for_exercise(
         db, body.exercise_id,
     )
-    if avg_rating is not None and avg_weight is not None:
-        target = strength_algo.progress_from_rating(
-            avg_weight, avg_rating, new_ex["is_compound"],
-        )
-    else:
+    target, _why = strength_algo.weight_from_history(
+        avg_weight, avg_rating, new_ex["is_compound"],
+    )
+    if target is None:
         target = strength_algo.starting_weight_lb(new_ex["movement_pattern"], level)
     if target is not None and "dumbbell" in new_ex["equipment"]:
         target = strength_algo.round_weight(target, pairs, wrist)
@@ -2261,11 +2328,10 @@ async def swap_exercise(
     avg_rating, avg_weight, _avg_reps = await strength_algo.last_target_weight_for_exercise(
         db, body.exercise_id,
     )
-    if avg_rating is not None and avg_weight is not None:
-        target = strength_algo.progress_from_rating(
-            avg_weight, avg_rating, new_ex["is_compound"],
-        )
-    else:
+    target, _why = strength_algo.weight_from_history(
+        avg_weight, avg_rating, new_ex["is_compound"],
+    )
+    if target is None:
         target = strength_algo.starting_weight_lb(new_ex["movement_pattern"], level)
 
     if target is not None and "dumbbell" in new_ex["equipment"]:
@@ -2393,17 +2459,51 @@ async def strength_stats(
     per_muscle: dict[str, float] = {}
     progression: dict[str, list[dict[str, Any]]] = {}
     workout_dates: set[str] = set()
+    # OG2-A3: sets that were performed but carry no poundage, so the
+    # volume figures cannot speak for them. Reported rather than hidden.
+    unweighted_sets = 0
 
     for d, ex_id, _setn, w_lb, reps, rating, skipped, set_type in rows:
-        if skipped or w_lb is None or reps is None or set_type == "warmup":
+        # OG2-A3: the null-weight test used to live here, one line above
+        # `workout_dates.add`, so a pull-up, a plank and a push-up were
+        # dropped before ANYTHING was counted — n_workouts, n_sets, the
+        # daily series, the ratings and the muscle split all excluded them,
+        # and a calisthenics-only day read as no session at all. That is 233
+        # of 760 logged sets on this database and 101 of 275 catalog
+        # exercises, on a home gym whose equipment is dumbbells, a bench and
+        # a pull-up bar.
+        #
+        # `/records` fixed exactly this in PR-1b and the fix was never
+        # carried across; `list_workouts` (:1358) has always had it right,
+        # filtering on `actual_reps` alone. So the app contained both the
+        # right and the wrong version of one query, twenty sections apart,
+        # and disagreed with itself on screen.
+        #
+        # A set counts as performed when it has reps and was not skipped or
+        # tagged as a warm-up. Whether it carries poundage decides only
+        # whether it can contribute to a POUNDS total.
+        kind = strength_algo.classify_set_row(skipped, reps, set_type, w_lb)
+        if kind == strength_algo.SET_EXCLUDED:
             continue
         date_iso = d.isoformat()
         workout_dates.add(date_iso)
-        vol = float(w_lb) * float(reps)
-        daily_vol[date_iso] = daily_vol.get(date_iso, 0.0) + vol
         daily_sets[date_iso] = daily_sets.get(date_iso, 0) + 1
         if rating is not None:
             rpe_vals.append(float(rating))
+
+        if kind == strength_algo.SET_UNWEIGHTED:
+            # Real work, no poundage. Deliberately NOT costed at zero: a
+            # volume total that quietly absorbs a set of pull-ups as 0 lb is
+            # worse than one that admits it is partial, which is the rule
+            # `_sum_nutrition` follows for an uncostable ingredient. It has
+            # already been counted as a set above, and `daily_sets` minus
+            # the weighted rows is what lets a client say which fraction of
+            # the work the volume figure speaks for.
+            unweighted_sets += 1
+            continue
+
+        vol = float(w_lb) * float(reps)
+        daily_vol[date_iso] = daily_vol.get(date_iso, 0.0) + vol
 
         # Muscle group from catalog
         meta = strength_algo.CATALOG_BY_ID.get(ex_id, {})
@@ -2413,6 +2513,11 @@ async def strength_stats(
         # Track top weight + top e1RM per (exercise, date) for the
         # progression series (e1RM-1). e1RM is the canonical strength signal;
         # a light warmup can't beat a working set's e1RM anyway.
+        #
+        # Still weight-keyed, deliberately: a reps-over-time series for
+        # bodyweight work is a different metric with a different axis and
+        # caption, and inventing one here would put reps and pounds on one
+        # scale. That is OG2-C3.
         e1 = strength_algo.estimate_1rm(w_lb, reps) or 0.0
         prog = progression.setdefault(ex_id, [])
         existing = next((p for p in prog if p["date"] == date_iso), None)
@@ -2468,6 +2573,12 @@ async def strength_stats(
         "n_workouts": len(workout_dates),
         "n_sets": sum(daily_sets.values()),
         "total_volume_lb": round(sum(daily_vol.values()), 1),
+        # OG2-A3: the denominator for the pounds figures. `n_sets` counts
+        # every working set; `total_volume_lb` can only speak for the ones
+        # carrying poundage. Emitting the gap lets a client caption the
+        # total honestly instead of implying it covers the session.
+        "unweighted_sets": unweighted_sets,
+        "weighted_sets": sum(daily_sets.values()) - unweighted_sets,
         "rpe_avg": round(sum(rpe_vals) / len(rpe_vals), 2) if rpe_vals else None,
         "daily": daily,
         "per_muscle": [
@@ -2535,23 +2646,41 @@ async def strength_volume_trend(
 
     vol: dict[_date, float] = {}
     setc: dict[_date, int] = {}
+    unweighted: dict[_date, int] = {}
     wkos: dict[_date, set] = {}
     for d, wid, w_lb, reps, skipped, set_type in rows:
-        if skipped or w_lb is None or reps is None or set_type == "warmup":
+        # OG2-A3, the same fault as in `/stats` and fixed the same way: a
+        # week of calisthenics used to report zero sets and zero workouts,
+        # so the mesocycle chart showed a gap where training had happened.
+        # Reps and not-skipped-or-warmup is what makes a set performed;
+        # poundage decides only what can enter a pounds total.
+        kind = strength_algo.classify_set_row(skipped, reps, set_type, w_lb)
+        if kind == strength_algo.SET_EXCLUDED:
             continue
         wk = d - _td(days=d.weekday())
-        vol[wk] = vol.get(wk, 0.0) + float(w_lb) * float(reps)
         setc[wk] = setc.get(wk, 0) + 1
         wkos.setdefault(wk, set()).add(wid)
+        if kind == strength_algo.SET_UNWEIGHTED:
+            unweighted[wk] = unweighted.get(wk, 0) + 1
+            continue
+        vol[wk] = vol.get(wk, 0.0) + float(w_lb) * float(reps)
 
     trend: list[dict[str, Any]] = []
     wk = since
     while wk <= this_monday:
+        n_sets = setc.get(wk, 0)
+        n_unweighted = unweighted.get(wk, 0)
         trend.append({
             "week_start": wk.isoformat(),
             "volume_lb": round(vol.get(wk, 0.0), 1),
-            "sets": setc.get(wk, 0),
+            "sets": n_sets,
             "workouts": len(wkos.get(wk, ())),
+            # The denominator for `volume_lb`, per week. A week that is all
+            # bodyweight work now reports its sets and workouts truthfully
+            # while its volume stays 0 lb, and these two say why rather than
+            # leaving the reader to infer a rest week.
+            "unweighted_sets": n_unweighted,
+            "weighted_sets": n_sets - n_unweighted,
         })
         wk += _td(days=7)
     return {"weeks": weeks, "since": since.isoformat(), "trend": trend}

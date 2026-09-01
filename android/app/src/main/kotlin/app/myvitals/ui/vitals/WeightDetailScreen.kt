@@ -37,6 +37,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,6 +55,45 @@ import app.myvitals.ui.LocalAppTokens
 
 private data class WPoint(val ms: Long, val kg: Double)
 
+/**
+ * Which way is "good" for a body-weight change — the Kotlin mirror of
+ * `frontend/src/weightDirection.ts` (OG2-A5 / OG2-D4).
+ *
+ * A body-weight delta has no intrinsic sign meaning, which is why
+ * `analytics/compare.py` classes bodyweight `better="context"` and says
+ * outright that the app does not get to assume. This screen used to paint a
+ * gain amber and a loss blue — softer than the web's red, but amber is this
+ * app's caution colour, so it was still a verdict, and it was reached without
+ * knowing which way the user was trying to move.
+ *
+ * Only the user's own goal can settle it. With no goal there is no direction
+ * and the figure renders plain, the same refusal `analytics/projection.py`
+ * makes rather than projecting a trend it cannot support.
+ */
+private enum class WeightTone { POSITIVE, CAUTION, NEUTRAL }
+
+/** Mirrors WEIGHT_NOISE_BAND_KG in `api/ai.py`, converted once, here.
+ *
+ *  GOAL-STATE measured the band and recorded why: a card that fires on water
+ *  weight is wrong most weeks, and one that is wrong most weeks is one you
+ *  stopped reading by the week it mattered. Everything on this screen is in
+ *  POUNDS, so the band is too — the unit question the GOAL-STATE note closes
+ *  by insisting on. */
+private const val WEIGHT_NOISE_BAND_LB = 2.2046226
+
+private fun weightDeltaTone(
+    deltaLb: Double?, currentLb: Double?, goalLb: Double?,
+): WeightTone {
+    if (deltaLb == null || currentLb == null || goalLb == null) return WeightTone.NEUTRAL
+    if (kotlin.math.abs(deltaLb) < WEIGHT_NOISE_BAND_LB) return WeightTone.NEUTRAL
+    val gap = goalLb - currentLb
+    // Sitting on the target is not a direction — there is nowhere good left
+    // to move, so neither sign is rewarded.
+    if (kotlin.math.abs(gap) < WEIGHT_NOISE_BAND_LB) return WeightTone.NEUTRAL
+    val towardGoal = if (gap < 0) deltaLb < 0 else deltaLb > 0
+    return if (towardGoal) WeightTone.POSITIVE else WeightTone.CAUTION
+}
+
 @Composable
 fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     val tok = LocalAppTokens.current
@@ -63,6 +103,12 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // OG2-D4: the target, in kg, or null when unset. The web has drawn this
+    // since the goal line shipped; the phone — the device you stand next to
+    // the scale with — did not, and had no way to say which direction was
+    // progress either. Null is a real state and stays one: no goal means no
+    // line and no verdict, never a guessed direction.
+    var goalKg by remember { mutableStateOf<Double?>(null) }
 
     val ptsType = remember {
         app.myvitals.data.JsonCache.listType(WPoint::class.java)
@@ -91,6 +137,10 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                 runCatching { out += WPoint(Instant.parse(t).toEpochMilli(), w) }
             }
             pts = out
+            // Fails soft and separately from the series: a profile that will
+            // not load should cost the goal line, not the chart.
+            runCatching { goalKg = withContext(Dispatchers.IO) { api.profile() }.weightGoalKg }
+                .onFailure { Timber.w(it, "weight goal fetch failed") }
             if (pts.isNotEmpty()) {
                 app.myvitals.data.JsonCache.write(context, cacheKey, ptsType, pts)
             }
@@ -139,7 +189,7 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    item { WeightHero(pts) }
+                    item { WeightHero(pts, goalKg) }
                     // The window the user asked for, not the span the data
                     // happens to cover — the chart draws the former.
                     val winStart = LocalDate.now()
@@ -147,7 +197,7 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                         .atStartOfDay(ZoneId.systemDefault())
                         .toInstant().toEpochMilli()
                     val winEnd = System.currentTimeMillis()
-                    item { WeightChart(pts, Vital.WEIGHT.accent, winStart, winEnd) }
+                    item { WeightChart(pts, Vital.WEIGHT.accent, winStart, winEnd, goalKg) }
                     item { WeightStats(pts, winStart, winEnd) }
                 }
             }
@@ -156,11 +206,13 @@ fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
 }
 
 @Composable
-private fun WeightHero(pts: List<WPoint>) {
+private fun WeightHero(pts: List<WPoint>, goalKg: Double?) {
     val tok = LocalAppTokens.current
     val latestLb = Units.weight(pts.last().kg) ?: 0.0
     val firstLb = Units.weight(pts.first().kg) ?: 0.0
     val delta = latestLb - firstLb
+    val goalLb = goalKg?.let { Units.weight(it) }
+    val tone = weightDeltaTone(delta, latestLb, goalLb)
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
             Text("LATEST", color = tok.onSurfaceVariant,
@@ -173,13 +225,22 @@ private fun WeightHero(pts: List<WPoint>) {
                     modifier = Modifier.padding(bottom = 6.dp))
             }
             val arrow = if (delta > 0.05) "↑" else if (delta < -0.05) "↓" else "→"
-            val color = when {
-                delta > 0.5 -> Color(0xFFFBBF24)
-                delta < -0.5 -> Color(0xFF60A5FA)
-                else -> tok.onSurfaceDim
+            // The arrow still says which way it moved — that is a fact. The
+            // COLOUR says whether that is good, which needs the goal.
+            val color = when (tone) {
+                WeightTone.POSITIVE -> tok.good
+                WeightTone.CAUTION -> tok.caution
+                WeightTone.NEUTRAL -> tok.onSurfaceDim
             }
             Text("$arrow %+.1f lb in window".format(delta),
                 color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            goalLb?.let {
+                val gap = it - latestLb
+                Text(
+                    "goal %.1f lb · %+.1f to go".format(it, gap),
+                    color = tok.onSurfaceVariant, fontSize = 11.sp,
+                )
+            }
         }
     }
 }
@@ -187,6 +248,7 @@ private fun WeightHero(pts: List<WPoint>) {
 @Composable
 private fun WeightChart(
     pts: List<WPoint>, color: Color, winStart: Long, winEnd: Long,
+    goalKg: Double? = null,
 ) {
     val tok = LocalAppTokens.current
     val measurer = androidx.compose.ui.text.rememberTextMeasurer()
@@ -208,8 +270,19 @@ private fun WeightChart(
             val b = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
             val a = (sumY - b * sumX) / n
             Canvas(Modifier.fillMaxWidth().height(190.dp)) {
-                val domain = niceDomain(minV.toFloat(), maxV.toFloat(), targetTicks = 4,
-                    minStep = 1f)
+                // OG2-D4: fold the goal into the domain BEFORE padding.
+                // Web hit this and left a note: a goal outside the plotted
+                // range simply does not widen the axis, so the line vanishes
+                // silently — and it vanishes exactly when the user is
+                // furthest from the target, which is when they most want to
+                // see the gap. `niceDomain` has taken includeLo/includeHi
+                // since it was written; nothing had passed them.
+                val goalLbF = goalKg?.let { Units.weight(it) }?.toFloat()
+                val domain = niceDomain(
+                    minV.toFloat(), maxV.toFloat(),
+                    includeLo = goalLbF, includeHi = goalLbF,
+                    targetTicks = 4, minStep = 1f,
+                )
                 val g = chartGeom(domain, ChartInsets(
                     left = 34.dp.toPx(), top = 6.dp.toPx(),
                     right = 4.dp.toPx(), bottom = 16.dp.toPx(),
@@ -220,6 +293,32 @@ private fun WeightChart(
                 // lined up with the lines they labelled. Drawn together now.
                 drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface) {
                     "%.0f".format(it)
+                }
+                // The goal line, dashed and labelled, drawn under the series
+                // so a reading never disappears behind it.
+                goalLbF?.let { gv: Float ->
+                    val gy = g.y(gv)
+                    drawLine(
+                        color = tok.onSurfaceVariant,
+                        start = Offset(g.left, gy), end = Offset(g.right, gy),
+                        strokeWidth = 1.2.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(
+                            floatArrayOf(6.dp.toPx(), 4.dp.toPx())
+                        ),
+                    )
+                    val lbl = measurer.measure(
+                        "goal %.0f".format(gv),
+                        style = androidx.compose.ui.text.TextStyle(
+                            color = tok.onSurfaceVariant, fontSize = 9.sp,
+                        ),
+                    )
+                    drawText(
+                        lbl,
+                        topLeft = Offset(
+                            g.right - lbl.size.width - 2.dp.toPx(),
+                            gy - lbl.size.height - 1.dp.toPx(),
+                        ),
+                    )
                 }
                 // Regression trend
                 drawLine(

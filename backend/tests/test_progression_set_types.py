@@ -38,8 +38,11 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "myvitals"
 # Functions that answer "what should be prescribed next time". Every one of
 # them must read the shared constant. Adding a fourth progression reader
 # without it should turn this suite red — that is the whole point.
+# OG2-B1 moved the prescription reader's filtering out of its query and into
+# the pure `read_session`, so the rule is now enforced in one place instead of
+# in a WHERE clause. The invariant is unchanged and the check follows it.
 PROGRESSION_READERS = [
-    (SRC / "analytics" / "strength.py", "last_target_weight_for_exercise"),
+    (SRC / "analytics" / "strength.py", "read_session"),
     (SRC / "api" / "workout" / "strength.py", "_advance_program_on_complete"),
 ]
 

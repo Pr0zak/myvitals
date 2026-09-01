@@ -807,11 +807,127 @@ def classify_set_row(
     return SET_WEIGHTED
 
 
+@dataclass(frozen=True)
+class SetFacts:
+    """One logged set, without a database. What the reducer reads and no more.
+
+    Separating this from the ORM row is what makes the judgement testable at
+    all — the house style for anything that decides what to lift, matching
+    `analytics/targets.py` (numbers in, numbers out) and
+    `analytics/projection.py`.
+    """
+    skipped: bool
+    actual_reps: int | None
+    set_type: str | None
+    actual_weight_lb: float | None
+    rating: int | None
+
+
+@dataclass(frozen=True)
+class SessionRead:
+    """How one past session of one exercise actually went — OG2-B1.
+
+    The point of this type is `enough`. `target_sets` was written on seven
+    construction sites in this module and read back by no progression reader,
+    so logging 2 of 4 prescribed sets and rating them Easy produced the same
+    weight jump as logging all 4 — a +20% advance off half the work, and the
+    truncation biases BOTH inputs toward advancing: the sets a user abandons
+    are the late ones, which are the hard ones.
+
+    `prescribed_sets` is read off the HISTORICAL slot, never today's freshly
+    generated number. FAST-18 modulates the count before it is persisted —
+    fewer sets at 18h and 24h fasted — so comparing last session against
+    today's prescription would let a fasted day retroactively declare a
+    complete session incomplete, or the reverse.
+    """
+    prescribed_sets: int
+    performed_sets: int
+    declined: bool
+    avg_rating: float | None
+    avg_weight_lb: float | None
+    avg_reps: float | None
+
+    @property
+    def enough(self) -> bool:
+        """Did the user perform what was prescribed?
+
+        A declined slot (SKIP-1) is not a short session — it is a decision,
+        and it carries no sets to judge.
+        """
+        return not self.declined and self.performed_sets >= self.prescribed_sets
+
+    @property
+    def has_history(self) -> bool:
+        return self.performed_sets > 0
+
+
+def read_session(
+    *,
+    target_sets: int,
+    slot_declined: bool,
+    sets: Sequence[SetFacts],
+) -> SessionRead:
+    """Reduce one session's logged sets to the facts a prescription needs.
+
+    Pure. The qualifying predicate is the same one `PROGRESSION_EXCLUDED_SET_TYPES`
+    names: a warm-up and a drop set are real work but are not evidence about
+    the load to prescribe next.
+    """
+    performed = [
+        s for s in sets
+        if not s.skipped
+        and s.actual_reps is not None
+        and (s.set_type or "working") not in PROGRESSION_EXCLUDED_SET_TYPES
+    ]
+    rated = [s.rating for s in performed if s.rating is not None]
+    weighted = [s.actual_weight_lb for s in performed if s.actual_weight_lb is not None]
+    repped = [s.actual_reps for s in performed if s.actual_reps is not None]
+    return SessionRead(
+        prescribed_sets=max(0, target_sets),
+        performed_sets=len(performed),
+        declined=slot_declined,
+        avg_rating=sum(rated) / len(rated) if rated else None,
+        avg_weight_lb=sum(weighted) / len(weighted) if weighted else None,
+        avg_reps=sum(repped) / len(repped) if repped else None,
+    )
+
+
+def stall_count(sessions: Sequence[SessionRead]) -> int:
+    """Consecutive recent sessions, NEWEST FIRST, that were not `enough`.
+
+    Reported, never acted on — deliberately, and this is the load-bearing
+    restraint of OG2-B1. There are already three deloads: the rating policy
+    cuts 7.5% at `avg_rating <= FAIL_THRESHOLD`, the recovery factor
+    multiplies up to 0.85 x 0.90 and `generate_plan` multiplies again by 0.90
+    on an easy day, and PROG-1 cuts the stored weight on its own fail streak.
+    0.6885 is reachable today with no stall logic at all, so a fourth
+    multiplier is exactly the compounding this codebase refuses elsewhere.
+
+    It exists because the AI coach cannot currently see a stall at all:
+    `build_deload_payload` sends four coarse 14-day numbers with no
+    per-exercise resolution, and its `missed_or_skipped_sets` counts rows
+    with null reps — of which production has zero, because an unlogged set
+    has no row. So a partial session is invisible to the deload check today.
+    A count lets the coach say "bench has fallen short three sessions
+    running" instead of "average rating is down 0.4", and leaves the decision
+    with the model and the user rather than silently multiplying a weight.
+
+    A single `enough` session zeroes it.
+    """
+    n = 0
+    for s in sessions:
+        if s.enough:
+            break
+        n += 1
+    return n
+
+
 def weight_from_history(
     avg_weight_lb: float | None,
     avg_rating: float | None,
     is_compound: bool,
     goal: str = "hypertrophy",
+    enough: bool = True,
 ) -> tuple[float | None, str]:
     """Next session's load from the last one, and the reason for it.
 
@@ -844,9 +960,21 @@ def weight_from_history(
         return None, "no_history"
     if avg_rating is None:
         return avg_weight_lb, "held_unrated"
-    return progress_from_rating(
+
+    proposed = progress_from_rating(
         avg_weight_lb, avg_rating, is_compound, goal=goal,
-    ), "rated"
+    )
+    # OG2-B1: a short session gates the ADVANCE and never the deload, and the
+    # asymmetry is the whole decision. Two sets rated Easy out of four
+    # prescribed are not evidence the prescription was met — and the sets a
+    # user abandons are the late ones, which are the hard ones, so truncation
+    # biases the average toward "advance" precisely when it is least earned.
+    # Two sets rated Failed, though, are real evidence to cut: refusing to
+    # act on them would leave a weight the user could not lift standing
+    # because they stopped early, which is the wrong way round.
+    if not enough and proposed > avg_weight_lb:
+        return avg_weight_lb, "held_incomplete"
+    return proposed, "rated"
 
 
 def progress_from_rating(
@@ -893,6 +1021,7 @@ def double_progression(
     pairs_lb: list[float],
     wrist_weights_lb: list[float],
     deload: float = 1.0,
+    session_complete: bool = True,
 ) -> tuple[float | None, int, int, str | None]:
     """Double progression for weighted lifts: add REPS toward the top of
     the range, and only add WEIGHT once you're at the top.
@@ -928,6 +1057,14 @@ def double_progression(
     at_top = last_avg_reps is not None and last_avg_reps >= base_reps_hi
     jumped = _round(progress_from_rating(
         last_weight_lb, last_avg_rating, is_compound, goal=goal))
+
+    # OG2-B1: every branch below this point ADVANCES — more weight in 2 and
+    # 4, more reps in 3. A session that fell short of its prescribed sets is
+    # not evidence that any of them were earned, so they are all skipped and
+    # the load holds. Branch 1 (the near-failure cut) sits above this line
+    # deliberately: a short session is still real evidence to back off.
+    if not session_complete:
+        return held, base_reps_lo, base_reps_hi, None
 
     # 2. At the top of the range AND the rating wants a jump AND the rack
     #    can deliver it → add weight, reset reps to the bottom.
@@ -2472,23 +2609,25 @@ def select_mobility_poses(
     return ranked[:min(count, len(ranked))]
 
 
-async def last_target_weight_for_exercise(
-    db: AsyncSession, exercise_id: str
-) -> tuple[float | None, float | None, float | None]:
-    """Find the most recent (avg_rating, avg_actual_weight_lb,
-    avg_actual_reps) for an exercise.
+async def read_recent_sessions(
+    db: AsyncSession, exercise_id: str, limit: int = 8,
+) -> list[SessionRead]:
+    """The last `limit` completed sessions of one exercise, newest first.
 
-    Used to compute next-session prescription: if you crushed 25 lb x 8
-    last session (avg_rating 4.8), this session should prescribe ~30 lb;
-    avg_reps feeds the double-progression rep ladder.
+    The query half of OG2-B1; `read_session` is the judgement half and has no
+    database in it.
 
-    Filters `PROGRESSION_EXCLUDED_SET_TYPES` — see that constant for why
-    (OG2-A1). Reachable two ways today: the web set logger has a set-type
-    picker, and imported Strong/Hevy history carries the source file's own
-    set types.
+    Two changes from the single-session lookup this replaces. It reads more
+    than one session, without which a stall cannot be seen at all. And it
+    keeps only sessions that actually carry qualifying sets — the old version
+    took the newest completed slot whatever it held, so a single DECLINED
+    slot (SKIP-1) in the most recent session made the reducer report no
+    history and fall through to `starting_weight_lb`, a table indexed by
+    declared experience level. That is the same shape as the OG2-A2 defect:
+    real history discarded in favour of a beginner's default.
     """
-    wex = (await db.execute(
-        select(models.StrengthWorkoutExercise)
+    rows = (await db.execute(
+        select(models.StrengthWorkoutExercise, models.StrengthWorkout.completed_at)
         .join(
             models.StrengthWorkout,
             models.StrengthWorkoutExercise.workout_id == models.StrengthWorkout.id,
@@ -2496,33 +2635,64 @@ async def last_target_weight_for_exercise(
         .where(models.StrengthWorkoutExercise.exercise_id == exercise_id)
         .where(models.StrengthWorkout.status == "completed")
         .order_by(models.StrengthWorkout.completed_at.desc())
-        .limit(1)
-    )).scalar_one_or_none()
-    if wex is None:
-        return None, None, None
+        .limit(max(1, limit) * 3)
+    )).all()
+    if not rows:
+        return []
 
-    sets = (await db.execute(
-        select(models.StrengthSet)
-        .where(models.StrengthSet.workout_exercise_id == wex.id)
-        .where(models.StrengthSet.skipped.is_(False))
-        .where(models.StrengthSet.set_type.notin_(PROGRESSION_EXCLUDED_SET_TYPES))
-    )).scalars().all()
-    if not sets:
-        return None, None, None
+    wex_by_id = {r[0].id: r[0] for r in rows}
+    sets_by_wex: dict[int, list[models.StrengthSet]] = {}
+    if wex_by_id:
+        for s in (await db.execute(
+            select(models.StrengthSet)
+            .where(models.StrengthSet.workout_exercise_id.in_(list(wex_by_id)))
+        )).scalars().all():
+            sets_by_wex.setdefault(s.workout_exercise_id, []).append(s)
 
-    rated = [s for s in sets if s.rating is not None]
-    weighted = [s for s in sets if s.actual_weight_lb is not None]
-    repped = [s for s in sets if s.actual_reps is not None]
-    avg_rating = sum(s.rating for s in rated) / len(rated) if rated else None
-    avg_weight = (
-        sum(s.actual_weight_lb for s in weighted) / len(weighted)
-        if weighted else None
-    )
-    avg_reps = (
-        sum(s.actual_reps for s in repped) / len(repped)
-        if repped else None
-    )
-    return avg_rating, avg_weight, avg_reps
+    out: list[SessionRead] = []
+    for wex, _completed_at in rows:
+        read = read_session(
+            target_sets=wex.target_sets,
+            slot_declined=bool(wex.skipped),
+            sets=[
+                SetFacts(
+                    skipped=bool(s.skipped),
+                    actual_reps=s.actual_reps,
+                    set_type=s.set_type,
+                    actual_weight_lb=s.actual_weight_lb,
+                    rating=s.rating,
+                )
+                for s in sets_by_wex.get(wex.id, [])
+            ],
+        )
+        # A slot with nothing logged is not a session. Including it would
+        # make every declined or forgotten slot read as a stall.
+        if read.has_history:
+            out.append(read)
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def last_target_weight_for_exercise(
+    db: AsyncSession, exercise_id: str
+) -> tuple[float | None, float | None, float | None, bool]:
+    """The most recent real session of an exercise, as
+    (avg_rating, avg_weight_lb, avg_reps, enough).
+
+    Used to compute the next prescription: crush 25 lb x 8 last session and
+    this session should prescribe ~30 lb.
+
+    `enough` is the OG2-B1 addition and it gates the ADVANCE only — see
+    `weight_from_history`. Filters `PROGRESSION_EXCLUDED_SET_TYPES`
+    (OG2-A1); reachable through the web set-type picker and through imported
+    Strong/Hevy history.
+    """
+    sessions = await read_recent_sessions(db, exercise_id, limit=1)
+    if not sessions:
+        return None, None, None, True
+    s = sessions[0]
+    return s.avg_rating, s.avg_weight_lb, s.avg_reps, s.enough
 
 
 # ------------------------------------------------------------------
@@ -3214,7 +3384,7 @@ async def generate_plan(
             rest_s += 30
 
         # History-driven progression first, then starting weight.
-        avg_rating, avg_weight, avg_reps = await last_target_weight_for_exercise(
+        avg_rating, avg_weight, avg_reps, enough = await last_target_weight_for_exercise(
             db, ex["id"])
         is_weighted = "dumbbell" in ex["equipment"] and not ex.get("is_timed")
 
@@ -3227,7 +3397,7 @@ async def generate_plan(
                 last_weight_lb=avg_weight, last_avg_rating=avg_rating,
                 last_avg_reps=avg_reps, is_compound=ex["is_compound"],
                 goal=goal, pairs_lb=pairs_lb, wrist_weights_lb=wrist,
-                deload=deload,
+                deload=deload, session_complete=enough,
             )
             if advisory:
                 dp_advisories.append((ex["name"], advisory))
@@ -3238,6 +3408,7 @@ async def generate_plan(
             # reps/seconds are handled elsewhere.
             target, _why = weight_from_history(
                 avg_weight, avg_rating, ex["is_compound"], goal=goal,
+                enough=enough,
             )
             if target is None:
                 target = starting_weight_lb(ex["movement_pattern"], level)

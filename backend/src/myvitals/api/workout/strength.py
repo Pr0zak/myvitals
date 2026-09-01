@@ -2292,11 +2292,11 @@ async def add_exercise(
     goal = (equip.get("training") or {}).get("goal", "general")
 
     # Same weight chain as swap_exercise — one prescription policy.
-    avg_rating, avg_weight, _avg_reps = await strength_algo.last_target_weight_for_exercise(
+    avg_rating, avg_weight, _avg_reps, enough = await strength_algo.last_target_weight_for_exercise(
         db, body.exercise_id,
     )
     target, _why = strength_algo.weight_from_history(
-        avg_weight, avg_rating, new_ex["is_compound"],
+        avg_weight, avg_rating, new_ex["is_compound"], goal=goal, enough=enough,
     )
     if target is None:
         target = strength_algo.starting_weight_lb(new_ex["movement_pattern"], level)
@@ -2443,15 +2443,20 @@ async def swap_exercise(
     level = (equip.get("training") or {}).get("level", "intermediate")
     pairs = (equip.get("dumbbells") or {}).get("pairs_lb") or []
     wrist = equip.get("wrist_weights_lb") or []
+    # OG2-B1: this site never read `goal` at all, so a swapped-in lift
+    # silently advanced on the hypertrophy default while the same lift in the
+    # generated plan advanced on the user's actual goal — the divergence A2
+    # started closing, one call site further on.
+    goal = (equip.get("training") or {}).get("goal", "general")
 
     # Recompute target weight from history (if any) or starting table.
     # Swap keeps the slot's existing rep range, so we use the weight-only
     # policy here; double progression lives in full plan generation.
-    avg_rating, avg_weight, _avg_reps = await strength_algo.last_target_weight_for_exercise(
+    avg_rating, avg_weight, _avg_reps, enough = await strength_algo.last_target_weight_for_exercise(
         db, body.exercise_id,
     )
     target, _why = strength_algo.weight_from_history(
-        avg_weight, avg_rating, new_ex["is_compound"],
+        avg_weight, avg_rating, new_ex["is_compound"], goal=goal, enough=enough,
     )
     if target is None:
         target = strength_algo.starting_weight_lb(new_ex["movement_pattern"], level)

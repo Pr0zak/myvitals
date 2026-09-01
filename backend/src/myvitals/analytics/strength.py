@@ -1252,6 +1252,18 @@ def filter_catalog_for_equipment(
     function) while CATALOG itself stays complete for history lookups.
     """
     catalog = [e for e in catalog if e["id"] not in SUPERSEDED_EXERCISE_IDS]
+    return [e for e in catalog if can_do_exercise(e, equipment)]
+
+
+def can_do_exercise(ex: dict[str, Any], equipment: dict[str, Any]) -> bool:
+    """Can this one exercise be performed with the equipment owned?
+
+    Extracted from `filter_catalog_for_equipment` (OG2-A6) so the same
+    question can be asked about an exercise that is ALREADY in a plan, not
+    only about candidates for a new one. Selling a bench does not un-write
+    yesterday's prescription, and until this existed nothing could tell the
+    user that a slot in front of them had become undoable.
+    """
     bench_owned = (
         equipment.get("bench", {}).get("flat")
         or equipment.get("bench", {}).get("incline")
@@ -1268,31 +1280,28 @@ def filter_catalog_for_equipment(
         or equipment.get("pull_up_bar")
     )
 
-    def can_do(ex: dict[str, Any]) -> bool:
-        if not bar_owned and ex["id"] in _BAR_REQUIRED_EXERCISES:
+    if not bar_owned and ex["id"] in _BAR_REQUIRED_EXERCISES:
+        return False
+    if not low_bar_owned and ex["id"] in _LOW_BAR_REQUIRED_EXERCISES:
+        return False
+    if not partner_owned and ex["id"] in _PARTNER_REQUIRED_EXERCISES:
+        return False
+    for tag in ex["equipment"]:
+        if tag == "bodyweight":
+            continue
+        if tag == "bench" and not bench_owned:
             return False
-        if not low_bar_owned and ex["id"] in _LOW_BAR_REQUIRED_EXERCISES:
+        if tag == "dumbbell" and not db_owned:
             return False
-        if not partner_owned and ex["id"] in _PARTNER_REQUIRED_EXERCISES:
+        if tag == "barbell" and not equipment.get("barbell"):
             return False
-        for tag in ex["equipment"]:
-            if tag == "bodyweight":
-                continue
-            if tag == "bench" and not bench_owned:
-                return False
-            if tag == "dumbbell" and not db_owned:
-                return False
-            if tag == "barbell" and not equipment.get("barbell"):
-                return False
-            if tag == "cable" and not equipment.get("cable_stack"):
-                return False
-            if tag == "kettlebell" and not equipment.get("kettlebells_lb"):
-                return False
-            if tag == "bands" and not equipment.get("resistance_bands"):
-                return False
-        return True
-
-    return [e for e in catalog if can_do(e)]
+        if tag == "cable" and not equipment.get("cable_stack"):
+            return False
+        if tag == "kettlebell" and not equipment.get("kettlebells_lb"):
+            return False
+        if tag == "bands" and not equipment.get("resistance_bands"):
+            return False
+    return True
 
 
 # ------------------------------------------------------------------

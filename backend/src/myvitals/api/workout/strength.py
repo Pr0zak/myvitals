@@ -260,17 +260,22 @@ async def put_equipment(
 ) -> EquipmentOut:
     now = datetime.now(timezone.utc)
     row = await db.get(models.UserEquipment, 1)
-    # Capture the prior training prefs so we can detect a meaningful
-    # change after the write and auto-regenerate today's plan. Only
-    # fields that actually change the workout shape trigger this:
-    # level, days_per_week, split_preference, workout_minutes,
-    # cardio_days_per_week, include_mobility, yoga_on_rest_days.
-    # Equipment-only changes (e.g. flipping a cardio_rower flag) do
-    # NOT trigger a strength regen since the strength plan is
-    # unaffected.
+    # Capture the prior state so a meaningful change can auto-regenerate
+    # today's plan after the write. Two things count as meaningful, and
+    # until OG2-A6 only the first did.
+    #
+    # The old comment claimed "equipment-only changes do NOT trigger a
+    # strength regen since the strength plan is unaffected". That is not
+    # true: `filter_catalog_for_equipment` keeps only exercises whose every
+    # required tag is owned, so the plan is built FROM the equipment. Untick
+    # the bench and today's plan went on prescribing bench work — nothing
+    # regenerated, nothing warned, and no row was marked. The user finds out
+    # at the rack.
     prior_training: dict[str, Any] = {}
+    prior_payload: dict[str, Any] = {}
     if row is not None:
-        prior_training = (row.payload or {}).get("training") or {}
+        prior_payload = row.payload or {}
+        prior_training = prior_payload.get("training") or {}
 
     if row is None:
         row = models.UserEquipment(
@@ -299,7 +304,28 @@ async def put_equipment(
     training_changed = any(
         prior_training.get(f) != new_training.get(f) for f in watched_fields
     )
-    if training_changed:
+    # Ask the question directly rather than maintaining a second field list:
+    # did this edit change WHICH EXERCISES ARE POSSIBLE? A named-field list
+    # has to be updated by hand every time `EquipmentPayload` grows — the
+    # payload is JSON precisely so it can grow without a migration — and the
+    # field that gets forgotten fails silently. Comparing the two filtered
+    # catalogs cannot drift, and it is exact: it is the same function the
+    # generator selects from.
+    equipment_changed = False
+    if row is not None and prior_payload:
+        before = {
+            e["id"] for e in strength_algo.filter_catalog_for_equipment(
+                strength_algo.CATALOG, prior_payload,
+            )
+        }
+        after = {
+            e["id"] for e in strength_algo.filter_catalog_for_equipment(
+                strength_algo.CATALOG, row.payload or {},
+            )
+        }
+        equipment_changed = before != after
+
+    if training_changed or equipment_changed:
         today_d = _local_today()
         existing = await _existing_workout_for(db, today_d)
         if existing is not None and existing.status == "planned":
@@ -713,6 +739,14 @@ class WorkoutExerciseOut(BaseModel):
     # user chose, and the AI reviewer reads a self-added accessory
     # differently from a planned one.
     added_ad_hoc: bool = False
+    # OG2-A6: this slot needs equipment the user no longer owns. An untouched
+    # plan regenerates on an equipment change, so this only appears on a plan
+    # that could not be — one already in progress, or one with logged sets.
+    # Flagged rather than removed: silently deleting work from a session the
+    # user has already read is worse than saying it cannot be done, which is
+    # openGym's rule for the same case and the same reason the shopping list
+    # flags an uncostable line instead of dropping it.
+    equipment_missing: bool = False
     # TD-6 — the per-set prescription, with server-resolved prefills. Clients
     # render these verbatim; they must not derive their own starting values.
     planned_sets: list[PlannedSetOut] = []
@@ -1036,8 +1070,16 @@ def _wex_to_out(
     wrist_lb: list[float] | None = None,
     last_sets: list[LastSetOut] | None = None,
     program_by_id: dict[str, dict] | None = None,
+    equipment: dict[str, Any] | None = None,
 ) -> WorkoutExerciseOut:
     prog = (program_by_id or {}).get(wex.exercise_id)
+    meta = _CATALOG_BY_ID.get(wex.exercise_id)
+    # Unknown to the catalog means unjudgeable, not undoable — an imported or
+    # superseded id must not be painted as missing kit.
+    missing_kit = bool(
+        equipment is not None and meta is not None
+        and not strength_algo.can_do_exercise(meta, equipment)
+    )
     return WorkoutExerciseOut(
         id=wex.id,
         workout_id=wex.workout_id,
@@ -1058,6 +1100,7 @@ def _wex_to_out(
         last_sets=last_sets or [],
         skipped=bool(wex.skipped),
         added_ad_hoc=bool(getattr(wex, "added_ad_hoc", False)),
+        equipment_missing=missing_kit,
         planned_sets=_planned_sets(wex, sets, last_sets, prog),
         sets=[_set_to_out(s) for s in sorted(sets, key=lambda x: x.set_number)],
     )
@@ -1297,7 +1340,8 @@ async def _hydrate_workout(
         deload_reason = ("low " + " / ".join(bits)) if bits else "low recovery"
     ex_out = [
         _wex_to_out(wex, sets_by_wex.get(wex.id, []), pairs_lb, wrist_lb,
-                    last_by_ex.get(wex.exercise_id), program_by_id)
+                    last_by_ex.get(wex.exercise_id), program_by_id,
+                    equipment=equip)
         for wex in wex_rows
     ]
     return WorkoutOut(

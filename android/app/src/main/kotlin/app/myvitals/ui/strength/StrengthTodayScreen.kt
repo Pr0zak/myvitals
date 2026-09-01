@@ -2939,6 +2939,17 @@ private fun ExerciseCard(
                             fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
                         )
                     }
+                    // OG2-A6: the equipment changed after this plan was made
+                    // and it was too late to regenerate. Flagged, never
+                    // removed — deleting work from a session already in front
+                    // of the user is worse than saying it cannot be done.
+                    if (wex.equipmentMissing) {
+                        Text(
+                            "NEEDS KIT YOU NO LONGER HAVE",
+                            color = pal.caution, fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
+                        )
+                    }
                     val rep = if (wex.targetRepsLow == wex.targetRepsHigh)
                         "${wex.targetRepsLow}" else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
                     val w = wex.targetWeightLb?.let { " @ ${it}lb" } ?: ""

@@ -1508,6 +1508,12 @@ useVisibilityRefresh(loadAll);
                  after the fact. The AI reviewer makes the same distinction. -->
             <span v-if="wex.added_ad_hoc" class="adhoc-tag"
                   title="You added this — the planner didn't prescribe it">added</span>
+            <!-- OG2-A6: the equipment changed after this plan was made, and
+                 it was too late to regenerate. Flagged, never removed:
+                 deleting work from a session already in front of the user
+                 is worse than saying it cannot be done. -->
+            <span v-if="wex.equipment_missing" class="kit-tag"
+                  title="Needs equipment your profile no longer lists — swap it or regenerate">no kit</span>
             <button v-if="wex.added_ad_hoc && !isSlotClosed(wex) && wex.sets.length === 0"
                     class="ghost tiny" title="Remove this exercise"
                     @click="removeExercise(wex.id)">remove</button>
@@ -2989,6 +2995,12 @@ html[data-theme="neon"] .big { color: var(--rn-ink); }
   background: var(--surface);
   color: var(--text);
 }
+.kit-tag {
+  font-size: 10px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; padding: 1px 5px; border-radius: 3px;
+  background: rgba(217, 119, 6, .14); color: #b45309; vertical-align: middle;
+}
+html[data-theme="neon"] .kit-tag { background: rgba(255,176,32,.16); color: var(--rn-amber); }
 .adhoc-tag {
   font-size: 0.62rem;
   letter-spacing: 0.05em;

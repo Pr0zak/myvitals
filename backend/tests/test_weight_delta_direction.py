@@ -45,6 +45,14 @@ HELPER = FRONTEND / "weightDirection.ts"
 WEIGHT_VIEW = FRONTEND / "views" / "Weight.vue"
 BODY_CARD = FRONTEND / "components" / "today" / "BodyMetrics.vue"
 DELTA = FRONTEND / "components" / "today" / "Delta.vue"
+PHONE_WEIGHT = (
+    REPO / "android" / "app" / "src" / "main" / "kotlin" / "app" / "myvitals"
+    / "ui" / "vitals" / "WeightDetailScreen.kt"
+)
+PHONE_TOKENS = (
+    REPO / "android" / "app" / "src" / "main" / "kotlin" / "app" / "myvitals"
+    / "ui" / "AppTokens.kt"
+)
 
 
 class TestTheRuleExistsInOnePlace:
@@ -164,3 +172,68 @@ class TestToneVocabulary:
         src = HELPER.read_text()
         tail = src[src.index("export function weightDeltaClass"):]
         assert ': ""' in tail
+
+
+class TestThePhoneAgrees:
+    """OG2-D4, pulled forward because A5 left the two surfaces disagreeing.
+
+    The phone painted a gain amber and a loss blue. Softer than the web's
+    red, but amber is this app's caution colour, so it was still a verdict —
+    and one reached without knowing which way the user was trying to move,
+    because the screen had no goal at all. It is also the device you stand
+    next to the scale with, which is the one place the target should be
+    visible.
+    """
+
+    def test_the_phone_fetches_the_goal(self):
+        assert "weightGoalKg" in PHONE_WEIGHT.read_text()
+
+    def test_the_goal_fetch_fails_soft(self):
+        """A profile that will not load should cost the goal line, not the
+        chart. Separate requests, separate failures."""
+        assert "runCatching { goalKg" in PHONE_WEIGHT.read_text()
+
+    def test_the_phone_uses_the_same_three_way_rule(self):
+        src = PHONE_WEIGHT.read_text()
+        assert "weightDeltaTone" in src
+        assert "WeightTone.NEUTRAL" in src
+
+    def test_the_phone_band_is_in_pounds(self):
+        """Everything on that screen is in pounds, so the band is too.
+
+        Reusing the kg value would be a factor-of-2.2 error that still looks
+        plausible on screen — the exact unit trap the GOAL-STATE note closes
+        by warning about.
+        """
+        assert "WEIGHT_NOISE_BAND_LB" in PHONE_WEIGHT.read_text()
+
+    def test_the_goal_is_folded_into_the_chart_domain(self):
+        """A goal outside the plotted range does not widen an axis on its own.
+
+        It then vanishes precisely when the user is furthest from the target,
+        which is when they most want to see the gap. Web left a note about
+        hitting this; `niceDomain` has taken includeLo/includeHi since it was
+        written and nothing had passed them.
+        """
+        src = PHONE_WEIGHT.read_text()
+        assert "includeLo = goalLbF" in src
+        assert "includeHi = goalLbF" in src
+
+    def test_the_verdict_colours_are_tokens_not_literals(self):
+        """The two shells disagree about which green means good.
+
+        A shared screen reaching for a hex literal is what AppTokens exists
+        to stop, and both palettes now carry the pair.
+        """
+        src = PHONE_WEIGHT.read_text()
+        assert "tok.good" in src
+        assert "tok.caution" in src
+        assert "0xFFFBBF24" not in src, "the hard-coded amber is back"
+        assert "0xFF60A5FA" not in src, "the hard-coded blue is back"
+
+        tokens = PHONE_TOKENS.read_text()
+        assert "val good: Color" in tokens
+        assert "val caution: Color" in tokens
+        # Both palettes, or a neon user gets a classic-theme colour.
+        assert tokens.count("good =") == 2
+        assert tokens.count("caution =") == 2

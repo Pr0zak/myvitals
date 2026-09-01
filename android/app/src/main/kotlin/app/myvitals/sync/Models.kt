@@ -217,6 +217,11 @@ data class StrengthSetRow(
      *  The two booleans above are derived from this server-side and kept
      *  only so an older APK still shows a badge. */
     @Json(name = "pr_kind") val prKind: String? = null,
+    /** OG2-A7: server-decided rest after this set, in seconds. 0 means do
+     *  not rest — the session is over and there is nothing left to time.
+     *  Defaults to 0 so an older server omitting the key starts no timer,
+     *  which fails quiet rather than counting down after the last set. */
+    @Json(name = "rest_after_s") val restAfterS: Int = 0,
 )
 
 @JsonClass(generateAdapter = true)

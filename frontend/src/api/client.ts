@@ -1245,7 +1245,7 @@ export const api = {
     skipped?: boolean;
     logged_at?: string;
     set_type?: string;
-  }): Promise<{ id: number; is_weight_pr: boolean; is_e1rm_pr: boolean }> {
+  }): Promise<{ id: number; is_weight_pr: boolean; is_e1rm_pr: boolean; rest_after_s: number }> {
     const { data } = await http.post("/workout/strength/sets", body);
     return data;
   },

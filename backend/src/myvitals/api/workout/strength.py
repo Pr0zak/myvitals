@@ -612,6 +612,15 @@ class SetOut(BaseModel):
     logged_at: datetime | None
     skipped: bool
     set_type: str = "working"
+    # OG2-A7: how long to rest after THIS set, decided server-side. 0 means
+    # do not rest — the session is over and there is no next effort to time.
+    # Both clients used to decide this themselves and both were wrong the
+    # same two ways: they rested after the final set of the workout, and
+    # they each hard-coded the 35-second within-round superset rest.
+    #
+    # Zero rather than null: the phone models this as a non-nullable Int, so
+    # a null crashes Moshi on a client built before the field existed.
+    rest_after_s: int = 0
     # PR-1: set on the log_set response when this set just beat the
     # exercise's prior best. Drives the transient "PR" badge on the client.
     #
@@ -1836,6 +1845,65 @@ async def delete_workout(
 # Sets — POST one-at-a-time from the phone during the active workout
 # ------------------------------------------------------------------
 
+async def _rest_after_s(
+    db: AsyncSession,
+    wex: models.StrengthWorkoutExercise,
+    s: models.StrengthSet,
+) -> int:
+    """Gather what `strength_algo.rest_after_set` needs, then ask it.
+
+    Two facts, both of which need the whole workout and neither of which a
+    client can see without re-deriving the session state the server already
+    holds.
+    """
+    if s.skipped:
+        return 0
+
+    siblings = (await db.execute(
+        select(models.StrengthWorkoutExercise)
+        .where(models.StrengthWorkoutExercise.workout_id == wex.workout_id)
+    )).scalars().all()
+    wex_ids = [x.id for x in siblings]
+    logged = (await db.execute(
+        select(models.StrengthSet)
+        .where(models.StrengthSet.workout_exercise_id.in_(wex_ids))
+        .where(models.StrengthSet.actual_reps.is_not(None))
+        .where(models.StrengthSet.skipped.is_(False))
+    )).scalars().all() if wex_ids else []
+    done_per_wex: dict[int, set[int]] = {}
+    for row in logged:
+        done_per_wex.setdefault(row.workout_exercise_id, set()).add(row.set_number)
+
+    # Is anything left to do in this session? A declined slot owes nothing,
+    # and a slot whose sets are all logged owes nothing. Counting the
+    # prescribed total rather than the rows present is deliberate: the rows
+    # are created lazily on log, so "no row" and "not done" are the same
+    # state and only `target_sets` knows how many there should be.
+    outstanding = 0
+    for x in siblings:
+        if x.skipped:
+            continue
+        outstanding += max(0, x.target_sets - len(done_per_wex.get(x.id, set())))
+    is_last = outstanding <= 0
+
+    # Does the superset partner still owe this round? Mid-round the rest is
+    # short; once they have taken it, the full rest applies.
+    partner_owes = False
+    if wex.superset_id:
+        for x in siblings:
+            if x.id == wex.id or x.superset_id != wex.superset_id or x.skipped:
+                continue
+            if s.set_number not in done_per_wex.get(x.id, set()):
+                partner_owes = True
+                break
+
+    return strength_algo.rest_after_set(
+        is_last_set_of_session=is_last,
+        superset_partner_owes_this_round=partner_owes,
+        target_rest_s=wex.target_rest_s,
+    )
+
+
 @router.post("/sets", response_model=SetOut, status_code=201)
 async def log_set(
     body: SetIn,
@@ -1897,6 +1965,7 @@ async def log_set(
     await db.commit()
     await db.refresh(s)
     out = _set_to_out(s)
+    out.rest_after_s = await _rest_after_s(db, wex, s)
     if not s.skipped:
         kind = await _detect_pr(db, wex.exercise_id, s, wex.workout_id)
         out.pr_kind = kind

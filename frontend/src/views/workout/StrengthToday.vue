@@ -250,29 +250,53 @@ function notifyDone(seconds: number) {
   }
 }
 
+// OG2-A7: anchored to a wall-clock deadline, not decremented once per tick.
+// A tick counter is only right if every tick fires, and a background tab is
+// throttled to roughly one a minute — so leaving the page and coming back
+// showed a rest far longer than the one actually taken. The phone has
+// anchored to an epoch since it was written; this is the web catching up,
+// and it is why the two surfaces disagreed about how long a rest was.
+let restEndsAt = 0;
+// A rest that has already chimed must not chime again when the tab is
+// refocused and the deadline is re-evaluated. Mirrors the phone's
+// `lastNotifiedFor`, keyed on the deadline so a NEW rest still fires.
+let lastNotifiedFor = 0;
+
+function tickRest() {
+  if (!restEndsAt) return;
+  const left = Math.max(0, Math.ceil((restEndsAt - Date.now()) / 1000));
+  restRemaining.value = left;
+  if (left <= 0 && restEndsAt !== lastNotifiedFor) {
+    lastNotifiedFor = restEndsAt;
+    chime();
+    notifyDone(restTotal.value);
+    // Vibrate (Android Chrome only)
+    if ("vibrate" in navigator) navigator.vibrate([200, 80, 200]);
+    stopRest();
+  }
+}
+
 function startRest(seconds: number) {
   stopRest();
-  restRemaining.value = seconds;
   restTotal.value = seconds;
-  restHandle = window.setInterval(() => {
-    if (restRemaining.value === null) return;
-    restRemaining.value -= 1;
-    if (restRemaining.value <= 0) {
-      chime();
-      notifyDone(seconds);
-      // Vibrate (Android Chrome only)
-      if ("vibrate" in navigator) navigator.vibrate([200, 80, 200]);
-      stopRest();
-    }
-  }, 1000);
+  restEndsAt = Date.now() + seconds * 1000;
+  restRemaining.value = seconds;
+  restHandle = window.setInterval(tickRest, 1000);
+  // A throttled tab may not tick for a minute, so re-read the deadline the
+  // moment it comes back rather than waiting for the next interval.
+  document.addEventListener("visibilitychange", tickRest);
 }
 function stopRest() {
   if (restHandle !== null) { clearInterval(restHandle); restHandle = null; }
+  document.removeEventListener("visibilitychange", tickRest);
+  restEndsAt = 0;
   restRemaining.value = null;
 }
 function addRest(s: number) {
-  if (restRemaining.value === null) return;
-  restRemaining.value += s;
+  if (!restEndsAt) return;
+  restEndsAt += s * 1000;
+  restTotal.value += s;
+  tickRest();
 }
 onUnmounted(stopRest);
 
@@ -970,23 +994,13 @@ async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = fa
       skipped,
       set_type: e.setType,
     });
-    if (!skipped) {
-      // Pick rest duration: within-round (35s) when this is a superset
-      // and the partner hasn't completed this set number yet; full
-      // target_rest_s otherwise.
-      let rest = wex.target_rest_s;
-      if (wex.superset_id && workout.value) {
-        const partner = workout.value.exercises.find(
-          (x) => x.superset_id === wex.superset_id && x.id !== wex.id,
-        );
-        const partnerDone = partner?.sets.some(
-          (s) => s.set_number === setNum && s.actual_reps != null && !s.skipped,
-        );
-        // 35s within-round when partner still owes this round; otherwise full rest
-        rest = partnerDone ? wex.target_rest_s : 35;
-      }
-      startRest(rest);
-    }
+    // OG2-A7: the server decides, having just written the set and knowing
+    // the whole session. It used to be decided here — and identically but
+    // separately in Kotlin — with a hard-coded 35 for the within-round
+    // superset rest and no notion of the session being over, so finishing a
+    // workout started a countdown while the user racked the weights.
+    // 0 means there is nothing left to time.
+    if (res.rest_after_s > 0) startRest(res.rest_after_s);
     await loadAll();
     // Flash the 🏆 badge only after loadAll() flips the row to logged (its
     // v-else branch), so the 5s window starts when the badge is actually

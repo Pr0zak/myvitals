@@ -1237,22 +1237,19 @@ fun StrengthTodayScreen(
                                 ).show()
                             }
                             if (logged != null) {
-                                // Within-round rest (35s) if this is a superset and
-                                // the partner hasn't completed this set yet; full
-                                // target_rest_s otherwise.
-                                var restMs = wex.targetRestS * 1000L
-                                val ssId = wex.supersetId
-                                if (ssId != null) {
-                                    val partner = workout?.exercises?.firstOrNull {
-                                        it.supersetId == ssId && it.id != wex.id
-                                    }
-                                    val partnerDone = partner?.sets?.any {
-                                        it.setNumber == setNum && it.actualReps != null && !it.skipped
-                                    } ?: false
-                                    if (!partnerDone) restMs = 35_000L
+                                // OG2-A7: the server decides, having just
+                                // written the set and knowing the whole
+                                // session. This block used to hard-code the
+                                // 35-second within-round superset rest — and
+                                // so did Vue, separately — and neither knew
+                                // the session could be over, so finishing a
+                                // workout started a countdown while the user
+                                // racked the weights. 0 means do not rest.
+                                val restMs = logged.restAfterS * 1000L
+                                if (restMs > 0L) {
+                                    restTotal = restMs
+                                    restEndsAt = System.currentTimeMillis() + restTotal
                                 }
-                                restTotal = restMs
-                                restEndsAt = System.currentTimeMillis() + restTotal
                             }
                             reload()
                         }

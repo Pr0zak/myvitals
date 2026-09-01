@@ -740,6 +740,38 @@ SET_UNWEIGHTED = "unweighted"
 SET_WEIGHTED = "weighted"
 
 
+def rest_after_set(
+    is_last_set_of_session: bool,
+    superset_partner_owes_this_round: bool,
+    target_rest_s: int,
+    within_round_rest_s: int = DEFAULT_REST_S_SUPERSET_WITHIN,
+) -> int:
+    """How long to rest after the set just logged. 0 means do not rest.
+
+    One predicate, server-side, because both clients had their own and both
+    were wrong in the same two ways (OG2-A7).
+
+    A rest belongs after every completed set — including the last set of an
+    exercise, because another exercise follows and you rest before that too.
+    The ONE set with nothing left to time is the last set of the SESSION,
+    where there is no next effort. Both surfaces guarded only on
+    `if (!skipped)`, so finishing a workout started a countdown while the
+    user racked the weights.
+
+    Mid-round in a superset the rest is short, because the point of the
+    pairing is to work the partner while this muscle recovers. Once the
+    partner has taken this round, the full rest applies. Both clients
+    hard-coded `35` for this, in Vue and again in Kotlin, so the two
+    surfaces could disagree about how long a rest was and a change had to be
+    made twice.
+    """
+    if is_last_set_of_session:
+        return 0
+    if superset_partner_owes_this_round:
+        return within_round_rest_s
+    return target_rest_s
+
+
 def classify_set_row(
     skipped: bool, reps: int | None, set_type: str | None,
     weight_lb: float | None,

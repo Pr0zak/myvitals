@@ -4,12 +4,14 @@
  * is reserved for a future slide-over; for now it routes the user
  * to /weight where the existing form lives.
  */
+import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import { Plus } from "lucide-vue-next";
 import Sparkline from "./Sparkline.vue";
 import Delta from "./Delta.vue";
+import { weightDeltaToneLb } from "@/weightDirection";
 
-defineProps<{
+const props = defineProps<{
   latestLb: number | null;
   goalLb: number | null;
   series: number[];   // up to 30 days, trailing
@@ -18,6 +20,14 @@ defineProps<{
   toLabel: string;
   asOfLabel?: string | null;
 }>();
+
+/**
+ * OG2-A5: this passed a hard-coded `invert`, so a 30-day gain rendered as
+ * bad news regardless of which way the user is trying to move. With no goal
+ * set the direction is genuinely unknown and the figure stays uncoloured.
+ */
+const deltaTone = computed(() =>
+  weightDeltaToneLb(props.delta30Lb, props.latestLb, props.goalLb));
 </script>
 
 <template>
@@ -34,7 +44,7 @@ defineProps<{
           {{ latestLb != null ? latestLb.toFixed(1) : "—" }}
           <span class="unit">lb</span>
         </span>
-        <Delta v-if="delta30Lb != null" :value="+delta30Lb.toFixed(1)" suffix=" lb" invert/>
+        <Delta v-if="delta30Lb != null" :value="+delta30Lb.toFixed(1)" suffix=" lb" :tone="deltaTone"/>
         <span class="dim ago">30d</span>
       </div>
       <div class="dim sub" v-if="asOfLabel || goalLb != null">

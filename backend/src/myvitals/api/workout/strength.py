@@ -2037,9 +2037,16 @@ async def upcoming_workouts(
         # was the rotation-misalignment bug).
         if last_done is not None and (d - last_done).days == 1:
             shifted = d + _td(days=1)
-            if strength_algo.schedule_day_type(shifted, dpw, cardio_pw) != "strength":
+            # Only onto a genuinely FREE day. The original guard asked
+            # whether the next day was a strength day, which is the same
+            # question one word narrower — and it let a session shift onto a
+            # cardio or yoga day, putting two sessions on one date. That was
+            # invisible while non-strength days were skipped entirely; the
+            # moment they were emitted, 2026-09-06 came back as both "pull"
+            # and "cardio" in the same forecast.
+            if strength_algo.schedule_day_type(shifted, dpw, cardio_pw) == "rest":
                 d = shifted
-            # else: next day is already a strength day — leave both alone.
+            # else: the next day already has something on it — leave both.
 
         focus = strength_algo.select_split(dpw, pref, cursor_split)
         cursor_split = focus

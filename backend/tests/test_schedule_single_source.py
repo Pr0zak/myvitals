@@ -126,6 +126,56 @@ class TestNonStrengthDaysAreVisible:
         shift = shift[:shift.index("# else:")]
         assert "schedule_day_type" in shift
 
+    def test_the_shift_only_lands_on_a_free_day(self):
+        """A pushed session must not double up on a day already booked.
+
+        Asking whether the target is a STRENGTH day is the same question one
+        word too narrow: it permits shifting onto a cardio or yoga day. That
+        was invisible while non-strength days were skipped, and surfaced the
+        moment they were emitted — 2026-09-06 came back as both "pull" and
+        "cardio" in one forecast, on the live instance, immediately after
+        this endpoint started reporting them.
+        """
+        src = inspect.getsource(api.upcoming_workouts)
+        shift = src[src.index("shifted = d + _td(days=1)"):]
+        shift = shift[:shift.index("# else:")]
+        assert 'schedule_day_type(shifted, dpw, cardio_pw) == "rest"' in shift, (
+            "the shift can still land on a day that already has a session"
+        )
+
+    def test_no_date_is_emitted_twice(self):
+        """The property the collision broke, asserted over the real schedule.
+
+        Walks a fortnight applying the same spacing rule the endpoint uses
+        and checks each date is claimed at most once.
+        """
+        from datetime import date, timedelta
+
+        from myvitals.analytics.strength import schedule_day_type
+
+        base = date(2026, 8, 31)
+        for dpw in (2, 3, 4, 5, 6):
+            for cardio_pw in (0, 1, 2):
+                seen: list[date] = []
+                last_done: date | None = None
+                for offset in range(14):
+                    d = base + timedelta(days=offset)
+                    kind = schedule_day_type(d, dpw, cardio_pw)
+                    if kind == "rest":
+                        continue
+                    if kind != "strength":
+                        seen.append(d)
+                        continue
+                    if last_done is not None and (d - last_done).days == 1:
+                        shifted = d + timedelta(days=1)
+                        if schedule_day_type(shifted, dpw, cardio_pw) == "rest":
+                            d = shifted
+                    seen.append(d)
+                    last_done = d
+                assert len(seen) == len(set(seen)), (
+                    f"dpw={dpw} cardio={cardio_pw} emits a date twice: {seen}"
+                )
+
 
 class TestNoClientDerivesTheSchedule:
     """Server is the source of truth, enforced by reading the clients.

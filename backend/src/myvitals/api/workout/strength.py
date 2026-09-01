@@ -1047,6 +1047,14 @@ def _planned_sets(
             # from the truth rather than from the plan.
             prefill_weight = prior.actual_weight_lb
             prefill_reps = prior.actual_reps or wex.target_reps_low
+            # OG2-A9: and its real classification. This said "working"
+            # unconditionally, which was harmless while a logged row could
+            # not be edited — the value was never sent back. Now that a
+            # correction re-POSTs the whole set, seeding the wrong type
+            # would silently reclassify a warm-up as working the moment the
+            # user fixed its weight, moving it into the volume audit and
+            # back into next session's prescription.
+            set_type = prior.set_type or set_type
         elif most_recent is not None and most_recent.set_type == set_type:
             # Same tier only. A light warm-up must never seed a working set.
             prefill_weight = most_recent.actual_weight_lb
@@ -1928,6 +1936,7 @@ async def log_set(
     )).scalar_one_or_none()
 
     logged_at = body.logged_at or datetime.now(timezone.utc)
+    is_correction = False
     if existing is None:
         s = models.StrengthSet(
             workout_exercise_id=body.workout_exercise_id,
@@ -1944,16 +1953,34 @@ async def log_set(
         )
         db.add(s)
     else:
+        # OG2-A9: the row already exists, so this POST is a CORRECTION of a
+        # set already logged — the only way to reach this branch from a UI,
+        # now that both clients can reopen a logged row.
+        #
+        # It is inferred rather than flagged. A client cannot reliably know
+        # whether it is correcting: an online POST whose response is lost
+        # buffers and replays, and that replay is a retry the user never saw,
+        # not an edit. `existing is not None` is the only thing that knows,
+        # and it knows on the server where the answer is the same for every
+        # caller.
+        is_correction = True
         s = existing
-        s.target_weight_lb = body.target_weight_lb
-        s.target_reps = body.target_reps
         s.actual_weight_lb = body.actual_weight_lb
         s.actual_reps = body.actual_reps
         s.rating = body.rating
         s.rest_seconds_taken = body.rest_seconds_taken
-        s.logged_at = logged_at
         s.skipped = body.skipped
         s.set_type = body.set_type
+        # `target_*` is deliberately NOT rewritten. Those columns record what
+        # the generator PRESCRIBED at log time, against which `actual_*` is
+        # what was done; letting a correction restate them would quietly
+        # rewrite the prescription to match the performance and erase the
+        # very comparison the pair exists to make.
+        #
+        # `logged_at` is deliberately NOT re-stamped either. The set happened
+        # when it happened. Neither client sends one, so re-stamping would
+        # move a set to the moment its typo was noticed — and `logged_at`
+        # orders the last-session lookup that picks the next weight.
 
     # Auto-advance the parent workout to in_progress on the first logged set
     workout = await db.get(models.StrengthWorkout, wex.workout_id)
@@ -1965,8 +1992,13 @@ async def log_set(
     await db.commit()
     await db.refresh(s)
     out = _set_to_out(s)
-    out.rest_after_s = await _rest_after_s(db, wex, s)
-    if not s.skipped:
+    # A correction is not a set just performed: there is no rest to take
+    # after fixing a typo, and no record to celebrate. `_detect_pr` excludes
+    # the row being written, so a corrected set is compared against every
+    # OTHER set and would happily re-award a badge it had already fired —
+    # or fire one for the first time on a set logged days ago.
+    out.rest_after_s = 0 if is_correction else await _rest_after_s(db, wex, s)
+    if not s.skipped and not is_correction:
         kind = await _detect_pr(db, wex.exercise_id, s, wex.workout_id)
         out.pr_kind = kind
         # Derived, so old clients keep working. Deciding WHICH badge to
@@ -2427,15 +2459,51 @@ async def swap_exercise(
     return _wex_to_out(wex, sets, pairs, wrist)
 
 
-@router.delete("/sets/{set_id}", status_code=204)
+@router.delete("/sets/{set_id}", response_model=WorkoutOut)
 async def delete_set(
     set_id: int, db: AsyncSession = Depends(get_session)
-) -> None:
+) -> WorkoutOut:
+    """Remove a set that never happened (OG2-A9).
+
+    Distinct from a CORRECTION, which is a re-POST on the natural key. This
+    is the only honest way to say the set did not occur: correcting its reps
+    to zero leaves a row that `_accounted_sets` still counts, so the session
+    reads as further along than it is.
+
+    Never expressed as `skipped=True` on the row instead. SKIP-1 records why
+    at length — `recent_mobility_history` reads a skipped set as a FAILED
+    one and `adjust_mobility_target` lowers the next hold prescription after
+    two fails, so marking a mistyped set skipped would quietly make future
+    cool-downs easier.
+
+    Online only, and deliberately so: this is addressed by `set_id`, a server
+    surrogate, and a set logged offline has no id on the client at all. A
+    correction is addressed by `(workout_exercise_id, set_number)`, which the
+    client derives from its own render loop, so that is the path that works
+    without a connection.
+
+    Returns the rehydrated workout rather than 204, matching
+    `delete_exercise` and `patch_workout_exercise`: the caller picks up the
+    recomputed progress counters in one round trip instead of deriving them
+    itself, which is the client-side re-derivation SKIP-1 removed.
+
+    Surviving sets are NOT renumbered. The upsert key is
+    (workout_exercise_id, set_number), so renumbering would invalidate any
+    set still sitting in a client's replay buffer. A hole is a valid state —
+    the counters count rows, not the highest number.
+    """
     s = await db.get(models.StrengthSet, set_id)
     if s is None:
         raise HTTPException(status_code=404, detail="set not found")
+    wex = await db.get(models.StrengthWorkoutExercise, s.workout_exercise_id)
+    if wex is None:
+        raise HTTPException(status_code=404, detail="workout exercise not found")
+    workout = await db.get(models.StrengthWorkout, wex.workout_id)
+    if workout is None:
+        raise HTTPException(status_code=404, detail="workout not found")
     await db.delete(s)
     await db.commit()
+    return await _hydrate_workout(db, workout)
 
 
 # ------------------------------------------------------------------

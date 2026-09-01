@@ -95,6 +95,15 @@ interface BackendApi {
     @GET("workout/strength/today")
     suspend fun strengthToday(): Response<StrengthWorkoutDetail>
 
+    /** OG2-A9: remove a set that never happened. Returns the rehydrated
+     *  workout so the caller picks up the recomputed progress counters
+     *  rather than deriving them. Online only — a set logged offline has no
+     *  server id on the client, so a correction is the offline repair. */
+    @retrofit2.http.DELETE("workout/strength/sets/{id}")
+    suspend fun deleteStrengthSet(
+        @retrofit2.http.Path("id") id: Long,
+    ): StrengthWorkoutDetail
+
     @GET("workout/strength/upcoming")
     suspend fun upcomingWorkouts(
         @Query("days") days: Int = 9,

@@ -419,6 +419,28 @@ class StrengthRepository(
         api().deleteStrengthWorkoutExercise(wexId)
     }
 
+    /** OG2-A9: delete a logged set. Deliberately NOT buffered.
+     *
+     *  It is addressed by `set_id`, a server surrogate, and a set logged
+     *  offline has no id here — `logSet` returns null on the buffered path,
+     *  so the row never comes back. Delete is literally inexpressible for
+     *  exactly the sets most likely to need it, which is why CORRECTION is
+     *  the offline repair: it is addressed by (workout_exercise_id,
+     *  set_number), which this client derives from its own render loop, and
+     *  rides the buffer that already exists.
+     *
+     *  Throwing rather than buffering is the honest failure. A queued delete
+     *  would drain from `buffered_workout_writes`, which flushes AFTER
+     *  `buffered_strength_sets` at every call site — so a delete could
+     *  replay before the insert it was meant to remove, and the set would
+     *  come back.
+     */
+    suspend fun deleteSet(
+        setId: Long,
+    ): app.myvitals.sync.StrengthWorkoutDetail = withContext(Dispatchers.IO) {
+        api().deleteStrengthSet(setId)
+    }
+
     suspend fun swapExercise(
         wexId: Long, newExerciseId: String,
     ): app.myvitals.sync.StrengthWorkoutExerciseRow = withContext(Dispatchers.IO) {

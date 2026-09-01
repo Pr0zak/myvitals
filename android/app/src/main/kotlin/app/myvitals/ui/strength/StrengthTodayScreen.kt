@@ -285,6 +285,11 @@ fun StrengthTodayScreen(
 
     // Per-set transient input + rest-timer state
     val setInputs = remember { mutableStateMapOf<String, SetInput>() }
+    // OG2-A9: the logged set currently being corrected, "<wexId>-<setNumber>".
+    // Hoisted above `items(orderedExercises)` deliberately — every mutation
+    // ends in reload(), and state held inside a LazyColumn item is dropped on
+    // slot churn. That is the recorded CoachCard failure, one screen over.
+    var editingSetKey by remember { mutableStateOf<String?>(null) }
     var restEndsAt by remember { mutableLongStateOf(0L) }
     var restTotal by remember { mutableLongStateOf(0L) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -1219,6 +1224,27 @@ fun StrengthTodayScreen(
                     skipLocked = skipBusyWexId != null,
                     skipError = skipError?.takeIf { it.first == wex.id }?.second,
                     isCurrentExercise = wex.id == currentExerciseId,
+                    editingSetNum = editingSetKey
+                        ?.takeIf { it.startsWith("${wex.id}-") }
+                        ?.substringAfter("-")?.toIntOrNull(),
+                    onEditSet = { n -> editingSetKey = "${wex.id}-$n" },
+                    onDeleteSet = { setId ->
+                        scope.launch {
+                            try {
+                                repo.deleteSet(setId)
+                                editingSetKey = null
+                                setInputs.clear()
+                                reload()
+                            } catch (e: Exception) {
+                                // Online only by design — see the repository
+                                // note. Say so rather than queueing a delete
+                                // that could replay before the insert it was
+                                // meant to remove.
+                                Timber.w(e, "deleteSet %d failed", setId)
+                                error = "Couldn't delete that set — needs a connection."
+                            }
+                        }
+                    },
                     onLogSet = onLogSet@{ setNum, weight, reps, rating, setType ->
                         // WP-14: resume before logging — a paused session
                         // shouldn't accept new sets.
@@ -2857,6 +2883,12 @@ private fun ExerciseCard(
     onSwap: () -> Unit,
     onSkipChange: (Boolean) -> Unit = {},
     onSetPref: (String) -> Unit = {},
+    // OG2-A9: which of this slot's logged sets is being corrected, and the
+    // two ways out. State lives on the screen, not in the card, because the
+    // card is rebuilt by every reload().
+    editingSetNum: Int? = null,
+    onEditSet: (Int) -> Unit = {},
+    onDeleteSet: (setId: Long) -> Unit = {},
     partnerName: String? = null,
     backendBaseUrl: String = "",
 ) {
@@ -3106,11 +3138,49 @@ private fun ExerciseCard(
                                 modifier = Modifier.weight(1f))
                             Text("✓", color = pal.good, fontWeight = FontWeight.Bold)
                         }
+                    } else if (editingSetNum == n && !closed) {
+                        // OG2-A9: the same entry form, seeded from the truth
+                        // by the server's planned_sets prefill. `isCurrent`
+                        // is false so the corrected row does not steal the
+                        // NOW accent from the set actually next up.
+                        SetEntryRow(
+                            n = n, input = inputs.getOrPut(key) {
+                                SetInput(
+                                    weight = logged.actualWeightLb?.toString() ?: "",
+                                    reps = (logged.actualReps ?: 0).toString(),
+                                    rating = logged.rating,
+                                    // The set's real classification, from
+                                    // the server's planned_sets rather than
+                                    // assumed "working" — correcting a
+                                    // warm-up's weight must not silently
+                                    // reclassify it and move it into the
+                                    // volume audit and next session's load.
+                                    setType = wex.plannedSets
+                                        .firstOrNull { it.setNumber == n }
+                                        ?.setType ?: "working",
+                                )
+                            },
+                            onWeight = { inputs[key] = (inputs[key] ?: SetInput()).copy(weight = it) },
+                            onReps = { inputs[key] = (inputs[key] ?: SetInput()).copy(reps = it) },
+                            onRating = { inputs[key] = (inputs[key] ?: SetInput()).copy(rating = it) },
+                            onSetType = { inputs[key] = (inputs[key] ?: SetInput()).copy(setType = it) },
+                            canLog = inputs[key]?.rating != null,
+                            onLog = {
+                                val inp = inputs[key]
+                                onLogSet(n, inp?.weight?.toDoubleOrNull(),
+                                    inp?.reps?.toIntOrNull(), inp?.rating,
+                                    inp?.setType ?: "working")
+                            },
+                            onFailed = { onDeleteSet(logged.id) },
+                            sideLabel = bilateralSideLabel(n, wex.targetSets, info),
+                            isCurrent = false,
+                        )
                     } else {
                         LoggedSetRow(
                             n, logged.actualWeightLb, logged.actualReps ?: 0,
                             logged.rating ?: 0,
                             sideLabel = bilateralSideLabel(n, wex.targetSets, info),
+                            onEdit = if (closed) null else ({ onEditSet(n) }),
                         )
                     }
                 } else if (timed && n == nextSet && !closed) {
@@ -3539,7 +3609,8 @@ private fun RateButton(label: String, glyph: String, color: Color, onClick: () -
 
 @Composable
 private fun LoggedSetRow(n: Int, weightLb: Double?, reps: Int, rating: Int,
-                          sideLabel: String? = null) {
+                          sideLabel: String? = null,
+                          onEdit: (() -> Unit)? = null) {
     val pal = LocalStrengthPalette.current
     val sideColor = if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA)
     Row(
@@ -3559,6 +3630,19 @@ private fun LoggedSetRow(n: Int, weightLb: Double?, reps: Int, rating: Int,
         )
         Text(ratingLabel(rating), color = ratingColor(rating, pal), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.width(8.dp))
+        // OG2-A9: a logged set was permanent from the UI, so a fat-fingered
+        // 225 instead of 25 stayed in the log, in the records card, and in
+        // the average that picks next session's weight.
+        if (onEdit != null) {
+            androidx.compose.material3.TextButton(
+                onClick = onEdit,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    horizontal = 6.dp, vertical = 0.dp,
+                ),
+            ) {
+                Text("edit", color = pal.muted, fontSize = 11.sp)
+            }
+        }
         Text("✓", color = pal.good, fontWeight = FontWeight.Bold)
     }
 }

@@ -42,6 +42,23 @@ const busy = ref<string>(""); // e.g. "regen", "complete", "skip-3"
 // after a few seconds. Only appears the moment a record is actually beaten.
 const prFlash = ref<Record<string, string>>({});
 
+// OG2-A9: which logged set is currently being corrected, keyed
+// `<wexId>-<setNumber>`. Null when nothing is being edited.
+//
+// Hoisted here rather than held per-row: every mutation ends in `loadAll()`,
+// and state living inside the v-for is dropped when the list re-renders —
+// the same slot-churn failure the CoachCard state was hoisted to escape.
+const editingSet = ref<string | null>(null);
+function isEditing(wexId: number, n: number): boolean {
+  return editingSet.value === `${wexId}-${n}`;
+}
+function beginEdit(wexId: number, n: number): void {
+  editingSet.value = `${wexId}-${n}`;
+}
+function cancelEdit(): void {
+  editingSet.value = null;
+}
+
 // Set-logging state, keyed by `${wexId}-${setNum}`
 interface SetEntry {
   weight: string;   // string so empty input doesn't show "0"
@@ -982,6 +999,36 @@ async function setExerciseSkipped(wex: StrengthWorkoutExercise, skipped: boolean
   }
 }
 
+/**
+ * OG2-A9: this set did not happen — remove the row.
+ *
+ * Distinct from correcting it to zero reps, which leaves a row
+ * `_accounted_sets` still counts, so the session reads as further along than
+ * it is. And distinct from marking it skipped: SKIP-1 records that
+ * `recent_mobility_history` reads a skipped set as a FAILED one and lowers
+ * the next hold prescription after two, so a mistyped set marked skipped
+ * would quietly make future cool-downs easier.
+ *
+ * Confirmed, because it destroys logged work and there is no undo. The
+ * ad-hoc exercise remove nearby does not confirm, but that only ever removes
+ * a slot the user added and has not touched.
+ */
+async function removeSet(wex: StrengthWorkoutExercise, setNum: number) {
+  const logged = wex.sets.find((s: { set_number: number; id: number }) => s.set_number === setNum);
+  if (!logged) return;
+  if (!confirm(`Delete set ${setNum}? This removes it from your log, your records and next session's weight.`)) return;
+  busy.value = `set-${wex.id}-${setNum}`;
+  try {
+    await api.deleteStrengthSet(logged.id);
+    cancelEdit();
+    await loadAll();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    busy.value = "";
+  }
+}
+
 async function logFailed(wex: StrengthWorkoutExercise, setNum: number): Promise<boolean> {
   // Shortcut: mark the set as failed (rating=1) using whatever weight is
   // already in the input. Reps default to whatever was entered (or the
@@ -1019,6 +1066,10 @@ async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = fa
     // workout started a countdown while the user racked the weights.
     // 0 means there is nothing left to time.
     if (res.rest_after_s > 0) startRest(res.rest_after_s);
+    // A correction closes its own editor. The server returns rest_after_s=0
+    // for one, so the branch above is already silent — a typo does not earn
+    // a rest and does not re-fire a PR badge.
+    cancelEdit();
     await loadAll();
     // Flash the 🏆 badge only after loadAll() flips the row to logged (its
     // v-else branch), so the 5s window starts when the badge is actually
@@ -1679,7 +1730,7 @@ useVisibilityRefresh(loadAll);
                       type="number" step="0.5" inputmode="decimal"
                       :placeholder="wex.target_weight_lb?.toString() ?? '—'"
                       v-model="entry(wex, n).weight"
-                      :disabled="isSetLogged(wex, n)"
+                      :disabled="isSetLogged(wex, n) && !isEditing(wex.id, n)"
                     />
                   </td>
                   <td>
@@ -1687,7 +1738,7 @@ useVisibilityRefresh(loadAll);
                       type="number" inputmode="numeric"
                       :placeholder="plannedSet(wex, n)?.target_reps?.toString() ?? wex.target_reps_low.toString()"
                       v-model="entry(wex, n).reps"
-                      :disabled="isSetLogged(wex, n)"
+                      :disabled="isSetLogged(wex, n) && !isEditing(wex.id, n)"
                     />
                     <!-- PROG-1 Greyskull: the last set is as-many-reps-as-
                          possible. Labelling the input beats a badge the user
@@ -1702,7 +1753,7 @@ useVisibilityRefresh(loadAll);
                        line for the next session. -->
                   <td class="settype-cell">
                     <select v-model="entry(wex, n).setType"
-                            :disabled="isSetLogged(wex, n)"
+                            :disabled="isSetLogged(wex, n) && !isEditing(wex.id, n)"
                             aria-label="Set type">
                       <option value="working">work</option>
                       <option value="warmup">warm</option>
@@ -1714,7 +1765,7 @@ useVisibilityRefresh(loadAll);
                       v-for="opt in RATING_CHOICES" :key="opt.v"
                       class="rating" :data-r="opt.v"
                       :class="{ on: entry(wex, n).rating === opt.v }"
-                      :disabled="isSetLogged(wex, n)"
+                      :disabled="isSetLogged(wex, n) && !isEditing(wex.id, n)"
                       :title="opt.title"
                       @click="setRating(wex.id, n, opt.v)"
                     >
@@ -1735,8 +1786,27 @@ useVisibilityRefresh(loadAll);
                         Failed
                       </button>
                     </div>
+                    <template v-else-if="isEditing(wex.id, n)">
+                      <div class="row-actions">
+                        <button class="primary small"
+                                :disabled="busy === `set-${wex.id}-${n}` || entry(wex, n).rating === null"
+                                @click="logSet(wex, n)">Save</button>
+                        <button class="ghost small" @click="cancelEdit">Cancel</button>
+                        <button class="ghost small fail"
+                                :disabled="busy === `set-${wex.id}-${n}`"
+                                title="This set did not happen — remove it"
+                                @click="removeSet(wex, n)">Delete</button>
+                      </div>
+                    </template>
                     <span v-else class="ok">
                       ✓
+                      <!-- OG2-A9: a logged set was permanent from the UI, so a
+                           fat-fingered 225 instead of 25 stayed in the log,
+                           in the PR card, and in the average that picks next
+                           session's weight. -->
+                      <button v-if="!sessionOver" class="ghost tiny"
+                              title="Correct this set"
+                              @click="beginEdit(wex.id, n)">edit</button>
                       <span v-if="prFlash[`${wex.id}-${n}`]" class="pr-badge">
                         🏆 {{ prFlash[`${wex.id}-${n}`] }}
                       </span>

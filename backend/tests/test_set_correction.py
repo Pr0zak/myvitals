@@ -116,9 +116,14 @@ class TestWhatACorrectionMustNotTouch:
     def test_it_does_not_re_stamp_when_the_set_happened(self):
         """The set happened when it happened.
 
-        Re-stamping would move it to the moment its typo was noticed — and
-        `logged_at` orders the last-session lookup that picks next session's
-        weight, so a correction could reorder the very history it is fixing.
+        Re-stamping would move it to the moment its typo was noticed.
+
+        Nothing currently reads `logged_at` — the last-session lookup orders
+        by `StrengthWorkout.completed_at` — so this preserves a fact rather
+        than preventing a live bug, and this docstring says so because an
+        earlier version of it claimed otherwise. It is still the right
+        default: a timestamp that silently means "when this was last edited"
+        is a trap for the first consumer that assumes otherwise.
         """
         src = inspect.getsource(api.log_set)
         update = src[src.index("is_correction = True"):]
@@ -262,3 +267,82 @@ class TestBothSurfacesOfferIt:
         # The real call, not the comment above the state that names it.
         i_items = src.index("items(orderedExercises, key =")
         assert i_state < i_items
+
+
+class TestTheFixesTheReviewFound:
+    """Four defects in the first cut of this task, found by an adversarial
+    review of the committed code. Each is pinned because each was invisible
+    to the tests that shipped with it.
+    """
+
+    def test_a_drop_set_does_not_crash_the_workout(self):
+        """`_planned_sets` echoes a logged set's real type back.
+
+        `PlannedSetOut.set_type` was `Literal["warmup", "working"]` — the two
+        values the GENERATOR prescribes — so the moment it started echoing
+        the four values a set can actually HOLD, loading any workout
+        containing a set the web's picker had marked `drop` raised a
+        ValidationError. A 500 on the main workout screen, shipped by a
+        change whose whole point was to preserve that value.
+        """
+        field = api.PlannedSetOut.model_fields["set_type"]
+        args = getattr(field.annotation, "__args__", ())
+        assert set(args) == {"warmup", "working", "drop", "failure"}
+
+    def test_every_loggable_set_type_survives_the_round_trip(self):
+        """The validator, not the annotation — the real failure was runtime."""
+        for kind in ("working", "warmup", "drop", "failure"):
+            api.PlannedSetOut(
+                set_number=1, set_type=kind, target_reps=8,
+                rest_s=90, prefill_reps=8,
+            )
+
+    def test_the_web_can_correct_a_finished_exercise(self):
+        """The common case, and the first cut did not cover it.
+
+        A finished exercise collapses to chip summaries, and that branch
+        precedes the input table — so a set could only be corrected while its
+        siblings were still outstanding, which is precisely not when a typo
+        gets noticed.
+        """
+        src = WEB.read_text()
+        assert "reopenExercise" in src
+        assert "isEditingExercise" in src
+        chips = src.index('class="done-summary"')
+        assert "isEditingExercise" in src[chips - 400:chips], (
+            "the done-summary branch must yield while a correction is open"
+        )
+
+    def test_the_phone_gates_edit_on_the_session_not_the_slot(self):
+        """`isSlotClosed` is true for a slot whose sets are all logged.
+
+        Gating the correction affordance on it hid the affordance exactly
+        when every set was done — the identical failure as the web's, on the
+        other surface, and neither the design nor the first implementation
+        noticed the phone had it too.
+        """
+        src = PHONE.read_text()
+        assert "sessionWritable" in src
+        assert "onEdit = if (sessionWritable)" in src
+        assert "editingSetNum == n && sessionWritable" in src
+
+    def test_the_phone_delete_is_not_wired_to_the_log_button(self):
+        """The sharpest of the four.
+
+        `SetEntryRow`'s single action button routes to `onFailed` whenever the
+        rating is 1, and reads "Log set". Passing delete as `onFailed` meant
+        correcting a set to Failed destroyed it — unconfirmed, from a button
+        that said it would log.
+        """
+        src = PHONE.read_text()
+        assert "onFailed = { onDeleteSet(" not in src, (
+            "delete is wired to the log button's failed path again"
+        )
+        assert "Delete set" in src, "delete needs its own named control"
+
+    def test_the_phone_correction_closes_itself(self):
+        """Otherwise the row stays an entry form after Save, and its scratch
+        input outlives it — the web already closed via cancelEdit()."""
+        src = PHONE.read_text()
+        assert "editingSetKey = null" in src
+        assert "setInputs.clear()" in src

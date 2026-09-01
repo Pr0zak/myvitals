@@ -58,6 +58,20 @@ function beginEdit(wexId: number, n: number): void {
 function cancelEdit(): void {
   editingSet.value = null;
 }
+/** True while any set of this exercise is being corrected, so the finished
+ *  chip summary yields back to the full table. */
+function isEditingExercise(wex: StrengthWorkoutExercise): boolean {
+  return editingSet.value?.startsWith(`${wex.id}-`) ?? false;
+}
+/** Reopen a completed exercise for correction, on its last logged set —
+ *  the one a typo is most often noticed in, and the one nearest the tap. */
+function reopenExercise(wex: StrengthWorkoutExercise): void {
+  const last = [...wex.sets]
+    .filter((s: { actual_reps: number | null }) => s.actual_reps != null)
+    .sort((a: { set_number: number }, b: { set_number: number }) => a.set_number - b.set_number)
+    .pop() as { set_number: number } | undefined;
+  if (last) beginEdit(wex.id, last.set_number);
+}
 
 // Set-logging state, keyed by `${wexId}-${setNum}`
 interface SetEntry {
@@ -1655,7 +1669,8 @@ useVisibilityRefresh(loadAll);
              inputs. A partially logged slot on a finished session lands here
              too — those sets are real work and must stay visible, rather
              than being hidden behind the "Not logged" strip below. -->
-        <div v-else-if="isExerciseDone(wex) || (sessionOver && hasAccountedSets(wex))"
+        <div v-else-if="!isEditingExercise(wex)
+                        && (isExerciseDone(wex) || (sessionOver && hasAccountedSets(wex)))"
              class="done-summary">
           <span v-for="s in [...wex.sets].sort((a, b) => a.set_number - b.set_number)"
                 :key="s.set_number"
@@ -1666,6 +1681,15 @@ useVisibilityRefresh(loadAll);
             <template v-if="s.skipped">fail</template>
             <template v-else>{{ s.actual_weight_lb ?? '—' }}×{{ s.actual_reps }}</template>
           </span>
+          <!-- OG2-A9: the correction affordance has to live HERE too, and
+               this is the common case. A finished exercise collapses to
+               chips, and that branch precedes the input table — so without
+               this a set could only be corrected while its siblings were
+               still outstanding, which is exactly not when you notice a
+               typo. Reopening restores the full table below. -->
+          <button v-if="!sessionOver" class="ghost tiny"
+                  title="Correct a set in this exercise"
+                  @click="reopenExercise(wex)">edit sets</button>
         </div>
 
         <!-- Session's over and this slot was never accounted for — the

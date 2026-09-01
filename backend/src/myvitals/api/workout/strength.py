@@ -685,7 +685,12 @@ class PlannedSetOut(BaseModel):
     quietly manufacturing progression data.
     """
     set_number: int
-    set_type: Literal["warmup", "working"] = "working"
+    # OG2-A9: all four SETTYPE-1 values, not just the two the generator
+    # prescribes. `_planned_sets` now echoes an already-logged set's real
+    # classification back so a correction cannot silently reclassify it —
+    # and the web's picker offers `drop`, so the narrower Literal turned
+    # loading a workout containing one into a 500.
+    set_type: Literal["warmup", "working", "drop", "failure"] = "working"
     target_weight_lb: float | None = None
     target_reps: int
     rest_s: int
@@ -1977,10 +1982,19 @@ async def log_set(
         # rewrite the prescription to match the performance and erase the
         # very comparison the pair exists to make.
         #
-        # `logged_at` is deliberately NOT re-stamped either. The set happened
-        # when it happened. Neither client sends one, so re-stamping would
-        # move a set to the moment its typo was noticed — and `logged_at`
-        # orders the last-session lookup that picks the next weight.
+        # `logged_at` is deliberately NOT re-stamped either: the set happened
+        # when it happened, and re-stamping would move it to the moment its
+        # typo was noticed.
+        #
+        # Worth being accurate about the stakes, because the first version of
+        # this comment was not. Nothing currently READS `logged_at` — the
+        # last-session lookup orders by `StrengthWorkout.completed_at`
+        # (analytics/strength.py) and a repo-wide search finds no other
+        # reader — so today this preserves a fact rather than preventing a
+        # bug. It is still the right default: a timestamp that silently means
+        # "when this was last edited" is a trap for the first consumer that
+        # assumes otherwise, and `started_at` is stamped from this value four
+        # lines below.
 
     # Auto-advance the parent workout to in_progress on the first logged set
     workout = await db.get(models.StrengthWorkout, wex.workout_id)

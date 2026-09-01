@@ -1224,10 +1224,15 @@ fun StrengthTodayScreen(
                     skipLocked = skipBusyWexId != null,
                     skipError = skipError?.takeIf { it.first == wex.id }?.second,
                     isCurrentExercise = wex.id == currentExerciseId,
+                    sessionWritable = !sessionOver && plan.status != "paused",
                     editingSetNum = editingSetKey
                         ?.takeIf { it.startsWith("${wex.id}-") }
                         ?.substringAfter("-")?.toIntOrNull(),
-                    onEditSet = { n -> editingSetKey = "${wex.id}-$n" },
+                    // -1 is the Cancel signal from the correction row.
+                    onEditSet = { n ->
+                        editingSetKey = if (n < 0) null else "${wex.id}-$n"
+                        if (n < 0) setInputs.clear()
+                    },
                     onDeleteSet = { setId ->
                         scope.launch {
                             try {
@@ -1284,6 +1289,14 @@ fun StrengthTodayScreen(
                                 ).show()
                             }
                             if (logged != null) {
+                                // OG2-A9: a correction closes its own editor
+                                // and drops its scratch input, so the row
+                                // returns to a logged summary instead of
+                                // staying an entry form after Save.
+                                if (editingSetKey != null) {
+                                    editingSetKey = null
+                                    setInputs.clear()
+                                }
                                 // OG2-A7: the server decides, having just
                                 // written the set and knowing the whole
                                 // session. This block used to hard-code the
@@ -2886,6 +2899,11 @@ private fun ExerciseCard(
     // OG2-A9: which of this slot's logged sets is being corrected, and the
     // two ways out. State lives on the screen, not in the card, because the
     // card is rebuilt by every reload().
+    // OG2-A9: whether the SESSION accepts writes. Deliberately not `closed`,
+    // which is also true for a slot whose sets are all logged — gating the
+    // correction affordance on that hides it exactly when every set is done,
+    // which is when a typo is actually noticed.
+    sessionWritable: Boolean = true,
     editingSetNum: Int? = null,
     onEditSet: (Int) -> Unit = {},
     onDeleteSet: (setId: Long) -> Unit = {},
@@ -3138,7 +3156,7 @@ private fun ExerciseCard(
                                 modifier = Modifier.weight(1f))
                             Text("✓", color = pal.good, fontWeight = FontWeight.Bold)
                         }
-                    } else if (editingSetNum == n && !closed) {
+                    } else if (editingSetNum == n && sessionWritable) {
                         // OG2-A9: the same entry form, seeded from the truth
                         // by the server's planned_sets prefill. `isCurrent`
                         // is false so the corrected row does not steal the
@@ -3171,16 +3189,41 @@ private fun ExerciseCard(
                                     inp?.reps?.toIntOrNull(), inp?.rating,
                                     inp?.setType ?: "working")
                             },
-                            onFailed = { onDeleteSet(logged.id) },
+                            // Log it as failed — NOT delete. SetEntryRow's
+                            // single button routes to onFailed whenever the
+                            // rating is 1, so wiring delete here made
+                            // correcting a set to Failed silently destroy it,
+                            // unconfirmed, from a button reading "Log set".
+                            onFailed = {
+                                val inp = inputs[key]
+                                onLogSet(n, inp?.weight?.toDoubleOrNull(),
+                                    inp?.reps?.toIntOrNull(), 1,
+                                    inp?.setType ?: "working")
+                            },
                             sideLabel = bilateralSideLabel(n, wex.targetSets, info),
                             isCurrent = false,
                         )
+                        // Delete is its own control, said in words, because
+                        // it destroys logged work and there is no undo.
+                        Row(
+                            Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            androidx.compose.material3.TextButton(
+                                onClick = { onEditSet(-1) },
+                            ) { Text("Cancel", color = pal.muted, fontSize = 12.sp) }
+                            androidx.compose.material3.TextButton(
+                                onClick = { onDeleteSet(logged.id) },
+                            ) {
+                                Text("Delete set", color = pal.caution, fontSize = 12.sp)
+                            }
+                        }
                     } else {
                         LoggedSetRow(
                             n, logged.actualWeightLb, logged.actualReps ?: 0,
                             logged.rating ?: 0,
                             sideLabel = bilateralSideLabel(n, wex.targetSets, info),
-                            onEdit = if (closed) null else ({ onEditSet(n) }),
+                            onEdit = if (sessionWritable) ({ onEditSet(n) }) else null,
                         )
                     }
                 } else if (timed && n == nextSet && !closed) {

@@ -165,23 +165,44 @@ fun StrengthTodayScreen(
     val neon = settings.neonShellEnabled
     val pal = remember(neon) { StrengthPalette(neon) }
 
-    // Keep the screen awake during the active workout — phones go to
-    // sleep mid-set otherwise. The flag is cleared on screen exit.
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        val activity = context as? android.app.Activity
-        activity?.window?.addFlags(
-            android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-        )
-        onDispose {
-            activity?.window?.clearFlags(
-                android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-            )
-        }
-    }
-
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var catalog by remember { mutableStateOf<Map<String, StrengthExerciseInfo>>(emptyMap()) }
     var recoveryReason by remember { mutableStateOf<String?>(null) }
+
+    // OG2-A8: hold the screen on for exactly as long as a workout is
+    // RUNNING. The comment above this said "during the active workout" and
+    // the code said `DisposableEffect(Unit)` — keyed to the composable, not
+    // to the workout — so the flag went up whenever this screen was on top.
+    // Reading a rest-day plan, or a session finished an hour ago, pinned the
+    // display awake and drained the battery for no session at all.
+    //
+    // `paused` releases deliberately: WP-14 pause means the user has stepped
+    // away, which is the one moment during a session when the screen should
+    // be allowed to sleep.
+    //
+    // Known and not fixed here: navigating to Charts or History mid-session
+    // leaves this composable, so the effect disposes and the flag drops until
+    // the user comes back. Holding it past dispose is worse — a user who
+    // navigates away and never returns would leave the display pinned on with
+    // nothing left to clear it. Fixing it properly means owning the flag
+    // above the NavHost, keyed off shared in-progress state, which is a
+    // larger change than this defect warrants.
+    androidx.compose.runtime.DisposableEffect(workout?.status) {
+        val activity = context as? android.app.Activity
+        val running = workout?.status == "in_progress"
+        if (running) {
+            activity?.window?.addFlags(
+                android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+        }
+        onDispose {
+            if (running) {
+                activity?.window?.clearFlags(
+                    android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                )
+            }
+        }
+    }
     // Incremented after each regenerate. DeloadBannerCard keys its
     // LaunchedEffect on this, so the banner re-fetches /latest after
     // a regen and we POST a fresh /deload-check in parallel (cached

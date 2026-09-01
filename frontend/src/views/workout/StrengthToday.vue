@@ -6,6 +6,7 @@
  */
 import { toLocalISO } from "@/dates";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { releaseWakeLock, requestWakeLock } from "@/wakeLock";
 import { useRouter } from "vue-router";
 import { Play, Pause, RotateCw, Plus, SkipForward, Timer, Check } from "lucide-vue-next";
 import { api } from "@/api/client";
@@ -299,6 +300,23 @@ function addRest(s: number) {
   tickRest();
 }
 onUnmounted(stopRest);
+
+// OG2-A8: hold the screen on for exactly as long as a workout is running.
+//
+// Keyed on the workout's own status rather than on this component being
+// mounted. Mounted is the easy key and the wrong one — it pins the display
+// awake while the user reads a rest-day plan or a finished session, which is
+// the leak the Compose side had.
+//
+// `paused` deliberately releases: WP-14 pause means the user has stepped
+// away, which is the one moment during a session when the screen should be
+// allowed to sleep.
+const workoutRunning = computed(() => workout.value?.status === "in_progress");
+watch(workoutRunning, (running) => {
+  if (running) requestWakeLock();
+  else releaseWakeLock();
+}, { immediate: true });
+onUnmounted(releaseWakeLock);
 
 // Week strip. The projected-day pattern is no longer derived here — see
 // the OG2-A4 note in weekStrip; it comes from `upcoming`, which is the

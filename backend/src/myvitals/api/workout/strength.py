@@ -2289,7 +2289,13 @@ async def add_exercise(
     level = (equip.get("training") or {}).get("level", "intermediate")
     pairs = (equip.get("dumbbells") or {}).get("pairs_lb") or []
     wrist = equip.get("wrist_weights_lb") or []
-    goal = (equip.get("training") or {}).get("goal", "general")
+    # OG2-B1: the default is the one `TrainingPreferences.goal` declares.
+    # These two sites defaulted to "general" while generate_plan defaults to
+    # "hypertrophy", so with no goal configured a swapped or appended lift
+    # advanced +2.5% where the same lift in the generated plan advanced +5%.
+    # Threading `goal` without aligning its default would have moved the
+    # divergence rather than closed it.
+    goal = (equip.get("training") or {}).get("goal", "hypertrophy")
 
     # Same weight chain as swap_exercise — one prescription policy.
     avg_rating, avg_weight, _avg_reps, enough = await strength_algo.last_target_weight_for_exercise(
@@ -2447,7 +2453,13 @@ async def swap_exercise(
     # silently advanced on the hypertrophy default while the same lift in the
     # generated plan advanced on the user's actual goal — the divergence A2
     # started closing, one call site further on.
-    goal = (equip.get("training") or {}).get("goal", "general")
+    # OG2-B1: the default is the one `TrainingPreferences.goal` declares.
+    # These two sites defaulted to "general" while generate_plan defaults to
+    # "hypertrophy", so with no goal configured a swapped or appended lift
+    # advanced +2.5% where the same lift in the generated plan advanced +5%.
+    # Threading `goal` without aligning its default would have moved the
+    # divergence rather than closed it.
+    goal = (equip.get("training") or {}).get("goal", "hypertrophy")
 
     # Recompute target weight from history (if any) or starting table.
     # Swap keeps the slot's existing rep range, so we use the weight-only

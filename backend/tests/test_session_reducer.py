@@ -17,16 +17,22 @@ evidence the prescription was met. Two sets rated Failed are still real
 evidence to cut — refusing to act on them would leave a weight the user could
 not lift standing because they stopped early, which is the wrong way round.
 
-`stall_count` ships as a pure function and is deliberately NOT acted on.
-There are already three deloads: the rating policy's cut at
-`avg_rating <= FAIL_THRESHOLD`, the recovery factor (0.85 x 0.90, then
-generate_plan's own 0.90 for an easy day — 0.6885 is reachable today), and
-PROG-1's fail streak on the stored weight. A fourth multiplier is the
-compounding this codebase refuses elsewhere. It exists because the AI coach
-cannot see a stall at all: `build_deload_payload` sends four coarse 14-day
-numbers, and its `missed_or_skipped_sets` counts rows with null reps — of
-which production has zero, because an unlogged set has no row. A partial
-session is invisible to the deload check today.
+A stall count was specified and is deliberately NOT shipped. An adversarial
+review measured the streak across all 143 exercises with history: the maximum
+is 1, and zero exercises reach 2 or 3 — so it could only ever return 0 or 1,
+and nothing consumed it. Shipping a function with no caller and a promise
+attached is the liability this file argues against everywhere else. It is
+recorded in TODO.md against the coach payload, which is where it would have
+a consumer: `build_deload_payload` sends four coarse 14-day numbers and its
+`missed_or_skipped_sets` counts rows with null reps, of which production has
+zero because an unlogged set has no row — so a partial session is invisible
+to the deload check today, and that is the gap a count would close.
+
+Had it shipped it would not have been acted on either. Three deloads already
+exist — the rating policy's cut at `avg_rating <= FAIL_THRESHOLD`, the
+recovery factor (0.85 x 0.90, then generate_plan's own 0.90 on an easy day,
+so 0.6885 is reachable today), and PROG-1's fail streak — and a fourth
+multiplier is the compounding this codebase refuses elsewhere.
 
 Measured before building: of 292 completed slots in this database, 5 are
 partial and 277 complete, so the gate is a correct fix with a small blast
@@ -38,6 +44,9 @@ across 1,430 rows, so myvitals has no era the hazard applies to.
 from __future__ import annotations
 
 import inspect
+import pathlib
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
 
 from myvitals.analytics.strength import (
     EASY_THRESHOLD,
@@ -45,7 +54,6 @@ from myvitals.analytics.strength import (
     SetFacts,
     double_progression,
     read_session,
-    stall_count,
     weight_from_history,
 )
 
@@ -184,39 +192,6 @@ class TestDoubleProgressionRespectsIt:
             "if not session_complete:")
 
 
-class TestStallCountIsReportedNotActedOn:
-    def test_consecutive_short_sessions_accumulate(self):
-        short = read_session(target_sets=4, slot_declined=False,
-                             sets=[_set(), _set()])
-        assert stall_count([short, short, short]) == 3
-
-    def test_one_complete_session_zeroes_it(self):
-        short = read_session(target_sets=4, slot_declined=False,
-                             sets=[_set(), _set()])
-        full = read_session(target_sets=4, slot_declined=False,
-                            sets=[_set() for _ in range(4)])
-        assert stall_count([short, full, short]) == 1
-        assert stall_count([full, short, short]) == 0
-
-    def test_no_weight_is_multiplied_by_it(self):
-        """The restraint, asserted.
-
-        Three deloads already exist and 0.6885 is reachable without any stall
-        logic. A fourth multiplier is the compounding this codebase refuses,
-        so the count is a fact for the coach to read, not an input to the
-        weight.
-        """
-        assert "stall" not in inspect.getsource(weight_from_history)
-        assert "stall" not in inspect.getsource(double_progression)
-
-    def test_it_is_pure(self):
-        """No database, so the judgement is testable — the house style of
-        analytics/targets.py and analytics/projection.py."""
-        src = inspect.getsource(stall_count)
-        assert "db" not in src.split('"""')[-1]
-        assert "await" not in src
-
-
 class TestTheHistoricalPrescriptionIsWhatCounts:
     def test_the_reducer_takes_target_sets_as_an_argument(self):
         """It must come from the slot being JUDGED, not from today's plan.
@@ -239,3 +214,36 @@ class TestTheHistoricalPrescriptionIsWhatCounts:
         """
         sig = inspect.signature(read_session)
         assert "fallback" not in sig.parameters
+
+
+class TestTheLookbackIsBounded:
+    """A regression the first cut of B1 introduced, caught by review.
+
+    Moving from "the newest completed slot" to "the newest slot that carries
+    qualifying sets" is correct — one declined slot used to discard all
+    history — but without a bound it reaches arbitrarily far back. Several
+    exercises in this database have no logged sets since May, and prescribing
+    September's weight off a four-month-old session states a confidence the
+    data does not support. Beyond the bound the caller falls through to
+    `starting_weight_lb`, which is at least honest about being a default.
+    """
+
+    def test_a_bound_exists(self):
+        from myvitals.analytics.strength import PROGRESSION_LOOKBACK_DAYS
+        assert PROGRESSION_LOOKBACK_DAYS == 180
+
+    def test_the_query_applies_it(self):
+        from myvitals.analytics import strength as algo
+        src = inspect.getsource(algo.read_recent_sessions)
+        assert "PROGRESSION_LOOKBACK_DAYS" in src
+        assert "StrengthWorkout.date >= cutoff" in src
+
+    def test_the_number_is_not_invented(self):
+        """It matches the prefill ghost's existing 180-day window, so this is
+        the codebase's own number rather than a new one — the same discipline
+        HEALTH-1 applied in measuring its thresholds instead of guessing."""
+        from myvitals.analytics.strength import PROGRESSION_LOOKBACK_DAYS
+        ghost = (
+            REPO / "backend" / "src" / "myvitals" / "api" / "workout" / "strength.py"
+        ).read_text()
+        assert f"{PROGRESSION_LOOKBACK_DAYS}" in ghost

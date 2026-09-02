@@ -113,6 +113,43 @@ Three things this exposed that ARE ours, none yet done:
 | OG2-B2 | One `next_prescription()` entry point; generate/swap/ad-hoc currently disagree | M | backend |
 | OG2-B3 | Every target carries its own reason as structured data, not prose behind a tap | M | both |
 
+### B1 follow-ons (deferred with reasons, 2026-09-01)
+
+`stall_count` was specified for B1 and deliberately not shipped. An
+adversarial review measured the streak across all 143 exercises with history:
+the maximum consecutive shortfall is **1**, and zero exercises reach 2 or 3,
+so the function could only ever return 0 or 1 — and nothing consumed it.
+Shipping a pure function with no caller and a promise attached is the
+liability the rest of this backlog argues against.
+
+Its consumer, when there is one, is the coach payload.
+`build_deload_payload` sends four coarse 14-day numbers, and its
+`missed_or_skipped_sets` counts rows with `actual_reps IS NULL` — of which
+production has **zero**, because an unlogged set has no row at all. So a
+partial session is invisible to the deload check today, which is the same
+blind spot B1 closed in the prescription, in a third place. Wiring `enough`
+per exercise into that payload is the small, well-defined change that would
+make a stall count worth having.
+
+Note it must still not be ACTED on. Three deloads already compound — the
+rating policy's 7.5% cut, the recovery factor (0.85 x 0.90, then
+generate_plan's own 0.90 on an easy day, so 0.6885 is reachable), and PROG-1's
+fail streak.
+
+Also found by that review and not yet done:
+
+- `recent_ratings_by_exercise` has no workout-status filter at all despite a
+  docstring claiming "completed workouts", and no set_type filter — so a
+  warm-up rated Easy is evidence about a lift, and it gates SELECTION at
+  `AUTO_AVOID_THRESHOLD`, meaning it can rotate an exercise out of the plan.
+- `explain_workout` narrates the prescription but reads a *different* set: the
+  heaviest set of any prior session, filtered only on `actual_weight_lb IS NOT
+  NULL`. It can cite a session the reducer never looked at. That is OG2-B3's
+  job — the explanation and the number must come from one read.
+- `_advance_program_on_complete` (PROG-1) shares the set_type constant but
+  drops the `¬skipped` predicate and advances a linear program off a single
+  logged set. Latent while PROG-1 is off in production.
+
 ### Phase C — the feature
 
 | ID | Task | Size | Surface |

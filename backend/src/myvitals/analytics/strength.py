@@ -892,36 +892,6 @@ def read_session(
     )
 
 
-def stall_count(sessions: Sequence[SessionRead]) -> int:
-    """Consecutive recent sessions, NEWEST FIRST, that were not `enough`.
-
-    Reported, never acted on — deliberately, and this is the load-bearing
-    restraint of OG2-B1. There are already three deloads: the rating policy
-    cuts 7.5% at `avg_rating <= FAIL_THRESHOLD`, the recovery factor
-    multiplies up to 0.85 x 0.90 and `generate_plan` multiplies again by 0.90
-    on an easy day, and PROG-1 cuts the stored weight on its own fail streak.
-    0.6885 is reachable today with no stall logic at all, so a fourth
-    multiplier is exactly the compounding this codebase refuses elsewhere.
-
-    It exists because the AI coach cannot currently see a stall at all:
-    `build_deload_payload` sends four coarse 14-day numbers with no
-    per-exercise resolution, and its `missed_or_skipped_sets` counts rows
-    with null reps — of which production has zero, because an unlogged set
-    has no row. So a partial session is invisible to the deload check today.
-    A count lets the coach say "bench has fallen short three sessions
-    running" instead of "average rating is down 0.4", and leaves the decision
-    with the model and the user rather than silently multiplying a weight.
-
-    A single `enough` session zeroes it.
-    """
-    n = 0
-    for s in sessions:
-        if s.enough:
-            break
-        n += 1
-    return n
-
-
 def weight_from_history(
     avg_weight_lb: float | None,
     avg_rating: float | None,
@@ -2609,8 +2579,21 @@ def select_mobility_poses(
     return ranked[:min(count, len(ranked))]
 
 
+#: How far back a session may be and still decide today's weight.
+#:
+#: Matches the prefill ghost's existing window (api/workout/strength.py), so
+#: this is the codebase's own number rather than a new one. It exists because
+#: skipping past empty slots to find qualifying sets can otherwise reach
+#: arbitrarily far back: several exercises here have no logged sets since May,
+#: and prescribing September's weight off a four-month-old session states a
+#: confidence the data does not support. Beyond it the caller falls through to
+#: `starting_weight_lb`, which is honest about being a default.
+PROGRESSION_LOOKBACK_DAYS = 180
+
+
 async def read_recent_sessions(
     db: AsyncSession, exercise_id: str, limit: int = 8,
+    since: date | None = None,
 ) -> list[SessionRead]:
     """The last `limit` completed sessions of one exercise, newest first.
 
@@ -2626,6 +2609,7 @@ async def read_recent_sessions(
     declared experience level. That is the same shape as the OG2-A2 defect:
     real history discarded in favour of a beginner's default.
     """
+    cutoff = since or (date.today() - timedelta(days=PROGRESSION_LOOKBACK_DAYS))
     rows = (await db.execute(
         select(models.StrengthWorkoutExercise, models.StrengthWorkout.completed_at)
         .join(
@@ -2634,6 +2618,7 @@ async def read_recent_sessions(
         )
         .where(models.StrengthWorkoutExercise.exercise_id == exercise_id)
         .where(models.StrengthWorkout.status == "completed")
+        .where(models.StrengthWorkout.date >= cutoff)
         .order_by(models.StrengthWorkout.completed_at.desc())
         .limit(max(1, limit) * 3)
     )).all()

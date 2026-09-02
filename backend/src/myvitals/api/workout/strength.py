@@ -2653,6 +2653,9 @@ async def strength_stats(
     # OG2-A3: sets that were performed but carry no poundage, so the
     # volume figures cannot speak for them. Reported rather than hidden.
     unweighted_sets = 0
+    # Exercises with at least one loaded set in this window — the input to
+    # the per-exercise metric choice (OG2-C3).
+    weighted_exercises: set[str] = set()
 
     for d, ex_id, _setn, w_lb, reps, rating, skipped, set_type in rows:
         # OG2-A3: the null-weight test used to live here, one line above
@@ -2682,6 +2685,25 @@ async def strength_stats(
         if rating is not None:
             rpe_vals.append(float(rating))
 
+        # OG2-C3: the progression point is built for EVERY performed set, not
+        # only the ones carrying a weight. Which number it plots is decided
+        # per exercise below, from what the history actually holds.
+        prog = progression.setdefault(ex_id, [])
+        point = next((p for p in prog if p["date"] == date_iso), None)
+        if point is None:
+            point = {"date": date_iso, "top_weight_lb": None,
+                     "e1rm": None, "top_reps": None}
+            prog.append(point)
+        if reps is not None and (point["top_reps"] is None or reps > point["top_reps"]):
+            point["top_reps"] = int(reps)
+        if w_lb is not None:
+            if point["top_weight_lb"] is None or float(w_lb) > point["top_weight_lb"]:
+                point["top_weight_lb"] = float(w_lb)
+            e1 = strength_algo.estimate_1rm(w_lb, reps) or 0.0
+            if point["e1rm"] is None or e1 > point["e1rm"]:
+                point["e1rm"] = e1
+            weighted_exercises.add(ex_id)
+
         if kind == strength_algo.SET_UNWEIGHTED:
             # Real work, no poundage. Deliberately NOT costed at zero: a
             # volume total that quietly absorbs a set of pull-ups as 0 lb is
@@ -2701,24 +2723,6 @@ async def strength_stats(
         muscle = meta.get("primary_muscle") or "other"
         per_muscle[muscle] = per_muscle.get(muscle, 0.0) + vol
 
-        # Track top weight + top e1RM per (exercise, date) for the
-        # progression series (e1RM-1). e1RM is the canonical strength signal;
-        # a light warmup can't beat a working set's e1RM anyway.
-        #
-        # Still weight-keyed, deliberately: a reps-over-time series for
-        # bodyweight work is a different metric with a different axis and
-        # caption, and inventing one here would put reps and pounds on one
-        # scale. That is OG2-C3.
-        e1 = strength_algo.estimate_1rm(w_lb, reps) or 0.0
-        prog = progression.setdefault(ex_id, [])
-        existing = next((p for p in prog if p["date"] == date_iso), None)
-        if existing is None:
-            prog.append({"date": date_iso, "top_weight_lb": float(w_lb), "e1rm": e1})
-        else:
-            if float(w_lb) > existing["top_weight_lb"]:
-                existing["top_weight_lb"] = float(w_lb)
-            if e1 > existing.get("e1rm", 0.0):
-                existing["e1rm"] = e1
 
     # Sort daily series by date for the line chart.
     daily = sorted(
@@ -2728,7 +2732,12 @@ async def strength_stats(
         key=lambda r: r["date"],
     )
 
-    # Weight progression — keep top 8 exercises by total set count for chart UX.
+    # Progression — keep the top 8 exercises by session count for chart UX.
+    #
+    # OG2-C3: each carries the metric its own history is about, plus the unit
+    # and caption for it, so the client renders a labelled chart rather than
+    # assuming pounds. A bodyweight lift plots reps and says so; a timed hold
+    # plots seconds; anything ever loaded plots weight.
     progression_by_count = sorted(
         progression.items(),
         key=lambda kv: -sum(1 for _ in kv[1]),
@@ -2737,6 +2746,17 @@ async def strength_stats(
         ex_id: sorted(pts, key=lambda r: r["date"])
         for ex_id, pts in progression_by_count
     }
+    progression_metric_by_ex: dict[str, dict[str, str]] = {}
+    for ex_id in progression_out:
+        meta = strength_algo.CATALOG_BY_ID.get(ex_id, {})
+        metric = strength_algo.progression_metric(
+            has_weighted_set=ex_id in weighted_exercises,
+            is_timed=bool(meta.get("is_timed")),
+        )
+        unit, caption = strength_algo.PROGRESSION_METRICS[metric]
+        progression_metric_by_ex[ex_id] = {
+            "metric": metric, "unit": unit, "caption": caption,
+        }
     progression_names = {
         ex_id: strength_algo.CATALOG_BY_ID.get(ex_id, {}).get("name", ex_id)
         for ex_id in progression_out
@@ -2771,6 +2791,17 @@ async def strength_stats(
         "unweighted_sets": unweighted_sets,
         "weighted_sets": sum(daily_sets.values()) - unweighted_sets,
         "rpe_avg": round(sum(rpe_vals) / len(rpe_vals), 2) if rpe_vals else None,
+        # OG2-C4: the denominator for `rpe_avg`. A rating is optional on the
+        # way in — the web logger does not require one, and imported
+        # Strong/Hevy history carries one only where the source file had an
+        # RPE column — so a partly-rated history is the normal case and the
+        # mean silently speaks for sets nobody rated. House doctrine
+        # everywhere else: projection.py refuses below MIN_POINTS with a
+        # reason, /log/stats refuses below 5 complete days and reports both
+        # counts. Reported rather than refused, because unlike those an
+        # average of five ratings is still worth seeing — it simply must not
+        # claim to describe the other forty.
+        "rated_sets": len(rpe_vals),
         "daily": daily,
         "per_muscle": [
             {"muscle": k, "volume_lb": round(v, 1)}
@@ -2778,6 +2809,9 @@ async def strength_stats(
         ],
         "progression": progression_out,
         "progression_names": progression_names,
+        # OG2-C3 — what each series is actually about. Clients render the
+        # unit and caption verbatim; the axis was hard-named "lb".
+        "progression_metric": progression_metric_by_ex,
         "consistency": {
             "current_streak_days": streaks.current_days,
             "longest_streak_days": streaks.longest_days,

@@ -353,7 +353,13 @@ private fun OverviewCard(s: StrengthStats, neon: Boolean) {
                 Stat("Workouts", "${s.nWorkouts}", neon)
                 Stat("Sets", "${s.nSets}", neon)
                 Stat("Volume", "%,.0f lb".format(s.totalVolumeLb), neon)
-                s.rpeAvg?.let { Stat("Avg RPE", "%.1f".format(it), neon) }
+                // OG2-C4: the average carries its denominator. A rating is
+                // optional, so a partly-rated history is the normal case and
+                // the mean must not silently speak for sets nobody rated.
+                s.rpeAvg?.let {
+                    val denom = s.ratedSets?.let { r -> " ($r/${s.nSets})" } ?: ""
+                    Stat("Avg rating", "%.1f".format(it) + denom, neon)
+                }
             }
         }
     }
@@ -566,15 +572,36 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
             // e1RM-1: toggle the single line between top weight and estimated
             // 1RM. One series at a time keeps the Vico producer simple (no
             // multi-series styling — see the v0.7.302/306 Vico notes).
-            var metric by remember { mutableStateOf("e1rm") }
-            Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
-                for ((mv, ml) in listOf("e1rm" to "e1RM", "weight" to "Top weight")) {
-                    androidx.compose.material3.FilterChip(
-                        selected = metric == mv,
-                        onClick = { metric = mv },
-                        label = { Text(ml, fontSize = 10.sp) },
-                    )
+            // OG2-C3: what this exercise's history is about, decided
+            // server-side. A lift that has never carried weight plots reps
+            // and a timed hold plots seconds — both used to be absent from
+            // this picker entirely, because the series was built only from
+            // sets carrying a weight.
+            val shape = s.progressionMetric[selected]
+                ?: app.myvitals.sync.ProgressionMetric()
+            val weighted = shape.metric == "weight"
+            var metric by remember(selected, weighted) {
+                mutableStateOf(if (weighted) "e1rm" else "primary")
+            }
+            if (weighted) {
+                Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
+                    for ((mv, ml) in listOf("e1rm" to "e1RM", "weight" to "Top weight")) {
+                        androidx.compose.material3.FilterChip(
+                            selected = metric == mv,
+                            onClick = { metric = mv },
+                            label = { Text(ml, fontSize = 10.sp) },
+                        )
+                    }
                 }
+            }
+            // The chart says what it plots rather than leaving the reader to
+            // infer it from an axis that used to be hard-named "lb".
+            if (shape.caption.isNotBlank()) {
+                Text(
+                    shape.caption,
+                    color = app.myvitals.ui.LocalAppTokens.current.onSurfaceVariant,
+                    fontSize = 11.sp,
+                )
             }
             // Single stable producer (see DailyVolumeCard) — data updates flow
             // through runTransaction keyed on (selected, s, metric), never a new producer.
@@ -587,7 +614,11 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
             LaunchedEffect(selected, s, metric) {
                 val pairs = pts.mapNotNull { p ->
                     runCatching {
-                        val y = if (metric == "e1rm") (p.e1rm ?: p.topWeightLb) else p.topWeightLb
+                        val y: Double = when {
+                            !weighted -> (p.topReps ?: 0).toDouble()
+                            metric == "e1rm" -> (p.e1rm ?: p.topWeightLb) ?: return@runCatching null
+                            else -> p.topWeightLb ?: return@runCatching null
+                        }
                         LocalDate.parse(p.date).toEpochDay().toDouble() to y
                     }.getOrNull()
                 }

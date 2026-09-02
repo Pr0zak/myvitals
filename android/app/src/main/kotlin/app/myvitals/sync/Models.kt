@@ -427,8 +427,24 @@ data class StrengthMuscleVolume(
 @JsonClass(generateAdapter = true)
 data class StrengthProgressionPoint(
     val date: String,
-    @Json(name = "top_weight_lb") val topWeightLb: Double,
+    // OG2-C3: nullable now. A point is built for every performed set, and a
+    // bodyweight lift carries no poundage — it used to be dropped before the
+    // series was built, so it could never appear in the picker at all.
+    @Json(name = "top_weight_lb") val topWeightLb: Double? = null,
     val e1rm: Double? = null,  // e1RM-1: Epley estimated 1-rep-max for the day
+    @Json(name = "top_reps") val topReps: Int? = null,
+)
+
+/** OG2-C3: what one exercise's progression series is actually about.
+ *
+ *  Decided server-side from the history itself — a lift that has never
+ *  carried weight progresses in reps, a timed hold in seconds — so the
+ *  client renders a labelled axis rather than assuming pounds. */
+@JsonClass(generateAdapter = true)
+data class ProgressionMetric(
+    val metric: String = "weight",
+    val unit: String = "lb",
+    val caption: String = "",
 )
 
 @JsonClass(generateAdapter = true)
@@ -470,6 +486,11 @@ data class StrengthStats(
     @Json(name = "per_muscle") val perMuscle: List<StrengthMuscleVolume> = emptyList(),
     val progression: Map<String, List<StrengthProgressionPoint>> = emptyMap(),
     @Json(name = "progression_names") val progressionNames: Map<String, String> = emptyMap(),
+    @Json(name = "progression_metric")
+    val progressionMetric: Map<String, ProgressionMetric> = emptyMap(),
+    /** OG2-C4: the denominator for `rpeAvg`. A rating is optional, so a
+     *  partly-rated history is the normal case. */
+    @Json(name = "rated_sets") val ratedSets: Int? = null,
     /** CONS-1. Streaks and frequency over full history, so these do NOT
      *  change when `days` does. Null from a backend older than v0.10.1. */
     val consistency: TrainingConsistency? = null,

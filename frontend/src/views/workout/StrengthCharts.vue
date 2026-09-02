@@ -21,8 +21,13 @@ interface Stats {
   total_volume_lb: number; rpe_avg: number | null;
   daily: Array<{ date: string; volume_lb: number; sets: number }>;
   per_muscle: Array<{ muscle: string; volume_lb: number }>;
-  progression: Record<string, Array<{ date: string; top_weight_lb: number; e1rm?: number }>>;
+  progression: Record<string, Array<{
+    date: string; top_weight_lb: number | null; e1rm: number | null; top_reps: number | null;
+  }>>;
   progression_names: Record<string, string>;
+  /** OG2-C3: what each series is about — the axis was hard-named "lb". */
+  progression_metric?: Record<string, { metric: string; unit: string; caption: string }>;
+  rated_sets?: number;
   /** CONS-1: full-history streaks + frequency; independent of `days`. */
   consistency?: TrainingConsistency | null;
 }
@@ -203,31 +208,64 @@ const progressionOption = computed(() => {
   if (pts.length < 2) return null;
   const prog = isNeon.value ? "#ff5d7a" : "#ef4444";
   const e1c = isNeon.value ? "#22d3ee" : "#0ea5e9";
+  // OG2-C3: the server says what this exercise's history is about. A lift
+  // that has never carried weight plots reps and a timed hold plots seconds,
+  // rather than being absent from the picker entirely — which is what
+  // happened while the series was built only from sets with a weight.
+  const m = s.progression_metric?.[selectedExercise.value]
+    ?? { metric: "weight", unit: "lb", caption: "Best set weight per session" };
+  const isWeight = m.metric === "weight";
+  const primary = isWeight
+    ? pts.map((p) => p.top_weight_lb)
+    : pts.map((p) => p.top_reps);
+  const primaryName = isWeight ? "Top weight" : m.caption;
   return {
     grid: { left: 56, right: 16, top: 34, bottom: 32 },
-    legend: { data: ["Top weight", "e1RM"], top: 2, textStyle: t.axisLabel },
+    legend: {
+      // e1RM is a claim about a maximum lift and means nothing without load.
+      data: isWeight ? [primaryName, "e1RM"] : [primaryName],
+      top: 2, textStyle: t.axisLabel,
+    },
     tooltip: { trigger: "axis", ...t.tooltip,
-               valueFormatter: (v: number | null) => (v == null ? "—" : `${v} lb`) },
+               valueFormatter: (v: number | null) => (v == null ? "—" : `${v} ${m.unit}`) },
     xAxis: {
       type: "category", data: pts.map((p) => p.date),
       axisLabel: { ...t.axisLabel, formatter: (v: string) => v.slice(5) },
     },
-    yAxis: { type: "value", name: "lb", axisLabel: t.axisLabel, splitLine: t.splitLine },
+    yAxis: { type: "value", name: m.unit, axisLabel: t.axisLabel, splitLine: t.splitLine },
     series: [{
-      name: "Top weight", type: "line",
+      name: primaryName, type: "line",
       smooth: false, symbol: "circle", symbolSize: 6,
-      data: pts.map((p) => p.top_weight_lb),
+      data: primary,
       lineStyle: { color: prog, width: 2 },
       itemStyle: { color: prog },
-    }, {
+    }, ...(isWeight ? [{
       // e1RM-1: estimated 1-rep-max trend (Epley) — the canonical strength signal.
-      name: "e1RM", type: "line",
+      name: "e1RM", type: "line" as const,
       smooth: false, symbol: "circle", symbolSize: 5,
       data: pts.map((p) => p.e1rm ?? null),
-      lineStyle: { color: e1c, width: 2, type: "dashed" },
+      lineStyle: { color: e1c, width: 2, type: "dashed" as const },
       itemStyle: { color: e1c },
-    }],
+    }] : [])],
   };
+});
+
+/** OG2-C3: the caption for the selected series, so the chart says what it
+ *  plots rather than leaving the reader to infer it from an axis label. */
+const progressionCaption = computed(() => {
+  const s = stats.value;
+  if (!s || !selectedExercise.value) return null;
+  return s.progression_metric?.[selectedExercise.value]?.caption ?? null;
+});
+
+/** OG2-C4: what share of the logged sets the rating average speaks for.
+ *  A rating is optional, so a partly-rated history is the normal case. */
+const rpeDenominator = computed(() => {
+  const s = stats.value;
+  if (!s || s.rpe_avg == null) return null;
+  const rated = s.rated_sets;
+  if (rated == null || !s.n_sets) return null;
+  return `from ${rated} rated ${rated === 1 ? "set" : "sets"} of ${s.n_sets}`;
 });
 </script>
 
@@ -261,8 +299,12 @@ const progressionOption = computed(() => {
           <div><div class="lbl">Volume</div>
                <div class="val">{{ Math.round(stats.total_volume_lb).toLocaleString() }} lb</div></div>
           <div v-if="stats.rpe_avg !== null">
-            <div class="lbl">Avg RPE</div>
+            <div class="lbl">Avg rating</div>
             <div class="val">{{ stats.rpe_avg.toFixed(1) }}</div>
+            <!-- OG2-C4: a rating is optional, so a partly-rated history is
+                 the normal case and the mean must not silently speak for
+                 sets nobody rated. -->
+            <div v-if="rpeDenominator" class="denom">{{ rpeDenominator }}</div>
           </div>
         </div>
       </Card>
@@ -286,7 +328,7 @@ const progressionOption = computed(() => {
         <div class="chart" style="height: 280px;"><VChart :option="muscleOption" autoresize /></div>
       </Card>
 
-      <Card v-if="Object.keys(stats.progression).length" title="Weight progression">
+      <Card v-if="Object.keys(stats.progression).length" title="Exercise progression">
         <div class="picker">
           <select v-model="selectedExercise">
             <option v-for="(name, id) in stats.progression_names" :key="id" :value="id">
@@ -294,6 +336,10 @@ const progressionOption = computed(() => {
             </option>
           </select>
         </div>
+        <!-- OG2-C3: the chart says what it plots. A lift that has never
+             carried weight charts reps, a timed hold charts seconds, and
+             either used to be absent from this picker entirely. -->
+        <p v-if="progressionCaption" class="muted small caption">{{ progressionCaption }}</p>
         <div v-if="progressionOption" class="chart">
           <VChart :option="progressionOption" autoresize />
         </div>
@@ -389,6 +435,8 @@ header h1 { margin: 0; font-size: 1.25rem; }
 .rec-num { font-family: 'Geist Mono', ui-monospace, monospace; }
 .rec-date { color: var(--muted); font-size: 0.72rem; }
 .rec-num .rec-date { margin-left: 0.35rem; }
+.denom { font-size: 10.5px; color: var(--muted, #8a9a92); margin-top: 1px; }
+.caption { margin: 0 0 4px; }
 .picker { margin-bottom: 0.6rem; }
 .picker select { background: var(--bg-2); color: var(--text);
                  border: 1px solid var(--line);

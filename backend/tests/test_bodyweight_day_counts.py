@@ -195,23 +195,22 @@ class TestTheUnweightedSetIsNotCostedAtZero:
         assert i_kind < i_muscle
 
 
-class TestTheProgressionSeriesIsLeftAlone:
-    def test_the_series_stays_weight_keyed(self):
-        """Scope boundary, stated so the omission is not read as an oversight.
+class TestTheProgressionSeriesBoundaryMovedInC3:
+    """A3 deliberately left the series weight-keyed and pinned that here.
 
-        A reps-over-time series for bodyweight work is a different metric
-        with a different axis and caption. Emitting it into `top_weight_lb`
-        would put reps and pounds on one scale, which is worse than the
-        exercise being absent. That is OG2-C3.
-        """
-        src = inspect.getsource(algo.classify_set_row)
-        assert "poundage" in src
+    The pin did its job: OG2-C3 is the change that crosses it, and this test
+    is the thing that made the crossing deliberate rather than accidental. It
+    now asserts the new rule instead of the old boundary — see
+    `test_progression_metric.py` for the substance.
+    """
+
+    def test_the_series_no_longer_drops_unweighted_sets(self):
         from myvitals.api.workout import strength as api
 
-        stats_src = inspect.getsource(api.strength_stats)
-        assert "top_weight_lb" in stats_src
-        i_kind = stats_src.index("SET_UNWEIGHTED")
-        i_prog = stats_src.index("top_weight_lb")
-        assert i_kind < i_prog, (
-            "an unweighted set must not reach the weight-keyed series"
+        src = inspect.getsource(api.strength_stats)
+        i_point = src.index("progression.setdefault")
+        i_unweighted = src.index("SET_UNWEIGHTED")
+        assert i_point < i_unweighted, (
+            "the progression point must be built before the unweighted "
+            "branch returns, or bodyweight history is dropped again"
         )

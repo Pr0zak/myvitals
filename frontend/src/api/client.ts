@@ -1170,7 +1170,17 @@ export const api = {
     total_volume_lb: number; rpe_avg: number | null;
     daily: Array<{ date: string; volume_lb: number; sets: number }>;
     per_muscle: Array<{ muscle: string; volume_lb: number }>;
-    progression: Record<string, Array<{ date: string; top_weight_lb: number }>>;
+    progression: Record<string, Array<{
+      date: string;
+      top_weight_lb: number | null;
+      e1rm: number | null;
+      /** OG2-C3: present for every performed set, weighted or not. */
+      top_reps: number | null;
+    }>>;
+    /** OG2-C3: what each series is about — metric, unit and caption. */
+    progression_metric?: Record<string, { metric: string; unit: string; caption: string }>;
+    /** OG2-C4: the denominator for `rpe_avg`. */
+    rated_sets?: number;
     progression_names: Record<string, string>;
     /** CONS-1. Streaks and frequency over full history, not `days`. */
     consistency?: TrainingConsistency | null;

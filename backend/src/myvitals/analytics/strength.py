@@ -779,6 +779,40 @@ def rest_after_set(
     return target_rest_s
 
 
+#: What a per-exercise progress chart should plot, and the unit it is in.
+#:
+#: OG2-C3. The chart had no metric selection at all: the axis was hard-named
+#: "lb" and the series was built only from sets carrying a weight, so a
+#: pull-up, a push-up or a plank could never appear in the progression picker
+#: however long its history. openGym hit the same thing and its issue #5
+#: records the fix and the reasoning: the metric is a property of the DATA,
+#: not a setting, and an exercise that has never been loaded progresses in
+#: reps, so reps are what to plot.
+#:
+#: "Switches back to weight the moment a loaded set appears" is the honest
+#: half of that rule rather than a convenience — that is the session in which
+#: load became the thing improving.
+PROGRESSION_METRICS: dict[str, tuple[str, str]] = {
+    # metric -> (axis unit, caption)
+    "weight": ("lb", "Best set weight per session"),
+    "reps": ("reps", "Most reps in a set per session"),
+    "seconds": ("s", "Longest hold per session"),
+}
+
+
+def progression_metric(*, has_weighted_set: bool, is_timed: bool) -> str:
+    """Which metric this exercise's history is actually about.
+
+    Order matters. A weighted set wins outright, including on a timed hold —
+    a weighted plank progresses by load, and its seconds are then the
+    constant. Only a lift that has never carried weight falls through to its
+    own natural unit.
+    """
+    if has_weighted_set:
+        return "weight"
+    return "seconds" if is_timed else "reps"
+
+
 def classify_set_row(
     skipped: bool, reps: int | None, set_type: str | None,
     weight_lb: float | None,

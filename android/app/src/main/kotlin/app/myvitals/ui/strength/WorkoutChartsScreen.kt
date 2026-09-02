@@ -737,7 +737,9 @@ private fun muscleStatusColor(status: String?, neon: Boolean): Color = when (sta
 }
 
 @Composable
-private fun BodyMapCard(muscles: Map<String, MuscleVolumeRow>, neon: Boolean) {
+// OG2-C2: widened from private so the planning screen renders the SAME
+// diagram projected forward, rather than a second body map to keep in step.
+internal fun BodyMapCard(muscles: Map<String, MuscleVolumeRow>, neon: Boolean) {
     val card = if (neon) NeonMV.Card else MV.SurfaceContainer
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     val sil = muted.copy(alpha = 0.22f)

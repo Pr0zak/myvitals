@@ -873,6 +873,29 @@ fun StrengthTodayScreen(
             Spacer(Modifier.height(6.dp))
         }
 
+        // OG2-C2: the same silhouette the charts screen shows, projected
+        // forward through today's plan. The audit alone counts logged sets,
+        // so it can only describe a gap already trained around; here it is
+        // still actionable — a slot can be swapped.
+        workout?.projectedMuscleVolume?.takeIf { it.isNotEmpty() }?.let { pv ->
+            Text(
+                "THIS WEEK, AFTER TODAY",
+                color = pal.muted, fontSize = 10.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
+                modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+            )
+            BodyMapCard(
+                muscles = pv.mapValues { (_, r) ->
+                    r.copy(
+                        sets = (r.setsProjected ?: r.sets.toDouble()).toInt(),
+                        status = r.statusProjected ?: r.status,
+                    )
+                },
+                neon = neon,
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+
         // 7-day strip
         WeekStrip(
             history = history,

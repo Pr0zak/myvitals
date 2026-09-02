@@ -855,6 +855,14 @@ class WorkoutOut(BaseModel):
     # Null until the session is finished; there is nothing to summarise about
     # a workout that has not happened yet.
     session_summary: SessionSummary | None = None
+    # OG2-C2: this week's per-muscle volume WITH today's plan added, so the
+    # silhouette can be read before the session rather than only after it.
+    # The audit alone counts logged sets, so it can only describe a gap the
+    # user has already trained around — openGym's routine editor shows the
+    # same diagram while the session is still being built, for exactly that
+    # reason. Recomputed on read rather than stored, so it also settles
+    # toward the audited figure as sets are logged during the session.
+    projected_muscle_volume: dict[str, dict[str, Any]] = {}
     exercises: list[WorkoutExerciseOut] = []
 
 
@@ -1393,6 +1401,23 @@ async def _hydrate_workout(
         exercises_total=len(ex_out),
         sets_done=sum(_accounted_sets(e) for e in ex_out),
         sets_total=sum(e.target_sets for e in ex_out),
+        projected_muscle_volume=strength_algo.project_muscle_volume(
+            await strength_algo.weekly_muscle_volume(db, days=7),
+            [
+                strength_algo.ExerciseInPlan(
+                    exercise_id=e.exercise_id, order_index=e.order_index,
+                    superset_id=e.superset_id, target_sets=e.target_sets,
+                    target_reps_low=e.target_reps_low,
+                    target_reps_high=e.target_reps_high,
+                    target_weight_lb=e.target_weight_lb,
+                    target_rest_s=e.target_rest_s,
+                )
+                # A declined slot contributes nothing — SKIP-1 says that is a
+                # decision, and projecting work the user has ruled out would
+                # show a week they are not going to have.
+                for e in ex_out if not e.skipped
+            ],
+        ),
         session_summary=await _session_summary(db, w),
         exercises=ex_out,
     )

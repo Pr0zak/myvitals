@@ -398,6 +398,12 @@ export interface StrengthWorkoutDetail {
   exercises_total?: number;
   sets_done?: number;
   sets_total?: number;
+  /** OG2-C2: this week's per-muscle volume with today's plan added, so the
+   *  silhouette can be read before the session rather than only after it. */
+  projected_muscle_volume?: Record<string, {
+    sets: number; mev: number; mav: number; status: string;
+    sets_planned?: number; sets_projected?: number; status_projected?: string;
+  }>;
   exercises: StrengthWorkoutExercise[];
 }
 

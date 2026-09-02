@@ -430,6 +430,81 @@ def muscles_for_focus(focus: str) -> set[str]:
     return out
 
 
+def volume_status(sets: float, mev: int, mav: int) -> str:
+    """Where a muscle's weekly set count sits against its MEV/MAV band.
+
+    Extracted (OG2-C2) so the audited figure and the PROJECTED one cannot be
+    classified by two different rules. They are rendered in the same row, and
+    a projection that called 9 sets "in range" where the audit called it
+    "under" would be two answers to one question.
+    """
+    if sets == 0:
+        return "untrained"
+    if sets < mev:
+        return "under"
+    if sets <= mav:
+        return "in_range"
+    return "over"
+
+
+def project_muscle_volume(
+    current: dict[str, dict[str, Any]],
+    plan: "Sequence[ExerciseInPlan]",
+) -> dict[str, dict[str, Any]]:
+    """This week's credited sets per muscle, WITH today's plan added.
+
+    OG2-C2. The muscle map could only ever describe training already done —
+    `weekly_muscle_volume` counts logged sets, so it tells you about a gap
+    you have already trained around. openGym's routine editor shows the same
+    diagram while you are still building the session, and its comment names
+    the reason: "so a gap shows up while you're building it rather than after
+    a month of training around it".
+
+    A retrospective audit answers "what did I do"; this answers "what will
+    this session leave me at", which is the question you can still act on.
+
+    Credit matches `weekly_muscle_volume` exactly — primary at 1.0, each
+    catalog secondary at 0.5 — because the projected figure is rendered in
+    the same row as the audited one, and two numbers computed under different
+    rules cannot both be right. Mobility is excluded by the same helper, for
+    the same reason: a cool-down pose is not training the muscle it stretches.
+
+    Uses each slot's OWN `target_sets` rather than an assumed session size.
+    The finisher picker nearby approximates at three sets per slot with the
+    comment "close enough" — fine for ranking which gap is widest, wrong for
+    a number a user reads.
+    """
+    out: dict[str, dict[str, Any]] = {
+        m: {**payload, "sets_planned": 0.0} for m, payload in current.items()
+    }
+    for ex in plan:
+        if is_mobility(ex.exercise_id):
+            continue
+        meta = CATALOG_BY_ID.get(ex.exercise_id)
+        if meta is None:
+            continue
+        n = float(ex.target_sets or 0)
+        primary = taxonomy.credits_volume(meta.get("primary_muscle"))
+        if primary and primary in out:
+            out[primary]["sets_planned"] += n
+        for sm in meta.get("secondary_muscles") or []:
+            folded = taxonomy.credits_volume(sm)
+            if folded and folded in out:
+                out[folded]["sets_planned"] += n * 0.5
+
+    for payload in out.values():
+        done = float(payload.get("sets") or 0)
+        planned = payload["sets_planned"]
+        payload["sets_projected"] = round(done + planned, 1)
+        payload["sets_planned"] = round(planned, 1)
+        # The status a user would be at AFTER today, judged on the same
+        # MEV/MAV bands the audit uses.
+        payload["status_projected"] = volume_status(
+            payload["sets_projected"], payload["mev"], payload["mav"],
+        )
+    return out
+
+
 def muscle_need(sets: float, mev: int, mav: int) -> float:
     """How much a muscle wants work, on a continuous scale.
 
@@ -2623,15 +2698,10 @@ async def weekly_muscle_volume(
         raw = sets_by_muscle.get(muscle, 0.0)
         sets = round(raw)
         mev, mav = MUSCLE_VOLUME_TARGETS[muscle]
-        if sets == 0:
-            status = "untrained"
-        elif sets < mev:
-            status = "under"
-        elif sets <= mav:
-            status = "in_range"
-        else:
-            status = "over"
-        out[muscle] = {"sets": sets, "mev": mev, "mav": mav, "status": status}
+        out[muscle] = {
+            "sets": sets, "mev": mev, "mav": mav,
+            "status": volume_status(sets, mev, mav),
+        }
     return out
 
 

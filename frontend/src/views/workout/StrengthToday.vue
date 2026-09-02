@@ -7,6 +7,7 @@
 import { toLocalISO } from "@/dates";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { releaseWakeLock, requestWakeLock } from "@/wakeLock";
+import BodyMap from "@/components/BodyMap.vue";
 import { useRouter } from "vue-router";
 import { Play, Pause, RotateCw, Plus, SkipForward, Timer, Check } from "lucide-vue-next";
 import { api } from "@/api/client";
@@ -48,6 +49,26 @@ const prFlash = ref<Record<string, string>>({});
 // Hoisted here rather than held per-row: every mutation ends in `loadAll()`,
 // and state living inside the v-for is dropped when the list re-renders —
 // the same slot-churn failure the CoachCard state was hoisted to escape.
+/**
+ * OG2-C2: what this week's muscle volume becomes once today's session is
+ * done, shaped for the existing BodyMap rather than a second diagram.
+ *
+ * The audit alone counts LOGGED sets, so it can only describe a gap already
+ * trained around. Shown here — on the planning surface, before the session —
+ * it is the same figure while it can still be acted on.
+ */
+const projectedMuscles = computed(() => {
+  const p = workout.value?.projected_muscle_volume;
+  if (!p || !Object.keys(p).length) return null;
+  return Object.fromEntries(
+    Object.entries(p).map(([m, v]) => [m, {
+      status: v.status_projected ?? v.status,
+      sets: v.sets_projected ?? v.sets,
+      mev: v.mev, mav: v.mav,
+    }]),
+  );
+});
+
 const editingSet = ref<string | null>(null);
 function isEditing(wexId: number, n: number): boolean {
   return editingSet.value === `${wexId}-${n}`;
@@ -2012,6 +2033,15 @@ useVisibilityRefresh(loadAll);
       <!-- Why + Variety + Deload + Focus are now consolidated into the
            single CoachCard mounted near the top of the page. -->
 
+      <!-- OG2-C2: the same silhouette the charts page shows, but projected
+           forward through today's plan. Placed above "Next workouts" and
+           below the session, because it answers "what will this leave me
+           at" — a question you can still act on by swapping a slot. -->
+      <div v-if="projectedMuscles" class="projected-map">
+        <h3>This week, after today</h3>
+        <BodyMap :muscles="projectedMuscles" />
+      </div>
+
       <!-- Next workouts moved to bottom — "look ahead" not "do now" -->
       <div v-if="upcoming.filter(u => !u.is_today).length > 0" class="upcoming">
         <h3>Next workouts</h3>
@@ -2379,6 +2409,8 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
 .skip-row { display: flex; justify-content: space-between; align-items: center;
   gap: 1rem; flex-wrap: wrap; }
 
+.projected-map { margin-top: 14px; }
+.projected-map h3 { font-size: 13px; margin: 0 0 6px; font-weight: 600; }
 .upcoming { margin-bottom: 1rem; }
 .upcoming h3 {
   font-size: 0.75rem; color: var(--muted); letter-spacing: 0.08em;

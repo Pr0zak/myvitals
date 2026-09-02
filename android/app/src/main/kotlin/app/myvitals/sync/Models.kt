@@ -342,6 +342,11 @@ data class StrengthWorkoutDetail(
     // do not re-derive from `exercises`.
     @Json(name = "exercises_done") val exercisesDone: Int = 0,
     @Json(name = "exercises_total") val exercisesTotal: Int = 0,
+    /** OG2-C2: this week's per-muscle volume WITH today's plan added, so the
+     *  silhouette can be read before the session rather than only after it.
+     *  Empty from a backend older than v0.36.0. */
+    @Json(name = "projected_muscle_volume")
+    val projectedMuscleVolume: Map<String, MuscleVolumeRow> = emptyMap(),
     @Json(name = "sets_done") val setsDone: Int = 0,
     @Json(name = "sets_total") val setsTotal: Int = 0,
     val exercises: List<StrengthWorkoutExerciseRow> = emptyList(),
@@ -716,6 +721,10 @@ data class MuscleVolumeRow(
     val mev: Int = 0,
     val mav: Int = 0,
     val status: String = "untrained",   // untrained | under | in_range | over
+    // OG2-C2: the same row with today's plan added. Absent on the audit
+    // endpoint and present on a workout, so both read through one type.
+    @Json(name = "sets_projected") val setsProjected: Double? = null,
+    @Json(name = "status_projected") val statusProjected: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

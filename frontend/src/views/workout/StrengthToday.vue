@@ -1622,6 +1622,11 @@ useVisibilityRefresh(loadAll);
             <span v-if="wex.target_weight_lb"> @ {{ wex.target_weight_lb }} lb</span>
             <span class="rest"> · {{ wex.target_rest_s }}s rest</span>
           </span>
+          <!-- OG2-B3: why this weight, in the server's words. It used to be
+               a single generic sentence behind a tap in the Coach card,
+               describing an RPE scale this app does not use — and derived
+               from a different query than the one that chose the number. -->
+          <p v-if="wex.notes" class="why-target">{{ wex.notes }}</p>
         </header>
 
         <!-- PROG-1: program-mode scheme badge on program lifts -->
@@ -3120,6 +3125,10 @@ html[data-theme="neon"] .big { color: var(--rn-ink); }
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
+}
+.why-target {
+  margin: 2px 0 0; font-size: 11.5px; line-height: 1.45;
+  color: var(--muted, #8a9a92); font-style: italic;
 }
 .kit-tag {
   font-size: 10px; font-weight: 600; letter-spacing: .04em;

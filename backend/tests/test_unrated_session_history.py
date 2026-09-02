@@ -130,15 +130,21 @@ class TestEveryCallSiteUsesIt:
     """
 
     def test_the_generator_uses_it(self):
-        src = inspect.getsource(algo.generate_plan)
-        assert "weight_from_history" in src
+        """OG2-B2 moved the branch behind `next_prescription`, so the
+        generator names the entry point and the entry point names this. The
+        invariant is unchanged and is now enforced one layer up."""
+        assert "weight_from_history" in inspect.getsource(algo.next_prescription)
+        assert "next_prescription" in inspect.getsource(algo.generate_plan)
 
     def test_the_api_sites_use_it(self):
         from myvitals.api.workout import strength as api
 
+        # OG2-B2: both now go through the shared entry point, which is the
+        # stronger check — a site reaching past it to `weight_from_history`
+        # would have reconstructed the branch this consolidated.
         for fn in (api.add_exercise, api.swap_exercise):
             src = inspect.getsource(fn)
-            assert "weight_from_history" in src, f"{fn.__name__} still branches itself"
+            assert "next_prescription" in src, f"{fn.__name__} still branches itself"
 
     def test_no_site_reaches_past_it_to_the_starting_table(self):
         """`starting_weight_lb` must only be reached when the helper returns
@@ -167,7 +173,7 @@ class TestDoubleProgressionIsUnaffected:
         fallback beneath it. Losing that ordering would unstick nothing and
         would quietly re-round light fixed pairs back onto the same load.
         """
-        src = inspect.getsource(algo.generate_plan)
+        src = inspect.getsource(algo.next_prescription)
         i_dp = src.index("double_progression(")
         i_wfh = src.index("weight_from_history(")
         assert i_dp < i_wfh, "double progression must remain the first branch"

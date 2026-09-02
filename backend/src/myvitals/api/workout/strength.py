@@ -2297,19 +2297,28 @@ async def add_exercise(
     # divergence rather than closed it.
     goal = (equip.get("training") or {}).get("goal", "hypertrophy")
 
-    # Same weight chain as swap_exercise — one prescription policy.
-    avg_rating, avg_weight, _avg_reps, enough = await strength_algo.last_target_weight_for_exercise(
+    # OG2-B2: the same entry point the generator uses. This site and
+    # swap_exercise each carried a reduced copy of the branch, and the copies
+    # had drifted — one never read `goal` at all, and both defaulted it
+    # differently. A comment here claimed "one prescription policy" while
+    # there were three.
+    avg_rating, avg_weight, avg_reps, enough = await strength_algo.last_target_weight_for_exercise(
         db, body.exercise_id,
     )
-    target, _why = strength_algo.weight_from_history(
-        avg_weight, avg_rating, new_ex["is_compound"], goal=goal, enough=enough,
+    rx = strength_algo.next_prescription(
+        exercise=new_ex, reps_lo=new_ex.get("rep_low") or 8,
+        reps_hi=new_ex.get("rep_high") or 12,
+        level=level, goal=goal,
+        avg_rating=avg_rating, avg_weight_lb=avg_weight, avg_reps=avg_reps,
+        enough=enough, pairs_lb=pairs, wrist_weights_lb=wrist,
     )
-    if target is None:
-        target = strength_algo.starting_weight_lb(new_ex["movement_pattern"], level)
+    target = rx.weight_lb
+    why_target = rx.why
     if target is not None and "dumbbell" in new_ex["equipment"]:
         target = strength_algo.round_weight(target, pairs, wrist)
     if "dumbbell" not in new_ex["equipment"]:
         target = None
+        why_target = None
 
     # Reuse the generator's own prescription rather than inventing a second
     # policy. slot_role="isolation" is the honest description of an appended
@@ -2348,6 +2357,7 @@ async def add_exercise(
         target_reps_high=reps_high,
         target_weight_lb=target,
         target_rest_s=rest_s,
+        notes=why_target,
         added_ad_hoc=True,
     )
     db.add(wex)
@@ -2464,14 +2474,17 @@ async def swap_exercise(
     # Recompute target weight from history (if any) or starting table.
     # Swap keeps the slot's existing rep range, so we use the weight-only
     # policy here; double progression lives in full plan generation.
-    avg_rating, avg_weight, _avg_reps, enough = await strength_algo.last_target_weight_for_exercise(
+    avg_rating, avg_weight, avg_reps, enough = await strength_algo.last_target_weight_for_exercise(
         db, body.exercise_id,
     )
-    target, _why = strength_algo.weight_from_history(
-        avg_weight, avg_rating, new_ex["is_compound"], goal=goal, enough=enough,
+    rx = strength_algo.next_prescription(
+        exercise=new_ex, reps_lo=wex.target_reps_low, reps_hi=wex.target_reps_high,
+        level=level, goal=goal,
+        avg_rating=avg_rating, avg_weight_lb=avg_weight, avg_reps=avg_reps,
+        enough=enough, pairs_lb=pairs, wrist_weights_lb=wrist,
     )
-    if target is None:
-        target = strength_algo.starting_weight_lb(new_ex["movement_pattern"], level)
+    target = rx.weight_lb
+    why_target = rx.why
 
     if target is not None and "dumbbell" in new_ex["equipment"]:
         target = strength_algo.round_weight(target, pairs, wrist)
@@ -2480,6 +2493,9 @@ async def swap_exercise(
 
     wex.exercise_id = body.exercise_id
     wex.target_weight_lb = target
+    # The reason belongs to the exercise now in the slot, so it is replaced
+    # rather than left describing the lift that was swapped out.
+    wex.notes = why_target
     await db.commit()
     await db.refresh(wex)
 
@@ -3030,62 +3046,37 @@ async def explain_workout(
             "was yours, not the planner's."
         )
 
-    # Why these targets? Pull last sets for these exercises; describe RPE-driven progression.
-    last_top_set: dict[str, dict[str, Any]] = {}
+    # OG2-B3: the explanation is now the SAME sentence the prescription
+    # produced, stored on the slot at generation time.
+    #
+    # It used to be re-derived here from a different query — the heaviest set
+    # of any prior session, filtered only on `actual_weight_lb IS NOT NULL`,
+    # with no status, skipped, set_type or reps predicate — so it could cite a
+    # session the reducer never looked at, and compare against a set the
+    # weight was not computed from. The fixed preamble was wrong too: it
+    # described "RPE ≤ 7" thresholds, but this app rates sets 1-5 where 5 is
+    # Easy, so the copy named a scale the user has never seen.
+    #
+    # Anything the server could not explain says nothing rather than
+    # inventing a reason, which is the same refusal `analytics/projection.py`
+    # makes.
+    per_exercise: list[str] = []
     for ex in exercises:
-        last_q = await db.execute(
-            select(
-                models.StrengthSet.actual_weight_lb,
-                models.StrengthSet.actual_reps,
-                models.StrengthSet.rating,
-                models.StrengthWorkout.date,
-            )
-            .join(models.StrengthWorkoutExercise,
-                  models.StrengthSet.workout_exercise_id ==
-                  models.StrengthWorkoutExercise.id)
-            .join(models.StrengthWorkout,
-                  models.StrengthWorkoutExercise.workout_id ==
-                  models.StrengthWorkout.id)
-            .where(models.StrengthWorkoutExercise.exercise_id == ex.exercise_id)
-            .where(models.StrengthWorkout.id != workout_id)
-            .where(models.StrengthSet.actual_weight_lb.is_not(None))
-            .order_by(models.StrengthWorkout.date.desc(),
-                      models.StrengthSet.actual_weight_lb.desc())
-            .limit(1)
-        )
-        row = last_q.first()
-        if row is not None:
-            last_top_set[ex.exercise_id] = {
-                "weight_lb": row[0], "reps": row[1],
-                "rpe": row[2], "date": row[3].isoformat(),
-            }
-
-    # Walk through any progressed exercises.
-    bumps: list[str] = []
-    for ex in exercises:
-        prev = last_top_set.get(ex.exercise_id)
-        if prev is None:
+        why = (ex.notes or "").strip()
+        if not why:
             continue
-        prev_w = float(prev["weight_lb"])
-        cur_w = float(ex.target_weight_lb or 0)
-        if cur_w > prev_w + 0.1:
-            rpe = prev["rpe"]
-            rpe_note = (
-                f" (last RPE {int(rpe)})" if rpe is not None else ""
-            )
-            name = strength_algo.CATALOG_BY_ID.get(
-                ex.exercise_id, {}).get("name", ex.exercise_id)
-            bumps.append(
-                f"{name}: {prev_w:g} → {cur_w:g} lb{rpe_note}"
-            )
+        name = strength_algo.CATALOG_BY_ID.get(
+            ex.exercise_id, {}).get("name", ex.exercise_id)
+        per_exercise.append(f"{name} — {why}")
 
-    why_targets = (
-        "Targets follow your RPE feedback: easy sessions (RPE ≤ 7) bump "
-        "weight via micro-loaders so the next prescription lands closer "
-        "to challenging-but-doable. Failed/RPE 9-10 sets pull back."
-    )
-    if bumps:
-        why_targets += " This session: " + "; ".join(bumps[:4]) + "."
+    if per_exercise:
+        why_targets = " ".join(per_exercise[:6])
+    else:
+        why_targets = (
+            "Targets come from your own logged sets: rate a set Easy at the "
+            "top of its rep range and the weight goes up next time, rate it "
+            "Failed and it comes down. Nothing here has enough history yet."
+        )
 
     return {
         "workout_id": workout_id,

@@ -316,6 +316,13 @@ class ExerciseInPlan:
     target_reps_high: int
     target_weight_lb: float | None
     target_rest_s: int
+    # OG2-B3: why this weight, in the user's terms. Server-authored and
+    # rendered verbatim; the client never derives it. Persisted onto the
+    # slot's own `notes` column, which existed and was NULL on every row —
+    # so the reason travels with the exercise it is about instead of being
+    # flattened into the workout-level notes blob, where it was prefixed
+    # with the exercise name and lost its subject.
+    why: str | None = None
 
 
 @dataclass
@@ -977,6 +984,132 @@ def progress_from_rating(
         return last_weight_lb * (1.05 if is_compound else 1.025)
     # hypertrophy default
     return last_weight_lb * (1.075 if is_compound else 1.05)
+
+
+@dataclass(frozen=True)
+class Prescription:
+    """What to lift, and why — OG2-B2 / OG2-B3.
+
+    One return type for the one decision. Before this the branch lived at
+    three call sites: `generate_plan` chose between `double_progression` and
+    `weight_from_history` and then fell through to `starting_weight_lb`,
+    while `add_exercise` and `swap_exercise` each reimplemented a subset and
+    had already drifted twice — once on `goal`, which one of them never read
+    at all, and once on its default.
+
+    `why` is a sentence, not a code. openGym's progression engine states the
+    reason for keeping one: "a suggestion you can't audit is one you stop
+    trusting". Every branch here has to be able to say what it did, which is
+    also what stops a branch existing that nobody can explain.
+    """
+    weight_lb: float | None
+    reps_lo: int
+    reps_hi: int
+    reason: str
+    why: str
+    advisory: str | None = None
+
+
+def next_prescription(
+    *,
+    exercise: dict[str, Any],
+    reps_lo: int,
+    reps_hi: int,
+    level: str,
+    goal: str,
+    avg_rating: float | None,
+    avg_weight_lb: float | None,
+    avg_reps: float | None,
+    enough: bool,
+    pairs_lb: list[float],
+    wrist_weights_lb: list[float],
+    deload: float = 1.0,
+) -> Prescription:
+    """The one place a strength weight is chosen.
+
+    Pure: every input is a number, a string or a list, so the decision is
+    testable without a database — the house style of `analytics/targets.py`
+    and `analytics/projection.py`.
+
+    The order of the branches is the policy:
+
+    1. A rated, weighted dumbbell lift takes double progression, which fills
+       the rep range before adding load. That is what unsticks light fixed
+       pairs whose percentage jump rounds back onto the same dumbbell.
+    2. Anything else with history takes the weight-only policy, including the
+       unrated case that used to fall through to the starting table with a
+       known weight in scope (OG2-A2).
+    3. No usable history falls through to the starting table, which is the
+       right answer only when there is genuinely nothing to read.
+    """
+    is_weighted = "dumbbell" in exercise["equipment"] and not exercise.get("is_timed")
+    name = exercise.get("name", exercise["id"])
+
+    if avg_rating is not None and avg_weight_lb is not None and is_weighted:
+        weight, lo, hi, advisory = double_progression(
+            base_reps_lo=reps_lo, base_reps_hi=reps_hi,
+            last_weight_lb=avg_weight_lb, last_avg_rating=avg_rating,
+            last_avg_reps=avg_reps, is_compound=exercise["is_compound"],
+            goal=goal, pairs_lb=pairs_lb, wrist_weights_lb=wrist_weights_lb,
+            deload=deload, session_complete=enough,
+        )
+        if not enough:
+            return Prescription(
+                weight, lo, hi, "held_incomplete",
+                f"Held at {avg_weight_lb:g} lb — last session logged fewer "
+                f"sets than prescribed, so it is not yet evidence to add.",
+                advisory,
+            )
+        if weight is not None and weight > avg_weight_lb:
+            return Prescription(
+                weight, lo, hi, "advanced",
+                f"Up from {avg_weight_lb:g} lb — you finished the range and "
+                f"rated it easy.", advisory,
+            )
+        if weight is not None and weight < avg_weight_lb:
+            return Prescription(
+                weight, lo, hi, "deloaded",
+                f"Down from {avg_weight_lb:g} lb — last session was rated "
+                f"failed.", advisory,
+            )
+        return Prescription(
+            weight, lo, hi, "rep_ladder",
+            f"Same {avg_weight_lb:g} lb, aiming for {lo} reps — the weight "
+            f"goes up once you fill the range.", advisory,
+        )
+
+    weight, reason = weight_from_history(
+        avg_weight_lb, avg_rating, exercise["is_compound"], goal=goal,
+        enough=enough,
+    )
+    if weight is not None:
+        why = {
+            "held_incomplete": (
+                f"Held at {avg_weight_lb:g} lb — last session logged fewer "
+                f"sets than prescribed."
+            ),
+            "held_unrated": (
+                f"Same {avg_weight_lb:g} lb as last time — that session was "
+                f"logged without a rating, so there is nothing to advance on."
+            ),
+        }.get(reason)
+        if why is None:
+            if avg_weight_lb is not None and weight > avg_weight_lb:
+                why = f"Up from {avg_weight_lb:g} lb on your rating."
+            elif avg_weight_lb is not None and weight < avg_weight_lb:
+                why = f"Down from {avg_weight_lb:g} lb — last session was hard."
+            else:
+                why = f"Same {avg_weight_lb:g} lb as last time."
+        return Prescription(weight, reps_lo, reps_hi, reason, why)
+
+    start = starting_weight_lb(exercise["movement_pattern"], level)
+    if start is not None:
+        start = deload_round(start, deload, pairs_lb, wrist_weights_lb)
+    return Prescription(
+        start, reps_lo, reps_hi, "no_history",
+        f"No recent history for {name}, so this is a starting weight for "
+        f"your level — rate the sets and it will tune from there.",
+    )
 
 
 def double_progression(
@@ -3368,42 +3501,29 @@ async def generate_plan(
                 sets = max(2, sets - 1)
             rest_s += 30
 
-        # History-driven progression first, then starting weight.
+        # OG2-B2: one entry point. The branch this replaced lived here and,
+        # in a reduced form, at the swap and ad-hoc-add sites — which had
+        # already drifted twice.
         avg_rating, avg_weight, avg_reps, enough = await last_target_weight_for_exercise(
             db, ex["id"])
-        is_weighted = "dumbbell" in ex["equipment"] and not ex.get("is_timed")
-
-        if avg_rating is not None and avg_weight is not None and is_weighted:
-            # Double progression: fill the rep range, then add weight. This
-            # is the path that unsticks light fixed-pair dumbbells whose
-            # +5% jump would otherwise round straight back to the same load.
-            target, reps_lo, reps_hi, advisory = double_progression(
-                base_reps_lo=reps_lo, base_reps_hi=reps_hi,
-                last_weight_lb=avg_weight, last_avg_rating=avg_rating,
-                last_avg_reps=avg_reps, is_compound=ex["is_compound"],
-                goal=goal, pairs_lb=pairs_lb, wrist_weights_lb=wrist,
-                deload=deload, session_complete=enough,
-            )
-            if advisory:
-                dp_advisories.append((ex["name"], advisory))
-        else:
-            # Weight-only policy: non-dumbbell but rated (a timed hold
-            # carrying a load), and the unrated case that used to fall
-            # through to the starting table with a known weight in scope.
-            # reps/seconds are handled elsewhere.
-            target, _why = weight_from_history(
-                avg_weight, avg_rating, ex["is_compound"], goal=goal,
-                enough=enough,
-            )
-            if target is None:
-                target = starting_weight_lb(ex["movement_pattern"], level)
-            if target is not None:
-                target = deload_round(target, deload, pairs_lb, wrist)
+        rx = next_prescription(
+            exercise=ex, reps_lo=reps_lo, reps_hi=reps_hi,
+            level=level, goal=goal,
+            avg_rating=avg_rating, avg_weight_lb=avg_weight,
+            avg_reps=avg_reps, enough=enough,
+            pairs_lb=pairs_lb, wrist_weights_lb=wrist, deload=deload,
+        )
+        target, reps_lo, reps_hi = rx.weight_lb, rx.reps_lo, rx.reps_hi
+        why_target = rx.why
+        if rx.advisory:
+            dp_advisories.append((ex["name"], rx.advisory))
 
         # Bodyweight-only exercise (or no DBs owned): leave weight null,
         # progress by reps.
         if "dumbbell" not in ex["equipment"]:
             target = None
+            # The weight reason described a load this lift does not carry.
+            why_target = None
 
         plan_exs.append(ExerciseInPlan(
             exercise_id=ex["id"],
@@ -3416,6 +3536,7 @@ async def generate_plan(
             target_rest_s=(
                 DEFAULT_REST_S_SUPERSET_AFTER if ex["id"] in superset_map else rest_s
             ),
+            why=why_target,
         ))
 
     for _name, _adv in dp_advisories[:3]:
@@ -3666,6 +3787,9 @@ async def persist_plan(
             target_reps_high=ex.target_reps_high,
             target_weight_lb=ex.target_weight_lb,
             target_rest_s=ex.target_rest_s,
+            # OG2-B3: the reason travels with the exercise it is about. The
+            # column existed and was NULL on every one of 1,430 rows.
+            notes=ex.why,
         ))
 
     await db.commit()

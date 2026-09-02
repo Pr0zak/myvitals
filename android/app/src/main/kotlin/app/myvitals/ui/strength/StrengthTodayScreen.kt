@@ -3033,6 +3033,19 @@ private fun ExerciseCard(
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
+                    // OG2-B3: why this weight, in the server's words. It was
+                    // a single generic sentence two taps deep in the Coach
+                    // card — which is collapsed by default and gone once the
+                    // workout is complete — describing an RPE scale this app
+                    // does not use, and derived from a different query than
+                    // the one that chose the number.
+                    wex.notes?.takeIf { it.isNotBlank() }?.let {
+                        Text(
+                            it,
+                            color = pal.muted, fontSize = 11.sp,
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        )
+                    }
                     // LOAD-1: how to load it (only when micro-loaders needed)
                     wex.loadHint?.let {
                         Text(

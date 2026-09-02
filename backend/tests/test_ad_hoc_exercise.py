@@ -79,8 +79,9 @@ def test_the_prescription_is_server_computed_from_the_shared_chain():
     # rather than the inner helper is the stronger check — a site that
     # reached past it to `progress_from_rating` would have reintroduced the
     # three-way branch this consolidated.
-    assert "weight_from_history" in src
-    assert "starting_weight_lb" in src
+    # OG2-B2 moved the branch behind `next_prescription`, which also owns
+    # the starting-table fallback — so this site no longer names either.
+    assert "next_prescription" in src
     assert "round_weight" in src
     assert "prescribe_slot" in src
 

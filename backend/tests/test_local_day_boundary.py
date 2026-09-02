@@ -30,6 +30,25 @@ ANALYTICS = SRC / "analytics"
 # the point — the guard is only worth anything if it is allowed to fail.
 DAY_FACING_MODULES = ["summary.py", "strava.py", "workout/strength.py", "meals.py"]
 
+# OG2-C1 widened the FIRST guard to the analytics layer, because the bug
+# reached production through the gap between the two guards in this file.
+#
+# `analytics/strength.py` anchored four windowed history readers on
+# `datetime.now(timezone.utc).date()` — the exact shape guard one matches —
+# but guard one walked only the API layer. Guard two DOES walk analytics, and
+# looks for a different shape entirely (`datetime.combine(..., tzinfo=utc)`).
+# Right shape with the wrong scope, and the right scope with the wrong shape,
+# so the expression fell between them.
+#
+# The cost was not cosmetic: `weekly_muscle_volume(days=7)` returned zero
+# credited sets for all fourteen muscles on a user who had trained seven days
+# earlier, `muscle_need()` saturated identically for every muscle, and
+# ADAPT-1's adaptive split selection degenerated to a tie.
+#
+# A module goes here only once it is clean. `consistency.py` is exempt by
+# name: its occurrence is inside a docstring explaining this very bug.
+DAY_FACING_ANALYTICS = ["strength.py"]
+
 
 def _utc_today_calls(tree: ast.AST) -> list[int]:
     """Line numbers of every expression that derives a DATE from UTC.
@@ -244,3 +263,26 @@ def test_day_scoped_endpoints_accept_a_date_parameter():
     assert set(seen) == wanted, f"missing routes: {wanted - set(seen)}"
     for path, params in seen.items():
         assert "date" in params, f"{path} still hardcodes today"
+
+
+def test_day_facing_analytics_modules_use_the_local_day():
+    """The same shape guard one forbids in the API layer, in analytics.
+
+    Windowed history readers decide what the generator sees. A window that
+    starts a day late for five hours every evening does not merely mislabel a
+    chart — at the boundary it drops the most recent session out of the
+    window, and a reader that returns "nothing" is indistinguishable from a
+    user who has not trained.
+    """
+    offenders = []
+    for name in DAY_FACING_ANALYTICS:
+        path = ANALYTICS / name
+        assert path.exists(), f"{name} is listed but does not exist"
+        tree = ast.parse(path.read_text())
+        offenders += [f"analytics/{name}:{ln}" for ln in _utc_today_calls(tree)]
+    assert not offenders, (
+        "UTC-derived calendar date in a day-facing analytics module: "
+        + ", ".join(offenders)
+        + " — the CT runs TZ=UTC while the user is Central, so this window "
+        "starts a day late from 7pm local. Use the module's `_local_today()`."
+    )

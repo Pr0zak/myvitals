@@ -2422,6 +2422,34 @@ async def missed_strength_carryover(
     return None
 
 
+def _local_today() -> date:
+    """Today in the USER's timezone, for windowing their own history.
+
+    OG2-C1. Four history readers in this module anchored on
+    `datetime.now(timezone.utc).date()`. The CT runs TZ=UTC while the user is
+    Central, so the UTC date rolls at 7pm local and every one of those windows
+    started a day late for five hours each evening — and, at the boundary,
+    silently dropped the most recent session out of the window entirely.
+
+    That is not hypothetical. `weekly_muscle_volume(days=7)` was returning
+    ZERO credited sets and "untrained" for all fourteen muscles on a user who
+    had trained seven days earlier; the local anchor returns 41. Because
+    `muscle_need()` saturates at an empty muscle, every focus scored
+    identically and ADAPT-1's adaptive split selection — which this user has
+    enabled — degenerated to a tie it then broke arbitrarily.
+
+    CLAUDE.md records this trap at length and says it keeps recurring because
+    it is invisible to unit tests and to anyone developing in UTC. It reached
+    here through a gap between two guards: `test_local_day_boundary.py`
+    catches this exact expression, but only in the API layer, while its
+    analytics guard looks for a different shape (`datetime.combine(...,
+    tzinfo=timezone.utc)`). Right shape, wrong scope; right scope, wrong
+    shape. The guard is widened in the same change.
+    """
+    from .advanced import _local_tz
+    return datetime.now(_local_tz()).date()
+
+
 async def recent_ratings_by_exercise(
     db: AsyncSession, since_days: int = 14,
 ) -> dict[str, float]:
@@ -2433,7 +2461,7 @@ async def recent_ratings_by_exercise(
     Excludes skipped sets and sets without a rating.
     """
     from datetime import timedelta as _td
-    since = datetime.now(timezone.utc).date() - _td(days=since_days)
+    since = _local_today() - _td(days=since_days)
 
     rows = (await db.execute(
         select(
@@ -2492,7 +2520,7 @@ async def weekly_muscle_volume(
     workouts are excluded by status filter on split_focus.
     """
     from datetime import timedelta as _td
-    since = datetime.now(timezone.utc).date() - _td(days=days)
+    since = _local_today() - _td(days=days)
 
     # Join through to get the exercise_id for each logged set.
     rows = (await db.execute(
@@ -2585,7 +2613,7 @@ async def recent_frequency_by_exercise(
     real logged set.
     """
     from datetime import timedelta as _td
-    since = datetime.now(timezone.utc).date() - _td(days=since_days)
+    since = _local_today() - _td(days=since_days)
 
     rows = (await db.execute(
         select(
@@ -2625,7 +2653,7 @@ async def recent_mobility_history(
     }
     """
     from datetime import timedelta as _td
-    since = datetime.now(timezone.utc).date() - _td(days=since_days)
+    since = _local_today() - _td(days=since_days)
 
     rows = (await db.execute(
         select(
@@ -2770,7 +2798,10 @@ async def read_recent_sessions(
     declared experience level. That is the same shape as the OG2-A2 defect:
     real history discarded in favour of a beginner's default.
     """
-    cutoff = since or (date.today() - timedelta(days=PROGRESSION_LOOKBACK_DAYS))
+    # `date.today()` reads the process clock, and the container runs TZ=UTC —
+    # the same trap in its second disguise, and one this change introduced
+    # hours earlier before the widened guard existed to catch it.
+    cutoff = since or (_local_today() - timedelta(days=PROGRESSION_LOOKBACK_DAYS))
     rows = (await db.execute(
         select(models.StrengthWorkoutExercise, models.StrengthWorkout.completed_at)
         .join(

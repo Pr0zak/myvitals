@@ -154,10 +154,53 @@ Also found by that review and not yet done:
 
 | ID | Task | Size | Surface |
 |---|---|---|---|
-| OG2-C1 | Per-muscle fatigue, crossed with the systemic recovery signal openGym does not have | L | backend + both |
+| ~~OG2-C1~~ | ~~Per-muscle fatigue~~ — **REFUSED on measurement, 2026-09-02.** See below | — | — |
 | OG2-C2 | The muscle silhouette shown at planning time, not only in review | M | both |
 | OG2-C3 | The progression chart picks its metric, unit and caption from what was logged | M | both |
 | OG2-C4 | Every rated average shows its denominator; e1RM names its source set | M | both |
+
+### OG2-C1 — per-muscle fatigue, refused on measurement (2026-09-02)
+
+Set out to build openGym's model: intensity-weighted tonnage accumulated with
+a 36-hour half-life, saturating readout, crossed with myvitals' systemic
+recovery. **Not built.** Every constant it needs was measured against this
+user's own data and none could be sourced. The refusal is the result, not an
+omission, and these numbers are the record so the question does not get
+re-opened from intuition.
+
+- **The decay constant cannot be derived.** Across 286 muscle-to-muscle
+  re-training intervals, ZERO arrive above 50% residual at a 36-hour
+  half-life; the maximum reachable is 0.397 because the shortest gap on any
+  muscle is 2 days. Every muscle would read "ready" at essentially every
+  decision point. That is HEALTH-1's failure with the sign flipped — a signal
+  that never fires is ignored exactly as fast as one that always does.
+- **Nor fitted from performance.** Of 88 exercises with any weighted set, 49
+  have been performed in exactly ONE session and only 5 in four or more.
+  There is no repeated-measures data to fit a curve to.
+- **The thing the model carries is not there.** Session size barely varies —
+  set-count CV 0.05 back, 0.16 chest, 0.19 quadriceps — because the generator
+  writes a fixed slot template. And 162 of 165 weighted slots carry a single
+  distinct weight, so the `(load/1RM)^1.5` intensity term collapses to a
+  constant.
+- **Two of fourteen muscles have no measurable load at all**: abdominals is
+  97% unweighted (2 weighted sets across 23 sessions), lower back 100%.
+- **The systemic cross has no signal.** Session size against next-day change
+  in `recovery_score`: r = -0.082 for set count, +0.015 for tonnage (n=20),
+  against a day-to-day median absolute change of 15.9 points.
+
+WHAT WOULD HAVE TO CHANGE for this to be worth revisiting: training frequency
+high enough that per-muscle gaps fall to 2-3 days, enough repeat sessions per
+exercise to fit a decay curve, and genuine variation in session size. None of
+those are true today and none can be manufactured.
+
+**OPEN QUESTION found on the way.** `strength_workouts.deload_factor` is below
+1.0 on ZERO of 40 completed workouts, including four whose
+`recovery_score_used` was 24.3 / 30.0 / 35.3 / 38.3 — all of which
+`RecoveryInputs.deload_factor()` maps to 0.85. Recovery-aware planning IS
+enabled (`user_profile.strength_recovery_aware = true`). Two explanations fit
+and I could not separate them from stored state: the user routinely taps
+"use full weight" (which correctly stores 1.0), or the factor is not being
+persisted on completed workouts. Worth an hour with the generation path.
 
 ### Phase D — follow-ons
 

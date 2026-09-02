@@ -2297,6 +2297,26 @@ async def last_split_for_user(
     return row.split_focus if row else None
 
 
+def is_mobility(exercise_id: str) -> bool:
+    """Is this catalog entry a mobility pose rather than trained work?
+
+    OG2-C1. Both muscle readers filter mobility at the WORKOUT level —
+    `split_focus NOT IN (yoga, cardio)` — which cannot see a mobility
+    cool-down appended to a strength day. The generator appends exactly that:
+    a two-pose block on a `push` / `pull` / `legs` workout. On this database
+    13 such slots sit inside strength sessions.
+
+    The consequence is not cosmetic. `days_since_muscle_trained` feeds the
+    adaptive split scorer, so a 30-second Cat-Cow resets its muscles' recency
+    to zero and makes the generator believe they were trained — biasing what
+    it picks next away from muscles that only had a stretch.
+    """
+    ex = CATALOG_BY_ID.get(exercise_id)
+    if ex is None:
+        return False
+    return taxonomy.canonical_pattern(ex.get("movement_pattern")) == "mobility"
+
+
 async def days_since_muscle_trained(
     db: AsyncSession, target_date: date, lookback_days: int = 28,
 ) -> dict[str, float]:
@@ -2338,6 +2358,9 @@ async def days_since_muscle_trained(
     for ex_id, last_date in rows:
         info = CATALOG_BY_ID.get(ex_id)
         if info is None or last_date is None:
+            continue
+        # A cool-down stretch is not training the muscle it stretches.
+        if is_mobility(ex_id):
             continue
         touched = [info.get("primary_muscle")] + list(
             info.get("secondary_muscles") or []
@@ -2497,6 +2520,9 @@ async def weekly_muscle_volume(
     # hamstrings/lower-back at 0 despite obvious training stress.
     SECONDARY_WEIGHT = 0.5
     sets_by_muscle: dict[str, float] = {}
+    # OG2-C1: and mobility is excluded here too, for the same reason and by
+    # the same helper. A cool-down pose credited against MEV/MAV makes a
+    # muscle look closer to its weekly target than the training did.
     # TD-1 — every token folds through taxonomy.credits_volume rather than
     # being used as a dict key raw. The catalog is already normalised at
     # import, so for bundled exercises this is a no-op; it matters for rows
@@ -2505,6 +2531,8 @@ async def weekly_muscle_volume(
     unmatched_ids: list[str] = []
     unmatched_sets = 0
     for ex_id, n_sets in rows:
+        if is_mobility(ex_id):
+            continue
         info = CATALOG_BY_ID.get(ex_id)
         n = int(n_sets)
         if info is None:

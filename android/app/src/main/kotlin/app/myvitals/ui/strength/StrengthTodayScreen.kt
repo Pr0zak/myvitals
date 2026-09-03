@@ -1191,6 +1191,26 @@ fun StrengthTodayScreen(
                     }
                 }
             }
+            // OG2-D-2 — the same `notes` on a day that DOES have exercises.
+            // The card below renders them only when the plan is empty, so on
+            // an ordinary strength day everything the generator said about
+            // the plan was web-only: StrengthToday.vue prints them
+            // unconditionally right under the header. That gap hid the #WP-8
+            // cadence advisory, which is the one note most worth reading,
+            // since it explains why untrained days keep appearing as skipped
+            // sessions. Muted single paragraph, matching web's "hint subtle"
+            // rather than inventing a card the other surface does not have.
+            if (plan.exercises.isNotEmpty() && !plan.notes.isNullOrBlank()) {
+                item {
+                    Text(
+                        plan.notes!!,
+                        color = pal.muted,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                    )
+                }
+            }
             // Cardio / notes-only plans (split_focus == "cardio") come back
             // with exercises=[] and the prescription text in `notes`. Without
             // this card the screen looks blank between the Coach card and

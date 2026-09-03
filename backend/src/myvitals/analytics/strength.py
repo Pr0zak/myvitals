@@ -802,6 +802,15 @@ EASY_THRESHOLD = 4.5   # ≥ this → the rating policy wants a weight jump
 REP_PROGRESS_MIN = 3.0  # ≥ this → solid set, add a rep (double progression)
 AUTO_AVOID_THRESHOLD = 1.5  # 14d avg ≤ this → rotate the exercise out
 
+# OG2-D-2. The minimum completed strength sessions in a trailing 14 days
+# before the #WP-8 cadence advisory will speak. A floor is right — 0 or 1
+# sessions cannot tell "this is my cadence" from a fortnight away — but the
+# old value of 4 sat ABOVE the mode of this user's own distribution, so the
+# note went quiet exactly when declared and actual diverged most. Measured
+# over 105 days of history: 2 sessions on 11 days, 3 on 44, 4 on 18, 5 on 22,
+# 6 on 10. Re-derive this from the user's own spread rather than nudging it.
+FREQ_ADVISORY_MIN_SESSIONS = 2
+
 
 def starting_weight_lb(movement_pattern: str, level: str) -> float | None:
     """First-session weight when no history exists. Returns None for
@@ -3237,6 +3246,61 @@ async def _active_fasting_context(db: AsyncSession) -> dict[str, Any] | None:
     }
 
 
+def frequency_advisory(
+    *, actual_14d: int, days_per_week: int, focus: str,
+) -> str | None:
+    """#WP-8 — the one-line note comparing declared cadence to actual.
+
+    Pure, so the copy and the thresholds are testable without a database —
+    the house style of `next_prescription` and `analytics/targets.py`. The
+    caller owns both gates that decide whether to ask at all: the split
+    preference must be `auto` or `adaptive` (never an explicit family, where
+    the user named a split and suggesting another argues with a decision),
+    and there must be no override_split for today.
+
+    Returns None when there is nothing worth saying: too few sessions to tell
+    a cadence from a fortnight away, or a declared figure already within one
+    session of the real one.
+    """
+    if actual_14d < FREQ_ADVISORY_MIN_SESSIONS:
+        return None
+    actual_per_week = actual_14d / 2.0  # 14 days = 2 weeks
+    suggested = max(1, min(6, round(actual_per_week)))
+    if abs(suggested - days_per_week) < 2:
+        return None
+    suggested_split = (
+        "full_body" if suggested <= 3 else
+        "upper_lower" if suggested == 4 else "ppl"
+    )
+    # The comment on the caller always described both directions; the copy
+    # only ever handled one. "Bumping" is wrong for the case this user is
+    # actually in, where the suggestion is to schedule FEWER days than
+    # declared — and getting the verb backwards on the one sentence meant to
+    # explain the schedule undoes the explaining.
+    if suggested < days_per_week:
+        verb = f"dropping days_per_week to {suggested}"
+        # Naming the consequence, because the symptom is what the user sees
+        # and the setting is not obviously connected to it. At a high
+        # declared count the schedule fills every weekday, so days that go
+        # untrained are swept to "skipped" by auto_skip_stale_workouts and
+        # the history fills with sessions nobody chose to miss.
+        consequence = (
+            " That would also stop the untrained days piling up as "
+            "skipped sessions in your history."
+        )
+    else:
+        verb = f"bumping days_per_week to {suggested}"
+        consequence = ""
+    return (
+        f"You've completed {actual_14d} strength sessions in the "
+        f"last 14 days (~{actual_per_week:.1f}/week), but your "
+        f"setting is {days_per_week}/week → {focus.replace('_', ' ')}. "
+        f"Consider {verb} → "
+        f"{suggested_split.replace('_', ' ')} split for a better "
+        f"per-muscle frequency match.{consequence}"
+    )
+
+
 async def generate_plan(
     db: AsyncSession,
     target_date: date,
@@ -3507,8 +3571,30 @@ async def generate_plan(
     # does 2/wk, or declared 2 but actually does 5/wk), surface a
     # one-line note suggesting they update the pref so the split
     # mapping matches their real cadence.
+    #
+    # OG2-D-2 — two conditions used to make this unreachable for exactly the
+    # user it describes, and both were structural rather than tuning.
+    #
+    # (1) `split_pref == "auto"` excluded "adaptive". ADAPT-1 chooses which
+    # focus to run, not how many days are scheduled: `days_per_week` still
+    # drives `_STRENGTH_WEEKDAYS_BY_COUNT` and still picks the candidate
+    # family, so the declared-versus-actual mismatch is identical under
+    # adaptive. It is excluded from an EXPLICIT family (ppl, upper_lower,
+    # full_body) on purpose — there the user named a split, and suggesting a
+    # different one is arguing with a decision rather than reporting a fact.
+    #
+    # (2) `actual_14d >= 4` disabled the advisory whenever actual cadence was
+    # LOW, which is the direction that most needs saying: someone declaring 6
+    # and completing 2 is precisely who the note is for. A floor is still
+    # right — 0 or 1 sessions cannot distinguish "this is my cadence" from a
+    # fortnight away — but it belongs just above that, not above the middle
+    # of the user's own distribution. Measured over 105 days of this
+    # database's history, trailing-14-day completed strength sessions land on
+    # 2 (11 days), 3 (44), 4 (18), 5 (22) and 6 (10): the old floor sat above
+    # the mode and silenced the note on 55 of 105 days, all of them days when
+    # the gap between declared and actual was at its widest.
     freq_advisory_note: str | None = None
-    if split_pref == "auto" and not override_split:
+    if split_pref in ("auto", "adaptive") and not override_split:
         since14 = target_date - timedelta(days=14)
         actual_count_q = await db.execute(
             select(func.count(models.StrengthWorkout.id))
@@ -3518,22 +3604,10 @@ async def generate_plan(
             .where(models.StrengthWorkout.split_focus.notin_(["yoga", "cardio"]))
         )
         actual_14d = int(actual_count_q.scalar() or 0)
-        actual_per_week = actual_14d / 2.0  # 14 days = 2 weeks
-        # Suggested days based on actual cadence, rounded.
-        suggested = max(1, min(6, round(actual_per_week)))
-        if actual_14d >= 4 and abs(suggested - days_per_week) >= 2:
-            suggested_split = (
-                "full_body" if suggested <= 3 else
-                "upper_lower" if suggested == 4 else "ppl"
-            )
-            freq_advisory_note = (
-                f"You've completed {actual_14d} strength sessions in the "
-                f"last 14 days (~{actual_per_week:.1f}/week), but your "
-                f"setting is {days_per_week}/week → {focus.replace('_', ' ')}. "
-                f"Consider bumping days_per_week to {suggested} → "
-                f"{suggested_split.replace('_', ' ')} split for a better "
-                f"per-muscle frequency match."
-            )
+        freq_advisory_note = frequency_advisory(
+            actual_14d=actual_14d, days_per_week=days_per_week,
+            focus=focus,
+        )
 
     catalog = filter_catalog_for_equipment(CATALOG, equipment)
     if not catalog:

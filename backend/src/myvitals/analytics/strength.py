@@ -1287,23 +1287,20 @@ def bodyweight_progression(
         new_hi = max(new_lo, hi - step)
         if (new_lo, new_hi) == (lo, hi):
             return lo, hi, "deloaded", (
-                f"Held at {band(lo, hi)} — last session was rated failed, but "
-                f"this is already the lowest target offered."
+                f"Hold {band(lo, hi)} — failed, but this is the lowest target."
             ), None
         return new_lo, new_hi, "deloaded", (
-            f"Down to {band(new_lo, new_hi)} — last session was rated failed."
+            f"Down to {band(new_lo, new_hi)} — last session failed."
         ), None
 
     if not session_complete:
         return lo, hi, "held_incomplete", (
-            f"Held at {band(lo, hi)} — last session logged fewer sets than "
-            f"prescribed, so it is not yet evidence to add."
+            f"Hold {band(lo, hi)} — last session was short."
         ), None
 
     if avg_rating is None:
         return lo, hi, "held_unrated", (
-            f"Same {band(lo, hi)} as last time — that session was logged "
-            f"without a rating, so there is nothing to advance on."
+            f"Hold {band(lo, hi)} — last session unrated."
         ), None
 
     # A number the prefill did not supply: the user went past the top of the
@@ -1318,15 +1315,14 @@ def bodyweight_progression(
             # again, which is the stall this ladder exists to end.
             new_hi = min(cap_hi, reached + width)
             return reached, max(reached, new_hi), "advanced", (
-                f"Up to {band(reached, max(reached, new_hi))} — you averaged "
-                f"more than the {hi}{unit} asked for."
+                f"Up to {band(reached, max(reached, new_hi))} — you beat "
+                f"{hi}{unit}."
             ), None
 
     if avg_rating >= EASY_THRESHOLD:
         if hi >= cap_hi:
             return lo, hi, "rep_ladder", (
-                f"Held at {band(lo, hi)} — rated easy, but this is the "
-                f"highest target offered for a lift with no load."
+                f"Hold {band(lo, hi)} — top of the bodyweight range."
             ), (
                 "at the top of the rep range for a bodyweight exercise — add "
                 "load (a dumbbell or weighted vest) or pick a harder "
@@ -1335,13 +1331,11 @@ def bodyweight_progression(
         new_lo = min(cap_hi, lo + step)
         new_hi = min(cap_hi, max(new_lo, hi + step))
         return new_lo, new_hi, "advanced", (
-            f"Up to {band(new_lo, new_hi)} — you finished last session and "
-            f"rated it easy."
+            f"Up to {band(new_lo, new_hi)} — finished it, rated easy."
         ), None
 
     return lo, hi, "rep_ladder", (
-        f"Same {band(lo, hi)} — the target goes up once you rate a full "
-        f"session easy."
+        f"Hold {band(lo, hi)} — rate a full session easy to add."
     ), None
 
 
@@ -1391,26 +1385,25 @@ def next_prescription(
         if not enough:
             return Prescription(
                 weight, lo, hi, "held_incomplete",
-                f"Held at {avg_weight_lb:g} lb — last session logged fewer "
-                f"sets than prescribed, so it is not yet evidence to add.",
+                f"Hold {avg_weight_lb:g} lb — last session was short.",
                 advisory,
             )
         if weight is not None and weight > avg_weight_lb:
             return Prescription(
                 weight, lo, hi, "advanced",
-                f"Up from {avg_weight_lb:g} lb — you finished the range and "
-                f"rated it easy.", advisory,
+                f"Up from {avg_weight_lb:g} lb — filled the range, rated easy.",
+                advisory,
             )
         if weight is not None and weight < avg_weight_lb:
             return Prescription(
                 weight, lo, hi, "deloaded",
-                f"Down from {avg_weight_lb:g} lb — last session was rated "
-                f"failed.", advisory,
+                f"Down from {avg_weight_lb:g} lb — last session failed.",
+                advisory,
             )
         return Prescription(
             weight, lo, hi, "rep_ladder",
-            f"Same {avg_weight_lb:g} lb, aiming for {lo} reps — the weight "
-            f"goes up once you fill the range.", advisory,
+            f"Hold {avg_weight_lb:g} lb — reach {lo} reps to add weight.",
+            advisory,
         )
 
     # OG2-D-6: a lift that carries no load progresses in REPS. It reaches
@@ -1441,21 +1434,19 @@ def next_prescription(
     if weight is not None:
         why = {
             "held_incomplete": (
-                f"Held at {avg_weight_lb:g} lb — last session logged fewer "
-                f"sets than prescribed."
+                f"Hold {avg_weight_lb:g} lb — last session was short."
             ),
             "held_unrated": (
-                f"Same {avg_weight_lb:g} lb as last time — that session was "
-                f"logged without a rating, so there is nothing to advance on."
+                f"Hold {avg_weight_lb:g} lb — last session unrated."
             ),
         }.get(reason)
         if why is None:
             if avg_weight_lb is not None and weight > avg_weight_lb:
-                why = f"Up from {avg_weight_lb:g} lb on your rating."
+                why = f"Up from {avg_weight_lb:g} lb — rated easy."
             elif avg_weight_lb is not None and weight < avg_weight_lb:
                 why = f"Down from {avg_weight_lb:g} lb — last session was hard."
             else:
-                why = f"Same {avg_weight_lb:g} lb as last time."
+                why = f"Hold {avg_weight_lb:g} lb."
         return Prescription(weight, reps_lo, reps_hi, reason, why)
 
     start = starting_weight_lb(exercise["movement_pattern"], level)
@@ -1463,8 +1454,7 @@ def next_prescription(
         start = deload_round(start, deload, pairs_lb, wrist_weights_lb)
     return Prescription(
         start, reps_lo, reps_hi, "no_history",
-        f"No recent history for {name}, so this is a starting weight for "
-        f"your level — rate the sets and it will tune from there.",
+        "Starting weight for your level — no recent history.",
     )
 
 
@@ -3631,16 +3621,14 @@ async def generate_plan(
             if split_pref == "adaptive":
                 carry_bypass_day_type = True
                 carryover_note = (
-                    f"You missed {carry[1].isoformat()}'s {carry[0]} session, "
-                    "so today is a strength day rather than rest/cardio/yoga "
-                    "— focus chosen by need, not by what was missed."
+                    f"Missed {carry[1].isoformat()}'s {carry[0]} — strength "
+                    "today instead of the scheduled rest day."
                 )
             else:
                 override_split = carry[0]
                 carryover_note = (
-                    f"Carried over from {carry[1].isoformat()}'s missed "
-                    f"{carry[0]} session — schedule slot would have been "
-                    "rest/cardio/yoga today."
+                    f"Re-serving {carry[1].isoformat()}'s missed {carry[0]} "
+                    "— today's slot was a rest day."
                 )
 
     # Day-type allocation by weekday — runs before recovery / rest
@@ -3790,11 +3778,11 @@ async def generate_plan(
         )[:3]
         if drivers:
             adaptive_note = (
-                "Adaptive split picked "
+                "Picked "
                 + focus.replace("_", " ")
-                + " — most-needed: "
+                + " — furthest from target: "
                 + ", ".join(
-                    f"{m.replace('_', ' ')} ({int(s)} sets, {int(d)}d rest)"
+                    f"{m.replace('_', ' ')} ({int(s)} sets, {int(d)}d)"
                     for m, s, d in drivers
                 )
                 + "."
@@ -3916,9 +3904,9 @@ async def generate_plan(
     )
     if auto_avoid_count:
         notes.append(
-            f"{auto_avoid_count} exercise(s) auto-avoided — you kept failing "
-            f"them over the last 14 days. Override by marking them "
-            f"'favorite' in the catalog if you want them back."
+            f"{auto_avoid_count} exercise(s) benched — you failed them "
+            f"repeatedly in the last 14 days. Mark one 'favorite' in the "
+            f"catalog to bring it back."
         )
 
     superset_map = pair_supersets(chosen, chosen_slots)
@@ -3938,10 +3926,12 @@ async def generate_plan(
     elif difficulty == "hard":
         deload *= 1.05
     if recovery_deload < 1.0:
+        # The "Use full weight" instruction is gone: both clients render a
+        # deload banner carrying that exact button, so the sentence was
+        # telling the user to tap something already on screen.
         notes.append(
-            f"Targets eased ~{round((1 - recovery_deload) * 100)}% for today's "
-            f"recovery / readiness. Tap “Use full weight” to override, "
-            f"or turn recovery-aware off in Settings."
+            f"Targets eased ~{round((1 - recovery_deload) * 100)}% for "
+            f"today's recovery."
         )
     if difficulty and difficulty != "normal":
         notes.append(f"Ad-hoc session — difficulty: {difficulty}.")
@@ -4198,14 +4188,14 @@ async def generate_plan(
             n = len(finishers_added)
             if target_count is not None:
                 notes.append(
-                    f"+{n} accessory slot{'s' if n > 1 else ''} added to hit "
-                    f"your {target_count}-exercise target: "
+                    f"+{n} accessor{'ies' if n > 1 else 'y'} to hit your "
+                    f"{target_count}-exercise target: "
                     f"{', '.join(muscles_named)}."
                 )
             else:
                 notes.append(
-                    f"+{n} finisher slot{'s' if n > 1 else ''} added "
-                    f"to chip away at weekly volume gap: {', '.join(muscles_named)}."
+                    f"+{n} finisher{'s' if n > 1 else ''} for this week's "
+                    f"volume gap: {', '.join(muscles_named)}."
                 )
 
     # Mobility / yoga block — append 2 poses tagged movement_pattern=mobility
@@ -4238,8 +4228,8 @@ async def generate_plan(
             # Count from the actual picks — disabling poses can shrink the
             # pool below the requested two.
             notes.append(
-                f"Mobility block appended — {len(picks)} yoga "
-                f"pose{'s' if len(picks) != 1 else ''}, ~30 s hold each."
+                f"Cool-down — {len(picks)} yoga "
+                f"pose{'s' if len(picks) != 1 else ''}, ~30 s holds."
             )
 
     # FAST-18 note — only when modulation actually changed the plan.
@@ -4249,14 +4239,13 @@ async def generate_plan(
         hrs = fasting_ctx["current_hours"]
         if fasting_ctx["modulation"] == "volume_-20%":
             notes.append(
-                f"Fasted {hrs:.0f}h — strength block scaled back ~20% "
-                f"(dropped 1 set per exercise, rest +15s)."
+                f"Fasted {hrs:.0f}h — volume down ~20%: 1 set off each "
+                f"lift, rest +15s."
             )
         else:
             notes.append(
-                f"Fasted {hrs:.0f}h — strength block scaled back ~30% "
-                f"(dropped 1-2 sets per exercise, rest +30s). "
-                f"A Z2 cardio block alongside is a strong option."
+                f"Fasted {hrs:.0f}h — volume down ~30%: 1-2 sets off each "
+                f"lift, rest +30s. Z2 cardio alongside is a strong option."
             )
 
     return GeneratedPlan(

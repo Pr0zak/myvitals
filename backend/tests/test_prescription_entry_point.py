@@ -104,7 +104,11 @@ class TestEveryBranchCanExplainItself:
     def test_no_history_says_it_is_a_starting_weight(self):
         rx = _rx()
         assert rx.reason == "no_history"
-        assert "starting weight" in rx.why
+        assert "Starting weight" in rx.why
+        # It no longer repeats the exercise NAME. That is the card's own
+        # title two lines above the reason, so printing it again spent a
+        # third of the sentence saying what the user was already looking at.
+        assert DUMBBELL["name"] not in rx.why
 
     def test_an_advance_names_what_it_came_from(self):
         rx = _rx(avg_rating=5.0, avg_weight_lb=25.0, avg_reps=12.0)
@@ -120,21 +124,25 @@ class TestEveryBranchCanExplainItself:
         """The OG2-B1 gate, now visible to the user rather than silent."""
         rx = _rx(avg_rating=5.0, avg_weight_lb=25.0, avg_reps=12.0, enough=False)
         assert rx.reason == "held_incomplete"
-        assert "fewer" in rx.why
+        assert "short" in rx.why
+        assert "25" in rx.why
 
     def test_an_unrated_session_says_so(self):
         """OG2-A2's case. It holds, and now it says why it held."""
         rx = _rx(exercise={**DUMBBELL, "equipment": ["barbell"]},
                  avg_rating=None, avg_weight_lb=25.0)
         assert rx.reason == "held_unrated"
-        assert "without a rating" in rx.why
+        assert "unrated" in rx.why
+        assert "25" in rx.why
 
     def test_the_rep_ladder_says_what_it_is_waiting_for(self):
         """Mid-range: the weight holds while the reps climb. Without a
         reason this reads as nothing having happened."""
         rx = _rx(avg_rating=4.0, avg_weight_lb=25.0, avg_reps=9.0)
         assert rx.reason == "rep_ladder"
-        assert "range" in rx.why
+        # The rep target it is waiting for, and the weight it is holding.
+        assert "reps" in rx.why
+        assert "25" in rx.why
 
     def test_every_branch_returns_a_non_empty_why(self):
         """The structural benefit: a branch that cannot say what it did

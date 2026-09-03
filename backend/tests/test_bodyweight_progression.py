@@ -90,7 +90,8 @@ class TestTheLadderMoves:
         lo, hi, reason, why, _ = _bp(avg_rating=4.0, avg_reps=12.0)
         assert lo == 12
         assert reason == "advanced"
-        assert "more than" in why
+        assert "beat" in why
+        assert "11" in why  # the number it beat survives the shortening
 
     def test_beating_the_range_keeps_its_width(self):
         """12-14, not 12-12. Flattening the range removes the room to grow
@@ -106,7 +107,7 @@ class TestItKeepsB1sAsymmetry:
             avg_rating=5.0, avg_reps=9.0, session_complete=False)
         assert (lo, hi) == (9, 11)
         assert reason == "held_incomplete"
-        assert "fewer" in why
+        assert "short" in why
 
     def test_a_short_failed_session_still_cuts(self):
         """The asymmetry. Two sets rated Failed are real evidence to ease
@@ -127,7 +128,7 @@ class TestItKeepsB1sAsymmetry:
         reps alone are the prefill and say nothing on their own."""
         _lo, _hi, reason, why, _ = _bp(avg_rating=None, avg_reps=9.0)
         assert reason == "held_unrated"
-        assert "without a rating" in why
+        assert "unrated" in why
 
 
 class TestTheCapsAreSharedNotCopied:

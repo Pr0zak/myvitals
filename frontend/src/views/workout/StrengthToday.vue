@@ -1398,14 +1398,19 @@ useVisibilityRefresh(loadAll);
          set. Collapsed and summarised by count, matching the phone.
          No truncated preview: a note cut mid-sentence is less useful than
          a count and reads as a rendering fault. -->
-    <div v-if="planNotes.length" class="plan-notes">
+    <div v-if="planNotes.length && workout?.exercises?.length" class="plan-notes">
       <button type="button" class="pn-head" @click="notesOpen = !notesOpen">
         <span class="pn-label">Why this plan</span>
         <span class="pn-count">{{ planNotes.length }}
           {{ planNotes.length === 1 ? 'note' : 'notes' }}</span>
         <span class="pn-chev">{{ notesOpen ? '⌃' : '⌄' }}</span>
       </button>
-      <p v-if="notesOpen" class="hint subtle pn-body">{{ workout?.notes }}</p>
+      <!-- One ROW per note, not one paragraph. The generator already
+           produces a list; joining it for storage and printing the join is
+           what turned four separate statements into a block of prose. -->
+      <ul v-if="notesOpen" class="pn-list">
+        <li v-for="(n, i) in planNotes" :key="i" class="pn-item">{{ n }}</li>
+      </ul>
     </div>
 
     <!-- FAST-18 — fasted-training banner. Appears when the workout
@@ -2441,10 +2446,20 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
   background: none; border: 0; padding: 6px 0; cursor: pointer;
   font: inherit; color: inherit; text-align: left;
 }
-.pn-label { font-size: 12px; font-weight: 600; opacity: 0.75; }
-.pn-count { font-size: 11px; opacity: 0.5; }
-.pn-chev { margin-left: auto; font-size: 13px; opacity: 0.75; }
-.pn-body { white-space: pre-line; margin: 0 0 6px; }
+.pn-label { font-size: 12px; font-weight: 600; color: var(--muted, #64748b); }
+.pn-count { font-size: 11px; color: var(--muted, #64748b); opacity: 0.7; }
+.pn-chev { margin-left: auto; font-size: 13px; color: var(--muted, #64748b); }
+.pn-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 5px; }
+.pn-item {
+  font-size: 12px; line-height: 1.45; color: var(--muted, #64748b);
+  padding-left: 12px; position: relative;
+}
+.pn-item::before {
+  content: "";
+  position: absolute; left: 0; top: 0.6em;
+  width: 4px; height: 4px; border-radius: 50%;
+  background: currentColor; opacity: 0.5;
+}
 
 .projected-map { margin-top: 14px; }
 .projected-map h3 { font-size: 13px; margin: 0 0 6px; font-weight: 600; }
@@ -2796,6 +2811,12 @@ html[data-theme="neon"] .page-head.compact .eyebrow {
   color: var(--rn-cyan); font-family: 'Space Grotesk', monospace;
 }
 html[data-theme="neon"] .page-head h1 { color: var(--rn-ink); letter-spacing: -0.3px; }
+/* The disclosure is secondary text. Without these it inherited --rn-ink and
+   read brighter than the exercise names it sits above. */
+html[data-theme="neon"] .pn-label,
+html[data-theme="neon"] .pn-count,
+html[data-theme="neon"] .pn-chev,
+html[data-theme="neon"] .pn-item { color: var(--rn-mut); }
 html[data-theme="neon"] .head-pip {
   background: rgba(40,230,255,0.08); color: var(--rn-cyan);
   border-color: rgba(40,230,255,0.30);
@@ -3195,9 +3216,13 @@ html[data-theme="neon"] .big { color: var(--rn-ink); }
   background: var(--surface);
   color: var(--text);
 }
+/* OG2-D-7: the italic went with the length. It set a whole wrapped
+   paragraph oblique at 11.5px directly under the numbers you came to read;
+   now it is one short line and the muted colour already marks it
+   secondary. */
 .why-target {
   margin: 2px 0 0; font-size: 11.5px; line-height: 1.45;
-  color: var(--muted, #8a9a92); font-style: italic;
+  color: var(--muted, #8a9a92);
 }
 .kit-tag {
   font-size: 10px; font-weight: 600; letter-spacing: .04em;

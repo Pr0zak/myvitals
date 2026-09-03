@@ -1226,15 +1226,34 @@ fun StrengthTodayScreen(
                                 color = pal.muted, fontSize = 13.sp,
                             )
                         }
+                        // One ROW per note, not one paragraph. The generator
+                        // already produces a list; joining it for storage and
+                        // then printing the join is what turned four separate
+                        // statements into a block of prose.
                         if (open) {
-                            Text(
-                                plan.notes!!,
-                                color = pal.muted,
-                                fontSize = 12.sp,
-                                lineHeight = 17.sp,
-                                modifier = Modifier.fillMaxWidth()
-                                    .padding(bottom = 6.dp),
-                            )
+                            Column(
+                                Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                for (line in lines) {
+                                    Row(Modifier.fillMaxWidth()) {
+                                        Canvas(
+                                            Modifier.padding(top = 6.dp, end = 8.dp)
+                                                .size(4.dp),
+                                        ) {
+                                            drawCircle(
+                                                pal.muted.copy(alpha = 0.5f),
+                                            )
+                                        }
+                                        Text(
+                                            line,
+                                            color = pal.muted,
+                                            fontSize = 12.sp,
+                                            lineHeight = 17.sp,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -3149,11 +3168,16 @@ private fun ExerciseCard(
                     // workout is complete — describing an RPE scale this app
                     // does not use, and derived from a different query than
                     // the one that chose the number.
+                    // OG2-D-7: the italic went with the length. It set a
+                    // whole wrapped paragraph in an oblique face at 11sp,
+                    // which is the least legible thing on the card and sat
+                    // directly under the numbers you came to read. Now it is
+                    // one short line, and muted already marks it secondary.
                     wex.notes?.takeIf { it.isNotBlank() }?.let {
                         Text(
                             it,
                             color = pal.muted, fontSize = 11.sp,
-                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                            lineHeight = 15.sp,
                         )
                     }
                     // LOAD-1: how to load it (only when micro-loaders needed)

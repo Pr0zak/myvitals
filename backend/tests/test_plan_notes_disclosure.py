@@ -89,21 +89,30 @@ class TestTheSummaryIsACountNotAPreview:
 
 
 class TestTheContentIsStillReachable:
-    def test_the_phone_renders_the_full_string_when_open(self):
+    def test_the_phone_renders_every_note_when_open(self):
+        """OG2-D-7 changed HOW, not WHETHER. This used to assert the raw
+        string was printed; the invariant it was really protecting is that
+        opening the disclosure reaches every note, which iterating the same
+        `lines` the count was derived from satisfies exactly."""
         src = PHONE.read_text()
-        block = src[src.index('"Why this plan"'):]
-        assert "if (open) {" in block[:1500]
-        assert "plan.notes!!" in block[:1500]
+        block = src[src.index('"Why this plan"'):][:2500]
+        assert "if (open) {" in block
+        assert "for (line in lines)" in block
 
-    def test_the_web_renders_the_full_string_when_open(self):
+    def test_the_web_renders_every_note_when_open(self):
         src = WEB.read_text()
         assert 'v-if="notesOpen"' in src
-        assert "workout?.notes" in src
+        assert 'v-for="(n, i) in planNotes"' in src
 
-    def test_the_web_preserves_the_line_breaks(self):
-        """The notes are newline-joined, so collapsing whitespace would run
-        four separate statements into one sentence."""
-        assert "white-space: pre-line" in WEB.read_text()
+    def test_the_notes_cannot_run_together_into_one_sentence(self):
+        """The original concern, now structural rather than a CSS property.
+        `white-space: pre-line` over a joined string kept four statements
+        apart by preserving newlines; one element per note cannot merge them
+        at all, so the rule is enforced by the markup instead of by a style
+        that a later edit could drop without anything failing."""
+        src = WEB.read_text()
+        assert "pn-item" in src
+        assert "white-space: pre-line" not in src
 
     def test_the_cardio_day_card_is_untouched(self):
         """A cardio day comes back with exercises=[] and the prescription

@@ -962,6 +962,15 @@ class SessionRead:
     avg_rating: float | None
     avg_weight_lb: float | None
     avg_reps: float | None
+    #: Reps of the qualifying sets, in set_number order. The averages above
+    #: answer "what load next", which is all the rating policy needs; the
+    #: PROG-1 schemes ask a different question and need the individual
+    #: numbers — linear and double read the MINIMUM across working sets, and
+    #: Greyskull reads the LAST one, its AMRAP. Exposing the list the reducer
+    #: already built is what stops that caller re-deriving the qualifying
+    #: predicate, which is how it came to be missing `skipped` in the first
+    #: place.
+    qualifying_reps: tuple[int, ...] = ()
 
     @property
     def enough(self) -> bool:
@@ -1005,6 +1014,7 @@ def read_session(
         avg_rating=sum(rated) / len(rated) if rated else None,
         avg_weight_lb=sum(weighted) / len(weighted) if weighted else None,
         avg_reps=sum(repped) / len(repped) if repped else None,
+        qualifying_reps=tuple(repped),
     )
 
 
@@ -1424,6 +1434,7 @@ def advance_program_lift(
     min_working_reps: int | None,
     amrap_reps: int | None = None,
     on_date: str | None = None,
+    session_complete: bool = True,
 ) -> dict:
     """Advance a program lift's stored state after a completed session.
 
@@ -1433,6 +1444,9 @@ def advance_program_lift(
         working sets (None = nothing logged → no advance).
       - amrap_reps: the Greyskull AMRAP set's reps (ignored otherwise).
       - on_date: ISO date to stamp last_advanced_on (double-advance guard).
+      - session_complete: whether the slot logged at least as many sets as
+        it prescribed (OG2-B1's `SessionRead.enough`). False gates the
+        ADVANCE only — see the comment at the gate.
 
     Schemes:
       linear    — all sets hit reps_low → +increment; else fail streak,
@@ -1478,9 +1492,8 @@ def advance_program_lift(
         else:
             out["current_weight_lb"] = round(w * (1.0 - dpct), 1)
             out["consecutive_fails"] = 0
-        return out
 
-    if scheme == "double":
+    elif scheme == "double":
         if min_working_reps >= hi:
             out["current_weight_lb"] = round(w + inc, 1)
             out["consecutive_fails"] = 0
@@ -1492,18 +1505,44 @@ def advance_program_lift(
                 out["current_weight_lb"] = round(w * (1.0 - dpct), 1)
                 fails = 0
             out["consecutive_fails"] = fails
-        return out
 
-    # linear (default)
-    if min_working_reps >= lo:
-        out["current_weight_lb"] = round(w + inc, 1)
-        out["consecutive_fails"] = 0
-    else:
-        fails += 1
-        if fails >= fbd:
-            out["current_weight_lb"] = round(w * (1.0 - dpct), 1)
-            fails = 0
-        out["consecutive_fails"] = fails
+    else:  # linear (default)
+        if min_working_reps >= lo:
+            out["current_weight_lb"] = round(w + inc, 1)
+            out["consecutive_fails"] = 0
+        else:
+            fails += 1
+            if fails >= fbd:
+                out["current_weight_lb"] = round(w * (1.0 - dpct), 1)
+                fails = 0
+            out["consecutive_fails"] = fails
+
+    # OG2-B1's asymmetry, applied to the program schemes: a session that
+    # logged fewer sets than were prescribed may CUT the weight but may not
+    # raise it. `min_working_reps` is a minimum over the sets that exist, and
+    # the sets a user abandons are the late ones, which are the hard ones —
+    # so a truncated session's minimum reads higher than the session was, and
+    # it advances precisely when the advance is least earned. A short session
+    # that genuinely failed is still real evidence to cut: refusing to act on
+    # it would leave a weight the user could not lift standing because they
+    # stopped early.
+    #
+    # Written as a single gate over the computed result rather than a branch
+    # inside each scheme, so a fourth scheme inherits it instead of having to
+    # remember it.
+    if not session_complete and float(out["current_weight_lb"]) > w:
+        out["current_weight_lb"] = state.get("current_weight_lb")
+        out["consecutive_fails"] = state.get("consecutive_fails", 0)
+        # And do not burn the per-date idempotency guard. This is the same
+        # reasoning the `min_working_reps is None` branch above states: the
+        # date is consumed by an ACT, and holding is not one. Stamping here
+        # would mean finishing the remaining sets and re-completing could
+        # never advance the lift, stalling it on that date forever.
+        if "last_advanced_on" in state:
+            out["last_advanced_on"] = state["last_advanced_on"]
+        else:
+            out.pop("last_advanced_on", None)
+
     return out
 
 
@@ -2562,10 +2601,29 @@ def _local_today() -> date:
 async def recent_ratings_by_exercise(
     db: AsyncSession, since_days: int = 14,
 ) -> dict[str, float]:
-    """Average rating per exercise across the last `since_days` of completed
-    workouts. Used by the picker to auto-down-rank exercises the user has
-    been struggling with — they get pushed to the back of candidates the
-    same way a manual 'avoid' pref does.
+    """Average rating per exercise across the last `since_days`. Used by the
+    picker to auto-down-rank exercises the user has been struggling with —
+    they get pushed to the back of candidates the same way a manual 'avoid'
+    pref does.
+
+    Two predicates the docstring used to claim and the query did not apply.
+
+    STATUS. It said "completed workouts" and filtered on nothing, so a plan
+    the user discarded could speak about which exercises to offer next. The
+    two sibling readers disagree here on purpose, and this one follows
+    `days_since_muscle_trained` rather than `read_recent_sessions`: both are
+    consulted at SELECTION time, about a session that may be underway, so a
+    set rated an hour ago is the freshest evidence there is about a lift the
+    user is struggling with. `read_recent_sessions` takes completed only
+    because it is deciding a LOAD, where a half-finished session is exactly
+    the thing OG2-B1's `enough` gate exists to refuse.
+
+    SET TYPE. It counted warm-ups and drop sets, which is the fault OG2-A1
+    named on the progression side and this reader shared. Both directions
+    are wrong here and they do not cancel: a warm-up rated Easy makes a hard
+    lift look comfortable, and a drop set is taken near failure by design,
+    so counting it makes a lift the user chose to push look like one they
+    are failing. Same constant as every other reader.
 
     Excludes skipped sets and sets without a rating.
     """
@@ -2586,6 +2644,8 @@ async def recent_ratings_by_exercise(
             models.StrengthWorkoutExercise.workout_id == models.StrengthWorkout.id,
         )
         .where(models.StrengthWorkout.date >= since)
+        .where(models.StrengthWorkout.status.in_(("completed", "in_progress")))
+        .where(models.StrengthSet.set_type.notin_(PROGRESSION_EXCLUDED_SET_TYPES))
         .where(models.StrengthSet.skipped.is_(False))
         .where(models.StrengthSet.rating.is_not(None))
     )).all()

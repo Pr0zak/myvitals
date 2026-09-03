@@ -1648,35 +1648,57 @@ async def _advance_program_on_complete(
         select(
             models.StrengthWorkoutExercise.id,
             models.StrengthWorkoutExercise.exercise_id,
+            models.StrengthWorkoutExercise.target_sets,
+            models.StrengthWorkoutExercise.skipped,
         ).where(models.StrengthWorkoutExercise.workout_id == w.id)
     )).all()
     on_date = w.date.isoformat()
     changed = False
-    for wex_id, ex_id in wex_rows:
+    for wex_id, ex_id, target_sets, slot_skipped in wex_rows:
         st = by_id.get(ex_id)
         if st is None or st.get("last_advanced_on") == on_date:
             continue  # not a program lift, or already advanced for this date
-        # Prescribed sets only: exclude warmups AND drop sets (lighter
-        # supplementary work), but KEEP a to-failure AMRAP set — a
-        # Greyskull last set taken to failure is naturally tagged
-        # set_type="failure" and must count toward progression. Ordered
-        # by set_number so reps[-1] is the true last set (the AMRAP),
-        # regardless of the order the user logged them in.
-        reps = [
-            int(r) for r in (await db.execute(
-                select(models.StrengthSet.actual_reps)
-                .where(models.StrengthSet.workout_exercise_id == wex_id)
-                .where(models.StrengthSet.set_type.notin_(
-                    strength_algo.PROGRESSION_EXCLUDED_SET_TYPES))
-                .where(models.StrengthSet.actual_reps.is_not(None))
-                .order_by(models.StrengthSet.set_number)
-            )).scalars().all()
-            if r is not None
-        ]
+        # Read the session through OG2-B1's reducer rather than a fourth
+        # hand-rolled predicate. It brings the `skipped` filter this query
+        # never had — a skipped set carrying reps used to enter `min()` and
+        # drag the minimum down — and it brings `enough`, so a program lift
+        # can no longer advance off one logged set of a prescribed three.
+        #
+        # Prescribed sets only: it excludes warmups AND drop sets (lighter
+        # supplementary work), but KEEPS a to-failure AMRAP set — a Greyskull
+        # last set taken to failure is naturally tagged set_type="failure"
+        # and must count toward progression. Ordered by set_number so
+        # reps[-1] is the true last set (the AMRAP), regardless of the order
+        # the user logged them in.
+        set_rows = (await db.execute(
+            select(
+                models.StrengthSet.skipped,
+                models.StrengthSet.actual_reps,
+                models.StrengthSet.set_type,
+                models.StrengthSet.actual_weight_lb,
+                models.StrengthSet.rating,
+            )
+            .where(models.StrengthSet.workout_exercise_id == wex_id)
+            .order_by(models.StrengthSet.set_number)
+        )).all()
+        read = strength_algo.read_session(
+            target_sets=int(target_sets or 0),
+            slot_declined=bool(slot_skipped),
+            sets=[
+                strength_algo.SetFacts(
+                    skipped=bool(r.skipped), actual_reps=r.actual_reps,
+                    set_type=r.set_type, actual_weight_lb=r.actual_weight_lb,
+                    rating=r.rating,
+                )
+                for r in set_rows
+            ],
+        )
+        reps = read.qualifying_reps
         min_working = min(reps) if reps else None
         amrap = reps[-1] if reps else None  # Greyskull's last-set AMRAP
         new_st = strength_algo.advance_program_lift(
-            st, min_working, amrap, on_date=on_date)
+            st, min_working, amrap, on_date=on_date,
+            session_complete=read.enough)
         if new_st != st:
             by_id[ex_id] = new_st
             changed = True
@@ -2515,6 +2537,11 @@ async def swap_exercise(
         target = strength_algo.round_weight(target, pairs, wrist)
     if "dumbbell" not in new_ex["equipment"]:
         target = None
+        # The weight reason described a load this lift does not carry. Its
+        # two siblings null both together (generate_plan, add_exercise);
+        # nulling only the weight leaves a starting-weight rationale
+        # rendering on a slot that shows no weight.
+        why_target = None
 
     wex.exercise_id = body.exercise_id
     wex.target_weight_lb = target

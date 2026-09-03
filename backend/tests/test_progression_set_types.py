@@ -76,14 +76,43 @@ def test_every_progression_reader_filters_set_type():
     reader that hard-codes `("warmup", "drop")` is correct today and free to
     drift tomorrow, which is exactly how the three predicates got out of step
     in the first place.
+
+    Two ways to satisfy it, and DELEGATING is the better one. This check was
+    written when each reader carried its own WHERE clause, so naming the
+    constant was the only available evidence. Since OG2-D-1,
+    `_advance_program_on_complete` reads its session through `read_session`
+    instead — which applies the predicate itself, and brought the `skipped`
+    filter that reader had never had. Insisting it still name the constant
+    would have meant keeping the hand-rolled query the delegation deleted,
+    which is the opposite of what this test exists to protect.
     """
     for path, name in PROGRESSION_READERS:
         src = _function_source(path, name)
+        delegates = "read_session" in src and name != "read_session"
+        if delegates:
+            continue
         assert "set_type" in src, f"{name} does not filter set_type at all"
         assert "PROGRESSION_EXCLUDED_SET_TYPES" in src, (
-            f"{name} filters set_type but not via the shared constant — "
-            "two copies of this rule is how it diverged before"
+            f"{name} neither names the shared constant nor delegates to "
+            "read_session — two copies of this rule is how it diverged before"
         )
+
+
+def test_the_ratings_reader_shares_the_constant_too():
+    """OG2-D-1. `recent_ratings_by_exercise` gates exercise SELECTION at
+    `AUTO_AVOID_THRESHOLD` off an average rating, and counted warm-ups and
+    drop sets while doing it.
+
+    It is not in PROGRESSION_READERS because it decides what to OFFER, not
+    what to load — but it reads the same column for the same reason, and both
+    directions of the error are wrong without cancelling: a warm-up rated Easy
+    makes a hard lift look comfortable, and a drop set is taken near failure
+    by design, so counting it makes a lift the user chose to push look like
+    one they are failing.
+    """
+    src = _function_source(SRC / "analytics" / "strength.py",
+                           "recent_ratings_by_exercise")
+    assert "PROGRESSION_EXCLUDED_SET_TYPES" in src
 
 
 def test_the_volume_and_pr_readers_are_deliberately_more_permissive():

@@ -1,6 +1,6 @@
 [project]
 name = "myvitals"
-version = "0.35.1"
+version = "0.36.0"
 description = "Self-hosted personal health tracking & analytics"
 requires-python = ">=3.12"
 dependencies = [

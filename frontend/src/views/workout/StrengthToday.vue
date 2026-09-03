@@ -57,6 +57,15 @@ const prFlash = ref<Record<string, string>>({});
  * trained around. Shown here — on the planning surface, before the session —
  * it is the same figure while it can still be acted on.
  */
+/** OG2-D-7: the generator's notes, collapsed. One entry per decision it
+ *  made, so a normal strength day carries four and prints nine lines of
+ *  prose above the first exercise. Counted rather than previewed — a note
+ *  cut mid-sentence reads as a rendering fault. */
+const notesOpen = ref(false);
+const planNotes = computed(() =>
+  (workout.value?.notes ?? "").trim().split("\n").filter((l) => l.trim()),
+);
+
 const projectedMuscles = computed(() => {
   const p = workout.value?.projected_muscle_volume;
   if (!p || !Object.keys(p).length) return null;
@@ -1380,7 +1389,24 @@ useVisibilityRefresh(loadAll);
       </div>
     </header>
 
-    <p v-if="workout?.notes" class="hint subtle">{{ workout.notes }}</p>
+    <!-- OG2-D-7: the generator emits one note per decision it made — the
+         split choice, a missed session, accessory padding, the mobility
+         block — joined by newlines. Printed raw that is a paragraph of
+         diagnostics above the first exercise, on the page whose job is
+         logging sets. It explains WHY the plan looks like this, which is
+         worth reading occasionally and never worth reading before every
+         set. Collapsed and summarised by count, matching the phone.
+         No truncated preview: a note cut mid-sentence is less useful than
+         a count and reads as a rendering fault. -->
+    <div v-if="planNotes.length" class="plan-notes">
+      <button type="button" class="pn-head" @click="notesOpen = !notesOpen">
+        <span class="pn-label">Why this plan</span>
+        <span class="pn-count">{{ planNotes.length }}
+          {{ planNotes.length === 1 ? 'note' : 'notes' }}</span>
+        <span class="pn-chev">{{ notesOpen ? '⌃' : '⌄' }}</span>
+      </button>
+      <p v-if="notesOpen" class="hint subtle pn-body">{{ workout?.notes }}</p>
+    </div>
 
     <!-- FAST-18 — fasted-training banner. Appears when the workout
          was generated against an active fast that crossed the 18h
@@ -2408,6 +2434,17 @@ button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: 
 .skip-banner { border-left: 3px solid #94a3b8; }
 .skip-row { display: flex; justify-content: space-between; align-items: center;
   gap: 1rem; flex-wrap: wrap; }
+
+.plan-notes { margin: 6px 0 2px; }
+.pn-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: 0; padding: 6px 0; cursor: pointer;
+  font: inherit; color: inherit; text-align: left;
+}
+.pn-label { font-size: 12px; font-weight: 600; opacity: 0.75; }
+.pn-count { font-size: 11px; opacity: 0.5; }
+.pn-chev { margin-left: auto; font-size: 13px; opacity: 0.75; }
+.pn-body { white-space: pre-line; margin: 0 0 6px; }
 
 .projected-map { margin-top: 14px; }
 .projected-map h3 { font-size: 13px; margin: 0 0 6px; font-weight: 600; }

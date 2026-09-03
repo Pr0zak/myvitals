@@ -1178,24 +1178,65 @@ fun StrengthTodayScreen(
                     }
                 }
             }
-            // OG2-D-2 — the same `notes` on a day that DOES have exercises.
-            // The card below renders them only when the plan is empty, so on
-            // an ordinary strength day everything the generator said about
-            // the plan was web-only: StrengthToday.vue prints them
-            // unconditionally right under the header. That gap hid the #WP-8
-            // cadence advisory, which is the one note most worth reading,
-            // since it explains why untrained days keep appearing as skipped
-            // sessions. Muted single paragraph, matching web's "hint subtle"
-            // rather than inventing a card the other surface does not have.
+            // OG2-D-2 — the generator's own notes on a day that DOES have
+            // exercises. The card below renders them only when the plan is
+            // empty, so on an ordinary strength day everything the generator
+            // said was web-only, which hid the #WP-8 cadence advisory.
+            //
+            // BEHIND A DISCLOSURE, not printed. The first cut rendered the
+            // raw string, and the generator emits one note per decision it
+            // made — split choice, a missed session, accessory padding, the
+            // mobility block — joined by newlines. That is nine lines of
+            // prose between the header and set 1 on the page whose entire
+            // job is logging set 1. They explain WHY the plan looks like
+            // this, which is worth reading occasionally and never worth
+            // reading before every set.
+            //
+            // Collapsed by default and summarised by count, the same shape
+            // the Coach card sitting directly above it has used since
+            // v0.7.169. No truncated preview: a note cut mid-sentence is
+            // less useful than a count and looks like a rendering fault.
             if (plan.exercises.isNotEmpty() && !plan.notes.isNullOrBlank()) {
                 item {
-                    Text(
-                        plan.notes!!,
-                        color = pal.muted,
-                        fontSize = 12.sp,
-                        lineHeight = 17.sp,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
-                    )
+                    val lines = plan.notes!!.trim().lines()
+                        .filter { it.isNotBlank() }
+                    var open by remember(plan.id) { mutableStateOf(false) }
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { open = !open }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "Why this plan",
+                                color = pal.muted, fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (lines.size == 1) "1 note"
+                                else "${lines.size} notes",
+                                color = pal.muted.copy(alpha = 0.7f),
+                                fontSize = 11.sp,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                if (open) "\u2303" else "\u2304",
+                                color = pal.muted, fontSize = 13.sp,
+                            )
+                        }
+                        if (open) {
+                            Text(
+                                plan.notes!!,
+                                color = pal.muted,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
+                                modifier = Modifier.fillMaxWidth()
+                                    .padding(bottom = 6.dp),
+                            )
+                        }
+                    }
                 }
             }
             // Cardio / notes-only plans (split_focus == "cardio") come back

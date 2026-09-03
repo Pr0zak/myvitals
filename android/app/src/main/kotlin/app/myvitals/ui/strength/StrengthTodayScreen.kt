@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -873,28 +874,14 @@ fun StrengthTodayScreen(
             Spacer(Modifier.height(6.dp))
         }
 
-        // OG2-C2: the same silhouette the charts screen shows, projected
-        // forward through today's plan. The audit alone counts logged sets,
-        // so it can only describe a gap already trained around; here it is
-        // still actionable — a slot can be swapped.
-        workout?.projectedMuscleVolume?.takeIf { it.isNotEmpty() }?.let { pv ->
-            Text(
-                "THIS WEEK, AFTER TODAY",
-                color = pal.muted, fontSize = 10.sp,
-                fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
-                modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
-            )
-            BodyMapCard(
-                muscles = pv.mapValues { (_, r) ->
-                    r.copy(
-                        sets = (r.setsProjected ?: r.sets.toDouble()).toInt(),
-                        status = r.statusProjected ?: r.status,
-                    )
-                },
-                neon = neon,
-            )
-            Spacer(Modifier.height(6.dp))
-        }
+        // OG2-C2's projected silhouette used to sit HERE, and that was the
+        // bug. Everything above the LazyColumn below is a fixed header —
+        // this Column has fillMaxSize() and no verticalScroll — so a card
+        // roughly 300dp tall could not be scrolled past. On a phone it took
+        // the whole first screen of the one page you open in order to log
+        // sets, and there was no way to move it out of the way. It now
+        // renders inside the list, after the exercises, which is also where
+        // StrengthToday.vue has always put it.
 
         // 7-day strip
         WeekStrip(
@@ -1422,6 +1409,45 @@ fun StrengthTodayScreen(
                             color = pal.muted, fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
+                    }
+                }
+            }
+            // OG2-C2: the same silhouette the charts screen shows, projected
+            // forward through today's plan. The audit alone counts logged
+            // sets, so it can only describe a gap already trained around;
+            // here it is still actionable — a slot can be swapped.
+            //
+            // Below the session rather than above it, matching the web page:
+            // the question it answers is "what will this leave me at", which
+            // is worth reading once the work in front of you is in view.
+            workout?.projectedMuscleVolume?.takeIf { it.isNotEmpty() }?.let { pv ->
+                item {
+                    Text(
+                        "THIS WEEK, AFTER TODAY",
+                        color = pal.muted, fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+                    )
+                    // Capped and centred, the way BodyMap.vue caps its svg at
+                    // 360px. Without it the canvas is width-driven at a 1.2
+                    // aspect, so a wider screen makes the figure taller rather
+                    // than bigger — the reason it grew to fill a phone.
+                    Box(
+                        Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(Modifier.widthIn(max = 360.dp)) {
+                            BodyMapCard(
+                                muscles = pv.mapValues { (_, r) ->
+                                    r.copy(
+                                        sets = (r.setsProjected
+                                            ?: r.sets.toDouble()).toInt(),
+                                        status = r.statusProjected ?: r.status,
+                                    )
+                                },
+                                neon = neon,
+                            )
+                        }
                     }
                 }
             }

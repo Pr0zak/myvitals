@@ -38,6 +38,7 @@ settles toward the audited figure as sets are logged during the session.
 from __future__ import annotations
 
 import inspect
+import pathlib
 
 from myvitals.analytics import strength as algo
 from myvitals.analytics.strength import (
@@ -46,6 +47,8 @@ from myvitals.analytics.strength import (
     volume_status,
 )
 from myvitals.api.workout import strength as api
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
 
 CURRENT = {
     "chest": {"sets": 4, "mev": 10, "mav": 20, "status": "under"},
@@ -154,3 +157,66 @@ class TestItReachesTheClients:
         src = inspect.getsource(api._hydrate_workout)
         block = src[src.index("project_muscle_volume"):]
         assert "if not e.skipped" in block[:900]
+
+
+class TestItDoesNotOwnTheScreen:
+    """Reported from live use: the projected silhouette filled a phone.
+
+    `StrengthTodayScreen.kt` builds its page as an outer Column with
+    `fillMaxSize()` and NO `verticalScroll`, holding a fixed header, and then
+    a LazyColumn underneath it that is the only scrolling region. The card
+    shipped into that header. At a 1.2 aspect ratio driven by width it is
+    roughly 300dp tall, so on the one page you open in order to log sets it
+    took the whole first screen — and because the header does not scroll,
+    there was no gesture that could move it out of the way. Not a styling
+    complaint: the content below it was unreachable without first scrolling
+    a list that began off-screen.
+
+    Two rules keep it fixed, and both are structural rather than cosmetic.
+
+    It renders INSIDE the scrolling list, and after the exercises — which is
+    where `StrengthToday.vue` has always put it (exercise loop at ~1616, the
+    map at ~2040). The question it answers, "what will this session leave me
+    at", is worth reading once the work in front of you is in view.
+
+    And its width is capped the way `BodyMap.vue` caps its svg at 360px.
+    The canvas is width-driven at a fixed aspect, so without a cap a wider
+    screen makes the figure TALLER rather than better — which is how it grew
+    to fill a phone in the first place, and would do the same on a tablet.
+    """
+
+    def _phone(self) -> str:
+        return (
+            REPO / "android" / "app" / "src" / "main" / "kotlin" / "app"
+            / "myvitals" / "ui" / "strength" / "StrengthTodayScreen.kt"
+        ).read_text()
+
+    def test_the_card_is_inside_the_scrolling_list(self):
+        src = self._phone()
+        assert src.index("LazyColumn(") < src.index("BodyMapCard(")
+
+    def test_it_comes_after_the_exercises(self):
+        """Matching the web page's order."""
+        src = self._phone()
+        assert src.index("items(orderedExercises") < src.index("BodyMapCard(")
+
+    def test_the_web_puts_it_after_the_exercises_too(self):
+        web = (REPO / "frontend" / "src" / "views" / "workout"
+               / "StrengthToday.vue").read_text()
+        assert web.index('v-for="(wex, idx) in workout.exercises"') < web.index(
+            'class="projected-map"')
+
+    def test_its_width_is_capped_on_both_surfaces(self):
+        """A width-driven canvas at a fixed aspect gets taller, not better."""
+        assert "widthIn(max = 360.dp)" in self._phone()
+        body_map = (REPO / "frontend" / "src" / "components"
+                    / "BodyMap.vue").read_text()
+        assert "max-width: 360px" in body_map
+
+    def test_the_fixed_header_holds_no_body_map(self):
+        """The header is everything before the LazyColumn and it does not
+        scroll, so anything tall placed there is unreachable-by-gesture."""
+        src = self._phone()
+        header = src[:src.index("LazyColumn(")]
+        assert "BodyMapCard(" not in header
+        assert "projectedMuscleVolume" not in header

@@ -2790,8 +2790,26 @@ async def strength_stats(
     # and caption for it, so the client renders a labelled chart rather than
     # assuming pounds. A bodyweight lift plots reps and says so; a timed hold
     # plots seconds; anything ever loaded plots weight.
+    #
+    # OG2-D-3: mobility is excluded from the RANKING, the same rule OG2-C1
+    # applied to both muscle readers and for the same reason — a cool-down
+    # pose is not the training this chart is about. It is a ranking fix
+    # rather than a data fix: the eight slots are scarce and a pose competes
+    # for them on session count, which the generator drives up by appending
+    # the same two-pose cool-down to every strength day. Measured on this
+    # database over 90 days, Bridge Pose ranked 4th and Downward-Facing Dog
+    # 6th, with Child's Pose and Happy Baby next in line — so a quarter of
+    # the chart described stretching, and the appended cool-down keeps
+    # feeding more in.
+    #
+    # The points themselves are still built, so a mobility surface can read
+    # them later without re-deriving anything; only the strength chart's
+    # shortlist declines to spend a slot on one.
     progression_by_count = sorted(
-        progression.items(),
+        (
+            (ex_id, pts) for ex_id, pts in progression.items()
+            if not strength_algo.is_mobility(ex_id)
+        ),
         key=lambda kv: -sum(1 for _ in kv[1]),
     )[:8]
     progression_out = {

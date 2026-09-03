@@ -2,6 +2,8 @@ package app.myvitals.ui.strength
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.RoundedCornerShape
+import app.myvitals.ui.common.categoryForSplitFocus
 import app.myvitals.data.SettingsRepository
 import app.myvitals.strength.StrengthRepository
 import app.myvitals.sync.BackendClient
@@ -140,7 +143,14 @@ fun StrengthHistoryScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 item { MuscleVolumeCard(settings = settings, neon = neon) }
-                item { WorkoutCalendar(rows, neon) }
+                item {
+                    WorkoutCalendar(rows, neon) { id ->
+                        scope.launch {
+                            try { detail = repo.workoutDetail(id) }
+                            catch (e: Exception) { error = e.message?.take(160) }
+                        }
+                    }
+                }
                 items(rows, key = { it.id }) { r ->
                     HistoryRow(r, neon) {
                         scope.launch {
@@ -279,7 +289,11 @@ private fun MuscleVolumeCard(settings: SettingsRepository, neon: Boolean) {
  *  color encodes split_focus (strength=red, yoga=violet, cardio=blue).
  *  Mirrors the web Workout-history calendar. */
 @Composable
-private fun WorkoutCalendar(rows: List<StrengthWorkoutSummary>, neon: Boolean) {
+private fun WorkoutCalendar(
+    rows: List<StrengthWorkoutSummary>,
+    neon: Boolean,
+    onPickWorkout: (Long) -> Unit,
+) {
     val card = if (neon) NeonMV.Card else MV.SurfaceContainer
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     val completed = remember(rows) {
@@ -288,6 +302,14 @@ private fun WorkoutCalendar(rows: List<StrengthWorkoutSummary>, neon: Boolean) {
     if (completed.isEmpty()) return
     val byDate = remember(completed) {
         completed.associateBy({ it.date }, { it.splitFocus.lowercase() })
+    }
+    // OG2-D-5: the strip is an index, not a picture. 110 distinct days in
+    // 2026 carry a completed workout and the detail sheet this opens is the
+    // same one a list row opens — so leaving the cells inert made the
+    // densest navigation surface on the screen the one thing that could not
+    // be touched. Keyed by date because that is what a cell knows.
+    val idByDate = remember(completed) {
+        completed.associateBy({ it.date }, { it.id })
     }
     val years = remember(byDate) {
         byDate.keys.map { it.take(4) }.distinct().sortedDescending()
@@ -308,24 +330,30 @@ private fun WorkoutCalendar(rows: List<StrengthWorkoutSummary>, neon: Boolean) {
                     fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
                 )
                 Spacer(Modifier.width(8.dp))
-                LegendDot(
-                    color = if (neon) NeonMV.Lime else androidx.compose.ui.graphics.Color(0xFFEF4444),
-                    label = "Strength", neon = neon,
-                )
-                Spacer(Modifier.width(6.dp))
-                LegendDot(
-                    color = if (neon) NeonMV.Magenta else androidx.compose.ui.graphics.Color(0xFFA78BFA),
-                    label = "Yoga", neon = neon,
-                )
-                Spacer(Modifier.width(6.dp))
-                LegendDot(
-                    color = if (neon) NeonMV.Cyan else androidx.compose.ui.graphics.Color(0xFF38BDF8),
-                    label = "Cardio", neon = neon,
-                )
+                // OG2-D-5: the legend and the cells below both read
+                // ActivityCategory, the module that exists so one activity is
+                // not two colours across two surfaces. The hexes written here
+                // had magenta meaning YOGA while StrengthHistory.vue had it
+                // meaning STRENGTH, and drew strength in the shared palette's
+                // `run` green — three colours disagreeing about one feature.
+                for ((focus, label) in listOf(
+                    "strength" to "Strength",
+                    "yoga" to "Yoga",
+                    "cardio" to "Cardio",
+                )) {
+                    LegendDot(
+                        color = categoryForSplitFocus(focus).color(neon),
+                        label = label, neon = neon,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
             }
             Spacer(Modifier.height(8.dp))
             for (y in years) {
-                YearStrip(year = y, byDate = byDate, neon = neon)
+                YearStrip(
+                    year = y, byDate = byDate, neon = neon,
+                    onPickDate = { iso -> idByDate[iso]?.let(onPickWorkout) },
+                )
                 Spacer(Modifier.height(8.dp))
             }
         }
@@ -347,7 +375,12 @@ private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String, 
 }
 
 @Composable
-private fun YearStrip(year: String, byDate: Map<String, String>, neon: Boolean) {
+private fun YearStrip(
+    year: String,
+    byDate: Map<String, String>,
+    neon: Boolean,
+    onPickDate: (String) -> Unit,
+) {
     val measurer = androidx.compose.ui.text.rememberTextMeasurer()
     // Build a 53-column × 7-row grid for the year. Walk every day from
     // Jan 1 → Dec 31 and place cells by ISO week + day-of-week.
@@ -365,10 +398,36 @@ private fun YearStrip(year: String, byDate: Map<String, String>, neon: Boolean) 
         val cellSize = (maxWidth / (totalCols + (totalCols - 1) * 0.22f))
         val cellGap = cellSize * 0.22f
         val labelH = 11.dp
+        // OG2-D-3/D-5: the first pointer gesture on any chart under
+        // ui/strength. The grid maths is inverted here rather than a hit-box
+        // list being built alongside the draw loop — two descriptions of the
+        // same layout would drift the moment either cell size changed.
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val cellPxOut = with(density) { cellSize.toPx() }
+        val gapPxOut = with(density) { cellGap.toPx() }
+        val labelPxOut = with(density) { labelH.toPx() }
+        val startDowOut = firstDay.dayOfWeek.value % 7
         androidx.compose.foundation.Canvas(
             modifier = Modifier
                 .height(cellSize * 7 + cellGap * 6 + labelH)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .pointerInput(year, byDate) {
+                    detectTapGestures { off ->
+                        val stride = cellPxOut + gapPxOut
+                        if (stride <= 0f) return@detectTapGestures
+                        val col = (off.x / stride).toInt()
+                        val row = ((off.y - labelPxOut) / stride).toInt()
+                        if (col < 0 || row < 0 || row > 6) return@detectTapGestures
+                        val index = col * 7 + row - startDowOut
+                        if (index < 0 || index >= daysInYear) return@detectTapGestures
+                        val iso = firstDay.plusDays(index.toLong()).toString()
+                        // Only a day that HAS a workout navigates. Opening an
+                        // empty day would land on a detail sheet with nothing
+                        // in it, which reads as a failure rather than as an
+                        // empty day.
+                        if (byDate.containsKey(iso)) onPickDate(iso)
+                    }
+                },
         ) {
             val cellPx = cellSize.toPx()
             val gapPx = cellGap.toPx()
@@ -383,12 +442,13 @@ private fun YearStrip(year: String, byDate: Map<String, String>, neon: Boolean) 
                 if (col >= totalCols) break
                 val isoDate = date.toString()
                 val focus = byDate[isoDate]
-                val color = when (focus) {
-                    null -> if (neon) NeonMV.Track else androidx.compose.ui.graphics.Color(0x141A2332)
-                    "yoga" -> if (neon) NeonMV.Magenta else androidx.compose.ui.graphics.Color(0xFFA78BFA)
-                    "cardio" -> if (neon) NeonMV.Cyan else androidx.compose.ui.graphics.Color(0xFF38BDF8)
-                    else -> if (neon) NeonMV.Lime else androidx.compose.ui.graphics.Color(0xFFEF4444)
-                }
+                val color =
+                    if (focus == null) {
+                        if (neon) NeonMV.Track
+                        else androidx.compose.ui.graphics.Color(0x141A2332)
+                    } else {
+                        categoryForSplitFocus(focus).color(neon)
+                    }
                 val x = originX + col * (cellPx + gapPx)
                 val y = gridTop + row * (cellPx + gapPx)
                 drawRect(

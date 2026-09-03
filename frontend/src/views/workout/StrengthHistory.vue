@@ -13,6 +13,10 @@ import Card from "@/components/Card.vue";
 import MuscleVolume from "@/components/MuscleVolume.vue";
 import { chartTheme, isNeon } from "@/theme";
 import type { StrengthExercise, StrengthWorkoutDetail } from "@/api/types";
+import { CATEGORY_BY_INDEX, CATEGORY_META } from "@/utils/activityCategory";
+import type { ActivityCategoryKey } from "@/utils/activityCategory";
+import { toLocalISO } from "@/dates";
+import { useRouter } from "vue-router";
 
 interface ListItem {
   id: number;
@@ -89,25 +93,29 @@ const grouped = computed(() => {
 
 onMounted(() => { loadList(); loadCatalog(); });
 
-// Year-strip heatmap of completed workouts by day. Color encodes the
-// session's split_focus: strength=red, yoga=violet, cardio=blue. Days
-// without a completed workout render as empty cells. Same year-strip
-// pattern as Activities.vue's calendar.
-const FOCUS_COLOR: Record<string, string> = {
-  yoga: "#a78bfa",
-  cardio: "#38bdf8",
+/**
+ * OG2-D-5: one place decides what colour a split focus is.
+ *
+ * This file used to hold the palette twice — here and again in the
+ * calendar's visualMap — and StrengthHistoryScreen.kt held a third copy with
+ * magenta meaning yoga. Every copy agreed until one did not, which is the
+ * only way this class of bug ever presents.
+ *
+ * Cardio maps to `ride`: the activity feed already draws a cardio day with a
+ * bike icon, so painting it in the strength colour contradicted the row two
+ * inches below it. `categoryForSplitFocus` on the phone says the same.
+ */
+const FOCUS_CATEGORY: Record<string, ActivityCategoryKey> = {
+  yoga: "yoga", cardio: "ride",
 };
+
+function focusKey(focus: string): ActivityCategoryKey {
+  return FOCUS_CATEGORY[focus.toLowerCase()] ?? "strength";
+}
+
 function focusColor(focus: string): string {
-  // Neon: strength→magenta, yoga→periwinkle, cardio→cyan. Classic
-  // values preserved byte-for-byte when not in the neon skin.
-  if (isNeon.value) {
-    if (focus.toLowerCase() === "yoga") return "#6f7bff";
-    if (focus.toLowerCase() === "cardio") return "#28e6ff";
-    return "#ff3ad8"; // strength split
-  }
-  if (focus.toLowerCase() === "yoga") return FOCUS_COLOR.yoga;
-  if (focus.toLowerCase() === "cardio") return FOCUS_COLOR.cardio;
-  return "#ef4444"; // strength split
+  const meta = CATEGORY_META[focusKey(focus)];
+  return isNeon.value ? meta.neon : meta.classic;
 }
 
 const calendarOption = computed(() => {
@@ -117,14 +125,19 @@ const calendarOption = computed(() => {
   const neon = isNeon.value;
   const completed = items.value.filter((it) => it.status === "completed");
   if (completed.length === 0) return null;
-  // Encode a small numeric offset per day so the visualMap can map it
-  // to the focus color. We split focus into 1=strength, 2=yoga, 3=cardio.
+  // OG2-D-5: the buckets and their colours come from CATEGORY_META, the
+  // module that exists so one activity is not two colours across two
+  // surfaces. This file used to write the hexes inline — correct, but a
+  // second copy — while StrengthHistoryScreen.kt wrote a THIRD set that had
+  // magenta meaning yoga and strength drawn in the shared palette's `run`
+  // green. Cardio maps to `ride`, matching `categoryForSplitFocus` on the
+  // phone and the bike icon the activity feed already draws for it.
   const focusBucket: Record<string, number> = {};
   for (const it of completed) {
-    const f = it.split_focus.toLowerCase();
-    const idx = f === "yoga" ? 2 : f === "cardio" ? 3 : 1;
-    focusBucket[it.date] = idx;
+    focusBucket[it.date] = CATEGORY_META[focusKey(it.split_focus)].index;
   }
+  // Only the focuses that can appear here, in the order the buckets run.
+  const usedKeys: ActivityCategoryKey[] = ["strength", "yoga", "ride"];
   const years = Array.from(
     new Set(Object.keys(focusBucket).map((d) => d.slice(0, 4)))
   ).sort((a, b) => b.localeCompare(a));
@@ -134,7 +147,13 @@ const calendarOption = computed(() => {
     top: TOP_PAD + i * STRIP_H,
     left: 30, right: 12,
     cellSize: ["auto", 14] as [string, number],
-    range: y,
+    // OG2-D-5: stop at today for the current year. `range: y` drew all 53
+    // weeks, so a strip read this September was ~30% empty future and the
+    // cells shrank to fit a year that has not happened yet. Solved twenty
+    // lines away in ActivityYearCalendar.vue and never carried across.
+    range: y === String(new Date().getFullYear())
+      ? [`${y}-01-01`, toLocalISO(new Date())]
+      : y,
     itemStyle: {
       color: neon ? "#181b27" : "#1a2332",
       borderColor: neon ? "rgba(39, 42, 59, 0.9)" : "rgba(148, 163, 184, 0.12)",
@@ -158,23 +177,20 @@ const calendarOption = computed(() => {
     tooltip: {
       ...t.tooltip,
       formatter: (p: any) => {
-        const labels = ["", "Strength", "Yoga", "Cardio"];
-        return `${p.value[0]}: ${labels[p.value[1]] ?? "?"}`;
+        const k = CATEGORY_BY_INDEX[p.value[1]];
+        const label = k === "ride" ? "Cardio" : CATEGORY_META[k]?.label ?? "?";
+        return `${p.value[0]}: ${label} — tap to open the day`;
       },
     },
     visualMap: {
       type: "piecewise" as const,
-      pieces: neon
-        ? [
-            { value: 1, color: "#ff3ad8", label: "Strength" },
-            { value: 2, color: "#6f7bff", label: "Yoga" },
-            { value: 3, color: "#28e6ff", label: "Cardio" },
-          ]
-        : [
-            { value: 1, color: "#ef4444", label: "Strength" },
-            { value: 2, color: "#a78bfa", label: "Yoga" },
-            { value: 3, color: "#38bdf8", label: "Cardio" },
-          ],
+      pieces: usedKeys.map((k) => ({
+        value: CATEGORY_META[k].index,
+        color: neon ? CATEGORY_META[k].neon : CATEGORY_META[k].classic,
+        // "Cardio" is what this screen calls a ride day; the palette key is
+        // shared with the activity feed, the label is local to the calendar.
+        label: k === "ride" ? "Cardio" : CATEGORY_META[k].label,
+      })),
       orient: "horizontal", show: true, top: 0, right: 12,
       textStyle: { color: t.axisLabel.color, fontSize: 11 },
       itemWidth: 12, itemHeight: 12,
@@ -183,6 +199,31 @@ const calendarOption = computed(() => {
     series,
   };
 });
+
+/**
+ * OG2-D-5 — the strip is an index, not a picture.
+ *
+ * 110 distinct days in 2026 carry a completed workout, and the day view it
+ * opens — `/workout/strength/day/:date`, StrengthDayView.vue — already
+ * exists on both surfaces. Leaving the cells inert meant
+ * the densest navigation surface in the app was the one thing on the page
+ * that could not be clicked.
+ *
+ * ECharts hands back the raw datum, so the ISO date is `value[0]` — the same
+ * string the route wants, with no reformatting and therefore no chance of a
+ * timezone slip on the way.
+ */
+const router = useRouter();
+function openDay(p: { value?: unknown }) {
+  // ECharts types the datum as a broad union, so the shape is checked rather
+  // than asserted: a cell whose value is not [iso, bucket] navigates nowhere
+  // instead of pushing an "undefined" route.
+  const v = p?.value;
+  const iso = Array.isArray(v) ? v[0] : null;
+  if (typeof iso === "string" && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    router.push(`/workout/strength/day/${iso}`);
+  }
+}
 
 const calendarHeight = computed(() => {
   const years = new Set<string>();
@@ -212,7 +253,8 @@ const calendarHeight = computed(() => {
       <MuscleVolume />
       <Card v-if="calendarOption" title="Workout calendar">
         <div class="cal" :style="{ height: calendarHeight + 'px' }">
-          <VChart :option="calendarOption" autoresize/>
+          <VChart :option="calendarOption" autoresize class="tappable"
+                  @click="openDay"/>
         </div>
       </Card>
 

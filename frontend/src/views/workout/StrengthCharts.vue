@@ -11,6 +11,8 @@ import ConsistencyCard from "@/components/ConsistencyCard.vue";
 import { api } from "@/api/client";
 import { chartTheme, isNeon } from "@/theme";
 import type { TrainingConsistency } from "@/api/types";
+import { effortBand, effortColor, effortSummary, effortSymbolSize }
+  from "@/effort";
 
 const days = ref<number>(90);
 const loading = ref(true);
@@ -23,10 +25,15 @@ interface Stats {
   per_muscle: Array<{ muscle: string; volume_lb: number }>;
   progression: Record<string, Array<{
     date: string; top_weight_lb: number | null; e1rm: number | null; top_reps: number | null;
+    /** OG2-D-4: how the day's sets felt, and the denominator behind it. */
+    rating_avg?: number | null; rated_sets?: number | null; effort?: string | null;
   }>>;
   progression_names: Record<string, string>;
   /** OG2-C3: what each series is about — the axis was hard-named "lb". */
   progression_metric?: Record<string, { metric: string; unit: string; caption: string }>;
+  /** OG2-D-4: band → the sentence explaining it, so the words and the
+   *  thresholds that define them cannot drift apart. */
+  effort_legend?: Record<string, string>;
   rated_sets?: number;
   /** CONS-1: full-history streaks + frequency; independent of `days`. */
   consistency?: TrainingConsistency | null;
@@ -226,8 +233,23 @@ const progressionOption = computed(() => {
       data: isWeight ? [primaryName, "e1RM"] : [primaryName],
       top: 2, textStyle: t.axisLabel,
     },
-    tooltip: { trigger: "axis", ...t.tooltip,
-               valueFormatter: (v: number | null) => (v == null ? "—" : `${v} ${m.unit}`) },
+    tooltip: {
+      trigger: "axis", ...t.tooltip,
+      valueFormatter: (v: number | null) => (v == null ? "—" : `${v} ${m.unit}`),
+      // OG2-D-4: the effort line is appended to the axis tooltip rather than
+      // replacing the values, so the reading a user came for stays first.
+      formatter: (params: Array<{ dataIndex: number; marker: string;
+                                  seriesName: string; value: number | null }>) => {
+        if (!params?.length) return "";
+        const i = params[0].dataIndex;
+        const head = `${pts[i]?.date ?? ""}`;
+        const lines = params.map((pa) =>
+          `${pa.marker}${pa.seriesName}: ${pa.value == null ? "—" : `${pa.value} ${m.unit}`}`);
+        const eff = pts[i] ? effortSummary(pts[i], s.effort_legend) : null;
+        return [head, ...lines, ...(eff ? [`<span style="opacity:.75">${eff}</span>`] : [])]
+          .join("<br/>");
+      },
+    },
     xAxis: {
       type: "category", data: pts.map((p) => p.date),
       axisLabel: { ...t.axisLabel, formatter: (v: string) => v.slice(5) },
@@ -235,10 +257,18 @@ const progressionOption = computed(() => {
     yAxis: { type: "value", name: m.unit, axisLabel: t.axisLabel, splitLine: t.splitLine },
     series: [{
       name: primaryName, type: "line",
-      smooth: false, symbol: "circle", symbolSize: 6,
+      smooth: false, symbol: "circle",
+      // OG2-D-4: the dot carries how the day felt. A flat weight line across
+      // four sessions is the shape this exists for — it reads as no progress
+      // while the ratings underneath it were climbing toward the jump.
+      symbolSize: (_v: unknown, pa: { dataIndex: number }) =>
+        effortSymbolSize(effortBand(pts[pa.dataIndex] ?? {}), 6),
       data: primary,
       lineStyle: { color: prog, width: 2 },
-      itemStyle: { color: prog },
+      itemStyle: {
+        color: (pa: { dataIndex: number }) =>
+          effortColor(effortBand(pts[pa.dataIndex] ?? {}), prog, isNeon.value),
+      },
     }, ...(isWeight ? [{
       // e1RM-1: estimated 1-rep-max trend (Epley) — the canonical strength signal.
       name: "e1RM", type: "line" as const,

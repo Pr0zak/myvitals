@@ -802,6 +802,69 @@ EASY_THRESHOLD = 4.5   # ≥ this → the rating policy wants a weight jump
 REP_PROGRESS_MIN = 3.0  # ≥ this → solid set, add a rep (double progression)
 AUTO_AVOID_THRESHOLD = 1.5  # 14d avg ≤ this → rotate the exercise out
 
+
+#: OG2-D-4 — how the day's sets FELT, as one of the three bands the
+#: progression policy itself acts on. Deliberately not a new scale: the
+#: boundaries ARE `EASY_THRESHOLD` and `FAIL_THRESHOLD`, so a dot coloured
+#: "easy" is exactly the dot where `weight_from_history` added weight and one
+#: coloured "failed" is exactly where it cut. A separate set of thresholds
+#: would let the chart disagree with the prescription it is drawing.
+#:
+#: Measured before shipping, per-exercise per-day across this database's
+#: rated history: working 199 exercise-days (range 2.00-4.33), easy 82
+#: (4.50-5.00), failed 1 (1.00). All three bands occur, which is the test
+#: OG2-C1 and B1's stall_count both failed — a band that can never fire is a
+#: legend entry explaining nothing.
+EFFORT_BANDS: dict[str, str] = {
+    "easy": "felt easy — the policy adds weight",
+    "working": "in range — the policy holds",
+    "failed": "failed — the policy cuts",
+}
+
+
+def effort_band(avg_rating: float | None) -> str | None:
+    """Which band a day's average rating falls in, or None if nothing was
+    rated that day.
+
+    None is not "moderate". A rating is optional on the way in — the web
+    logger does not require one and imported history carries one only where
+    the source had an RPE column — so an unrated day is an absence, and
+    colouring it as the middle band would be inventing a reading. Same rule
+    as OG2-C4's denominator and `null is not zero` throughout.
+
+    NOTE the direction: this app rates sets 1-5 where 5 is EASY, so the scale
+    counts up with ease, not with effort. openGym's RIR counts the other way.
+    That inversion is exactly why the band is decided here rather than in two
+    clients — the GOAL-STATE rule, where the server owns which end is which.
+    """
+    if avg_rating is None:
+        return None
+    if avg_rating >= EASY_THRESHOLD:
+        return "easy"
+    if avg_rating <= FAIL_THRESHOLD:
+        return "failed"
+    return "working"
+
+
+def finish_progression_point(point: dict) -> dict:
+    """Reduce one accumulated progression point to what a client renders.
+
+    Pure and module-level rather than a closure inside the endpoint, so the
+    rule is testable — this suite has no database fixture, and a reduction
+    that can only be exercised through a live request is a reduction nobody
+    checks.
+
+    `rated_sets` travels beside `rating_avg` for the reason OG2-C4 gave: a
+    rating is optional on the way in, so a mean over two of five sets must
+    not silently speak for the other three. A day where nothing was rated
+    keeps both `rating_avg` and `effort` as None and never a middle band.
+    """
+    n = int(point.pop("rated_sets", 0) or 0)
+    total = float(point.pop("_r_sum", 0.0) or 0.0)
+    avg = round(total / n, 2) if n else None
+    return {**point, "rating_avg": avg, "rated_sets": n,
+            "effort": effort_band(avg)}
+
 # OG2-D-2. The minimum completed strength sessions in a trailing 14 days
 # before the #WP-8 cadence advisory will speak. A floor is right — 0 or 1
 # sessions cannot tell "this is my cadence" from a fortnight away — but the

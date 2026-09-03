@@ -63,7 +63,11 @@ import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStart
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberColumnCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLine
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
+import com.patrykandpatrick.vico.compose.cartesian.marker.rememberDefaultCartesianMarker
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
+import com.patrykandpatrick.vico.compose.common.component.rememberTextComponent
+import com.patrykandpatrick.vico.core.cartesian.marker.CartesianMarker
+import com.patrykandpatrick.vico.core.cartesian.marker.CartesianMarkerVisibilityListener
 import com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState
 import com.patrykandpatrick.vico.compose.cartesian.rememberVicoZoomState
 import com.patrykandpatrick.vico.compose.common.fill
@@ -611,6 +615,12 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
             // card and simply could not be read.
             val axisInk = app.myvitals.ui.LocalAppTokens.current.onSurfaceVariant
             val producer = remember { CartesianChartModelProducer() }
+            // OG2-D-3: the x values are epoch days offset from the first
+            // point, so a marker's `x` maps straight back to a session. Kept
+            // beside the producer rather than recomputed in the listener,
+            // which would be a second copy of the offset convention.
+            var xOrigin by remember(selected, metric) { mutableStateOf(0L) }
+            var markedX by remember(selected, metric) { mutableStateOf<Double?>(null) }
             LaunchedEffect(selected, s, metric) {
                 val pairs = pts.mapNotNull { p ->
                     runCatching {
@@ -624,9 +634,82 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
                 }
                 if (pairs.size < 2) return@LaunchedEffect
                 val origin = pairs.first().first
+                xOrigin = origin.toLong()
                 val xs = pairs.map { it.first - origin }
                 val ys = pairs.map { it.second }
                 producer.runTransaction { lineSeries { series(x = xs, y = ys) } }
+            }
+            // OG2-D-3 / D-4 — the readout. Before this, none of the four Vico
+            // charts in the app passed a marker and nothing under ui/strength
+            // took a pointer gesture, so the series was interrogable on the
+            // desktop and mute on the phone. The hand-rolled Canvas charts all
+            // carry an exact-value list beneath them; these four were the ones
+            // with no way at all to read a point.
+            //
+            // It defaults to the LATEST session rather than to nothing,
+            // because a readout that appears only after a tap is a readout
+            // most people never find. Tapping the chart moves it.
+            val shown = remember(markedX, selected, metric, s) {
+                val x = markedX
+                if (x == null) pts.lastOrNull()
+                else {
+                    val target = xOrigin + Math.round(x)
+                    pts.firstOrNull {
+                        runCatching { LocalDate.parse(it.date).toEpochDay() == target }
+                            .getOrDefault(false)
+                    } ?: pts.lastOrNull()
+                }
+            }
+            if (shown != null) {
+                val band = effortBand(shown)
+                val dot = effortColor(band, ink, neon)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 6.dp),
+                ) {
+                    Canvas(Modifier.size(9.dp)) { drawCircle(dot) }
+                    Spacer(Modifier.width(6.dp))
+                    val value: String = when {
+                        !weighted -> "${shown.topReps ?: 0} ${shape.unit}"
+                        metric == "e1rm" ->
+                            "${fmtNum(shown.e1rm ?: shown.topWeightLb)} ${shape.unit}"
+                        else -> "${fmtNum(shown.topWeightLb)} ${shape.unit}"
+                    }
+                    Text(
+                        "${fmtRecDate(shown.date)} · $value",
+                        color = app.myvitals.ui.LocalAppTokens.current.onSurface,
+                        fontSize = 12.sp,
+                    )
+                }
+                // The effort sentence comes from the server's legend, so the
+                // words and the thresholds behind them cannot drift. An
+                // unrated session says so rather than falling silent, which
+                // would read as though the row had simply not loaded.
+                val summary = effortSummary(shown, s.effortLegend)
+                Text(
+                    summary ?: "No sets rated this session.",
+                    color = muted, fontSize = 11.sp,
+                    modifier = Modifier.padding(start = 15.dp),
+                )
+            }
+            val markerLabel = rememberTextComponent(color = axisInk)
+            val chartMarker = rememberDefaultCartesianMarker(label = markerLabel)
+            val markerListener = remember(selected, metric) {
+                object : CartesianMarkerVisibilityListener {
+                    override fun onShown(
+                        marker: CartesianMarker,
+                        targets: List<CartesianMarker.Target>,
+                    ) { markedX = targets.firstOrNull()?.x }
+                    override fun onUpdated(
+                        marker: CartesianMarker,
+                        targets: List<CartesianMarker.Target>,
+                    ) { markedX = targets.firstOrNull()?.x }
+                    // Deliberately NOT cleared on hide. The readout falling
+                    // back to the latest session the instant a finger lifts
+                    // would make the number unreadable — you would only ever
+                    // see it while obscuring it.
+                    override fun onHidden(marker: CartesianMarker) = Unit
+                }
             }
             // Default Vico line layer (stable across data shapes + devices).
             CartesianChartHost(
@@ -638,6 +721,8 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
                     bottomAxis = HorizontalAxis.rememberBottom(
                         label = rememberAxisLabelComponent(color = axisInk),
                     ),
+                    marker = chartMarker,
+                    markerVisibilityListener = markerListener,
                 ),
                 modelProducer = producer,
                 scrollState = rememberVicoScrollState(),
@@ -646,6 +731,15 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
             )
         }
     }
+}
+
+/** A weight the way the logger shows it: no trailing ".0" on a whole
+ *  number, one decimal otherwise, and an em dash for absent rather than a
+ *  zero — a bodyweight set has no poundage, and 0 lb is a claim about a
+ *  load rather than the absence of one. */
+private fun fmtNum(v: Double?): String {
+    if (v == null) return "—"
+    return if (v % 1.0 == 0.0) v.toInt().toString() else String.format("%.1f", v)
 }
 
 private val REC_DATE_FMT = java.time.format.DateTimeFormatter.ofPattern("MMM d, yy")

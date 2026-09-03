@@ -2743,9 +2743,19 @@ async def strength_stats(
         prog = progression.setdefault(ex_id, [])
         point = next((p for p in prog if p["date"] == date_iso), None)
         if point is None:
+            # OG2-D-4: `_r_sum` / `rated_sets` accumulate here and are
+            # reduced to an average and a band once the scan is done. The
+            # rating was already SELECTed and already fed the global average;
+            # it was simply dropped before reaching the point, so the chart
+            # could draw a flat line across four sessions without showing
+            # that the lift had gone from hard to easy underneath it.
             point = {"date": date_iso, "top_weight_lb": None,
-                     "e1rm": None, "top_reps": None}
+                     "e1rm": None, "top_reps": None,
+                     "_r_sum": 0.0, "rated_sets": 0}
             prog.append(point)
+        if rating is not None:
+            point["_r_sum"] += float(rating)
+            point["rated_sets"] += 1
         if reps is not None and (point["top_reps"] is None or reps > point["top_reps"]):
             point["top_reps"] = int(reps)
         if w_lb is not None:
@@ -2812,8 +2822,18 @@ async def strength_stats(
         ),
         key=lambda kv: -sum(1 for _ in kv[1]),
     )[:8]
+    # OG2-D-4: reduce the accumulator to the two numbers a client renders,
+    # plus the band. `rated_sets` travels with the average for the reason
+    # OG2-C4 gave — a rating is optional on the way in, so a mean over two of
+    # five sets must not silently speak for the other three. An unrated day
+    # keeps `rating_avg: None` and `effort: None`, never a middle band:
+    # "nobody rated this" is an absence, and colouring it moderate would be
+    # inventing a reading.
     progression_out = {
-        ex_id: sorted(pts, key=lambda r: r["date"])
+        ex_id: [
+            strength_algo.finish_progression_point(p)
+            for p in sorted(pts, key=lambda r: r["date"])
+        ]
         for ex_id, pts in progression_by_count
     }
     progression_metric_by_ex: dict[str, dict[str, str]] = {}
@@ -2827,6 +2847,11 @@ async def strength_stats(
         progression_metric_by_ex[ex_id] = {
             "metric": metric, "unit": unit, "caption": caption,
         }
+    # The legend, decided once on the server. A client mapping a band to a
+    # label would be re-deriving which end of a 1-5 scale means easy — and
+    # this app counts UP with ease where openGym's RIR counts down, which is
+    # exactly the inversion GOAL-STATE says must not be left to two clients.
+    effort_legend = dict(strength_algo.EFFORT_BANDS)
     progression_names = {
         ex_id: strength_algo.CATALOG_BY_ID.get(ex_id, {}).get("name", ex_id)
         for ex_id in progression_out
@@ -2882,6 +2907,7 @@ async def strength_stats(
         # OG2-C3 — what each series is actually about. Clients render the
         # unit and caption verbatim; the axis was hard-named "lb".
         "progression_metric": progression_metric_by_ex,
+        "effort_legend": effort_legend,
         "consistency": {
             "current_streak_days": streaks.current_days,
             "longest_streak_days": streaks.longest_days,

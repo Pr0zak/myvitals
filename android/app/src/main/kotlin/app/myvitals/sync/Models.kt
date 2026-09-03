@@ -438,6 +438,12 @@ data class StrengthProgressionPoint(
     @Json(name = "top_weight_lb") val topWeightLb: Double? = null,
     val e1rm: Double? = null,  // e1RM-1: Epley estimated 1-rep-max for the day
     @Json(name = "top_reps") val topReps: Int? = null,
+    /** OG2-D-4: how the day's sets felt, plus the denominator behind the
+     *  average. Null from a backend older than v0.37.0, and null on a day
+     *  nobody rated — which is an absence, never the middle band. */
+    @Json(name = "rating_avg") val ratingAvg: Double? = null,
+    @Json(name = "rated_sets") val ratedSets: Int = 0,
+    val effort: String? = null,
 )
 
 /** OG2-C3: what one exercise's progression series is actually about.
@@ -496,6 +502,9 @@ data class StrengthStats(
     /** OG2-C4: the denominator for `rpeAvg`. A rating is optional, so a
      *  partly-rated history is the normal case. */
     @Json(name = "rated_sets") val ratedSets: Int? = null,
+    /** OG2-D-4: band → the sentence explaining it. Server-supplied so the
+     *  words and the thresholds defining them cannot drift apart. */
+    @Json(name = "effort_legend") val effortLegend: Map<String, String> = emptyMap(),
     /** CONS-1. Streaks and frequency over full history, so these do NOT
      *  change when `days` does. Null from a backend older than v0.10.1. */
     val consistency: TrainingConsistency? = null,

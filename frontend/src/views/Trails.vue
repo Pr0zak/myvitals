@@ -6,6 +6,7 @@
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
+import { baseTileUrl, labelTileUrl, tileOptions } from "@/mapTiles";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "@/leaflet-icons";   // side-effect: fixes default marker URLs under Vite
@@ -177,13 +178,9 @@ function initEditMap(t: Trail) {
     : KC_CENTER;
   editMap = L.map(editMapEl.value, { zoomControl: true })
     .setView(start, t.latitude != null ? 14 : 9);
-  const tiles = (effectiveTheme.value === "dark" || isNeon.value)
-    ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-    : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
-  L.tileLayer(tiles, {
-    attribution: "© OpenStreetMap, © CARTO",
-    subdomains: "abcd", maxZoom: 19,
-  }).addTo(editMap);
+  const dark = effectiveTheme.value === "dark" || isNeon.value;
+  L.tileLayer(baseTileUrl(dark), tileOptions()).addTo(editMap);
+  L.tileLayer(labelTileUrl(dark), { ...tileOptions(), pane: "shadowPane" }).addTo(editMap);
 
   if (t.latitude != null && t.longitude != null) {
     editPin = L.marker(start, { draggable: true }).addTo(editMap);

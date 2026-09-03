@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import VChart from "@/echarts";
+import { baseTileUrl, labelTileUrl, tileOptions } from "@/mapTiles";
 import polylineDecoder from "@mapbox/polyline";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -93,14 +94,9 @@ function renderMap() {
   polylineCoords = coords;
 
   map = L.map(mapEl.value, { zoomControl: true });
-  const tiles = effectiveTheme.value === "dark"
-    ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-    : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
-  L.tileLayer(tiles, {
-    attribution: "© OpenStreetMap, © CARTO",
-    subdomains: "abcd",
-    maxZoom: 19,
-  }).addTo(map);
+  const dark = effectiveTheme.value === "dark";
+  L.tileLayer(baseTileUrl(dark), tileOptions()).addTo(map);
+  L.tileLayer(labelTileUrl(dark), { ...tileOptions(), pane: "shadowPane" }).addTo(map);
 
   polylineLayer = L.polyline(coords, {
     color: isNeon.value ? "#28e6ff" : "#38bdf8", weight: 3,

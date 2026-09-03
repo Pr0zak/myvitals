@@ -13,6 +13,7 @@ import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import "@/leaflet-icons";
 import { api } from "@/api/client";
+import { baseTileUrl, labelTileUrl, tileOptions } from "@/mapTiles";
 import { effectiveTheme } from "@/theme";
 import { ChevronLeft } from "lucide-vue-next";
 
@@ -48,20 +49,15 @@ function fmtAge(iso: string | null | undefined): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function tileUrl(): string {
-  return effectiveTheme.value === "dark"
-    ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-    : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
+function isDark(): boolean {
+  return effectiveTheme.value === "dark";
 }
 
 function ensureMap() {
   if (map || !mapEl.value) return;
   map = L.map(mapEl.value, { zoomControl: true });
-  L.tileLayer(tileUrl(), {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; CARTO',
-    subdomains: "abcd",
-    maxZoom: 19,
-  }).addTo(map);
+  L.tileLayer(baseTileUrl(isDark()), tileOptions()).addTo(map);
+  L.tileLayer(labelTileUrl(isDark()), { ...tileOptions(), pane: "shadowPane" }).addTo(map);
 }
 
 function plot() {

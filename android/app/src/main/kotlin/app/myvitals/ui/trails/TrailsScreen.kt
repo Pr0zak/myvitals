@@ -1237,8 +1237,10 @@ function applySize() {
 applySize();
 try {
   window.map = L.map('m', {zoomControl:true,scrollWheelZoom:false}).setView([$lat,$lon], 14);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(window.map);
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:19,maxNativeZoom:16,attribution:'© OSM, Tiles © Esri'}).addTo(window.map);
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:19,maxNativeZoom:16,pane:'shadowPane'}).addTo(window.map);
   // CSS-only pin (avoids the broken-image fallback when Leaflet's
   // default PNG marker can't resolve under loadDataWithBaseURL(null)).
   const pinIcon = L.divIcon({
@@ -1340,8 +1342,10 @@ function applySize(){const w=window.innerWidth||360,h=window.innerHeight||400;
 applySize();
 try{
   const map=L.map('m',{zoomControl:true,scrollWheelZoom:false}).setView([$centerLat,$centerLon],10);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(map);
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:19,maxNativeZoom:16,attribution:'© OSM, Tiles © Esri'}).addTo(map);
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:19,maxNativeZoom:16,pane:'shadowPane'}).addTo(map);
   const pins=$markersJs;
   const bounds=L.latLngBounds([]);
   pins.forEach(p=>{

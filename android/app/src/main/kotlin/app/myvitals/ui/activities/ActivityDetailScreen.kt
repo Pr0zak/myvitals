@@ -923,8 +923,10 @@ function decodePolyline(str) {
 }
 try {
   window.map = L.map('m', {zoomControl:true,scrollWheelZoom:false}).setView([39, -94], 13);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(window.map);
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:19,maxNativeZoom:16,attribution:'© OSM, Tiles © Esri'}).addTo(window.map);
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:19,maxNativeZoom:16,pane:'shadowPane'}).addTo(window.map);
   const enc = '$polylineEsc';
   let bounds = null;
   if (enc.length > 0) {

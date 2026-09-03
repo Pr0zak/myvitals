@@ -5,6 +5,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import { api } from "@/api/client";
+import { baseTileUrl, labelTileUrl, tileOptions } from "@/mapTiles";
 import type { MapTrack } from "@/api/types";
 import { effectiveTheme } from "@/theme";
 import { fmtDistance, distanceVal, distanceUnit } from "@/units";
@@ -38,6 +39,7 @@ let initialAllTimeRender = true;
 const mapEl = ref<HTMLDivElement | null>(null);
 let map: L.Map | null = null;
 let tileLayer: L.TileLayer | null = null;
+let labelLayer: L.TileLayer | null = null;
 const lines: L.Polyline[] = [];
 
 // View mode: "lines" colors by activity type; "heatmap" stacks low-opacity
@@ -111,14 +113,11 @@ function renderMap() {
 
   // Tile layer (theme-reactive)
   if (tileLayer) { map.removeLayer(tileLayer); }
-  const tiles = effectiveTheme.value === "dark"
-    ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-    : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
-  tileLayer = L.tileLayer(tiles, {
-    attribution: "© OpenStreetMap, © CARTO",
-    subdomains: "abcd",
-    maxZoom: 19,
-  }).addTo(map);
+  if (labelLayer) { map.removeLayer(labelLayer); }
+  const dark = effectiveTheme.value === "dark";
+  tileLayer = L.tileLayer(baseTileUrl(dark), tileOptions()).addTo(map);
+  // Labels ride above the routes; Esri's base carries none of its own.
+  labelLayer = L.tileLayer(labelTileUrl(dark), { ...tileOptions(), pane: "shadowPane" }).addTo(map);
 
   // Clear old polylines
   for (const ln of lines) map.removeLayer(ln);

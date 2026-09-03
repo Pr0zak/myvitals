@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import VChart from "@/echarts";
+import { baseTileUrl, labelTileUrl, tileOptions } from "@/mapTiles";
 import polylineDecoder from "@mapbox/polyline";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -110,11 +111,8 @@ function rerenderMap() {
   if (!map) {
     map = L.map(mapEl.value, { zoomControl: true });
     const dark = effectiveTheme.value === "dark";
-    L.tileLayer(dark
-      ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-      : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-      { attribution: "© OpenStreetMap, © CARTO", subdomains: "abcd", maxZoom: 19 }
-    ).addTo(map);
+    L.tileLayer(baseTileUrl(dark), tileOptions()).addTo(map);
+    L.tileLayer(labelTileUrl(dark), { ...tileOptions(), pane: "shadowPane" }).addTo(map);
   }
   for (const l of layers) map.removeLayer(l);
   layers = [];

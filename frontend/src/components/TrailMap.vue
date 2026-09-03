@@ -14,6 +14,7 @@ import "leaflet/dist/leaflet.css";
 import "@/leaflet-icons";   // side-effect: fixes default marker URLs under Vite
 import polylineDecoder from "@mapbox/polyline";
 import { api } from "@/api/client";
+import { baseTileUrl, labelTileUrl, tileOptions } from "@/mapTiles";
 import { effectiveTheme } from "@/theme";
 
 const props = withDefaults(defineProps<{
@@ -34,6 +35,7 @@ const error = ref<string>("");
 
 let map: L.Map | null = null;
 let tileLayer: L.TileLayer | null = null;
+let labelLayer: L.TileLayer | null = null;
 const overlays: L.Layer[] = [];
 
 const TYPE_COLORS: Record<string, string> = {
@@ -65,14 +67,11 @@ function render() {
     map = L.map(mapEl.value, { zoomControl: true, scrollWheelZoom: false });
   }
   if (tileLayer) { map.removeLayer(tileLayer); }
-  const tiles = effectiveTheme.value === "dark"
-    ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-    : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
-  tileLayer = L.tileLayer(tiles, {
-    attribution: "© OpenStreetMap, © CARTO",
-    subdomains: "abcd",
-    maxZoom: 19,
-  }).addTo(map);
+  if (labelLayer) { map.removeLayer(labelLayer); }
+  const dark = effectiveTheme.value === "dark";
+  tileLayer = L.tileLayer(baseTileUrl(dark), tileOptions()).addTo(map);
+  labelLayer = L.tileLayer(labelTileUrl(dark),
+    { ...tileOptions(), pane: "shadowPane" }).addTo(map);
 
   // Clear previous overlays
   for (const o of overlays) map.removeLayer(o);

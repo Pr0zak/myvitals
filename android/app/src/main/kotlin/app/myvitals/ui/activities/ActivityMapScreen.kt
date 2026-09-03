@@ -388,8 +388,10 @@ function decodePolyline(str) {
 try {
   const map = L.map('m', {zoomControl:true, preferCanvas:true}).setView([39,-94],10);
   window.map = map;
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {subdomains:'abcd',maxZoom:19,attribution:'© OSM, © CARTO'}).addTo(map);
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:19,maxNativeZoom:16,attribution:'© OSM, Tiles © Esri'}).addTo(map);
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:19,maxNativeZoom:16,pane:'shadowPane'}).addTo(map);
   // preferCanvas above matters: 559 SVG paths make panning crawl on a
   // mid-range phone, while one canvas surface stays smooth.
   const data = [$json];

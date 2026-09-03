@@ -1199,6 +1199,150 @@ class Prescription:
     reason: str
     why: str
     advisory: str | None = None
+    #: Whether `why` is a sentence about a LOAD. False when the prescription
+    #: is a rep or hold target for a lift that carries no weight.
+    #:
+    #: The three sites that null a bodyweight slot's weight also nulled its
+    #: reason, under the correct observation that "this is a starting weight
+    #: for your level" describes a load the lift does not have. Since OG2-D-6
+    #: a bodyweight lift has a reason of its own — about reps, which it very
+    #: much does have — and discarding that would have deleted the only
+    #: visible evidence the new ladder is working. The flag lets those sites
+    #: keep nulling exactly what they were right to null.
+    about_load: bool = True
+
+
+def bodyweight_progression(
+    *,
+    base_reps_lo: int,
+    base_reps_hi: int,
+    is_timed: bool,
+    avg_rating: float | None,
+    avg_reps: float | None,
+    session_complete: bool,
+) -> tuple[int, int, str, str, str | None]:
+    """Progress a lift that carries no load — OG2-D-6.
+
+    A bodyweight strength exercise never progressed at all. `next_prescription`
+    gates `double_progression` on a dumbbell being present, and generate_plan
+    then forces the weight to None, so its reps came only from
+    `prescribe_slot` — a pure function of goal, slot role, age and bodyweight
+    that never reads the log. Same body, same number, every session, forever.
+    `_scale_bw_reps` is a profile adjustment, not a progression. On this
+    database that is 74 of 292 slots in completed workouts.
+
+    THE TARGET IS NOT THE EVIDENCE. Both loggers prefill the rep field with
+    the previous session's reps, falling back to `target_reps_low`, so a user
+    tapping through logs exactly what was prescribed and the next prefill
+    reads back the same number. Butt Lift (Bridge) sat at 9 reps against a
+    9-11 target across four sessions on that loop. Reps therefore cannot be
+    the primary signal here the way they are in `double_progression`, where a
+    weight the user chose makes the reps an independent reading. The RATING
+    is the signal that escapes the loop, which is why this ladder is built on
+    the same `EASY_THRESHOLD` / `FAIL_THRESHOLD` the weighted policy uses
+    rather than on reps alone.
+
+    Reps still speak when they EXCEED the prescription, because that is a
+    number the prefill did not supply.
+
+    Order matters, and it is `double_progression`'s order:
+
+    1. A failed session cuts, and is NOT gated on completeness — OG2-B1's
+       asymmetry. Two sets rated Failed are real evidence to ease off, and
+       refusing to act would leave a target the user could not hit standing
+       because they stopped early.
+    2. A short session holds. `avg_rating` over the sets that exist is
+       biased easy, since the sets people abandon are the late ones.
+    3. An unrated session holds — OG2-A2's rule, unchanged here.
+    4. Averaging above the top of the range raises the range to meet it.
+    5. Rated easy adds one step.
+    6. Otherwise hold.
+
+    Measured before building, across this database's 49 non-mobility
+    bodyweight rep sessions: 7 would advance, 1 logged above prescription,
+    and 0 would cut. The cut rung ships despite never having fired, and that
+    is deliberately unlike OG2-B1's declined stall count: that had no
+    consumer at all, whereas omitting this one would leave a ladder that can
+    only ever tighten. A one-way ratchet on a target is exactly the shape
+    that hurts someone returning from injury.
+
+    There is no "add a set" rung and no "refuse" rung. Both would need a
+    lift sitting at the rep cap and none is within reach, so each would be a
+    branch that cannot fire — the fault that got OG2-C1 refused. At the cap
+    the ladder says so in an advisory instead, the way `double_progression`
+    speaks up at the top of the dumbbell rack.
+    """
+    step, cap_lo, cap_hi = rep_ladder_bounds(is_timed)
+    unit = "s" if is_timed else " reps"
+    lo, hi = base_reps_lo, base_reps_hi
+    width = max(0, hi - lo)
+
+    def band(a: int, b: int) -> str:
+        """"9-11 reps", or "30s" when the range has no width. A target
+        printed as "30-30s" reads as a typo rather than as a fixed hold."""
+        return f"{a}{unit}" if a == b else f"{a}-{b}{unit}"
+
+    if avg_rating is not None and avg_rating <= FAIL_THRESHOLD:
+        new_lo = max(cap_lo, lo - step)
+        new_hi = max(new_lo, hi - step)
+        if (new_lo, new_hi) == (lo, hi):
+            return lo, hi, "deloaded", (
+                f"Held at {band(lo, hi)} — last session was rated failed, but "
+                f"this is already the lowest target offered."
+            ), None
+        return new_lo, new_hi, "deloaded", (
+            f"Down to {band(new_lo, new_hi)} — last session was rated failed."
+        ), None
+
+    if not session_complete:
+        return lo, hi, "held_incomplete", (
+            f"Held at {band(lo, hi)} — last session logged fewer sets than "
+            f"prescribed, so it is not yet evidence to add."
+        ), None
+
+    if avg_rating is None:
+        return lo, hi, "held_unrated", (
+            f"Same {band(lo, hi)} as last time — that session was logged "
+            f"without a rating, so there is nothing to advance on."
+        ), None
+
+    # A number the prefill did not supply: the user went past the top of the
+    # range under their own steam.
+    if avg_reps is not None and avg_reps > hi:
+        reached = min(cap_hi, int(avg_reps))
+        if reached > lo:
+            # Keep the range's WIDTH rather than collapsing to a single
+            # number. A 9-11 target met at 12 becomes 12-14, not 12-12:
+            # flattening it removes the room to grow inside the range and
+            # leaves the rating as the only way the target can ever move
+            # again, which is the stall this ladder exists to end.
+            new_hi = min(cap_hi, reached + width)
+            return reached, max(reached, new_hi), "advanced", (
+                f"Up to {band(reached, max(reached, new_hi))} — you averaged "
+                f"more than the {hi}{unit} asked for."
+            ), None
+
+    if avg_rating >= EASY_THRESHOLD:
+        if hi >= cap_hi:
+            return lo, hi, "rep_ladder", (
+                f"Held at {band(lo, hi)} — rated easy, but this is the "
+                f"highest target offered for a lift with no load."
+            ), (
+                "at the top of the rep range for a bodyweight exercise — add "
+                "load (a dumbbell or weighted vest) or pick a harder "
+                "variation to keep progressing."
+            )
+        new_lo = min(cap_hi, lo + step)
+        new_hi = min(cap_hi, max(new_lo, hi + step))
+        return new_lo, new_hi, "advanced", (
+            f"Up to {band(new_lo, new_hi)} — you finished last session and "
+            f"rated it easy."
+        ), None
+
+    return lo, hi, "rep_ladder", (
+        f"Same {band(lo, hi)} — the target goes up once you rate a full "
+        f"session easy."
+    ), None
 
 
 def next_prescription(
@@ -1268,6 +1412,27 @@ def next_prescription(
             f"Same {avg_weight_lb:g} lb, aiming for {lo} reps — the weight "
             f"goes up once you fill the range.", advisory,
         )
+
+    # OG2-D-6: a lift that carries no load progresses in REPS. It reaches
+    # here because `is_weighted` requires a dumbbell, and below this the
+    # weight chain has nothing to offer it — `weight_from_history` returns
+    # None on a null weight and `starting_weight_lb` is not a rep target — so
+    # its range used to arrive from `prescribe_slot` and never move again.
+    #
+    # Placed BEFORE the weight chain rather than after, because for this lift
+    # there is no weight to decide and the chain's only remaining job would
+    # be to reach the no_history fallback and discard the history that does
+    # exist.
+    if not is_weighted and "dumbbell" not in exercise["equipment"]:
+        lo, hi, reason, why, advisory = bodyweight_progression(
+            base_reps_lo=reps_lo, base_reps_hi=reps_hi,
+            is_timed=bool(exercise.get("is_timed")),
+            avg_rating=avg_rating, avg_reps=avg_reps,
+            session_complete=enough,
+        )
+        if avg_rating is not None or avg_reps is not None:
+            return Prescription(None, lo, hi, reason, why, advisory,
+                                about_load=False)
 
     weight, reason = weight_from_history(
         avg_weight_lb, avg_rating, exercise["is_compound"], goal=goal,
@@ -2934,6 +3099,16 @@ async def recent_mobility_history(
     return out
 
 
+def rep_ladder_bounds(is_timed: bool) -> tuple[int, int, int]:
+    """`(step, cap_lo, cap_hi)` for a target measured in reps or in seconds.
+
+    One table, because two ladders now read it — the mobility nudge and the
+    bodyweight progression — and a bodyweight hold capped at 15 SECONDS while
+    a pose was capped at 90 would be the same exercise obeying two rules.
+    """
+    return (5, 15, 90) if is_timed else (1, 5, 15)
+
+
 def adjust_mobility_target(
     base_low: int, base_high: int, hist: dict[str, float | int] | None,
     is_timed: bool,
@@ -2950,8 +3125,7 @@ def adjust_mobility_target(
     """
     if hist is None or hist.get("sample_count", 0) == 0:
         return base_low, base_high
-    step = 5 if is_timed else 1
-    cap_lo, cap_hi = (15, 90) if is_timed else (5, 15)
+    step, cap_lo, cap_hi = rep_ladder_bounds(is_timed)
     low, high = base_low, base_high
     if hist.get("fail_count", 0) >= 2:
         low = max(cap_lo, low - step)
@@ -3883,7 +4057,10 @@ async def generate_plan(
         if "dumbbell" not in ex["equipment"]:
             target = None
             # The weight reason described a load this lift does not carry.
-            why_target = None
+            # A rep reason from OG2-D-6's ladder describes reps, which it
+            # does, so it survives.
+            if rx.about_load:
+                why_target = None
 
         plan_exs.append(ExerciseInPlan(
             exercise_id=ex["id"],

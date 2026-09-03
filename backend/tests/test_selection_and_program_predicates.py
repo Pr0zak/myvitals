@@ -75,22 +75,49 @@ def _sets(*specs) -> list[SetFacts]:
 
 class TestSwapNullsBothOrNeither:
     def test_a_bodyweight_swap_clears_the_weight_reason(self):
-        """The reason renders verbatim on both surfaces since B3, so leaving
-        it describes a load the slot does not carry."""
+        """The reason renders verbatim on both surfaces since B3, so a
+        starting-weight sentence left on a slot with no weight is visible
+        prose about something that is not there.
+
+        Since OG2-D-6 the clearing is CONDITIONAL rather than unconditional,
+        because a bodyweight lift now has a reason of its own about reps.
+        The invariant is unchanged in substance: a reason describing a LOAD
+        does not survive onto a lift that carries none.
+        """
         src = inspect.getsource(api.swap_exercise)
         block = src[src.index('if "dumbbell" not in new_ex["equipment"]:'):]
-        assert "target = None" in block[:400]
-        assert "why_target = None" in block[:400]
+        assert "target = None" in block[:700]
+        assert "why_target = None" in block[:700]
+        assert "rx.about_load" in block[:700]
 
     def test_all_three_prescription_sites_agree(self):
-        """generate_plan and add_exercise already did this. The value of the
-        fix is that the three sites now say the same thing."""
+        """generate_plan and add_exercise already cleared it. The value of
+        the fix is that the three sites say the same thing — including, now,
+        the same condition."""
         for src in (
             inspect.getsource(algo.generate_plan),
             inspect.getsource(api.add_exercise),
             inspect.getsource(api.swap_exercise),
         ):
             assert "why_target = None" in src
+            assert "rx.about_load" in src
+
+    def test_a_rep_reason_is_not_a_load_reason(self):
+        """The distinction the flag exists for. Without it, OG2-D-6's ladder
+        would compute a reason and all three sites would immediately throw
+        it away — deleting the only visible evidence the ladder works."""
+        from myvitals.analytics.strength import next_prescription
+        rx = next_prescription(
+            exercise={"id": "Pullups", "name": "Pull-Ups",
+                      "equipment": ["bodyweight"], "is_compound": True,
+                      "movement_pattern": "vertical_pull"},
+            reps_lo=8, reps_hi=12, level="intermediate", goal="hypertrophy",
+            avg_rating=5.0, avg_weight_lb=None, avg_reps=12.0, enough=True,
+            pairs_lb=[10, 15, 20], wrist_weights_lb=[],
+        )
+        assert rx.about_load is False
+        assert rx.weight_lb is None
+        assert "reps" in rx.why
 
 
 class TestTheRatingsReaderAppliesWhatItClaims:

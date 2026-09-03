@@ -2365,7 +2365,9 @@ async def add_exercise(
         target = strength_algo.round_weight(target, pairs, wrist)
     if "dumbbell" not in new_ex["equipment"]:
         target = None
-        why_target = None
+        # OG2-D-6: a rep reason survives; only a load reason is discarded.
+        if rx.about_load:
+            why_target = None
 
     # Reuse the generator's own prescription rather than inventing a second
     # policy. slot_role="isolation" is the honest description of an appended
@@ -2540,8 +2542,10 @@ async def swap_exercise(
         # The weight reason described a load this lift does not carry. Its
         # two siblings null both together (generate_plan, add_exercise);
         # nulling only the weight leaves a starting-weight rationale
-        # rendering on a slot that shows no weight.
-        why_target = None
+        # rendering on a slot that shows no weight. OG2-D-6: a REP reason
+        # describes something the lift does have, so it survives.
+        if rx.about_load:
+            why_target = None
 
     wex.exercise_id = body.exercise_id
     wex.target_weight_lb = target

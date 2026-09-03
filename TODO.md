@@ -221,6 +221,87 @@ persisted on completed workouts. Worth an hour with the generation path.
 `OG2-D15` the "Log weight" button actually logs weight ·
 `OG2-D16` light theme on the phone
 
+#### Phase D outcome — shipped in v0.37.0
+
+The sixteen were re-verified against the code before any of them was built,
+because phases A-C had shipped since the list was written and several items
+described code that had changed underneath them. Five survived. Four of the
+five close a divergence rather than adding a capability, and two of the five
+were not on the list at all — they were found while measuring the items that
+were.
+
+SHIPPED. D3 and D5 (effort on the progression dot, and the first pointer
+gesture on any chart in the app). D6 in part — the tappable cells and the
+current year stopping at today; its headline is in the refused list below.
+D7 in part — the shared palette, which turned out to be a live cross-surface
+contradiction rather than the tidy-up the entry described. D1, reshaped: the
+ladder runs on the RATING, not on reps, because both loggers prefill the rep
+field from the previous session and the number read back is the app's own
+suggestion.
+
+Also shipped, not from the list: the three drifted readers found by the B1
+review, and the #WP-8 cadence advisory, which was gated off for exactly the
+user it describes.
+
+ALREADY DONE: D4 (v0.33.0). MOOT: D15 — the component holding that button was
+unmounted on 2026-08-10 and weight has arrived automatically since 2026-08-23
+via the Garmin Index path.
+
+NOT BUILT, each against a decision this project had already recorded and that
+still holds:
+- `D8` warm-up ramp. The deferral comment at `api/workout/strength.py` says
+  prescribing warm-ups would change what `sets_total` means and force the
+  SKIP-1 counters to learn to exclude them. Since that was written SKIP-1 made
+  those counters the single client-rendered definition, so the blast radius
+  grew. And the benefit needs loads this user does not lift: the heaviest set
+  ever logged is 30 lb, the mean of 547 weighted sets is 15.7, and there are
+  zero sets at or above 40. At that ceiling the first working set IS the
+  warm-up. Revisit if a barbell appears.
+- `D10` sparse date → day-type override. Refuted by measurement: deviation is
+  the majority case here, not a sparse exception, so an override sheet would
+  ask for four to seven taps a week forever while leaving the setting that
+  generates the phantom days untouched. The measurement is what surfaced the
+  cadence advisory instead, which addresses the same complaint at its source.
+- `D12` snapshot muscle attribution at log time. It would have PREVENTED the
+  one catalog change this project has actually made — `_CATALOG_OVERRIDES`
+  moves both pullovers from chest to lats, with the stated intent that sets
+  already logged must pick up the correction.
+- `D13` retained strength. Its consumer was already rejected, and the signal
+  never fires: across 242 re-training intervals the median gap is 6 days and
+  only 12 of 242 clear a 14-day plateau.
+- `D6`'s headline, shading the strip by minutes. Reverts v0.7.361, which
+  replaced exactly that ramp with the per-category calendar and recorded why.
+  The 2026 mix is 48 ebike rides to 13 walks, so category is load-bearing.
+- `D16` light theme on the phone. 1,084 direct `NeonMV.` reads across 52
+  files, 474 `MV.` across 27, and 315 raw colour literals, against two
+  recorded decisions — including v0.7.393 retiring the Classic/Neon choice on
+  the grounds that there is one app theme.
+
+DEFERRED, still real:
+- `D11` program state replayed from the log. Blocked on the product decision
+  TODO.md already defers under PROG-STATE-1, and PROG-1 is `enabled: false`.
+- `D9` mid-session pair/unpair/reorder. Zero demand signal: `added_ad_hoc` is
+  false on all 1,450 slots, so the existing mid-session structural edit has
+  never been used once.
+- `D14` curated import alias table. No imported rows exist, and there is no
+  import surface on the phone.
+- `D2` session notes. The existing free-text surface holds 3 rows in four
+  months with nothing in the note column, against 780 rated sets in the same
+  period.
+
+CORRECTION to the v0.37.0 commit message for the bodyweight ladder. It says
+the frozen target covered "74 of 292 slots in completed workouts", a figure
+carried over from the triage. The real reach is smaller and the difference is
+structural, not a counting slip. Of 152 null-weight slots in completed
+workouts, 76 are mobility cool-down poses, which already had their own ladder
+via `adjust_mobility_target`; 42 are WP-17 finisher slots, which hard-code a
+fixed 12-15 light-pump range with no weight on purpose and are deliberately
+not laddered; and **34 are main strength slots, which is what the ladder
+actually reaches.** The defect and the fix are unchanged — a main bodyweight
+slot genuinely could not progress — but the headline number was roughly
+double the truth, and the two excluded groups are excluded for good reasons
+rather than by oversight.
+
 ### Considered and rejected
 
 "Expected current 1RM" (openGym's own weakest number — a decay constant

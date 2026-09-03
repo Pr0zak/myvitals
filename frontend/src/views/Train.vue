@@ -263,7 +263,12 @@ const recentWorkouts = computed<FeedRow[]>(() => {
       tone: "mag",
       value: "",
       unit: "",
-      href: `/workout/day/${w.date}`,
+      // The route is /workout/strength/day/:date. Without the `strength`
+      // segment this matched nothing, fell through to main.ts's catch-all,
+      // and was redirected to "/" — which the neon guard then turns into
+      // /rings. So tapping a strength session in Recent left the page
+      // entirely instead of opening it.
+      href: `/workout/strength/day/${w.date}`,
       sortAt: `${w.date}T12:00:00`,
     }));
 });

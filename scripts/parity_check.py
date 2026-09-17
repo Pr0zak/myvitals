@@ -229,6 +229,19 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/views/Journal.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/JournalScreen.kt",
      "Journal / annotation entry surface (#LOG family)"),
+    # OG3-B2. The muscle-volume audit is a standalone component on web and
+    # is rendered inline by the history screen on the phone, so the gate saw
+    # every change to it as a one-sided change and flagged
+    # StrengthHistory.vue as the missing half — which it is not.
+    ("frontend/src/components/MuscleVolume.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/strength/StrengthHistoryScreen.kt",
+     "Weekly muscle-volume audit (#WP-4, OG3-B2)"),
+    # OG3-D1. Same shape: the data-health card is its own component on web
+    # and lives inside Settings on the phone. Both render one response from
+    # `/query/data-health`, so a field added to it has to reach both.
+    ("frontend/src/components/DataHealthCard.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/SettingsScreen.kt",
+     "Per-stream freshness + integration status (HEALTH-1, OG3-D1)"),
 ]
 
 # Paths that are intentionally web-only (don't trigger a parity warning

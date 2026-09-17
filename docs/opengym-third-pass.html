@@ -241,6 +241,37 @@ td strong{color:var(--ink)}
   <p style="margin:14px 0 0;font-size:14px;color:var(--ink-2)">Tracked as <code>OG3-*</code> in the repo's <code>TODO.md</code>. Chips below carry the live state; this page is republished to the same URL as items land.</p>
 </div>
 
+<h2>What building it changed</h2>
+<p>Three entries above were wrong in their particulars, and one of the fixes found a live bug. Recorded here rather than quietly corrected in place, because the pattern — the backlog entry's premise not surviving contact with the data — is the same one the previous two passes hit, and it is the reason each item gets measured before it gets built.</p>
+
+<div class="opts">
+  <div class="opt">
+    <div class="h">OG3-B2's headline number was wrong</div>
+    <div class="m"><span class="chip c-id">correction</span></div>
+    <p class="b">The entry said five of fourteen muscles have a pool smaller than their own MEV. That counted PRIME MOVERS only. The audit credits secondaries at 0.5, so those muscles do accumulate volume, and counted the way MEV is actually credited the real figure is <strong>one</strong>: lats, with 9 reachable exercises against an MEV of 10. The prime-mover pools genuinely are thin for several more — lower back 1, lats 2, calves 4, traps 4 — so both numbers are reported, but the flag uses the audit's own arithmetic. A flag that fires on muscles you can in fact train is the HEALTH-1 failure again.</p>
+  </div>
+  <div class="opt">
+    <div class="h">OG3-E1's no-op range was wider than the rack allows</div>
+    <div class="m"><span class="chip c-id">correction</span></div>
+    <p class="b">"A structural no-op at every rung from 5 to 50 lb" is not what the rounder does. Measured, a light or moderate deload cannot move the weight from 5 to 20 lb; above that the absolute cut clears the disproportion guard and the drop goes through. What makes it total in practice is where this user trains — the mean of 547 weighted sets is 15.7 lb and the heaviest set ever logged is 30 — so the frozen rungs are the lived-in ones. The narrower claim is pinned in the test.</p>
+  </div>
+  <div class="opt">
+    <div class="h">The rounder was non-monotonic in its deload factor</div>
+    <div class="m"><span class="chip c-id">found</span><span class="chip c-v5">live bug</span></div>
+    <p class="b">Found by OG3-M3's seeded probe on its first run, which is the entire argument for the genre. With 1.5 and 2 lb micro-loaders on a 12 lb lift, a 5% deload returned 11.5 and a 7.5% deload returned <strong>12</strong> — asking for a deeper cut gave back more weight, because the deeper one tripped the disproportion guard and snapped to full weight while the gentler one did not. No named test could have caught it, and it sits on the one code path this user's equipment never exercises. The guard now takes the deepest cut it still considers proportionate instead of treating "too big a cut" as "no cut at all".</p>
+  </div>
+  <div class="opt">
+    <div class="h">The variety nudge validator read the wrong payload key</div>
+    <div class="m"><span class="chip c-id">found</span></div>
+    <p class="b">OG3-C1's first draft looked for <code>today_plan</code> at the top level; the builder nests it under <code>today.exercises</code>. The test fixture had been written to the same wrong shape, so both halves agreed with each other and every test passed while the live card would have rejected every swap and rendered empty — a validator that silently refuses everything is worse than none, because it looks like the model had no ideas. The fixture now mirrors the builder's real output.</p>
+  </div>
+  <div class="opt">
+    <div class="h">The parity gate had two false gaps</div>
+    <div class="m"><span class="chip c-id">fixed</span></div>
+    <p class="b">B2 and D1 both pair a standalone web component against a phone screen that renders the same thing inline — <code>MuscleVolume.vue</code> against the history screen, <code>DataHealthCard.vue</code> against Settings. The gate knew neither pairing and flagged both as one-sided. Two rows added to the map, per the rule that a new paired surface gets one.</p>
+  </div>
+</div>
+
 <h2>Ranked shortlist</h2>
 <p>Ranked by value ÷ effort. The first five are one release tag between them: all are pure render over fields the server already sends.</p>
 

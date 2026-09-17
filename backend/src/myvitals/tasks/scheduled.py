@@ -191,10 +191,26 @@ async def _google_health_tick() -> None:
     try:
         from datetime import date as _date
         from ..db import models, session
-        from ..integrations import google_health
+        from ..integrations import errors, google_health
         async with session.SessionLocal() as db:
             creds = await db.get(models.GoogleHealthCredentials, 1)
             if creds is None or not creds.refresh_token or not creds.poll_enabled:
+                return
+            # OG3-D1 — a blocking failure stops the poll until a human
+            # clears it. `auth` and `config` cannot recover on their own, so
+            # re-trying them every fifteen minutes achieves nothing except
+            # burying the real message under identical log lines and hitting
+            # a third party with a credential that will keep being refused.
+            #
+            # This exact case ran for eight days: the grant expired on
+            # 2026-09-08 and roughly 770 pointless refresh attempts followed.
+            # The reconnect flow clears `last_error_kind`, which re-arms the
+            # poll; nothing else does, deliberately.
+            if getattr(creds, "last_error_kind", None) in errors.BLOCKING_KINDS:
+                log.debug(
+                    "Google Health poll skipped: %s error needs a reconnect (%s)",
+                    creds.last_error_kind, (creds.last_error or "")[:120],
+                )
                 return
             # The job ticks on a fixed short cadence; the user's chosen
             # interval is enforced here. Doing it this way rather than

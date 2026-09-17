@@ -1003,6 +1003,8 @@ async def set_cookie(
         if have_creds:
             row.last_auto_login_at = now
         row.last_error = None
+        # OG3-D1 — the user just supplied fresh credentials, so the poll is re-armed.
+        row.last_error_kind = None
         row.updated_at = now
     await db.commit()
 
@@ -1050,6 +1052,8 @@ async def _refresh_cookie_via_auto_login(
         row.athlete_name_cached = login.athlete_name
     row.last_auto_login_at = datetime.now(timezone.utc)
     row.last_error = None
+    # OG3-D1 — auto-login succeeded, so the poll is re-armed.
+    row.last_error_kind = None
     return True
 
 
@@ -1184,6 +1188,8 @@ async def _run_cookie_sync(
 
     row.last_sync_at = datetime.now(timezone.utc)
     row.last_error = None
+    # OG3-D1 — a clean sync means whatever killed it is gone; re-arm the poll.
+    row.last_error_kind = None
     await db.commit()
     return StravaCookieSyncOut(upserted=len(upserted_ids), activity_ids=upserted_ids)
 

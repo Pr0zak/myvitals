@@ -731,6 +731,13 @@ export interface IntegrationHealth {
   last_sync_at: string | null;
   age_hours: number | null;
   last_error: string | null;
+  /** OG3-D1 — transient | auth | config | upstream, and what to do about
+   *  it. Decided server-side: a client inferring "this 400 means
+   *  reconnect" is making a judgement it has no information for. Null on
+   *  rows whose error predates the classifier. */
+  last_error_kind?: string | null;
+  action?: string | null;
+  needs_reconnect?: boolean;
   status: "ok" | "stale" | "error" | "never" | "not_configured";
   /** Newest row this integration has actually produced. */
   last_item_at?: string | null;

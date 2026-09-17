@@ -310,6 +310,13 @@ class GoogleHealthCredentials(Base):
     # weeks before anyone noticed; every integration added since carries a
     # user-visible failure state for that reason.
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # OG3-D1 — what KIND of failure `last_error` was: transient | auth |
+    # config | upstream. A revoked grant and a timed-out request look
+    # identical in a message string, and only one of them is worth
+    # retrying. The scheduler skips a blocking kind until a reconnect
+    # clears it; data_health turns it into an action rather than a
+    # staleness report. See integrations/errors.py.
+    last_error_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
     poll_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False,
     )
@@ -358,6 +365,13 @@ class StravaCookieCreds(Base):
     athlete_name_cached: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # OG3-D1 — what KIND of failure `last_error` was: transient | auth |
+    # config | upstream. A revoked grant and a timed-out request look
+    # identical in a message string, and only one of them is worth
+    # retrying. The scheduler skips a blocking kind until a reconnect
+    # clears it; data_health turns it into an action rather than a
+    # staleness report. See integrations/errors.py.
+    last_error_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Scheduled poll (migration 0055). Default OFF: this reaches a third
     # party on a timer, and unlike Google Health the credential cannot
     # self-heal — with no stored auto-login, only a human can restore an

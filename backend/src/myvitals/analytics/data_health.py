@@ -49,6 +49,8 @@ from typing import Any, Literal
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..integrations import errors
+
 Kind = Literal["continuous", "nightly", "ad_hoc", "optional"]
 Status = Literal["ok", "stale", "ad_hoc", "not_configured", "never"]
 
@@ -289,6 +291,13 @@ async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
         is_configured = configured if configured is not None else row is not None
         last = getattr(row, "last_sync_at", None) if row is not None else None
         err = getattr(row, error_attr, None) if row is not None else None
+        kind = getattr(row, "last_error_kind", None) if row is not None else None
+        # An error with no classification predates the classifier. Reported
+        # as unclassified rather than guessed at, which keeps it out of the
+        # reconnect prompt: telling someone to reconnect when the real fault
+        # was a timeout is worse than saying nothing.
+        if not err:
+            kind = None
         if last is not None and last.tzinfo is None:
             last = last.replace(tzinfo=timezone.utc)
         age_h = (now - last).total_seconds() / 3600.0 if last else None
@@ -321,6 +330,21 @@ async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
             "last_sync_at": last.isoformat() if last else None,
             "age_hours": round(age_h, 2) if age_h is not None else None,
             "last_error": err,
+            # OG3-D1 — what KIND of failure, and what the user can do about
+            # it. A revoked grant and a timed-out request are both `status:
+            # "error"` with a message; only one of them has an action, and
+            # only one of them will still be failing in an hour.
+            #
+            # Decided server-side for the same reason `analytics/compare.py`
+            # owns `better`: a client inferring "this 400 means reconnect"
+            # is a client making a judgement it has no information for.
+            #
+            # Deliberately does NOT change `status`. HEALTH-1's restraint
+            # holds — this adds a fact beside the verdict rather than a new
+            # colour, so an un-updated surface stays incomplete, never wrong.
+            "last_error_kind": kind,
+            "action": errors.KIND_ACTION.get(kind) if kind else None,
+            "needs_reconnect": kind == "auth",
             "status": status,
             # Null, never a zero age, when the integration has produced
             # nothing at all — "imported nothing ever" and "imported

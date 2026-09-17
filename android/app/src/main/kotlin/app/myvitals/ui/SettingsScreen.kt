@@ -1274,6 +1274,24 @@ private fun DataHealthRows(dh: app.myvitals.sync.DataHealth) {
                         // Strava: a dead cookie syncs zero rides silently.
                         i.lastError?.let {
                             Text(it.take(120), color = bad, fontSize = 10.sp)
+                            // OG3-D1: what to DO about it. A revoked grant and
+                            // a timed-out request are both an error with a
+                            // message, but only one has an action and only one
+                            // will still be failing in an hour. The Google
+                            // Health grant sat revoked for eight days here,
+                            // retried every fifteen minutes, with nothing on
+                            // any screen saying it needed a person.
+                            i.action?.let { act ->
+                                Text(
+                                    act,
+                                    // Amber, not red: the red line above already says something
+                                    // is wrong; this one says what to do about it.
+                                    color = if (i.needsReconnect) MV.Amber else muted,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (i.needsReconnect)
+                                        FontWeight.SemiBold else FontWeight.Normal,
+                                )
+                            }
                         }
                     }
                     Column(horizontalAlignment = Alignment.End) {

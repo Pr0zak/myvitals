@@ -43,6 +43,7 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import models
+from .errors import IntegrationError, classify_oauth_response
 
 log = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ _DAILY_COLUMNS = (
 )
 
 
-class GoogleHealthError(RuntimeError):
+class GoogleHealthError(IntegrationError, RuntimeError):
     """A call failed in a way worth showing the user."""
 
 
@@ -424,9 +425,19 @@ async def valid_access_token(db: AsyncSession) -> str:
     if resp.status_code >= 400:
         # Record it: a revoked grant otherwise presents as "no new data",
         # which is indistinguishable from a quiet week.
+        #
+        # OG3-D1 — and record what KIND of failure it was. `invalid_grant`
+        # means the refresh token is gone, which no amount of retrying can
+        # undo; on an OAuth client still in Testing publishing status Google
+        # expires it after exactly seven days regardless of use, which is
+        # what happened here on 2026-08-28 and again on 2026-09-08. Without
+        # the kind, the scheduler retried it every fifteen minutes for eight
+        # days and nothing said the difference between that and a quiet week.
+        kind = classify_oauth_response(resp.status_code, resp.text)
         creds.last_error = f"token refresh failed: {resp.text[:200]}"
+        creds.last_error_kind = kind
         await db.commit()
-        raise GoogleHealthError(creds.last_error)
+        raise GoogleHealthError(creds.last_error, kind=kind)
 
     data = resp.json()
     creds.access_token = data["access_token"]
@@ -435,6 +446,7 @@ async def valid_access_token(db: AsyncSession) -> str:
     if data.get("refresh_token"):
         creds.refresh_token = data["refresh_token"]
     creds.last_error = None
+    creds.last_error_kind = None
     await db.commit()
     return creds.access_token
 

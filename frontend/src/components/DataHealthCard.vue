@@ -98,6 +98,16 @@ const problems = computed(() => data.value?.problem_keys ?? []);
             <!-- The error text is the whole reason this card exists for
                  Strava: a dead cookie syncs zero rides silently. -->
             <span v-if="i.last_error" class="src err">{{ i.last_error }}</span>
+            <!-- OG3-D1: what to DO about it. A revoked grant and a timed-out
+                 request are both `status: error` with a message, but only one
+                 of them has an action and only one will still be failing in
+                 an hour. The Google Health grant sat revoked for eight days
+                 here, retried every fifteen minutes, with nothing on any
+                 screen saying it needed a person. -->
+            <span v-if="i.action && i.last_error"
+                  class="src" :class="i.needs_reconnect ? 'act' : 'quiet'">
+              {{ i.action }}
+            </span>
           </span>
           <span class="age">
             {{ i.configured ? age(i.age_hours) : "not connected" }}
@@ -124,6 +134,7 @@ const problems = computed(() => data.value?.problem_keys ?? []);
 </template>
 
 <style scoped>
+.src.act { color: var(--accent, #28e6ff); font-weight: 600; }
 .quiet { display: block; opacity: 0.7; font-size: 0.72em; }
 .summary { margin: 0 0 0.8rem; font-size: 0.9rem; }
 .summary.ok { color: var(--good); }

@@ -871,6 +871,116 @@ def deload_round(
     return deloaded
 
 
+def select_deload_candidate(
+    current_lb: float | None,
+    target_reps: int,
+    reps_lo: int,
+    pairs_lb: list[float],
+    wrist_weights_lb: list[float],
+    factor: float,
+) -> tuple[float | None, int, str | None]:
+    """Ease a prescription across the (weight x reps) grid, not weight alone.
+
+    OG3-E1. `deload_round` searches one axis, and on this rack that axis has
+    no resolution to search. The equipment settles it: `pairs_lb` steps in 5
+    and `wrist_weights_lb` is EMPTY, so the app's own micro-loader rounder —
+    its distinguishing feature — is inert here and the grid is 5 lb coarse.
+
+    Work a light deload through: a 7.5% cut on a 15 lb lift targets 13.875,
+    `round_weight` drops it to 10, and `deload_round` sees `actual_cut` at
+    more than twice the intended cut and returns FULL WEIGHT. The same
+    arithmetic holds at every rung from 5 to 50 lb, so the light and moderate
+    deload is a structural no-op on this equipment. The guard is right — a
+    gentle easing should not knock off a third of the load — but holding full
+    weight is not the only alternative available, and the code comment says
+    as much.
+
+    So: hold the weight and take the REPS down instead. Reps are continuous
+    where this rack is not, and a set of 8 at 15 lb genuinely is easier than
+    a set of 10 at 15 lb.
+
+    Both axes are bounded in the easing direction only, which is what makes
+    this a deload rather than a rewrite:
+
+      * weight never rises above the current load;
+      * reps never rise above the prescription — adding reps at a lighter
+        weight can land closer to the target e1RM, but a session of more
+        reps is not an easier session, and an unbounded search picks it
+        every time;
+      * reps never fall below `reps_lo`, the exercise's own working range.
+
+    Closest grid point wins, by ABSOLUTE distance. Requiring the result to
+    sit at or below the eased target sounds stricter and is worse: on this
+    rack a 7.5% cut from 15x10 has nothing below it nearer than 10x10, a 33%
+    drop, while 15x8 overshoots by 2.7%. Refusing the near miss to honour the
+    direction is how the guard got here in the first place.
+
+    Returns `(weight_lb, reps, note)`. The note is a sentence for
+    `Prescription.why`, so both clients render the reasoning with no client
+    change at all — and it is NOT optional: a prescription that quietly holds
+    its weight and drops two reps, while the screen still says "eased for
+    recovery", is the kind of silent adjustment that erodes trust in every
+    other number on the page.
+
+    Never eases upward: `factor >= 1.0` returns the input untouched, because
+    a "deload" that adds load is a bug with a reassuring name.
+    """
+    if current_lb is None or factor >= 1.0:
+        return current_lb, target_reps, None
+
+    pct = round((1.0 - factor) * 100)
+
+    # The weight axis FIRST, through the existing rounder. When the rack can
+    # deliver the cut — which is exactly what owning micro-loaders buys — the
+    # weight axis is the right one and this function must not second-guess
+    # it. Skipping this step made a 15 lb lift with 1.5 lb wrist weights hold
+    # 15 and cut reps, when 13.5 lb was available and is the better answer;
+    # the app's distinguishing feature would have been switched off by the
+    # thing meant to cover for its absence.
+    eased = deload_round(current_lb, factor, pairs_lb, wrist_weights_lb)
+    if eased is not None and eased < current_lb - 1e-9:
+        return eased, target_reps, (
+            f"eased to {_fmt_lb(eased)} lb for a {pct}% lighter session"
+        )
+
+    # Weight held: either the rack has no rung below this one, or the
+    # disproportion guard fired. Take it out of reps instead.
+    #
+    # Bounded in the easing direction only. Reps never rise above the
+    # prescription — more reps at the same weight is not an easier session,
+    # and a search that ignores that picks it whenever it lands nearer the
+    # target e1RM. Reps never fall below `reps_lo` either, which is the
+    # exercise's own working range.
+    target_e1rm = estimate_1rm(current_lb, target_reps)
+    if target_e1rm is None:
+        return current_lb, target_reps, None
+    want = target_e1rm * factor
+
+    rep_lo = max(1, min(reps_lo, target_reps))
+    best: tuple[float, int] | None = None
+    for r in range(rep_lo, max(rep_lo, target_reps) + 1):
+        e = estimate_1rm(current_lb, r)
+        if e is None:
+            continue
+        gap = abs(e - want)
+        if best is None or gap < best[0] - 1e-9:
+            best = (gap, r)
+    if best is None or best[1] == target_reps:
+        # Nothing to give on either axis. Say nothing rather than claim an
+        # easing that did not happen.
+        return current_lb, target_reps, None
+
+    return current_lb, best[1], (
+        f"held {_fmt_lb(current_lb)} lb and cut to {best[1]} reps — the rack "
+        f"cannot deliver a {pct}% drop in weight"
+    )
+
+
+def _fmt_lb(w: float) -> str:
+    """Weights print as 15, not 15.0 — and as 12.5 when they need to."""
+    return str(int(w)) if abs(w - round(w)) < 1e-9 else f"{w:g}"
+
+
 # ------------------------------------------------------------------
 # Pure: starting weight + rating-driven progression
 # ------------------------------------------------------------------
@@ -1461,6 +1571,40 @@ def next_prescription(
     is_weighted = "dumbbell" in exercise["equipment"] and not exercise.get("is_timed")
     name = exercise.get("name", exercise["id"])
 
+    def _ease(
+        weight: float | None, lo: int, hi: int, why: str,
+    ) -> tuple[float | None, int, int, str]:
+        """OG3-E1 — deliver the recovery easing on the axis that has room.
+
+        Applied ONLY where the prescription is not an advance. A deload that
+        can turn into a heavier session is not a deload, and the guard that
+        makes this necessary already errs toward holding load; compounding
+        the two in the wrong direction would be worse than either.
+
+        On this rack the weight axis has no resolution — 5 lb steps, no
+        micro-loaders — so a light or moderate `deload` factor is rounded
+        away entirely and the session arrives at full weight and full reps
+        while the screen says it was eased. `strength_workouts.deload_factor`
+        is 1.0 on all 40 completed workouts, including four whose recovery
+        score maps to 0.85, which is consistent with exactly that.
+
+        When the weight DOES move, `select_deload_candidate` returns it
+        unchanged and this is a no-op.
+        """
+        if deload >= 1.0 or weight is None or avg_weight_lb is None:
+            return weight, lo, hi, why
+        if weight > avg_weight_lb + 1e-9:
+            return weight, lo, hi, why  # never ease an advance
+        eased_w, eased_reps, note = select_deload_candidate(
+            weight, hi, lo, pairs_lb, wrist_weights_lb, deload,
+        )
+        if note is None:
+            return weight, lo, hi, why
+        # Reps come down from the TOP of the range; the floor is the range's
+        # own lower bound, so `lo` is untouched and the range narrows rather
+        # than sliding.
+        return eased_w, min(lo, eased_reps), eased_reps, f"{why} Recovery: {note}."
+
     if avg_rating is not None and avg_weight_lb is not None and is_weighted:
         weight, lo, hi, advisory = double_progression(
             base_reps_lo=reps_lo, base_reps_hi=reps_hi,
@@ -1482,16 +1626,14 @@ def next_prescription(
                 advisory,
             )
         if weight is not None and weight < avg_weight_lb:
-            return Prescription(
-                weight, lo, hi, "deloaded",
-                f"Down from {avg_weight_lb:g} lb — last session failed.",
-                advisory,
-            )
-        return Prescription(
-            weight, lo, hi, "rep_ladder",
-            f"Hold {avg_weight_lb:g} lb — reach {lo} reps to add weight.",
-            advisory,
-        )
+            w2, lo2, hi2, why2 = _ease(
+                weight, lo, hi,
+                f"Down from {avg_weight_lb:g} lb — last session failed.")
+            return Prescription(w2, lo2, hi2, "deloaded", why2, advisory)
+        w2, lo2, hi2, why2 = _ease(
+            weight, lo, hi,
+            f"Hold {avg_weight_lb:g} lb — reach {lo} reps to add weight.")
+        return Prescription(w2, lo2, hi2, "rep_ladder", why2, advisory)
 
     # OG2-D-6: a lift that carries no load progresses in REPS. It reaches
     # here because `is_weighted` requires a dumbbell, and below this the
@@ -1534,7 +1676,8 @@ def next_prescription(
                 why = f"Down from {avg_weight_lb:g} lb — last session was hard."
             else:
                 why = f"Hold {avg_weight_lb:g} lb."
-        return Prescription(weight, reps_lo, reps_hi, reason, why)
+        w2, lo2, hi2, why2 = _ease(weight, reps_lo, reps_hi, why)
+        return Prescription(w2, lo2, hi2, reason, why2)
 
     start = starting_weight_lb(exercise["movement_pattern"], level)
     if start is not None:

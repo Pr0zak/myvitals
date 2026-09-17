@@ -232,11 +232,11 @@ td strong{color:var(--ink)}
 
 <div class="prog">
   <h4>Progress · 0 of 21 shipped</h4>
-  <div class="bar"><i class="b-ship" style="width:0%"></i><i class="b-wip" style="width:48%"></i></div>
+  <div class="bar"><i class="b-ship" style="width:0%"></i><i class="b-wip" style="width:57%"></i></div>
   <div class="legend">
     <span><b style="background:var(--done)"></b> shipped 0</span>
-    <span><b style="background:var(--warn)"></b> in progress 10</span>
-    <span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 11</span>
+    <span><b style="background:var(--warn)"></b> in progress 12</span>
+    <span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 9</span>
   </div>
   <p style="margin:14px 0 0;font-size:14px;color:var(--ink-2)">Tracked as <code>OG3-*</code> in the repo's <code>TODO.md</code>. Chips below carry the live state; this page is republished to the same URL as items land.</p>
 </div>
@@ -378,7 +378,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">11</div>
     <div class="t">Classify an integration failure and stop retrying the class that cannot recover</div>
-    <div class="m"><span class="chip c-id">OG3-D1</span><span class="chip c-live">live</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-mv">backend</span><span class="chip c-todo">not started</span></div>
+    <div class="m"><span class="chip c-id">OG3-D1</span><span class="chip c-live">live</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-mv">backend</span><span class="chip c-wip">in progress</span></div>
     <div class="d">
       <p>openGym reduces every job failure to a named class before anything acts on it — timeout, missing, auth, provider, unusable, internal — and lets the class drive behaviour: an answer that failed validation and was paid for is never retried; a call that never reached the model is. myvitals has this taxonomy inside the LLM layer only.</p>
       <p>The evidence is live rather than hypothetical, and it is the box at the top of this page. TODO.md predicted this failure in prose under GH-EXPIRY; the database shows it happening for the second time. A four-value enum across four integrations is the right size — do not build a pipeline.</p>
@@ -393,7 +393,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">12</div>
     <div class="t">Deload on the weight × reps grid, not on weight alone</div>
-    <div class="m"><span class="chip c-id">OG3-E1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-mv">backend</span><span class="chip c-todo">not started</span></div>
+    <div class="m"><span class="chip c-id">OG3-E1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-mv">backend</span><span class="chip c-wip">in progress</span></div>
     <div class="d">
       <p>openGym computes a target e1RM at 0.9× and searches loadable weights crossed with allowed rep counts, falling back explicitly to holding the weight and cutting reps when no grid point exists below the current load. myvitals deloads on the weight axis only, and the rack settles it: <code>dumbbells.pairs_lb = [5,10,…,50]</code> with <strong><code>wrist_weights_lb = []</code></strong>. The user owns no micro-loaders, so the app's flagship rounder is inert and the grid is 5 lb.</p>
       <p>Work it through: a 7.5% cut on a 15 lb lift targets 13.875, <code>round_weight</code> drops to 10, <code>deload_round</code> sees <code>actual_cut &gt; 2× intended</code> and <strong>returns full weight</strong>. The light and moderate deload is a structural no-op at every rung from 5 to 50 lb, and the code comment says so honestly. The rep axis is the only axis with resolution here, and nothing uses it.</p>

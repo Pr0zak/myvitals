@@ -35,6 +35,7 @@ import httpx
 from fitparse import FitFile
 
 from ..db import models
+from .errors import IntegrationError
 
 log = logging.getLogger(__name__)
 
@@ -193,13 +194,21 @@ async def auto_login(email: str, password: str) -> LoginResult:
 
 # ─── Cookie validation ──────────────────────────────────────────────
 
-class CookieExpired(Exception):
+class CookieExpired(IntegrationError):
     """Raised when the Strava cookie session is confirmed dead (401 /
     login-redirect) and could NOT be self-healed via auto-login. The
     sync runner catches this and persists it as a user-facing
     `last_error` instead of silently reporting a clean 0-activity run —
     which is what let a dead cookie masquerade as 'up to date' for
-    weeks (the ride never came in, but the UI stayed green)."""
+    weeks (the ride never came in, but the UI stayed green).
+
+    OG3-D1: `kind = "auth"`, so the scheduler stops re-polling and the
+    data-health card offers a reconnect rather than reporting staleness.
+    A dead cookie is the archetype of a failure that retrying cannot fix —
+    it is why v0.7.319 grew a one-off reconnect banner, which this
+    generalises."""
+
+    kind = "auth"
 
 
 @dataclass

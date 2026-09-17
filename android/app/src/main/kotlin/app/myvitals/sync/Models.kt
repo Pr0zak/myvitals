@@ -1550,6 +1550,13 @@ data class IntegrationHealth(
     @Json(name = "last_sync_at") val lastSyncAt: String? = null,
     @Json(name = "age_hours") val ageHours: Double? = null,
     @Json(name = "last_error") val lastError: String? = null,
+    /** OG3-D1 — transient | auth | config | upstream, and what to do about
+     *  it. Decided server-side: a client inferring "this 400 means
+     *  reconnect" is making a judgement it has no information for. Null on
+     *  rows whose error predates the classifier. */
+    @Json(name = "last_error_kind") val lastErrorKind: String? = null,
+    val action: String? = null,
+    @Json(name = "needs_reconnect") val needsReconnect: Boolean = false,
     val status: String = "ok",
     // Newest row this integration has actually produced, beside when it
     // last ran. `lastSyncAt` alone cannot tell a dead Strava cookie

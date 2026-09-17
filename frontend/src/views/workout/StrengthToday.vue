@@ -11,6 +11,8 @@ import BodyMap from "@/components/BodyMap.vue";
 import { useRouter } from "vue-router";
 import { Play, Pause, RotateCw, Plus, SkipForward, Timer, Check } from "lucide-vue-next";
 import { api } from "@/api/client";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
+import { useConfirm } from "@/useConfirm";
 import { isNeon } from "@/theme";
 import { apiBase, queryToken } from "@/config";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
@@ -841,6 +843,9 @@ const weekStrip = computed<DayCell[]>(() => {
 // the row; the chooser offers the three non-failed outcomes. Values map
 // onto the backend progression thresholds (Hard=2 hold, Good=4 +rep,
 // Easy=5 +weight); historical 1–5 RPE data still renders via ratingLabel.
+const confirmState = useConfirm();
+const ask = confirmState.ask;
+
 const RATING_CHOICES: { v: number; label: string; title: string }[] = [
   { v: 2, label: "Hard", title: "Hard — finished it with nothing in the tank. Weight stays next time." },
   { v: 4, label: "Good", title: "Good — solid, a couple reps left. Adds a rep next time." },
@@ -1086,7 +1091,17 @@ async function setExerciseSkipped(wex: StrengthWorkoutExercise, skipped: boolean
 async function removeSet(wex: StrengthWorkoutExercise, setNum: number) {
   const logged = wex.sets.find((s: { set_number: number; id: number }) => s.set_number === setNum);
   if (!logged) return;
-  if (!confirm(`Delete set ${setNum}? This removes it from your log, your records and next session's weight.`)) return;
+  // OG3-M5 — a rendered dialog, because this one is not reversible and
+  // its consequence reaches further than the row on screen: the set feeds
+  // the progression reducer, so deleting it changes what next session
+  // prescribes. `window.confirm` gave that the same one-line treatment as
+  // every other confirm in the app, with the destructive action focused.
+  if (!(await ask({
+    title: `Delete set ${setNum}?`,
+    detail: "This removes it from your log, your records, and the history "
+      + "next session's weight is calculated from.",
+    confirmLabel: "Delete set",
+  }))) return;
   busy.value = `set-${wex.id}-${setNum}`;
   try {
     await api.deleteStrengthSet(logged.id);
@@ -1107,7 +1122,13 @@ async function logFailed(wex: StrengthWorkoutExercise, setNum: number): Promise<
   // confirm so callers (e.g. the timed-hold overlay) can keep the timer
   // running instead of closing on a no-op.
   const e = entry(wex, setNum);
-  if (!confirm("Mark set " + setNum + " as failed? Next session's weight will drop ~7.5%.")) return false;
+  // OG3-M5 — same reasoning: the rating is the single input the whole
+  // progression policy runs on, and this one deliberately moves it down.
+  if (!(await ask({
+    title: `Mark set ${setNum} as failed?`,
+    detail: "Next session's weight for this exercise will drop by about 7.5%.",
+    confirmLabel: "Mark failed",
+  }))) return false;
   e.rating = 1;
   await logSet(wex, setNum);
   return true;
@@ -2209,6 +2230,15 @@ useVisibilityRefresh(loadAll);
       </div>
     </div>
   </main>
+
+  <!-- OG3-M5: the app draws its own confirmation for the two set
+       operations that rewrite progression history. -->
+  <ConfirmDialog
+    :open="confirmState.open.value"
+    v-bind="confirmState.request.value"
+    @confirm="confirmState.onConfirm"
+    @cancel="confirmState.onCancel"
+  />
 </template>
 
 <style scoped>

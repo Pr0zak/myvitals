@@ -13,6 +13,7 @@ import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
 import ActivityYearCalendar from "@/components/ActivityYearCalendar.vue";
+import ActivityIcon from "@/components/ActivityIcon.vue";
 import type { Activity, ActivityStats, StrengthWorkoutDetail } from "@/api/types";
 
 const router = useRouter();
@@ -224,7 +225,18 @@ interface FeedRow {
   key: string;
   name: string;
   sub: string;
-  icon: string;
+  /** OG3-M4 — the activity type, rendered through `ActivityIcon`, rather
+   *  than a glyph chosen here.
+   *
+   *  This row used to carry an emoji from a six-branch table inside
+   *  `classifyType`, which was a second and much cruder copy of the
+   *  classification `ActivityIcon.vue` already performs — one that has
+   *  since absorbed ebike, paddle, VR fitness, snow and the HIIT case,
+   *  none of which the local table knew about. Two classifiers over one
+   *  vocabulary is a divergence waiting to happen, and the emoji half also
+   *  renders differently on every phone, which is exactly what the
+   *  hand-drawn icon set exists to avoid. */
+  iconType: string;
   tone: "lime" | "cyan" | "amber" | "mag";
   value: string;
   unit: string;
@@ -275,8 +287,14 @@ function hms(duration_s: number | null | undefined): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+/** OG3-M4 — TONE and routing only. The glyph comes from `ActivityIcon`.
+ *
+ *  What is left here is the part `ActivityIcon` does not answer: which
+ *  accent colour the row takes, and whether it routes to the trail or
+ *  strength surface. Those are this screen's concerns; the icon is not,
+ *  and keeping a private emoji table for it meant this feed disagreed with
+ *  the Activities list about what a ride looks like. */
 function classifyType(type: string | null | undefined): {
-  icon: string;
   tone: FeedRow["tone"];
   isTrail: boolean;
   isStrength: boolean;
@@ -285,15 +303,9 @@ function classifyType(type: string | null | undefined): {
   const isStrength =
     t.includes("strength") || t.includes("weight") || t.includes("workout");
   const isTrail = t.includes("trail") || t.includes("hike") || t.includes("run");
-  if (isStrength) return { icon: "🏋", tone: "lime", isTrail: false, isStrength: true };
-  if (isTrail) return { icon: "⛰", tone: "amber", isTrail: true, isStrength: false };
-  if (t.includes("ride") || t.includes("bike") || t.includes("cycl"))
-    return { icon: "🚴", tone: "cyan", isTrail: false, isStrength: false };
-  if (t.includes("swim"))
-    return { icon: "🏊", tone: "cyan", isTrail: false, isStrength: false };
-  if (t.includes("row"))
-    return { icon: "🚣", tone: "cyan", isTrail: false, isStrength: false };
-  return { icon: "🏃", tone: "cyan", isTrail: false, isStrength: false };
+  if (isStrength) return { tone: "lime", isTrail: false, isStrength: true };
+  if (isTrail) return { tone: "amber", isTrail: true, isStrength: false };
+  return { tone: "cyan", isTrail: false, isStrength: false };
 }
 
 const RECENT_LIMIT = 12;
@@ -321,7 +333,7 @@ const recentWorkouts = computed<FeedRow[]>(() => {
       key: `w:${w.date}`,
       name: `${titleCase(w.split_focus ?? "Strength")} workout`,
       sub: relDay(`${w.date}T12:00:00`),
-      icon: "🏋",
+      iconType: "strength",
       tone: "mag",
       value: "",
       unit: "",
@@ -375,7 +387,7 @@ const recentActivities = computed<FeedRow[]>(() => {
       key: `${a?.source ?? "x"}-${a?.source_id ?? i}`,
       name,
       sub,
-      icon: cls.icon,
+      iconType: a?.type ?? "",
       tone: cls.tone,
       value,
       unit,
@@ -533,7 +545,7 @@ const recent = computed<FeedRow[]>(() =>
         @click="go(row.href ?? '/activities')"
       >
         <span class="pi" :class="`bg-${row.tone}`" :style="{ color: 'inherit' }">
-          {{ row.icon }}
+          <ActivityIcon :type="row.iconType" :size="17" />
         </span>
         <span class="pn">
           {{ row.name }}
@@ -547,7 +559,7 @@ const recent = computed<FeedRow[]>(() =>
     </template>
 
     <button v-else class="pill empty" @click="go('/activities')">
-      <span class="pi bg-cyan">🏃</span>
+      <span class="pi bg-cyan"><ActivityIcon type="run" :size="17" /></span>
       <span class="pn">
         No activity in the last 7 days
         <small>Tap to see your full history</small>
@@ -610,7 +622,10 @@ const recent = computed<FeedRow[]>(() =>
   --rn-track: #272a3b;
   min-height: 100vh;
   margin: -1.25rem -1.5rem;
-  padding: 54px 22px 32px;
+  /* OG3-M1: the bar's own height is reserved at the shell now. This view
+     used to carry 32px of its own — less than the bar is tall, so the
+     last feed row sat under it. */
+  padding: 54px 22px 12px;
   background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
   color: var(--rn-ink);
   font-family: "Plus Jakarta Sans", "Geist", system-ui;

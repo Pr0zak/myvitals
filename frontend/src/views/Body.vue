@@ -31,7 +31,7 @@ import KeyMetrics from "@/components/KeyMetrics.vue";
 .body-view {
   min-height: 100vh;
   margin: -1.25rem -1.5rem;
-  padding: 54px 22px 32px;
+  padding: 54px 22px 12px;  /* OG3-M1: bar height reserved at the shell */
   background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
   color: #ececf5;
 }

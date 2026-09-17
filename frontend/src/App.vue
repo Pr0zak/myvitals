@@ -350,6 +350,21 @@ main {
 /* Neon shell layout: no side rail in flow; NeonNav is fixed (bottom bar on
  * mobile, left rail ≥768px). Offset the content for the desktop rail. The
  * neon views carry their own bottom padding to clear the mobile bottom bar. */
+/* OG3-M1 — the floating bar's height, reserved ONCE.
+   `NeonNav` is `position: fixed` with `bottom: calc(10px + safe-area)`, so
+   nothing in normal flow knows it is there and every view has had to
+   remember to leave room. The written policy failed two of its three
+   chances: Rings.vue reserves 104px while Train.vue and You.vue reserve
+   32px, and both of those end in a tappable row that the bar covers.
+   One token, one rule, and a view only overrides it deliberately. */
+.app.neon { --neon-bar-h: calc(74px + env(safe-area-inset-bottom)); }
+.app.neon main { padding-bottom: var(--neon-bar-h); }
+@media (min-width: 768px) {
+  /* Desktop puts the nav in a left rail, so there is nothing below to
+     clear and the reservation would just be dead space. */
+  .app.neon { --neon-bar-h: 0px; }
+}
+
 .app.neon .main-col { width: 100%; }
 @media (min-width: 768px) {
   .app.neon .main-col { margin-left: 88px; }

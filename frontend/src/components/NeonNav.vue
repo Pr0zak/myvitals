@@ -64,8 +64,21 @@ const activeIndex = computed(() => {
   position: fixed;
   z-index: 50;
   display: flex;
-  background: rgba(20, 22, 34, 0.78);
-  backdrop-filter: blur(14px);
+  /* OG3-M2 — the opaque case is the DEFAULT, and the blur is the
+     enhancement layered on top.
+     `grep '@supports' frontend/src` returned zero across the whole
+     frontend, and this bar was 78% fill plus a blur with no prefixed twin
+     and no fallback. Where `backdrop-filter` is unsupported or disabled —
+     Firefox with the pref off, older WebKit, a browser in reduced-
+     transparency mode — 78% opacity over a scrolling page is not frosted
+     glass, it is a translucent bar with text running under the labels.
+     0.92 is legible on its own; the blur then softens what shows through. */
+  background: rgba(20, 22, 34, 0.92);
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background: rgba(20, 22, 34, 0.78);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
   border: 1px solid #23263a;
 }
 .tab {

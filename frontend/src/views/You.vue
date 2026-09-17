@@ -14,6 +14,11 @@ import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
 import { goalTone, goalMovedAway, goalDeltaLabel } from "@/goalState";
+// OG3-M4 — lucide rather than emoji for the nav pills. An emoji is rendered
+// by the platform's own font, so the same glyph is a different drawing on
+// every phone and browser, which is the thing a hand-picked icon set exists
+// to prevent. These five sat in the neon chrome as the last holdouts.
+import { Link2, PencilLine, Salad, User, UtensilsCrossed } from "lucide-vue-next";
 
 const router = useRouter();
 const loading = ref(true);
@@ -275,31 +280,31 @@ function go(path: string): void {
     <div class="cap">Personal &amp; system</div>
 
     <button class="pill" @click="go('/meals/prep')">
-      <span class="pi bg-amber amber">🍳</span>
+      <span class="pi bg-amber amber"><UtensilsCrossed :size="17" /></span>
       <span class="pn">Weekend prep<small>Cook once, eat all week</small></span>
       <span class="chev">›</span>
     </button>
 
     <button class="pill" @click="go('/meals/can-make')">
-      <span class="pi bg-lime lime">🍽</span>
+      <span class="pi bg-lime lime"><Salad :size="17" /></span>
       <span class="pn">Meals<small>What can I make · pantry · log</small></span>
       <span class="chev">›</span>
     </button>
 
     <button class="pill" @click="go('/journal')">
-      <span class="pi bg-mag mag">✎</span>
+      <span class="pi bg-mag mag"><PencilLine :size="17" /></span>
       <span class="pn">Journal<small>Notes & reflections</small></span>
       <span class="chev">›</span>
     </button>
 
     <button class="pill" @click="go('/settings?tab=profile')">
-      <span class="pi bg-cyan cyan">👤</span>
+      <span class="pi bg-cyan cyan"><User :size="17" /></span>
       <span class="pn">Profile &amp; body<small>Age, height, metrics</small></span>
       <span class="chev">›</span>
     </button>
 
     <button class="pill" @click="go('/settings?tab=strava')">
-      <span class="pi bg-lime lime">🔗</span>
+      <span class="pi bg-lime lime"><Link2 :size="17" /></span>
       <span class="pn">Integrations<small>Strava · Health Connect</small></span>
       <span class="chev">›</span>
     </button>
@@ -328,7 +333,11 @@ function go(path: string): void {
   --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
   --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-cyan: #28e6ff; --rn-amber: #ffb52e;
   --rn-track: #272a3b;
-  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 54px 22px 32px;
+  min-height: 100vh; margin: -1.25rem -1.5rem;
+  /* OG3-M1: the bar's own height is reserved at the shell now.
+     This view used to carry 32px of its own, which is how the
+     three neon views ended up disagreeing about it. */
+  padding: 54px 22px 12px;
   background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
   color: var(--rn-ink); font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
 }

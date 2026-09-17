@@ -37,10 +37,14 @@ class TestTheProblemItSolves:
 
         The no-op is not universal and the first draft of this test
         over-claimed that it was. Measured against this rack, a light or
-        moderate deload cannot move the weight anywhere from 5 to 25 lb.
+        moderate deload cannot move the weight anywhere from 5 to 20 lb.
         Above that the absolute cut grows large enough to clear the
-        disproportion guard and the drop goes through — 30 lb at 0.90 lands
-        on 25, and 50 lb moves even at 0.95.
+        disproportion guard and the drop goes through — 25 lb at 0.90 lands
+        on 20, and 50 lb moves even at 0.95.
+
+        The range was 5-25 until OG3-M3's probe found a non-monotonicity in
+        the guard and the fix let one more rung through. Re-measured rather
+        than adjusted by eye, because the whole entry rests on this number.
 
         What makes it total in practice is where this user actually trains.
         The mean of 547 weighted sets is 15.7 lb, the heaviest set ever
@@ -52,7 +56,7 @@ class TestTheProblemItSolves:
         stronger — and in both cases the feature has become less necessary
         rather than broken.
         """
-        for rung in [p for p in PAIRS if p <= 25]:
+        for rung in [p for p in PAIRS if p <= 20]:
             for factor in (0.95, 0.925, 0.90):
                 out = s.deload_round(rung, factor, PAIRS, NO_MICROS)
                 assert out == rung, (

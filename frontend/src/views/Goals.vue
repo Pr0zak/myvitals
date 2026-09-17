@@ -3,6 +3,11 @@ import { onMounted, ref } from "vue";
 import Card from "@/components/Card.vue";
 import { Plus, Pencil, Trash2, Check, X as XIcon, Sparkles } from "lucide-vue-next";
 import { api } from "@/api/client";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
+import { useConfirm } from "@/useConfirm";
+
+const confirmState = useConfirm();
+const ask = confirmState.ask;
 import { renderMarkdown } from "@/markdown";
 import { fmtDateTime } from "@/format";
 import { goalTone, goalMovedAway, goalDeltaLabel } from "@/goalState";
@@ -79,7 +84,15 @@ async function createGoal() {
 }
 
 async function endGoal(g: Goal) {
-  if (!confirm(`End the "${g.title}" goal?`)) return;
+  // OG3-M5 — ending a goal closes the history the progress bar is drawn
+  // from, and GOAL-STATE made that bar carry real information about
+  // direction. Worth a dialog that says so rather than a browser prompt.
+  if (!(await ask({
+    title: `End the "${g.title}" goal?`,
+    detail: "It stops tracking and leaves your dashboard. Its history is kept.",
+    confirmLabel: "End goal",
+    destructive: false,
+  }))) return;
   try {
     await api.aiUpdateGoal(g.id, { ended_at: new Date().toISOString() });
     await load();
@@ -87,7 +100,12 @@ async function endGoal(g: Goal) {
 }
 
 async function removeGoal(g: Goal) {
-  if (!confirm(`Delete "${g.title}" entirely?`)) return;
+  if (!(await ask({
+    title: `Delete "${g.title}" entirely?`,
+    detail: "This removes the goal and its history. Ending it instead keeps "
+      + "the record and just stops tracking.",
+    confirmLabel: "Delete goal",
+  }))) return;
   try { await api.aiDeleteGoal(g.id); await load(); }
   catch (e) { error.value = e instanceof Error ? e.message : "delete failed"; }
 }
@@ -222,6 +240,15 @@ onMounted(load);
       <div v-if="checks[g.id]" class="check-out" v-html="renderMarkdown(checks[g.id])"/>
     </Card>
   </div>
+
+  <!-- OG3-M5: the app draws its own confirmation for ending or deleting
+       a goal. -->
+  <ConfirmDialog
+    :open="confirmState.open.value"
+    v-bind="confirmState.request.value"
+    @confirm="confirmState.onConfirm"
+    @cancel="confirmState.onCancel"
+  />
 </template>
 
 <style scoped>

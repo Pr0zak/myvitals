@@ -29,6 +29,10 @@ import java.io.File
  * install intent when ACTION_DOWNLOAD_COMPLETE fires. Single instance:
  * we only ever have one APK update in flight.
  */
+/** OG3-M9 — smaller than this and it is not an APK. The real artifact is
+ *  tens of megabytes; an error page is a few kilobytes. */
+private const val MIN_APK_BYTES = 100L * 1024L
+
 object ApkDownloader {
 
     sealed class State {
@@ -130,6 +134,29 @@ object ApkDownloader {
         val f = apkFile
         if (f == null || !f.exists() || f.length() == 0L) {
             _state.value = State.Failed("Download finished but APK is missing.")
+            downloadId = -1
+            return
+        }
+        // OG3-M9 — a size floor, not just a non-zero check.
+        //
+        // A zero-length file is caught above; the case that got through is a
+        // SMALL one. An HTML error page, a login redirect or an S3 "access
+        // denied" body all arrive as a successful download of a few
+        // kilobytes, and the user is then offered an "Install" button that
+        // hands the OS package installer a file that is not an APK. The
+        // failure surfaces as Android's generic "There was a problem parsing
+        // the package", which says nothing about what actually happened.
+        //
+        // Deliberately NOT a checksum. `DownloadManager` already validates
+        // against `Content-Length` and reports STATUS_FAILED on a short
+        // download, and Android verifies the v2/v3 signature over the whole
+        // file at install time, so real corruption already fails closed.
+        // This is one `if` that turns an opaque parse error into a sentence.
+        if (f.length() < MIN_APK_BYTES) {
+            _state.value = State.Failed(
+                "Download finished but the file is only ${f.length() / 1024} KB — " +
+                    "that is an error page, not an APK. Check the release URL."
+            )
             downloadId = -1
             return
         }

@@ -232,11 +232,11 @@ td strong{color:var(--ink)}
 
 <div class="prog">
   <h4>Progress · 0 of 21 shipped</h4>
-  <div class="bar"><i class="b-ship" style="width:0%"></i><i class="b-wip" style="width:57%"></i></div>
+  <div class="bar"><i class="b-ship" style="width:0%"></i><i class="b-wip" style="width:86%"></i></div>
   <div class="legend">
     <span><b style="background:var(--done)"></b> shipped 0</span>
-    <span><b style="background:var(--warn)"></b> in progress 12</span>
-    <span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 9</span>
+    <span><b style="background:var(--warn)"></b> in progress 18</span>
+    <span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 3</span>
   </div>
   <p style="margin:14px 0 0;font-size:14px;color:var(--ink-2)">Tracked as <code>OG3-*</code> in the repo's <code>TODO.md</code>. Chips below carry the live state; this page is republished to the same URL as items land.</p>
 </div>
@@ -408,27 +408,27 @@ td strong{color:var(--ink)}
 <div class="opts">
   <div class="opt">
     <div class="h">Reserve the floating bar's height once at the shell</div>
-    <div class="m"><span class="chip c-id">OG3-M1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S</span><span class="chip c-todo">not started</span></div>
+    <div class="m"><span class="chip c-id">OG3-M1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S</span><span class="chip c-wip">in progress</span></div>
     <p class="b"><code>--neon-bar-h: calc(74px + env(safe-area-inset-bottom))</code> in <code>App.vue</code>'s neon token block plus one <code>.app.neon main</code> rule. The written per-view policy has already failed twice in three chances: <code>Rings.vue</code> reserves 104px while <code>Train.vue</code> and <code>You.vue</code> reserve 32px, and both of those end in tappable rows.</p>
   </div>
   <div class="opt">
     <div class="h">A <code>backdrop-filter</code> fallback</div>
-    <div class="m"><span class="chip c-id">OG3-M2</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-todo">not started</span></div>
+    <div class="m"><span class="chip c-id">OG3-M2</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-wip">in progress</span></div>
     <p class="b"><code>grep '@supports' frontend/src</code> returns zero across the whole frontend. <code>NeonNav.vue</code> is 78% fill plus <code>blur(14px)</code> with no prefixed twin and no opaque fallback. Three lines, plus raise the fill toward 0.92.</p>
   </div>
   <div class="opt">
     <div class="h">A seeded invariant probe for <code>round_weight</code> / <code>deload_round</code></div>
-    <div class="m"><span class="chip c-id">OG3-M3</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-todo">not started</span></div>
+    <div class="m"><span class="chip c-id">OG3-M3</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-wip">in progress</span></div>
     <p class="b">openGym's property probes are a test genre distinct from unit tests; no numerical cross-input invariant exists anywhere in the 113 myvitals test files. Both named invariants pass today. It matters because the micro-loader path is currently unexercised by real data — <code>wrist_weights_lb</code> is empty — so the distinguishing feature has no live regression cover.</p>
   </div>
   <div class="opt">
     <div class="h">Emoji doing icon work in the neon chrome</div>
-    <div class="m"><span class="chip c-id">OG3-M4</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-todo">not started</span></div>
+    <div class="m"><span class="chip c-id">OG3-M4</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-wip">in progress</span></div>
     <p class="b"><code>Train.vue:226</code> returns 🏋 ⛰ 🚴 from <code>classifyType()</code> — a second, emoji-flavoured copy of the classification <code>ActivityIcon.vue</code> already performs, and which has already absorbed ebike, paddle, VR fitness and the cardio-split case. Delete the table and render the component; swap the four <code>You.vue</code> pill glyphs for tinted lucide. A duplication bug, not a design complaint.</p>
   </div>
   <div class="opt">
     <div class="h"><code>ConfirmDialog.vue</code> for the four highest-stakes confirms</div>
-    <div class="m"><span class="chip c-id">OG3-M5</span><span class="chip c-v3">value 2</span><span class="chip c-eff">M</span><span class="chip c-todo">not started</span></div>
+    <div class="m"><span class="chip c-id">OG3-M5</span><span class="chip c-v3">value 2</span><span class="chip c-eff">M</span><span class="chip c-wip">in progress</span></div>
     <p class="b">17 <code>window.confirm</code> calls on web against 19 Compose <code>AlertDialog</code>s. Convert <code>StrengthToday.vue:1063</code> and <code>:1084</code> (set deletion feeds the progression reducer) and <code>Goals.vue:82</code>, <code>:90</code> only. Leave the 37 selects and 42 checkboxes alone.</p>
   </div>
   <div class="opt">
@@ -448,7 +448,7 @@ td strong{color:var(--ink)}
   </div>
   <div class="opt">
     <div class="h">Two one-liners while nearby</div>
-    <div class="m"><span class="chip c-id">OG3-M9</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-todo">not started</span></div>
+    <div class="m"><span class="chip c-id">OG3-M9</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-wip">in progress</span></div>
     <p class="b">A <code>targetHour + 3</code> ceiling in <code>WorkoutReminderWorker</code>, so a phone that was off all day does not post "Push workout today" at 11pm. And a sub-100 KB size floor in <code>ApkDownloader</code> — a file that small is a redirect or an error page, not an APK.</p>
   </div>
 </div>

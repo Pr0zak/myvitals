@@ -244,11 +244,21 @@ class TestBothSurfacesOfferIt:
 
         The ad-hoc exercise remove nearby does not confirm, but that only
         ever removes a slot the user added and has not touched.
+
+        The assertion is on the PROPERTY, not the mechanism. It used to grep
+        for `confirm(` specifically, which failed the moment OG3-M5 moved
+        this call site onto the app's own `ConfirmDialog` — a change that
+        strengthened the guarantee (the consequence is now stated separately
+        from the question, and focus lands on Cancel rather than on the
+        destructive action) while breaking a test written against the old
+        spelling. Either route satisfies what this test is actually for.
         """
         src = WEB.read_text()
         block = src[src.index("async function removeSet("):]
         block = block[:block.index("async function logFailed(")]
-        assert "confirm(" in block
+        assert "confirm(" in block or "await ask(" in block, (
+            "removeSet must confirm before destroying logged work"
+        )
 
     def test_the_phone_offers_an_edit_and_reuses_the_entry_form(self):
         """`SetEntryRow` already took `isCurrent` so a non-current set could

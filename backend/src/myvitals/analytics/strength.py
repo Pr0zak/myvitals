@@ -867,7 +867,26 @@ def deload_round(
     intended_cut = target_lb * (1.0 - deload)
     actual_cut = full - deloaded
     if actual_cut > 2.0 * intended_cut and deload >= 0.85:
-        return full  # coarse rounding over-corrected — hold full weight
+        # Coarse rounding over-corrected. Take the deepest cut the guard
+        # still permits rather than snapping all the way back to full.
+        #
+        # Returning `full` here was NON-MONOTONIC in the deload factor, and
+        # the seeded rounder probe (OG3-M3) found it on its first run: with
+        # 1.5 and 2 lb micro-loaders on a 12 lb lift, a 5% deload gave 11.5
+        # while a 7.5% deload gave 12 — asking for a deeper cut returned MORE
+        # weight, because the deeper one tripped this branch and the gentler
+        # one did not. Absurd on its face, invisible to every named test, and
+        # reachable the day this user buys a pair of wrist weights.
+        #
+        # The guard's purpose is unchanged: never take a drop more than twice
+        # the size intended. It just no longer treats "too big a cut" as
+        # "therefore no cut at all" when something in between exists.
+        limit = full - 2.0 * intended_cut
+        acceptable = [
+            w for w in valid_dumbbell_loads(pairs_lb, wrist_weights_lb)
+            if limit - 1e-9 <= w < full - 1e-9
+        ]
+        return min(acceptable) if acceptable else full
     return deloaded
 
 

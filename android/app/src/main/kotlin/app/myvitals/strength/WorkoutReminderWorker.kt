@@ -24,6 +24,9 @@ import java.time.ZoneId
  * hourly; worker no-ops outside the user's chosen hour and dedupes
  * within a day via SharedPreferences.
  */
+/** OG3-M9 — how many hours past the chosen hour a reminder may still fire. */
+private const val REMINDER_WINDOW_H = 3
+
 class WorkoutReminderWorker(
     appContext: Context, params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
@@ -45,6 +48,15 @@ class WorkoutReminderWorker(
             // periodic jobs drift, and a missed 8 AM window meant no
             // notification at all that day).
             if (now.hour < targetHour) return Result.success()
+            // OG3-M9 — and a ceiling, which the open-ended window lacked.
+            // "at or after the target hour" with nothing above it means a
+            // phone that was off, in a dead zone, or simply not checked all
+            // day posts "Push workout today" at 11pm, about a day that is
+            // effectively over. A reminder that arrives too late to act on
+            // is not a reminder; it is a reproach. Three hours is the window
+            // in which the suggestion is still actionable, and past it the
+            // day rolls over to tomorrow's check.
+            if (now.hour > targetHour + REMINDER_WINDOW_H) return Result.success()
 
             val today = LocalDate.now(ZoneId.systemDefault()).toString()
             val prefs = applicationContext.getSharedPreferences(

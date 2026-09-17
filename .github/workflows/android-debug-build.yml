@@ -37,6 +37,17 @@ jobs:
           java-version: "17"
 
       - uses: android-actions/setup-android@v3
+        with:
+          # The action's default `packages` is "tools platform-tools", and
+          # the deprecated `tools` package was removed from the SDK, so the
+          # default install now fails outright:
+          #   Warning: Failed to find package 'tools'
+          #   Error: sdkmanager failed with exit code 1
+          # It broke every Android job on 2026-09-17, including the v0.39.0
+          # release. The runner image already ships platform-tools and the
+          # build-tools the Gradle build asks for, so the right fix is to
+          # install nothing extra rather than to name a replacement.
+          packages: ''
 
       - uses: gradle/actions/setup-gradle@v4
         with:

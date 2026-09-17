@@ -193,6 +193,23 @@ fun TrainHubScreen(
     val doneExercises: Int = workout?.exercisesDone ?: 0
     val splitLabel = workout?.splitFocus?.let { titleCase(it) } ?: "Rest Day"
     val isRest = workout == null || workout!!.splitFocus.contains("rest", ignoreCase = true)
+
+    /** OG3-A1 — the call to action reads the session's own status, not only
+     *  its focus.
+     *
+     *  It was `if (isRest) "View" else "Continue"`, computed from
+     *  `splitFocus` alone, while `status` sat unread on the same object.
+     *  Every one of the completed and skipped workouts in the history
+     *  therefore presented as an outstanding task on the most prominent card
+     *  of this tab. Four labels off one enum; the same mapping is mirrored in
+     *  `Train.vue`, so keep the two in step. */
+    val ctaLabel = when {
+        workout == null || isRest -> "View"
+        workout!!.status == "completed" -> "Done"
+        workout!!.status == "skipped" -> "View"
+        workout!!.status == "in_progress" || workout!!.status == "paused" -> "Resume"
+        else -> "Start"
+    }
     val ringPct: Float = totalExercises?.takeIf { it > 0 }
         ?.let { (doneExercises.toFloat() / it).coerceIn(0f, 1f) } ?: 0f
     val ringLabel = if (totalExercises == null) "—" else "$doneExercises/$totalExercises"
@@ -295,7 +312,8 @@ fun TrainHubScreen(
             } ?: splitLabel,
             title = splitLabel,
             exerciseCount = totalExercises,
-            ctaLabel = if (isRest) "View" else "Continue",
+            ctaLabel = ctaLabel,
+            ctaDone = workout?.status == "completed",
             loading = loading && workout == null,
             upcoming = nextSessions,
             onClick = { onOpen("workout/today") },
@@ -633,6 +651,9 @@ private fun TodayHero(
     title: String,
     exerciseCount: Int?,
     ctaLabel: String,
+    /** OG3-A1 — a finished session shows a muted outline pill rather than the
+     *  lime fill, so "Done" does not read as an outstanding action. */
+    ctaDone: Boolean,
     loading: Boolean,
     upcoming: List<UpcomingDay>,
     onClick: () -> Unit,
@@ -688,14 +709,18 @@ private fun TodayHero(
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(14.dp))
-                        .background(NeonMV.Lime)
-                        .border(1.dp, NeonMV.Lime.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                        .background(if (ctaDone) NeonMV.Card else NeonMV.Lime)
+                        .border(
+                            1.dp,
+                            if (ctaDone) NeonMV.Track else NeonMV.Lime.copy(alpha = 0.5f),
+                            RoundedCornerShape(14.dp),
+                        )
                         .padding(horizontal = 16.dp, vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         ctaLabel,
-                        color = NeonMV.OnAccent,
+                        color = if (ctaDone) NeonMV.Muted else NeonMV.OnAccent,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.ExtraBold,
                     )

@@ -260,6 +260,56 @@ async def _goals(db: AsyncSession, args: dict[str, Any]) -> Any:
     ]
 
 
+async def _today_workout(db: AsyncSession, args: dict[str, Any]) -> Any:
+    """Today's plan as the app itself would render it (OG3-B1).
+
+    Every other tool here is retrospective — what happened, how much, how
+    consistently. None of them could answer "what am I lifting today, and at
+    what weight", which for someone who trains at home from a phone is the
+    highest-frequency question there is.
+
+    This calls the SAME hydration the `/workout/strength/today` endpoint
+    calls, so the prescription a model reads is the prescription both clients
+    render. Deriving a second version here is how a tool starts quoting
+    weights the app never offered.
+
+    Read-only despite the endpoint's name: `get_today` will GENERATE and
+    persist a plan when none exists yet, which is a write, so this reads the
+    existing row and returns a plain statement when there is none. A model
+    asking what today looks like must not be the thing that decides today
+    happens.
+    """
+    from ..api.workout import strength as strength_api
+
+    day = strength_api._local_today()
+    w = await strength_api._existing_workout_for(db, day)
+    if w is None:
+        return {
+            "date": day.isoformat(),
+            "planned": False,
+            "note": (
+                "No workout has been generated for today yet. Open the app to "
+                "generate one — this tool never creates a plan."
+            ),
+        }
+    out = await strength_api._hydrate_workout(db, w)
+    return out.model_dump(mode="json")
+
+
+async def _exercise_records(db: AsyncSession, args: dict[str, Any]) -> Any:
+    """Per-exercise personal bests (OG3-B1).
+
+    e1RM already drives `/records` on both clients and was simply not
+    exposed. Reuses the endpoint body so the five PR kinds — heaviest set,
+    best e1RM, best reps, best added load, longest hold — stay in one place;
+    PR-1b exists because a single scalar could not represent a bodyweight
+    hold, and a second implementation here would lose that again.
+    """
+    from ..api.workout import strength as strength_api
+
+    return await strength_api.strength_records(db)
+
+
 def _days_schema(default: int, maximum: int, what: str) -> dict[str, Any]:
     return {
         "type": "object",
@@ -337,6 +387,22 @@ TOOLS: dict[str, tuple[str, dict[str, Any], ToolFn]] = {
         "Active health goals with their targets.",
         {"type": "object", "properties": {}, "additionalProperties": False},
         _goals,
+    ),
+    "preview_today_workout": (
+        "Today's generated strength plan: split focus, each exercise with its "
+        "prescribed sets, reps and weight, the reason behind each target, "
+        "progress counters, and any fasting or recovery context applied. "
+        "Reports that nothing is planned rather than generating one.",
+        {"type": "object", "properties": {}, "additionalProperties": False},
+        _today_workout,
+    ),
+    "get_exercise_records": (
+        "Per-exercise personal bests: heaviest set and best estimated 1RM "
+        "for loaded lifts, best reps or best added load for bodyweight "
+        "exercises, and longest hold for timed ones, each with the date and "
+        "the set it came from.",
+        {"type": "object", "properties": {}, "additionalProperties": False},
+        _exercise_records,
     ),
 }
 

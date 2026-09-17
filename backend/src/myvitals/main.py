@@ -169,7 +169,9 @@ async def _weekly_ai_digest() -> None:
     from datetime import datetime, timedelta, timezone
     from sqlalchemy import delete, select
     from .db import models, session as _session
-    from .integrations.claude import build_summary_payload, explain_legacy, hash_payload
+    from .integrations.claude import (
+        _credentials_missing, build_summary_payload, explain_legacy, hash_payload,
+    )
 
     async with _session.SessionLocal() as db:
         # Retention: ai_summaries is append-only on every AI call and never
@@ -188,7 +190,19 @@ async def _weekly_ai_digest() -> None:
             log.warning("ai_summaries retention prune failed: %s", e)
 
         cfg = await db.get(models.AiConfig, 1)
-        if not cfg or not cfg.enabled or not cfg.weekly_digest_enabled or not cfg.anthropic_api_key:
+        # OG3-L2. This read `not cfg.anthropic_api_key` — one of the guards
+        # `_credentials_missing` was written to replace when the CLI provider
+        # shipped. That test is correct for Anthropic and wrong for every
+        # other provider: `claude_cli` authenticates through the machine's
+        # subscription OAuth and deliberately has no API key, so the Sunday
+        # digest has been silently returning at this line ever since, logging
+        # only at debug level.
+        if (
+            not cfg
+            or not cfg.enabled
+            or not cfg.weekly_digest_enabled
+            or _credentials_missing(cfg)
+        ):
             log.debug("weekly AI digest: not configured / disabled, skipping")
             return
         try:

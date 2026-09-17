@@ -16,6 +16,13 @@ type Row = {
   mev: number;
   mav: number;
   status: Status;
+  /** OG3-B2 — how many exercises the user's own equipment can reach for
+   *  this muscle, and whether that pool is smaller than its own MEV. Both
+   *  decided server-side: `pool_below_mev` is a judgement, and a second
+   *  copy of the rule on a client is how two surfaces drift. */
+  available_primary?: number;
+  available_any?: number;
+  pool_below_mev?: boolean;
 };
 
 const rows = ref<Row[]>([]);
@@ -82,12 +89,21 @@ function muscleLabel(m: string): string {
           <div class="mv-mev-tick" :style="{ left: mevPct(r) + '%' }"></div>
         </div>
         <div class="mv-tag">{{ r.status.replace("_", " ") }}</div>
+        <!-- OG3-B2: under-trained and under-equipped are different problems
+             and only one of them is the user's to fix. Shown only when the
+             pool cannot reach MEV, so it stays an exception rather than
+             another number on every row. -->
+        <div v-if="r.pool_below_mev" class="mv-pool">
+          only {{ r.available_any }} exercise{{ r.available_any === 1 ? "" : "s" }}
+          in your equipment reach this — below its MEV of {{ r.mev }}
+        </div>
       </li>
     </ul>
   </Card>
 </template>
 
 <style scoped>
+.mv-pool { font-size: .72rem; line-height: 1.4; color: var(--muted); margin-top: 2px; }
 .mv-list { list-style: none; padding: 0; margin: 0; display: flex;
            flex-direction: column; gap: 0.4rem; }
 .mv-row { padding: 0.5rem 0.6rem; border-radius: 8px;

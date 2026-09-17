@@ -1406,6 +1406,10 @@ Use the `give_variety_nudge` tool. Suggest 0-2 swaps. Rules:
 - The `reason` cites concrete history (e.g. "Bulgarian Split Squat done
   3 of last 4 leg sessions; Cossack Squat untouched in 4 weeks") in
   ≤24 words.
+- `previously_declined` lists swaps the user has already turned down for
+  this plan. Do NOT propose them again unless something in the data
+  genuinely justifies revisiting one, and say what changed if you do.
+  Offering a rejected suggestion back reads as not having listened.
 """
 
 
@@ -1506,6 +1510,23 @@ async def build_strength_nudge_payload(
     ))
     available_catalog = candidates[:60]
 
+    # OG3-C2 — what the user has already turned down for this plan.
+    #
+    # Dismissal used to be client-only state, and `POST /ai/strength/nudge`
+    # caches by payload hash with no `force` parameter, so "Get fresh
+    # suggestions" after a decline was GUARANTEED to return the two swaps
+    # just dismissed. Feeding the declines in fixes both halves at once: the
+    # prompt can be told not to repeat them, and because the list is part of
+    # the payload it moves the hash, so the re-ask is genuinely a different
+    # question rather than a cache hit.
+    #
+    # Ids only, never the reasons, and capped — the cache key is per-byte and
+    # this payload has to stay bounded.
+    declined = [
+        d for d in (workout.nudge_declines or [])
+        if isinstance(d, dict) and d.get("target") and d.get("replacement")
+    ][-10:]
+
     return {
         "today": {
             "date": str(workout.date),
@@ -1514,7 +1535,114 @@ async def build_strength_nudge_payload(
         },
         "recent_history": recent_history,  # exercise_id -> {count, last_seen}
         "available_catalog": available_catalog,
+        "previously_declined": declined,
     }
+
+
+def validate_strength_swaps(
+    tool_input: dict[str, Any],
+    payload: dict[str, Any],
+    catalog_by_id: dict[str, dict],
+) -> dict[str, Any]:
+    """Re-check the model's swaps against the plan and catalog (OG3-C1).
+
+    `strength_nudge` took `block.input` verbatim, JSON-dumped it, and cached
+    the result in `ai_summaries`. The prompt asks for three properties —
+    target must be in today's plan, replacement must come from
+    `available_catalog`, muscles should match — but a prompt rule is a
+    request, not a guarantee, and this is the same layered pattern
+    `assess_meal_fat` and `fasting_coach()` already use for the numbers that
+    matter.
+
+    Two failure modes, and only the first one ever announced itself:
+
+      * A hallucinated id renders as a plausible exercise name with a
+        confident reason, and fails only when the user taps Accept and
+        `swap_exercise` 404s — after they have read and believed it. Because
+        the answer is cached by payload hash, it then persists until the
+        plan changes.
+      * A replacement that IS in the catalog but trains a different muscle
+        never fails at all. It is silently accepted and quietly changes what
+        the session trains.
+
+    Drops are RECORDED, not silent — `notes` follows MEAL-9's convention
+    that an automatic repair says what it changed, because a card that
+    quietly shows one suggestion where the model offered two is
+    indistinguishable from a model that only had one idea.
+
+    Names are attached here too. Both clients rendered the raw slug through
+    `replace("_", " ")`, which is why a hallucinated id looked like a real
+    exercise: the client had no way to know the difference.
+    """
+    swaps = tool_input.get("swaps")
+    if not isinstance(swaps, list):
+        return {"swaps": [], "notes": ["the model returned no usable swaps"]}
+
+    # The plan lives at `today.exercises`, not at the top level. Reading the
+    # wrong key here would make EVERY swap fail the in-plan check and return
+    # an always-empty card — a validator that silently rejects everything is
+    # worse than no validator, because it looks like the model had no ideas.
+    today = payload.get("today")
+    plan_rows = (today or {}).get("exercises") if isinstance(today, dict) else None
+    in_plan = {
+        p["exercise_id"]: p for p in plan_rows or []
+        if isinstance(p, dict) and p.get("exercise_id")
+    }
+    offered = {
+        c["exercise_id"] for c in payload.get("available_catalog") or []
+        if isinstance(c, dict) and c.get("exercise_id")
+    }
+
+    kept: list[dict[str, Any]] = []
+    notes: list[str] = []
+    for raw in swaps:
+        if not isinstance(raw, dict):
+            continue
+        target = raw.get("target_exercise_id")
+        repl = raw.get("replacement_exercise_id")
+
+        if target not in in_plan:
+            notes.append(
+                f"dropped a swap naming {target!r}, which is not in today's plan"
+            )
+            continue
+        if repl not in offered:
+            notes.append(
+                f"dropped a swap to {repl!r}, which was not among the "
+                "exercises offered"
+            )
+            continue
+
+        # Muscle parity. The pool was already filtered to today's muscles, so
+        # this can only fire on a catalog row whose tagging disagrees with
+        # the slot it would replace — but that is exactly the case that
+        # cannot fail loudly later.
+        want = in_plan[target].get("primary_muscle")
+        got = (catalog_by_id.get(repl) or {}).get("primary_muscle")
+        if want and got and want != got:
+            notes.append(
+                f"dropped a swap from {want} to {got}, which changes what "
+                "the session trains"
+            )
+            continue
+
+        kept.append({
+            "target_exercise_id": target,
+            "replacement_exercise_id": repl,
+            # Real display names, so a client never has to un-slug an id and
+            # can never make a bad one look plausible.
+            "target_name": in_plan[target].get("name")
+            or (catalog_by_id.get(target) or {}).get("name") or target,
+            "replacement_name": (catalog_by_id.get(repl) or {}).get("name") or repl,
+            "reason": raw.get("reason") or "",
+        })
+        if len(kept) == 2:
+            break
+
+    out: dict[str, Any] = {"swaps": kept}
+    if notes:
+        out["notes"] = notes
+    return out
 
 
 async def strength_nudge(
@@ -1548,6 +1676,10 @@ async def strength_nudge(
         if getattr(block, "type", "") == "tool_use" and block.name == "give_variety_nudge":
             tool_input = block.input  # type: ignore[assignment]
             break
+    # OG3-C1 — the model's answer is untrusted input. Validated BEFORE the
+    # result is returned, because the caller caches it in `ai_summaries` by
+    # payload hash, so one bad answer would persist until the plan changed.
+    tool_input = validate_strength_swaps(tool_input, payload, catalog_by_id)
     return AiResult(
         content=json.dumps(tool_input),
         model=resp.model,

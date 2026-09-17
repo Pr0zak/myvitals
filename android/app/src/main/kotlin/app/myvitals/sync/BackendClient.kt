@@ -223,6 +223,18 @@ interface BackendApi {
         @Path("wexId") wexId: Long,
     ): StrengthWorkoutDetail
 
+    /** OG3-C2 — record that an AI-suggested swap was turned down.
+     *
+     *  Dismissal used to live only in `CoachCardState`, and the nudge
+     *  endpoint caches by payload hash with no `force` parameter — so "Get
+     *  fresh suggestions" after a decline returned exactly what was just
+     *  dismissed. Idempotent server-side, which matters because this is
+     *  fire-and-forget and may be sent more than once. */
+    @POST("workout/strength/workouts/{workoutId}/nudge-decline")
+    suspend fun declineStrengthNudge(
+        @Path("workoutId") workoutId: Long, @Body body: NudgeDeclineBody,
+    ): StrengthWorkoutDetail
+
     @POST("workout/strength/workout-exercises/{wexId}/swap")
     suspend fun swapStrengthExercise(
         @Path("wexId") wexId: Long, @Body body: SwapBody,

@@ -20,6 +20,82 @@ acting on it.
 
 ## Active — actionable now
 
+## #OG3 — openGym third-pass teardown (2026-09-16)
+
+Third reading of `DuarteSantos8/openGym`, run because #ENHANCE saw it to
+~v1.2.5 and #OG2 to ~v1.2.11; HEAD is the v1.3.x line. Four lenses, each
+verifying its own findings against this source and the production database,
+then one adversarial refuter. 49 findings, 31 survived the check, roughly a
+third of those survived the refuter. The refusals are recorded in the report
+and are measured against this user's own data — do not re-open them from
+intuition.
+
+The AGPL rule from both prior passes still binds: **openGym is AGPL-3.0 and
+myvitals is not. Reimplement behaviour from the described design; never copy
+source.**
+
+Report artifact: `https://claude.ai/code/artifact/b9820117-3615-426e-9f56-d111f9a87803`
+Repo copy: `docs/opengym-third-pass.html` — **keep its status chips in step
+with this table.** Republish by passing the existing URL so the link the user
+holds keeps working.
+
+### Live — the app is wrong right now
+
+| ID | Task | Size | Surface |
+|---|---|---|---|
+| OG3-L1 | Google Health grant dead since 2026-09-08 (`invalid_grant`), retried every 15 min, surfaced nowhere. **Recovery is on Google's side**: publish the OAuth client to *In production*, then Settings → Google → Reconnect | — | user action |
+| OG3-L2 | `main.py:191` gates the weekly AI digest on `not cfg.anthropic_api_key` — a guard `_credentials_missing(cfg)` replaced, so the digest silently no-ops under `provider="claude_cli"` | S | backend |
+
+### Batch A — the session surfaces stop lying (one tag, pure render)
+
+| ID | Task | Size | Surface |
+|---|---|---|---|
+| OG3-A1 | Today's session card reads `split_focus` only; `status` is in the same payload and neither client reads it, so 45 completed + 86 skipped workouts all present as outstanding | S | both |
+| OG3-A2 | Web rest day is a dead end; the phone already names the next session from `/upcoming` | S | web |
+| OG3-A3 | `LastSetOut` carries no date and no rating, though both are already in the join — and 106 of 159 re-training gaps exceed 14 days | S | both |
+| OG3-A4 | `tiles.py` never passes `target` for weight, so `MetricCard.vue`'s dashed goal line is always null | S | both |
+| OG3-A5 | `Train.vue` invents `heroMinutes` as `exercises × 7` and renders an unbound `RPE —`; the phone prints "6 exercises" for the same session | S | web |
+
+### Batch B — backend only, no parity cost
+
+| ID | Task | Size | Surface |
+|---|---|---|---|
+| OG3-B1 | Two MCP tools: `preview_today_workout` and `get_exercise_records`. All eight existing tools are retrospective | S | backend |
+| OG3-B2 | Count exercises this equipment can actually reach per muscle — 5 of 14 audited muscles have a pool smaller than their own MEV | S | both |
+| OG3-B3 | Say "per side" on unilateral lifts. **Phase 1 only** — flag the rows, do NOT double `target_sets` | S | both |
+
+### Batch C — the model is untrusted input
+
+| ID | Task | Size | Surface |
+|---|---|---|---|
+| OG3-C1 | `strength_nudge` renders and caches unvalidated `block.input`; filter against `selectable_ids` and attach real names | M | both |
+| OG3-C2 | Declines never reach the server, so "Get fresh suggestions" is guaranteed to return the swaps just dismissed | M | both |
+
+### Batch D — integrations that fail loudly
+
+| ID | Task | Size | Surface |
+|---|---|---|---|
+| OG3-D1 | Classify integration failures (`transient`/`auth`/`config`/`upstream`); stop retrying `auth`, surface it as a reconnect action | M | backend |
+
+### Batch E — the prescription says what it means
+
+| ID | Task | Size | Surface |
+|---|---|---|---|
+| OG3-E1 | Deload on the weight × reps grid. With `wrist_weights_lb = []` the light/moderate deload is a structural no-op at every rung 5-50 lb | M | backend |
+
+### Menu — survived, below the line
+
+`OG3-M1` reserve the floating bar height once at the shell (S) ·
+`OG3-M2` `backdrop-filter` fallback, zero `@supports` in the frontend (S) ·
+`OG3-M3` seeded invariant probe for `round_weight`/`deload_round` (S) ·
+`OG3-M4` emoji doing icon work in `Train.vue`, duplicating `ActivityIcon` (M) ·
+`OG3-M5` `ConfirmDialog.vue` for the four highest-stakes confirms (M) ·
+`OG3-M6` neon type scale — 31 of 42 web weights at 700+ (L) ·
+`OG3-M7` BodyMap tap-through to the filtered catalog (L) ·
+`OG3-M8` unilateral phase 2 — a volume-semantics decision, deferred ·
+`OG3-M9` reminder hour ceiling + APK size floor (S)
+
+
 ## #OG2 — openGym second-pass teardown (2026-08-29)
 
 A second teardown of `gitlab.com/DuarteSantos8/opengym`, run because the

@@ -111,7 +111,7 @@ fun KeyMetrics(
                             higherIsBetter = t.higherIsBetter,
                             bandLow = t.bandLow,
                             bandHigh = t.bandHigh,
-                            target = if (t.key == "steps") t.target else null,
+                            target = t.target,
                             bars = t.key == "steps",
                             span = if (t.key in INTERMITTENT) 14 else 7,
                             accent = accentFor(t.key),
@@ -210,13 +210,18 @@ private fun qualifier(t: VitalTile): String {
         val left = ((t.target ?: 0.0) - v).toLong()
         return if (left > 0) "Today • %,d to go".format(left) else "Today • goal met"
     }
+    // OG3-A4 — rendered verbatim. The distance to a weight goal is signed and
+    // its wording depends on which way the goal points, so the server builds
+    // the sentence; deriving `target - value` here would put a second opinion
+    // about direction on a client, which is what GOAL-STATE exists to stop.
     val sd = t.staleDays
-    if (sd != null && sd > 0 && t.asOf != null) {
-        return runCatching {
+    val stale = if (sd != null && sd > 0 && t.asOf != null) {
+        runCatching {
             LocalDate.parse(t.asOf).format(DateTimeFormatter.ofPattern("MMM d"))
-        }.getOrDefault("Today")
-    }
-    return "Today"
+        }.getOrNull()
+    } else null
+    t.goalNote?.let { return "${stale ?: "Today"} • $it" }
+    return stale ?: "Today"
 }
 
 private fun displayValue(t: VitalTile): String? =

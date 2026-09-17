@@ -46,6 +46,13 @@ const deloadError = ref<string | null>(null);
 type Swap = {
   target_exercise_id: string;
   replacement_exercise_id: string;
+  /** OG3-C1 — real catalog display names, attached server-side after the
+   *  model's answer is validated against today's plan and the offered
+   *  pool. This card used to un-slug the id with `replace(/_/g, " ")`,
+   *  which is exactly what made a hallucinated id render as a plausible
+   *  exercise: the client had no way to tell one from the other. */
+  target_name?: string | null;
+  replacement_name?: string | null;
   reason: string;
 };
 const swaps = ref<Swap[] | null>(null);
@@ -138,7 +145,16 @@ async function loadExplain() {
 }
 
 function dismissSwap(s: Swap) {
+  // Local dismissal first so the row disappears on tap.
   swapsDismissed.value = new Set([...swapsDismissed.value, s.target_exercise_id]);
+  // OG3-C2 — and tell the server, which is the half that was missing.
+  // `POST /ai/strength/nudge` caches by payload hash and takes no `force`,
+  // so without this "Get fresh suggestions" is a cache hit on exactly the
+  // answer just dismissed. Fire-and-forget: a failed decline must not stop
+  // the card responding, and the worst case is the behaviour we had.
+  api.declineStrengthNudge(
+    props.workoutId, s.target_exercise_id, s.replacement_exercise_id,
+  ).catch(() => { /* best-effort; the next ask simply repeats as before */ });
 }
 
 function visibleSwaps(): Swap[] {
@@ -256,9 +272,9 @@ watch(() => props.refreshKey, () => {
         <ul v-else class="swap-list">
           <li v-for="s in visibleSwaps()" :key="s.target_exercise_id" class="swap-item">
             <div class="swap-row">
-              <code class="eid">{{ s.target_exercise_id.replace(/_/g, " ") }}</code>
+              <code class="eid">{{ s.target_name || s.target_exercise_id.replace(/_/g, " ") }}</code>
               <span class="arrow">→</span>
-              <code class="eid alt">{{ s.replacement_exercise_id.replace(/_/g, " ") }}</code>
+              <code class="eid alt">{{ s.replacement_name || s.replacement_exercise_id.replace(/_/g, " ") }}</code>
             </div>
             <div class="reason">{{ s.reason }}</div>
             <div class="actions">

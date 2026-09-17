@@ -99,6 +99,20 @@ function qualifier(t: VitalTile): string {
     const left = Math.max(0, Math.round(t.target - t.value));
     return left > 0 ? `Today • ${left.toLocaleString()} to go` : "Today • goal met";
   }
+  // OG3-A4 — rendered verbatim. The distance to a weight goal is signed and
+  // its wording depends on which way the goal points, so the server builds
+  // the sentence; deriving `target - value` here would put a second opinion
+  // about direction on the client, which is what GOAL-STATE exists to stop.
+  if (t.goal_note) {
+    if (t.stale_days != null && t.stale_days > 0) {
+      const d = new Date((t.as_of ?? "") + "T00:00:00");
+      if (!Number.isNaN(d.getTime())) {
+        const when = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        return `${when} • ${t.goal_note}`;
+      }
+    }
+    return `Today • ${t.goal_note}`;
+  }
   if (t.stale_days != null && t.stale_days > 0) {
     const d = new Date((t.as_of ?? "") + "T00:00:00");
     if (!Number.isNaN(d.getTime())) {
@@ -175,7 +189,7 @@ const shown = computed(() => {
           :series="t.series"
           :band-low="t.band_low"
           :band-high="t.band_high"
-          :target="t.key === 'steps' ? t.target ?? null : null"
+          :target="t.target ?? null"
           :chart="BAR.has(t.key) ? 'bar' : 'line'"
           :span="INTERMITTENT.has(t.key) ? 14 : 7"
           :accent="ACCENT[t.key] ?? '#28e6ff'"

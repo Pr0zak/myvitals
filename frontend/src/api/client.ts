@@ -1308,6 +1308,20 @@ export const api = {
     return data;
   },
 
+  /** OG3-C2 — tell the server a suggested swap was turned down.
+   *
+   *  Dismissal used to live only in component state, and the nudge endpoint
+   *  caches by payload hash with no `force`, so "Get fresh suggestions"
+   *  after a decline returned exactly what was just dismissed. */
+  async declineStrengthNudge(
+    workoutId: number, targetExerciseId: string, replacementExerciseId: string,
+  ): Promise<void> {
+    await http.post(`/workout/strength/workouts/${workoutId}/nudge-decline`, {
+      target_exercise_id: targetExerciseId,
+      replacement_exercise_id: replacementExerciseId,
+    });
+  },
+
   async swapStrengthExercise(
     workoutExerciseId: number, newExerciseId: string,
   ): Promise<import("./types").StrengthWorkoutExercise> {

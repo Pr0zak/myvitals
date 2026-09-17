@@ -329,6 +329,11 @@ export interface PlannedSet {
   /** Always null for an unlogged set. The rating drives next session's
    *  weight, so defaulting it would manufacture progression data. */
   prefill_rating: number | null;
+  /** OG3-B3 — the exercise is performed one side at a time, so `target_reps`
+   *  means reps PER SIDE. `side_label` is the words to append, decided
+   *  server-side so the two clients cannot word it differently. */
+  per_side?: boolean;
+  side_label?: string | null;
 }
 
 export interface StrengthWorkoutExercise {
@@ -347,7 +352,12 @@ export interface StrengthWorkoutExercise {
   load_hint?: string | null;  // LOAD-1: "30 lb DB + 2.5 lb wrist" when micro-loaders needed
   program_scheme?: string | null;  // PROG-1: "Greyskull LP · AMRAP last · +5" badge on program lifts
   // LOG-1: previous session's working sets, for a faint "last: 30×8 · 30×8" ghost line.
-  last_sets?: { set_number: number; weight_lb: number | null; reps: number | null }[];
+  /** OG3-A3 — `date` and `rating` were already in the join behind this and
+   *  simply were not selected. See `LastSetOut` for why both matter. */
+  last_sets?: {
+    set_number: number; weight_lb: number | null; reps: number | null;
+    date?: string | null; rating?: number | null;
+  }[];
   // SKIP-1: the user explicitly declined this slot. Distinct from an empty
   // `sets` array, which means "never touched" — render collapsed with an
   // Undo instead of a live logging table.
@@ -425,6 +435,10 @@ export interface VitalTile {
   /** Section heading for the Key metrics grid, assigned server-side. */
   group?: string;
   target?: number | null;
+  /** OG3-A4 — the goal stated in words ("5 lb to lose"), built server-side
+   *  because its wording depends on the goal's direction and GOAL-STATE
+   *  owns direction. Null when no goal is set or there is no reading. */
+  goal_note?: string | null;
   delta: number | null;
   z?: number | null;
   status: "good" | "typical" | "watch" | null;

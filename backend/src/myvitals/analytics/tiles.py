@@ -479,6 +479,9 @@ async def tile_stats(
         # tile so clients can read one shape instead of branching per key.
         kw.setdefault("as_of", None)
         kw.setdefault("stale_days", None)
+        # OG3-A4. A NEW field rather than reusing `status_reason`, which is
+        # tied to a verdict this tile deliberately does not have.
+        kw.setdefault("goal_note", None)
         tiles.append(suppress_stale_verdict(kw))
 
     # ── personal-baseline metrics ────────────────────────────────────
@@ -654,9 +657,45 @@ async def tile_stats(
     )).first()
     wkg = float(wrow[0]) if wrow else None
     w_as_of = _local_date(wrow[1], day) if wrow else None
+
+    # OG3-A4 — the stored weight goal, as a dashed line on the tile and a
+    # sentence beside the number.
+    #
+    # `MetricCard.vue` has drawn a dashed rule at `target` since it shipped
+    # and includes it in the y-extent, but this builder never passed one for
+    # weight, so the goal was only ever visible on the /weight detail view —
+    # which is exactly where someone tracking a target does not look daily.
+    #
+    # Two rules constrain what goes in here. The note is built server-side
+    # rather than as `target - value` on each client, because its wording
+    # depends on the goal's DIRECTION and GOAL-STATE owns direction. And the
+    # tile stays `kind="neutral"` with `higher_is_better=None`: the number
+    # and the distance travel, never the colour. A losing week and a gaining
+    # week are the same neutral grey here; the verdict belongs to
+    # `_goal_progress`, which already has a noise band and a sober-safe tone.
+    #
+    # The unit is asserted in `tests/test_tiles_weight_goal.py`. The stored
+    # column is KILOGRAMS and this tile is POUNDS; emitting the raw column
+    # beside a pounds value is the exact bug `_goal_progress` shipped in
+    # v0.32.x, one line outside the reach of the test that walked it.
+    goal_kg = (await db.execute(
+        select(models.UserProfile.weight_goal_kg).limit(1)
+    )).scalar_one_or_none()
+    goal_lb = round(float(goal_kg) * KG_TO_LB, 1) if goal_kg else None
+    goal_note = None
+    if goal_lb is not None and wkg is not None:
+        gap = round(wkg * KG_TO_LB - goal_lb, 1)
+        if abs(gap) < 0.1:
+            goal_note = "at goal"
+        elif gap > 0:
+            goal_note = f"{gap:g} lb to lose"
+        else:
+            goal_note = f"{abs(gap):g} lb to gain"
+
     add(key="weight", label="Weight", unit="lb",
         value=(round(wkg * KG_TO_LB, 1) if wkg is not None else None),
         kind="neutral", higher_is_better=None,
+        target=goal_lb, goal_note=goal_note,
         as_of=(w_as_of.isoformat() if w_as_of else None),
         stale_days=((day - w_as_of).days if w_as_of else None),
         series=await _intermittent_series(

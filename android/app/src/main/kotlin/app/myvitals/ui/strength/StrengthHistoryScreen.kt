@@ -277,6 +277,21 @@ private fun MuscleVolumeCard(settings: SettingsRepository, neon: Boolean) {
                                     .background(accent),
                             )
                         }
+                        // OG3-B2 — under-trained and under-equipped are
+                        // different problems, and only one of them is the
+                        // user's to fix. Rendered only when the pool cannot
+                        // reach MEV, so it stays an exception rather than
+                        // another number on every row.
+                        if (r.poolBelowMev && r.availableAny != null) {
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "only ${r.availableAny} exercise" +
+                                    (if (r.availableAny == 1) "" else "s") +
+                                    " in your equipment reach this — below its " +
+                                    "MEV of ${r.mev}",
+                                color = muted, fontSize = 10.sp, lineHeight = 13.sp,
+                            )
+                        }
                     }
                 }
             }

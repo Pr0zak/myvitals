@@ -240,17 +240,33 @@ async function applySwap(newExId: string) {
 // Variety-nudge accept: AI returns target/replacement by exercise_id;
 // we map target_exercise_id back to the matching workout_exercise row.
 async function acceptNudge(p: { targetExerciseId: string; replacementExerciseId: string }) {
-  if (!workout.value) return;
+  // OG3-C1 — every failure path here used to end in a bare `return` or a
+  // console warning, so a tap on "Accept swap" that could not be honoured
+  // did nothing at all and looked like an unresponsive button. The swaps
+  // themselves are now validated server-side before the card renders, so
+  // reaching one of these branches is genuinely unexpected — which is
+  // precisely why it should say so rather than go quiet.
+  swapError.value = "";
+  if (!workout.value) {
+    swapError.value = "No workout loaded — reload and try again.";
+    return;
+  }
   const wex = workout.value.exercises.find(
     (x) => x.exercise_id === p.targetExerciseId,
   );
-  if (!wex) return;
+  if (!wex) {
+    swapError.value =
+      "That exercise is no longer in today's plan — the suggestion is stale.";
+    return;
+  }
   try {
     await api.swapStrengthExercise(wex.id, p.replacementExerciseId);
     await loadAll();
   } catch (e: unknown) {
-    /* surface via existing swapError if you want; silent for now */
-    console.warn("nudge swap failed", e);
+    const resp = (e as { response?: { data?: { detail?: string }; status?: number } })
+      .response;
+    swapError.value = resp?.data?.detail
+      ?? (e instanceof Error ? e.message : String(e));
   }
 }
 
@@ -535,6 +551,16 @@ function isTimedExercise(wex: StrengthWorkoutExercise): boolean {
 
 // For bilateral mobility (sets=2, one per side), label the sets R / L
 // instead of 1 / 2 — mirrors the phone TimedSetRow treatment.
+/** OG3-B3 — "per side" when the server says the rep target is per side.
+ *
+ *  Distinct from `bilateralSideLabel` below, which is the mobility
+ *  mechanism: that one doubles `target_sets` and labels the two rows R/L.
+ *  This one changes no numbers at all — it states what the existing rep
+ *  count counts. */
+function sideLabel(wex: StrengthWorkoutExercise): string | null {
+  return wex.planned_sets?.find((p) => p.per_side)?.side_label ?? null;
+}
+
 function bilateralSideLabel(wex: StrengthWorkoutExercise, n: number): string {
   const c = ex(wex.exercise_id);
   if (!c?.is_bilateral || wex.target_sets !== 2) return String(n);
@@ -1148,6 +1174,42 @@ function lastSetsSummary(wex: StrengthWorkoutExercise): string | null {
     .join(" · ");
 }
 
+/** OG3-A3 — when that last session was, and how it felt.
+ *
+ *  "last:" without a date reads as "last session"; the real gap on this
+ *  history averages 31 days, so the line was quietly implying a recency it
+ *  did not have. The rating is the input the progression policy acts on, so
+ *  showing it makes the prefilled weight explicable rather than magic.
+ *
+ *  Built component-wise from `YYYY-MM-DD`. `new Date("2026-08-14")` parses as
+ *  UTC midnight, which in Central is the previous evening — the same
+ *  local-day boundary that has bitten `/summary/today` twice. */
+function lastSetsWhen(wex: StrengthWorkoutExercise): string | null {
+  const ls = wex.last_sets;
+  const iso = ls?.find((s) => s.date)?.date;
+  if (!iso) return null;
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  const then = new Date(y, m - 1, d);
+  const now = new Date();
+  const days = Math.round(
+    (new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - then.getTime())
+      / 86_400_000,
+  );
+  const when = days <= 0 ? "today"
+    : days === 1 ? "yesterday"
+    : days < 7 ? `${days}d ago`
+    : then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+  // One rating for the line, not one per set: the ghost is already a
+  // compressed summary and a per-set rating list would be longer than the
+  // weights it annotates. The worst rating is the honest one to show — a
+  // session that ended in a failed set is not a session that felt "Easy".
+  const rated = (ls ?? []).map((s) => s.rating).filter((r): r is number => r != null);
+  const worst = rated.length ? Math.min(...rated) : null;
+  return worst == null ? when : `${when} · ${ratingLabel(worst)}`;
+}
+
 // Lookup helpers for superset rendering
 function supersetPartnerName(superId: string | null, ownId: number): string | null {
   if (!superId || !workout.value) return null;
@@ -1671,6 +1733,11 @@ useVisibilityRefresh(loadAll);
             {{ wex.target_sets }} ×
             {{ wex.target_reps_low === wex.target_reps_high
               ? wex.target_reps_low : `${wex.target_reps_low}-${wex.target_reps_high}` }}
+            <!-- OG3-B3: rendered verbatim from the server. "3 × 10" on a
+                 One-Arm Row is ambiguous between per arm and in total, and
+                 both readings are plausible — so the words come from one
+                 place rather than each client wording it its own way. -->
+            <span v-if="sideLabel(wex)" class="side-label"> {{ sideLabel(wex) }}</span>
             <span v-if="wex.target_weight_lb"> @ {{ wex.target_weight_lb }} lb</span>
             <span class="rest"> · {{ wex.target_rest_s }}s rest</span>
           </span>
@@ -1697,7 +1764,8 @@ useVisibilityRefresh(loadAll);
         <!-- LOG-1: what you did last time (rep-based rows only) -->
         <p v-if="lastSetsSummary(wex) && !isSlotClosed(wex) && !isTimedExercise(wex)"
            class="last-hint">
-          ↩ last: {{ lastSetsSummary(wex) }}
+          ↩ last<template v-if="lastSetsWhen(wex)"> ({{ lastSetsWhen(wex) }})</template>:
+          {{ lastSetsSummary(wex) }}
         </p>
 
         <p v-if="skipError?.wexId === wex.id" class="err skip-err">
@@ -2144,6 +2212,7 @@ useVisibilityRefresh(loadAll);
 </template>
 
 <style scoped>
+.side-label { color: var(--muted); font-weight: 600; }
 .strength-today { max-width: 880px; }
 h1 { margin: 0 0 0.6rem; }
 h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }

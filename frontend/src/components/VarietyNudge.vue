@@ -21,11 +21,23 @@ const emit = defineEmits<{
     targetExerciseId: string;
     replacementExerciseId: string;
   }): void;
+  /** OG3-C2 — the caller persists the decline so the next ask is a
+   *  different question rather than a cache hit on the same answer. */
+  (e: "decline", payload: {
+    targetExerciseId: string;
+    replacementExerciseId: string;
+  }): void;
 }>();
 
 type Swap = {
   target_exercise_id: string;
   replacement_exercise_id: string;
+  /** OG3-C1 — real catalog display names, attached server-side after the
+   *  model's answer is validated. This view used to un-slug the id with
+   *  `replace(/_/g, " ")`, which is exactly what made a hallucinated id
+   *  render as a plausible exercise: the client had no way to tell. */
+  target_name?: string | null;
+  replacement_name?: string | null;
   reason: string;
 };
 
@@ -61,7 +73,16 @@ function toggleOpen() {
 }
 
 function decline(s: Swap) {
+  // Local dismissal is applied immediately so the row disappears on tap,
+  // and the server is told separately. OG3-C2: without the second half,
+  // "Get fresh suggestions" is a cache hit on the very answer just
+  // dismissed. Fire-and-forget — a failed decline should not block the UI
+  // from responding, and the worst case is the old behaviour.
   dismissed.value = new Set([...dismissed.value, s.target_exercise_id]);
+  emit("decline", {
+    targetExerciseId: s.target_exercise_id,
+    replacementExerciseId: s.replacement_exercise_id,
+  });
 }
 
 // Caller is expected to map target_exercise_id → workout_exercise_id
@@ -102,9 +123,9 @@ const visibleSwaps = (() => {
         <li v-for="s in visibleSwaps()" :key="s.target_exercise_id" class="vn-item">
           <div class="vn-row">
             <span class="vn-tag">swap</span>
-            <code class="vn-eid">{{ s.target_exercise_id.replace(/_/g, " ") }}</code>
+            <code class="vn-eid">{{ s.target_name || s.target_exercise_id.replace(/_/g, " ") }}</code>
             <span class="vn-arrow">→</span>
-            <code class="vn-eid alt">{{ s.replacement_exercise_id.replace(/_/g, " ") }}</code>
+            <code class="vn-eid alt">{{ s.replacement_name || s.replacement_exercise_id.replace(/_/g, " ") }}</code>
           </div>
           <div class="vn-reason">{{ s.reason }}</div>
           <div class="vn-actions">

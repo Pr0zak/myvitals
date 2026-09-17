@@ -24,6 +24,12 @@ const stats = ref<ActivityStats | null>(null);
 const activities = ref<Activity[]>([]);
 const workouts = ref<Array<{ date: string; status?: string | null;
   split_focus?: string | null }>>([]);
+/** OG3-A2: the next few planned sessions, so a rest day names what is
+ *  coming instead of ending the screen. Same source as the phone's week
+ *  strip — `/workout/strength/upcoming`, which is generator-authoritative
+ *  since OG2-A4. */
+const upcoming = ref<Array<{ date: string; split_focus: string;
+  exercise_count: number }>>([]);
 
 const segment = ref<"strength" | "cardio">("strength");
 
@@ -37,12 +43,17 @@ function ytdSince(): string {
 
 async function load(): Promise<void> {
   loading.value = true;
-  const [w, acts, wkts, st] = await Promise.all([
+  const [w, acts, wkts, st, up] = await Promise.all([
     api.strengthToday().catch(() => null),
     api.activities({ limit: 2000, since: ytdSince() }).catch(() => [] as Activity[]),
     api.strengthWorkouts({ limit: 400 }).catch(() => ({ count: 0, workouts: [] })),
     api.activitiesStats(30).catch(() => null),
+    // OG3-A2 — the phone has named the next sessions since the week strip
+    // shipped; this screen made no call to /upcoming at all, so a rest day
+    // here was a dead end that just said "Rest Day / View".
+    api.strengthUpcoming(7, 4).catch(() => null),
   ]);
+  upcoming.value = (up?.upcoming ?? []).filter((s) => !s.is_today).slice(0, 3);
   workout.value = w ?? null;
   activities.value = Array.isArray(acts) ? acts : [];
   stats.value = st;
@@ -144,18 +155,69 @@ const heroTag = computed<string>(() => {
   return /day$/i.test(t) ? t : `${t} Day`;
 });
 
-const heroMinutes = computed<string>(() => {
-  // No prescribed-minutes field on the plan — derive a coarse estimate
-  // from exercise count (≈7 min/exercise), else fall back to placeholder.
+/** OG3-A5 — what the hero says under the split name.
+ *
+ *  This used to render `heroMinutes` — exercise count × 7, a duration
+ *  invented in Vue — beside a hard-coded `RPE —` with nothing bound behind
+ *  it. Two rules at once: a number a user sees was derived on the client,
+ *  and the phone printed "6 exercises" for the same session the web called
+ *  "42 min", while the user's own stored `workout_minutes` for that day was
+ *  75. There is no prescribed-minutes field on the plan, so the honest move
+ *  is to print what the phone prints rather than to guess better. If a
+ *  duration is wanted later it is `estimated_duration_s` on `WorkoutOut`,
+ *  computed server-side from prescribed sets × target rest. */
+const heroSub = computed<string>(() => {
   const total = totalExercises.value;
-  if (total == null || total <= 0) return "—";
-  return String(total * 7);
+  if (total == null) return "No plan today";
+  if (total === 0) return "Rest";
+  return total === 1 ? "1 exercise" : `${total} exercises`;
 });
 
 const isRest = computed<boolean>(() => {
   const sf = workout.value?.split_focus ?? "";
   return workout.value == null || /rest/i.test(sf);
 });
+
+/** OG3-A1 — the call to action reads the session's own status, not only its
+ *  focus.
+ *
+ *  It was `isRest ? "View" : "Continue"`, computed from `split_focus` alone,
+ *  while `status` sat unread in the same payload. Every one of the 45
+ *  completed and 86 skipped workouts in the history therefore presented as
+ *  an outstanding task on the most prominent card of this tab. Four labels
+ *  off one enum; the same mapping is mirrored in `TrainHubScreen.kt`, so
+ *  keep the two in step. */
+const ctaLabel = computed<string>(() => {
+  const w = workout.value;
+  if (w == null || isRest.value) return "View";
+  switch (w.status) {
+    case "completed":
+      return "Done";
+    case "skipped":
+      return "View";
+    case "in_progress":
+    case "paused":
+      return "Resume";
+    default:
+      return "Start";
+  }
+});
+
+/** True once the session is finished — the hero shows a check rather than a
+ *  play triangle, so the state reads without parsing the label. */
+const ctaDone = computed<boolean>(() => workout.value?.status === "completed");
+
+/** Weekday label for a plain `YYYY-MM-DD`.
+ *
+ *  Built component-wise on purpose. `new Date("2026-09-18")` is parsed as
+ *  UTC midnight, which in Central is the previous evening, so the strip
+ *  would name the wrong day for every entry — the same local-vs-UTC day
+ *  boundary that has bitten `/summary/today` and `/summary/readiness`. */
+function shortDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short" });
+}
 
 // ── Recent activities feed ────────────────────────────────────────────
 interface FeedRow {
@@ -395,8 +457,8 @@ const recent = computed<FeedRow[]>(() =>
       <div class="herobody">
         <div class="tag">{{ heroTag }}</div>
         <h2>{{ splitLabel }}</h2>
-        <div class="meta">
-          <b>{{ heroMinutes }}</b> min · RPE <b>—</b>
+        <div v-if="heroSub" class="meta">
+          <b>{{ heroSub }}</b>
         </div>
         <span class="cont">
           <svg
@@ -405,12 +467,30 @@ const recent = computed<FeedRow[]>(() =>
             stroke="currentColor"
             stroke-width="2.4"
           >
-            <path d="M5 3l14 9-14 9z" />
+            <path v-if="ctaDone" d="M4 12.5l5.5 5.5L20 7" />
+            <path v-else d="M5 3l14 9-14 9z" />
           </svg>
-          {{ isRest ? "View" : "Continue" }}
+          {{ ctaLabel }}
         </span>
       </div>
     </button>
+
+    <!-- OG3-A2: next sessions. Mirrors the phone's week strip so a rest day
+         names what is coming rather than ending the screen. -->
+    <div v-if="upcoming.length" class="next">
+      <button
+        v-for="(s, i) in upcoming"
+        :key="s.date"
+        class="ncell"
+        :class="{ lead: i === 0 }"
+        type="button"
+        @click="go('/workout/strength/today')"
+      >
+        <span class="nday">{{ shortDay(s.date) }}</span>
+        <span class="nname">{{ titleCase(s.split_focus) }}</span>
+        <span v-if="s.exercise_count > 0" class="nex">{{ s.exercise_count }} ex</span>
+      </button>
+    </div>
 
     <!-- Recent feed -->
     <!-- This year + activity calendar, ported from the retired Neon Refined
@@ -671,6 +751,57 @@ const recent = computed<FeedRow[]>(() =>
   min-width: 0;
   position: relative;
   z-index: 1;
+}
+/* OG3-A2 — next sessions strip under the hero. */
+.next {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+  margin: 10px 0 4px;
+}
+.ncell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 11px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.ncell.lead {
+  border-color: color-mix(in srgb, var(--rn-lime) 30%, transparent);
+}
+.ncell:active {
+  transform: scale(0.985);
+}
+.nday {
+  font-family: "Space Grotesk", "Geist Mono", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rn-mut);
+}
+.ncell.lead .nday {
+  color: var(--rn-lime);
+}
+.nname {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.nex {
+  font-size: 11px;
+  color: var(--rn-mut);
 }
 .herobody .tag {
   font-family: "Space Grotesk", "Geist Mono", monospace;

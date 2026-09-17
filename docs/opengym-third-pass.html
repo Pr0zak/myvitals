@@ -1,0 +1,552 @@
+<title>Third Pass on openGym</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#F2F3EE;
+  --surface:#FBFCF9;
+  --surface-2:#E6E9DF;
+  --ink:#16190F;
+  --ink-2:#4B5142;
+  --ink-3:#787E6D;
+  --rule:#D3D8C8;
+  --rule-soft:#E3E7DA;
+  --mv:#1C5A62;            /* myvitals side */
+  --mv-soft:#1c5a6214;
+  --og:#55710F;            /* openGym side — olive-lime */
+  --og-soft:#55710f16;
+  --done:#1F6B57;          /* shipped / present — blue-green, distinct from og */
+  --done-soft:#1f6b5716;
+  --warn:#8A6410;
+  --warn-soft:#8a641014;
+  --crit:#9B3529;
+  --crit-soft:#9b352914;
+  --shadow:0 1px 2px #16190f0d, 0 6px 18px -12px #16190f26;
+  --serif:'Newsreader',Iowan Old Style,Palatino,Georgia,serif;
+  --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#0F1109;
+    --surface:#171A11;
+    --surface-2:#1F2318;
+    --ink:#E6E9DD;
+    --ink-2:#A9B09C;
+    --ink-3:#7B8271;
+    --rule:#2C3122;
+    --rule-soft:#23271B;
+    --mv:#5FADB5;
+    --mv-soft:#5fadb51f;
+    --og:#A8C455;
+    --og-soft:#a8c4551f;
+    --done:#5FBFA0;
+    --done-soft:#5fbfa01f;
+    --warn:#C9A24E;
+    --warn-soft:#c9a24e1f;
+    --crit:#D9725F;
+    --crit-soft:#d9725f1f;
+    --shadow:0 1px 2px #0000004d, 0 8px 22px -14px #00000080;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0F1109;
+  --surface:#171A11;
+  --surface-2:#1F2318;
+  --ink:#E6E9DD;
+  --ink-2:#A9B09C;
+  --ink-3:#7B8271;
+  --rule:#2C3122;
+  --rule-soft:#23271B;
+  --mv:#5FADB5;
+  --mv-soft:#5fadb51f;
+  --og:#A8C455;
+  --og-soft:#a8c4551f;
+  --done:#5FBFA0;
+  --done-soft:#5fbfa01f;
+  --warn:#C9A24E;
+  --warn-soft:#c9a24e1f;
+  --crit:#D9725F;
+  --crit-soft:#d9725f1f;
+  --shadow:0 1px 2px #0000004d, 0 8px 22px -14px #00000080;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--sans);font-size:16px;line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1060px;margin:0 auto;padding:0 28px 110px}
+@media(max-width:640px){.wrap{padding:0 18px 72px}}
+code{font-family:var(--mono);font-size:.86em;background:var(--surface-2);
+  padding:.08em .34em;border-radius:2px;word-break:break-word}
+a{color:var(--mv)}
+p{max-width:66ch}
+
+/* masthead */
+.mast{padding:64px 0 38px;border-bottom:1px solid var(--rule);margin-bottom:40px}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);display:flex;flex-wrap:wrap;
+  gap:8px;align-items:center;margin-bottom:16px}
+.eyebrow b{color:var(--og);font-weight:500}
+.eyebrow i{color:var(--mv);font-style:normal;font-weight:500}
+h1{font-family:var(--serif);font-weight:600;font-size:46px;line-height:1.08;
+  letter-spacing:-.018em;margin:0 0 18px;text-wrap:balance}
+@media(max-width:640px){h1{font-size:34px}}
+.dek{font-size:18.5px;line-height:1.56;color:var(--ink-2);max-width:64ch;margin:0}
+.dek strong{color:var(--ink);font-weight:600}
+
+h2{font-family:var(--serif);font-weight:600;font-size:15px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-3);margin:66px 0 18px;
+  padding-bottom:9px;border-bottom:1px solid var(--rule-soft)}
+h3{font-family:var(--sans);font-weight:650;font-size:14px;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--ink-2);margin:34px 0 14px}
+h4{font-family:var(--mono);font-size:11px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--ink-3);margin:0 0 10px;font-weight:500}
+
+/* callouts */
+.box{background:var(--surface);border:1px solid var(--rule);border-radius:2px;
+  padding:22px 24px;box-shadow:var(--shadow);margin:0 0 26px}
+.box p{margin:0 0 12px}
+.box p:last-child{margin-bottom:0}
+.box.alarm{border-left:3px solid var(--crit);background:var(--crit-soft)}
+.box.head{border-left:3px solid var(--og)}
+
+/* chips */
+.chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);
+  font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--rule);border-radius:2px;padding:2px 7px;
+  white-space:nowrap;color:var(--ink-3)}
+.c-v5{color:var(--crit);background:var(--crit-soft);border-color:var(--crit)}
+.c-v4{color:var(--warn);background:var(--warn-soft);border-color:var(--warn)}
+.c-v3{color:var(--ink-2)}
+.c-eff{color:var(--ink-2)}
+.c-mv{color:var(--mv);background:var(--mv-soft);border-color:var(--mv)}
+.c-og{color:var(--og);background:var(--og-soft);border-color:var(--og)}
+.c-done{color:var(--done);background:var(--done-soft);border-color:var(--done)}
+.c-live{color:var(--crit);background:var(--crit-soft);border-color:var(--crit)}
+
+/* status */
+.c-todo{color:var(--ink-3);border-color:var(--rule)}
+.c-wip{color:var(--warn);background:var(--warn-soft);border-color:var(--warn)}
+.c-ship{color:var(--done);background:var(--done-soft);border-color:var(--done)}
+.c-cut{color:var(--ink-3);border-style:dashed}
+.c-id{color:var(--og);border-color:var(--og);background:var(--og-soft);font-weight:500}
+
+.prog{background:var(--surface);border:1px solid var(--rule);border-radius:2px;
+  padding:20px 22px;box-shadow:var(--shadow);margin:0 0 26px}
+.bar{display:flex;height:8px;border-radius:2px;overflow:hidden;
+  background:var(--surface-2);margin:14px 0 12px}
+.bar i{display:block;height:100%}
+.bar .b-ship{background:var(--done)}
+.bar .b-wip{background:var(--warn)}
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;font-family:var(--mono);
+  font-size:11px;letter-spacing:.05em;color:var(--ink-3)}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend b{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+/* ranked items */
+
+.rank{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);
+  border-radius:2px;margin-bottom:26px}
+.rk{background:var(--surface);padding:18px 22px;
+  display:grid;grid-template-columns:38px 1fr auto;gap:4px 14px;align-items:start}
+.rk .n{font-family:var(--mono);font-size:18px;font-weight:500;color:var(--og);
+  line-height:1.3;grid-row:1/3}
+.rk .t{font-weight:650;font-size:15.5px;line-height:1.36;align-self:center}
+.rk .m{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.rk .d{grid-column:2/-1;color:var(--ink-2);font-size:14.5px;line-height:1.56;max-width:none}
+.rk .d p{max-width:none;margin:0 0 9px}
+.rk .d p:last-child{margin-bottom:0}
+.rk .where{font-family:var(--mono);font-size:12px;line-height:1.55;
+  color:var(--ink-3);border-left:2px solid var(--rule);padding-left:12px;margin-top:10px}
+.rk .where b{color:var(--ink-2);font-weight:500}
+@media(max-width:640px){
+  .rk{grid-template-columns:30px 1fr;padding:16px 16px}
+  .rk .m{grid-column:2;justify-content:flex-start;margin-top:6px}
+  .rk .t{align-self:start}
+}
+
+/* plain list of options */
+.opts{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);
+  border-radius:2px;margin-bottom:26px}
+.opt{background:var(--surface);padding:15px 20px;display:grid;
+  grid-template-columns:1fr auto;gap:4px 14px;align-items:start}
+.opt .h{font-weight:650;font-size:14.5px;line-height:1.4}
+.opt .m{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.opt .b{grid-column:1/-1;color:var(--ink-2);font-size:14px;line-height:1.55;margin:0;max-width:none}
+@media(max-width:640px){.opt{grid-template-columns:1fr}.opt .m{grid-column:1}}
+
+/* declined */
+.dec{border-left:2px solid var(--rule);padding:0 0 0 18px;margin:0 0 20px}
+.dec dt{font-weight:650;font-size:14.5px;margin-bottom:3px}
+.dec dd{margin:0 0 16px;color:var(--ink-2);font-size:14.5px;line-height:1.56;max-width:68ch}
+.dec dd:last-child{margin-bottom:0}
+
+/* table */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 26px;
+  border:1px solid var(--rule);border-radius:2px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:620px}
+th{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);text-align:left;font-weight:500;
+  padding:11px 16px;border-bottom:1px solid var(--rule);white-space:nowrap}
+td{padding:11px 16px;border-bottom:1px solid var(--rule-soft);
+  color:var(--ink-2);vertical-align:top;line-height:1.5}
+tr:last-child td{border-bottom:none}
+td:first-child{color:var(--og)}
+td strong{color:var(--ink)}
+
+.foot{border-top:1px solid var(--rule);padding-top:22px;margin-top:64px;
+  font-family:var(--mono);font-size:11.5px;line-height:1.75;color:var(--ink-3)}
+:focus-visible{outline:2px solid var(--mv);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="eyebrow">
+    <span>Teardown · third pass</span><span>·</span>
+    <b>openGym</b><span>→</span><i>myvitals</i><span>·</span>
+    <span>16 Sept 2026</span>
+  </div>
+  <h1>Third Pass on openGym</h1>
+  <p class="dek">Read of <strong>DuarteSantos8/openGym</strong> at HEAD — Node/Express API, React 19 web, Capacitor Android, an optional AI coach — against the myvitals source, with four lenses and an adversarial refutation pass. This is the <strong>third</strong> reading of this repository, so almost everything obvious is already shipped. What is left divides cleanly: five places where a myvitals surface currently states something untrue, one live integration failure, and a discipline openGym applies everywhere that myvitals applies only where a medical number forced it.</p>
+</header>
+
+<div class="box alarm">
+  <h4>Fix first — production is broken right now</h4>
+  <p><strong>The Google Health OAuth grant died on 8 September and is still being retried every fifteen minutes.</strong> <code>google_health_credentials.last_error</code> reads <code>invalid_grant</code> / "Token has been expired or revoked", <code>expires_at</code> is <code>2026-09-08 18:33:21Z</code>, and nothing on either client says so. This is GH-EXPIRY recurring: the grant was reconnected after the 28 August expiry but the OAuth client was <em>not</em> published to <strong>In production</strong> on the consent screen, so Google expired the refresh token seven days later exactly as before. Recovery is entirely on Google's side and needs no code — publish the client, then Settings → Google → Reconnect.</p>
+  <p>While in that file: <code>main.py:191</code> still gates the weekly AI digest on <code>not cfg.anthropic_api_key</code>. That is one of the twenty-one guards <code>_credentials_missing(cfg)</code> was written to replace, so under <code>provider="claude_cli"</code> the Sunday digest has been silently no-opping. One line.</p>
+</div>
+
+<div class="box head">
+  <h4>The headline</h4>
+  <p><strong>openGym treats model output as untrusted input and validates it in code against the real library before it reaches a card. myvitals applies that discipline only where a medical number forced it.</strong> <code>api/coach/core/validate.js</code> is explicit that the boundary is the validator and not the prompt: a hostile note in free text can talk the model into saying anything at all, but it cannot invent a change type. Every proposed change is resolved against the real exercise library, refused when it names something not in the plan, and matched against a closed list with no default case.</p>
+  <p>myvitals already knows this pattern — <code>assess_meal_fat</code> re-judges every AI meal suggestion and discards the model's own verdict; <code>fasting_coach</code> overrides <code>break_now</code> for a religious fast. But <code>strength_nudge</code> takes <code>block.input</code> verbatim, JSON-dumps it, <strong>caches it in <code>ai_summaries</code></strong>, and both clients render the raw slug as prose. A hallucinated exercise id becomes a plausible name with a confident reason and only fails on tap; a valid-but-wrong-muscle swap never fails at all.</p>
+</div>
+
+<h2>Where this sits</h2>
+<p>Two openGym passes preceded this one. <strong>#ENHANCE</strong> (researched July 2026, shipped v0.7.322→342) read the project up to ~v1.2.5. <strong>#OG2</strong> (August 2026) re-read everything since and ran phases A through D out to v0.37.0, refusing OG2-C1, D6's headline, D8, D10, D12, D13 and D16 on measurement. Twenty-four items were confirmed already shipped in that pass alone.</p>
+<p>So the bar here is high and the yield is correspondingly narrow: <strong>49 findings, 31 survived the first check, and roughly two thirds of those did not survive the refuter.</strong> The refusals are recorded in full below, because a measured refusal is what stops an idea returning next quarter — and several of them are refusals against this user's own production data rather than against taste.</p>
+
+<div class="prog">
+  <h4>Progress · 0 of 21 shipped</h4>
+  <div class="bar"><i class="b-ship" style="width:0%"></i><i class="b-wip" style="width:48%"></i></div>
+  <div class="legend">
+    <span><b style="background:var(--done)"></b> shipped 0</span>
+    <span><b style="background:var(--warn)"></b> in progress 10</span>
+    <span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 11</span>
+  </div>
+  <p style="margin:14px 0 0;font-size:14px;color:var(--ink-2)">Tracked as <code>OG3-*</code> in the repo's <code>TODO.md</code>. Chips below carry the live state; this page is republished to the same URL as items land.</p>
+</div>
+
+<h2>Ranked shortlist</h2>
+<p>Ranked by value ÷ effort. The first five are one release tag between them: all are pure render over fields the server already sends.</p>
+
+<h3>Batch A — the session surfaces stop lying</h3>
+
+<div class="rank">
+
+  <div class="rk">
+    <div class="n">1</div>
+    <div class="t">Give today's session card four states, not two</div>
+    <div class="m"><span class="chip c-id">OG3-A1</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="d">
+      <p>openGym's TODAY row is a state machine over rest / scheduled / running / logged, added after a finished day kept showing the routine name behind a green Start tag and read as still outstanding. myvitals renders <code>isRest ? "View" : "Continue"</code> on both surfaces, computed from <code>split_focus</code> alone — <code>status</code> is in the same payload and neither client reads it. Production holds 45 completed and 86 skipped workouts, every one of which presents as an outstanding task on the most prominent card of the Train tab.</p>
+      <p>Four labels off one enum: completed → "Done", in_progress or paused → "Resume", planned → "Start", rest → "View".</p>
+      <div class="where"><b>Touches</b> <code>frontend/src/views/Train.vue:410</code> · <code>ui/neon/TrainHubScreen.kt:298,697</code>. Optional follow-on: an amber dot on the Train tab — neither shell references <code>in_progress</code> today. No migration, no endpoint change. Reinforces SKIP-1's rule that clients render the counters verbatim.</div>
+    </div>
+  </div>
+
+  <div class="rk">
+    <div class="n">2</div>
+    <div class="t">Name the next session on a web rest day</div>
+    <div class="m"><span class="chip c-id">OG3-A2</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">web</span><span class="chip c-wip">in progress</span></div>
+    <div class="d">
+      <p>openGym renders "Next session: Wednesday, Pull Day" under the Today row whenever nothing is scheduled, so the rest state is never a dead end. The phone already does this through <code>api.upcomingWorkouts()</code>; the web Train hub makes zero calls to <code>upcoming</code> and shows "Rest Day / View". That is a live parity gap on a screen the parity gate covers, and the expensive half — OG2-A4's generator-authoritative schedule — is already built.</p>
+      <p>With <code>split_preference: adaptive</code>, <code>yoga_on_rest_days: true</code> and 45 strength sessions in 130 days, a non-strength day is the common case here, not the exception.</p>
+      <div class="where"><b>Touches</b> add <code>api.strengthUpcoming(7, 4)</code> to the <code>Promise.all</code> in <code>Train.vue</code>; separately lift the <code>.upcoming</code> block in <code>views/workout/StrengthToday.vue</code> out of the plan-exists <code>v-else</code> so the rest-day and no-plan cards carry it too. Phone unchanged.</div>
+    </div>
+  </div>
+
+  <div class="rk">
+    <div class="n">3</div>
+    <div class="t">Put the date and the rating on the "last:" ghost line</div>
+    <div class="m"><span class="chip c-id">OG3-A3</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="d">
+      <p>openGym prints <code>Last time (7 Sept): 75×8 (RIR 3)</code> from the same function that seeds the new session, so the line read and the number used cannot disagree. myvitals' <code>LastSetOut</code> carries only <code>{set_number, weight_lb, reps}</code> — <code>StrengthWorkout.date</code> is already in the join and <code>StrengthSet.rating</code> is already on the table, and neither is selected.</p>
+      <p>Measured in production: across 159 per-exercise re-training intervals, <strong>106 exceed 14 days and the mean gap is 31 days</strong>. An undated "last:" reads as "last session" and is usually wrong by a month. The rating is the single input the whole progression policy runs on, and the user is never shown what the app did with the tap.</p>
+      <div class="where"><b>Touches</b> <code>api/workout/strength.py:648</code> and the select at <code>:1311</code>; render in <code>StrengthToday.vue:1143</code> and <code>StrengthTodayScreen.kt:3191</code>, reusing the existing rating map. <b>Do not touch the filters</b> — the missing workout-status gate is deliberate and documented in place at <code>:1304-1310</code>, because auto-skip flips forgotten-to-finish sessions to "skipped" though their sets are real.</div>
+    </div>
+  </div>
+
+  <div class="rk">
+    <div class="n">4</div>
+    <div class="t">Put the weight goal on the home tile, not only in /weight</div>
+    <div class="m"><span class="chip c-id">OG3-A4</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="d">
+      <p>openGym's Home body-weight card carries the goal inline: current weight, a delta coloured by whether it moved toward the target, "Goal 77 kg · 1.4 kg to lose", and a sparkline with a dashed rule at the goal. In myvitals every ingredient exists and the wiring is one argument short — <code>MetricCard.vue</code> declares <code>target</code>, includes it in the y-extent and draws the dashed line, but <code>analytics/tiles.py</code> builds the weight tile with no <code>target</code>, so the prop is always null. The goal is stored: <code>weight_goal_kg = 90.718</code>, i.e. 200 lb.</p>
+      <p>With weigh-ins intermittent — 24 readings in 26 weeks — the home tile is exactly where the goal should appear, and the detail view is exactly where someone tracking a target does not look daily.</p>
+      <div class="where"><b>Touches</b> <code>analytics/tiles.py:657</code> — pass <code>target=round(goal_kg * KG_TO_LB, 1)</code>, keep <code>kind="neutral"</code> and <code>higher_is_better=None</code>; build the "N lb to lose" subline server-side the way <code>_goal_progress</code> builds <code>delta_value</code>. Mirror on the phone tile. <b>Assert the unit in a test</b> — <code>_goal_progress</code> already shipped a kilograms-beside-a-pounds-target bug in v0.32.x. Pass the number, never the colour: tone stays GOAL-STATE's.</div>
+    </div>
+  </div>
+
+  <div class="rk">
+    <div class="n">5</div>
+    <div class="t">Delete the invented hero duration and the phantom RPE</div>
+    <div class="m"><span class="chip c-id">OG3-A5</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">web</span><span class="chip c-wip">in progress</span></div>
+    <div class="d">
+      <p>openGym omits a reading that does not exist rather than printing a placeholder — an unknown duration is left out, not shown as "0 min". <code>Train.vue:147-152</code> computes <code>heroMinutes</code> as seven minutes per exercise, invented in Vue, and line 399 renders <code>{{ heroMinutes }} min · RPE —</code> where the RPE is a literal em dash with no binding behind it.</p>
+      <p>The phone's equivalent line prints "6 exercises". So the same session reads "42 min · RPE —" on web and "6 exercises" on the phone, and the 42 contradicts the user's own stored <code>workout_minutes: 75</code>. The cheapest honest fix is deletion: print what the phone prints.</p>
+      <div class="where"><b>Touches</b> <code>Train.vue:147-152</code> and <code>:399</code>; source the count from <code>exercises_total</code> on <code>WorkoutOut</code>. If a duration is genuinely wanted, it is <code>estimated_duration_s</code>, derived from prescribed sets × <code>target_rest_s</code>. Fixes two rule violations at once: a client-side derived number, and two clients disagreeing about one session.</div>
+    </div>
+  </div>
+
+</div>
+
+<h3>Batch B — backend only, no parity cost</h3>
+
+<div class="rank">
+
+  <div class="rk">
+    <div class="n">6</div>
+    <div class="t">Two MCP tools: what am I lifting today, and what is my best on this lift</div>
+    <div class="m"><span class="chip c-id">OG3-B1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S</span><span class="chip c-mv">backend</span><span class="chip c-wip">in progress</span></div>
+    <div class="d">
+      <p>openGym's <code>preview_session</code> runs the live progression engine for a date rather than echoing a stored plan, so the tool's numbers come from the same functions the UI uses. All eight myvitals MCP tools are retrospective — <code>get_strength_sessions</code> returns date, status and split focus, nothing forward-looking — and e1RM drives <code>/exercise-records</code> but is not exposed at all.</p>
+      <p>For someone who trains at home from a phone, "what am I lifting today and at what weight", asked in a Claude session, is the highest-frequency question the current tool set cannot answer.</p>
+      <div class="where"><b>Touches</b> two entries in <code>TOOLS</code> at <code>integrations/mcp_tools.py:283</code> — <code>preview_today_workout</code> wrapping the <code>/workout/strength/today</code> hydration (split focus, per-slot sets/reps/weight, notes, <code>fasting_context</code>, the SKIP-1 counters verbatim) and <code>get_exercise_records</code>. Both SELECT-only, so the no-mutation assertion in <code>test_mcp_server.py</code> still holds.</div>
+    </div>
+  </div>
+
+  <div class="rk">
+    <div class="n">7</div>
+    <div class="t">Count how many exercises this home gym can actually reach per muscle</div>
+    <div class="m"><span class="chip c-id">OG3-B2</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="d">
+      <p>openGym's muscle chips carry a live count of reachable exercises counted against the active equipment profile, which answers "can my kit even train this". Counting the bundled catalog by <code>primary_muscle</code>: <strong>lower back has 1 exercise against MEV 2, calves 3 against MEV 8, lats 4 against MEV 10, hamstrings 5 against MEV 8</strong> — versus abdominals 40 and shoulders 37. Five of fourteen audited muscles have a pool too small to reach their own MEV without repeating one lift weekly.</p>
+      <p>Nothing in myvitals distinguishes under-trained from under-equipped, so a permanently-under lats reading is the same colour as a genuine programming gap. The project faced this once already and answered by deleting the neck row; a count is the more informative version of that judgement and keeps the row.</p>
+      <div class="where"><b>Touches</b> <code>api/workout/strength.py:3438</code> — run the stored <code>EquipmentPayload</code> through <code>filter_catalog_for_equipment</code> once, add <code>available_exercises</code> per muscle row counted through <code>taxonomy.credits_volume</code>. Render beside the status in <code>components/MuscleVolume.vue</code> and the phone audit rows, and say so explicitly when the pool is smaller than the MEV. <b>Ship the count alone</b> — the tap-through is a separate L, since the phone map is a Canvas needing per-region hit-testing.</div>
+    </div>
+  </div>
+
+  <div class="rk">
+    <div class="n">8</div>
+    <div class="t">Say "per side" on unilateral lifts</div>
+    <div class="m"><span class="chip c-id">OG3-B3</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S · phase 1</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="d">
+      <p>openGym logs each limb independently because asymmetries are the whole point of tracking it. myvitals has the mechanism but it reaches only mobility: 9 of 74 supplement rows carry <code>is_bilateral</code>, all <code>movement_pattern="mobility"</code>, and <strong>zero of 201 main-catalog rows</strong> do — while 27 are unilateral by name. These are in weekly rotation; the last 28 days include One-Arm Dumbbell Row, Single-Arm Romanian Deadlift, Single-Leg Hip Thrust, Dumbbell Step-Up, Bird Dog Row and Cossack Squat. A One-Arm Row is prescribed "3 × 10" with no statement of per-arm or total.</p>
+      <p><strong>Phase 1 only: flag the rows and say "per side".</strong> Do not double <code>target_sets</code> — that silently doubles weekly volume credit, breaks comparability with 876 historical sets, and can push a muscle over MAV overnight. That is a data-semantics migration needing a decision about which convention MEV/MAV are denominated in.</p>
+      <div class="where"><b>Touches</b> curate <code>is_bilateral: true</code> into <code>data/exercises_supplement.json</code> (data only, no migration, with a resolve test of the kind <code>_PREFERRED_VARIETY</code> has); emit <code>side_label</code> and <code>per_side</code> on <code>PlannedSetOut</code> at <code>api/workout/strength.py:654</code>; relax <code>bilateralSideLabel</code> in <code>StrengthToday.vue:538</code> and <code>StrengthTodayScreen.kt:3500</code> to render the server's label verbatim. The R/L rule must move server-side — two client copies is the divergence the architecture rule forbids. Do <b>not</b> nest sides in a set row: <code>StrengthSet</code> is flat and <code>log_set</code> is idempotent on <code>(workout_exercise_id, set_number)</code>, which offline replay depends on.</div>
+    </div>
+  </div>
+
+</div>
+
+<h3>Batch C — the model is untrusted input</h3>
+
+<div class="rank">
+
+  <div class="rk">
+    <div class="n">9</div>
+    <div class="t">Validate the AI's proposed swap in code before it reaches the card</div>
+    <div class="m"><span class="chip c-id">OG3-C1</span><span class="chip c-v5">value 5</span><span class="chip c-eff">M</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="d">
+      <p><code>strength_nudge</code> does <code>tool_input = block.input</code> then <code>json.dumps(tool_input)</code> with no check that <code>target_exercise_id</code> is in today's plan, that <code>replacement_exercise_id</code> is in the catalog the payload actually sent, or that the primary muscle matches — even though the prompt asks for all three. The result is cached in <code>ai_summaries</code>, so one bad answer persists until the plan changes, and the only real gate is a <code>swap_exercise</code> 404 that fires after the user has read and believed the card. A valid-but-wrong-muscle replacement never fails at all.</p>
+      <p>The payload builder already computes <code>selectable_ids</code> at the call site, so this is a filter, not new machinery.</p>
+      <div class="where"><b>Touches</b> <code>integrations/claude.py:1520-1557</code> — filter the swaps, attach <code>target_name</code> and <code>replacement_name</code> from the catalog so clients stop rendering raw slugs, and record drops in a <code>notes</code> array following MEAL-9's visible-repair convention. Render the names in <code>VarietyNudge.vue:105</code> and <code>StrengthTodayScreen.kt:2200</code>. New <code>backend/tests/test_ai_nudge_gating.py</code>. While in there, replace the bare <code>return</code> at <code>StrengthToday.vue:248</code> with the existing <code>swapError</code> surface so a dead tap says something. Supports MEAL-4: a prompt rule is a request, not a guarantee.</div>
+    </div>
+  </div>
+
+  <div class="rk">
+    <div class="n">10</div>
+    <div class="t">Feed declined suggestions back into the nudge payload</div>
+    <div class="m"><span class="chip c-id">OG3-C2</span><span class="chip c-v4">value 4</span><span class="chip c-eff">M</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="d">
+      <p>openGym appends <code>previouslyDeclined</code> to the payload with the rule "do not propose them again unless something new in the data justifies it" — and because the list is <em>in the payload</em>, it moves the cache identity, so a re-ask after a decline is genuinely a different question. In myvitals dismissal is ephemeral client state and never reaches the server, while <code>POST /ai/strength/nudge/{id}</code> takes no <code>force</code> parameter and hashes the payload.</p>
+      <p>So <strong>"Get fresh suggestions" is guaranteed to return the two swaps just dismissed.</strong> The accept path is fine — accepting mutates the plan, which moves the hash. Only the decline path is broken, and it makes the indecisive-AI problem v0.7.157 was chasing worse.</p>
+      <div class="where"><b>Touches</b> an additive migration for <code>strength_nudge_declines</code> (or a JSON list on <code>strength_workouts</code>); <code>POST /workout/strength/workouts/{id}/nudge-decline</code>; <code>build_strength_nudge_payload</code> gains <code>previously_declined</code>, capped at ~10 and scoped to the workout; the rule verbatim in <code>_strength_nudge_system</code>; <code>VarietyNudge.vue:63</code> and <code>StrengthTodayScreen.kt:2225,2731</code> call it before setting local <code>dismissed</code>. Constrained by "the cache hash is per-byte" — send ids only, never reasons, and cap the list.</div>
+    </div>
+  </div>
+
+</div>
+
+<h3>Batch D — integrations that fail loudly</h3>
+
+<div class="rank">
+  <div class="rk">
+    <div class="n">11</div>
+    <div class="t">Classify an integration failure and stop retrying the class that cannot recover</div>
+    <div class="m"><span class="chip c-id">OG3-D1</span><span class="chip c-live">live</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-mv">backend</span><span class="chip c-todo">not started</span></div>
+    <div class="d">
+      <p>openGym reduces every job failure to a named class before anything acts on it — timeout, missing, auth, provider, unusable, internal — and lets the class drive behaviour: an answer that failed validation and was paid for is never retried; a call that never reached the model is. myvitals has this taxonomy inside the LLM layer only.</p>
+      <p>The evidence is live rather than hypothetical, and it is the box at the top of this page. TODO.md predicted this failure in prose under GH-EXPIRY; the database shows it happening for the second time. A four-value enum across four integrations is the right size — do not build a pipeline.</p>
+      <div class="where"><b>Touches</b> an <code>IntegrationError</code> with <code>kind ∈ {transient, auth, config, upstream}</code> in <code>integrations/</code>, raised by <code>google_health.valid_access_token</code> (map <code>invalid_grant</code> → auth), <code>strava_web.CookieExpired</code> and <code>concept2</code>. Persist <code>last_error_kind</code>; <code>tasks/scheduled.py</code> skips <code>auth</code> polls until a reconnect clears it; <code>analytics/data_health.py</code> surfaces <code>auth</code> as a reconnect <em>action</em>, not staleness — which generalises the one-off Strava banner from v0.7.319.</div>
+    </div>
+  </div>
+</div>
+
+<h3>Batch E — the prescription says what it means</h3>
+
+<div class="rank">
+  <div class="rk">
+    <div class="n">12</div>
+    <div class="t">Deload on the weight × reps grid, not on weight alone</div>
+    <div class="m"><span class="chip c-id">OG3-E1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-mv">backend</span><span class="chip c-todo">not started</span></div>
+    <div class="d">
+      <p>openGym computes a target e1RM at 0.9× and searches loadable weights crossed with allowed rep counts, falling back explicitly to holding the weight and cutting reps when no grid point exists below the current load. myvitals deloads on the weight axis only, and the rack settles it: <code>dumbbells.pairs_lb = [5,10,…,50]</code> with <strong><code>wrist_weights_lb = []</code></strong>. The user owns no micro-loaders, so the app's flagship rounder is inert and the grid is 5 lb.</p>
+      <p>Work it through: a 7.5% cut on a 15 lb lift targets 13.875, <code>round_weight</code> drops to 10, <code>deload_round</code> sees <code>actual_cut &gt; 2× intended</code> and <strong>returns full weight</strong>. The light and moderate deload is a structural no-op at every rung from 5 to 50 lb, and the code comment says so honestly. The rep axis is the only axis with resolution here, and nothing uses it.</p>
+      <div class="where"><b>Touches</b> a new pure <code>select_deload_candidate(current_lb, target_reps, reps_lo, pairs_lb, wrist_lb, factor)</code> beside <code>deload_round</code> at <code>analytics/strength.py:752</code>, called <b>only</b> from the cut branches, never on an advance. Returns through the existing <code>Prescription.why</code> so both clients render "held 15 lb and cut to 8 reps — the rack cannot deliver a 7.5% drop" with no client change. This changes <em>how</em> one existing cut is delivered, not how many exist; three deloads already compound, so do not add a fourth. <b>Lead worth checking first:</b> <code>strength_workouts.deload_factor</code> is 1.0 on all 40 completed workouts, which is consistent with the recovery deload being computed and then rounded away by this same guard — the open question OG2-C1 left behind.</div>
+    </div>
+  </div>
+</div>
+
+<h2>The full menu</h2>
+<p>Survived as adopt or adapt, but below the line. Kept so nothing is lost.</p>
+
+<div class="opts">
+  <div class="opt">
+    <div class="h">Reserve the floating bar's height once at the shell</div>
+    <div class="m"><span class="chip c-id">OG3-M1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S</span><span class="chip c-todo">not started</span></div>
+    <p class="b"><code>--neon-bar-h: calc(74px + env(safe-area-inset-bottom))</code> in <code>App.vue</code>'s neon token block plus one <code>.app.neon main</code> rule. The written per-view policy has already failed twice in three chances: <code>Rings.vue</code> reserves 104px while <code>Train.vue</code> and <code>You.vue</code> reserve 32px, and both of those end in tappable rows.</p>
+  </div>
+  <div class="opt">
+    <div class="h">A <code>backdrop-filter</code> fallback</div>
+    <div class="m"><span class="chip c-id">OG3-M2</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-todo">not started</span></div>
+    <p class="b"><code>grep '@supports' frontend/src</code> returns zero across the whole frontend. <code>NeonNav.vue</code> is 78% fill plus <code>blur(14px)</code> with no prefixed twin and no opaque fallback. Three lines, plus raise the fill toward 0.92.</p>
+  </div>
+  <div class="opt">
+    <div class="h">A seeded invariant probe for <code>round_weight</code> / <code>deload_round</code></div>
+    <div class="m"><span class="chip c-id">OG3-M3</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-todo">not started</span></div>
+    <p class="b">openGym's property probes are a test genre distinct from unit tests; no numerical cross-input invariant exists anywhere in the 113 myvitals test files. Both named invariants pass today. It matters because the micro-loader path is currently unexercised by real data — <code>wrist_weights_lb</code> is empty — so the distinguishing feature has no live regression cover.</p>
+  </div>
+  <div class="opt">
+    <div class="h">Emoji doing icon work in the neon chrome</div>
+    <div class="m"><span class="chip c-id">OG3-M4</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-todo">not started</span></div>
+    <p class="b"><code>Train.vue:226</code> returns 🏋 ⛰ 🚴 from <code>classifyType()</code> — a second, emoji-flavoured copy of the classification <code>ActivityIcon.vue</code> already performs, and which has already absorbed ebike, paddle, VR fitness and the cardio-split case. Delete the table and render the component; swap the four <code>You.vue</code> pill glyphs for tinted lucide. A duplication bug, not a design complaint.</p>
+  </div>
+  <div class="opt">
+    <div class="h"><code>ConfirmDialog.vue</code> for the four highest-stakes confirms</div>
+    <div class="m"><span class="chip c-id">OG3-M5</span><span class="chip c-v3">value 2</span><span class="chip c-eff">M</span><span class="chip c-todo">not started</span></div>
+    <p class="b">17 <code>window.confirm</code> calls on web against 19 Compose <code>AlertDialog</code>s. Convert <code>StrengthToday.vue:1063</code> and <code>:1084</code> (set deletion feeds the progression reducer) and <code>Goals.vue:82</code>, <code>:90</code> only. Leave the 37 selects and 42 checkboxes alone.</p>
+  </div>
+  <div class="opt">
+    <div class="h">A neon type scale</div>
+    <div class="m"><span class="chip c-id">OG3-M6</span><span class="chip c-v3">value 3</span><span class="chip c-eff">L</span><span class="chip c-todo">not started</span></div>
+    <p class="b">Measured: 31 of 42 web <code>font-weight</code> declarations sit at 700 or above, and 32 of 45 Compose weights at Bold or above; <code>Rings.vue</code> stacks seven consecutive declarations, none below 600. The classic views have a discipline the neon layer dropped. Five roles, one <code>NeonType</code> object beside <code>NeonMV</code>. Cannot be half-done.</p>
+  </div>
+  <div class="opt">
+    <div class="h">BodyMap tap-through to the filtered catalog</div>
+    <div class="m"><span class="chip c-id">OG3-M7</span><span class="chip c-v3">value 3</span><span class="chip c-eff">L</span><span class="chip c-todo">not started</span></div>
+    <p class="b">The natural follow-on to the equipment count in #7. Web SVG regions are cheap; the phone Canvas needs <code>PathMeasure</code> hit-testing plus a nav argument.</p>
+  </div>
+  <div class="opt">
+    <div class="h">Unilateral phase 2</div>
+    <div class="m"><span class="chip c-id">OG3-M8</span><span class="chip c-v3">deferred</span><span class="chip c-todo">not started</span></div>
+    <p class="b">Decide whether a unilateral slot's <code>target_sets</code> means per-side or total, then re-derive <code>MUSCLE_VOLUME_TARGETS</code> against whichever is chosen. Deliberately deferred — it is a data-semantics decision, not an implementation.</p>
+  </div>
+  <div class="opt">
+    <div class="h">Two one-liners while nearby</div>
+    <div class="m"><span class="chip c-id">OG3-M9</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-todo">not started</span></div>
+    <p class="b">A <code>targetHour + 3</code> ceiling in <code>WorkoutReminderWorker</code>, so a phone that was off all day does not post "Push workout today" at 11pm. And a sub-100 KB size floor in <code>ApkDownloader</code> — a file that small is a redirect or an error page, not an APK.</p>
+  </div>
+</div>
+
+<h2>Declined, with reasons</h2>
+
+<h3>Refuted on this user's own data</h3>
+<dl class="dec">
+  <dt>Refuse an e1RM above 12 reps instead of clamping</dt>
+  <dd>Of 876 logged sets, the number with weight &gt; 0 and reps &gt; 12 is <strong>zero</strong>. The clamp has never bound and cannot under <code>goal=hypertrophy</code>. A clamp at 12 is a conservative floor; uncapped Epley is the fantasy the cap prevents. Returning None would also sort a real lift to the bottom of <code>/records</code> via two <code>or 0.0</code> call sites — a different lie about a number that has never been wrong.</dd>
+
+  <dt>Count MEV/MAV volume in hard sets</dt>
+  <dd>Last 28 days: 129 sets, <strong>2</strong> rated ≤ 3. Full history 128 of 876, and 124 of those land in two weeks in late May. On a hard-set basis all 14 muscles would read "under" every week forever — the HEALTH-1 failure with the sign flipped. Correct in the literature, inapplicable to a user who does not train near failure.</dd>
+
+  <dt>Plot weekly effort beside weekly volume · Report the effort distribution</dt>
+  <dd>Weekly average rating over 16 weeks sits inside 4.08–4.60 for 13 of 15 weeks while volume swings from 1,740 to 9,536 lb, so the second series is a horizontal line and four distribution bars would be one tall bar at Good, one at Easy and two invisible, forever. The real problem underneath both is a rating-scale collapse — 748 of 876 sets rated 4 or 5. Plotting a constant decorates that rather than diagnosing it, and <code>effort_band</code> plus <code>effort_legend</code> already ship.</dd>
+
+  <dt>Per-muscle mechanical fatigue with a 36 h half-life</dt>
+  <dd>Already refused as OG2-C1 on measurement, 2 September. Zero of 286 re-training intervals arrive above 50% residual; 49 of 88 exercises have one session so no curve fits; and 162 of 165 weighted slots carry a single distinct weight, so the <code>(load/1RM)^1.5</code> intensity term collapses to a constant.</dd>
+
+  <dt>Retained strength, or an "expected current 1RM"</dt>
+  <dd>Refused twice now. The median re-training gap is 6 days, so 230 of 242 intervals never leave the 14-day plateau, and <code>STRENGTH_FLOOR = 0.5</code> reports half your best forever — a number with no evidence presented as confidently as a measured one. Fights <code>projection.py</code>'s refuse-rather-than-guess rule.</dd>
+
+  <dt>A self-calibrating noise band from the user's own spread</dt>
+  <dd>Only 4 of the last 26 weeks have more than one weigh-in, with spreads of 2.60, 0.21, 1.03 and 2.48 kg. A derived band lands around 1.6–2.5 kg — <strong>looser</strong> than the hard-coded 1.0 — which would newly classify the exact 5 lb regression GOAL-STATE was built to expose as <code>at_start</code>. Any honest minimum-points refusal would fire every time, making the derived path dead code wrapped around the constant it replaced.</dd>
+
+  <dt>Stall-count deload, and the bodyweight add-a-set rung</dt>
+  <dd>Both already measured and refused: the maximum consecutive shortfall across 143 exercises with history is <strong>1</strong>, and both missing bodyweight rungs would be branches that cannot fire. Note for whoever changes the prefill: openGym's miss predicate is rep-based, and myvitals' prefill makes a rep-miss streak unobservable by construction.</dd>
+</dl>
+
+<h3>Refuted on structure</h3>
+<dl class="dec">
+  <dt>Take the superset rest as the maximum over members</dt>
+  <dd><code>pair_supersets</code> only ever pairs isolation exercises — compounds always stand alone — and production confirms it: all 228 superset slots are isolation lifts at 120 s, while the 1,338 non-superset slots span 15–240 s. At <code>goal=hypertrophy</code> and age 48, isolation rest is 60 + 15 = 75 s, so the flat 120 is <em>longer</em> than every member asks. Adopting openGym's rule would cut this user's superset rest by 45 s, reversing a deliberate May 2026 bump. The genuinely unhandled combination — strength, 60+, isolation superset — is unreachable, and is a two-line floor if it ever is.</dd>
+
+  <dt>Cascade a weight edit forward through the session</dt>
+  <dd>TD-6 already ships it, server-side and one set later: <code>PlannedSetOut</code>'s prefill tiers on the most recently logged set of this exercise <em>in this session</em>, warm-ups tiered separately, and <code>logSet</code> reloads after every set. The claimed correctness tail cannot occur, and re-implementing it in Vue and Compose recreates exactly the divergence TD-6 removed.</dd>
+
+  <dt>Smooth decay on the volume feeding split selection</dt>
+  <dd>The sketch's own honest minimum — <code>weighted_sets</code> for <code>score_focus</code>, plain <code>sets</code> for the audit card — is a second number under a different rule sitting one field away in the same response, which is precisely what <code>volume_status</code> was extracted (OG2-C2) to prevent. The consumer is a once-daily pick whose recency half already moves continuously, so a 23:59-versus-00:01 difference is an oddity nobody observes.</dd>
+
+  <dt>Derive PROG-1's state from the log · Conditional writes with a revision</dt>
+  <dd>Same root: PROG-1 is <code>enabled: false</code> with an empty lift list, <code>_advance_program_on_complete</code> returns at its second line and has never run, and the only writer that can lose an update to <code>user_equipment.payload</code> is that disabled one. The sketch's own "reset to, with an effective-from date" <em>is</em> stored progression state, plus an O(history) replay in the plan-generation hot path. The house answer to the lost-write shape is already recorded and lighter: add new preferences as scoped merging endpoints. If PROG-1 ships, the fix is a scoped <code>/workout/strength/program-state</code> the config PUT cannot reach.</dd>
+
+  <dt>Stale-suggestion machinery — <code>planHash</code>, <code>applicable</code>, <code>stale_reason</code></dt>
+  <dd>The id-invalidity half is better handled by shortlist #9, which never renders the bad card at all. What remains requires expanding a collapse-by-default Coach card, loading the nudge, navigating away, modifying that exact exercise, returning and tapping Accept — in one session, on one surface, for one user. The worthwhile subset is the one-line <code>swapError</code>, folded into #9. openGym's version also mirrors a plan hash on the client, which the architecture rule forbids.</dd>
+
+  <dt>Verify the APK sha256 before install</dt>
+  <dd>Presented as integrity but conceded not to be the boundary. <code>DownloadManager</code> validates against <code>Content-Length</code> and reports <code>STATUS_FAILED</code> on a short download, and Android's installer verifies the v2/v3 signature over the whole file, so any corruption already fails closed. What is bought is a friendlier message on a path that must fail twice first. Keep the 100 KB size floor as a one-<code>if</code> nit.</dd>
+
+  <dt>A randomised history-edit probe</dt>
+  <dd>Its headline invariant already ships in a stronger form: <code>backend/tests/test_progression_set_types.py</code> is an AST guard over the thirteen query sites, which catches a <em>new</em> reader that forgets the constant — something a probe cannot do. Production also has zero warm-up and zero drop rows.</dd>
+
+  <dt>A bundle-size guard in CI</dt>
+  <dd>openGym ships to strangers on unknown connections; this dashboard is served over LAN to one person from a container on the same subnet, and ECharts dominates the bundle regardless. Revisit only if the dashboard is exposed over Tailscale on cellular and felt slow.</dd>
+</dl>
+
+<h3>Out of bounds</h3>
+<dl class="dec">
+  <dt>openGym's exercise GIF pack</dt>
+  <dd>Disputed third-party rights per openGym's own <code>NOTICE.md</code> — its instance downloads the media rather than shipping it, and ownership is contested between two parties. myvitals ships free-exercise-db, which is public domain, and stays there.</dd>
+  <dt>Porting any openGym source file</dt>
+  <dd>AGPL-3.0 against a public repo that is not. Everything above is an idea, an algorithm or a product decision, described from behaviour.</dd>
+  <dt>Multi-profile, admin dashboards, invite-only signup, passkeys, 14-language i18n, plan sharing</dt>
+  <dd>Single user. No solo angle found for any of them.</dd>
+  <dt>A hand-rolled control library or icon set</dt>
+  <dd>Already recorded as rejected, and downstream of a dependency-light constraint myvitals does not share. The two survivors above — <code>ConfirmDialog</code> and reusing <code>ActivityIcon</code> — are deliberately scoped so they cannot grow into one.</dd>
+</dl>
+
+<h2>Already present</h2>
+<p>What openGym does that myvitals had already shipped. This is the proof the check was done honestly, and in several rows the myvitals version is the stronger one.</p>
+
+<div class="scroll">
+<table>
+<thead><tr><th>openGym has</th><th>myvitals shipped it as</th></tr></thead>
+<tbody>
+<tr><td>Rest after every set including the last of an exercise; short within-round superset rest</td><td><strong>OG2-A7</strong> — <code>rest_after_set</code> at <code>analytics/strength.py:897</code>, and <em>server-decided</em>, where openGym's still lives in the React view</td></tr>
+<tr><td>Linear / Greyskull / double progression, per-policy stall tolerance, the AMRAP double jump</td><td><strong>PROG-1</strong>, v0.7.340 — <code>PROGRAM_SCHEME_DEFAULTS</code> matches openGym constant for constant, and <code>jump = inc * (2 if top &gt;= lo * 2 else 1)</code> is identical</td></tr>
+<tr><td>Server-side prefill cascade within a session, scoped by phase</td><td><strong>TD-6</strong>, documented in <code>PlannedSetOut</code>'s docstring</td></tr>
+<tr><td>Muscle balance body map naming the untrained groups</td><td><strong>#WP-4</strong> — <code>MuscleVolume.vue</code> + <code>BodyMap.vue</code>, against <em>absolute</em> MEV/MAV with a MEV tick, where openGym shades relative to the busiest muscle and so carries no absolute meaning</td></tr>
+<tr><td>The muscle map at planning time, not only in review</td><td><strong>OG2-C2</strong> — <code>project_muscle_volume</code>, classified through the <em>shared</em> <code>volume_status</code> so audit and projection cannot disagree</td></tr>
+<tr><td>Days since a muscle was trained</td><td><code>days_since_muscle_trained</code> — excludes mobility, because a 30-second Cat-Cow was resetting recency, and the same number both drives the planner and is displayed</td></tr>
+<tr><td>Fractional secondary-mover credit, one canonical muscle vocabulary</td><td><code>SECONDARY_WEIGHT = 0.5</code> + <code>analytics/taxonomy.py</code>, with a red test on catalog drift. Deliberately <em>no</em> body-part fallback — an unresolvable credit counts nothing, per <em>null is not zero</em></td></tr>
+<tr><td>A PR on the session that first reached the best; e1RM naming its source set</td><td><strong>PR-1 / PR-1b</strong> — five PR kinds so a bodyweight hold or a rep record counts, which openGym's single scalar cannot, mobility excluded, plus OG2-C4's denominators</td></tr>
+<tr><td>Effort encoded on the progression dot</td><td><strong>OG2-D5</strong>, v0.37.0 — <code>effort.ts</code> / <code>Effort.kt</code>, server-computed off the same thresholds the progression acts on, and an intensity ramp rather than a traffic light</td></tr>
+<tr><td>Goal-direction colour, "to go" wording, dashed goal line with a goal-aware extent</td><td><strong>OG2-A5</strong>, <strong>OG2-D4</strong> and <strong>GOAL-STATE</strong> v0.32.0, which goes further with <code>progress_state</code> / <code>state_tone</code> / a noise band. openGym has no noise band, so a 0.3 kg fluctuation is a coloured verdict there</td></tr>
+<tr><td>A screen wake lock held for the workout, re-acquired on visibility</td><td><strong>OG2-A8</strong> — <code>wakeLock.ts</code> + <code>DisposableEffect(workout?.status)</code>, keyed to the workout's status rather than to screen presence</td></tr>
+<tr><td>A reminder per local calendar date, in a window not at an exact minute, quiet if already trained</td><td><code>WorkoutReminderWorker</code> — the same three rules, the same recorded bug, plus graceful network degradation</td></tr>
+<tr><td>CSV history import with a header map and a refusal to guess</td><td><strong>IMPORT-1</strong> (Strong / Hevy / FitNotes), <code>strength_import.py</code> — refuses fuzzy matching because difflib mapped incline to decline with a false "matched" flag</td></tr>
+<tr><td>Generated API documentation</td><td>FastAPI's own <code>/openapi.json</code> and <code>/docs</code>, with no possibility of the drift openGym's hand-kept spec header warns about</td></tr>
+<tr><td>A <code>muscle_balance</code> MCP tool reported in effective sets, never in kilograms</td><td><code>get_muscle_volume</code>, already the better version</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="foot">
+  <p>Method — openGym cloned at HEAD (v1.3.x line, last push 13 Sept 2026, AGPL-3.0, 938 stars). Four reading lenses (workout mechanics · muscle and fatigue maths · UI and design · platform), each verifying its own findings against the myvitals source and the production database before returning them, then a single adversarial refuter over the survivors, then synthesis. 49 findings · 31 survived the first check · roughly one third of those survived the refuter.</p>
+  <p>Spot-checked by hand after the run: the invented <code>heroMinutes</code> and the unbound RPE em dash, the two-state session card, the absent weight-tile target, the unvalidated <code>block.input</code> in <code>strength_nudge</code>, the <code>LastSetOut</code> field list, the <code>anthropic_api_key</code> digest gate, and the live <code>invalid_grant</code> state of the Google Health grant.</p>
+</div>
+
+</div>

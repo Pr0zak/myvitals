@@ -21,10 +21,15 @@ from types import SimpleNamespace
 from myvitals.api.workout.strength import LastSetOut, _planned_sets
 
 
-def _wex(target_sets=3, reps_low=8, weight=40.0, rest=90):
+def _wex(target_sets=3, reps_low=8, weight=40.0, rest=90,
+         exercise_id="Dumbbell_Bench_Press"):
     return SimpleNamespace(
         target_sets=target_sets, target_reps_low=reps_low, target_reps_high=12,
         target_weight_lb=weight, target_rest_s=rest,
+        # OG3-B3 — `_planned_sets` reads this to decide whether the rep
+        # target is per side. Defaulted to a two-handed press so existing
+        # cases keep testing the ordinary path.
+        exercise_id=exercise_id,
     )
 
 
@@ -209,3 +214,80 @@ def test_both_surfaces_can_record_a_set_type():
     root = pathlib.Path(__file__).resolve().parents[2]
     web = (root / "frontend" / "src" / "views" / "workout" / "StrengthToday.vue").read_text()
     assert 'class="settype-cell"' in web, "the web still cannot record a warm-up"
+
+
+# --------------------------------------------------------------------------
+# OG3-B3 — per-side labelling
+# --------------------------------------------------------------------------
+
+def test_a_two_handed_lift_is_not_marked_per_side():
+    rows = _planned_sets(_wex(), [], None, None)
+    assert all(r.per_side is False for r in rows)
+    assert all(r.side_label is None for r in rows)
+
+
+def test_a_one_arm_lift_is_marked_per_side():
+    """A One-Arm Dumbbell Row read "3 x 10" with nothing saying per arm."""
+    rows = _planned_sets(_wex(exercise_id="One-Arm_Dumbbell_Row"), [], None, None)
+    assert all(r.per_side is True for r in rows)
+    assert all(r.side_label == "per side" for r in rows)
+
+
+def test_the_label_does_not_change_the_prescription():
+    """Phase 1 is words only.
+
+    Doubling `target_sets` here would double weekly volume credit overnight,
+    break comparability with the existing set history, and could push a
+    muscle over MAV without the user changing anything they do. That
+    decision is OG3-M8 and is deliberately deferred.
+    """
+    plain = _planned_sets(_wex(target_sets=3), [], None, None)
+    uni = _planned_sets(
+        _wex(target_sets=3, exercise_id="One-Arm_Dumbbell_Row"), [], None, None)
+    assert len(uni) == len(plain) == 3
+    assert [r.target_reps for r in uni] == [r.target_reps for r in plain]
+    assert [r.target_weight_lb for r in uni] == [r.target_weight_lb for r in plain]
+
+
+def test_alternating_movements_are_excluded():
+    """Their sides alternate WITHIN the set, so the count is already a total.
+
+    Labelling one "per side" would halve the work the user actually does.
+    """
+    for eid in ("Alternate_Hammer_Curl", "Standing_Alternating_Dumbbell_Press",
+                "Walking_Lunge", "Dead_Bug"):
+        rows = _planned_sets(_wex(exercise_id=eid), [], None, None)
+        assert all(r.per_side is False for r in rows), eid
+
+
+def test_every_curated_unilateral_id_still_resolves():
+    """A renamed catalog row must fail loudly, not silently lose its label.
+
+    Same guarantee `_PREFERRED_VARIETY` and `common_pantry.py` carry. A
+    stale entry here is not inert: the prescription quietly goes back to
+    saying "3 x 10" with no statement of what the 10 counts, which is the
+    ambiguity the table exists to remove.
+    """
+    from myvitals.analytics import strength as strength_algo
+
+    missing = sorted(
+        eid for eid in strength_algo._UNILATERAL_EXERCISE_IDS
+        if eid not in strength_algo.CATALOG_BY_ID
+    )
+    assert not missing, f"unilateral ids no longer in the catalog: {missing}"
+
+
+def test_the_unilateral_table_excludes_mobility():
+    """Mobility already has `is_bilateral`, which doubles the sets.
+
+    Carrying both flags on one row would mean a pose held once per side
+    AND labelled "per side" — the same fact stated twice, by two mechanisms
+    that disagree about whether it changes the set count.
+    """
+    from myvitals.analytics import strength as strength_algo
+
+    both = sorted(
+        eid for eid in strength_algo._UNILATERAL_EXERCISE_IDS
+        if strength_algo.is_mobility(eid)
+    )
+    assert not both, f"these carry both mechanisms: {both}"

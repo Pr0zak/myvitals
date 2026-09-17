@@ -119,6 +119,93 @@ for _eid, _patch in _CATALOG_OVERRIDES.items():
     if _eid in CATALOG_BY_ID:
         CATALOG_BY_ID[_eid].update(_patch)
 
+# OG3-B3 — exercises performed ONE SIDE AT A TIME, where the prescribed reps
+# mean reps per side.
+#
+# `is_bilateral` already existed and is the wrong tool: it makes the mobility
+# picker write `target_sets=2` so a pose is held once per side, and the
+# clients label those two sets "R"/"L". Nine rows carry it, all mobility, and
+# ZERO of the 201 main-catalog rows do — while 27 of them are unilateral by
+# name. So a One-Arm Dumbbell Row is prescribed "3 x 10" with no statement of
+# whether that is per arm or in total, and both readings are plausible.
+#
+# PHASE 1 IS A LABEL AND NOTHING ELSE. Doubling `target_sets` for these would
+# double the weekly volume credit overnight, break comparability with 876
+# sets of existing history, and could push a muscle over MAV without the user
+# changing anything they do. Which convention MEV/MAV are denominated in is a
+# data-semantics decision, tracked as OG3-M8 and deliberately deferred.
+#
+# Curated rather than pattern-matched, like `_PREFERRED_VARIETY` and
+# `common_pantry.py`, because the distinction is editorial: a name tells you
+# an exercise involves one limb, not how its reps are conventionally counted.
+# Three families are deliberately EXCLUDED even though their names match:
+#
+#   * Alternating movements (Alternate Hammer Curl, See-Saw Press, Standing
+#     Alternating Dumbbell Press, Dead Bug, Push-Up to Side Plank). The sides
+#     alternate WITHIN the set, so the rep count is already a total and
+#     "per side" would halve the work the user actually does.
+#   * Walking lunges, counted in total steps for the same reason.
+#   * Pilates Single-Leg Stretch, which is mobility and already carries
+#     `is_bilateral`.
+#
+# A wrong entry here is not inert: it changes what a prescription MEANS. The
+# test beside this asserts every id still resolves, so a catalog rebuild that
+# renames a row fails loudly rather than silently dropping the label.
+_UNILATERAL_EXERCISE_IDS: frozenset[str] = frozenset({
+    "Bird_Dog_Row",
+    "Bulgarian_Split_Squat",
+    "Cossack_Squat",
+    "Deficit_Reverse_Lunge",
+    "Dumbbell_Lunges",
+    "Dumbbell_Lying_One-Arm_Rear_Lateral_Raise",
+    "Dumbbell_One-Arm_Shoulder_Press",
+    "Dumbbell_One-Arm_Triceps_Extension",
+    "Dumbbell_One-Arm_Upright_Row",
+    "Dumbbell_Rear_Lunge",
+    "Dumbbell_Seated_One-Leg_Calf_Raise",
+    "Dumbbell_Step_Up",
+    "Dumbbell_Step_Ups",
+    "Lateral_Lunge",
+    "Lying_One-Arm_Lateral_Raise",
+    "One-Arm_Dumbbell_Row",
+    "One-Arm_Flat_Bench_Dumbbell_Flye",
+    "One-Arm_Incline_Lateral_Raise",
+    "One-Arm_Side_Laterals",
+    "One_Arm_Dumbbell_Bench_Press",
+    "One_Arm_Dumbbell_Preacher_Curl",
+    "One_Arm_Pronated_Dumbbell_Triceps_Extension",
+    "One_Arm_Supinated_Dumbbell_Triceps_Extension",
+    "Seated_Bent-Over_One-Arm_Dumbbell_Triceps_Extension",
+    "Seated_One-Arm_Dumbbell_Palms-Down_Wrist_Curl",
+    "Seated_One-Arm_Dumbbell_Palms-Up_Wrist_Curl",
+    "Seated_Single_Leg_Calf_Raise",
+    "Single-Arm_Push-Up",
+    "Single_Arm_Dumbbell_Press",
+    "Single_Arm_Floor_Press",
+    "Single_Arm_Romanian_Deadlift",
+    "Single_Arm_Skullcrusher",
+    "Single_Leg_Glute_Bridge",
+    "Single_Leg_Hip_Thrust",
+    "Single_Leg_Romanian_Deadlift",
+    "Split_Squat_with_Dumbbells",
+    "Standing_Bent-Over_One-Arm_Dumbbell_Triceps_Extension",
+    "Standing_One-Arm_Dumbbell_Curl_Over_Incline_Bench",
+    "Standing_One-Arm_Dumbbell_Triceps_Extension",
+    "Standing_Palm-In_One-Arm_Dumbbell_Press",
+    "Step-up_with_Knee_Raise",
+})
+
+
+def is_unilateral(exercise_id: str) -> bool:
+    """Whether this exercise's prescribed reps are PER SIDE (OG3-B3).
+
+    The server owns this rather than each client testing a name, because two
+    copies of a rule that changes what a number means is exactly the
+    divergence the architecture rule forbids.
+    """
+    return exercise_id in _UNILATERAL_EXERCISE_IDS
+
+
 # TD-1 -- fold the catalog's muscle and movement-pattern vocabulary onto the
 # canonical set before anything reads it. The two source files disagree on
 # spelling ("quads" vs "quadriceps", "abs" vs "abdominals") and on how finely
@@ -2990,6 +3077,65 @@ async def weekly_muscle_volume(
             "status": volume_status(sets, mev, mav),
         }
     return out
+
+
+
+def reachable_exercises_by_muscle(
+    equipment: dict[str, Any],
+    exercise_prefs: dict[str, str] | None = None,
+) -> dict[str, dict[str, int]]:
+    """How many exercises this kit can actually reach, per muscle (OG3-B2).
+
+    The volume audit answers "did you train this muscle enough". It cannot
+    answer the question standing behind that one: "can I". Counting the
+    bundled catalog against this user's own equipment, five of the fourteen
+    audited muscles have a pool smaller than their own MEV — lower back has
+    ONE exercise against an MEV of 2, calves 3 against 8, lats 4 against 10,
+    hamstrings 5 against 8 — while abdominals has 40 and shoulders 37.
+
+    Without this, a permanently-under lats row is the same colour as a
+    genuine programming gap, and no amount of training will move it. The
+    project has met this before and answered by deleting the neck row
+    outright; a count is the more informative version of that judgement and
+    keeps the row, because "you own one exercise for this" is actionable in
+    a way "under" is not.
+
+    Counts flow through the same three filters the generator uses
+    (`selectable_catalog_ids`) and the same muscle vocabulary the audit uses
+    (`taxonomy.credits_volume`), so the pool reported here is exactly the
+    pool the planner draws from. Mobility is excluded for the reason
+    OG2-C1 excluded it from volume: a cool-down pose is not a way to train
+    a muscle to MEV.
+
+    Pure — equipment in, counts out, no database. Returns, per muscle:
+        {"primary": 4, "any": 11}
+    `primary` is exercises that train it as the prime mover; `any` also
+    counts those crediting it at the 0.5x secondary weight.
+    """
+    ids = selectable_catalog_ids(equipment, exercise_prefs)
+    primary: dict[str, int] = {m: 0 for m in MUSCLE_VOLUME_TARGETS}
+    any_: dict[str, int] = {m: 0 for m in MUSCLE_VOLUME_TARGETS}
+    for ex_id in ids:
+        if is_mobility(ex_id):
+            continue
+        info = CATALOG_BY_ID.get(ex_id)
+        if info is None:
+            continue
+        prime = taxonomy.credits_volume(info.get("primary_muscle"))
+        touched: set[str] = set()
+        if prime:
+            primary[prime] = primary.get(prime, 0) + 1
+            touched.add(prime)
+        for sec in info.get("secondary_muscles") or []:
+            canon = taxonomy.credits_volume(sec)
+            if canon:
+                touched.add(canon)
+        for m in touched:
+            any_[m] = any_.get(m, 0) + 1
+    return {
+        m: {"primary": primary.get(m, 0), "any": any_.get(m, 0)}
+        for m in MUSCLE_VOLUME_TARGETS
+    }
 
 
 async def recent_frequency_by_exercise(

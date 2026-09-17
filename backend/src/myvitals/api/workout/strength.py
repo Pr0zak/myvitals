@@ -645,11 +645,44 @@ class WorkoutExerciseIn(BaseModel):
     notes: str | None = None
 
 
+#: `LastSetOut.date` is a FIELD named `date`, and assigning it a default binds
+#: `date = None` in the class namespace — which then shadows the imported
+#: `date` type when Pydantic resolves the annotation, so `date | None` becomes
+#: `None | None` and collection fails outright. `WorkoutOut.date` gets away
+#: with the same name only because it has no default. This alias keeps the
+#: wire field named `date` without the annotation having to name it.
+_DateT = date
+
+
 class LastSetOut(BaseModel):
-    """LOG-1: one working set from the last time this exercise was done."""
+    """LOG-1: one working set from the last time this exercise was done.
+
+    OG3-A3 adds `date` and `rating`, both of which were already in the join
+    and neither of which was selected.
+
+    The date matters because "last" is doing more work than it looks. Across
+    159 per-exercise re-training intervals in this history, 106 exceed 14 days
+    and the mean gap is 31; an undated ghost line reads as "last session" and
+    is usually wrong by about a month. Prefilling today's weights from a
+    figure set five weeks ago is a defensible thing for the app to do, but it
+    is not a defensible thing for the app to do silently.
+
+    The rating matters because it is the single input the whole progression
+    policy runs on — the weight offered today is a function of the tap the
+    user made last time — and until now that tap was write-only from the
+    user's point of view. Showing it closes the loop: the line now states
+    both what was lifted and what the app concluded from it.
+
+    Both fields are optional, so a row that predates ratings renders the old
+    way rather than rendering a zero.
+    """
     set_number: int
     weight_lb: float | None = None  # None for bodyweight lifts
     reps: int | None = None
+    #: The session these sets came from, as a local calendar date.
+    date: _DateT | None = None
+    #: 1-5 effort rating as logged; None for a set logged without one.
+    rating: int | None = None
 
 
 class PlannedSetOut(BaseModel):
@@ -702,6 +735,17 @@ class PlannedSetOut(BaseModel):
     prefill_weight_lb: float | None = None
     prefill_reps: int
     prefill_rating: int | None = None
+    # OG3-B3 — this exercise is performed one side at a time, so `target_reps`
+    # means reps PER SIDE. A One-Arm Dumbbell Row read "3 x 10" with nothing
+    # saying whether that was per arm or in total, and both readings are
+    # plausible. `side_label` is the words to append, decided here so the two
+    # clients cannot word it differently.
+    #
+    # Phase 1 is a label only: `target_sets` is untouched. Doubling it would
+    # double weekly volume credit overnight and break comparability with the
+    # existing set history — tracked as OG3-M8 and deliberately deferred.
+    per_side: bool = False
+    side_label: str | None = None
 
 
 class WorkoutExerciseOut(BaseModel):
@@ -1028,6 +1072,9 @@ def _planned_sets(
     accumulating fatigue. Writing placeholder rows here would reintroduce
     both, plus break the idempotency the offline replay path depends on.
     """
+    # OG3-B3 — whether this slot's rep target is per side. Resolved once per
+    # slot rather than per set: it is a property of the exercise.
+    unilateral = strength_algo.is_unilateral(wex.exercise_id)
     logged_by_number = {
         s.set_number: s for s in sets
         if s.actual_reps is not None and not s.skipped
@@ -1089,6 +1136,9 @@ def _planned_sets(
             # Never defaulted. See PlannedSetOut's docstring: a pre-selected
             # rating is a fabricated input to next session's weight choice.
             prefill_rating=(prior.rating if prior is not None else None),
+            # OG3-B3. Decided here so both clients render the same words.
+            per_side=unilateral,
+            side_label=("per side" if unilateral else None),
         ))
     return out
 
@@ -1319,6 +1369,10 @@ async def _hydrate_workout(
                 models.StrengthSet.set_number,
                 models.StrengthSet.actual_weight_lb,
                 models.StrengthSet.actual_reps,
+                # OG3-A3. Both already reachable from the joins below; the
+                # ghost line just never asked for them.
+                models.StrengthWorkout.date.label("wdate"),
+                models.StrengthSet.rating,
             )
             .join(models.StrengthWorkoutExercise,
                   models.StrengthSet.workout_exercise_id
@@ -1355,6 +1409,8 @@ async def _hydrate_workout(
                 set_number=r.set_number,
                 weight_lb=r.actual_weight_lb,
                 reps=r.actual_reps,
+                date=r.wdate,
+                rating=r.rating,
             ))
     # Surface the automatic recovery deload + a short reason so the client can
     # show a "load eased for recovery — Use full weight" banner. Legacy rows
@@ -2291,6 +2347,57 @@ class AddExerciseBody(BaseModel):
     # right: an accessory added mid-session belongs after the planned work,
     # not spliced into the middle of a superset.
     position: int | None = None
+
+
+class NudgeDeclineBody(BaseModel):
+    """One AI variety suggestion the user turned down (OG3-C2)."""
+    target_exercise_id: str
+    replacement_exercise_id: str
+
+
+@router.post("/workouts/{workout_id}/nudge-decline", response_model=WorkoutOut)
+async def decline_nudge(
+    workout_id: int, body: NudgeDeclineBody,
+    db: AsyncSession = Depends(get_session),
+) -> WorkoutOut:
+    """Record that the user declined an AI-suggested swap for this plan.
+
+    Dismissal used to be client state only — a `dismissed` set in
+    `VarietyNudge.vue`, a `CoachCardState` on the phone — and never reached
+    the server. Because `POST /ai/strength/nudge/{id}` caches by payload hash
+    and takes no `force` parameter, "Get fresh suggestions" after a decline
+    was GUARANTEED to return the two swaps just dismissed.
+
+    Persisting the decline fixes both halves with one write: the prompt can
+    be told not to re-propose it, and the list is part of the payload, so it
+    moves the cache key and the re-ask is a genuinely different question.
+
+    Idempotent — declining the same swap twice is a no-op rather than a
+    duplicate, because the phone replays buffered writes and must be able to
+    send one more than once. Capped at 10, oldest dropped: the payload has to
+    stay bounded and a plan has at most a handful of slots anyway.
+    """
+    w = await db.get(models.StrengthWorkout, workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="workout not found")
+
+    entry = {
+        "target": body.target_exercise_id,
+        "replacement": body.replacement_exercise_id,
+    }
+    current = [
+        d for d in (w.nudge_declines or [])
+        if isinstance(d, dict) and d.get("target") and d.get("replacement")
+    ]
+    if entry not in current:
+        current.append(entry)
+    # Reassigned, not mutated in place: SQLAlchemy does not track mutation of
+    # a plain JSON column, so appending to the existing list would be dropped
+    # silently on commit. Same trap the scoped-preference endpoints document.
+    w.nudge_declines = current[-10:]
+    await db.commit()
+    await db.refresh(w)
+    return await _hydrate_workout(db, w)
 
 
 @router.post("/workouts/{workout_id}/exercises", response_model=WorkoutOut)
@@ -3457,6 +3564,25 @@ async def get_muscle_volume(
     """
     days = max(1, min(28, int(days)))
     muscles = await strength_algo.weekly_muscle_volume(db, days=days)
+
+    # OG3-B2 — how many exercises this kit can actually reach for each
+    # muscle. Without it, "under" on a muscle you own one exercise for is
+    # indistinguishable from "under" on one you simply did not train, and
+    # only the second is something the user can act on. `pool_below_mev` is
+    # decided here rather than by each client, for the same reason
+    # `volume_status` is: it is a judgement, and two copies drift.
+    equip = await _equipment_payload(db)
+    prefs = (equip.get("exercise_prefs") or {}) if isinstance(equip, dict) else {}
+    reach = strength_algo.reachable_exercises_by_muscle(equip, prefs)
+    for muscle, row in muscles.items():
+        r = reach.get(muscle, {"primary": 0, "any": 0})
+        row["available_primary"] = r["primary"]
+        row["available_any"] = r["any"]
+        # Compared against `any`, not `primary`: secondary credit counts
+        # toward MEV in this audit, so it has to count toward reachability
+        # too, or the flag would fire on muscles the user can in fact train.
+        row["pool_below_mev"] = r["any"] < row["mev"]
+
     return {"window_days": days, "muscles": muscles}
 
 

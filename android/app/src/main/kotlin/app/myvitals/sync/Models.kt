@@ -229,6 +229,12 @@ data class LastSet(
     @Json(name = "set_number") val setNumber: Int,
     @Json(name = "weight_lb") val weightLb: Double? = null,
     val reps: Int? = null,
+    /** OG3-A3 — the session these sets came from. "last" without a date
+     *  reads as "last session", and the mean gap between repeats of one
+     *  exercise in this history is 31 days. */
+    val date: String? = null,
+    /** OG3-A3 — the effort tap that produced today's prescription. */
+    val rating: Int? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -301,6 +307,11 @@ data class PlannedSet(
     @Json(name = "prefill_weight_lb") val prefillWeightLb: Double? = null,
     @Json(name = "prefill_reps") val prefillReps: Int = 0,
     @Json(name = "prefill_rating") val prefillRating: Int? = null,
+    /** OG3-B3 — the exercise is performed one side at a time, so [targetReps]
+     *  means reps PER SIDE. [sideLabel] is the words to append, decided
+     *  server-side so the two clients cannot word it differently. */
+    @Json(name = "per_side") val perSide: Boolean = false,
+    @Json(name = "side_label") val sideLabel: String? = null,
 )
 
 /** POST /workout/strength/workouts/{id}/exercises — append an off-plan lift.
@@ -708,8 +719,18 @@ data class StrengthExerciseStatsSummary(
 data class StrengthSwapSuggestion(
     @Json(name = "target_exercise_id") val targetExerciseId: String,
     @Json(name = "replacement_exercise_id") val replacementExerciseId: String,
+    /** OG3-C1 — real catalog display names, attached server-side after the
+     *  model's answer is validated. The screen used to un-slug the id with
+     *  `replace('_', ' ')`, which is exactly what made a hallucinated id
+     *  render as a plausible exercise: the client had no way to tell. */
+    @Json(name = "target_name") val targetName: String? = null,
+    @Json(name = "replacement_name") val replacementName: String? = null,
     val reason: String,
-)
+) {
+    fun targetDisplay(): String = targetName ?: targetExerciseId.replace('_', ' ')
+    fun replacementDisplay(): String =
+        replacementName ?: replacementExerciseId.replace('_', ' ')
+}
 
 @JsonClass(generateAdapter = true)
 data class StrengthNudgeBody(
@@ -734,6 +755,13 @@ data class MuscleVolumeRow(
     // endpoint and present on a workout, so both read through one type.
     @Json(name = "sets_projected") val setsProjected: Double? = null,
     @Json(name = "status_projected") val statusProjected: String? = null,
+    // OG3-B2: how many exercises the user's own equipment can reach for this
+    // muscle, and whether that pool is smaller than its own MEV. Both decided
+    // server-side — `poolBelowMev` is a judgement, and a second copy of the
+    // rule on a client is how two surfaces drift.
+    @Json(name = "available_primary") val availablePrimary: Int? = null,
+    @Json(name = "available_any") val availableAny: Int? = null,
+    @Json(name = "pool_below_mev") val poolBelowMev: Boolean = false,
 )
 
 @JsonClass(generateAdapter = true)
@@ -958,6 +986,13 @@ data class ExercisePrefBody(val pref: String)         // neutral|disabled|favori
 @JsonClass(generateAdapter = true)
 data class SwapBody(@Json(name = "exercise_id") val exerciseId: String)
 
+/** OG3-C2 — one AI variety suggestion the user turned down. */
+@JsonClass(generateAdapter = true)
+data class NudgeDeclineBody(
+    @Json(name = "target_exercise_id") val targetExerciseId: String,
+    @Json(name = "replacement_exercise_id") val replacementExerciseId: String,
+)
+
 // ── Trails (RainoutLine status) ─────────────────────────────────
 
 @JsonClass(generateAdapter = true)
@@ -1058,6 +1093,10 @@ data class VitalTile(
     /** Section heading for the Key metrics grid, assigned server-side. */
     val group: String? = null,
     val target: Double? = null,
+    /** OG3-A4 — the goal stated in words ("5 lb to lose"). Built server-side
+     *  because its wording depends on the goal's direction, and GOAL-STATE
+     *  owns direction. Null when no goal is set or there is no reading. */
+    @Json(name = "goal_note") val goalNote: String? = null,
     val delta: Double? = null,
     val z: Double? = null,
     /** good | typical | watch, or null when the server withheld a verdict. */

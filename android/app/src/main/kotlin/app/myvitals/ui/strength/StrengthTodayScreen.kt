@@ -2122,6 +2122,44 @@ internal fun WhyWorkoutCard(
     }
 }
 
+/** OG3-C2 — tell the server a suggested swap was turned down.
+ *
+ *  Dismissal used to live only in Compose state, and `POST
+ *  /ai/strength/nudge/{id}` caches by payload hash with no `force`
+ *  parameter — so "Get fresh suggestions" after a decline returned exactly
+ *  the swaps just dismissed, which reads as the coach not having listened.
+ *
+ *  Fire-and-forget on purpose. The row disappears on tap regardless; if this
+ *  call fails the only consequence is the behaviour we already had, and
+ *  blocking the UI on it would trade a real responsiveness cost for a
+ *  best-effort improvement. The endpoint is idempotent, so a retry that
+ *  arrives twice is harmless.
+ */
+private fun declineNudge(
+    scope: kotlinx.coroutines.CoroutineScope,
+    settings: SettingsRepository,
+    workoutId: Long,
+    targetExerciseId: String,
+    replacementExerciseId: String,
+) {
+    if (!settings.isConfigured()) return
+    scope.launch {
+        try {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            withContext(Dispatchers.IO) {
+                api.declineStrengthNudge(
+                    workoutId,
+                    app.myvitals.sync.NudgeDeclineBody(
+                        targetExerciseId, replacementExerciseId,
+                    ),
+                )
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "nudge decline not recorded")
+        }
+    }
+}
+
 @Composable
 internal fun VarietyNudgeCard(
     settings: SettingsRepository,
@@ -2197,12 +2235,12 @@ internal fun VarietyNudgeCard(
                                     .padding(10.dp),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(s.targetExerciseId.replace('_', ' ')
+                                    Text(s.targetDisplay()
                                             .replaceFirstChar(Char::titlecase),
                                         color = pal.ink, fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold)
                                     Text(" → ", color = pal.muted, fontSize = 12.sp)
-                                    Text(s.replacementExerciseId.replace('_', ' ')
+                                    Text(s.replacementDisplay()
                                             .replaceFirstChar(Char::titlecase),
                                         color = pal.good, fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold)
@@ -2222,7 +2260,14 @@ internal fun VarietyNudgeCard(
                                         ),
                                     ) { Text("Accept", fontSize = 11.sp) }
                                     OutlinedButton(
-                                        onClick = { dismissed[s.targetExerciseId] = true },
+                                        onClick = {
+                                            dismissed[s.targetExerciseId] = true
+                                            declineNudge(
+                                                scope, settings, workoutId,
+                                                s.targetExerciseId,
+                                                s.replacementExerciseId,
+                                            )
+                                        },
                                     ) { Text("Dismiss", fontSize = 11.sp) }
                                 }
                             }
@@ -2702,12 +2747,12 @@ internal fun CoachCard(
                                 .padding(8.dp),
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(s.targetExerciseId.replace('_', ' ')
+                                Text(s.targetDisplay()
                                         .replaceFirstChar(Char::titlecase),
                                     color = pal.ink, fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold)
                                 Text(" → ", color = pal.muted, fontSize = 11.sp)
-                                Text(s.replacementExerciseId.replace('_', ' ')
+                                Text(s.replacementDisplay()
                                         .replaceFirstChar(Char::titlecase),
                                     color = pal.good, fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold)
@@ -2728,7 +2773,14 @@ internal fun CoachCard(
                                     ),
                                 ) { Text("Accept", fontSize = 10.sp) }
                                 OutlinedButton(
-                                    onClick = { state.dismissed[s.targetExerciseId] = true },
+                                    onClick = {
+                                        state.dismissed[s.targetExerciseId] = true
+                                        declineNudge(
+                                            scope, settings, workoutId,
+                                            s.targetExerciseId,
+                                            s.replacementExerciseId,
+                                        )
+                                    },
                                 ) { Text("Dismiss", fontSize = 10.sp) }
                             }
                         }
@@ -3150,8 +3202,14 @@ private fun ExerciseCard(
                     val rep = if (wex.targetRepsLow == wex.targetRepsHigh)
                         "${wex.targetRepsLow}" else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
                     val w = wex.targetWeightLb?.let { " @ ${it}lb" } ?: ""
+                    // OG3-B3: rendered verbatim from the server. "3×10" on a
+                    // One-Arm Row is ambiguous between per arm and in total,
+                    // and both readings are plausible — so the words come
+                    // from one place rather than each client choosing.
+                    val side = wex.plannedSets.firstOrNull { it.perSide }
+                        ?.sideLabel?.let { " $it" } ?: ""
                     Text(
-                        "${wex.targetSets}×$rep$w  ·  ${wex.targetRestS}s rest",
+                        "${wex.targetSets}×$rep$side$w  ·  ${wex.targetRestS}s rest",
                         color = pal.muted, fontSize = 12.sp,
                     )
                     // PROG-1: program-mode scheme badge on program lifts
@@ -3196,8 +3254,15 @@ private fun ExerciseCard(
                             }
                             if (wv != null) "$wv×${ls.reps}" else "${ls.reps}"
                         }
+                        // OG3-A3 — when, and how it felt. One rating for the
+                        // line rather than one per set: the ghost is already a
+                        // compressed summary, and the WORST rating is the
+                        // honest one, since a session containing a failed set
+                        // is not a session that felt "Easy".
+                        val when_ = lastSetsWhen(wex.lastSets)
+                        val head = if (when_ != null) "↩ last ($when_)" else "↩ last"
                         Text(
-                            "↩ last: $summary",
+                            "$head: $summary",
                             color = pal.dim, fontSize = 11.sp,
                         )
                     }
@@ -4109,6 +4174,25 @@ private fun ratingColor(r: Int, pal: StrengthPalette) = when (r) {
 // WP-16 — four-button labels; historical 1–5 RPE data still maps cleanly.
 private fun ratingLabel(r: Int) = when (r) {
     1 -> "Failed"; 2 -> "Hard"; 3, 4 -> "Good"; 5 -> "Easy"; else -> "RPE $r"
+}
+
+/** OG3-A3 — "3d ago · Hard" for the ghost line, or null when the server sent
+ *  no date (rows logged before the field existed).
+ *
+ *  Mirrors `lastSetsWhen` in `StrengthToday.vue`; the two must agree, since
+ *  they annotate the same prefilled number on the same session. */
+private fun lastSetsWhen(sets: List<app.myvitals.sync.LastSet>): String? {
+    val iso = sets.firstOrNull { it.date != null }?.date ?: return null
+    val then = runCatching { java.time.LocalDate.parse(iso) }.getOrNull() ?: return null
+    val days = java.time.temporal.ChronoUnit.DAYS.between(then, java.time.LocalDate.now())
+    val when_ = when {
+        days <= 0L -> "today"
+        days == 1L -> "yesterday"
+        days < 7L -> "${days}d ago"
+        else -> then.format(java.time.format.DateTimeFormatter.ofPattern("MMM d"))
+    }
+    val worst = sets.mapNotNull { it.rating }.minOrNull()
+    return if (worst == null) when_ else "$when_ · ${ratingLabel(worst)}"
 }
 
 @Composable

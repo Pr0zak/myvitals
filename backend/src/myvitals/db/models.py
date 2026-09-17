@@ -600,6 +600,14 @@ class StrengthWorkout(Base):
     # paused intervals so net training duration excludes time away.
     paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     total_paused_s: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # OG3-C2 — AI variety suggestions the user has declined for THIS plan, as
+    # a list of {"target": id, "replacement": id}. Fed back into the nudge
+    # payload with a prompt rule not to re-propose them, which also moves the
+    # payload hash — so "Get fresh suggestions" after a decline is genuinely
+    # a different question rather than a guaranteed repeat of the answer just
+    # dismissed. Capped at ten by the endpoint. Ids only, never reasons: the
+    # cache key is per-byte and the payload has to stay bounded.
+    nudge_declines: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class StrengthWorkoutExercise(Base):

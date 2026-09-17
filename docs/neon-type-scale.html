@@ -1,0 +1,432 @@
+<title>Neon Type Scale</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;450;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Page chrome — deliberately NOT the app's palette, so commentary can
+   never be mistaken for part of the thing being shown. */
+:root{
+  --page:#F4F4F1;
+  --panel:#FFFFFF;
+  --edge:#DEDED8;
+  --edge-soft:#EAEAE5;
+  --ink:#16171A;
+  --ink-2:#4E5158;
+  --ink-3:#83868E;
+  --now:#9B3529;      /* the current state */
+  --now-soft:#9b352912;
+  --prop:#1F6B57;     /* the proposal */
+  --prop-soft:#1f6b5712;
+  --sans:'Plus Jakarta Sans',ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --shadow:0 1px 2px #16171a0d, 0 10px 30px -18px #16171a33;
+
+  /* The app's own neon tokens, verbatim from Rings.vue. */
+  --rn-bg:#0f1118; --rn-card:#181b27; --rn-ink:#ececf5; --rn-mut:#9b9bb0;
+  --rn-mag:#ff3ad8; --rn-lime:#5dff3b; --rn-cyan:#28e6ff; --rn-track:#272a3b;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --page:#101113;
+    --panel:#17181B;
+    --edge:#2A2C31;
+    --edge-soft:#212226;
+    --ink:#E9EAEC;
+    --ink-2:#AAADB4;
+    --ink-3:#7C8088;
+    --now:#D9725F;
+    --now-soft:#d9725f1a;
+    --prop:#5FBFA0;
+    --prop-soft:#5fbfa01a;
+    --shadow:0 1px 2px #0000004d, 0 12px 34px -20px #000000cc;
+  }
+}
+:root[data-theme="dark"]{
+  --page:#101113;
+  --panel:#17181B;
+  --edge:#2A2C31;
+  --edge-soft:#212226;
+  --ink:#E9EAEC;
+  --ink-2:#AAADB4;
+  --ink-3:#7C8088;
+  --now:#D9725F;
+  --now-soft:#d9725f1a;
+  --prop:#5FBFA0;
+  --prop-soft:#5fbfa01a;
+  --shadow:0 1px 2px #0000004d, 0 12px 34px -20px #000000cc;
+}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);
+  font-family:var(--sans);font-size:16px;line-height:1.6;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1120px;margin:0 auto;padding:0 26px 110px}
+@media(max-width:640px){.wrap{padding:0 16px 70px}}
+code{font-family:var(--mono);font-size:.85em;background:var(--edge-soft);
+  padding:.1em .34em;border-radius:3px}
+p{max-width:68ch}
+
+header.mast{padding:60px 0 30px;border-bottom:1px solid var(--edge);margin-bottom:34px}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:14px}
+h1{font-size:42px;font-weight:800;letter-spacing:-.022em;line-height:1.05;
+  margin:0 0 16px;text-wrap:balance}
+@media(max-width:640px){h1{font-size:31px}}
+.dek{font-size:18px;line-height:1.55;color:var(--ink-2);max-width:62ch;margin:0}
+.dek strong{color:var(--ink);font-weight:650}
+
+h2{font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);margin:58px 0 16px;padding-bottom:8px;
+  border-bottom:1px solid var(--edge-soft)}
+
+/* ── the two phones ───────────────────────────────────────────── */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-bottom:10px}
+@media(max-width:760px){.compare{grid-template-columns:1fr}}
+.side{min-width:0}
+.sidehead{display:flex;align-items:baseline;gap:9px;margin-bottom:11px}
+.sidehead b{font-size:14.5px;font-weight:700}
+.sidehead span{font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase;padding:2px 7px;border-radius:3px;border:1px solid}
+.tag-now{color:var(--now);background:var(--now-soft);border-color:var(--now)}
+.tag-prop{color:var(--prop);background:var(--prop-soft);border-color:var(--prop)}
+
+/* The mockup itself — the app's real tokens, type and geometry. */
+.phone{
+  background:radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
+  color:var(--rn-ink);
+  font-family:'Plus Jakarta Sans',system-ui,sans-serif;
+  border:1px solid #23263a;border-radius:22px;
+  padding:26px 20px 22px;
+  box-shadow:var(--shadow);
+  overflow:hidden;
+}
+.ph-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px}
+.ph-h1{font-size:32px;margin:0;letter-spacing:-.5px}
+.ph-date{color:var(--rn-mut);font-size:15px}
+.ph-rings{display:flex;justify-content:space-between;gap:6px;margin-bottom:24px}
+.ph-ring{flex:1;text-align:center}
+.ph-ring svg{width:100%;max-width:92px;height:auto;display:block;margin:0 auto}
+.ph-lab{font-size:11px;letter-spacing:.12em;color:var(--rn-mut);margin-top:8px}
+.ph-pct{font-size:19px;margin-top:1px}
+.ph-pct small{font-size:13px;color:var(--rn-mut)}
+.ph-list{display:flex;flex-direction:column;gap:11px}
+.ph-pill{display:flex;align-items:center;gap:13px;background:var(--rn-card);
+  border-radius:20px;padding:14px 16px}
+.ph-pi{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;flex:0 0 auto}
+.ph-pi svg{width:18px;height:18px}
+.bg-cyan{background:rgba(40,230,255,.14);color:var(--rn-cyan)}
+.bg-mag{background:rgba(255,58,216,.14);color:var(--rn-mag)}
+.bg-lime{background:rgba(93,255,59,.14);color:var(--rn-lime)}
+.ph-pn{flex:1;font-size:16px;min-width:0}
+.ph-sub{display:block;color:var(--rn-mut);font-size:12.5px;margin-top:1px}
+.ph-pv{font-family:'Space Grotesk',ui-monospace,monospace;font-size:14px;
+  color:var(--rn-mut);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ph-pv b{color:var(--rn-ink)}
+.ph-pv b.lime{color:var(--rn-lime)}
+.ph-pv b.mag{color:var(--rn-mag)}
+
+/* NOW — the weights actually in Rings.vue today. */
+.now .ph-h1{font-weight:800}
+.now .ph-date{font-weight:600}
+.now .ph-lab{font-weight:700}
+.now .ph-pct{font-weight:800}
+.now .ph-pct small{font-weight:700}
+.now .ph-pn{font-weight:700}
+.now .ph-sub{font-weight:600}
+.now .ph-pv{font-weight:700}
+
+/* PROPOSED — five roles, applied. */
+.prop .ph-h1{font-weight:800}                 /* display  — once per screen */
+.prop .ph-date{font-weight:450}               /* body     */
+.prop .ph-lab{font-weight:600}                /* label    */
+.prop .ph-pct{font-weight:700}                /* numeric-lg */
+.prop .ph-pct small{font-weight:600}          /* numeric-sm */
+.prop .ph-pn{font-weight:650}                 /* title    */
+.prop .ph-sub{font-weight:450}                /* body     */
+.prop .ph-pv{font-weight:600}                 /* numeric-sm */
+
+.caption{font-size:13.5px;color:var(--ink-3);line-height:1.5;margin:10px 0 0;max-width:none}
+
+/* ── the scale table ──────────────────────────────────────────── */
+.scroll{overflow-x:auto;border:1px solid var(--edge);border-radius:4px;
+  background:var(--panel);margin-bottom:24px}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:660px}
+th{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-3);text-align:left;font-weight:500;
+  padding:11px 15px;border-bottom:1px solid var(--edge);white-space:nowrap}
+td{padding:12px 15px;border-bottom:1px solid var(--edge-soft);color:var(--ink-2);
+  vertical-align:middle;line-height:1.45}
+tr:last-child td{border-bottom:none}
+td.role{font-family:var(--mono);font-size:12.5px;color:var(--ink);white-space:nowrap}
+td.spec{font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+.samp{font-family:'Plus Jakarta Sans',sans-serif;color:var(--ink);font-size:15px}
+.samp.num{font-family:'Space Grotesk',monospace;font-variant-numeric:tabular-nums}
+
+/* ── the diff ─────────────────────────────────────────────────── */
+.diff{display:grid;gap:1px;background:var(--edge);border:1px solid var(--edge);
+  border-radius:4px;margin-bottom:24px}
+.drow{background:var(--panel);padding:13px 16px;display:grid;
+  grid-template-columns:1fr auto;gap:4px 16px;align-items:center}
+.drow .sel{font-family:var(--mono);font-size:12.5px;color:var(--ink)}
+.drow .mv{font-family:var(--mono);font-size:12px;white-space:nowrap}
+.drow .mv s{color:var(--now);text-decoration-thickness:1px}
+.drow .mv b{color:var(--prop)}
+.drow .why{grid-column:1/-1;font-size:13.5px;color:var(--ink-3);line-height:1.45}
+@media(max-width:640px){.drow{grid-template-columns:1fr}}
+
+.note{border-left:2px solid var(--edge);padding:2px 0 2px 16px;color:var(--ink-2);
+  font-size:15px;margin:0 0 18px;max-width:66ch}
+.note b{color:var(--ink)}
+
+.foot{border-top:1px solid var(--edge);padding-top:20px;margin-top:56px;
+  font-family:var(--mono);font-size:11.5px;line-height:1.75;color:var(--ink-3)}
+:focus-visible{outline:2px solid var(--prop);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="eyebrow">OG3-M6 · proposal · myvitals neon shell</div>
+  <h1>Neon Type Scale</h1>
+  <p class="dek">The neon shell has almost no weight hierarchy left. <strong>34 of 46 web <code>font-weight</code> declarations sit at 700 or above</strong>, and 32 of 45 Compose weights at Bold or above. When the heading, the label, the value and the list row are all bold, weight has stopped carrying information — nothing recedes, so nothing stands out. Below is the same screen, same content, same colours and sizes. Only the weights differ.</p>
+</header>
+
+<h2>The same screen, twice</h2>
+
+<div class="compare">
+
+  <div class="side">
+    <div class="sidehead"><b>Today</b><span class="tag-now">as it ships now</span></div>
+    <div class="phone now">
+      <div class="ph-head">
+        <div class="ph-h1">Today</div>
+        <div class="ph-date">Wed 17 Sept</div>
+      </div>
+      <div class="ph-rings">
+        <div class="ph-ring">
+          <svg viewBox="0 0 100 100" aria-hidden="true">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#272a3b" stroke-width="9"/>
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#5dff3b" stroke-width="9"
+                    stroke-linecap="round" stroke-dasharray="198 264"
+                    transform="rotate(-90 50 50)"/>
+          </svg>
+          <div class="ph-lab">MOVE</div>
+          <div class="ph-pct">75<small>%</small></div>
+        </div>
+        <div class="ph-ring">
+          <svg viewBox="0 0 100 100" aria-hidden="true">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#272a3b" stroke-width="9"/>
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#28e6ff" stroke-width="9"
+                    stroke-linecap="round" stroke-dasharray="238 264"
+                    transform="rotate(-90 50 50)"/>
+          </svg>
+          <div class="ph-lab">SLEEP</div>
+          <div class="ph-pct">90<small>%</small></div>
+        </div>
+        <div class="ph-ring">
+          <svg viewBox="0 0 100 100" aria-hidden="true">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#272a3b" stroke-width="9"/>
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#ff3ad8" stroke-width="9"
+                    stroke-linecap="round" stroke-dasharray="132 264"
+                    transform="rotate(-90 50 50)"/>
+          </svg>
+          <div class="ph-lab">RECOVERY</div>
+          <div class="ph-pct">50<small>%</small></div>
+        </div>
+      </div>
+      <div class="ph-list">
+        <div class="ph-pill">
+          <span class="ph-pi bg-mag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20.8 6.6a5.5 5.5 0 0 0-9.3-2.4l-.5.5-.5-.5a5.5 5.5 0 0 0-7.8 7.8l8.3 8.3 8.3-8.3a5.5 5.5 0 0 0 1.5-5.4z"/></svg></span>
+          <span class="ph-pn">Resting HR<small class="ph-sub">Today · 28-day mean 54</small></span>
+          <span class="ph-pv"><b>52</b> bpm</span>
+        </div>
+        <div class="ph-pill">
+          <span class="ph-pi bg-cyan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></span>
+          <span class="ph-pn">HRV<small class="ph-sub">Today · above your normal</small></span>
+          <span class="ph-pv"><b class="lime">31</b> ms</span>
+        </div>
+        <div class="ph-pill">
+          <span class="ph-pi bg-lime"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 20l4-9 4 4 4-10 4 15"/></svg></span>
+          <span class="ph-pn">Steps<small class="ph-sub">Today · 1,740 to go</small></span>
+          <span class="ph-pv"><b>8,260</b></span>
+        </div>
+        <div class="ph-pill">
+          <span class="ph-pi bg-mag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 3v18M5 8h14M5 16h14"/></svg></span>
+          <span class="ph-pn">Weight<small class="ph-sub">Sept 14 · 53.9 lb to lose</small></span>
+          <span class="ph-pv"><b>253.9</b> lb</span>
+        </div>
+      </div>
+    </div>
+    <p class="caption">Seven consecutive declarations, none below 600. The date, the ring labels, the row names and the numbers are all within one step of each other.</p>
+  </div>
+
+  <div class="side">
+    <div class="sidehead"><b>Today</b><span class="tag-prop">with the scale</span></div>
+    <div class="phone prop">
+      <div class="ph-head">
+        <div class="ph-h1">Today</div>
+        <div class="ph-date">Wed 17 Sept</div>
+      </div>
+      <div class="ph-rings">
+        <div class="ph-ring">
+          <svg viewBox="0 0 100 100" aria-hidden="true">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#272a3b" stroke-width="9"/>
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#5dff3b" stroke-width="9"
+                    stroke-linecap="round" stroke-dasharray="198 264"
+                    transform="rotate(-90 50 50)"/>
+          </svg>
+          <div class="ph-lab">MOVE</div>
+          <div class="ph-pct">75<small>%</small></div>
+        </div>
+        <div class="ph-ring">
+          <svg viewBox="0 0 100 100" aria-hidden="true">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#272a3b" stroke-width="9"/>
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#28e6ff" stroke-width="9"
+                    stroke-linecap="round" stroke-dasharray="238 264"
+                    transform="rotate(-90 50 50)"/>
+          </svg>
+          <div class="ph-lab">SLEEP</div>
+          <div class="ph-pct">90<small>%</small></div>
+        </div>
+        <div class="ph-ring">
+          <svg viewBox="0 0 100 100" aria-hidden="true">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#272a3b" stroke-width="9"/>
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#ff3ad8" stroke-width="9"
+                    stroke-linecap="round" stroke-dasharray="132 264"
+                    transform="rotate(-90 50 50)"/>
+          </svg>
+          <div class="ph-lab">RECOVERY</div>
+          <div class="ph-pct">50<small>%</small></div>
+        </div>
+      </div>
+      <div class="ph-list">
+        <div class="ph-pill">
+          <span class="ph-pi bg-mag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20.8 6.6a5.5 5.5 0 0 0-9.3-2.4l-.5.5-.5-.5a5.5 5.5 0 0 0-7.8 7.8l8.3 8.3 8.3-8.3a5.5 5.5 0 0 0 1.5-5.4z"/></svg></span>
+          <span class="ph-pn">Resting HR<small class="ph-sub">Today · 28-day mean 54</small></span>
+          <span class="ph-pv"><b>52</b> bpm</span>
+        </div>
+        <div class="ph-pill">
+          <span class="ph-pi bg-cyan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></span>
+          <span class="ph-pn">HRV<small class="ph-sub">Today · above your normal</small></span>
+          <span class="ph-pv"><b class="lime">31</b> ms</span>
+        </div>
+        <div class="ph-pill">
+          <span class="ph-pi bg-lime"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 20l4-9 4 4 4-10 4 15"/></svg></span>
+          <span class="ph-pn">Steps<small class="ph-sub">Today · 1,740 to go</small></span>
+          <span class="ph-pv"><b>8,260</b></span>
+        </div>
+        <div class="ph-pill">
+          <span class="ph-pi bg-mag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 3v18M5 8h14M5 16h14"/></svg></span>
+          <span class="ph-pn">Weight<small class="ph-sub">Sept 14 · 53.9 lb to lose</small></span>
+          <span class="ph-pv"><b>253.9</b> lb</span>
+        </div>
+      </div>
+    </div>
+    <p class="caption">Five steps instead of one. The screen title is the only thing at 800; the numbers you came to read sit above the names, and the names sit above the supporting lines.</p>
+  </div>
+
+</div>
+
+<p class="note"><b>Nothing else moves.</b> Same colours, same sizes, same spacing, same geometry, same content. Every difference on this page is a <code>font-weight</code>.</p>
+
+<h2>The five roles</h2>
+
+<div class="scroll">
+<table>
+<thead>
+<tr><th>Role</th><th>Spec</th><th>Used for</th><th>Sample</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td class="role">display</td>
+  <td class="spec">32 / 800 / −0.5px</td>
+  <td>The screen title. <strong>Once per screen</strong> — that is what makes it read as the top of the page.</td>
+  <td><span class="samp" style="font-weight:800;font-size:22px;letter-spacing:-.5px">Today</span></td>
+</tr>
+<tr>
+  <td class="role">title</td>
+  <td class="spec">16 / 650</td>
+  <td>Card headings and list-row names. The thing you scan for.</td>
+  <td><span class="samp" style="font-weight:650">Resting HR</span></td>
+</tr>
+<tr>
+  <td class="role">body</td>
+  <td class="spec">15 / 450</td>
+  <td>Supporting lines, dates, sub-captions. Currently 600, which is why nothing recedes.</td>
+  <td><span class="samp" style="font-weight:450">Today · 28-day mean 54</span></td>
+</tr>
+<tr>
+  <td class="role">label</td>
+  <td class="spec">11 / 600 / 0.12em / upper</td>
+  <td>Ring captions and micro-labels. Tracking and case already carry it; weight does not need to.</td>
+  <td><span class="samp" style="font-weight:600;font-size:11px;letter-spacing:.12em">MOVE</span></td>
+</tr>
+<tr>
+  <td class="role">numeric-lg</td>
+  <td class="spec">19 / 700 / tabular</td>
+  <td>Ring percentages and hero figures — the reading itself.</td>
+  <td><span class="samp num" style="font-weight:700;font-size:19px">75%</span></td>
+</tr>
+<tr>
+  <td class="role">numeric-sm</td>
+  <td class="spec">14 / 600 / tabular</td>
+  <td>Inline row values. Tabular figures so columns of digits line up.</td>
+  <td><span class="samp num" style="font-weight:600">8,260</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<p class="note">Six entries for five roles: <code>numeric</code> needs two sizes because a ring percentage and a row value are the same role at different scales, and splitting them is cheaper than every call site picking a size by hand. They live as one <code>NeonType</code> object beside the existing <code>NeonMV</code> colour tokens, mirrored as CSS custom properties on the web side.</p>
+
+<h2>What actually changes on this screen</h2>
+
+<div class="diff">
+  <div class="drow">
+    <div class="sel">.head .date</div>
+    <div class="mv"><s>600</s> → <b>450</b></div>
+    <div class="why">A date is supporting text. At 600 it competed with the title beside it.</div>
+  </div>
+  <div class="drow">
+    <div class="sel">.ring .lab</div>
+    <div class="mv"><s>700</s> → <b>600</b></div>
+    <div class="why">Uppercase at 0.12em tracking is already emphatic; bolding it as well is saying the same thing twice.</div>
+  </div>
+  <div class="drow">
+    <div class="sel">.ring .pct</div>
+    <div class="mv"><s>800</s> → <b>700</b></div>
+    <div class="why">800 is reserved for the one display element, so the screen has a single heaviest thing.</div>
+  </div>
+  <div class="drow">
+    <div class="sel">.ring .pct small</div>
+    <div class="mv"><s>700</s> → <b>600</b></div>
+    <div class="why">The unit is not the number. It should sit a step behind it.</div>
+  </div>
+  <div class="drow">
+    <div class="sel">.pill .pn</div>
+    <div class="mv"><s>700</s> → <b>650</b></div>
+    <div class="why">Row names stay prominent, one step under the numbers they label.</div>
+  </div>
+  <div class="drow">
+    <div class="sel">.pill .pv</div>
+    <div class="mv"><s>700</s> → <b>600</b></div>
+    <div class="why">Plus <code>tabular-nums</code>, so a column of figures aligns instead of shifting per digit.</div>
+  </div>
+  <div class="drow">
+    <div class="sel">.head h1</div>
+    <div class="mv"><b>800</b> — unchanged</div>
+    <div class="why">The one place ExtraBold earns its place, and the only one that keeps it.</div>
+  </div>
+</div>
+
+<h2>Why it is one change, not seven</h2>
+
+<p>Half of this is worse than none of it. A screen where the ring percentages have come down to 700 but the row names are still 700 has lost the old hierarchy without gaining the new one — every element sits at the same weight for a different reason, and the result reads as an unfinished edit rather than a design. That is why the item is sized large and why it was held back rather than slipped in with the rest of v0.39.0.</p>
+
+<p>The scope is <strong>46 web declarations and 45 Compose ones</strong>, across <code>Rings.vue</code>, <code>Train.vue</code>, <code>You.vue</code>, <code>Body.vue</code>, <code>NeonNav.vue</code> and their five Compose twins. Mechanical once the scale is agreed, but it has to land in one pass on both surfaces — the parity rule applies, and a screen restyled on web and not on the phone is the same half-done state at a different granularity.</p>
+
+<div class="foot">
+  <p>Weights re-measured on the neon surfaces at v0.39.1 — web: 2 at 400, 2 at 500, 8 at 600, 28 at 700, 6 at 800. Compose: 3 Normal, 5 Medium, 5 SemiBold, 28 Bold, 4 ExtraBold. Both panels above use the app's own tokens, faces and geometry from <code>Rings.vue</code>; the numbers shown are illustrative, the type is not.</p>
+</div>
+
+</div>

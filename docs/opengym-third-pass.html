@@ -231,12 +231,13 @@ td strong{color:var(--ink)}
 <p>So the bar here is high and the yield is correspondingly narrow: <strong>49 findings, 31 survived the first check, and roughly two thirds of those did not survive the refuter.</strong> The refusals are recorded in full below, because a measured refusal is what stops an idea returning next quarter — and several of them are refusals against this user's own production data rather than against taste.</p>
 
 <div class="prog">
-  <h4>Progress · 0 of 21 shipped</h4>
-  <div class="bar"><i class="b-ship" style="width:0%"></i><i class="b-wip" style="width:86%"></i></div>
+  <h4>Progress · 18 of 21 shipped</h4>
+  <div class="bar"><i class="b-ship" style="width:86%"></i><i class="b-wip" style="width:0%"></i></div>
   <div class="legend">
-    <span><b style="background:var(--done)"></b> shipped 0</span>
-    <span><b style="background:var(--warn)"></b> in progress 18</span>
-    <span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 3</span>
+    <span><b style="background:var(--done)"></b> shipped 18</span>
+    <span><b style="background:var(--warn)"></b> in progress 0</span>
+    <span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 2</span>
+    <span><b style="border:1px dashed var(--rule)"></b> declined 1</span>
   </div>
   <p style="margin:14px 0 0;font-size:14px;color:var(--ink-2)">Tracked as <code>OG3-*</code> in the repo's <code>TODO.md</code>. Chips below carry the live state; this page is republished to the same URL as items land.</p>
 </div>
@@ -282,7 +283,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">1</div>
     <div class="t">Give today's session card four states, not two</div>
-    <div class="m"><span class="chip c-id">OG3-A1</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-A1</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">both</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <div class="d">
       <p>openGym's TODAY row is a state machine over rest / scheduled / running / logged, added after a finished day kept showing the routine name behind a green Start tag and read as still outstanding. myvitals renders <code>isRest ? "View" : "Continue"</code> on both surfaces, computed from <code>split_focus</code> alone — <code>status</code> is in the same payload and neither client reads it. Production holds 45 completed and 86 skipped workouts, every one of which presents as an outstanding task on the most prominent card of the Train tab.</p>
       <p>Four labels off one enum: completed → "Done", in_progress or paused → "Resume", planned → "Start", rest → "View".</p>
@@ -293,7 +294,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">2</div>
     <div class="t">Name the next session on a web rest day</div>
-    <div class="m"><span class="chip c-id">OG3-A2</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">web</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-A2</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">web</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <div class="d">
       <p>openGym renders "Next session: Wednesday, Pull Day" under the Today row whenever nothing is scheduled, so the rest state is never a dead end. The phone already does this through <code>api.upcomingWorkouts()</code>; the web Train hub makes zero calls to <code>upcoming</code> and shows "Rest Day / View". That is a live parity gap on a screen the parity gate covers, and the expensive half — OG2-A4's generator-authoritative schedule — is already built.</p>
       <p>With <code>split_preference: adaptive</code>, <code>yoga_on_rest_days: true</code> and 45 strength sessions in 130 days, a non-strength day is the common case here, not the exception.</p>
@@ -304,7 +305,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">3</div>
     <div class="t">Put the date and the rating on the "last:" ghost line</div>
-    <div class="m"><span class="chip c-id">OG3-A3</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-A3</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">both</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <div class="d">
       <p>openGym prints <code>Last time (7 Sept): 75×8 (RIR 3)</code> from the same function that seeds the new session, so the line read and the number used cannot disagree. myvitals' <code>LastSetOut</code> carries only <code>{set_number, weight_lb, reps}</code> — <code>StrengthWorkout.date</code> is already in the join and <code>StrengthSet.rating</code> is already on the table, and neither is selected.</p>
       <p>Measured in production: across 159 per-exercise re-training intervals, <strong>106 exceed 14 days and the mean gap is 31 days</strong>. An undated "last:" reads as "last session" and is usually wrong by a month. The rating is the single input the whole progression policy runs on, and the user is never shown what the app did with the tap.</p>
@@ -315,7 +316,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">4</div>
     <div class="t">Put the weight goal on the home tile, not only in /weight</div>
-    <div class="m"><span class="chip c-id">OG3-A4</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-A4</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">both</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <div class="d">
       <p>openGym's Home body-weight card carries the goal inline: current weight, a delta coloured by whether it moved toward the target, "Goal 77 kg · 1.4 kg to lose", and a sparkline with a dashed rule at the goal. In myvitals every ingredient exists and the wiring is one argument short — <code>MetricCard.vue</code> declares <code>target</code>, includes it in the y-extent and draws the dashed line, but <code>analytics/tiles.py</code> builds the weight tile with no <code>target</code>, so the prop is always null. The goal is stored: <code>weight_goal_kg = 90.718</code>, i.e. 200 lb.</p>
       <p>With weigh-ins intermittent — 24 readings in 26 weeks — the home tile is exactly where the goal should appear, and the detail view is exactly where someone tracking a target does not look daily.</p>
@@ -326,7 +327,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">5</div>
     <div class="t">Delete the invented hero duration and the phantom RPE</div>
-    <div class="m"><span class="chip c-id">OG3-A5</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">web</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-A5</span><span class="chip c-v4">value 4</span><span class="chip c-eff">S</span><span class="chip c-mv">web</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <div class="d">
       <p>openGym omits a reading that does not exist rather than printing a placeholder — an unknown duration is left out, not shown as "0 min". <code>Train.vue:147-152</code> computes <code>heroMinutes</code> as seven minutes per exercise, invented in Vue, and line 399 renders <code>{{ heroMinutes }} min · RPE —</code> where the RPE is a literal em dash with no binding behind it.</p>
       <p>The phone's equivalent line prints "6 exercises". So the same session reads "42 min · RPE —" on web and "6 exercises" on the phone, and the 42 contradicts the user's own stored <code>workout_minutes: 75</code>. The cheapest honest fix is deletion: print what the phone prints.</p>
@@ -343,7 +344,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">6</div>
     <div class="t">Two MCP tools: what am I lifting today, and what is my best on this lift</div>
-    <div class="m"><span class="chip c-id">OG3-B1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S</span><span class="chip c-mv">backend</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-B1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S</span><span class="chip c-mv">backend</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <div class="d">
       <p>openGym's <code>preview_session</code> runs the live progression engine for a date rather than echoing a stored plan, so the tool's numbers come from the same functions the UI uses. All eight myvitals MCP tools are retrospective — <code>get_strength_sessions</code> returns date, status and split focus, nothing forward-looking — and e1RM drives <code>/exercise-records</code> but is not exposed at all.</p>
       <p>For someone who trains at home from a phone, "what am I lifting today and at what weight", asked in a Claude session, is the highest-frequency question the current tool set cannot answer.</p>
@@ -354,7 +355,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">7</div>
     <div class="t">Count how many exercises this home gym can actually reach per muscle</div>
-    <div class="m"><span class="chip c-id">OG3-B2</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-B2</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S</span><span class="chip c-mv">both</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <div class="d">
       <p>openGym's muscle chips carry a live count of reachable exercises counted against the active equipment profile, which answers "can my kit even train this". Counting the bundled catalog by <code>primary_muscle</code>: <strong>lower back has 1 exercise against MEV 2, calves 3 against MEV 8, lats 4 against MEV 10, hamstrings 5 against MEV 8</strong> — versus abdominals 40 and shoulders 37. Five of fourteen audited muscles have a pool too small to reach their own MEV without repeating one lift weekly.</p>
       <p>Nothing in myvitals distinguishes under-trained from under-equipped, so a permanently-under lats reading is the same colour as a genuine programming gap. The project faced this once already and answered by deleting the neck row; a count is the more informative version of that judgement and keeps the row.</p>
@@ -365,7 +366,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">8</div>
     <div class="t">Say "per side" on unilateral lifts</div>
-    <div class="m"><span class="chip c-id">OG3-B3</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S · phase 1</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-B3</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S · phase 1</span><span class="chip c-mv">both</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <div class="d">
       <p>openGym logs each limb independently because asymmetries are the whole point of tracking it. myvitals has the mechanism but it reaches only mobility: 9 of 74 supplement rows carry <code>is_bilateral</code>, all <code>movement_pattern="mobility"</code>, and <strong>zero of 201 main-catalog rows</strong> do — while 27 are unilateral by name. These are in weekly rotation; the last 28 days include One-Arm Dumbbell Row, Single-Arm Romanian Deadlift, Single-Leg Hip Thrust, Dumbbell Step-Up, Bird Dog Row and Cossack Squat. A One-Arm Row is prescribed "3 × 10" with no statement of per-arm or total.</p>
       <p><strong>Phase 1 only: flag the rows and say "per side".</strong> Do not double <code>target_sets</code> — that silently doubles weekly volume credit, breaks comparability with 876 historical sets, and can push a muscle over MAV overnight. That is a data-semantics migration needing a decision about which convention MEV/MAV are denominated in.</p>
@@ -382,7 +383,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">9</div>
     <div class="t">Validate the AI's proposed swap in code before it reaches the card</div>
-    <div class="m"><span class="chip c-id">OG3-C1</span><span class="chip c-v5">value 5</span><span class="chip c-eff">M</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-C1</span><span class="chip c-v5">value 5</span><span class="chip c-eff">M</span><span class="chip c-mv">both</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <div class="d">
       <p><code>strength_nudge</code> does <code>tool_input = block.input</code> then <code>json.dumps(tool_input)</code> with no check that <code>target_exercise_id</code> is in today's plan, that <code>replacement_exercise_id</code> is in the catalog the payload actually sent, or that the primary muscle matches — even though the prompt asks for all three. The result is cached in <code>ai_summaries</code>, so one bad answer persists until the plan changes, and the only real gate is a <code>swap_exercise</code> 404 that fires after the user has read and believed the card. A valid-but-wrong-muscle replacement never fails at all.</p>
       <p>The payload builder already computes <code>selectable_ids</code> at the call site, so this is a filter, not new machinery.</p>
@@ -393,7 +394,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">10</div>
     <div class="t">Feed declined suggestions back into the nudge payload</div>
-    <div class="m"><span class="chip c-id">OG3-C2</span><span class="chip c-v4">value 4</span><span class="chip c-eff">M</span><span class="chip c-mv">both</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-C2</span><span class="chip c-v4">value 4</span><span class="chip c-eff">M</span><span class="chip c-mv">both</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <div class="d">
       <p>openGym appends <code>previouslyDeclined</code> to the payload with the rule "do not propose them again unless something new in the data justifies it" — and because the list is <em>in the payload</em>, it moves the cache identity, so a re-ask after a decline is genuinely a different question. In myvitals dismissal is ephemeral client state and never reaches the server, while <code>POST /ai/strength/nudge/{id}</code> takes no <code>force</code> parameter and hashes the payload.</p>
       <p>So <strong>"Get fresh suggestions" is guaranteed to return the two swaps just dismissed.</strong> The accept path is fine — accepting mutates the plan, which moves the hash. Only the decline path is broken, and it makes the indecisive-AI problem v0.7.157 was chasing worse.</p>
@@ -409,7 +410,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">11</div>
     <div class="t">Classify an integration failure and stop retrying the class that cannot recover</div>
-    <div class="m"><span class="chip c-id">OG3-D1</span><span class="chip c-live">live</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-mv">backend</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-D1</span><span class="chip c-live">live</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-mv">backend</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <div class="d">
       <p>openGym reduces every job failure to a named class before anything acts on it — timeout, missing, auth, provider, unusable, internal — and lets the class drive behaviour: an answer that failed validation and was paid for is never retried; a call that never reached the model is. myvitals has this taxonomy inside the LLM layer only.</p>
       <p>The evidence is live rather than hypothetical, and it is the box at the top of this page. TODO.md predicted this failure in prose under GH-EXPIRY; the database shows it happening for the second time. A four-value enum across four integrations is the right size — do not build a pipeline.</p>
@@ -424,7 +425,7 @@ td strong{color:var(--ink)}
   <div class="rk">
     <div class="n">12</div>
     <div class="t">Deload on the weight × reps grid, not on weight alone</div>
-    <div class="m"><span class="chip c-id">OG3-E1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-mv">backend</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-E1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-mv">backend</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <div class="d">
       <p>openGym computes a target e1RM at 0.9× and searches loadable weights crossed with allowed rep counts, falling back explicitly to holding the weight and cutting reps when no grid point exists below the current load. myvitals deloads on the weight axis only, and the rack settles it: <code>dumbbells.pairs_lb = [5,10,…,50]</code> with <strong><code>wrist_weights_lb = []</code></strong>. The user owns no micro-loaders, so the app's flagship rounder is inert and the grid is 5 lb.</p>
       <p>Work it through: a 7.5% cut on a 15 lb lift targets 13.875, <code>round_weight</code> drops to 10, <code>deload_round</code> sees <code>actual_cut &gt; 2× intended</code> and <strong>returns full weight</strong>. The light and moderate deload is a structural no-op at every rung from 5 to 50 lb, and the code comment says so honestly. The rep axis is the only axis with resolution here, and nothing uses it.</p>
@@ -439,27 +440,27 @@ td strong{color:var(--ink)}
 <div class="opts">
   <div class="opt">
     <div class="h">Reserve the floating bar's height once at the shell</div>
-    <div class="m"><span class="chip c-id">OG3-M1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-M1</span><span class="chip c-v3">value 3</span><span class="chip c-eff">S</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <p class="b"><code>--neon-bar-h: calc(74px + env(safe-area-inset-bottom))</code> in <code>App.vue</code>'s neon token block plus one <code>.app.neon main</code> rule. The written per-view policy has already failed twice in three chances: <code>Rings.vue</code> reserves 104px while <code>Train.vue</code> and <code>You.vue</code> reserve 32px, and both of those end in tappable rows.</p>
   </div>
   <div class="opt">
     <div class="h">A <code>backdrop-filter</code> fallback</div>
-    <div class="m"><span class="chip c-id">OG3-M2</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-M2</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <p class="b"><code>grep '@supports' frontend/src</code> returns zero across the whole frontend. <code>NeonNav.vue</code> is 78% fill plus <code>blur(14px)</code> with no prefixed twin and no opaque fallback. Three lines, plus raise the fill toward 0.92.</p>
   </div>
   <div class="opt">
     <div class="h">A seeded invariant probe for <code>round_weight</code> / <code>deload_round</code></div>
-    <div class="m"><span class="chip c-id">OG3-M3</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-M3</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <p class="b">openGym's property probes are a test genre distinct from unit tests; no numerical cross-input invariant exists anywhere in the 113 myvitals test files. Both named invariants pass today. It matters because the micro-loader path is currently unexercised by real data — <code>wrist_weights_lb</code> is empty — so the distinguishing feature has no live regression cover.</p>
   </div>
   <div class="opt">
     <div class="h">Emoji doing icon work in the neon chrome</div>
-    <div class="m"><span class="chip c-id">OG3-M4</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-M4</span><span class="chip c-v3">value 3</span><span class="chip c-eff">M</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <p class="b"><code>Train.vue:226</code> returns 🏋 ⛰ 🚴 from <code>classifyType()</code> — a second, emoji-flavoured copy of the classification <code>ActivityIcon.vue</code> already performs, and which has already absorbed ebike, paddle, VR fitness and the cardio-split case. Delete the table and render the component; swap the four <code>You.vue</code> pill glyphs for tinted lucide. A duplication bug, not a design complaint.</p>
   </div>
   <div class="opt">
     <div class="h"><code>ConfirmDialog.vue</code> for the four highest-stakes confirms</div>
-    <div class="m"><span class="chip c-id">OG3-M5</span><span class="chip c-v3">value 2</span><span class="chip c-eff">M</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-M5</span><span class="chip c-v3">value 2</span><span class="chip c-eff">M</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <p class="b">17 <code>window.confirm</code> calls on web against 19 Compose <code>AlertDialog</code>s. Convert <code>StrengthToday.vue:1063</code> and <code>:1084</code> (set deletion feeds the progression reducer) and <code>Goals.vue:82</code>, <code>:90</code> only. Leave the 37 selects and 42 checkboxes alone.</p>
   </div>
   <div class="opt">
@@ -474,12 +475,12 @@ td strong{color:var(--ink)}
   </div>
   <div class="opt">
     <div class="h">Unilateral phase 2</div>
-    <div class="m"><span class="chip c-id">OG3-M8</span><span class="chip c-v3">deferred</span><span class="chip c-todo">not started</span></div>
+    <div class="m"><span class="chip c-id">OG3-M8</span><span class="chip c-v3">deferred</span><span class="chip c-cut">declined</span></div>
     <p class="b">Decide whether a unilateral slot's <code>target_sets</code> means per-side or total, then re-derive <code>MUSCLE_VOLUME_TARGETS</code> against whichever is chosen. Deliberately deferred — it is a data-semantics decision, not an implementation.</p>
   </div>
   <div class="opt">
     <div class="h">Two one-liners while nearby</div>
-    <div class="m"><span class="chip c-id">OG3-M9</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-wip">in progress</span></div>
+    <div class="m"><span class="chip c-id">OG3-M9</span><span class="chip c-v3">value 2</span><span class="chip c-eff">S</span><span class="chip c-ship">shipped v0.39.0</span></div>
     <p class="b">A <code>targetHour + 3</code> ceiling in <code>WorkoutReminderWorker</code>, so a phone that was off all day does not post "Push workout today" at 11pm. And a sub-100 KB size floor in <code>ApkDownloader</code> — a file that small is a redirect or an error page, not an APK.</p>
   </div>
 </div>

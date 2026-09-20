@@ -8,7 +8,8 @@
   "found": 52,
   "survived": 42,
   "refuted": 10,
-  "ranked": 45
+  "ranked": 45,
+  "released": "v0.40.1, deployed 2026-09-20"
  },
  "items": [
   {

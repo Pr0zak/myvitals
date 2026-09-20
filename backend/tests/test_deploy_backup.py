@@ -14,6 +14,7 @@ discovered only when a restore point is needed.
 
 from __future__ import annotations
 
+import os
 import re
 import stat
 import subprocess
@@ -163,9 +164,19 @@ def test_prune_old_keeps_the_oldest_dump_per_day_within_the_window(tmp_path):
         "c": stamp(1, 4), "d": stamp(1, 22),
         "e": stamp(9, 5), "f": stamp(9, 23),
     }
+    # prune_old's pass 1 keeps the newest N dumps by MODIFICATION TIME (ls -1t),
+    # so the fixture has to set mtime as well as the meta timestamp. Writing all
+    # six in one loop leaves their mtimes within the same instant, and the ls tie
+    # break is then arbitrary — which is exactly how an earlier version of this
+    # test passed locally and failed in CI by keeping a nine-day-old dump.
     for name, taken in plan.items():
-        (tmp_path / f"myvitals-{name}.dump").write_bytes(b"PGDMP fake")
+        dump = tmp_path / f"myvitals-{name}.dump"
+        dump.write_bytes(b"PGDMP fake")
         (tmp_path / f"myvitals-{name}.dump.meta").write_text(f"taken={taken}\n")
+        epoch = _dt.datetime.strptime(taken, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=_dt.timezone.utc
+        ).timestamp()
+        os.utime(dump, (epoch, epoch))
 
     # prune_old is not reachable without running main(), which would try to
     # reach a database — so lift the function definition out and drive it directly.
@@ -184,6 +195,7 @@ def test_prune_old_keeps_the_oldest_dump_per_day_within_the_window(tmp_path):
 
     survived = sorted(p.stem.split("-")[-1] for p in tmp_path.glob("myvitals-*.dump"))
     # oldest of each in-window day survives; the out-of-window day is dropped
+    assert "b" in survived, f"pass 1 should keep the newest dump by mtime: {survived}"
     assert "a" in survived, f"oldest dump of today was pruned: {survived}"
     assert "c" in survived, f"oldest dump of yesterday was pruned: {survived}"
     assert "e" not in survived and "f" not in survived, (

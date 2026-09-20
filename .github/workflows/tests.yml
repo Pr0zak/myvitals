@@ -30,6 +30,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # test_parity_change_confirmation reads real repository history,
+          # and parity_check.py itself diffs against the last tag.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5

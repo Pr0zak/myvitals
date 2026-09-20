@@ -35,6 +35,8 @@ import importlib.util
 import pathlib
 import sys
 
+import subprocess
+
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -87,6 +89,17 @@ def test_the_evidence_commit_is_not_actually_asymmetric(pc):
     commit does not demonstrate the heuristic catching anything, and the
     module docstring says so rather than repeating the unverified claim.
     """
+    # This is the one test in the suite that reads real repository history, so
+    # it cannot run where that history is absent. CI checks out shallow by
+    # default, and a contributor may well have a truncated clone; skip rather
+    # than fail, because the claim being pinned is about a past commit and not
+    # about any code shipping today.
+    if subprocess.run(
+        ["git", "cat-file", "-e", "1d006a7~1"],
+        cwd=ROOT, capture_output=True,
+    ).returncode != 0:
+        pytest.skip("commit 1d006a7 is not in this clone (shallow checkout)")
+
     counts = pc.diff_line_counts(
         [
             "frontend/src/views/HeartRate.vue",

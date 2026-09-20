@@ -820,6 +820,48 @@ class SyncHeartbeat(Base):
     app_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
+#: The `versionName` android/app/build.gradle.kts falls back to when
+#: `BUILD_VERSION_NAME` is unset. Every CI-built release (android-release.yml)
+#: overrides it from the git tag, so this exact string can only reach
+#: production from a local/dev install pointed at the real backend by
+#: mistake — it can never be a real release, past or future, so filtering
+#: it out never hides a genuine permissions-lost report.
+#:
+#: SA-O2: a stray debug APK posted 222 heartbeats under this version between
+#: 2026-08-25 and 2026-09-03 and intermittently won "most recent heartbeat"
+#: against the real phone's, flapping the web's HC-permissions banner for
+#: nine days while the real phone was at 13/13. `sync_heartbeat` carries no
+#: device identity to filter on directly (unlike `device_status.device_id`
+#: above) — adding one would also require widening ingest.py's
+#: `on_conflict_do_nothing` target, which is a bigger, cross-cutting change.
+#: For a confirmed single-user install this sentinel is the cheap, precise
+#: fix instead.
+LOCAL_BUILD_APP_VERSION = "0.1.0"
+
+
+def real_install_heartbeat_filter():
+    """SQLAlchemy WHERE clause: true for a heartbeat not provably the
+    local-build ghost described above.
+
+    Every "most recent heartbeat" query should filter through this rather
+    than re-deriving it — the same reasoning as `_is_watch_source` being
+    imported instead of copied for steps. As of this fix that means
+    `api/query.py:get_last_sync` and `api/query.py:data_health`; the
+    identical query at `api/summary.py:327` (feeding `_resolve_last_sync`)
+    is owned by a different lane and was not touched here, so it is still
+    exposed to the same ghost until it applies this too.
+
+    NULL `app_version` is let through deliberately: an install that
+    predates this column, or a future client that omits it, is unknown,
+    not proven to be the ghost — "null is not zero" applies here as much
+    as anywhere else in this codebase.
+    """
+    return (
+        (SyncHeartbeat.app_version.is_(None))
+        | (SyncHeartbeat.app_version != LOCAL_BUILD_APP_VERSION)
+    )
+
+
 # ===== Meals: foods, recipes, pantry (MEAL-1) ========================
 #
 # See docs/MEALS_PLAN.md. Two shape decisions worth knowing before

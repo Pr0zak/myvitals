@@ -177,6 +177,7 @@ private fun vitalFor(key: String): Vital? = when (key) {
     "blood_pressure" -> Vital.BP
     "recovery" -> Vital.RECOVERY
     "skin_temp" -> Vital.SKIN_TEMP
+    "measurements" -> Vital.MEASUREMENTS
     else -> null
 }
 

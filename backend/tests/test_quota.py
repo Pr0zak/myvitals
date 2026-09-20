@@ -70,9 +70,15 @@ async def test_disabled_raises_400():
 
 
 async def test_missing_key_raises_400():
+    # Anthropic provider with no key should raise 400
     with pytest.raises(HTTPException) as ei:
-        await _check_and_bump_quota(_FakeDB(), _cfg(anthropic_api_key=""))
+        await _check_and_bump_quota(_FakeDB(), _cfg(anthropic_api_key="", provider="anthropic"))
     assert ei.value.status_code == 400
+
+
+async def test_claude_cli_with_no_key_passes():
+    # claude_cli provider with no key should pass (auth via CLI OAuth)
+    await _check_and_bump_quota(_FakeDB(), _cfg(anthropic_api_key="", provider="claude_cli", cli_oauth_token="token"))  # no raise
 
 
 async def test_new_day_resets_and_commits():

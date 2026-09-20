@@ -130,10 +130,19 @@ ssh root@$PVE_HOST "pct exec $CT_ID -- /opt/myvitals/deploy/backup.sh --list"
 ssh root@$PVE_HOST "pct exec $CT_ID -- /opt/myvitals/deploy/backup.sh --now"
 ```
 
-Retention is 3 dumps (`MYVITALS_BACKUP_KEEP`). A real dump of this
-database is ~100 MB and takes ~35 s, so the cap costs about 300 MB.
-Because the dumps sit on the CT rootfs, the nightly PBS run carries them
-off-box too.
+Retention keeps dumps from multiple calendar days to support selective
+restores (docs/operations.md:146-163) when silent bugs take days to notice:
+
+- **Always keep** the 3 newest dumps (`MYVITALS_BACKUP_KEEP=3`)
+- **Additionally keep** the oldest dump from each of the last 5 calendar
+  days (`MYVITALS_BACKUP_KEEP_DAYS=5`), giving effective depth of 5+
+  calendar days (~8 dumps total, ~800 MB).
+
+A real dump of this database is ~103 MB and takes ~35 s. The cost is
+~500 MB on a 36 GB rootfs with 16 GB free. Under disk pressure
+(during release bursts), the script degrades gracefully to keep=1,
+keep_days=1, preserving at least today's oldest dump. Because the
+dumps sit on the CT rootfs, the nightly PBS run carries them off-box too.
 
 ### Restoring the database
 

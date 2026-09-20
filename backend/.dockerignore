@@ -1,0 +1,44 @@
+# Virtual environment and Python caches — SA-C12: .venv and __pycache__
+# should not join the build context; they must come from uv sync inside the image
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.python-version
+
+# Built artifacts
+dist/
+build/
+*.egg-info/
+
+# Version control and CI
+.git
+.gitignore
+.github/
+
+# IDE and editor artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Local environment
+.env
+.env.local
+*.local
+
+# Temporary files and logs
+*.log
+
+# Project-local planning docs (not shipped in image)
+CLAUDE.md
+docs/HA_REALTIME_PLAN.md
+
+# Kotlin development artifacts (Android app, not needed in backend image)
+android/
+.kotlin/

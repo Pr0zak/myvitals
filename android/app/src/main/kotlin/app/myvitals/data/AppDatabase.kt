@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.PrimaryKey
 import androidx.room.Query
@@ -50,7 +51,12 @@ data class BufferedSummary(
     val createdAtEpochS: Long,
 )
 
-@Entity(tableName = "logs")
+@Entity(
+    tableName = "logs",
+    indices = [
+        Index(value = ["uploadedAt", "tsEpochMs"]),  // unsent() query filter + sort
+    ]
+)
 data class LogEntry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val tsEpochMs: Long,

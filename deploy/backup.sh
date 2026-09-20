@@ -50,7 +50,8 @@
 #
 # Environment overrides:
 #   MYVITALS_BACKUP_DIR       where dumps live (default /var/backups/myvitals)
-#   MYVITALS_BACKUP_KEEP      how many to retain (default 3)
+#   MYVITALS_BACKUP_KEEP      how many newest to retain (default 3)
+#   MYVITALS_BACKUP_KEEP_DAYS how many calendar days to retain oldest dump from (default 5)
 #   MYVITALS_BACKUP_MIN_FREE  MB that must remain free after a dump (default 2048)
 #   MYVITALS_BACKUP_REQUIRED  1 (default) = a failed pre-update dump blocks
 #                             the update; 0 = warn and update anyway.
@@ -61,6 +62,7 @@ cd "$(dirname "$0")/.." || exit 1
 
 BACKUP_DIR=${MYVITALS_BACKUP_DIR:-/var/backups/myvitals}
 KEEP=${MYVITALS_BACKUP_KEEP:-3}
+KEEP_DAYS=${MYVITALS_BACKUP_KEEP_DAYS:-5}
 MIN_FREE_MB=${MYVITALS_BACKUP_MIN_FREE:-2048}
 REQUIRED=${MYVITALS_BACKUP_REQUIRED:-1}
 
@@ -84,17 +86,76 @@ fi
 
 # ── retention ────────────────────────────────────────────────────────
 #
-# Prunes oldest-first. Called both before a dump (to make room) and after
-# (to enforce the cap), so a tight disk reclaims space before it is
-# needed rather than after the write has already failed.
+# Retention is both count-aware and date-aware to support selective restores
+# when silent bugs take days to notice:
+#   - Always keep the $keep newest dumps (default 3)
+#   - Additionally keep the OLDEST dump from each calendar day in the last
+#     $keep_days days (default 5), for depth across multiple days
+#
+# This is called both before a dump (to make room) and after (to enforce
+# the cap), so a tight disk reclaims space before it is needed rather than
+# after the write has already failed. Under disk pressure, do_dump:132
+# calls this with keep=1, keep_days=1 to keep at least the last day's oldest dump.
 prune_old() {
-    local keep="$1" victim
-    # shellcheck disable=SC2012  # filenames are ours and timestamp-shaped
-    while [ "$(ls -1 "$BACKUP_DIR"/myvitals-*.dump 2>/dev/null | wc -l)" -gt "$keep" ]; do
-        victim=$(ls -1t "$BACKUP_DIR"/myvitals-*.dump 2>/dev/null | tail -1)
-        [ -z "$victim" ] && break
-        rm -f "$victim" "${victim}.meta" 2>/dev/null || true
-        log "pruned old dump $(basename "$victim")"
+    local keep="$1" keep_days="${2:-5}"
+    local today cutoff_date
+
+    # Calculate the cutoff date (keep_days days ago, in YYYY-MM-DD format)
+    today=$(date -u +%Y-%m-%d)
+    # Use date arithmetic: $(date -u -d 'N days ago')
+    # Fallback to accepting recent dates if date math fails.
+    cutoff_date=$(date -u -d "$keep_days days ago" +%Y-%m-%d 2>/dev/null || echo "1970-01-01")
+
+    # Build the keep set in two passes
+    local -a keep_files
+    local -A seen_dates
+
+    # Pass 1: keep the newest N dumps (by modification time)
+    local count=0
+    for f in $(ls -1t "$BACKUP_DIR"/myvitals-*.dump 2>/dev/null); do
+        [ ! -f "${f}.meta" ] && continue
+        keep_files+=("$f")
+        count=$((count + 1))
+        [ $count -ge $keep ] && break
+    done
+
+    # Pass 2: for each calendar day in the last keep_days, keep its oldest dump
+    # (iterate in sort order to find oldest-first)
+    for f in $(ls -1 "$BACKUP_DIR"/myvitals-*.dump 2>/dev/null | sort); do
+        [ ! -f "${f}.meta" ] && continue
+        local taken=$(grep "^taken=" "${f}.meta" 2>/dev/null | cut -d= -f2-)
+        [ -z "$taken" ] && continue
+
+        # Extract calendar date (YYYY-MM-DD) from ISO timestamp
+        local date="${taken:0:10}"
+
+        # Skip if already in keep_files (from Pass 1)
+        local already_kept=0
+        for kf in "${keep_files[@]}"; do
+            [ "$kf" = "$f" ] && already_kept=1 && break
+        done
+        [ $already_kept -eq 1 ] && continue
+
+        # If this date is within keep_days and we haven't seen it yet, keep this dump
+        # (Date comparison works lexicographically with YYYY-MM-DD format)
+        # bash [[ ]] has < and > for string compare but no >=, so negate <
+        if [ -z "${seen_dates[$date]:-}" ] && [[ ! "$date" < "$cutoff_date" ]]; then
+            keep_files+=("$f")
+            seen_dates[$date]=1
+        fi
+    done
+
+    # Delete everything not in keep_files
+    for f in $(ls -1 "$BACKUP_DIR"/myvitals-*.dump 2>/dev/null); do
+        local should_keep=0
+        for kf in "${keep_files[@]}"; do
+            [ "$kf" = "$f" ] && should_keep=1 && break
+        done
+
+        if [ $should_keep -eq 0 ]; then
+            rm -f "$f" "${f}.meta" 2>/dev/null || true
+            log "pruned old dump $(basename "$f")"
+        fi
     done
 }
 
@@ -117,7 +178,7 @@ do_dump() {
     chmod 700 "$BACKUP_DIR"
 
     # Make room first if we are already over the cap.
-    prune_old "$KEEP"
+    prune_old "$KEEP" "$KEEP_DAYS"
 
     # Estimate the dump at 60% of on-disk database size. Time-series
     # float columns compress well, so this is comfortably pessimistic;
@@ -131,8 +192,8 @@ do_dump() {
 
     if [ "$avail" -lt $((estimate + MIN_FREE_MB)) ]; then
         log "disk too tight for a dump — ${avail}MB free, need ~$((estimate + MIN_FREE_MB))MB"
-        log "  dropping retention to 1 and retrying"
-        prune_old 1
+        log "  dropping retention to keep=1, keep_days=1 and retrying"
+        prune_old 1 1
         avail=$(free_mb); avail=${avail:-0}
         if [ "$avail" -lt $((estimate + MIN_FREE_MB)) ]; then
             log "ERROR: still only ${avail}MB free — refusing to fill the rootfs"
@@ -179,7 +240,7 @@ size_bytes=$(stat -c%s "$out" 2>/dev/null || echo 0)
 EOF
 
     log "dump written: $(basename "$out") ($(du -h "$out" | cut -f1), reason=$reason)"
-    prune_old "$KEEP"
+    prune_old "$KEEP" "$KEEP_DAYS"
     return 0
 }
 

@@ -133,3 +133,14 @@ def test_explain_does_not_take_credit_for_user_choices():
     src = inspect.getsource(strength.explain_workout)
     assert "added_ad_hoc" in src
     assert "planned exercises" in src
+
+
+def test_add_exercise_logger_is_defined():
+    """The add_exercise handler calls log.info() after committing.
+
+    If the logger is not defined, the call will raise NameError and turn
+    a successful slot addition into a 500 error. The slot is committed
+    before the log call, so each retry writes another phantom exercise.
+    """
+    assert hasattr(strength, 'log'), "strength module must have a logger"
+    assert callable(strength.log.info), "logger must be callable"

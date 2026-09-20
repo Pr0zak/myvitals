@@ -1,8 +1,24 @@
 """Rolling baselines for resting HR and HRV.
 
 These are intentionally simple and personal-scale — we're tracking single-user
-trends, not building a population model. "Nightly" values use the 22:00 → 09:00
-window of the night ending on the target date.
+trends, not building a population model. "Nightly" values prefer the canonical
+SleepSession boundary when one exists (HC / Fitbit / Garmin all ship session
+start+end — the same pattern `sleep.py:_stages_for_night` already uses), and
+fall back to a 22:00 → 09:00 clock window resolved in `settings.tz` for nights
+without one.
+
+SA-N1: that clock window used to be hard-coded `tzinfo=timezone.utc`, so on
+this deployment (settings.tz = America/Chicago, UTC-5/6) the "night" actually
+ran 17:00→04:00 local — five-plus hours of evening wakefulness folded in, the
+last two-plus hours of real sleep cut off. Measured against the canonical
+sleep session as ground truth: not a systematic bias (RHR bias -0.13 bpm,
+mean -0.13; the ratios and z-scores downstream cancel a *proportional* window
+bias exactly), but real per-night noise (RHR sd_diff 4.08 bpm, |diff|>=2bpm on
+60/124 nights; HRV sd_diff 1.29, mean skewed -1.31 because the fallback window
+draws in ~12 evening HRV samples/night it should not and misses ~24 real ones)
+that inflates the 7-day rolling baseline's spread and damps recovery/readiness
+rather than skewing them. See docs/sa-findings.json SA-N1 for the full
+measurement.
 """
 from datetime import date, datetime, time, timedelta, timezone
 from statistics import median
@@ -13,10 +29,67 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import models
 
 
+def _local_tz():
+    """The user's configured timezone, falling back to UTC if unresolvable.
+
+    Same self-contained pattern as `analytics/jobs.py:_local_tz` — duplicated
+    rather than imported to avoid a `jobs.py` <-> `baselines.py` import cycle
+    (`jobs.py` already imports from this module).
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        from ..config import settings
+        return ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:  # noqa: BLE001
+        return timezone.utc
+
+
 def _night_window(day: date) -> tuple[datetime, datetime]:
-    start = datetime.combine(day - timedelta(days=1), time(hour=22), tzinfo=timezone.utc)
-    end = datetime.combine(day, time(hour=9), tzinfo=timezone.utc)
+    """The 22:00→09:00 fallback window for the night ending on `day`,
+    resolved in `settings.tz`.
+
+    Pure and synchronous on purpose, mirroring `sleep.py:_night_window`
+    (SA-N2's extraction of the same shape): a day-attribution bisector like
+    `api/summary.py:_owning_days` needs a plain function of `day` alone, not
+    a database round-trip, to place raw sample timestamps into calendar
+    nights across a whole date range. `nightly_rhr` / `nightly_hrv` layer a
+    DB-backed canonical-SleepSession preference on top of this
+    (`_resolve_night_bounds`) for the value they actually compute; this
+    function is what a night falls back to when there is no session to
+    prefer.
+    """
+    local_tz = _local_tz()
+    start = datetime.combine(day - timedelta(days=1), time(hour=22), tzinfo=local_tz)
+    end = datetime.combine(day, time(hour=9), tzinfo=local_tz)
     return start, end
+
+
+async def _resolve_night_bounds(db: AsyncSession, day: date) -> tuple[datetime, datetime]:
+    """The night ending on `day`, for computing an actual RHR/HRV value.
+
+    Prefers the canonical SleepSession boundary when one exists — mirrors
+    `sleep.py:_stages_for_night`'s search (a generous local-day-plus-reach-back
+    window used only to LOCATE the session; the session's own start_at/end_at,
+    not this search window, become the actual RHR/HRV bounds). Falls back to
+    `_night_window(day)` for nights without a canonical session row.
+    """
+    local_tz = _local_tz()
+    day_start = datetime.combine(day, time.min, tzinfo=local_tz)
+    day_end = datetime.combine(day, time.max, tzinfo=local_tz)
+    search_start = day_start - timedelta(hours=18)
+
+    sess = (await db.execute(
+        select(models.SleepSession)
+        .where(models.SleepSession.end_at >= search_start)
+        .where(models.SleepSession.end_at <= day_end)
+        .order_by((models.SleepSession.end_at - models.SleepSession.start_at).desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if sess is not None:
+        return sess.start_at, sess.end_at
+
+    return _night_window(day)
 
 
 async def nightly_rhr(db: AsyncSession, day: date) -> float | None:
@@ -34,7 +107,7 @@ async def nightly_rhr(db: AsyncSession, day: date) -> float | None:
     tracks optical-sensor dropouts. Five minutes is long enough to require
     the low HR to be *sustained* and short enough to catch the true trough.
     """
-    start, end = _night_window(day)
+    start, end = await _resolve_night_bounds(db, day)
     bucket = func.to_timestamp(
         func.floor(func.extract("epoch", models.HeartRate.time) / 300.0) * 300.0
     ).label("bucket")
@@ -57,7 +130,7 @@ async def nightly_rhr(db: AsyncSession, day: date) -> float | None:
 
 async def nightly_hrv(db: AsyncSession, day: date) -> float | None:
     """Mean RMSSD during the sleep window for the night ending on `day`."""
-    start, end = _night_window(day)
+    start, end = await _resolve_night_bounds(db, day)
     result = await db.execute(
         select(func.avg(models.Hrv.rmssd_ms))
         .where(models.Hrv.time >= start)

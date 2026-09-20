@@ -53,7 +53,11 @@ import java.time.LocalDate
 import java.time.ZoneId
 import app.myvitals.ui.LocalAppTokens
 
-private data class WPoint(val ms: Long, val kg: Double)
+// internal (not private) + @JsonClass: this crosses JsonCache's Moshi
+// boundary (SWR cache read/write), and Moshi codegen's generated adapter
+// lives in a separate generated file — it cannot see a file-private class.
+@com.squareup.moshi.JsonClass(generateAdapter = true)
+internal data class WPoint(val ms: Long, val kg: Double)
 
 /**
  * Which way is "good" for a body-weight change — the Kotlin mirror of

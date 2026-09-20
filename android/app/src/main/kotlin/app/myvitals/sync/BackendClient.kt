@@ -1,7 +1,6 @@
 package app.myvitals.sync
 
 import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
@@ -44,31 +43,31 @@ interface BackendApi {
     suspend fun aiAskLatest(): Response<AiAskResult>
 
     @POST("ai/coach/cardio")
-    suspend fun coachCardio(@Body body: Map<String, Any> = emptyMap()): CoachCard
+    suspend fun coachCardio(): CoachCard
 
     @GET("ai/coach/cardio/latest")
     suspend fun coachCardioLatest(): Response<CoachCard>
 
     @POST("ai/coach/workout")
-    suspend fun coachWorkout(@Body body: Map<String, Any> = emptyMap()): CoachCard
+    suspend fun coachWorkout(): CoachCard
 
     @GET("ai/coach/workout/latest")
     suspend fun coachWorkoutLatest(): Response<CoachCard>
 
     @POST("ai/coach/sleep")
-    suspend fun coachSleep(@Body body: Map<String, Any> = emptyMap()): CoachCard
+    suspend fun coachSleep(): CoachCard
 
     @GET("ai/coach/sleep/latest")
     suspend fun coachSleepLatest(): Response<CoachCard>
 
     @POST("ai/coach/recovery")
-    suspend fun coachRecovery(@Body body: Map<String, Any> = emptyMap()): CoachCard
+    suspend fun coachRecovery(): CoachCard
 
     @GET("ai/coach/recovery/latest")
     suspend fun coachRecoveryLatest(): Response<CoachCard>
 
     @POST("ai/coach/fasting")
-    suspend fun coachFasting(@Body body: Map<String, Any> = emptyMap()): CoachCard
+    suspend fun coachFasting(): CoachCard
 
     @GET("ai/coach/fasting/latest")
     suspend fun coachFastingLatest(): Response<CoachCard>
@@ -742,7 +741,7 @@ interface BackendApi {
 }
 
 object BackendClient {
-    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    private val moshi = Moshi.Builder().build()
 
     // Track backend reachability so the app-level banner can tell the
     // user "can't reach server" vs "device offline". Any response →

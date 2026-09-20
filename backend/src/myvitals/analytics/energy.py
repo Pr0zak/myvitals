@@ -142,7 +142,7 @@ def net_duration_s(
 
     The single definition of "how long was that session". Both clients used
     to compute gross ``completed_at - started_at`` when synthesising the
-    activities-feed row, while analytics/advanced.py:_strength_training_stress
+    activities-feed row, while analytics/advanced.py:training_load_by_day
     correctly subtracted the paused time -- so the feed and the training-load
     model already disagreed about the same workout, and a session left open
     on the rack during a phone call read as a multi-hour effort in one place

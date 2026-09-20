@@ -3,7 +3,6 @@ package app.myvitals.data
 import android.content.Context
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import java.lang.reflect.Type
 
 /**
@@ -13,10 +12,18 @@ import java.lang.reflect.Type
  *
  * Type-safe via [Moshi] adapters; callers pass a Type for collections
  * (use `Types.newParameterizedType(List::class.java, Foo::class.java)`).
+ *
+ * SA-C1: this Moshi has no reflective fallback — every type cached here
+ * must be `@JsonClass(generateAdapter = true)` (moshi-kotlin-codegen runs
+ * via ksp) AND at least `internal` visibility, because the generated
+ * adapter lands in a different file and can't see a file-private class.
+ * A screen-local cache type that skips either one fails at runtime with
+ * "Cannot serialize/deserialize" the first time this is called for it —
+ * not a compile error, so check both when adding a new cached type.
  */
 object JsonCache {
     private const val PREFS = "myvitals_cache_v1"
-    private val moshi: Moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    private val moshi: Moshi = Moshi.Builder().build()
 
     data class Entry<T>(val value: T, val savedAt: Long)
 

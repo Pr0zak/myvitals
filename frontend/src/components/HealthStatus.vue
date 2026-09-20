@@ -77,7 +77,10 @@ const rollText = computed(() => {
 
 const ORDER: Array<[string, string]> = [
   ["hrv", "HRV"], ["rhr", "Resting HR"],
-  ["sleep_score", "Sleep quality"], ["sleep_duration", "Sleep duration"],
+  // SA-N3: matches the server's driver label (advanced.py) and every
+  // other surface reading this column — it's a duration-dominated
+  // score, not a validated quality/recovery signal.
+  ["sleep_score", "Sleep score"], ["sleep_duration", "Sleep duration"],
 ];
 </script>
 

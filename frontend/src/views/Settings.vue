@@ -318,11 +318,11 @@ function relAge(seconds: number | null): string {
 
 async function loadUpdateStatus() {
   try {
-    const { data } = await axios.get<UpdateStatus>("/api/update/status", {
-      baseURL: apiBase.value || undefined,
-      headers: queryToken.value ? { Authorization: `Bearer ${queryToken.value}` } : {},
-    });
-    updateStatus.value = data;
+    // SA-C14: was a direct axios.get("/api/update/status", { baseURL })
+    // — double-prefixes to `<base>/api/update/status` when a custom API
+    // base is set. api.updateStatus() goes through the shared client,
+    // whose interceptor replaces rather than appends the base.
+    updateStatus.value = await api.updateStatus();
   } catch {
     updateStatus.value = null;
   }
@@ -333,11 +333,7 @@ async function checkUpdate() {
   updateApplyResult.value = "";
   updateApplyError.value = null;
   try {
-    const { data } = await axios.get<UpdateCheck>("/api/update/check", {
-      baseURL: apiBase.value || undefined,
-      headers: queryToken.value ? { Authorization: `Bearer ${queryToken.value}` } : {},
-    });
-    updateInfo.value = data;
+    updateInfo.value = await api.updateCheck();
   } catch (e: unknown) {
     const err = e as { response?: { data?: { detail?: string } }; message?: string };
     updateInfo.value = {
@@ -386,12 +382,11 @@ async function applyUpdate() {
   const baselineTail = updateStatus.value?.tail?.join("\n") ?? "";
 
   try {
-    const { data } = await axios.post<{
-      triggered: boolean; error?: string; hint?: string;
-    }>("/api/update/apply", {}, {
-      baseURL: apiBase.value || undefined,
-      headers: queryToken.value ? { Authorization: `Bearer ${queryToken.value}` } : {},
-    });
+    // SA-C14: identical bug to loadUpdateStatus/checkUpdate below (same
+    // hard-coded "/api/..." + separate baseURL shape) — not one of the
+    // three the finding named, but the same defect in the same file, so
+    // fixed alongside them rather than left as a fourth instance.
+    const data = await api.updateApply();
     if (!data.triggered) {
       applyPhase.value = "failed";
       updateApplyError.value = data.hint ?? data.error ?? "Trigger failed.";
@@ -523,7 +518,40 @@ const aiKeyInput = ref("");
 const aiKeyVisible = ref(false);
 const aiPreviewing = ref(false);
 const aiPreviewJson = ref<string>("");
+const aiPreviewNote = ref<string>("");
 const aiResult = ref<string>("");
+
+// SA-O1: the preview used to be one button that always called the weekly
+// summary builder — 1 of the 15 payload builders the app actually has.
+// This list must stay in step with `PREVIEW_SURFACES` in
+// `backend/src/myvitals/api/ai.py` (values are the `surface` query param
+// it dispatches on; labels are display-only). It's an enum of endpoint
+// names for a dropdown, not a number derived from user data, so unlike
+// the rest of this page it's fine for it to live here rather than be
+// fetched — nothing on this list can drift into showing a wrong figure.
+const AI_PREVIEW_SURFACES: { value: string; label: string }[] = [
+  { value: "summary", label: "Weekly / monthly summary" },
+  { value: "topic", label: "Topic read (sleep / recovery / sober / anomaly)" },
+  { value: "verdict", label: "One-line daily verdict" },
+  { value: "ask", label: "Ask a question" },
+  { value: "deload", label: "Deload-trigger judgment" },
+  { value: "focus_cue", label: "Pre-workout focus cue" },
+  { value: "strength_nudge", label: "Variety nudge (exercise swaps)" },
+  { value: "strength_review", label: "Post-workout review" },
+  { value: "cardio_coach", label: "Cardio coach" },
+  { value: "sleep_coach", label: "Sleep coach" },
+  { value: "recovery_coach", label: "Recovery coach" },
+  { value: "fasting_coach", label: "Fasting coach" },
+  { value: "workout_coach", label: "Workout coach" },
+  { value: "meal_suggestion", label: "Meal suggestion" },
+  { value: "prep_plan", label: "Weekly prep planner" },
+  { value: "meals_identify", label: "Pantry photo identify (uploads a photo, not JSON)" },
+  { value: "meals_read_label", label: "Nutrition-label scan (uploads a photo, not JSON)" },
+];
+const aiPreviewSurface = ref("summary");
+const aiPreviewRange = ref<"week" | "month">("week");
+const aiPreviewTopic = ref<"sleep" | "recovery" | "sober" | "anomaly">("sleep");
+const aiPreviewQuestion = ref("");
 
 async function loadAiCfg() {
   if (!queryToken.value) return;
@@ -874,29 +902,67 @@ async function aiUpdateTone(tone: string) {
 
 // Available Claude models with their cost / capability profile so the
 // picker can show "Haiku (cheapest, fast)" rather than just an ID.
+//
+// SA-C10: `sub` multipliers are against current per-token API pricing —
+// Haiku 4.5 $1/$5 per MTok, Sonnet 4.6 $3/$15, Opus 4.7 $5/$25 — so
+// Sonnet is 3x Haiku (was stated as 4x) and Opus is 1.7x Sonnet (was
+// stated as 5x, a stale multiplier from an older, pricier Opus). `cliSub`
+// is shown instead whenever the live provider is claude_cli, where every
+// model bills $0 against a subscription and the honest tradeoff is
+// latency / rate-limit budget, not dollars — see `aiModelSub` below.
 const AI_MODELS = [
   {
     id: "claude-haiku-4-5-20251001",
     label: "Haiku 4.5",
     sub: "cheapest, fastest — recommended for structured summaries",
+    cliSub: "fastest, lightest on your subscription's rate limit — recommended for structured summaries",
   },
   {
     id: "claude-sonnet-4-6",
     label: "Sonnet 4.6",
-    sub: "stronger reasoning, ~4× the cost of Haiku",
+    sub: "stronger reasoning, ~3× the cost of Haiku",
+    cliSub: "stronger reasoning, a heavier call against your subscription's rate limit than Haiku",
   },
   {
     id: "claude-opus-4-7",
     label: "Opus 4.7",
-    sub: "deepest analysis, ~5× Sonnet — overkill for daily reads",
+    sub: "deepest analysis, ~1.7× Sonnet — overkill for daily reads",
+    cliSub: "deepest analysis, the heaviest call against your subscription's rate limit — overkill for daily reads",
   },
 ];
+// The picker's subtitle, gated on the LIVE provider (aiCfg, not the
+// pending `aiProvider` draft) — same field the model dropdown itself
+// reads. Dollar-cost multipliers are meaningless under claude_cli, which
+// bills $0 against the subscription regardless of model.
+const aiModelSub = computed(() => {
+  const m = AI_MODELS.find((x) => x.id === aiCfg.value?.model);
+  if (!m) return "";
+  return aiCfg.value?.provider === "claude_cli" ? m.cliSub : m.sub;
+});
 async function aiPreview() {
-  aiPreviewing.value = true; aiPreviewJson.value = "";
+  aiPreviewing.value = true; aiPreviewJson.value = ""; aiPreviewNote.value = "";
   try {
-    const p = await api.aiPreviewPayload("week");
-    aiPreviewJson.value = JSON.stringify(p, null, 2);
-  } catch (e) { aiResult.value = `Preview failed: ${e instanceof Error ? e.message : String(e)}`; }
+    // SA-C14: this used to be a direct axios.get("/api/ai/preview-payload",
+    // { baseURL }) — same hard-coded-prefix bug as the update-checker
+    // calls above, which double-prefixes to `<base>/api/...` when a
+    // custom API base is set. `api.aiPreviewPayload` now forwards the
+    // full param set (surface/topic/question, not just range), so the
+    // workaround this comment used to explain no longer applies.
+    const data = await api.aiPreviewPayload({
+      surface: aiPreviewSurface.value,
+      range: aiPreviewRange.value,
+      topic: aiPreviewTopic.value,
+      question: aiPreviewQuestion.value.trim() || undefined,
+    });
+    if (data && data.is_payload === false) {
+      aiPreviewNote.value = (data.note as string) ?? "";
+    } else {
+      aiPreviewJson.value = JSON.stringify(data, null, 2);
+    }
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { detail?: string } }; message?: string };
+    aiResult.value = `Preview failed: ${err.response?.data?.detail ?? (e instanceof Error ? e.message : String(e))}`;
+  }
   finally { aiPreviewing.value = false; }
 }
 
@@ -1959,9 +2025,11 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
     <section v-show="activeTab === 'ai'" v-if="queryToken" class="settings-pane">
       <h2>AI summaries</h2>
       <p class="hint">
-        Claude turns your weekly / monthly stats into a plain-English read.
-        <strong>Aggregate only</strong> — no raw HR samples, GPS, or sober history dates leave your server.
-        Tap <em>Preview payload</em> to see exactly what gets sent.
+        Claude reads pre-aggregated stats to power summaries, coach cards,
+        and meal suggestions across the app. <strong>Aggregate only</strong> —
+        no raw HR samples, GPS, or sober history dates leave your server for
+        any of it. Pick a surface below and tap <em>Preview payload</em> to
+        see exactly what that one sends.
       </p>
       <label>
         <span>Anthropic API key
@@ -1993,7 +2061,7 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
             <option v-for="m in AI_MODELS" :key="m.id" :value="m.id">{{ m.label }}</option>
           </select>
           <span class="muted" style="font-size: 0.75rem;">
-            {{ AI_MODELS.find((m) => m.id === aiCfg?.model)?.sub ?? '' }}
+            {{ aiModelSub }}
           </span>
         </label>
         <label class="ai-toggle">
@@ -2115,9 +2183,44 @@ const APPLY_PHASE_LABEL: Record<ApplyPhase, string> = {
       <div class="actions">
         <button class="primary" :disabled="!aiKeyInput.trim()" @click="aiSaveKey">Save API key</button>
         <button class="ghost danger" v-if="aiCfg?.api_key_set" @click="aiClearKey">Clear key</button>
+      </div>
+
+      <div class="ai-preview-picker">
+        <label class="ai-toggle">
+          <span>Preview:</span>
+          <select v-model="aiPreviewSurface" style="min-width: 240px;">
+            <option v-for="s in AI_PREVIEW_SURFACES" :key="s.value" :value="s.value">{{ s.label }}</option>
+          </select>
+        </label>
+        <label v-if="aiPreviewSurface === 'summary'" class="ai-toggle">
+          <span>Range:</span>
+          <select v-model="aiPreviewRange">
+            <option value="week">Week (7 days)</option>
+            <option value="month">Month (30 days)</option>
+          </select>
+        </label>
+        <label v-if="aiPreviewSurface === 'topic'" class="ai-toggle">
+          <span>Topic:</span>
+          <select v-model="aiPreviewTopic">
+            <option value="sleep">Sleep</option>
+            <option value="recovery">Recovery</option>
+            <option value="sober">Sober</option>
+            <option value="anomaly">Anomaly</option>
+          </select>
+        </label>
+        <label v-if="aiPreviewSurface === 'ask'" class="ai-toggle">
+          <span>Question (optional):</span>
+          <input v-model="aiPreviewQuestion" type="text"
+                 placeholder="e.g. How has my sleep trended?" style="min-width: 220px;"/>
+        </label>
         <button class="ghost" @click="aiPreview">{{ aiPreviewing ? 'Loading…' : 'Preview payload' }}</button>
       </div>
+      <p v-if="aiPreviewJson || aiPreviewNote" class="hint" style="margin-top: 0.3rem;">
+        <strong>Aggregate only</strong> — no raw HR samples, GPS, or sober
+        history dates leave your server for the surface picked above.
+      </p>
       <pre v-if="aiPreviewJson" class="ai-preview">{{ aiPreviewJson }}</pre>
+      <p v-if="aiPreviewNote" class="hint ai-preview-note">{{ aiPreviewNote }}</p>
       <p v-if="aiResult" class="ok">{{ aiResult }}</p>
     </section>
 
@@ -3152,6 +3255,14 @@ tr.job-failed { background: rgba(239, 68, 68, 0.05); }
   border-radius: 8px; padding: 0.7rem; max-height: 280px; overflow: auto;
   font-family: ui-monospace, monospace; font-size: 0.75rem;
   color: var(--text-soft); margin-top: 0.5rem; white-space: pre-wrap;
+}
+.ai-preview-picker {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem;
+  margin-top: 0.6rem;
+}
+.ai-preview-note {
+  background: var(--surface); border: 1px dashed var(--border);
+  border-radius: 8px; padding: 0.7rem; margin-top: 0.5rem;
 }
 
 /* UPDATE-1: release check + apply controls */

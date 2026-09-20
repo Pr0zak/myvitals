@@ -1,7 +1,18 @@
-"""Trail status endpoints — list, history, subscribe, refresh, alerts.
+"""Trail status endpoints — list, subscribe, refresh, alerts.
 
 Pulls from the trails / trail_status_snapshots / trail_subscriptions /
 trail_alerts tables populated by integrations/rainoutline.py.
+
+SA-C4: a `/{trail_id}/history` route used to live here, returning raw
+snapshots for a window. It had zero callers on either client (no Vue view,
+no Compose screen, and the one API-client wrapper for it had no callers
+either — `frontend/src/api/client.ts` before this fix) and zero hits in
+production logs, so it was removed rather than kept as a foundation for a
+history feature nothing had asked for yet. If a status-reliability surface
+gets built later, see the SA-C4 correction in docs/sa-findings.json for
+what a defensible version needs: distinct source statements, time-weighted
+by how long each stood, excluding `unknown`, refusing below N statements
+or on a stale feed — not raw-snapshot percentages.
 """
 from __future__ import annotations
 
@@ -419,34 +430,6 @@ async def seed_locations(
         updated += 1
     await db.commit()
     return {"updated": updated, "skipped": skipped, "total_in_db": len(trails)}
-
-
-@router.get("/{trail_id}/history")
-async def trail_history(
-    trail_id: int, days: int = 30,
-    db: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
-    """All snapshots for a trail in the last `days` days, oldest first."""
-    t = await db.get(models.Trail, trail_id)
-    if t is None:
-        raise HTTPException(status_code=404, detail="trail not found")
-    since = datetime.now(timezone.utc) - timedelta(days=days)
-    rows = (await db.execute(
-        select(models.TrailStatusSnapshot)
-        .where(models.TrailStatusSnapshot.trail_id == trail_id)
-        .where(models.TrailStatusSnapshot.fetched_at >= since)
-        .order_by(models.TrailStatusSnapshot.fetched_at)
-    )).scalars().all()
-    return {
-        "trail_id": trail_id, "name": t.name,
-        "snapshots": [
-            {
-                "fetched_at": s.fetched_at, "status": s.status,
-                "comment": s.comment, "source_ts": s.source_ts,
-            }
-            for s in rows
-        ],
-    }
 
 
 # ------------------------------------------------------------------

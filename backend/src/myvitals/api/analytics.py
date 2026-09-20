@@ -21,7 +21,18 @@ router = APIRouter(dependencies=[Depends(require_query)])
 @router.post("/analytics/run")
 async def run_analytics(target_date: date | None = Query(None)) -> dict[str, str]:
     await compute_daily_summary(target_date)
-    return {"status": "ok", "target_date": (target_date or datetime.now(timezone.utc).date()).isoformat()}
+    if target_date is None:
+        # Resolve "today" in the user's configured TZ rather than UTC.
+        # With TZ=UTC, on Central time the UTC day starts at 7pm CDT the
+        # previous evening, so 5 hours of yesterday's steps were leaking
+        # into today's count.
+        try:
+            from zoneinfo import ZoneInfo
+            local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+        except Exception:
+            local_tz = timezone.utc
+        target_date = datetime.now(local_tz).date()
+    return {"status": "ok", "target_date": target_date.isoformat()}
 
 
 @router.get("/analytics/discoveries")
@@ -36,7 +47,16 @@ async def discoveries(
     for surfacing surprising correlations the user wouldn't think to ask
     about manually.
     """
-    until = datetime.now(timezone.utc).date()
+    # Resolve "today" in the user's configured TZ rather than UTC.
+    # With TZ=UTC, on Central time the UTC day starts at 7pm CDT the
+    # previous evening, so 5 hours of yesterday's steps were leaking
+    # into today's count.
+    try:
+        from zoneinfo import ZoneInfo
+        local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        local_tz = timezone.utc
+    until = datetime.now(local_tz).date()
     since = until - timedelta(days=days)
     cache: dict[str, dict[date, float]] = {}
     for m in _DAILY_SUMMARY_METRICS:
@@ -97,10 +117,27 @@ async def backfill_hr_recovery() -> dict[str, int]:
 @router.post("/analytics/backfill")
 async def backfill_analytics(days: int = Query(7, ge=1, le=3650)) -> dict[str, int]:
     """Recompute daily_summary for the past `days` days. Useful when raw data
-    arrives later than the original nightly job ran (e.g. backfilled from HC)."""
-    today = datetime.now(timezone.utc).date()
+    arrives later than the original nightly job ran (e.g. backfilled from HC).
+
+    Oldest first. `update_training_load` seeds each day's CTL/ATL off
+    *yesterday's stored row*, so newest-first computes today from a
+    yesterday this same call hasn't recomputed yet — every day but the
+    very last one seeds from stale (or missing) history. Walking forward
+    from the oldest requested day means each day's yesterday is already
+    correct by the time it's used, so one call heals the whole chain.
+    """
+    # Resolve "today" in the user's configured TZ rather than UTC.
+    # With TZ=UTC, on Central time the UTC day starts at 7pm CDT the
+    # previous evening, so 5 hours of yesterday's steps were leaking
+    # into today's count.
+    try:
+        from zoneinfo import ZoneInfo
+        local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        local_tz = timezone.utc
+    today = datetime.now(local_tz).date()
     ok = 0
-    for i in range(days):
+    for i in reversed(range(days)):
         try:
             await compute_daily_summary(today - timedelta(days=i))
             ok += 1
@@ -330,7 +367,16 @@ async def correlate(
     if x not in SUPPORTED_METRICS or y not in SUPPORTED_METRICS:
         raise HTTPException(400, f"metric must be one of {SUPPORTED_METRICS}")
 
-    until = datetime.now(timezone.utc).date()
+    # Resolve "today" in the user's configured TZ rather than UTC.
+    # With TZ=UTC, on Central time the UTC day starts at 7pm CDT the
+    # previous evening, so 5 hours of yesterday's steps were leaking
+    # into today's count.
+    try:
+        from zoneinfo import ZoneInfo
+        local_tz = ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
+    except Exception:
+        local_tz = timezone.utc
+    until = datetime.now(local_tz).date()
     since = until - timedelta(days=days + abs(lag))
 
     x_series = await _series_for_metric(db, x, since, until)
@@ -349,38 +395,20 @@ async def correlate(
     )
 
 
-# === Alerts ===
-
-class AlertOut(BaseModel):
-    id: int
-    ts: datetime
-    kind: str
-    payload: dict[str, Any]
-    acknowledged: bool
-
-
-@router.get("/alerts", response_model=list[AlertOut])
-async def list_alerts(
-    acknowledged: bool | None = Query(None),
-    limit: int = Query(50, ge=1, le=500),
-    db: AsyncSession = Depends(get_session),
-) -> list[AlertOut]:
-    stmt = select(models.Alert).order_by(models.Alert.ts.desc()).limit(limit)
-    if acknowledged is not None:
-        stmt = stmt.where(models.Alert.acknowledged == acknowledged)
-    result = await db.execute(stmt)
-    return [
-        AlertOut(id=a.id, ts=a.ts, kind=a.kind, payload=a.payload,
-                 acknowledged=a.acknowledged)
-        for a in result.scalars().all()
-    ]
-
-
-@router.post("/alerts/{alert_id}/ack")
-async def ack_alert(alert_id: int, db: AsyncSession = Depends(get_session)) -> dict[str, str]:
-    alert = await db.get(models.Alert, alert_id)
-    if alert is None:
-        raise HTTPException(404, "alert not found")
-    alert.acknowledged = True
-    await db.commit()
-    return {"status": "ok"}
+# NOTE (SA-C6, 2026-09): the legacy `models.Alert` read surface (bare
+# `GET /alerts` + `POST /alerts/{id}/ack`) was removed from here. Confirmed
+# zero callers across frontend/src/api/client.ts, BackendClient.kt, and
+# api/mcp.py before deleting — both clients only ever called `/ai/alerts`
+# (the unrelated, live `ai_alerts` table) and `/trails/alerts`. `acknowledged`
+# was false on every one of ~4,600 rows because nothing could ack them.
+# `models.Alert` is still written by analytics/jobs.py (rhr_drift,
+# bp_elevated_stage1/2, weight_rapid_change, skin_temp_anomaly,
+# illness_warning) and documented as "legacy stat alerts" in
+# docs/architecture.md — that write path, and the decision to either retire
+# it or route it into the `ai_alerts` feed both clients actually render, is
+# out of this endpoint's scope. See docs/sa-findings.json SA-C6 (and the
+# refused finding one below it) for the full analysis, including a live-data
+# bug worth a follow-up: `_alert_recently_fired` in jobs.py suppresses by
+# write-time recency, not by the alert's own subject date, so the same
+# stale BP reading (e.g. 2026-06-08's 145/91.5) has re-fired as a "new"
+# bp_elevated_stage2 alert on every lazy recompute for months.

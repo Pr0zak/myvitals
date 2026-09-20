@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import TodayHero from "@/components/TodayHero.vue";
+import WeeklyLoad from "@/components/WeeklyLoad.vue";
 import HealthStatus from "@/components/HealthStatus.vue";
 import FocusAreas from "@/components/FocusAreas.vue";
 import KeyMetrics from "@/components/KeyMetrics.vue";
@@ -21,21 +22,6 @@ import { isConfigured } from "@/config";
 const router = useRouter();
 const loading = ref(true);
 
-const sleepScore = ref<number | null>(null);
-const recoveryScore = ref<number | null>(null);
-const steps = ref<number | null>(null);
-const stepGoal = ref(10000);
-const soberDays = ref<number | null>(null);
-const fastH = ref<number | null>(null);
-const fastTarget = ref(16);
-const fastActive = ref(false);
-
-const C = 2 * Math.PI * 42; // ring circumference
-
-function dash(pct: number): string {
-  const p = Math.max(0, Math.min(100, pct));
-  return `${((p / 100) * C).toFixed(1)} ${C.toFixed(1)}`;
-}
 const today = computed(() =>
   new Date().toLocaleDateString([], { month: "short", day: "numeric" }),
 );
@@ -59,36 +45,25 @@ async function load() {
     return;
   }
 
+  // The rings/pills this used to feed are gone; each remaining component
+  // below (TodayHero, WeeklyLoad, ...) fetches its own data now. This
+  // Promise.all survives purely as the unreachable-backend probe: four
+  // independent endpoints failing together is a connection problem, not
+  // four coincidences, whereas a single endpoint would paint the whole
+  // page "unreachable" over one dead route.
   const [sum, prof, sober, fast] = await Promise.all([
     api.todaySummary().catch(() => null),
     api.getProfile().catch(() => null),
     api.soberStats().catch(() => null),
     api.fastingCurrent().catch(() => null),
   ]);
-  // All four failing is a connection problem, not four coincidences.
   if (!sum && !prof && !sober && !fast) emptyReason.value = "unreachable";
-  if (sum) {
-    sleepScore.value = sum.sleep_score;
-    recoveryScore.value = sum.recovery_score;
-    steps.value = sum.steps_total;
-  }
-  const extra = prof?.extra as { steps_goal?: number } | undefined;
-  if (extra?.steps_goal != null) stepGoal.value = Math.round(extra.steps_goal);
-  if (sober) soberDays.value = sober.current_days;
-  if (fast && fast.is_active) {
-    fastActive.value = true;
-    fastH.value = fast.elapsed_h;
-    if (fast.target_hours) fastTarget.value = fast.target_hours;
-  }
   loading.value = false;
 }
 onMounted(load);
 
 function go(path: string) {
   router.push(path);
-}
-function fmt(n: number | null, d = 0): string {
-  return n == null ? "—" : n.toFixed(d);
 }
 </script>
 
@@ -114,11 +89,9 @@ function fmt(n: number | null, d = 0): string {
     </header>
 
     <TodayHero />
+    <WeeklyLoad />
     <HealthStatus />
 
-    <!-- Goal rings -->
-
-    <!-- Streaks & goals -->
     <KeyMetrics />
 
     <NarrativeCards />

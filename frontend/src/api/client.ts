@@ -414,8 +414,60 @@ export const api = {
     return data;
   },
 
-  async aiPreviewPayload(range: "week" | "month" = "week") {
-    const { data } = await http.get("/ai/preview-payload", { params: { range } });
+  // Accepts the full `/ai/preview-payload` param set (SA-O1's surface
+  // picker needs `surface`/`topic`/`question`, not just `range`) so
+  // Settings.vue's preview button can go through the shared client
+  // instead of a direct axios call that hard-codes the `/api` prefix
+  // (SA-C14 — see Settings.vue's `aiPreview`).
+  async aiPreviewPayload(params: {
+    surface?: string;
+    range?: "week" | "month";
+    topic?: string;
+    question?: string;
+  } = {}): Promise<Record<string, unknown>> {
+    const { data } = await http.get("/ai/preview-payload", { params });
+    return data;
+  },
+
+  // ── Update checker (Settings → About) ─────────────────────
+  // SA-C14: these three used to be direct `axios.get("/api/update/...")`
+  // calls that also set `baseURL` — with a custom API base configured
+  // that double-prefixes to `<base>/api/update/...` and 404s, since
+  // hitting the backend directly bypasses the Caddy `/api` strip. Routed
+  // through `http` so the shared interceptor's base-vs-prefix logic
+  // (client.ts:25-33) is the only place that decides the prefix.
+  async updateStatus(): Promise<{
+    log_present: boolean;
+    log_modified_at: string | null;
+    stale_seconds: number | null;
+    cron_healthy: boolean;
+    tail: string[];
+    trigger_pending: boolean;
+  }> {
+    const { data } = await http.get("/update/status");
+    return data;
+  },
+
+  async updateCheck(): Promise<{
+    current: string;
+    latest: string | null;
+    latest_tag: string | null;
+    latest_url: string | null;
+    latest_published_at: string | null;
+    release_notes: string | null;
+    update_available: boolean;
+    error: string | null;
+  }> {
+    const { data } = await http.get("/update/check");
+    return data;
+  },
+
+  async updateApply(): Promise<{
+    triggered: boolean;
+    error?: string;
+    hint?: string;
+  }> {
+    const { data } = await http.post("/update/apply", {});
     return data;
   },
 
@@ -552,6 +604,13 @@ export const api = {
     target_value: number | null; target_unit: string | null;
     target_date: string | null; started_at: string;
     ended_at: string | null; notes: string | null;
+    current_value: number | null;
+    progress_pct: number | null;
+    progress_state: string | null;
+    state_tone: string | null;
+    delta_value: number | null;
+    baseline_value: number | null;
+    projection: { per_day: number | null; per_week: number | null; eta_date: string | null; eta_days: number | null; confidence: string | null; is_fallback: boolean; fallback_reason: string | null; method: string } | null;
   }>> {
     const { data } = await http.get("/ai/goals", { params: { active_only: activeOnly } });
     return data;
@@ -1393,17 +1452,6 @@ export const api = {
     dnis_url?: string | null;
   }> {
     const { data } = await http.get("/trails");
-    return data;
-  },
-
-  async trailHistory(id: number, days = 30): Promise<{
-    trail_id: number; name: string;
-    snapshots: Array<{
-      fetched_at: string; status: string;
-      comment: string | null; source_ts: string | null;
-    }>;
-  }> {
-    const { data } = await http.get(`/trails/${id}/history`, { params: { days } });
     return data;
   },
 

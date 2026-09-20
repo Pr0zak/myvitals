@@ -16,9 +16,6 @@ dist/
 build/
 *.egg-info/
 
-# uv
-uv.lock
-
 # node / frontend
 node_modules/
 frontend/dist/
@@ -58,4 +55,9 @@ docs/HA_REALTIME_PLAN.md
 
 # kotlin compiler session caches
 android/.kotlin/
+
+# SA-S4: the image builds with pnpm (frontend/pnpm-lock.yaml is the real,
+# tracked lockfile) — an npm-format package-lock.json here would describe
+# a different install than what actually ships and is easy to mistake for
+# the one that matters.
 frontend/package-lock.json

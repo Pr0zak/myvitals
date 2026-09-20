@@ -8,7 +8,6 @@ import app.myvitals.data.LogEntry
 import app.myvitals.data.SettingsRepository
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
@@ -63,7 +62,15 @@ class LogUploadWorker(
 
         return try {
             api.upload(batch)
-            db.logs().markSent(pending.map { it.id }, System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            db.logs().markSent(pending.map { it.id }, now)
+
+            // Prune logs older than 14 days. Retention window keeps ~20k rows / ~3.5 MB,
+            // which is enough for debugging sync problems without unbounded growth.
+            // 14 days = 1,209,600,000 ms.
+            val fourteenDaysAgoMs = now - 1_209_600_000L
+            db.logs().deleteOlderThan(fourteenDaysAgoMs)
+
             Timber.d("Uploaded %d log entries", pending.size)
             Result.success()
         } catch (e: Exception) {
@@ -75,7 +82,7 @@ class LogUploadWorker(
     }
 
     private fun buildApi(baseUrl: String, token: String): DebugApi {
-        val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+        val moshi = Moshi.Builder().build()
         val auth = Interceptor { chain ->
             chain.proceed(chain.request().newBuilder()
                 .header("Authorization", "Bearer $token").build())

@@ -18,7 +18,7 @@ import { goalTone, goalMovedAway, goalDeltaLabel } from "@/goalState";
 // by the platform's own font, so the same glyph is a different drawing on
 // every phone and browser, which is the thing a hand-picked icon set exists
 // to prevent. These five sat in the neon chrome as the last holdouts.
-import { Link2, PencilLine, Salad, User, UtensilsCrossed } from "lucide-vue-next";
+import { ClipboardList, Link2, Package, PencilLine, Salad, User, UtensilsCrossed } from "lucide-vue-next";
 
 const router = useRouter();
 const loading = ref(true);
@@ -82,6 +82,15 @@ const fastDash = computed<string>(() => {
   const filled = (fastPct.value / 100) * RC;
   return `${filled.toFixed(1)} ${RC.toFixed(1)}`;
 });
+// The template's v-else-if guarantees fastH is set, but the checker cannot
+// narrow through it — so resolve the label here rather than with a `?? 0` in
+// the template, which would read as a real zero-hour fast to the next reader.
+const fastProgressLabel = computed<string>(() =>
+  fastH.value == null
+    ? "—"
+    : `${Math.floor(fastH.value)} / ${Math.round(fastTargetVal.value)}h`,
+);
+
 const fastBig = computed<string>(() => {
   if (fastH.value == null) return "—";
   return `${Math.floor(fastH.value)}:${Math.round(fastTargetVal.value)}`;
@@ -167,13 +176,7 @@ async function load(): Promise<void> {
     soberDays.value = sober.current_days ?? null;
     soberLongest.value = sober.longest_days ?? null;
   }
-  goals.value = (gs ?? []).map((g) => ({
-    id: g.id,
-    kind: g.kind ?? "",
-    title: g.title ?? "Goal",
-    target_value: g.target_value ?? null,
-    target_unit: g.target_unit ?? null,
-  }));
+  goals.value = (gs ?? []) as GoalRow[];
 
   loading.value = false;
 }
@@ -219,9 +222,10 @@ function go(path: string): void {
           </div>
         </div>
         <div v-if="fastComplete" class="tag bg-cyan cyan">Complete ✓</div>
-        <div v-else class="tag bg-cyan cyan">
-          {{ fastH != null ? Math.floor(fastH) : "—" }} / {{ Math.round(fastTargetVal) }}h
+        <div v-else-if="fastActive" class="tag bg-cyan cyan">
+          {{ fastProgressLabel }}
         </div>
+        <div v-else class="tag bg-cyan cyan">Not fasting</div>
       </button>
 
       <!-- Sober -->
@@ -279,15 +283,39 @@ function go(path: string): void {
     <!-- ── Personal & system ────────────────────────────────── -->
     <div class="cap">Personal &amp; system</div>
 
-    <button class="pill" @click="go('/meals/prep')">
-      <span class="pi bg-amber amber"><UtensilsCrossed :size="17" /></span>
-      <span class="pn">Weekend prep<small>Cook once, eat all week</small></span>
+    <!-- SA-R3/SA-R4 — a single "Meals" pill used to be the ONLY neon-shell
+         door into meals, pointing at /meals/can-make while its subtitle
+         promised "pantry · log" — two screens that page cannot reach.
+         Rather than patch the wording, four pills now each name what they
+         actually open: Meals (-> /meals -> Today.vue, Direction A's daily
+         log, previously unreachable on web at all -- "log" is what the
+         old subtitle promised), Pantry (49 real rows, previously
+         reachable from no neon page), Cook from pantry (the can-make
+         check + its "meal ideas" footer link -- the page the old pill
+         actually landed on), and Weekend prep (unchanged, already
+         reachable). Named to match SideNav.vue's own labels for the same
+         four routes so the two shells describe one feature consistently. -->
+    <button class="pill" @click="go('/meals')">
+      <span class="pi bg-lime lime"><ClipboardList :size="17" /></span>
+      <span class="pn">Meals<small>Today's log · plan · shopping</small></span>
+      <span class="chev">›</span>
+    </button>
+
+    <button class="pill" @click="go('/meals/pantry')">
+      <span class="pi bg-cyan cyan"><Package :size="17" /></span>
+      <span class="pn">Pantry<small>What's in the house</small></span>
       <span class="chev">›</span>
     </button>
 
     <button class="pill" @click="go('/meals/can-make')">
-      <span class="pi bg-lime lime"><Salad :size="17" /></span>
-      <span class="pn">Meals<small>What can I make · pantry · log</small></span>
+      <span class="pi bg-mag mag"><Salad :size="17" /></span>
+      <span class="pn">Cook from pantry<small>What can I make · meal ideas</small></span>
+      <span class="chev">›</span>
+    </button>
+
+    <button class="pill" @click="go('/meals/prep')">
+      <span class="pi bg-amber amber"><UtensilsCrossed :size="17" /></span>
+      <span class="pn">Weekend prep<small>Cook once, eat all week</small></span>
       <span class="chev">›</span>
     </button>
 

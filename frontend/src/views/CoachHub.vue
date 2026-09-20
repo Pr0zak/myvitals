@@ -13,7 +13,7 @@
 import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
-import type { TodaySummary } from "@/api/types";
+import type { TodaySummary, VitalTile } from "@/api/types";
 
 interface Discovery {
   x_metric: string;
@@ -26,6 +26,7 @@ const router = useRouter();
 const loading = ref(true);
 const sum = ref<TodaySummary | null>(null);
 const disc = ref<Discovery[]>([]);
+const tiles = ref<VitalTile[]>([]);
 
 /** Humanize backend metric keys for display. */
 const METRIC_LABELS: Record<string, string> = {
@@ -61,12 +62,17 @@ function humanize(key: string | null | undefined): string {
 
 async function load(): Promise<void> {
   loading.value = true;
-  const [s, d] = await Promise.all([
+  const [s, d, t] = await Promise.all([
     api.todaySummary().catch(() => null),
     api.discoveries(90).catch((): Discovery[] => []),
+    // SA-N4: the recovery verdict below reads the tile's server-decided
+    // `status`, not a client-side re-threshold of recovery_score — see
+    // the readTone comment.
+    api.summaryTiles().catch(() => null),
   ]);
   sum.value = s;
   disc.value = Array.isArray(d) ? d : [];
+  tiles.value = t?.tiles ?? [];
   loading.value = false;
 }
 onMounted(load);
@@ -84,13 +90,34 @@ const recovery = computed<number | null>(() => sum.value?.recovery_score ?? null
 const hrv = computed<number | null>(() => sum.value?.hrv_avg ?? null);
 const tsb = computed<number | null>(() => sum.value?.tsb ?? null);
 
+// SA-N4: this used to re-threshold the raw recovery_score at 70/50 —
+// numbers picked here, disagreeing with the recovery TILE's own
+// server-decided 65/30 banding (analytics/tiles.py) on roughly half of
+// scored days (measured against production: 53.7% same-day disagreement
+// over the last ~150 scored days). The tile and this hero could tell
+// opposite stories about the same day, which is exactly what the
+// architecture rule ("server decides, client renders") exists to
+// prevent. Now reads the tile's `status` instead of recomputing one.
+// This does not smooth away the underlying night-to-night HRV noise —
+// see the SA-N4 report for why a rolling-window rework is a bigger,
+// separately-scoped change — but it does stop the hero from disagreeing
+// with the tile sitting right below it on the same page.
+const recoveryTile = computed<VitalTile | null>(
+  () => tiles.value.find((t) => t.key === "recovery") ?? null,
+);
+
 type ReadTone = "strong" | "low" | "balanced";
 
 const readTone = computed<ReadTone>(() => {
-  const rec = recovery.value;
-  const form = tsb.value ?? 0;
-  if (rec != null && rec >= 70 && form >= 0) return "strong";
-  if (rec != null && rec < 50) return "low";
+  const status = recoveryTile.value?.status ?? null;
+  const form = tsb.value;
+  // `form` must be a KNOWN non-negative number to earn "strong" — an
+  // absent TSB (no training history yet, or the day hasn't been
+  // computed) is not evidence of good form, and treating it as 0 used to
+  // borrow that reassurance for free. Falls through to "balanced" same
+  // as any other unknown-form day.
+  if (status === "good" && form != null && form >= 0) return "strong";
+  if (status === "watch") return "low";
   return "balanced";
 });
 

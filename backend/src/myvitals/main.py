@@ -7,10 +7,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import version as version_mod
+from .db.session import get_session
 from .api import (
     ai,
     analytics,
@@ -112,7 +116,7 @@ async def _anomaly_scan() -> None:
     and posts system notifications for any unnotified rows."""
     from sqlalchemy import select
     from .db import models, session as _session
-    from .integrations.claude import detect_anomalies, phrase_anomaly
+    from .integrations.claude import _credentials_missing, detect_anomalies, phrase_anomaly
 
     async with _session.SessionLocal() as db:
         cfg = await db.get(models.AiConfig, 1)
@@ -139,7 +143,7 @@ async def _anomaly_scan() -> None:
             # Generate the phrasing only if Claude is configured;
             # otherwise drop a structured one-liner.
             try:
-                if cfg.anthropic_api_key:
+                if not _credentials_missing(cfg):
                     body = await phrase_anomaly(cfg, a)
                 else:
                     body = (
@@ -272,9 +276,33 @@ if _IMG_DIR.is_dir():
     )
 
 
+# SA-O4: `/health` used to be a literal `{"status": "ok"}` — no DB round
+# trip, so it could not tell "serving" from "every request 500s". It is
+# the sole gate on deploy/auto-update.sh's 60s rollback probe (30 retries,
+# 2s apart) and the intended target of an external uptime check (see
+# docs/operations.md), so both directions matter: too weak and a dead DB
+# ships as "healthy" forever; too strict and a one-off blip becomes an
+# automatic rollback, which is worse than the always-OK it replaces. The
+# 2s per-attempt budget below is well inside the auto-update retry
+# cadence, so a transient hiccup gets several free retries before the
+# script's own 60s window is spent — it takes a DB that is down for the
+# whole minute to actually flip this red.
+#
+# `SELECT 1` touches no table (this app also has a 24.5M-row hypertable a
+# health probe must never go near) and measured ~0.1-2ms against the live
+# DB from inside the CT, against ~1.6ms for the old no-op response — the
+# added cost is noise next to the "every few seconds" polling budget.
+_HEALTH_DB_TIMEOUT_S = 2.0
+
+
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health(db: AsyncSession = Depends(get_session)) -> JSONResponse:
+    info = version_mod.info()
+    try:
+        await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=_HEALTH_DB_TIMEOUT_S)
+    except Exception:  # noqa: BLE001 — DB down/slow/unreachable, all read the same to a probe
+        return JSONResponse(status_code=503, content={"status": "error", **info})
+    return JSONResponse(status_code=200, content={"status": "ok", **info})
 
 
 @app.get("/version")

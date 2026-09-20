@@ -66,7 +66,17 @@ class TodaySummary(BaseModel):
     sleep_consistency_score: float | None = None
     sleep_debt_h: float | None = None
     fasting_hours: float | None = None
+    # Phone sync freshness (sync_heartbeat: last_success, else last_attempt,
+    # else the last HR sample as a last resort). NOT the same thing as the
+    # last watch HR sample — see last_hr_sample_at below. Both clients render
+    # this as "synced Xh ago" (SA-L6: it used to BE the HR sample, which
+    # reads amber-and-false whenever the watch stops writing HR while the
+    # phone keeps syncing fine).
     last_sync: datetime | None = None
+    # The last watch HR sample instant — kept under its own name so nothing
+    # that actually wants "when did HR last land" loses it now that
+    # last_sync means sync freshness. Unused by any client today.
+    last_hr_sample_at: datetime | None = None
     # Fields whose value did NOT come from today's row but was carried
     # forward from an earlier day, mapped to the date it came from.
     # Overnight metrics go missing whenever the watch hasn't synced last

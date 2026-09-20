@@ -2,7 +2,7 @@
 import logging
 from datetime import date, datetime, time, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import Date, cast, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,6 +43,56 @@ def _is_watch_source(name: str) -> bool:
     return any(k in n for k in _WATCH_SOURCE_KEYWORDS)
 
 
+# A stored steps_total within this many steps of a fresh recount is treated
+# as current. Zero tolerance would rebuild the whole daily_summary row on
+# every read while the user is out walking; a generous one would let a
+# materially wrong number stand. The errors this guards against ran to
+# thousands of steps, so the exact figure is not delicate.
+STEPS_STALE_TOLERANCE = 100
+
+
+def steps_total_is_stale(stored: int | None, canonical: int | None) -> bool:
+    """Is a stored `daily_summary.steps_total` behind a fresh recount?
+
+    The one rule, shared by the single-day check and the batched range
+    scan, so the two cannot answer differently for the same day.
+
+    A canonical of None (no usable source) or 0 never marks the row stale:
+    there is nothing to repair it WITH, and treating it as stale would
+    rebuild the same row on every read forever.
+    """
+    if not canonical:
+        return False
+    return stored is None or abs(stored - canonical) > STEPS_STALE_TOLERANCE
+
+
+def _pick_steps_source(totals: list[tuple[str, int]]) -> str | None:
+    """The one source to trust, given each source's total for a window.
+
+    Split out of `pick_canonical_steps_source` so the per-day scan in
+    `canonical_steps_by_day` cannot drift from the single-day path.
+
+    The ORDER of `totals` must not decide the answer, and it used to: the
+    watch branch was a `next(...)` over an unordered GROUP BY, so on the
+    days where both `com.fitbit.FitbitMobile` and Google Health write —
+    50 of the last 100, disagreeing by ~5,000 steps on average — the
+    canonical count was whichever row postgres happened to return first.
+    Besides being arbitrary, that makes any stored-vs-recount staleness
+    test flip-flop forever: each recompute can legitimately produce a
+    different number and so look stale again immediately.
+    """
+    if not totals:
+        return None
+    watch = [t for t in totals if _is_watch_source(t[0])]
+    pool = watch or totals
+    # Largest total wins, source name breaks an exact tie. Largest was
+    # always the rule for the no-watch case; applying it inside the watch
+    # pool too matters during the Fitbit -> Google Health rebrand, where
+    # both packages write and the fuller one is the live writer rather
+    # than a partial duplicate left behind mid-migration.
+    return min(pool, key=lambda x: (-x[1], x[0]))[0]
+
+
 async def pick_canonical_steps_source(
     db: AsyncSession, start: datetime, end: datetime,
 ) -> str | None:
@@ -61,15 +111,81 @@ async def pick_canonical_steps_source(
         .where(models.Steps.source != "unknown")
         .group_by(models.Steps.source)
     )).all()
-    totals = [(s, int(t)) for s, t in rows if s]
-    if not totals:
+    return _pick_steps_source([(s, int(t)) for s, t in rows if s])
+
+
+async def canonical_steps_total(
+    db: AsyncSession, start: datetime, end: datetime,
+) -> int | None:
+    """Steps in [start, end] exactly as `daily_summary.steps_total` stores it.
+
+    One canonical source, per-minute MAX inside it. Shared by the write
+    (`compute_daily_summary`) and by the staleness check that decides
+    whether that write is out of date — two copies of this arithmetic
+    would disagree and the row would be judged stale forever.
+
+    None means no usable source covered the window; 0 means a source was
+    there and recorded nothing, which is a fact about the day rather than
+    an absence of data.
+    """
+    canonical = await pick_canonical_steps_source(db, start, end)
+    if canonical is None:
         return None
-    watch = next((s for s, _ in totals if _is_watch_source(s)), None)
-    if watch is not None:
-        return watch
-    # Multi-source day with no watch — pick the largest. Single-source
-    # days fall through here too (only one entry, that's the answer).
-    return max(totals, key=lambda x: x[1])[0]
+    minute_col = func.date_trunc("minute", models.Steps.time)
+    per_min_subq = (
+        select(func.max(models.Steps.count).label("mx"))
+        .where(models.Steps.time >= start)
+        .where(models.Steps.time <= end)
+        .where(models.Steps.source == canonical)
+        .group_by(minute_col)
+        .subquery()
+    )
+    total = (await db.execute(
+        select(func.coalesce(func.sum(per_min_subq.c.mx), 0))
+    )).scalar()
+    return int(total or 0)
+
+
+async def canonical_steps_by_day(
+    db: AsyncSession, start: datetime, end: datetime, tzname: str,
+) -> dict[date, int]:
+    """`canonical_steps_total` for every LOCAL day in the window, in one query.
+
+    The batched staleness scan in /summary/range needs the canonical count
+    for up to a year of days at once; asking day by day would be the
+    per-day round-trip the rest of that scan exists to avoid. Days with no
+    usable source are simply absent from the mapping.
+    """
+    local_day = cast(func.timezone(tzname, models.Steps.time), Date)
+    minute_col = func.date_trunc("minute", models.Steps.time)
+    per_min = (
+        select(
+            local_day.label("day"),
+            models.Steps.source.label("source"),
+            func.max(models.Steps.count).label("mx"),
+        )
+        .where(models.Steps.time >= start)
+        .where(models.Steps.time <= end)
+        .where(models.Steps.source != "unknown")
+        .group_by(local_day, models.Steps.source, minute_col)
+        .subquery()
+    )
+    rows = (await db.execute(
+        select(per_min.c.day, per_min.c.source, func.sum(per_min.c.mx))
+        .group_by(per_min.c.day, per_min.c.source)
+    )).all()
+    per_day: dict[date, list[tuple[str, int]]] = {}
+    for d, src, total in rows:
+        if d is None or not src:
+            continue
+        per_day.setdefault(d, []).append((src, int(total or 0)))
+    out: dict[date, int] = {}
+    for d, totals in per_day.items():
+        chosen = _pick_steps_source(totals)
+        if chosen is None:
+            continue
+        out[d] = next(t for s, t in totals if s == chosen)
+    return out
 
 # An RHR jump above the rolling baseline by this many bpm fires an alert.
 RHR_DRIFT_BPM = 5.0
@@ -83,8 +199,24 @@ WEIGHT_RAPID_PCT = 2.0  # rolling 7d delta vs the prior week
 SKIN_TEMP_ANOMALY_DELTA_C = 0.5  # 3d mean above 28d mean
 
 
+def _local_tz():
+    """The user's configured timezone, falling back to UTC if unresolvable."""
+    try:
+        from zoneinfo import ZoneInfo
+        from ..config import settings as _settings
+        return ZoneInfo(_settings.tz) if _settings.tz != "UTC" else timezone.utc
+    except Exception:
+        return timezone.utc
+
+
 async def compute_daily_summary(target_date: date | None = None) -> None:
-    target = target_date or datetime.now(timezone.utc).date()
+    # The default target is the user's LOCAL today, not the UTC one. The CT
+    # runs TZ=UTC while the user is Central, so from 7pm local a UTC-derived
+    # date is TOMORROW -- and the one caller that relies on the default
+    # (`main.py`'s startup job) was writing an empty row for a day that had
+    # not begun, which then sat in front of every reader as though the day
+    # were simply stepless.
+    target = target_date or datetime.now(_local_tz()).date()
     log.info("computing daily_summary for %s", target)
 
     async with SessionLocal() as db:
@@ -97,36 +229,17 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
         # Steps total for the date — local-tz day, deduped per minute.
         # See summary.py for rationale on both the TZ fix and the
         # per-minute MAX (multi-source HC ingest dedupe).
-        try:
-            from zoneinfo import ZoneInfo
-            from ..config import settings as _settings
-            _local = ZoneInfo(_settings.tz) if _settings.tz != "UTC" else timezone.utc
-        except Exception:
-            _local = timezone.utc
+        _local = _local_tz()
         day_start = datetime.combine(target, time.min, tzinfo=_local)
         day_end = datetime.combine(target, time.max, tzinfo=_local)
-        # Pick a SINGLE canonical source (watch when present) and sum
+        # A SINGLE canonical source (watch when present), summed as
         # per-minute MAX within it. Crossing sources here over-counts
         # because the phone pedometer and the watch rarely fire on the
         # same minute boundary — what looks like per-minute MAX
-        # de-duping turns into "add both totals together".
-        canonical_src = await pick_canonical_steps_source(db, day_start, day_end)
-        if canonical_src is None:
-            steps_total = None
-        else:
-            minute_col = func.date_trunc("minute", models.Steps.time)
-            per_min_subq = (
-                select(func.max(models.Steps.count).label("mx"))
-                .where(models.Steps.time >= day_start)
-                .where(models.Steps.time <= day_end)
-                .where(models.Steps.source == canonical_src)
-                .group_by(minute_col)
-                .subquery()
-            )
-            steps_result = await db.execute(
-                select(func.coalesce(func.sum(per_min_subq.c.mx), 0))
-            )
-            steps_total = int(steps_result.scalar() or 0) or None
+        # de-duping turns into "add both totals together". The staleness
+        # checks in api/summary.py recount through the same helper, so a
+        # repaired row lands on the number they were comparing against.
+        steps_total = await canonical_steps_total(db, day_start, day_end)
 
         # Body metrics — last reading on this day wins (daily weigh-in pattern).
         body_row = await db.execute(

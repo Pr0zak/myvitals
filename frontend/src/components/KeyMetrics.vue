@@ -32,7 +32,8 @@ const groupOrder = ref<string[]>([]);
 const ROUTE: Record<string, string> = {
   hrv: "/hrv", resting_hr: "/heart-rate", steps: "/steps",
   sleep_duration: "/sleep", blood_pressure: "/blood-pressure",
-  recovery: "/heart-rate", weight: "/weight",
+  recovery: "/trends", weight: "/weight", skin_temp: "/skin-temp",
+  measurements: "/measurements",
 };
 
 /**
@@ -45,7 +46,7 @@ const ROUTE: Record<string, string> = {
  */
 const ACCENT: Record<string, string> = {
   resting_hr: "#28e6ff", hrv: "#28e6ff", blood_pressure: "#28e6ff",
-  recovery: "#28e6ff", sleep_duration: "#ff3ad8", steps: "#5dff3b",
+  recovery: "#28e6ff", measurements: "#28e6ff", sleep_duration: "#ff3ad8", steps: "#5dff3b",
   weight: "#ffb52e", skin_temp: "#ffb52e",
 };
 
@@ -171,14 +172,14 @@ const shown = computed(() => {
   <section v-if="loaded && shown.length" class="km">
     <div class="sechead">
       <h2 class="sect">Key metrics</h2>
-      <button class="edit" @click="router.push('/settings')">Edit</button>
+      <button class="edit" @click="router.push('/settings?tab=display')">Edit</button>
     </div>
 
     <div v-for="g in grouped" :key="g.name" class="group">
       <h3 class="ghead">{{ g.name }}</h3>
       <div class="grid">
       <button v-for="t in g.tiles" :key="t.key" class="cell"
-              @click="router.push(ROUTE[t.key] ?? '/')">
+              @click="ROUTE[t.key] && router.push(ROUTE[t.key])">
         <MetricCard
           :name="t.label"
           :value="displayValue(t)"

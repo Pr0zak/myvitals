@@ -5,10 +5,13 @@ Each customer is keyed by a 10-digit DNIS. The page fragment endpoint
 (no header chrome) and is what the page uses for its 30-second
 self-refresh — much friendlier to parse than the full page.
 
-We poll it on a 15-minute APScheduler interval, persist every reading
-to `trail_status_snapshots` (hypertable), and emit a `trail_alerts`
-row whenever a trail's status differs from its previous snapshot AND
-the user has subscribed to that trail.
+We poll it on a 15-minute APScheduler interval, persist a reading to
+`trail_status_snapshots` (hypertable) only when it differs from the
+trail's last-persisted snapshot (SA-C5 — see `_snapshot_changed`), and
+emit a `trail_alerts` row whenever a trail's status differs from its
+previous snapshot AND the user has subscribed to that trail.
+`trails.last_seen_at` is still touched on every poll regardless, so
+"last checked" stays exact even on a tick that writes no snapshot.
 """
 from __future__ import annotations
 
@@ -256,18 +259,25 @@ async def _ensure_trail(
 
 async def _latest_status(
     db: AsyncSession, trail_id: int, before: datetime,
-) -> str | None:
-    """Most recent status for a trail strictly before `before`. Used to
-    diff against the new reading and decide whether to alert."""
+) -> tuple[str, str | None, datetime | None] | None:
+    """Most recent (status, comment, source_ts) for a trail strictly before
+    `before`. Used both to decide whether to alert (status only — see
+    `_should_alert`) and whether the new reading is a genuine change worth
+    persisting a new snapshot for (all three columns — see
+    `_snapshot_changed`)."""
     stmt = (
-        select(models.TrailStatusSnapshot.status)
+        select(
+            models.TrailStatusSnapshot.status,
+            models.TrailStatusSnapshot.comment,
+            models.TrailStatusSnapshot.source_ts,
+        )
         .where(models.TrailStatusSnapshot.trail_id == trail_id)
         .where(models.TrailStatusSnapshot.fetched_at < before)
         .order_by(models.TrailStatusSnapshot.fetched_at.desc())
         .limit(1)
     )
     row = (await db.execute(stmt)).first()
-    return row[0] if row else None
+    return (row[0], row[1], row[2]) if row else None
 
 
 def _should_alert(notify_on: str, prev: str | None, new: str) -> bool:
@@ -282,6 +292,24 @@ def _should_alert(notify_on: str, prev: str | None, new: str) -> bool:
     if notify_on == "close_only":
         return new == "closed"
     return False
+
+
+def _snapshot_changed(
+    prev: tuple[str, str | None, datetime | None] | None,
+    reading: TrailReading,
+) -> bool:
+    """True when `reading` differs from the trail's last-persisted snapshot
+    on status, comment, or source_ts — the write-path counterpart to
+    `_should_alert`.
+
+    The poller used to write a row every 15 minutes unconditionally: 35
+    trails at 96 ticks/day accumulated 463k rows in 4.5 months, 99.62%
+    byte-identical to the previous row for that trail (SA-C5). `prev is
+    None` means this trail has never been seen before, which always writes
+    — the first sighting is itself a fact worth keeping."""
+    if prev is None:
+        return True
+    return prev != (reading.status, reading.comment, reading.source_ts)
 
 
 async def poll_and_persist(dnis: str | None = None) -> dict:
@@ -328,19 +356,21 @@ async def poll_and_persist(dnis: str | None = None) -> dict:
         for r in readings:
             trail = await _ensure_trail(db, dnis, r, now)
             prev = await _latest_status(db, trail.id, now)
-            db.add(models.TrailStatusSnapshot(
-                fetched_at=now,
-                trail_id=trail.id,
-                status=r.status,
-                comment=r.comment,
-                source_ts=r.source_ts,
-            ))
-            snap_count += 1
+            prev_status = prev[0] if prev else None
+            if _snapshot_changed(prev, r):
+                db.add(models.TrailStatusSnapshot(
+                    fetched_at=now,
+                    trail_id=trail.id,
+                    status=r.status,
+                    comment=r.comment,
+                    source_ts=r.source_ts,
+                ))
+                snap_count += 1
             if trail.id in notify_by_id:
-                if _should_alert(notify_by_id[trail.id], prev, r.status):
+                if _should_alert(notify_by_id[trail.id], prev_status, r.status):
                     db.add(models.TrailAlert(
                         trail_id=trail.id,
-                        from_status=prev,
+                        from_status=prev_status,
                         to_status=r.status,
                         source_ts=r.source_ts,
                         created_at=now,

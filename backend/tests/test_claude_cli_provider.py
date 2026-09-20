@@ -275,6 +275,24 @@ def test_credentials_are_mounted_read_only():
     assert "/root/.claude:ro" in compose
 
 
+def test_database_port_is_not_published():
+    """The database is reachable only from the backend over the Compose
+    network. Publishing the port to the host would allow any device on the
+    LAN to reach it, bypassing the app's bearer-token model. The backend
+    connects via host `db` (POSTGRES_HOST: db in the same file) and
+    backup.sh uses `docker compose exec`, so nothing needs the published port."""
+    import yaml
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    compose_path = root / "docker-compose.yml"
+    compose = yaml.safe_load(compose_path.read_text())
+
+    # The db service must exist
+    assert "db" in compose["services"]
+    # The db service must not have a ports section
+    assert "ports" not in compose["services"]["db"] or not compose["services"]["db"]["ports"]
+
+
 # ------------------------------------------------- the token is visible
 #
 # Reported from live use: "i dont see any way to save it or view it". The

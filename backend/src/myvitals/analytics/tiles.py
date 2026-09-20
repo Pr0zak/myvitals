@@ -317,12 +317,20 @@ def _pct_of_target(value: float, target: float) -> float:
 
 async def _series(
     db: AsyncSession, column, day: date, days: int, scale: float = 1.0,
+    override: float | None = None,
 ) -> list[dict[str, Any]]:
     """Trailing `days` of one daily_summary column, oldest first.
 
     Missing days are emitted as null rather than skipped — a gap must stay
     a gap in the sparkline, not silently close up and imply continuity that
     the data doesn't have.
+
+    `override` replaces the value at `day` — already in the rendered unit,
+    so it bypasses `scale`. Only for a metric whose headline is spliced
+    live for the same day (steps): the card read 1,324 above a sparkline
+    whose last bar was the stored 1,051, which is one card disagreeing with
+    itself, and the weekly ring on /summary/tiles is summed from this
+    series so it inherited the stale number too.
     """
     since = day - timedelta(days=days - 1)
     rows = dict(
@@ -336,10 +344,10 @@ async def _series(
     for i in range(days):
         d = since + timedelta(days=i)
         v = rows.get(d)
-        out.append({
-            "date": d.isoformat(),
-            "value": (round(float(v) * scale, 2) if v is not None else None),
-        })
+        value = (round(float(v) * scale, 2) if v is not None else None)
+        if override is not None and d == day:
+            value = round(float(override), 2)
+        out.append({"date": d.isoformat(), "value": value})
     return out
 
 
@@ -539,7 +547,8 @@ async def tile_stats(
         value=(int(steps) if steps is not None else None),
         kind="target", higher_is_better=True, target=steps_goal,
         status=status, status_reason=reason,
-        series=await _series(db, models.DailySummary.steps_total, day, SERIES_DAYS))
+        series=await _series(db, models.DailySummary.steps_total, day,
+                             SERIES_DAYS, override=steps_override))
 
     sleep_s, sleep_as_of = carried("sleep_duration_s")
     sleep_h = round(sleep_s / 3600.0, 2) if sleep_s else None

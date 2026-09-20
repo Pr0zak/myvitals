@@ -52,7 +52,11 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import app.myvitals.ui.LocalAppTokens
 
-private data class BpReading(val ms: Long, val sys: Int, val dia: Int)
+// internal (not private) + @JsonClass: crosses JsonCache's Moshi boundary
+// (SWR cache read/write) — a codegen adapter lives in a separate generated
+// file and cannot see a file-private class.
+@com.squareup.moshi.JsonClass(generateAdapter = true)
+internal data class BpReading(val ms: Long, val sys: Int, val dia: Int)
 
 @Composable
 fun BpDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {

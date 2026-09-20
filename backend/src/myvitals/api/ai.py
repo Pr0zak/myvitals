@@ -21,13 +21,20 @@ from ..integrations.claude import (
     build_ask_payload,
     ask,
     build_cardio_coach_payload,
+    build_deload_payload,
     build_fasting_coach_payload,
+    build_focus_cue_payload,
+    build_prep_plan_payload,
     build_recovery_coach_payload,
     build_sleep_coach_payload,
+    build_strength_nudge_payload,
+    build_strength_review_payload,
     build_summary_payload,
     build_topic_payload,
+    build_verdict_payload,
     build_workout_coach_payload,
     cardio_coach,
+    _credentials_missing,
     explain_discovery,
     explain_legacy,
     explain_topic,
@@ -111,10 +118,25 @@ def _ai_cache_key(
 
     `kind` is part of the key so two surfaces built from the same aggregate
     cannot collide.
+
+    SA-C10: `model` belongs here for the same reason tone does -- it is an
+    input that changes the recommendation, and the largest one at that.
+    Without it, re-requesting the SAME surface with an unchanged payload
+    after switching models returns the row generated under the old model
+    (every cache-hit path reports `row.model`, so the response is honest
+    about which model actually produced it -- it just isn't the one now
+    configured). Whether that path gets hit in practice depends on the
+    user re-opening a card whose payload hasn't moved since the last
+    generation; ai_summaries is small and low-traffic enough that this is
+    correctness worth having rather than a measured daily complaint.
+    Adding `model` here makes every existing cached row miss once on next
+    request, which is correct: none of them were generated at whatever
+    model is configured now.
     """
     return hash_payload({
         "kind": kind,
         "tone": cfg.tone,
+        "model": cfg.model,
         "instructions": (getattr(cfg, "custom_instructions", None) or "").strip(),
         "p": payload,
     })
@@ -256,19 +278,157 @@ async def get_badges(db: AsyncSession = Depends(get_session)) -> list[dict[str, 
 
 # ─────────────── Preview / debug ───────────────
 
+# SA-O1: this used to be reachable only as `build_summary_payload(db,
+# "week")` — the web button hard-coded "week" and forwarded nothing else,
+# so the "see exactly what gets sent" claim in Settings covered 1 of the
+# 15 payload builders in claude.py. `ai_summaries` shows 14 of 24 cached
+# real results came from the other 14 range kinds. Every surface below
+# maps onto a real `build_*_payload` call by delegation, not a
+# reconstruction of its shape — this must return what the builder itself
+# produces, or a drift between the two would make the preview lie about
+# a privacy surface. Keep this dict in step with claude.py's
+# `build_*_payload` functions: `test_ai_preview_surfaces.py` fails the
+# suite if a builder ships with no key here.
+PREVIEW_SURFACES: dict[str, str] = {
+    "summary": "Weekly / monthly stats read (the AI summary card)",
+    "topic": "Focused single-topic read — sleep, recovery, sober, or anomaly",
+    "verdict": "One-line daily verdict",
+    "ask": "Free-form question — your question text plus the week's context",
+    "strength_review": "Post-workout review card",
+    "strength_nudge": "Variety-nudge exercise-swap suggestions",
+    "focus_cue": "Pre-workout focus cue",
+    "deload": "Deload-trigger judgment",
+    "cardio_coach": "Cardio coach card",
+    "sleep_coach": "Sleep coach card",
+    "recovery_coach": "Recovery coach card",
+    "fasting_coach": "Fasting coach card",
+    "workout_coach": "Workout coach card",
+    "meal_suggestion": "Meal-suggestion card",
+    "prep_plan": "Weekly prep-planner",
+    # Not payload builders — the two surfaces that upload a photo instead
+    # of an aggregate. Named here so they stop being invisible, but they
+    # return a description, never a reconstruction of image bytes.
+    "meals_identify": "Pantry-photo identify — uploads a photo, not JSON",
+    "meals_read_label": "Nutrition-label scan — uploads a photo, not JSON",
+}
+
+_PHOTO_SURFACE_NOTE = (
+    "This surface uploads a photo directly instead of building a JSON "
+    f"aggregate (up to 4 images per call, each under {MAX_IMAGE_BYTES:,} "
+    "bytes after the client's own downscale), so there is nothing in the "
+    "usual shape to preview. The photo is forwarded once, never stored, "
+    "never logged, and never cached — this note is static text, not a "
+    "read of anything you've uploaded."
+)
+
+
+async def _latest_workout_id(db: AsyncSession) -> int | None:
+    """Most recent strength workout by date, for previewing the three
+    per-workout builders without making the user paste an id."""
+    return (await db.execute(
+        select(models.StrengthWorkout.id)
+        .order_by(models.StrengthWorkout.date.desc(), models.StrengthWorkout.id.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+
 @router.get("/preview-payload")
 async def preview_payload(
+    surface: str = "summary",
     range: str = "week",
-    topic: str | None = None,
+    topic: str = "sleep",
+    question: str | None = None,
+    workout_id: int | None = None,
+    days: int = 5,
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Return the exact aggregate JSON we'd send to Claude — for the user
-    to audit before flipping the feature on. No external calls."""
-    if topic and topic in ("sleep", "recovery", "sober", "anomaly"):
+    """Return the exact aggregate JSON we'd send to Claude for the chosen
+    `surface` — for the user to audit before flipping the feature on. No
+    external calls, and this never bills the daily quota.
+
+    `surface` picks one of PREVIEW_SURFACES; defaults (`summary` +
+    `range=week`) match the old, single-shape behaviour so nothing that
+    already calls this with no `surface` breaks.
+    """
+    if surface not in PREVIEW_SURFACES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown surface. Choose one of: {', '.join(PREVIEW_SURFACES)}",
+        )
+
+    if surface in ("meals_identify", "meals_read_label"):
+        return {"surface": surface, "is_payload": False, "note": _PHOTO_SURFACE_NOTE}
+
+    if surface == "summary":
+        if range not in ("week", "month"):
+            raise HTTPException(status_code=400, detail="range must be week or month")
+        return await build_summary_payload(db, range)
+
+    if surface == "topic":
+        if topic not in ("sleep", "recovery", "sober", "anomaly"):
+            raise HTTPException(
+                status_code=400,
+                detail="topic must be one of sleep, recovery, sober, anomaly",
+            )
         return await build_topic_payload(db, topic, days=14)
-    if range not in ("week", "month"):
-        raise HTTPException(status_code=400, detail="range must be week or month")
-    return await build_summary_payload(db, range)
+
+    if surface == "verdict":
+        return await build_verdict_payload(db)
+
+    if surface == "ask":
+        # There is no "latest question" to default to. An explicit example
+        # keeps the shape honest about what actually gets sent: your
+        # literal text, truncated, next to the week's context.
+        example = question or (
+            "(example) How has my sleep trended this month? — your actual "
+            "question is sent here verbatim, truncated to 500 characters."
+        )
+        return await build_ask_payload(db, example)
+
+    if surface in ("strength_review", "strength_nudge", "focus_cue"):
+        wid = workout_id
+        if wid is None:
+            wid = await _latest_workout_id(db)
+        if wid is None:
+            return {
+                "surface": surface, "is_payload": False,
+                "note": "No strength workouts exist yet — this builder needs at least one to preview.",
+            }
+        if surface == "strength_review":
+            return await build_strength_review_payload(db, wid)
+        from ..analytics import strength as strength_algo
+        from .workout.strength import _equipment_payload
+        catalog_by_id = strength_algo.CATALOG_BY_ID
+        if surface == "focus_cue":
+            return await build_focus_cue_payload(db, wid, catalog_by_id)
+        equip = await _equipment_payload(db)
+        selectable_ids = strength_algo.selectable_catalog_ids(
+            equip, equip.get("exercise_prefs") or {},
+        )
+        return await build_strength_nudge_payload(db, wid, catalog_by_id, selectable_ids)
+
+    if surface == "deload":
+        return await build_deload_payload(db)
+    if surface == "cardio_coach":
+        return await build_cardio_coach_payload(db)
+    if surface == "sleep_coach":
+        return await build_sleep_coach_payload(db)
+    if surface == "recovery_coach":
+        return await build_recovery_coach_payload(db)
+    if surface == "fasting_coach":
+        return await build_fasting_coach_payload(db)
+    if surface == "workout_coach":
+        return await build_workout_coach_payload(db)
+    if surface == "meal_suggestion":
+        return await build_meal_suggestion_payload(db)
+
+    # surface == "prep_plan" — the only remaining member of PREVIEW_SURFACES.
+    from datetime import timedelta as _prep_td
+    today = _local_today_ai()
+    start_day = today - _prep_td(days=today.weekday())
+    return await build_prep_plan_payload(
+        db, start_day=start_day, days=min(max(days, 1), 7), slots=["lunch", "dinner"],
+    )
 
 
 # ─────────────── Quota guard ───────────────
@@ -276,8 +436,8 @@ async def preview_payload(
 async def _check_and_bump_quota(db: AsyncSession, cfg: models.AiConfig) -> None:
     if not cfg.enabled:
         raise HTTPException(status_code=400, detail="AI summaries disabled in Settings")
-    if not cfg.anthropic_api_key:
-        raise HTTPException(status_code=400, detail="Anthropic API key not configured")
+    if _credentials_missing(cfg):
+        raise HTTPException(status_code=400, detail="AI credentials not configured")
     today = _local_today_ai()
     if cfg.calls_today_date != today:
         cfg.calls_today = 0

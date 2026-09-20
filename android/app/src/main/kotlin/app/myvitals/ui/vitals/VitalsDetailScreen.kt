@@ -67,6 +67,8 @@ enum class VitalRange(val label: String, val days: Int) {
     DAY("24h", 1), WEEK("7d", 7), MONTH("30d", 30), QUARTER("90d", 90),
 }
 
+// @JsonClass: crosses JsonCache's Moshi boundary (SWR cache read/write).
+@com.squareup.moshi.JsonClass(generateAdapter = true)
 internal data class VitalsSeries(val xs: List<Double>, val ys: List<Double>)
 
 @Composable

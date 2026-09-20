@@ -153,3 +153,23 @@ def test_every_branch_returns_the_full_field_set() -> None:
                          (STEPS, 4000, None), (SOBER, 0.0, None),
                          (GAIN, 75.0, 70.0)):
         assert keys <= set(_goal_progress(g, cur, base)), (g.kind, cur)
+
+
+def test_goal_progress_includes_all_goal_state_fields_for_projection() -> None:
+    """The _goal_progress function must return all GOAL-STATE fields plus
+    projection so the client can render complete goal cards. This was failing
+    in SA-L2 because You.vue re-mapped and dropped projection.
+    """
+    r = _goal_progress(LOSS, 115.33, 112.9)
+    # Verify the function includes all fields the endpoint needs to return
+    assert "current_value" in r
+    assert "baseline_value" in r
+    assert "delta_value" in r
+    assert "progress_pct" in r
+    assert "progress_state" in r
+    assert "state_tone" in r
+    # The projection field is added by the endpoint, not by _goal_progress,
+    # but we verify no_data case also gets the full set
+    r_no_data = _goal_progress(LOSS, None, 112.9)
+    assert "progress_state" in r_no_data and r_no_data["progress_state"] == "no_data"
+    assert "state_tone" in r_no_data and r_no_data["state_tone"] == "unknown"

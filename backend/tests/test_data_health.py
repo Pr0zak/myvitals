@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from datetime import datetime, timedelta, timezone
 
 from myvitals.analytics import data_health as DH
 
@@ -193,6 +194,110 @@ def test_steps_are_judged_on_the_canonical_writer_not_the_table():
     assert "steps" in DH._MULTI_SOURCE_STREAMS
     code = _code_only((SRC / "analytics" / "data_health.py").read_text())
     assert "_canonical_steps_last" in code
+
+
+# ------------------------------------- SA-C11: bounded canonical-steps MAX
+
+
+class _Row:
+    def __init__(self, source: str, newest: datetime | None):
+        self.source = source
+        self.newest = newest
+
+
+class _Result:
+    def __init__(self, rows: list[_Row]):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _FakeDb:
+    """Hands back queued `.execute(...)` results in order, one per SQL
+    round trip. `_canonical_steps_last` issues at most two — a bounded
+    query, then (only when needed) the unbounded fallback — so ordering
+    is enough to stand in for the real statements."""
+
+    def __init__(self, *results: _Result):
+        self._queue = list(results)
+        self.calls = 0
+
+    async def execute(self, _stmt):
+        self.calls += 1
+        assert self._queue, "more queries were issued than the test queued"
+        return self._queue.pop(0)
+
+
+WATCH = "com.fitbit.FitbitMobile"
+PHONE = "android"
+
+NOW = datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)
+RECENT = NOW - timedelta(hours=2)
+STALE = NOW - timedelta(days=10)  # older than _STEPS_RECENT_WINDOW (3 days)
+
+
+async def test_recent_watch_row_short_circuits_on_the_bounded_query():
+    """The ordinary case: the watch wrote today. One round trip, and the
+    unbounded fallback is never touched."""
+    db = _FakeDb(_Result([_Row(WATCH, RECENT)]))
+    result = await DH._canonical_steps_last(db)
+    assert result == RECENT
+    assert db.calls == 1
+
+
+async def test_a_watch_gone_stale_beyond_the_window_still_reports_its_own_time():
+    """The bound must not change the answer. The watch stopped 10 days
+    ago; the phone pedometer is still writing today. The bounded query
+    (first result) only sees the phone, because the watch's own rows are
+    outside the window -- if the function stopped there it would report
+    the phone's fresh timestamp and silently hide a dead watch, which is
+    the exact false-green HEALTH-1 exists to catch. It must fall through
+    to the unbounded query (second result) and report the watch's true,
+    stale time instead."""
+    bounded = _Result([_Row(PHONE, RECENT)])
+    unbounded = _Result([_Row(PHONE, RECENT), _Row(WATCH, STALE)])
+    db = _FakeDb(bounded, unbounded)
+    result = await DH._canonical_steps_last(db)
+    assert result == STALE
+    assert db.calls == 2
+
+
+async def test_an_empty_window_still_falls_through_to_find_a_stale_watch():
+    """No source wrote in the last 3 days at all (a longer sync gap than
+    usual). The window being empty must not be read as "nothing was ever
+    written" when the unbounded query can still find the watch's last
+    real value."""
+    db = _FakeDb(_Result([]), _Result([_Row(WATCH, STALE)]))
+    result = await DH._canonical_steps_last(db)
+    assert result == STALE
+    assert db.calls == 2
+
+
+async def test_nothing_ever_written_is_still_none_not_a_crash():
+    db = _FakeDb(_Result([]), _Result([]))
+    assert await DH._canonical_steps_last(db) is None
+    assert db.calls == 2
+
+
+async def test_no_watch_source_ever_falls_back_to_the_freshest_other_source():
+    """Matches the pre-SA-C11 behaviour exactly: with no watch at all,
+    the freshest of whatever is there wins, regardless of which query
+    found it."""
+    db = _FakeDb(_Result([_Row(PHONE, RECENT)]), _Result([_Row(PHONE, RECENT)]))
+    result = await DH._canonical_steps_last(db)
+    assert result == RECENT
+
+
+def test_the_bound_is_a_module_constant_not_user_input():
+    """Interpolated into raw SQL text, so it must be a fixed literal this
+    module owns -- never anything that could originate from a request."""
+    assert isinstance(DH._STEPS_RECENT_WINDOW, str)
+    code = _code_only((SRC / "analytics" / "data_health.py").read_text())
+    assert "_STEPS_RECENT_WINDOW" in code
+    # Two grouped-MAX statements now: the bounded fast path and the
+    # unbounded fallback, sharing one query builder.
+    assert code.count("GROUP BY source") == 1  # built once, called twice
 
 
 def test_the_watch_source_keyword_list_is_not_duplicated():

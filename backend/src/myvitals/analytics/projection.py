@@ -24,6 +24,15 @@ Smoothing is a 7-day moving average before fitting, which takes out the
 day-of-week cycle in steps and the water-weight sawtooth. Fitting raw
 daily values makes the slope swing with whichever day the window happens
 to end on.
+
+The R² that gates the "noisy" refusal is scored against the RAW window
+points, never the smoothed ones. A trailing average is autocorrelated by
+construction, so testing a fit against its own smoother always looks
+clean regardless of how noisy the underlying measurements are — that was
+a bug (SA-N5), not a design choice. Smoothing stays for the slope, which
+is genuinely more stable that way; the goodness-of-fit question ("does
+this line actually explain what was measured?") has to be asked of what
+was measured.
 """
 
 from __future__ import annotations
@@ -36,10 +45,21 @@ from typing import Any, Literal, Sequence
 MIN_POINTS = 10
 
 #: A fit explaining less than this fraction of variance is noise wearing
-#: a trend's clothes. 0.3 is deliberately permissive — this is a personal
-#: health tracker, not a study — but it still rejects the flat scatter
-#: that would otherwise produce a confident date.
-MIN_R2 = 0.30
+#: a trend's clothes. Re-derived (SA-N5) after the previous 0.30 turned
+#: out to have been graded on the smoothed series, which meant it had
+#: never actually rejected anything real. Measured against this app's
+#: own live weight goal: day-to-day scatter there is ~0.87 kg. Over a
+#: full 28-point daily window, a Monte Carlo replay of a genuine 1 lb/
+#: week loss at that noise level clears R²=0.30 only ~32% of the time —
+#: the old value refused a real trend two times in three, which is the
+#: same failure this fix exists to remove, just pointed the other way.
+#: R²=0.10 clears that same real trend ~88% of the time while a
+#: zero-slope series of pure noise only clears it ~6% of the time (see
+#: TestNoiseGate in test_goal_projection.py). Below a full window, or
+#: across a gap of several days, no threshold here cleanly separates a
+#: real trend from noise — that is what MIN_POINTS is for, not this
+#: constant.
+MIN_R2 = 0.10
 
 #: Slopes smaller than this (per day, relative to the value's own scale)
 #: count as flat.
@@ -115,6 +135,25 @@ def _ols(xs: Sequence[float], ys: Sequence[float]) -> tuple[float, float, float]
     return slope, intercept, max(0.0, min(1.0, r2))
 
 
+def _r2_against(
+    xs: Sequence[float], ys: Sequence[float], slope: float, intercept: float,
+) -> float:
+    """R² of an *already-fitted* line against a set of points.
+
+    Unlike ``_ols``, the line here was not necessarily fit to ``xs``/``ys``
+    — that is the point (SA-N5). Callers pass the slope/intercept fit to
+    the smoothed series and ``xs``/``ys`` from the raw, unsmoothed window,
+    so this measures whether the reported trend actually explains the
+    measurements, not the smoother built on top of them.
+    """
+    my = sum(ys) / len(ys)
+    ss_tot = sum((y - my) ** 2 for y in ys)
+    if ss_tot == 0:
+        return 1.0
+    ss_res = sum((y - (slope * x + intercept)) ** 2 for x, y in zip(xs, ys))
+    return max(0.0, min(1.0, 1.0 - ss_res / ss_tot))
+
+
 def _confidence(r2: float, n: int) -> Confidence:
     """Confidence from fit quality and sample size, both of which matter.
 
@@ -157,7 +196,15 @@ def project(
     origin = smoothed[0][0]
     xs = [float((d - origin).days) for d, _ in smoothed]
     ys = [v for _, v in smoothed]
-    slope, intercept, r2 = _ols(xs, ys)
+    slope, intercept, _ = _ols(xs, ys)
+
+    # Score that line against the RAW window it was smoothed from, not
+    # against the smoothed series it was fit to (SA-N5) — a trailing
+    # average is autocorrelated by construction, so grading a fit against
+    # its own smoother can never come back low.
+    raw_xs = [float((d - origin).days) for d, _ in window]
+    raw_ys = [v for _, v in window]
+    r2 = _r2_against(raw_xs, raw_ys, slope, intercept)
 
     n = len(smoothed)
     current = ys[-1]

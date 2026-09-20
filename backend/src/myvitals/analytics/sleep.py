@@ -1,6 +1,21 @@
 """Sleep score: 0-100 based on duration + deep/REM proportion.
 
 Heuristic — useful as a personal trend signal, not a clinical metric.
+
+SA-N3: the deep/REM term below is NOT a validated sleep-quality or
+recovery signal — don't caption it "quality" anywhere new. Measured
+against production: with IDEAL_DEEP_REM_PCT=0.30 the term saturates at
+100 on ~90% of real nights (this user's deep+REM average sits above the
+anchor), so the blended score correlates at r=-0.89 with how far
+duration sits from 8h and only weakly with the architecture split it's
+supposed to add. Same-night deep sleep also barely predicts next-day
+HRV here (r=0.15, n=432) — there's no measured basis for treating deep/
+REM share as a recovery forecast. Every caller of `sleep_score` should
+present it as what it is: a duration-led sleep score. See
+docs/sa-findings.json SA-N3 for the full measurement; the computation
+itself is deliberately unchanged (this is a stored daily_summary column
+read by Compare, Insights and five AI payloads — a formula change needs
+a backfill plan, not a single-finding patch).
 """
 from datetime import date, datetime, time, timedelta, timezone
 
@@ -15,6 +30,19 @@ HOURS_PENALTY = 15.0          # per hour off ideal
 IDEAL_DEEP_REM_PCT = 0.30     # combined deep + REM
 
 
+def _night_window(day: date) -> tuple[datetime, datetime]:
+    """The 18:00→14:00 UTC window for the night ending on `day`.
+
+    Pulled out of `_stages_for_night` (SA-N2) so callers that need to know
+    which day a raw sample's night belongs to — without wanting the full
+    stage/session query — can attribute it the same way this module does,
+    instead of re-deriving these hours a second time somewhere else.
+    """
+    start = datetime.combine(day - timedelta(days=1), time(hour=18), tzinfo=timezone.utc)
+    end = datetime.combine(day, time(hour=14), tzinfo=timezone.utc)
+    return start, end
+
+
 async def _stages_for_night(db: AsyncSession, day: date) -> dict[str, int]:
     """Sum stage durations for the night ending on `day`.
 
@@ -27,8 +55,7 @@ async def _stages_for_night(db: AsyncSession, day: date) -> dict[str, int]:
     Falls back to the older 20:00→12:00 window for nights without a
     canonical session row.
     """
-    night_start = datetime.combine(day - timedelta(days=1), time(hour=18), tzinfo=timezone.utc)
-    night_end = datetime.combine(day, time(hour=14), tzinfo=timezone.utc)
+    night_start, night_end = _night_window(day)
 
     # 1. Most relevant canonical session (one whose end falls in the night
     # window). Take the longest if multiple.

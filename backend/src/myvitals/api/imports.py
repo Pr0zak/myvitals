@@ -13,6 +13,7 @@ outside the long ingest transaction.
 from __future__ import annotations
 
 import asyncio
+import csv
 import logging
 import os
 import tempfile

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -120,4 +121,75 @@ def test_no_nightly_backup_cron_was_added():
         assert "backup.sh" not in cron.read_text(), (
             f"{cron.name} schedules backup.sh; see docs/operations.md for why "
             "backups are pre-update only rather than nightly"
+        )
+
+
+# ── SA-O3: the retention policy is executed, not just read ───────────────
+#
+# A fatal bash syntax error in prune_old shipped past this file once, because
+# every test above reads backup.sh as text and none of them runs it. `[[ a >= b ]]`
+# is not valid bash — [[ ]] has < and > for string comparison but no >=, and the
+# parse error is raised for the whole script, so `backup.sh --pre-update` would
+# have failed on every invocation. auto-update.sh runs that before every
+# migration and a failed dump blocks the update by design, so the blast radius
+# was every unattended upgrade. These two tests execute the script instead.
+
+def test_backup_script_parses_as_bash():
+    """A syntax error anywhere in the script breaks every invocation of it."""
+    out = subprocess.run(
+        ["bash", "-n", str(BACKUP)], capture_output=True, text=True
+    )
+    assert out.returncode == 0, f"backup.sh does not parse:\n{out.stderr}"
+
+
+def test_prune_old_keeps_the_oldest_dump_per_day_within_the_window(tmp_path):
+    """Run prune_old for real against fabricated dumps and check what survives.
+
+    Retention is the point of the script: a pre-update restore point has to
+    outlive the time it takes to notice the bug it exists for. Asserting on the
+    surviving filenames is the only way to know the policy does what it says.
+    """
+    import datetime as _dt
+
+    def stamp(days_ago: int, hour: int) -> str:
+        d = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days_ago)
+        return d.replace(hour=hour, minute=0, second=0, microsecond=0).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+
+    # two dumps on each of days 0, 1 and 9 — the last is outside a 5-day window
+    plan = {
+        "a": stamp(0, 3), "b": stamp(0, 21),
+        "c": stamp(1, 4), "d": stamp(1, 22),
+        "e": stamp(9, 5), "f": stamp(9, 23),
+    }
+    for name, taken in plan.items():
+        (tmp_path / f"myvitals-{name}.dump").write_bytes(b"PGDMP fake")
+        (tmp_path / f"myvitals-{name}.dump.meta").write_text(f"taken={taken}\n")
+
+    # prune_old is not reachable without running main(), which would try to
+    # reach a database — so lift the function definition out and drive it directly.
+    body = BACKUP.read_text()
+    start = body.index("prune_old() {")
+    end = body.index("\nfree_mb()", start)
+    script = (
+        "set -uo pipefail\n"
+        f'BACKUP_DIR="{tmp_path}"\n'
+        'log() { :; }\n'
+        + body[start:end]
+        + "\nprune_old 1 5\n"
+    )
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert out.returncode == 0, f"prune_old failed:\n{out.stderr}"
+
+    survived = sorted(p.stem.split("-")[-1] for p in tmp_path.glob("myvitals-*.dump"))
+    # oldest of each in-window day survives; the out-of-window day is dropped
+    assert "a" in survived, f"oldest dump of today was pruned: {survived}"
+    assert "c" in survived, f"oldest dump of yesterday was pruned: {survived}"
+    assert "e" not in survived and "f" not in survived, (
+        f"a 9-day-old dump survived a 5-day window: {survived}"
+    )
+    for name in survived:
+        assert (tmp_path / f"myvitals-{name}.dump.meta").exists(), (
+            f"dump {name} survived but its .meta was pruned"
         )

@@ -25,18 +25,32 @@ streams that should be continuous can be stale.
 ## The performance constraint
 
 `vitals_heartrate` holds ~23.6M rows across 451 chunks on an 8 GB
-container with no memory limit, and the navigation polls this on page
-load. Two rules, both learned the hard way:
+container with no memory limit. This card is NOT polled by the nav —
+that was this module's own long-standing wrong claim. It renders once,
+on the Settings page (`Settings.vue:1805`, ~46 hits/24h), which is
+why the query shape below has never needed to be fast.
 
-* Freshness is `MAX(time)` on the indexed time column — measured at
-  127-172 ms per hypertable, and TimescaleDB answers it by chunk
-  exclusion rather than a scan.
+Two rules, one of which used to be mis-diagnosed (SA-C11):
+
+* `MAX(time)` on the indexed time column costs 127-172 ms per
+  hypertable — and that cost is almost entirely query PLANNING (the
+  planner enumerating every one of ~450-555 chunks before it can rule
+  any out), not "chunk exclusion" as this module used to say, and not
+  execution, which is 3-8 ms. It stays unbounded on purpose: the plan
+  is amortised by asyncpg's prepared-statement cache per connection
+  (527 ms once, ~15 ms every call after), so bounding it would
+  optimise a cost this Settings-only card essentially never pays
+  twice on the same connection. Same reasoning for the four MAXes in
+  `/query/last-sync`. `_canonical_steps_last` below is the one
+  exception, because its query is a per-source GROUP BY over the
+  whole table rather than a single-value MAX, so it pays real
+  execution cost — not just planning — on every call.
 * Never `count(*)` without a time predicate.
 
-The ten MAXes run as ONE statement with scalar subqueries — 510 ms
-total against ~1.5 s if issued serially — and the result is cached
-briefly, because "how fresh is my data" does not need sub-minute
-accuracy.
+The ten MAXes run as ONE statement with scalar subqueries — 510 ms of
+(amortised) planning against 17 ms of execution — and the result is
+cached briefly regardless, because "how fresh is my data" does not
+need sub-minute accuracy.
 """
 
 from __future__ import annotations
@@ -118,30 +132,70 @@ STREAMS: tuple[StreamSpec, ...] = (
 _MULTI_SOURCE_STREAMS: frozenset[str] = frozenset({"steps"})
 
 
+#: SA-C11: how far back the fast path looks for a watch sample before
+#: falling through to the unbounded scan. Wide enough to clear the
+#: heart-rate stream's own measured worst gap (16.4 h, see STREAMS
+#: below) with margin for a missed sync, so the fast path is the one
+#: taken on every ordinary day and the slow path is reserved for a
+#: genuinely stale or absent watch.
+_STEPS_RECENT_WINDOW = "3 days"
+
+
 async def _canonical_steps_last(db: AsyncSession) -> datetime | None:
     """Newest step sample from the source the rest of the app trusts.
 
-    Cheap: one grouped MAX over an indexed column, no time predicate
-    needed because there is one row per source.
+    NOT cheap the way the ten single-value MAXes above are: this is a
+    per-source GROUP BY over the whole table (230,763 rows across 555
+    chunks on this database, not "one row per source" as this docstring
+    used to claim), so it pays real execution time — 58-91 ms — on every
+    call, not just one-time planning.
+
+    SA-C11 bounds it to `_STEPS_RECENT_WINDOW` first: 0.54 ms, prepared,
+    when a watch row exists in that window, which is the ordinary case.
+    The bound must never change the ANSWER, only how cheaply the common
+    case reaches it — a source that stopped writing longer ago than the
+    window is not "absent", it is stale, and this function exists
+    specifically to keep reporting that (see _MULTI_SOURCE_STREAMS). So
+    the fast path only short-circuits when a watch row actually turns up
+    inside the window; anything else — no watch row in the window, or no
+    rows in the window at all — re-runs the original unbounded query,
+    which is the only way to tell "the watch went stale" from "the watch
+    never existed" without missing a watch source that simply stopped
+    writing further back than the bound looks.
     """
     from .jobs import _is_watch_source
 
-    rows = (await db.execute(text(
-        'SELECT source, max("time") AS newest FROM vitals_steps '
-        "WHERE source <> 'unknown' GROUP BY source"
-    ))).all()
-    if not rows:
-        return None
+    async def _grouped_max(where_extra: str = "") -> list[Any]:
+        return (await db.execute(text(
+            'SELECT source, max("time") AS newest FROM vitals_steps '
+            f"WHERE source <> 'unknown'{where_extra} GROUP BY source"
+        ))).all()
+
+    rows = await _grouped_max(
+        f" AND time > now() - interval '{_STEPS_RECENT_WINDOW}'"
+    )
     watch = [r for r in rows if r.source and _is_watch_source(r.source)]
+    if not watch:
+        # Rare path — a watch source that has gone stale, or one that
+        # never existed at all. Only the unbounded scan can tell those
+        # apart, so pay the full-table cost here rather than risk
+        # answering with a still-active non-watch source's recent value,
+        # which is exactly the false-green HEALTH-1 exists to prevent.
+        rows = await _grouped_max()
+        if not rows:
+            return None
+        watch = [r for r in rows if r.source and _is_watch_source(r.source)]
     if watch:
         return max(r.newest for r in watch if r.newest is not None)
-    # No watch writer at all — fall back to the freshest of whatever is
-    # there, which matches what the summaries would do.
+    # No watch writer at all, in the window or out of it — fall back to
+    # the freshest of whatever is there, which matches what the
+    # summaries would do.
     candidates = [r.newest for r in rows if r.newest is not None]
     return max(candidates) if candidates else None
 
-#: Freshness does not need sub-minute accuracy, and the nav polls this on
-#: every page load. One statement per minute is plenty.
+#: Freshness does not need sub-minute accuracy. This is a Settings-only
+#: card (see the module docstring), not something the nav polls, but a
+#: short cache still keeps repeated visits from re-running the query.
 _CACHE_TTL_S = 60.0
 _cache: tuple[float, list[dict[str, Any]]] | None = None
 

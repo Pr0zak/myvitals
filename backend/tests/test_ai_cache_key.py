@@ -21,8 +21,8 @@ from myvitals.api.ai import _ai_cache_key
 from myvitals.integrations import claude
 
 
-def _cfg(tone="supportive", instructions=None):
-    return SimpleNamespace(tone=tone, custom_instructions=instructions)
+def _cfg(tone="supportive", instructions=None, model="claude-haiku-4-5-20251001"):
+    return SimpleNamespace(tone=tone, custom_instructions=instructions, model=model)
 
 
 PAYLOAD = {"hrv": 62, "rhr": 51}
@@ -67,9 +67,36 @@ def test_kind_separates_surfaces_built_from_the_same_payload():
 
 def test_a_config_without_the_column_still_hashes():
     """Mid-rollout the app can run against a database that has not taken
-    migration 0049 yet. That must degrade to "no instructions", not 500."""
-    legacy = SimpleNamespace(tone="blunt")
+    migration 0049 yet. That must degrade to "no instructions", not 500.
+
+    `model` is set here (unlike `custom_instructions`) because it predates
+    that migration -- every real `AiConfig` row has always had a `model`
+    column, so there is no legacy-database case for it to simulate."""
+    legacy = SimpleNamespace(tone="blunt", model="claude-haiku-4-5-20251001")
     assert _ai_cache_key(legacy, "summary", PAYLOAD)
+
+
+# --------------------------------------------------------------------------
+# SA-C10 — switching models must not return the old model's cached card
+# --------------------------------------------------------------------------
+
+def test_model_changes_the_cache_key():
+    """The bug: a card cached under Haiku was returned unchanged after
+    switching to Sonnet or Opus, because `model` was not part of the key --
+    the same shape of bug as tone before TD-9, and the largest of the
+    inputs this function hashes."""
+    haiku = _ai_cache_key(_cfg(model="claude-haiku-4-5-20251001"), "summary", PAYLOAD)
+    sonnet = _ai_cache_key(_cfg(model="claude-sonnet-4-6"), "summary", PAYLOAD)
+    opus = _ai_cache_key(_cfg(model="claude-opus-4-7"), "summary", PAYLOAD)
+    assert len({haiku, sonnet, opus}) == 3
+
+
+def test_same_model_still_hits_the_cache():
+    """The fix must not turn every request into a forced miss -- two calls
+    with the same model (the overwhelmingly common case: nobody switches
+    models between opening a card and refreshing it) still key identically."""
+    assert _ai_cache_key(_cfg(model="claude-sonnet-4-6"), "summary", PAYLOAD) == \
+        _ai_cache_key(_cfg(model="claude-sonnet-4-6"), "summary", dict(PAYLOAD))
 
 
 # --------------------------------------------------------------------------

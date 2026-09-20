@@ -21,7 +21,6 @@ import app.myvitals.data.SettingsRepository
 import app.myvitals.health.DataMapper
 import app.myvitals.health.HealthConnectGateway
 import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
@@ -58,7 +57,7 @@ class SyncWorker(
     private val settings = SettingsRepository(context)
     private val gateway = HealthConnectGateway(context)
     private val db = AppDatabase.get(context)
-    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    private val moshi = Moshi.Builder().build()
     private val batchAdapter = moshi.adapter(IngestBatch::class.java)
     private val state = AttemptState()
 

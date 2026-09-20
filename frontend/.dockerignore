@@ -1,0 +1,33 @@
+# Dependencies — SA-C12: node_modules (227 MB) should not join the build
+# context; it must come from pnpm install --frozen-lockfile inside the image
+node_modules/
+.pnpm-store/
+
+# Built artifacts
+dist/
+.tsbuildinfo
+
+# Testing and linting artifacts
+.pytest_cache/
+.vite/
+
+# Version control and CI
+.git
+.gitignore
+.github/
+
+# IDE and editor artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Local environment
+.env
+.env.local
+*.local
+
+# Temporary files and logs
+*.log

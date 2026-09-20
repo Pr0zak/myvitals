@@ -678,8 +678,12 @@ async def data_health(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
 
     # The phone's own heartbeat, which is upstream of every phone-fed
     # stream: if it stopped, nothing below it will be fresh either.
+    # Filtered per SA-O2: a stray local-build install can otherwise post
+    # newer rows than the real phone and briefly define "the phone" for
+    # this whole response — see models.real_install_heartbeat_filter.
     hb = (await db.execute(
         select(models.SyncHeartbeat)
+        .where(models.real_install_heartbeat_filter())
         .order_by(models.SyncHeartbeat.attempt_at.desc())
         .limit(1)
     )).scalar_one_or_none()
@@ -725,8 +729,10 @@ async def get_last_sync(db: AsyncSession = Depends(get_session)) -> dict[str, An
         if ts and (latest is None or ts > latest):
             latest = ts
 
+    # Filtered per SA-O2 — see models.real_install_heartbeat_filter.
     hb = (await db.execute(
         select(models.SyncHeartbeat)
+        .where(models.real_install_heartbeat_filter())
         .order_by(models.SyncHeartbeat.attempt_at.desc())
         .limit(1)
     )).scalar_one_or_none()

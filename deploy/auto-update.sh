@@ -134,6 +134,24 @@ sweep_recreate_orphans() {
 }
 sweep_recreate_orphans
 
+# Check if the weekly docker-prune job is stale (PRUNE-1 liveness check).
+# The prune script truncates /var/log/docker-prune.log on each run, so a
+# missing or old file means the cron job hasn't fired. This catches cases
+# where the job is scheduled but failing silently.
+check_prune_staleness() {
+    local prune_log="/var/log/docker-prune.log"
+    [ ! -f "$prune_log" ] && {
+        echo "$LOG_TAG WARNING: docker-prune job has never run — /var/log/docker-prune.log missing"
+        return 0
+    }
+    # Check if the log is older than 7 days (604800 seconds).
+    local file_age=$(($(date +%s) - $(stat -c %Y "$prune_log" 2>/dev/null || echo 0)))
+    [ "$file_age" -gt 604800 ] && {
+        echo "$LOG_TAG WARNING: docker-prune job is stale — /var/log/docker-prune.log is $(( file_age / 86400 )) days old"
+    }
+}
+check_prune_staleness
+
 # NOTE: the CT's /opt/myvitals is not a git checkout under the current
 # bootstrap (deploy uses tar+rsync). So we don't `git pull` here — only
 # image pulls, which cover the 99% case. If docker-compose.yml or the
@@ -234,6 +252,15 @@ if [ "${PIPESTATUS[0]:-0}" -ne 0 ] || [ "$recreate_rc" -ne 0 ]; then
 fi
 
 # Health probe — give the backend up to 60s to come up.
+#
+# SA-O4: /health does a real `SELECT 1` now (main.py), not a literal
+# {"status":"ok"} — it returns 503 on a dead/unreachable DB, which -fsS
+# (fail-on-non-2xx) already treats as failure below. No change needed
+# here for that: the retry loop's own 60s/30-attempt budget is what keeps
+# a few-second DB blip from triggering a rollback — it takes a DB that
+# stays down for the whole minute to actually flip this red. /health also
+# has its own internal timeout, so a wedged (not just down) DB can't stall
+# this loop past its intended 2s-per-attempt cadence either.
 healthy=0
 for _ in $(seq 1 30); do
     if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then

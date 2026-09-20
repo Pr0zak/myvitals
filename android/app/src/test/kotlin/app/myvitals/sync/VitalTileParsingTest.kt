@@ -1,7 +1,6 @@
 package app.myvitals.sync
 
 import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -18,13 +17,17 @@ import org.junit.Test
  * The fixture in `src/test/resources/tiles_live.json` is an actual response,
  * not a hand-written sample, so field names and shapes are the server's.
  *
- * Note this project has no Moshi codegen processor: `@JsonClass` is inert
- * and everything resolves through `KotlinJsonAdapterFactory` reflection —
- * the same construction `BackendClient` uses, mirrored here deliberately.
+ * SA-C1: `Moshi.Builder().build()`, no factory added — the same construction
+ * `BackendClient` uses now that every wire type is `@JsonClass(generateAdapter
+ * = true)` and moshi-kotlin-codegen is wired via ksp. If codegen ever fails to
+ * generate `VitalTilesResponseJsonAdapter` (a missing annotation, a visibility
+ * problem), this test fails at `fromJson` with "no JsonAdapter" — on the JVM,
+ * with no device needed — rather than the reflective fallback papering over
+ * it here while a differently-built release APK crashes on device.
  */
 class VitalTileParsingTest {
 
-    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    private val moshi = Moshi.Builder().build()
 
     private fun parse(): VitalTilesResponse {
         val json = javaClass.classLoader!!

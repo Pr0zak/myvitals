@@ -89,6 +89,22 @@ async def test_drivers_carry_z_and_weight():
     assert rhr["higher_is_better"] is False
 
 
+async def test_sleep_driver_is_not_captioned_quality():
+    """SA-N3: `sleep_score` is 60% duration-distance-from-8h plus a
+    deep/REM term that saturates at 100 on ~90% of this user's real
+    nights, so it correlates at r=-0.89 with |hours-8| in production —
+    it is a duration score, not a validated quality signal. Captioning
+    it "Sleep quality" in the readiness drawer claimed something the
+    data does not support, and disagreed with every other place this
+    same column is shown (Calendar, Compare, Trends all say "Sleep
+    score"). The label must match what's actually computed."""
+    db = FakeDb(BASELINE)
+    out = await readiness_breakdown(db, DAY, 72.0, 52.0, 80.0, 27000)
+    sleep = next(d for d in out["drivers"] if d["key"] == "sleep_score")
+    assert sleep["label"] == "Sleep score"
+    assert "quality" not in sleep["label"].lower()
+
+
 async def test_thin_inputs_return_none_with_a_reason_not_a_number():
     db = FakeDb(BASELINE)
     # Sleep score alone is 0.15 weight — below the 0.45 floor.

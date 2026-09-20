@@ -17,7 +17,6 @@ import app.myvitals.sync.WorkoutExercisePatchRequest
 import app.myvitals.sync.WorkoutPatchRequest
 import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -37,7 +36,7 @@ class StrengthRepository(
     private val settings: SettingsRepository,
 ) {
 
-    private val moshi: Moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    private val moshi: Moshi = Moshi.Builder().build()
     private val logSetAdapter: JsonAdapter<LogSetRequest> =
         moshi.adapter(LogSetRequest::class.java)
     private val patchAdapter: JsonAdapter<WorkoutPatchRequest> =

@@ -14,4 +14,5 @@ SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Sundays 04:00 — quiet hour, well clear of the Sun 22:00 weekly AI digest.
-0 4 * * 0 root /opt/myvitals/deploy/docker-prune.sh
+# Run via /bin/bash so the script mode can never silently break the cron.
+0 4 * * 0 root /bin/bash /opt/myvitals/deploy/docker-prune.sh

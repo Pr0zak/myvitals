@@ -1,14 +1,16 @@
 import asyncio
+import bisect
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics import compare
+from ..analytics.sleep import _night_window as _sleep_night_window
 from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
@@ -17,6 +19,11 @@ from ..schemas import TodaySummary
 
 router = APIRouter(dependencies=[Depends(require_any)])
 log = logging.getLogger(__name__)
+
+# Most stale days one /summary/range call will rebuild inline. See the
+# comment at the recompute loop — the cap is about not exceeding the
+# client's patience, not about the work being optional.
+MAX_LAZY_RECOMPUTES = 60
 
 # Serializes lazy compute_daily_summary recomputes triggered on read. Phone +
 # web both hit /summary/today on load; without this they each run the recompute
@@ -32,6 +39,28 @@ def _local_tz() -> Any:
         return ZoneInfo(settings.tz) if settings.tz != "UTC" else timezone.utc
     except Exception:
         return timezone.utc
+
+
+def _resolve_last_sync(
+    hb: models.SyncHeartbeat | None,
+    last_hr_sample_at: datetime | None,
+) -> datetime | None:
+    """Sync-freshness fallback, mirroring what `/query/last-sync` reads.
+
+    Three rungs, most direct signal first: the phone's own record of when
+    it last *succeeded*; if it has never succeeded but has tried, when it
+    last *attempted*; and only with no `sync_heartbeat` row at all — an
+    install predating that table, or one that hasn't posted yet — the last
+    watch HR sample, so the field still resolves to something rather than
+    regressing to "never synced" (SA-L6 correction; `SideNav.vue` keeps the
+    same `lastAttemptAt ?? lastSyncAt` order for the identical reason).
+    """
+    if hb is not None:
+        if hb.last_success_at is not None:
+            return hb.last_success_at
+        if hb.attempt_at is not None:
+            return hb.attempt_at
+    return last_hr_sample_at
 
 
 def resolve_day(requested: date | None = None) -> tuple[date, Any, bool]:
@@ -86,7 +115,105 @@ async def _today_row_is_stale(
         )).scalar() or 0
         if hrv_count > 0:
             return True
+    # Steps — a different shape of staleness from the two above, and the
+    # reason the row can be wrong for months. Sleep and HRV land once and
+    # the row is then final; steps accumulate all day, so a row written at
+    # 00:05 (or by the startup job) holds a partial count, and once sleep
+    # and HRV HAVE landed neither branch above ever fires again. The row
+    # can never repair itself: 32 of the last 100 stored days were short,
+    # the worst by 17,733 steps, while /query/steps rendered the right
+    # number on the Steps screen for the same day.
+    #
+    # Recounted through the same helper `compute_daily_summary` writes
+    # with, and compared with a tolerance — an exact test would rebuild
+    # the row on every page load while the user is out walking.
+    from ..analytics.jobs import canonical_steps_total, steps_total_is_stale
+
+    canonical = await canonical_steps_total(db, day_start, day_end)
+    if steps_total_is_stale(saved.steps_total if saved else None, canonical):
+        return True
     return False
+
+
+def _hrv_night_window(day: date, local_tz: Any) -> tuple[datetime, datetime]:
+    """A local-clock 22:00→09:00 net for the night ending on `day`.
+
+    `baselines.py:_night_window` (SA-N1) now prefers the exact canonical
+    SleepSession boundary and only falls back to a local clock window when
+    no session exists — a per-day answer that needs a DB lookup per
+    candidate day, which is exactly the O(days) round-trip cost this
+    staleness scan exists to avoid. This is deliberately a wider, cheaper
+    APPROXIMATION rather than that exact function: staleness detection only
+    needs to know a night ending on `day` produced SOME sample, not its
+    precise bounds, and SA-N1 measured this user's actual sessions at a
+    median 22:41→06:20 local — comfortably inside this window regardless of
+    which branch the live computation takes. A real night with no sample
+    anywhere in an 11-hour local-clock span is not a case this scan needs
+    to catch. Local time, not UTC, on purpose — hard-coding a UTC clock
+    hour here is the exact SA-N1 bug applied to a second call site.
+    """
+    start = datetime.combine(day - timedelta(days=1), time(hour=22), tzinfo=local_tz)
+    end = datetime.combine(day, time(hour=9), tzinfo=local_tz)
+    return start, end
+
+
+def _owning_days(
+    times: list[datetime],
+    night_window: Any,
+    since: date,
+    until: date,
+) -> set[date]:
+    """Which day in `[since, until]` does each raw sample's NIGHT belong to?
+
+    SA-N2. `compute_daily_summary` attributes a night to the day it ENDS
+    (`_stages_for_night` / `nightly_hrv`, both windowed via a `night_window`
+    function of exactly this shape), but the staleness scan this feeds used
+    to ask for the sample's OWN local calendar date instead. For every
+    evening sample that mismatch is off by one day: the write always lands
+    on D+1 while the scan keeps flagging D, which has no sleep_stage/hrv
+    row of its own and so can never stop looking stale.
+
+    Takes a `night_window(day) -> (start, end)` function rather than
+    re-deriving hours here, and the caller passes each metric's OWN
+    function — sleep and HRV do not share a window (`sleep.py`'s is
+    18:00→14:00 UTC; HRV's is `_hrv_night_window` above) — so this also
+    keeps working if sleep's window definition changes.
+
+    A sample that falls in neither day's window (the gap between one
+    night's end and the next one's start) belongs to no day, same as it
+    contributes to no day's write.
+    """
+    if not times:
+        return set()
+    # Every candidate day's window, computed once — pure Python, no DB —
+    # and sorted by start (it already is: window(d).start = d-1 at a fixed
+    # hour, strictly increasing with d) so each sample is placed with a
+    # bisect instead of a scan over the whole calendar range. Normalised to
+    # UTC immediately: `times` are already UTC (straight from the DB), and
+    # comparing two tz-AWARE datetimes recomputes both sides' `utcoffset()`
+    # on every comparison — cheap for a fixed UTC offset, measurably not for
+    # a `ZoneInfo` (HRV's local-clock window), which re-derives the DST rule
+    # for that instant each time. A year of HRV samples against a
+    # ZoneInfo-tagged window measured 220ms of that recomputation alone;
+    # doing the tz conversion 365 times up front instead of ~25,000 times
+    # in the bisect loop dropped it to noise.
+    days: list[date] = []
+    starts: list[datetime] = []
+    ends: list[datetime] = []
+    d = since
+    while d <= until:
+        start, end = night_window(d)
+        days.append(d)
+        starts.append(start.astimezone(timezone.utc))
+        ends.append(end.astimezone(timezone.utc))
+        d += timedelta(days=1)
+
+    owning: set[date] = set()
+    for ts in times:
+        i = bisect.bisect_right(starts, ts) - 1
+        if i >= 0 and ts <= ends[i]:
+            owning.add(days[i])
+    return owning
 
 
 async def live_steps_today(
@@ -188,8 +315,20 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     # 2. Compute live values as a fallback / supplement.
     steps_total = await live_steps_today(db, midnight_local, end)
 
-    last_sync_result = await db.execute(select(func.max(models.HeartRate.time)))
-    last_sync = last_sync_result.scalar()
+    # last_sync means sync freshness, not "when did HR last land" — those two
+    # only agree while the watch is actively writing HR. This used to be a
+    # bare max(HeartRate.time), so a watch that stopped writing HR while the
+    # phone kept syncing fine every 15 minutes rendered as "amber, synced
+    # 58h ago" on both home screens — the exact "phone stopped vs upstream
+    # stopped" confusion HEALTH-1 exists to prevent (SA-L6).
+    last_hr_sample_result = await db.execute(select(func.max(models.HeartRate.time)))
+    last_hr_sample_at = last_hr_sample_result.scalar()
+    hb = (await db.execute(
+        select(models.SyncHeartbeat)
+        .order_by(models.SyncHeartbeat.attempt_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    last_sync = _resolve_last_sync(hb, last_hr_sample_at)
 
     # Today's row may exist (e.g., backfill ran mid-day) but be sparse —
     # the Pixel Watch hasn't yet synced today's RHR/HRV/sleep. Pull the
@@ -231,11 +370,12 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     # baseline + an overnight reading), so today's row is often null even
     # though a recent night has one. Carry forward the latest non-null delta.
     latest_skin = (await db.execute(
-        select(models.DailySummary.skin_temp_delta_avg)
+        select(models.DailySummary.skin_temp_delta_avg, models.DailySummary.date)
         .where(models.DailySummary.skin_temp_delta_avg.is_not(None))
         .order_by(models.DailySummary.date.desc())
         .limit(1)
-    )).scalar()
+    )).first()
+    latest_skin_on = latest_skin[1].isoformat() if latest_skin else None
 
     # Which fields came from an earlier day rather than today's row. The
     # carry-forward is intentional — a missing overnight sync shouldn't blank
@@ -264,7 +404,8 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
                 carried_from[field] = latest_bp_on
                 return latest_bp[1]
         if v is None and field == "skin_temp_delta_avg" and latest_skin is not None:
-            return latest_skin
+            carried_from[field] = latest_skin_on
+            return latest_skin[0]
         return v
 
     if saved or fallback:
@@ -290,6 +431,7 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
             sleep_debt_h=pick("sleep_debt_h"),
             fasting_hours=pick("fasting_hours"),
             last_sync=last_sync,
+            last_hr_sample_at=last_hr_sample_at,
             # Last, so every pick() above has already recorded into it.
             carried_from=carried_from,
         )
@@ -299,6 +441,7 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
         date=today_local,
         steps_total=steps_total,
         last_sync=last_sync,
+        last_hr_sample_at=last_hr_sample_at,
     )
 
 
@@ -546,31 +689,57 @@ async def summary_range(
 
     # Identify dates needing a recompute. For each date in the range:
     #   - missing row → recompute
-    #   - row's sleep_duration_s is null but sleep_stages has data → recompute
-    #   - row's hrv_avg is null but vitals_hrv has data → recompute
-    #   (same heuristic as _today_row_is_stale, applied per date)
+    #   - row's sleep_duration_s is null but a night ending on this date has
+    #     sleep_stages data → recompute
+    #   - row's hrv_avg is null but a night ending on this date has vitals_hrv
+    #     data → recompute
+    #   - row's steps_total is absent or differs from a fresh canonical
+    #     recount by more than the tolerance → recompute
     # Batched staleness scan: instead of firing up to 2 count() queries per
-    # day (O(days) round-trips — ~730 on a 1-year Trends load), pull the set
-    # of local dates that have *any* sleep_stage / hrv sample across the whole
-    # window in two GROUP-BY queries, then decide per-day in Python. Same
-    # heuristic as _today_row_is_stale, just hoisted out of the loop.
-    from datetime import timedelta as _td
+    # day (O(days) round-trips — ~730 on a 1-year Trends load), pull the raw
+    # sleep_stage / hrv samples across the whole window in two queries, then
+    # decide per-day in Python.
     tzname = settings.tz if local_tz is not timezone.utc else "UTC"
     window_start = datetime.combine(since, datetime.min.time(), tzinfo=local_tz)
     window_end = datetime.combine(end, datetime.max.time(), tzinfo=local_tz)
 
-    sleep_days: set[date] = set((await db.execute(
-        select(cast(func.timezone(tzname, models.SleepStage.time), Date))
-        .where(models.SleepStage.time >= window_start)
-        .where(models.SleepStage.time <= window_end)
-        .distinct()
-    )).scalars().all())
-    hrv_days: set[date] = set((await db.execute(
-        select(cast(func.timezone(tzname, models.Hrv.time), Date))
-        .where(models.Hrv.time >= window_start)
-        .where(models.Hrv.time <= window_end)
-        .distinct()
-    )).scalars().all())
+    # SA-N2: a night is attributed to the day it ENDS
+    # (`_stages_for_night(day)` / `nightly_hrv(day)` both read a window that
+    # ends ON `day`), not to the sample's own local calendar date. The old
+    # version of this scan cast each raw sample to its own date, so every
+    # evening sample flagged the day it occurred on (D) while the write
+    # always landed on the day the night ends (D+1) — D has no row of its
+    # own to ever satisfy the check, so it was rescanned and recomputed on
+    # every single call, forever. `_owning_days` maps samples the same way
+    # the write does, and each metric passes its OWN window function since
+    # sleep and HRV do not share one (see its docstring). Padded a day each
+    # side of the query window because a night ending on `since` starts
+    # the evening BEFORE `since`, and one ending after `end`'s local
+    # midnight can still belong to `end`.
+    pad_start = window_start - timedelta(days=1)
+    pad_end = window_end + timedelta(days=1)
+    sleep_times = (await db.execute(
+        select(models.SleepStage.time)
+        .where(models.SleepStage.time >= pad_start)
+        .where(models.SleepStage.time <= pad_end)
+    )).scalars().all()
+    hrv_times = (await db.execute(
+        select(models.Hrv.time)
+        .where(models.Hrv.time >= pad_start)
+        .where(models.Hrv.time <= pad_end)
+    )).scalars().all()
+    sleep_days = _owning_days(sleep_times, _sleep_night_window, since, end)
+    hrv_days = _owning_days(
+        hrv_times, lambda d: _hrv_night_window(d, local_tz), since, end)
+    # Steps are not a set of "days that have data" like the two above but a
+    # per-day NUMBER, because the stored column goes stale by being partial
+    # rather than by being null — see the steps branch of
+    # `_today_row_is_stale`. One query for the whole window, same canonical
+    # source + per-minute MAX arithmetic `compute_daily_summary` writes.
+    from ..analytics.jobs import canonical_steps_by_day, steps_total_is_stale
+
+    steps_by_day = await canonical_steps_by_day(
+        db, window_start, window_end, tzname)
 
     cur = since
     needs_recompute: list[date] = []
@@ -580,19 +749,32 @@ async def summary_range(
             needs_recompute.append(cur)
         elif (row is None or row.hrv_avg is None) and cur in hrv_days:
             needs_recompute.append(cur)
-        cur = cur + _td(days=1)
+        elif steps_total_is_stale(
+            row.steps_total if row else None, steps_by_day.get(cur)
+        ):
+            needs_recompute.append(cur)
+        cur = cur + timedelta(days=1)
 
     if needs_recompute:
+        # Bounded per request. A year of Trends loaded for the first time
+        # after this shipped can find a hundred wrong days at once, and
+        # rebuilding them all inline would stall the request past the point
+        # the client gives up — after which the retry finds the same work
+        # again and nothing ever finishes. Oldest first, because
+        # `update_training_load` seeds each day off yesterday's stored row,
+        # so walking forward heals the chain; the days left over stop
+        # qualifying one batch at a time on subsequent loads.
+        todo = needs_recompute[:MAX_LAZY_RECOMPUTES]
         async with _lazy_compute_lock:
             try:
                 from ..analytics.jobs import compute_daily_summary
-                for d in needs_recompute:
+                for d in todo:
                     try:
                         await compute_daily_summary(d)
                     except Exception as e:  # noqa: BLE001
                         log.warning("recompute %s failed: %s", d, e)
-                log.info("/summary/range recomputed %d stale days",
-                         len(needs_recompute))
+                log.info("/summary/range recomputed %d of %d stale days",
+                         len(todo), len(needs_recompute))
             except Exception as e:  # noqa: BLE001
                 log.warning("on-demand summary_range recompute failed: %s", e)
 

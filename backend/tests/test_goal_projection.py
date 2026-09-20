@@ -151,6 +151,121 @@ class TestSparseData:
         assert p.n_points == 28, "a 200-day-old cluster must not enter the fit"
 
 
+class TestNoiseGate:
+    """SA-N5: the "fit is mostly noise" refusal has to look at the real
+    measurements, not at the smoother built on top of them.
+
+    ``project()`` used to compute R² on the 7-day moving average it had
+    just built *from* the window — a trailing average is autocorrelated
+    by construction, so that R² was scoring the smoother, not the data,
+    and the refusal could not fire on real noisy data. See
+    ``analytics/projection.py``'s ``_r2_against`` and the ``MIN_R2``
+    derivation comment for the fix and the measurement behind the new
+    threshold.
+    """
+
+    def test_smoothed_r2_no_longer_masks_real_scatter(self):
+        """The production weight goal, reproduced verbatim (SA-N5 evidence).
+
+        11 real weigh-ins spanning 17 days with a 4-day gap. Fit on the
+        smoothed series alone reports R²=0.887 and a confident ETA; the
+        same line explains only ~6% of the RAW measurements. Before the
+        fix this returned ``is_fallback=False`` with an ETA around
+        2028-01. This test fails without the fix.
+        """
+        today = date(2026, 9, 18)
+        real_weigh_ins = [
+            (date(2026, 8, 23), 115.439), (date(2026, 8, 24), 115.33),
+            (date(2026, 8, 25), 115.338), (date(2026, 8, 26), 115.638),
+            (date(2026, 8, 27), 115.15), (date(2026, 8, 31), 113.58),
+            (date(2026, 9, 1), 113.37), (date(2026, 9, 2), 115.33),
+            (date(2026, 9, 3), 115.848), (date(2026, 9, 4), 115.16),
+            (date(2026, 9, 9), 114.629),
+        ]
+        p = projection.project(real_weigh_ins, target=None, today=today)
+        assert p.is_fallback is True, (
+            "a fit that explains ~6% of the raw measurements must refuse, "
+            "not name a date four hundred-odd days out"
+        )
+        assert p.r2 is not None and p.r2 < 0.10
+        assert "variation" in (p.fallback_reason or "").lower()
+
+    def test_raw_r2_is_what_gets_reported(self):
+        """The published ``r2`` must be the raw-data figure, not the
+        smoothed-series figure — the same number feeds ``_confidence``,
+        so an inflated r2 here would also mislabel a noisy fit "medium".
+        """
+        today = date(2026, 9, 18)
+        real_weigh_ins = [
+            (date(2026, 8, 23), 115.439), (date(2026, 8, 24), 115.33),
+            (date(2026, 8, 25), 115.338), (date(2026, 8, 26), 115.638),
+            (date(2026, 8, 27), 115.15), (date(2026, 8, 31), 113.58),
+            (date(2026, 9, 1), 113.37), (date(2026, 9, 2), 115.33),
+            (date(2026, 9, 3), 115.848), (date(2026, 9, 4), 115.16),
+            (date(2026, 9, 9), 114.629),
+        ]
+        p = projection.project(real_weigh_ins, target=None, today=today)
+        # The smoothed-series r2 for this exact input is ~0.89 (that is
+        # the bug this finding is about); the raw one is under 0.10.
+        assert p.r2 is not None and p.r2 < 0.15
+
+    def test_real_1lb_per_week_loss_still_projects_at_measured_noise(self):
+        """The gate must not over-correct into refusing everything.
+
+        A genuine 1 lb/week loss, over a full 28-point daily window, with
+        noise sampled at this project's own measured day-to-day weight
+        scatter (~0.87 kg). This fit's raw R² lands at ~0.20 — comfortably
+        past the re-derived MIN_R2=0.10, and (by design of this fixture)
+        BELOW the old MIN_R2=0.30. If MIN_R2 is ever reverted to 0.30
+        without re-deriving it, this genuine trend gets refused again —
+        the same failure this fix exists to remove, just with the sign
+        flipped. That is exactly the outcome SA-N5's correction warned
+        against, so this is the test that catches it.
+        """
+        today = date(2026, 9, 18)
+        slope_kg_per_day = -(0.45359237 / 7)  # -1 lb/week
+        start = 115.0
+        # Fixed noise draw (not random.random — must be reproducible),
+        # amplitude tuned to this project's measured ~0.87 kg scatter.
+        noise_kg = [
+            -0.486, -0.792, -0.803, -0.321, 1.014, -0.104, 0.459, 0.126,
+            -0.226, -1.908, 0.679, 0.687, 0.714, -0.84, 1.049, 0.115,
+            -0.145, 0.585, 0.379, -0.159, 0.699, -1.276, -0.644, -0.425,
+            1.122, 0.643, 0.53, -0.139,
+        ]
+        points = [
+            (today - timedelta(days=27 - i),
+             round(start + slope_kg_per_day * i + noise_kg[i], 3))
+            for i in range(28)
+        ]
+        p = projection.project(points, target=None, today=today)
+        assert p.is_fallback is False, (
+            f"a real 1 lb/week loss at this project's own measured noise "
+            f"level was refused (r2={p.r2}); MIN_R2 is too strict again"
+        )
+        assert p.r2 is not None and 0.10 <= p.r2 < 0.30
+        assert p.per_week is not None and p.per_week < 0
+
+    def test_pure_flat_noise_still_refuses_after_the_fix(self):
+        """The original proposal's ask: a flat scatter must refuse even
+        after smoothing papers over it. ``test_noisy_scatter_refuses``
+        above already covers a clean alternating series; this uses the
+        same amplitude but an irregular (non-alternating) pattern so
+        smoothing cannot average it back toward a straight line either.
+        """
+        today = date(2026, 9, 18)
+        wobble = [3.0, -2.0, 2.5, -3.0, 1.5, -2.5, 3.0, -1.5, 2.0, -3.0,
+                  2.5, -2.0, 1.5, -3.0, 2.0, -2.5, 3.0, -1.5, 2.5, -2.0,
+                  1.5, -3.0, 2.0, -2.5, 3.0, -1.5, 2.5, -2.0]
+        points = [
+            (today - timedelta(days=27 - i), 80.0 + wobble[i])
+            for i in range(28)
+        ]
+        p = projection.project(points, target=None, today=today)
+        assert p.is_fallback is True
+        assert p.r2 is not None and p.r2 < projection.MIN_R2
+
+
 class TestDeterministic:
     def test_streak_goal_uses_arithmetic_not_regression(self):
         """A sober streak gains exactly one day per day.

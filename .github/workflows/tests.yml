@@ -1,0 +1,101 @@
+name: tests
+
+# SA-G1: this is the gate. Nothing else in this repo runs pytest, ruff,
+# or the Android unit tests — a red guard test (test_local_day_boundary,
+# test_no_streak_or_completion_percentage, the no-RDA / no-default-fat
+# tests, the MCP read-only test, ...) was previously invisible until a
+# human happened to run the suite by hand. `images.yml` and
+# `android-release.yml` call this workflow as a reusable workflow
+# (`uses: ./.github/workflows/tests.yml`) and gate their build/release
+# jobs on it with `needs: [tests]` — that is the half that actually
+# matters, since the CT's auto-update cron pulls `:latest` within 15
+# minutes of a tag.
+#
+# Also runnable as a plain CI check on push / PR for fast feedback,
+# independent of a release.
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+# Opt every JavaScript-based action into Node 24 ahead of GitHub's
+# 2026-06-02 forced cutover. Removable once each action publishes a
+# release pinned to Node 24 by default. (Matches the other workflows.)
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --extra dev
+
+      - name: Run test suite
+        working-directory: backend
+        run: uv run pytest -q
+
+      # SA-G1 scopes this to F-codes that are currently clean rather than
+      # the full `select = [...]` in pyproject.toml (E, F, I, B, UP, SIM, N).
+      # The audit measured 313 pre-existing B-code findings (298 of them
+      # B008, FastAPI's own `Depends(...)` default-argument idiom — not a
+      # real bug) and 23 pre-existing F-code findings beyond F821 (17
+      # F401 unused import, 3 F841, 2 F541, 1 F811). Turning any of those
+      # on here would fail this gate on day one over pre-existing debt
+      # this batch does not own, which is exactly the kind of change this
+      # finding's scope excludes ("keep it tight — the scope is your
+      # finding, not the surrounding code"). F821 (undefined name) is the
+      # class that shipped two NameErrors to production; it is clean
+      # today and is the one this gate must never let regress. The
+      # `--ignore` list names the four codes with existing debt so any
+      # OTHER F-code (F601-F632, F701-F707, F501-F509, F901, ...) is
+      # still caught if introduced. Cleaning up the ignored codes is
+      # separate, mechanical follow-up work for another batch — do not
+      # fold it into this gate.
+      - name: Lint (ruff, undefined-name class of bug)
+        working-directory: backend
+        run: uv run ruff check src --select F --ignore F401,F841,F541,F811
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          # See android-debug-build.yml / android-release.yml: the
+          # action's default `packages` ("tools platform-tools") fails
+          # outright because the deprecated `tools` package no longer
+          # exists. The runner image already ships what the Gradle build
+          # asks for, so install nothing extra.
+          packages: ''
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Run unit tests
+        working-directory: android
+        run: |
+          if [ -f ./gradlew ]; then
+            ./gradlew :app:testDebugUnitTest --no-daemon
+          else
+            gradle :app:testDebugUnitTest --no-daemon
+          fi

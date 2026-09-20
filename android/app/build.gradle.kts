@@ -51,7 +51,12 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // SA-C1: safe to flip now that the six Moshi.Builder() sites are
+            // codegen-only (no KotlinJsonAdapterFactory reflection fallback
+            // left to break under obfuscation) — see build.gradle.kts's
+            // moshi-kotlin-codegen comment and proguard-rules.pro.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Only attach the signing config if it was actually populated;
             // otherwise gradle errors instead of silently producing an unsigned APK.
@@ -103,7 +108,15 @@ dependencies {
 
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-moshi:2.11.0")
-    implementation("com.squareup.moshi:moshi-kotlin:1.15.1")
+    // SA-C1: codegen, not the reflective moshi-kotlin. Every wire type is
+    // @JsonClass(generateAdapter = true) (see sync/Models.kt, GitHubApi.kt,
+    // LogUploadWorker.kt, plus the three JsonCache-local types) and the six
+    // Moshi.Builder() sites no longer register KotlinJsonAdapterFactory.
+    // This is also the point of the change: kotlin-reflect contributed 1,888
+    // classes to the release dex, and R8 keep rules for reflective Moshi are
+    // exactly the failure mode that turns a large APK into one that builds
+    // fine and 401/crashes on the first ingest call.
+    ksp("com.squareup.moshi:moshi-kotlin-codegen:1.15.1")
     implementation("com.squareup.moshi:moshi-adapters:1.15.1")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
@@ -119,9 +132,10 @@ dependencies {
 
     // JVM unit tests. The wire models are the one part of the phone that can
     // be verified without a device, and a parse failure would render an empty
-    // screen that compiles perfectly.
+    // screen that compiles perfectly. No moshi-kotlin here: the tests build
+    // Moshi the same way BackendClient does (codegen adapters from the main
+    // source set's ksp output), so they exercise the real construction.
     testImplementation("junit:junit:4.13.2")
-    testImplementation("com.squareup.moshi:moshi-kotlin:1.15.1")
 
     // Vico — Compose-native chart library used on Vitals detail screens.
     implementation("com.patrykandpatrick.vico:compose:2.1.0")

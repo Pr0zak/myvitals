@@ -28,7 +28,9 @@ ANALYTICS = SRC / "analytics"
 # training-load week boundary all resolve days). Adding a module here turns
 # the suite red until every offending expression in it is fixed, which is
 # the point — the guard is only worth anything if it is allowed to fail.
-DAY_FACING_MODULES = ["summary.py", "strava.py", "workout/strength.py", "meals.py"]
+# SA-N7 added analytics.py: backfill_analytics and correlate both resolve
+# window boundaries as calendar dates the user sees.
+DAY_FACING_MODULES = ["analytics.py", "summary.py", "strava.py", "workout/strength.py", "meals.py"]
 
 # OG2-C1 widened the FIRST guard to the analytics layer, because the bug
 # reached production through the gap between the two guards in this file.
@@ -47,7 +49,14 @@ DAY_FACING_MODULES = ["summary.py", "strava.py", "workout/strength.py", "meals.p
 #
 # A module goes here only once it is clean. `consistency.py` is exempt by
 # name: its occurrence is inside a docstring explaining this very bug.
-DAY_FACING_ANALYTICS = ["strength.py"]
+#
+# SA-L1 added `jobs.py`. `compute_daily_summary()` defaulted its target to
+# `datetime.now(timezone.utc).date()`, and the one caller that takes the
+# default is the startup job in `main.py` — so a backend restarted after 7pm
+# Central wrote a daily_summary row for TOMORROW. The row is empty because
+# the day has not happened, and an empty row is not the same as no row: the
+# readers in front of it show the day as real and stepless.
+DAY_FACING_ANALYTICS = ["strength.py", "jobs.py"]
 
 
 def _utc_today_calls(tree: ast.AST) -> list[int]:
@@ -156,19 +165,48 @@ def test_the_guard_actually_catches_the_pattern():
 # bar in the weekly-load card, and at a week boundary in the following week.
 #
 # Windows anchored to a CLOCK HOUR rather than midnight (a "night" of
-# 22:00→09:00) are a different question and deliberately not flagged here;
-# they are listed in KNOWN_CLOCK_WINDOWS so this test states what it does not
-# cover instead of implying the whole layer is clean.
+# 22:00→09:00) used to be a different question and deliberately unflagged —
+# they were only listed in KNOWN_CLOCK_WINDOWS so this test stated what it
+# did not cover instead of implying the whole layer was clean.
+#
+# SA-N1: that carve-out is exactly how `baselines.py:_night_window` hard-coded
+# its 22:00→09:00 "night" to `tzinfo=timezone.utc` and shipped invisibly — on
+# this deployment (settings.tz=America/Chicago) that ran 17:00→04:00 local,
+# folding in ~5h40m of evening wakefulness and cutting the last ~2h20m of real
+# sleep, and neither this guard nor `KNOWN_CLOCK_WINDOWS` said a word about
+# it, because `is_midnight` only matched the `.min`/`.max` attribute shape — a
+# `time(hour=22)` call is neither. `_utc_day_windows` now also matches a
+# `time(hour=N, ...)` CALL as the clock argument, so a UTC-anchored clock-hour
+# window is caught the same way a UTC-anchored midnight window already was.
+# `baselines.py` no longer needs an entry below because its window now
+# resolves in `settings.tz` rather than a literal `timezone.utc` (see
+# `analytics/baselines.py:_night_window`). `sleep.py`'s 18:00→14:00 window is
+# a deliberately different (wider) fallback that SA-N1's correction explicitly
+# said not to unify with baselines.py without evidence they should match —
+# fixing ITS UTC anchoring is a separate, not-yet-made decision, so it keeps
+# its exemption rather than turning this guard red for an out-of-scope module.
 
 KNOWN_CLOCK_WINDOWS = {
     # module: why it is exempt
-    "sleep.py": "18:00→14:00 night window, not a midnight-to-midnight day",
-    "baselines.py": "22:00→09:00 night window for nightly RHR",
+    "sleep.py": "18:00→14:00 UTC night window — a different, wider fallback "
+                "than baselines.py's; SA-N1 fixed baselines.py's clock-hour "
+                "window but deliberately left this one alone (see SA-N1's "
+                "correction in docs/sa-findings.json).",
 }
 
 
 def _utc_day_windows(tree: ast.AST) -> list[int]:
-    """`datetime.combine(<date>, time.min|max, tzinfo=timezone.utc)` lines."""
+    """`datetime.combine(<date>, <clock>, tzinfo=timezone.utc)` lines.
+
+    ``<clock>`` covers two shapes:
+
+    - ``time.min`` / ``time.max`` — a bare midnight-to-midnight calendar day.
+    - ``time(hour=N, ...)`` — a fixed clock-hour window, e.g. the
+      ``time(hour=22)`` this function could not see before SA-N1. Both are
+      "a calendar day combined with UTC" in exactly the same sense: on a
+      negative UTC offset the window runs some fixed number of hours earlier
+      than the caller intended.
+    """
     hits = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -176,7 +214,7 @@ def _utc_day_windows(tree: ast.AST) -> list[int]:
         fn = node.func
         if not (isinstance(fn, ast.Attribute) and fn.attr == "combine"):
             continue
-        # Second arg is a midnight/end-of-day sentinel?
+        # Second arg is a midnight/end-of-day sentinel, or a clock-hour call?
         if len(node.args) < 2:
             continue
         a1 = node.args[1]
@@ -184,7 +222,14 @@ def _utc_day_windows(tree: ast.AST) -> list[int]:
             isinstance(a1, ast.Attribute) and a1.attr in {"min", "max"}
             and isinstance(a1.value, ast.Name) and a1.value.id == "time"
         )
-        if not is_midnight:
+        is_clock_hour = (
+            isinstance(a1, ast.Call)
+            and (
+                (isinstance(a1.func, ast.Name) and a1.func.id == "time")
+                or (isinstance(a1.func, ast.Attribute) and a1.func.attr == "time")
+            )
+        )
+        if not (is_midnight or is_clock_hour):
             continue
         for kw in node.keywords:
             if kw.arg != "tzinfo":
@@ -193,6 +238,27 @@ def _utc_day_windows(tree: ast.AST) -> list[int]:
             if isinstance(v, ast.Attribute) and v.attr == "utc":
                 hits.append(node.lineno)
     return hits
+
+
+def test_the_guard_now_catches_a_clock_hour_window():
+    """SA-N1: `is_midnight` alone let `_night_window`'s `time(hour=22)` /
+    `time(hour=9)` UTC window ship invisibly. Pin the widened shape so the
+    next fixed-clock-hour UTC window doesn't slip through the same gap.
+    """
+    bad = ast.parse(
+        "from datetime import datetime, time, timezone\n"
+        "d = datetime.combine(day, time(hour=22), tzinfo=timezone.utc)\n"
+    )
+    assert _utc_day_windows(bad) == [2]
+
+    # A clock-hour window resolved against a local tz variable — exactly
+    # what the SA-N1 fix produces — must stay clean; only a literal
+    # `timezone.utc` is the bug.
+    good = ast.parse(
+        "from datetime import datetime, time\n"
+        "d = datetime.combine(day, time(hour=22), tzinfo=local_tz)\n"
+    )
+    assert _utc_day_windows(good) == []
 
 
 def test_analytics_day_windows_are_local():

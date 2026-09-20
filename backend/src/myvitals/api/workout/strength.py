@@ -12,6 +12,7 @@ backend, ~200 entries, no need to involve the DB.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -30,6 +31,8 @@ from ...auth import require_any
 from ...config import settings
 from ...db import models
 from ...db.session import get_session
+
+log = logging.getLogger(__name__)
 
 
 def _local_today() -> date:
@@ -828,7 +831,7 @@ class SessionSummary(BaseModel):
     Every field here was previously either absent or derived independently by
     each client. `net_duration_s` is the clearest example: both clients
     synthesised the activities-feed row with gross `completed_at - started_at`
-    while `analytics/advanced.py:_strength_training_stress` subtracted the
+    while `analytics/advanced.py:training_load_by_day` subtracted the
     accumulated pause, so the feed and the CTL/ATL model already reported
     different durations for the same workout, and a session left open on the
     rack during a phone call read as a multi-hour effort in one of them.

@@ -233,13 +233,23 @@ fun ActivityDetailScreen(
                     if (!a.polyline.isNullOrBlank() ||
                         (a.trailId != null && trails.any { it.id == a.trailId && it.latitude != null })) {
                         item { ActivityMap(a, trails, neon) }
-                    } else if (a.source == "healthconnect") {
-                        // SA-P3. This branch used to not exist: with no
-                        // polyline the whole card vanished, which is why a
-                        // walk whose GPS track was sitting in Health
-                        // Connect read as a broken map rather than as
-                        // missing data. Only for Health Connect sessions —
-                        // it is the one source this app can go and ask.
+                    }
+                    // SA-P3. This card used to not exist: with no polyline
+                    // the whole thing vanished, which is why a walk whose GPS
+                    // track was sitting in Health Connect read as a broken map
+                    // rather than as missing data. Only for Health Connect
+                    // sessions — it is the one source this app can go and ask.
+                    //
+                    // It is deliberately NOT an `else` of the branch above. A
+                    // trail link gives this activity a PIN, not a track, so the
+                    // map renders from `trail_id` alone and an `else` put the
+                    // fetch affordance behind a map that was already drawn —
+                    // which is exactly how the 2026-09-19 walk shipped with no
+                    // way to fetch its route: it is linked to trail 13, the
+                    // first branch won, and the button was unreachable. The
+                    // web half never had this bug because it gates on the
+                    // polyline alone.
+                    if (a.polyline.isNullOrBlank() && a.source == "healthconnect") {
                         item {
                             RouteMissingCard(
                                 a = a,

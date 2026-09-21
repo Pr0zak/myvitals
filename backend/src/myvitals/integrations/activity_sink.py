@@ -265,8 +265,52 @@ def is_duplicate_recording(
     return best
 
 
+def _hc_activity_values(
+    w: models.Workout,
+    hc_type: str,
+    start: datetime,
+    source_id: str,
+    distance_by_start: dict[str, float] | None,
+) -> dict[str, Any]:
+    """The row `promote_health_connect_workouts` hands to `upsert_activity`.
+
+    Pulled out as a pure function so the distance wiring can be tested
+    without a database: `models.Workout` and `models.Activity` are plain
+    ORM classes and can be built directly, the way the rest of this test
+    suite already builds fake rows for `_retire_promotion`.
+
+    `distance_by_start` is looked up by `source_id`, not defaulted to 0.0
+    when the key is absent -- an indoor session genuinely has no distance,
+    and `.get()` already returns None for that case. None is exactly what
+    `upsert_activity` needs: it inserts it as a real NULL on a brand-new
+    row, and its skip-None rule means an UPDATE never uses it to blank out
+    a distance a richer provider (or an earlier call to this same function,
+    with batch data this one lacks) already stored.
+    """
+    return {
+        "source": HC_SOURCE,
+        # The workouts PK is `time`, so the ISO instant is a stable
+        # natural key: re-promoting the same session updates its
+        # row rather than creating a second one.
+        "source_id": source_id,
+        "type": hc_type,
+        "start_at": start,
+        "duration_s": int(w.duration_s),
+        "avg_hr": w.avg_hr,
+        "max_hr": w.max_hr,
+        "kcal": w.kcal,
+        "distance_m": (distance_by_start or {}).get(source_id),
+        # `name` deliberately omitted. `workouts.title` comes from
+        # whichever app wrote the HC record, and the feed already
+        # renders the type; a borrowed title adds nothing and can
+        # carry a location.
+    }
+
+
 async def promote_health_connect_workouts(
-    db: AsyncSession, since: datetime | None = None,
+    db: AsyncSession,
+    since: datetime | None = None,
+    distance_by_start: dict[str, float] | None = None,
 ) -> dict[str, int]:
     """Copy Health Connect exercise sessions into the activities feed.
 
@@ -276,10 +320,26 @@ async def promote_health_connect_workouts(
     first GPS fix, the watch on the button press — and a fixed ± window
     either misses real duplicates or merges genuinely separate sessions.
 
-    Providers with GPS are strictly richer: they carry distance, elevation
-    and a polyline that Health Connect's session record does not. So when
-    both have a session, the existing one wins and this does nothing. This
-    fills gaps; it never overwrites.
+    Providers with GPS are strictly richer: they carry elevation and a
+    polyline Health Connect has no equivalent for, and their distance is
+    measured from GPS rather than a step-count estimate. (Earlier text here
+    claimed Health Connect's session record carries no distance at all —
+    true of the *session* record, but Health Connect also exposes a
+    `DistanceRecord` aggregate over the session's own window, which
+    `HealthConnectGateway` now reads. That was the actual gap, not a
+    platform limitation, and SA-P1 closed it.) So when both have a session,
+    the existing one wins and this does nothing. This fills gaps; it never
+    overwrites.
+
+    ``distance_by_start`` is an optional ``{start.isoformat(): meters}`` map
+    for the distance Health Connect reported for each session, keyed the
+    same way ``source_id`` is below. It comes from the caller because the
+    `workouts` table itself has no `distance_m` column — only `activities`
+    does, and that is deliberate: this function fills a gap in an existing
+    field rather than growing the raw ingest schema. A caller with no batch
+    context (the post-Strava-sync rescan in `strava.py`) passes nothing, and
+    `upsert_activity`'s None-skip rule means that never erases a distance an
+    earlier promotion already wrote — it only ever fails to *add* one.
 
     That skip is also applied RETROSPECTIVELY, because promotion decides once
     and the richer provider usually arrives second. Strava here is synced by
@@ -492,23 +552,7 @@ async def promote_health_connect_workouts(
 
         await upsert_activity(
             db,
-            {
-                "source": HC_SOURCE,
-                # The workouts PK is `time`, so the ISO instant is a stable
-                # natural key: re-promoting the same session updates its
-                # row rather than creating a second one.
-                "source_id": source_id,
-                "type": hc_type,
-                "start_at": start,
-                "duration_s": int(w.duration_s),
-                "avg_hr": w.avg_hr,
-                "max_hr": w.max_hr,
-                "kcal": w.kcal,
-                # `name` deliberately omitted. `workouts.title` comes from
-                # whichever app wrote the HC record, and the feed already
-                # renders the type; a borrowed title adds nothing and can
-                # carry a location.
-            },
+            _hc_activity_values(w, hc_type, start, source_id, distance_by_start),
             # No GPS on these, so there is no trail to match.
             link_trail=False,
         )

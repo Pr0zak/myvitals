@@ -8,7 +8,7 @@
   "found": 52,
   "survived": 42,
   "refuted": 10,
-  "ranked": 45,
+  "ranked": 47,
   "released": "v0.40.1, deployed 2026-09-20"
  },
  "items": [
@@ -826,6 +826,42 @@
    "proposal": "Route all three through the shared client, or resolve the prefix the way the client's interceptor does: `/api` only when no custom base is set. Prefer the former — the whole reason `client.ts` centralises this is that the rule is easy to get wrong twice.",
    "correction": "Not independently refuted. Flagged by the reach/ops batch reviewer against SA-O1's new call, and confirmed pre-existing by inspection: the identical idiom appears at `loadUpdateStatus` and `checkUpdate`, both of which predate this audit. SA-O1 inherited the file's established pattern rather than introducing a defect, so this is recorded as its own item rather than charged to that finding.",
    "evidence": "`frontend/src/views/Settings.vue` — three call sites share the shape `axios.get(\"/api/<path>\", { baseURL: apiBase.value || undefined, headers: ... })`. Contrast `frontend/src/api/client.ts`: created with `baseURL: \"/api\"`, and the request interceptor does `cfg.baseURL = apiBase.value.replace(/\\/$/, \"\")` — replacing the prefix rather than appending to it.",
+   "also_found_by": []
+  },
+  {
+   "id": "SA-P1",
+   "batch": "gap",
+   "status": "shipped",
+   "title": "`READ_DISTANCE` is granted and never read, so every phone-ingested activity has a null distance",
+   "task": "`DistanceRecord` is in the manifest and in `HealthConnectGateway`'s permission list but is never read; `WorkoutSample` has no distance field on either side of the wire, so all 18 Health Connect activities have `distance_m` NULL",
+   "lens": "reported-from-use",
+   "kind": "missing",
+   "surface": "both",
+   "size": "S",
+   "value": 4,
+   "problem": "`android.permission.health.READ_DISTANCE` is declared in `AndroidManifest.xml` and `HealthPermission.getReadPermission(DistanceRecord::class)` is in the gateway's permission list at `HealthConnectGateway.kt:37` — so the grant is requested, granted, and counted in the total the permission banner reports. `DistanceRecord` appears nowhere else in the app. The wire model has nowhere to put a distance anyway: `WorkoutSample` carries time, type, duration_s, kcal, avg_hr, max_hr, source and title, identically on the phone (`sync/Models.kt:34`) and the backend (`api/ingest.py:145`). The backend sink is NOT the blocker — `integrations/activity_sink.py` already writes `distance_m`, and its docstring's claim that \"Health Connect's session record does not\" carry distance is true of the wire model but not of Health Connect, where `DistanceRecord` is aggregatable over the session window.",
+   "impact": "Today: every activity the phone ingests shows no distance — 18 of them since 2026-05-13, including a 2h17m walk on 2026-09-19. Activities imported from Strava and Garmin do show one, so the feed looks inconsistent for no visible reason. After: a phone-ingested walk or ride carries the distance the watch already measured, which also feeds the activity feed's totals and the weekly summaries that currently undercount.",
+   "proposal": "Read `DistanceRecord` aggregated over each exercise session's window in `HealthConnectGateway`, add `distance_m` to `WorkoutSample` on both sides of the wire, and pass it through the HC-1 promotion into the sink field that already exists. No migration — `activities.distance_m` is already there and already populated by other providers. Correct the `promote_health_connect_workouts` docstring, which currently records the belief that HC cannot supply this.",
+   "correction": "Not yet independently refuted. Diagnosed 2026-09-20 from a live report that a walk showed no path on the map; the null distance was found alongside the null route and is the more tractable half. The claim that Google Health writes `DistanceRecord` is inferred from the same package (`com.fitbit.FitbitMobile`) already writing the step stream this app reads — likely, but confirm on device before building.",
+   "evidence": "Production: `select type, count(*), count(polyline), count(distance_m) from activities where source='healthconnect' group by 1` returns cycling 8/0/0, walking 5/0/0, workout 5/0/0 — zero distances across all 18 rows since 2026-05-13. By contrast Strava supplies distance on 61 of 61 ebike rides and Garmin on 319 of 319 cycling activities.\n`grep -rn DistanceRecord android/app/src/main/kotlin/` returns exactly two lines, both in `HealthConnectGateway.kt` — the import at :9 and the permission at :37. No read.\nThe walk in question: `source_id 2026-09-19T14:05:05+00:00`, duration 8217 s, `distance_m` NULL, `raw` empty — nothing was received and discarded.",
+   "also_found_by": []
+  },
+  {
+   "id": "SA-P2",
+   "batch": "gap",
+   "status": "shipped",
+   "title": "Exercise routes are never requested, so no phone-ingested activity can ever draw a map",
+   "task": "`READ_EXERCISE_ROUTE` is absent from the manifest and `ExerciseRoute` appears nowhere in the app, so `activities.polyline` is NULL for every Health Connect activity and the Route card is hidden",
+   "lens": "reported-from-use",
+   "kind": "missing",
+   "surface": "both",
+   "size": "M",
+   "value": 3,
+   "problem": "`android.permission.health.READ_EXERCISE_ROUTE` is not declared in `AndroidManifest.xml`, and there is no reference to `ExerciseRoute` or `exerciseRouteResult` anywhere in the Kotlin source. `WorkoutSample` has no field for a track either. So `activities.polyline` is NULL for all 18 phone-ingested activities, `ActivityDetail.vue:690` gates the Route card on `v-if=\"activity.polyline\"`, and the card is omitted entirely — no empty map, but no explanation either.",
+   "impact": "Today: a walk or ride the watch recorded with GPS shows no path, and nothing says why. Strava and Garmin activities do show one, so the behaviour reads as a bug in the map rather than as missing data. After: either the track is drawn, or — if the route genuinely is not available — the app can say so instead of silently hiding the card.",
+   "proposal": "**Probe before building.** Health Connect only has a route if the writing app puts one there, and Fitbit historically did not write `ExerciseRoute`. Read `exerciseRouteResult` for one known-GPS session on the device and report what comes back; that single answer decides whether this is worth any further work. If routes ARE available: declare the permission (note it uses a separate per-route consent flow, not the ordinary grant sheet), add a polyline field to the wire model, encode to the same polyline format the sink already stores for Strava, and let the existing map render it unchanged. If they are NOT: make the empty state honest rather than invisible, and record the refusal here so it is not re-investigated.",
+   "correction": "Not yet independently refuted, and deliberately scoped as probe-first. This is the shape of the SpO2 item in TODO.md — wiring a chain whose upstream may never produce data. The difference is that SpO2's blocker is a known upstream firmware bug, whereas here nobody has yet checked whether the data exists at all.",
+   "evidence": "`grep -riE 'ExerciseRoute|READ_EXERCISE_ROUTE|exerciseRouteResult' android/app/src/main/kotlin/ android/app/src/main/AndroidManifest.xml` returns nothing.\nThe manifest declares fourteen health permissions; `READ_EXERCISE_ROUTE` is not among them.\nProduction: zero of 18 `source='healthconnect'` activities have a non-null `polyline`, against 61 of 61 for Strava ebike rides and 318 of 319 for Garmin cycling.\n`frontend/src/views/ActivityDetail.vue:690` — `<Card v-if=\"activity.polyline\" title=\"Route\">`.",
    "also_found_by": []
   }
  ],

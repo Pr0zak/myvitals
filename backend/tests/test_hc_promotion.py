@@ -51,9 +51,10 @@ class TestOverlapRatherThanProximity:
 
 class TestNeverOverwritesRicherData:
     def test_an_overlapping_activity_wins(self):
-        """Strava and Garmin carry distance, elevation and a polyline that
-        a Health Connect session record does not. This fills gaps; it must
-        never replace a richer row with a poorer one."""
+        """Strava and Garmin carry elevation and a polyline Health Connect
+        has no equivalent for, and GPS-measured distance beats Health
+        Connect's step-based estimate. This fills gaps; it must never
+        replace a richer row with a poorer one."""
         src = inspect.getsource(activity_sink.promote_health_connect_workouts)
         assert "skipped_overlap += 1" in src
         assert "continue" in src
@@ -74,7 +75,15 @@ class TestIdempotence:
         """`workouts` is keyed on `time`, so the ISO instant is a stable
         natural key — re-promoting updates the row rather than adding a
         second one."""
-        src = inspect.getsource(activity_sink.promote_health_connect_workouts)
+        # The dict this asserts on now lives in `_hc_activity_values`,
+        # pulled out of `promote_health_connect_workouts` so the SA-P1
+        # distance wiring could be unit-tested without a database — see
+        # test_activity_sink_distance.py. Check both sources together so
+        # the assertion still means what it always meant.
+        src = (
+            inspect.getsource(activity_sink.promote_health_connect_workouts)
+            + inspect.getsource(activity_sink._hc_activity_values)
+        )
         assert "start.isoformat()" in src
         assert '"source": HC_SOURCE' in src
 
@@ -87,7 +96,10 @@ class TestPrivacy:
         nothing — and it is exactly the field that carries a location, per
         the rule test_ai_privacy.py exists to enforce.
         """
-        src = inspect.getsource(activity_sink.promote_health_connect_workouts)
+        src = (
+            inspect.getsource(activity_sink.promote_health_connect_workouts)
+            + inspect.getsource(activity_sink._hc_activity_values)
+        )
         assert '"name":' not in src
         assert "w.title" not in src
 

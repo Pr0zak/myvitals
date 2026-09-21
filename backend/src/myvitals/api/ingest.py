@@ -149,6 +149,13 @@ class WorkoutSample(BaseModel):
     kcal: float | None = None
     avg_hr: float | None = None
     max_hr: float | None = None
+    # SA-P1: Health Connect's DistanceRecord, aggregated over the session's
+    # own window on the phone. Optional and defaults to None -- an indoor
+    # session genuinely has no distance, and a 0.0 default would claim the
+    # user covered no ground rather than that none was measured. Not stored
+    # on `workouts` (see ingest_batch below); it only ever flows through to
+    # `activities.distance_m` via the HC-1 promotion.
+    distance_m: float | None = None
     source: str | None = None
     title: str | None = None
 
@@ -228,7 +235,12 @@ async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) ->
         await _bulk_upsert(
             db,
             models.Workout,
-            (w.model_dump() for w in batch.workouts),
+            # `distance_m` is excluded here -- `workouts` has no such
+            # column (see the WorkoutSample docstring above) and an
+            # unrecognised key in a multi-row VALUES list fails the whole
+            # insert. It reaches `activities.distance_m` via the promotion
+            # call below instead, which is the only place it needs to be.
+            (w.model_dump(exclude={"distance_m"}) for w in batch.workouts),
             ["time"],
             update_cols=["type", "duration_s", "kcal", "avg_hr", "max_hr", "source", "title"],
         )
@@ -240,8 +252,18 @@ async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) ->
         # anything a richer provider already covers.
         try:
             earliest = min(w.time for w in batch.workouts)
+            # SA-P1: hand the promotion step this batch's own distances,
+            # keyed the same way it already keys `source_id` -- the start
+            # instant's isoformat. `workouts` has nowhere to persist this,
+            # so it has to travel with the request rather than be re-read
+            # off the row the promotion step queries.
+            distance_by_start = {
+                w.time.isoformat(): w.distance_m
+                for w in batch.workouts
+                if w.distance_m is not None
+            }
             promo = await activity_sink.promote_health_connect_workouts(
-                db, since=earliest,
+                db, since=earliest, distance_by_start=distance_by_start,
             )
             if promo["promoted"]:
                 counts["activities_promoted"] = promo["promoted"]

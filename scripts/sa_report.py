@@ -77,6 +77,10 @@ BATCHES = [
      "The deploy chain is better than it looks: auto-update takes a pre-update dump, health-probes the "
      "new image and rolls back on failure. What it cannot see is a logic regression, which is the whole "
      "of SA-G1."),
+    ("gap", "Phone telemetry — permissioned, counted as granted, never read",
+     "Health Connect grants the app reads it does not use. Each one inflates the \"12/12 granted\" "
+     "count that the permission banner and the sync diagnostics report, while contributing nothing, "
+     "so the app looks fully wired for data it has never once requested."),
     ("cut", "Dead weight — things to delete rather than build",
      "Eleven items where the right change removes code, rows or megabytes. Listed last not because they "
      "matter least but because none of them is urgent; several are the cheapest wins on the page."),

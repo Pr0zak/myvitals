@@ -182,9 +182,9 @@ td:first-child{color:var(--mv);font-family:var(--mono);font-size:12.5px;white-sp
   was done. Nothing makes it run.</p>
 </div>
 <div class="prog">
-<h4>Progress · 43 of 45 shipped</h4>
+<h4>Progress · 45 of 47 shipped</h4>
 <div class="bar"><i class="b-ship" style="width:96%"></i><i class="b-wip" style="width:0%"></i></div>
-<div class="legend"><span><b style="background:var(--done)"></b> shipped 43</span><span><b style="background:var(--warn)"></b> in progress 0</span><span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 1</span><span><b style="border:1px dashed var(--rule)"></b> declined 1</span></div>
+<div class="legend"><span><b style="background:var(--done)"></b> shipped 45</span><span><b style="background:var(--warn)"></b> in progress 0</span><span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 1</span><span><b style="border:1px dashed var(--rule)"></b> declined 1</span></div>
 <p style="margin:14px 0 0;font-size:14px;color:var(--ink-2)">Tracked as <code>SA-*</code> in the repo's <code>TODO.md</code>. Status lives in <code>docs/sa-findings.json</code> and this page is regenerated from it by <code>scripts/sa_report.py</code> — the chips cannot drift from the tracker because they are the same file.</p>
 </div>
 <h2>Method</h2>
@@ -206,6 +206,7 @@ invariants. Those corrections are printed with each item, under
 <tr><td>The numbers behind the numbers</td><td><strong>8</strong></td><td>7</td><td></td></tr>
 <tr><td>Reachability</td><td><strong>4</strong></td><td>4</td><td>built, shipped, and with no door</td></tr>
 <tr><td>Operations</td><td><strong>6</strong></td><td>6</td><td>what happens when nobody is watching</td></tr>
+<tr><td>Phone telemetry</td><td><strong>2</strong></td><td>2</td><td>permissioned, counted as granted, never read</td></tr>
 <tr><td>Dead weight</td><td><strong>14</strong></td><td>13</td><td>things to delete rather than build</td></tr>
 <tr><td>Refuted</td><td><strong>10</strong></td><td>—</td><td>printed in full, with the measurement that killed them</td></tr>
 </tbody></table></div>
@@ -1230,6 +1231,43 @@ Swallowed and invisible: tasks/scheduled.py:31 `log.warning("trail poll failed: 
 The surface that would render them already exists: api/debug.py:31 `source: str = Field("phone", description="phone | server | other")`; api/debug.py:66 `source: str | None = Query(None, description="filter: phone | server")`; frontend/src/views/Logs.vue:74 `&lt;option value="server"&gt;server&lt;/option&gt;`.
 No retention either: `grep -rn "AppLog" --include=*.py . | grep -i "delete\|prune"` → nothing; `app_logs` is 77 MB / 265,175 rows, oldest 2026-05-03, of which 205,956 are DEBUG.</pre></details></div>
 </div>
+<h2>Phone telemetry — permissioned, counted as granted, never read</h2>
+<p>Health Connect grants the app reads it does not use. Each one inflates the "12/12 granted" count that the permission banner and the sync diagnostics report, while contributing nothing, so the app looks fully wired for data it has never once requested.</p>
+<div class="rank">
+<div class="rk">
+<div class="top"><div class="t"><code>READ_DISTANCE</code> is granted and never read, so every phone-ingested activity has a null distance</div><div class="m">
+<span class="chip c-id">SA-P1</span>
+<span class="chip c-ship">shipped</span>
+<span class="chip c-v4">value 4</span>
+<span class="chip c-eff">S</span>
+<span class="chip c-eff">both</span>
+<span class="chip c-lens">reported-from-use</span>
+</div></div>
+<p><code>android.permission.health.READ_DISTANCE</code> is declared in <code>AndroidManifest.xml</code> and <code>HealthPermission.getReadPermission(DistanceRecord::class)</code> is in the gateway's permission list at <code>HealthConnectGateway.kt:37</code> — so the grant is requested, granted, and counted in the total the permission banner reports. <code>DistanceRecord</code> appears nowhere else in the app. The wire model has nowhere to put a distance anyway: <code>WorkoutSample</code> carries time, type, duration_s, kcal, avg_hr, max_hr, source and title, identically on the phone (<code>sync/Models.kt:34</code>) and the backend (<code>api/ingest.py:145</code>). The backend sink is NOT the blocker — <code>integrations/activity_sink.py</code> already writes <code>distance_m</code>, and its docstring's claim that "Health Connect's session record does not" carry distance is true of the wire model but not of Health Connect, where <code>DistanceRecord</code> is aggregatable over the session window.</p>
+<p><span class="lab">Today</span>Today: every activity the phone ingests shows no distance — 18 of them since 2026-05-13, including a 2h17m walk on 2026-09-19. Activities imported from Strava and Garmin do show one, so the feed looks inconsistent for no visible reason. After: a phone-ingested walk or ride carries the distance the watch already measured, which also feeds the activity feed's totals and the weekly summaries that currently undercount.</p>
+<p><span class="lab">Change</span>Read <code>DistanceRecord</code> aggregated over each exercise session's window in <code>HealthConnectGateway</code>, add <code>distance_m</code> to <code>WorkoutSample</code> on both sides of the wire, and pass it through the HC-1 promotion into the sink field that already exists. No migration — <code>activities.distance_m</code> is already there and already populated by other providers. Correct the <code>promote_health_connect_workouts</code> docstring, which currently records the belief that HC cannot supply this.</p>
+<p class="corr"><span class="lab">Refuter</span>Not yet independently refuted. Diagnosed 2026-09-20 from a live report that a walk showed no path on the map; the null distance was found alongside the null route and is the more tractable half. The claim that Google Health writes <code>DistanceRecord</code> is inferred from the same package (<code>com.fitbit.FitbitMobile</code>) already writing the step stream this app reads — likely, but confirm on device before building.</p>
+<details><summary>Evidence</summary><pre>Production: `select type, count(*), count(polyline), count(distance_m) from activities where source='healthconnect' group by 1` returns cycling 8/0/0, walking 5/0/0, workout 5/0/0 — zero distances across all 18 rows since 2026-05-13. By contrast Strava supplies distance on 61 of 61 ebike rides and Garmin on 319 of 319 cycling activities.
+`grep -rn DistanceRecord android/app/src/main/kotlin/` returns exactly two lines, both in `HealthConnectGateway.kt` — the import at :9 and the permission at :37. No read.
+The walk in question: `source_id 2026-09-19T14:05:05+00:00`, duration 8217 s, `distance_m` NULL, `raw` empty — nothing was received and discarded.</pre></details></div>
+<div class="rk">
+<div class="top"><div class="t">Exercise routes are never requested, so no phone-ingested activity can ever draw a map</div><div class="m">
+<span class="chip c-id">SA-P2</span>
+<span class="chip c-ship">shipped</span>
+<span class="chip c-v3">value 3</span>
+<span class="chip c-eff">M</span>
+<span class="chip c-eff">both</span>
+<span class="chip c-lens">reported-from-use</span>
+</div></div>
+<p><code>android.permission.health.READ_EXERCISE_ROUTE</code> is not declared in <code>AndroidManifest.xml</code>, and there is no reference to <code>ExerciseRoute</code> or <code>exerciseRouteResult</code> anywhere in the Kotlin source. <code>WorkoutSample</code> has no field for a track either. So <code>activities.polyline</code> is NULL for all 18 phone-ingested activities, <code>ActivityDetail.vue:690</code> gates the Route card on <code>v-if="activity.polyline"</code>, and the card is omitted entirely — no empty map, but no explanation either.</p>
+<p><span class="lab">Today</span>Today: a walk or ride the watch recorded with GPS shows no path, and nothing says why. Strava and Garmin activities do show one, so the behaviour reads as a bug in the map rather than as missing data. After: either the track is drawn, or — if the route genuinely is not available — the app can say so instead of silently hiding the card.</p>
+<p><span class="lab">Change</span>**Probe before building.** Health Connect only has a route if the writing app puts one there, and Fitbit historically did not write <code>ExerciseRoute</code>. Read <code>exerciseRouteResult</code> for one known-GPS session on the device and report what comes back; that single answer decides whether this is worth any further work. If routes ARE available: declare the permission (note it uses a separate per-route consent flow, not the ordinary grant sheet), add a polyline field to the wire model, encode to the same polyline format the sink already stores for Strava, and let the existing map render it unchanged. If they are NOT: make the empty state honest rather than invisible, and record the refusal here so it is not re-investigated.</p>
+<p class="corr"><span class="lab">Refuter</span>Not yet independently refuted, and deliberately scoped as probe-first. This is the shape of the SpO2 item in TODO.md — wiring a chain whose upstream may never produce data. The difference is that SpO2's blocker is a known upstream firmware bug, whereas here nobody has yet checked whether the data exists at all.</p>
+<details><summary>Evidence</summary><pre>`grep -riE 'ExerciseRoute|READ_EXERCISE_ROUTE|exerciseRouteResult' android/app/src/main/kotlin/ android/app/src/main/AndroidManifest.xml` returns nothing.
+The manifest declares fourteen health permissions; `READ_EXERCISE_ROUTE` is not among them.
+Production: zero of 18 `source='healthconnect'` activities have a non-null `polyline`, against 61 of 61 for Strava ebike rides and 318 of 319 for Garmin cycling.
+`frontend/src/views/ActivityDetail.vue:690` — `&lt;Card v-if="activity.polyline" title="Route"&gt;`.</pre></details></div>
+</div>
 <h2>Dead weight — things to delete rather than build</h2>
 <p>Eleven items where the right change removes code, rows or megabytes. Listed last not because they matter least but because none of them is urgent; several are the cheapest wins on the page.</p>
 <div class="rank">
@@ -1721,7 +1759,7 @@ re-walked.</p>
 
 <div class="foot">
   myvitals · internal audit, first pass · 2026-09-18 · against v0.39.1 (a5e5e49)<br>
-  13 lenses · 52 findings · 42 survived adversarial refutation · 45 ranked here, 3 merged into a sibling<br>
+  13 lenses · 52 findings · 42 survived adversarial refutation · 47 ranked here, 3 merged into a sibling<br>
   Generated by <code>scripts/sa_report.py</code> from <code>docs/sa-findings.json</code>. Do not edit
   this file by hand.
 </div></div>

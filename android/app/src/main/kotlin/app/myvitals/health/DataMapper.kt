@@ -44,6 +44,14 @@ object DataMapper {
         steps: List<StepsRecord>,
         sleep: List<SleepSessionRecord>,
         exercise: List<ExerciseSessionRecord>,
+        // SA-P1: one entry per `exercise` session, same order, from a
+        // DistanceRecord aggregate over that session's own window —
+        // HealthConnectGateway.distanceMetersFor() can't be called from
+        // here (it's a suspend HC round-trip; this mapper is pure), so
+        // SyncWorker resolves it first and hands the parallel list in.
+        // A missing/short entry (an older caller that never resolved
+        // distances) reads as null via getOrNull, never as 0.0.
+        exerciseDistances: List<Double?> = emptyList(),
         weight: List<WeightRecord> = emptyList(),
         bodyFat: List<BodyFatRecord> = emptyList(),
         leanMass: List<LeanBodyMassRecord> = emptyList(),
@@ -143,11 +151,12 @@ object DataMapper {
                     title = s.title,
                 )
             },
-            workouts = exercise.map { session ->
+            workouts = exercise.mapIndexed { index, session ->
                 WorkoutSample(
                     time = session.startTime.toString(),
                     type = exerciseTypeName(session.exerciseType),
                     durationS = (session.endTime.epochSecond - session.startTime.epochSecond).toInt(),
+                    distanceM = exerciseDistances.getOrNull(index),
                     source = session.metadata.dataOrigin.packageName.takeIf { it.isNotBlank() },
                     title = session.title,
                 )
@@ -201,7 +210,9 @@ object DataMapper {
         else -> "unknown"
     }
 
-    private fun exerciseTypeName(type: Int): String = when (type) {
+    // internal, not private: SA-P2's route probe in SyncWorker names the
+    // exercise type in its log line rather than logging the raw HC int.
+    internal fun exerciseTypeName(type: Int): String = when (type) {
         ExerciseSessionRecord.EXERCISE_TYPE_RUNNING -> "running"
         ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL -> "running_treadmill"
         ExerciseSessionRecord.EXERCISE_TYPE_WALKING -> "walking"

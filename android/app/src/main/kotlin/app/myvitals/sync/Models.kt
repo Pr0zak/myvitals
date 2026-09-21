@@ -38,6 +38,14 @@ data class WorkoutSample(
     val kcal: Double? = null,
     @Json(name = "avg_hr") val avgHr: Double? = null,
     @Json(name = "max_hr") val maxHr: Double? = null,
+    // SA-P1: Health Connect's DistanceRecord, aggregated over this
+    // session's own start/end window. Defaults to null, not 0.0 — an
+    // indoor session genuinely has no distance, and Moshi fills this
+    // default whenever a buffered/replayed batch's JSON omits the key,
+    // same as every other optional field here. A 0.0 default would be
+    // read downstream as "the user covered no distance", which is a
+    // measurement, not an absence.
+    @Json(name = "distance_m") val distanceM: Double? = null,
     val source: String? = null,
     val title: String? = null,
 )

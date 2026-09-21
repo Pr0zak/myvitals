@@ -20,6 +20,7 @@ import app.myvitals.data.BufferedBatch
 import app.myvitals.data.SettingsRepository
 import app.myvitals.health.DataMapper
 import app.myvitals.health.HealthConnectGateway
+import app.myvitals.health.RouteAvailability
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
@@ -349,11 +350,44 @@ class SyncWorker(
             val leanMass = safeRead(LeanBodyMassRecord::class, sliceStart, sliceEnd)
             val bp = safeRead(BloodPressureRecord::class, sliceStart, sliceEnd)
             val skinTemp = safeRead(SkinTemperatureRecord::class, sliceStart, sliceEnd)
+            // SA-P1: one aggregate call per exercise session, over that
+            // session's own start/end — not the whole slice window, which
+            // would attribute one day's total distance to every session in
+            // it. Same index order as `exercise`; DataMapper zips them back
+            // together positionally.
+            val exerciseDistances = exercise.map { session ->
+                safeDistance(session.startTime, session.endTime)
+            }
+            // SA-P2 probe: log which of HC's three route states came back
+            // for each exercise session — a category, never a coordinate.
+            // Not the route feature; see docs/sa-findings.json SA-P2.
+            // Capped per slice so a months-long manual backfill can't turn
+            // a diagnostic into hundreds of extra binder round-trips —
+            // production has only ever seen 18 HC-sourced activities total,
+            // so this bound should never actually bind in practice.
+            exercise.take(MAX_ROUTE_PROBES_PER_SLICE).forEach { session ->
+                val availability = safeRouteProbe(session.metadata.id)
+                if (availability != null) {
+                    // Writer package, not a coordinate — evidence for this
+                    // finding already showed more than one app publishing
+                    // exercise sessions (Fitbit + a third-party sync app),
+                    // and the answer differs by writer.
+                    val writer = session.metadata.dataOrigin.packageName.takeIf { it.isNotBlank() }
+                        ?: "unknown"
+                    Timber.tag(ROUTE_PROBE_TAG).i(
+                        "type=%s writer=%s duration_s=%d result=%s",
+                        DataMapper.exerciseTypeName(session.exerciseType),
+                        writer,
+                        session.endTime.epochSecond - session.startTime.epochSecond,
+                        availability,
+                    )
+                }
+            }
             Timber.i(
-                "HC reads %s..%s: hr=%d hrv=%d steps=%d sleep=%d exercise=%d weight=%d bodyFat=%d leanMass=%d bp=%d skinTemp=%d",
+                "HC reads %s..%s: hr=%d hrv=%d steps=%d sleep=%d exercise=%d weight=%d bodyFat=%d leanMass=%d bp=%d skinTemp=%d distanceHits=%d",
                 sliceStart, sliceEnd, hr.size, hrv.size, steps.size, sleep.size,
                 exercise.size, weight.size, bodyFat.size, leanMass.size, bp.size,
-                skinTemp.size,
+                skinTemp.size, exerciseDistances.count { it != null },
             )
             state.recordsPulled += hr.size + hrv.size + steps.size + sleep.size +
                 exercise.size + weight.size + bodyFat.size + leanMass.size +
@@ -361,6 +395,7 @@ class SyncWorker(
 
             val batch = DataMapper.toBatch(
                 hr, hrv, steps, sleep, exercise,
+                exerciseDistances = exerciseDistances,
                 weight = weight, bodyFat = bodyFat, leanMass = leanMass,
                 bloodPressure = bp, skinTemp = skinTemp,
             )
@@ -485,6 +520,49 @@ class SyncWorker(
             Timber.e(e, "HC read FAILED for %s — continuing with empty list", type.simpleName)
             state.errors += "HC ${type.simpleName}: ${e.javaClass.simpleName}: ${e.message?.take(160)}"
             emptyList()
+        }
+    }
+
+    /**
+     * Same error-containment idiom as [safeRead], for
+     * [HealthConnectGateway.distanceMetersFor] — a denied or failed
+     * aggregate must not lose the exercise session it was resolving
+     * distance for, so this returns null (a real "we don't know") rather
+     * than throwing out of the per-session map in [doWork].
+     */
+    private suspend fun safeDistance(since: Instant, until: Instant): Double? {
+        return try {
+            gateway.distanceMetersFor(since, until)
+        } catch (e: SecurityException) {
+            state.permissionsLost = true
+            val concise = "HC DistanceRecord denied: ${e.message?.lineSequence()?.firstOrNull()?.take(180)}"
+            Timber.e(concise)
+            state.errors += concise
+            null
+        } catch (e: Exception) {
+            Timber.e(e, "HC distance aggregate FAILED for %s..%s — continuing without it", since, until)
+            state.errors += "HC DistanceRecord: ${e.javaClass.simpleName}: ${e.message?.take(160)}"
+            null
+        }
+    }
+
+    /**
+     * SA-P2 probe wrapper — same error-containment idiom as [safeDistance].
+     * Not routed through [state.permissionsLost]/[state.errors]: this reads
+     * via `READ_EXERCISE`, which [safeRead] already covers and already
+     * flags there if it's lost, and a failure here is diagnostic-only —
+     * it must never turn into a retry or a heartbeat error for a probe
+     * nobody but this finding is watching.
+     */
+    private suspend fun safeRouteProbe(sessionId: String): RouteAvailability? {
+        return try {
+            gateway.routeAvailabilityFor(sessionId)
+        } catch (e: SecurityException) {
+            Timber.tag(ROUTE_PROBE_TAG).w("denied for session %s: %s", sessionId, e.message?.take(160))
+            null
+        } catch (e: Exception) {
+            Timber.tag(ROUTE_PROBE_TAG).w(e, "failed for session %s", sessionId)
+            null
         }
     }
 
@@ -666,6 +744,18 @@ class SyncWorker(
          */
         private const val SLICE_DAYS = 14L
         private const val BUFFER_ENTRY_TIMEOUT_MS = 240_000L
+
+        /** Tag for SA-P2's route-availability probe lines — grep the
+         *  server-side AppLog table for this instead of a free-text
+         *  search over ordinary sync messages. */
+        private const val ROUTE_PROBE_TAG = "HCRouteProbe"
+
+        /** Defensive cap on [safeRouteProbe] calls per slice. Each call
+         *  is one extra binder round-trip beyond the exercise-session
+         *  read that already happened; this is a diagnostic, not a
+         *  feature, so it must not turn a large manual backfill into
+         *  hundreds of individual HC reads. */
+        private const val MAX_ROUTE_PROBES_PER_SLICE = 20
 
         // Android's CursorWindow ceiling is ~2 MB; any single buffered_batches
         // row whose `json` column exceeds it throws SQLiteBlobTooBigException

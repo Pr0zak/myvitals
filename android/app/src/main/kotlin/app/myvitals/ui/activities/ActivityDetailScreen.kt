@@ -233,6 +233,21 @@ fun ActivityDetailScreen(
                     if (!a.polyline.isNullOrBlank() ||
                         (a.trailId != null && trails.any { it.id == a.trailId && it.latitude != null })) {
                         item { ActivityMap(a, trails, neon) }
+                    } else if (a.source == "healthconnect") {
+                        // SA-P3. This branch used to not exist: with no
+                        // polyline the whole card vanished, which is why a
+                        // walk whose GPS track was sitting in Health
+                        // Connect read as a broken map rather than as
+                        // missing data. Only for Health Connect sessions —
+                        // it is the one source this app can go and ask.
+                        item {
+                            RouteMissingCard(
+                                a = a,
+                                neon = neon,
+                                settings = settings,
+                                onRefreshed = { scope.launch { load() } },
+                            )
+                        }
                     }
                     if (hrPoints.isNotEmpty()) {
                         item { ActivityHrChart(hrPoints, maxHr = maxHr) }
@@ -857,6 +872,220 @@ private fun NeonTrailLinkCard(a: ActivityRow, trails: List<Trail>, onPick: () ->
                 Text("Tap to link a trail", color = NeonMV.Ink, fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold)
             }
+        }
+    }
+}
+
+/**
+ * SA-P3 — the Route card when there is no route to draw.
+ *
+ * Three states, and telling them apart is the whole point. Before this,
+ * all three rendered as the card not being there:
+ *
+ *  - `route_state == "consent_required"` — Health Connect HAS a track for
+ *    this session and is withholding it. Actionable, and the only one of
+ *    the three that is. This is the state the SA-P2 probe found on the
+ *    2026-09-19 walk from both writers.
+ *  - `route_state == "none"` — Health Connect was asked and there is no
+ *    track. An indoor dumbbell session, and nothing to fix.
+ *  - `route_state == null` — nobody has asked. Every session ingested
+ *    before this shipped. Not the same as "none", and rendering it as
+ *    "no GPS" would be a claim about data that was never read.
+ *
+ * The button is deliberately here, on the activity, rather than only in
+ * Settings: Google asks that routes be requested "upon deliberate user
+ * interaction with your app, when the user is actively engaged with your
+ * app's UI", and a tap on the specific walk you are looking at is exactly
+ * that. It is also the only place the read can work at all — a route
+ * written by another app is refused to a background worker whatever is
+ * granted, so the 15-minute sync cannot be the answer.
+ *
+ * What the button launches is the per-session route request, NOT a
+ * permission sheet. See [routeRequest] below: the all-routes permission is
+ * unrequestable by design and API 35+ besides, so a permission button
+ * would have done nothing on this device and would not have existed on an
+ * older one.
+ */
+@Composable
+private fun RouteMissingCard(
+    a: ActivityRow,
+    neon: Boolean,
+    settings: SettingsRepository,
+    onRefreshed: () -> Unit,
+) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
+    val ink = if (neon) NeonMV.Ink else MV.OnSurface
+    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
+    val errColor = if (neon) NeonMV.Bad else MV.Red
+
+    val gateway = remember { app.myvitals.health.HealthConnectGateway(ctx) }
+    // True once the user has turned on all-routes access in Health Connect
+    // settings. Not requestable from here — see below — but worth knowing,
+    // because when it IS on a plain read works and no dialog is needed.
+    var granted by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(Unit) {
+        granted = runCatching { gateway.hasRoutePermission() }.getOrDefault(false)
+    }
+
+    var busy by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    // Resolved just before the per-session dialog is launched, and kept so
+    // the result callback can build the sample from the same record.
+    var pending by remember {
+        mutableStateOf<androidx.health.connect.client.records.ExerciseSessionRecord?>(null)
+    }
+
+    /**
+     * The per-session route request — `ACTION_REQUEST_EXERCISE_ROUTE`,
+     * which `ExerciseRouteRequestContract` wraps.
+     *
+     * This, not a permission request, is the primary path, and that is not
+     * a fallback choice. The platform javadoc for `READ_EXERCISE_ROUTES`
+     * says plainly that "attempts to request the permission by
+     * applications will be ignored" — it is grantable only from Health
+     * Connect's own settings or from this very dialog — and it is API 35+
+     * besides, where this app's minSdk is 28. A button wired to the
+     * ordinary permission sheet would have opened a sheet that did
+     * nothing and reported failure the user could not act on.
+     *
+     * The contract hands back the `ExerciseRoute` itself on approval, so
+     * nothing has to be re-read afterwards.
+     */
+    val routeRequest = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.health.connect.client.contracts.ExerciseRouteRequestContract()
+    ) { route ->
+        val session = pending
+        pending = null
+        if (route == null || session == null) {
+            busy = false
+            failed = true
+            note = "Health Connect did not release the route. You can also " +
+                "turn on Health Connect \u2192 App permissions \u2192 myvitals " +
+                "\u2192 Exercise routes to allow all of them at once."
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            val result = app.myvitals.health.RouteBackfill.deliverOne(
+                ctx, settings, session, route,
+            )
+            busy = false
+            failed = result.error != null || result.tracks == 0
+            note = when {
+                result.error != null -> result.error
+                result.tracks > 0 -> "Route saved \u2014 reloading\u2026"
+                else -> "Health Connect released a route with too few points to draw."
+            }
+            if (result.tracks > 0) onRefreshed()
+        }
+    }
+
+    fun fetch() {
+        if (busy) return
+        busy = true
+        note = null
+        failed = false
+        scope.launch {
+            val start = runCatching { java.time.Instant.parse(a.startAt) }.getOrNull()
+            if (start == null) {
+                busy = false
+                failed = true
+                note = "Could not read this activity\u2019s start time."
+                return@launch
+            }
+            // With all-routes access already on, a plain foreground read
+            // gets the track with no dialog at all. A narrow window around
+            // this one session, not the whole 30 days: the user tapped one
+            // activity, and reading a month of sessions to answer about one
+            // of them is a binder round-trip each for nothing.
+            if (granted == true) {
+                val result = app.myvitals.health.RouteBackfill.run(
+                    ctx, settings,
+                    since = start.minusSeconds(3600),
+                    until = start.plusSeconds(a.durationS.toLong() + 3600),
+                )
+                if (result.tracks > 0 || result.error != null || result.noData > 0) {
+                    busy = false
+                    failed = result.error != null || result.tracks == 0
+                    note = when {
+                        result.error != null -> result.error
+                        result.tracks > 0 -> "Route found \u2014 reloading\u2026"
+                        else -> "Health Connect has no GPS track for this session."
+                    }
+                    if (result.tracks > 0) onRefreshed()
+                    return@launch
+                }
+                // Fell through on CONSENT_REQUIRED even with the grant
+                // held. Ask for this one session explicitly rather than
+                // telling the user something they cannot act on.
+            }
+            val session = runCatching { gateway.sessionStartingAt(start) }.getOrNull()
+            if (session == null) {
+                busy = false
+                failed = true
+                note = "Health Connect no longer has an exercise session at this time."
+                return@launch
+            }
+            pending = session
+            runCatching { routeRequest.launch(session.metadata.id) }.onFailure {
+                busy = false
+                pending = null
+                failed = true
+                note = "This device has no Health Connect route request screen."
+            }
+        }
+    }
+
+    val body: String = when {
+        a.routeState == "consent_required" ->
+            "Health Connect has a GPS track for this session and is holding it " +
+                "back until you allow route access."
+        a.routeState == "none" ->
+            "Health Connect was asked and has no GPS track for this session."
+        else ->
+            "No route has been requested for this session yet. It was recorded " +
+                "before this app read exercise routes."
+    }
+    // "none" is settled: the provider answered, and there is nothing to
+    // go and get. Offering a button there would invite a tap that can
+    // only ever fail.
+    val actionable = a.routeState != "none"
+
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(if (neon) NeonCardShape else RoundedCornerShape(12.dp))
+            .background(card)
+            .padding(16.dp),
+    ) {
+        Text(
+            "ROUTE", color = muted,
+            fontFamily = if (neon) NeonNumberFamily else null,
+            fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(body, color = ink, fontSize = 14.sp)
+        if (actionable) {
+            Spacer(Modifier.height(12.dp))
+            if (granted == false) {
+                Text(
+                    "Health Connect will ask about this one session. To stop " +
+                        "being asked per walk, turn on Exercise routes for " +
+                        "myvitals in Health Connect \u2192 App permissions. " +
+                        "Routes are separate from the rest of your health data, " +
+                        "and leaving them off never affects syncing.",
+                    color = muted, fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            OutlinedButton(onClick = { fetch() }, enabled = !busy) {
+                Text(if (busy) "Reading\u2026" else "Fetch route from Health Connect")
+            }
+        }
+        note?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, color = if (failed) errColor else muted, fontSize = 12.sp)
         }
     }
 }

@@ -88,6 +88,15 @@ private object Routes {
     const val SETTINGS = "settings"
 }
 
+/** SA-P3 — how often the on-launch route backfill may actually run.
+ *  Six hours: routes only appear when a session is recorded, and nobody
+ *  records more than a handful a day. */
+private const val ROUTE_BACKFILL_MIN_INTERVAL_S = 6L * 3600L
+
+/** Matches SyncWorker.MAX_LOOKBACK_DAYS. Anything older is the job of a
+ *  deliberate fetch from the activity's own Route card. */
+private const val ROUTE_BACKFILL_WINDOW_DAYS = 14L
+
 class MainActivity : ComponentActivity() {
     // Re-route to the shortcut's target tab when the user taps a static
     // app shortcut while the app is already running (singleTop + new
@@ -184,6 +193,58 @@ class MainActivity : ComponentActivity() {
                     intent?.removeExtra("apk_update_name")
                     intent?.removeExtra("apk_update_tag")
                 }
+            }
+
+            // SA-P3 — collect exercise routes, here, because here is the
+            // only place it can be done.
+            //
+            // Health Connect refuses a route written by ANOTHER app to a
+            // caller running in the background, whatever permission is
+            // held: "When your app runs in the background and tries to
+            // read an exercise route created by another app, Health
+            // Connect returns an ExerciseRouteResult.ConsentRequired
+            // response, even if your app has Always allow access to
+            // exercise route data." Every exercise session on this install
+            // is written by another app, so SyncWorker's 15-minute tick
+            // can never be the thing that produces a map. Launching the
+            // app can, and does — otherwise every walk would need its own
+            // tap on its own detail screen forever.
+            //
+            // Three deliberate restraints, because a silent network+HC
+            // pass on every launch is exactly the kind of thing that
+            // becomes a battery complaint:
+            //   - only when the grant is ALREADY held. This never prompts.
+            //     Asking is the detail screen's job, on a tap, where the
+            //     user can see what they are agreeing to.
+            //   - throttled to once every ROUTE_BACKFILL_MIN_INTERVAL_S,
+            //     so ten app switches in an afternoon is one pass.
+            //   - a 14-day window, matching SyncWorker.MAX_LOOKBACK_DAYS
+            //     rather than RouteBackfill's 30-day ceiling: this is the
+            //     routine top-up, and the wider sweep belongs to a
+            //     deliberate action.
+            LaunchedEffect(Unit) {
+                val now = System.currentTimeMillis() / 1000
+                val due = now - settings.lastRouteBackfillEpochSeconds >=
+                    ROUTE_BACKFILL_MIN_INTERVAL_S
+                if (!due || !settings.isConfigured()) return@LaunchedEffect
+                val granted = runCatching { gateway.hasRoutePermission() }
+                    .getOrDefault(false)
+                if (!granted) return@LaunchedEffect
+                // Stamped BEFORE the run, not after: a pass that fails
+                // should back off like one that succeeded, or a broken
+                // backend turns into a read on every single launch.
+                settings.lastRouteBackfillEpochSeconds = now
+                val result = app.myvitals.health.RouteBackfill.run(
+                    applicationContext, settings,
+                    since = java.time.Instant.now()
+                        .minusSeconds(ROUTE_BACKFILL_WINDOW_DAYS * 86_400L),
+                )
+                Timber.i(
+                    "Route backfill on launch: %d session(s), %d track(s), " +
+                        "%d withheld, %d with no route%s",
+                    result.sessions, result.tracks, result.consentRequired,
+                    result.noData, result.error?.let { " — $it" } ?: "",
+                )
             }
 
             // ONE shell. The Classic / Vitality Neon choice is retired: both

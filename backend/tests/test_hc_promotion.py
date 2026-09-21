@@ -64,10 +64,16 @@ class TestNeverOverwritesRicherData:
         src = inspect.getsource(activity_sink.promote_health_connect_workouts)
         assert "skipped_untimed" in src
 
-    def test_trail_linking_is_disabled(self):
-        """These have no GPS, so there is no trail to match against."""
+    def test_trail_linking_follows_whether_a_route_was_actually_read(self):
+        """Was unconditionally disabled, on the premise that these have no
+        GPS. SA-P3 falsified the premise: Health Connect does hold routes,
+        and a promoted session that carries one is exactly the case
+        `_auto_link_trail` exists for. It stays off without a polyline --
+        that path reads `act.polyline` and would otherwise cost a query on
+        every indoor session to do nothing.
+        """
         src = inspect.getsource(activity_sink.promote_health_connect_workouts)
-        assert "link_trail=False" in src
+        assert 'link_trail=values.get("polyline") is not None' in src
 
 
 class TestIdempotence:

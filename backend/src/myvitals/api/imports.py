@@ -126,13 +126,20 @@ async def _upsert_activities_chunk(db: AsyncSession, rows: list[dict[str, Any]])
     # wiped every restored map on the next import — that is what erased the
     # Garmin tracks before.
     #
+    # `route_state` (SA-P3) is excluded for exactly the same reason, and
+    # would have repeated exactly the same bug. No import parser emits it,
+    # so `stmt.excluded.route_state` is the column default — NULL — and
+    # listing it here would reset every "Health Connect is withholding a
+    # route for this session" back to "nobody asked" on the next import,
+    # silently turning an actionable card into an inert one.
+    #
     # The one rule it cannot honour is the sink's skip-None: a single bulk
     # statement covers many rows, so there is no per-row notion of "this
     # provider had nothing to say about that field". Import parsers must
     # therefore emit complete rows.
     from ..integrations.activity_sink import PROVIDER_COLUMNS
 
-    writable = set(PROVIDER_COLUMNS) - {"polyline"}
+    writable = set(PROVIDER_COLUMNS) - {"polyline", "route_state"}
     update_cols = {c.name: c for c in stmt.excluded if c.name in writable}
     stmt = stmt.on_conflict_do_update(index_elements=["source", "source_id"], set_=update_cols)
     await db.execute(stmt)

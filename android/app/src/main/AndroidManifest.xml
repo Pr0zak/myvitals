@@ -26,6 +26,42 @@
     <uses-permission android:name="android.permission.health.READ_LEAN_BODY_MASS" />
     <uses-permission android:name="android.permission.health.READ_BLOOD_PRESSURE" />
 
+    <!-- SA-P3 — exercise routes (the GPS track on a walk or a ride).
+         Note the PLURAL: `READ_EXERCISE_ROUTES` is the all-routes grant,
+         and it is a different thing from the per-session route request
+         (ACTION_REQUEST_EXERCISE_ROUTE / ExerciseRouteRequestContract),
+         which releases exactly one track after a system dialog.
+
+         Declared but NEVER requested, because requesting it does
+         nothing. The platform javadoc for READ_EXERCISE_ROUTES: "This
+         permission can only be granted manually by a user in Health
+         Connect settings or in the route request activity which can be
+         launched using ACTION_REQUEST_EXERCISE_ROUTE. Attempts to request
+         the permission by applications will be ignored." It is also API
+         35+ and minSdk here is 28. The manifest entry is still required —
+         without it the toggle does not exist in Health Connect settings
+         either — and when the user does turn it on, one foreground pass
+         collects every route instead of one dialog per walk.
+
+         It is deliberately NOT in
+         HealthConnectGateway.requiredPermissions. That set is the gate
+         SyncWorker checks before reading anything, and a permission that
+         cannot be requested would have held it false forever, stopping
+         heart rate, sleep and steps and reporting itself as "Health
+         Connect permissions lost".
+
+         And it is not sufficient even when held. Google: "When your app
+         runs in the background and tries to read an exercise route
+         created by another app, Health Connect returns an
+         ExerciseRouteResult.ConsentRequired response, even if your app has
+         Always allow access to exercise route data." Every route here is
+         written by another app (Fitbit / Google Health, and healthsync),
+         so the 15-minute SyncWorker is refused however this is granted —
+         which is why RouteBackfill runs in the foreground.
+         See developer.android.com/health-and-fitness/health-connect/
+         features/exercise-routes. -->
+    <uses-permission android:name="android.permission.health.READ_EXERCISE_ROUTES" />
+
     <!-- Required so WorkManager (15-min background sync) can read HC.
          Without this, every sync fired while the phone is asleep
          throws SecurityException despite per-record perms being

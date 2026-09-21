@@ -156,8 +156,33 @@ class WorkoutSample(BaseModel):
     # on `workouts` (see ingest_batch below); it only ever flows through to
     # `activities.distance_m` via the HC-1 promotion.
     distance_m: float | None = None
+    # SA-P3: the session's GPS track, already encoded on the phone as a
+    # Google polyline at precision 5 -- the same encoding Strava's
+    # `summary_polyline` arrives in and the same one both clients' Leaflet
+    # renderers decode, so nothing downstream had to change to draw it.
+    # Encoded phone-side rather than posted as raw coordinates because a
+    # 2h17m walk is thousands of points, and the ingest batch is already
+    # sliced to stay under Android's CursorWindow when it has to buffer.
+    # Optional and null by default: most sessions have no route, and a
+    # client too old to read one must keep ingesting.
+    polyline: str | None = None
+    # Why there is no polyline, when Health Connect was asked and could
+    # answer: "consent_required" (a route is stored and withheld pending
+    # the route grant) or "none" (asked, and there is no route). Absent
+    # means nobody asked. Three states, deliberately -- collapsing the
+    # first two is what made a withheld route look like an empty map.
+    route_state: str | None = None
     source: str | None = None
     title: str | None = None
+
+
+#: Fields a `WorkoutSample` carries for the HC-1 promotion only. `workouts`
+#: has no column for any of them, so they must be excluded from the raw
+#: insert -- named once here so adding the next one cannot land in the
+#: Pydantic model and be forgotten at the `model_dump`.
+_WORKOUT_PROMOTION_ONLY: frozenset[str] = frozenset(
+    {"distance_m", "polyline", "route_state"},
+)
 
 
 class BodyMetricSample(BaseModel):
@@ -235,12 +260,17 @@ async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) ->
         await _bulk_upsert(
             db,
             models.Workout,
-            # `distance_m` is excluded here -- `workouts` has no such
-            # column (see the WorkoutSample docstring above) and an
-            # unrecognised key in a multi-row VALUES list fails the whole
-            # insert. It reaches `activities.distance_m` via the promotion
-            # call below instead, which is the only place it needs to be.
-            (w.model_dump(exclude={"distance_m"}) for w in batch.workouts),
+            # `distance_m`, `polyline` and `route_state` are excluded here
+            # -- `workouts` has no such columns (see the WorkoutSample
+            # docstring above) and an unrecognised key in a multi-row
+            # VALUES list fails the whole insert, for every sample in the
+            # batch rather than just the one carrying the extra key. They
+            # reach `activities` via the promotion call below instead,
+            # which is the only place they need to be.
+            (
+                w.model_dump(exclude=_WORKOUT_PROMOTION_ONLY)
+                for w in batch.workouts
+            ),
             ["time"],
             update_cols=["type", "duration_s", "kcal", "avg_hr", "max_hr", "source", "title"],
         )
@@ -262,8 +292,26 @@ async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) ->
                 for w in batch.workouts
                 if w.distance_m is not None
             }
+            # SA-P3: the route travels the same way, for the same reason.
+            # Built with the same `is not None` filter so a sample that
+            # says nothing about its route contributes no key at all --
+            # which is what lets `upsert_activity`'s skip-None rule leave a
+            # polyline an earlier pass found (or a richer provider wrote)
+            # exactly where it is.
+            polyline_by_start = {
+                w.time.isoformat(): w.polyline
+                for w in batch.workouts
+                if w.polyline is not None
+            }
+            route_state_by_start = {
+                w.time.isoformat(): w.route_state
+                for w in batch.workouts
+                if w.route_state is not None
+            }
             promo = await activity_sink.promote_health_connect_workouts(
                 db, since=earliest, distance_by_start=distance_by_start,
+                polyline_by_start=polyline_by_start,
+                route_state_by_start=route_state_by_start,
             )
             if promo["promoted"]:
                 counts["activities_promoted"] = promo["promoted"]

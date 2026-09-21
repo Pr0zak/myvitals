@@ -867,7 +867,7 @@
   {
    "id": "SA-P3",
    "batch": "gap",
-   "status": "todo",
+   "status": "shipped",
    "title": "Routes exist and are one consent away — the probe came back CONSENT_REQUIRED, not NO_DATA",
    "task": "Health Connect holds a route for the walk and withholds it pending `READ_EXERCISE_ROUTE`; declare the permission, request it through the route consent flow, and carry a polyline on the wire so phone-ingested activities can draw a map",
    "lens": "probe-result",

@@ -91,6 +91,12 @@ class ActivityOut(BaseModel):
     kcal: float | None
     suffer_score: float | None
     polyline: str | None
+    #: SA-P3 -- why there is no polyline, when the provider could say.
+    #: "consent_required" / "none", or null when nobody asked (every row
+    #: written before the phone read routes). The clients need all three
+    #: to tell a withheld route from a session that never had one; before
+    #: this the Route card just vanished for both.
+    route_state: str | None = None
     notes: str | None = None
     tags: list[str] | None = None
     trail_id: int | None = None
@@ -254,6 +260,7 @@ def _activity_to_out(
         avg_hr=a.avg_hr, max_hr=a.max_hr,
         avg_power_w=a.avg_power_w, max_power_w=a.max_power_w,
         kcal=a.kcal, suffer_score=a.suffer_score, polyline=a.polyline,
+        route_state=a.route_state,
         notes=a.notes, tags=a.tags,
         trail_id=a.trail_id, trail_name=trail_name,
     )

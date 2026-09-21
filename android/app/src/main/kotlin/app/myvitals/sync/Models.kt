@@ -46,6 +46,24 @@ data class WorkoutSample(
     // read downstream as "the user covered no distance", which is a
     // measurement, not an absence.
     @Json(name = "distance_m") val distanceM: Double? = null,
+    // SA-P3: the session's GPS track as a Google encoded polyline,
+    // precision 5 — the format `activities.polyline` already holds for
+    // Strava and Garmin, so the map that draws those draws this. Encoded
+    // on this side rather than posted as coordinates: a 2h17m walk is
+    // thousands of fixes, and a buffered batch has to fit inside
+    // Android's CursorWindow.
+    //
+    // Null by default, and that default is load-bearing in the direction
+    // CLAUDE.md warns about: absence must mean "this sample says nothing
+    // about a route", because the backend builds `polyline_by_start` with
+    // an `is not None` filter and a key that is present overwrites. An
+    // empty-string default would post `""` for every indoor session and
+    // blank a track a previous sync found.
+    val polyline: String? = null,
+    // Why there is no polyline, when Health Connect was asked and could
+    // answer: "consent_required" or "none". Null means nobody asked —
+    // a third state, not a synonym for the second. See RouteRead.
+    @Json(name = "route_state") val routeState: String? = null,
     val source: String? = null,
     val title: String? = null,
 )
@@ -1382,6 +1400,11 @@ data class ActivityRow(
     @Json(name = "avg_power_w") val avgPowerW: Double? = null,
     @Json(name = "kcal") val kcal: Double? = null,
     val polyline: String? = null,
+    // SA-P3 — why there is no polyline, when the provider could say.
+    // "consent_required" / "none" / null (nobody asked). Null-defaulted so
+    // a backend older than v0.42 keeps deserialising; the detail screen
+    // reads that as "unknown", which is what it is.
+    @Json(name = "route_state") val routeState: String? = null,
     val notes: String? = null,
     val tags: List<String>? = null,
     @Json(name = "trail_id") val trailId: Long? = null,

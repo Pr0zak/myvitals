@@ -59,6 +59,11 @@ PROVIDER_COLUMNS: tuple[str, ...] = (
     "elevation_gain_m", "avg_hr", "max_hr", "avg_power_w", "max_power_w",
     "kcal", "suffer_score", "polyline", "raw",
     "hr_recovery_60s", "hr_recovery_120s",
+    # SA-P3. Why there is no polyline, when the provider could say. Listed
+    # here so the skip-None rule governs it like every other provider
+    # column: a pass that has nothing to say about the route must not
+    # erase what an earlier pass learned.
+    "route_state",
 )
 
 # Columns the user owns. Listed so the rule is documented in code rather than
@@ -153,6 +158,12 @@ async def _retire_promotion(
     column. Two different trails on two rows is a genuine conflict between
     two of the user's own decisions, and this is not the code to resolve it.
 
+    A GPS track is carried too, though it is not user-owned (SA-P3). It is
+    carried for the plainer reason that this function deletes the row it is
+    on, and until routes existed there was never one to lose. Strictly onto
+    a winner that has none — a richer provider's own track is never
+    replaced.
+
     Same discipline as MEAL-3's shopping list, where only a demonstrably
     complete cancellation may drop a line.
     """
@@ -196,6 +207,35 @@ async def _retire_promotion(
             ", ".join(sorted(carried)), source_id,
             winner.source, winner.source_id,
         )
+
+    # SA-P3 — the track is not user-owned, and until routes existed there
+    # was never one on a promoted row, so it was never at risk here. Now
+    # there can be, and this function DELETES the row.
+    #
+    # The 2026-09-19 walk is the case: two Health Connect writers published
+    # it, `com.fitbit.FitbitMobile` at 8217 s and `nl.appyhapps.healthsync`
+    # at 8213 s, four seconds apart. The dedupe keeps one and deletes the
+    # other, and nothing says the survivor is the one whose route Health
+    # Connect released. Deleting the only copy of a track the user just
+    # granted access to would be the worst possible outcome of a feature
+    # whose entire point is that the track appears.
+    #
+    # Strictly gap-filling, never a downgrade: carried ONLY onto a winner
+    # that has no polyline at all, so a Strava or Garmin recording keeps
+    # its own. `polyline_simple` is a cached simplification of the OLD
+    # value and has to go with it -- same reasoning as `upsert_activity`.
+    if winner is not None and stale.polyline and not winner.polyline:
+        winner.polyline = stale.polyline
+        winner.polyline_simple = None
+        log.info(
+            "activity_sink: carried the route from HC promotion %s to %s/%s "
+            "before retiring it",
+            source_id, winner.source, winner.source_id,
+        )
+    # Same for the explanation, and for the same reason: the surviving row
+    # would otherwise say "nobody asked" about a session that was asked.
+    if winner is not None and stale.route_state and not winner.route_state:
+        winner.route_state = stale.route_state
 
     await db.execute(
         delete(models.Activity)
@@ -271,6 +311,8 @@ def _hc_activity_values(
     start: datetime,
     source_id: str,
     distance_by_start: dict[str, float] | None,
+    polyline_by_start: dict[str, str] | None = None,
+    route_state_by_start: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """The row `promote_health_connect_workouts` hands to `upsert_activity`.
 
@@ -286,6 +328,19 @@ def _hc_activity_values(
     row, and its skip-None rule means an UPDATE never uses it to blank out
     a distance a richer provider (or an earlier call to this same function,
     with batch data this one lacks) already stored.
+
+    `polyline_by_start` (SA-P3) is the same side-channel, carrying a Google
+    encoded polyline at precision 5 -- byte-identical in shape to what
+    Strava stores in this column, so the existing Leaflet renderers on both
+    clients need no change. It obeys the same None rule for the same
+    reason, which matters more here than for distance: a Health Connect
+    route is a watch track, and it must never be written over a row a
+    richer provider already filled.
+
+    `route_state_by_start` records WHY there is no polyline, when Health
+    Connect was asked and could answer -- "consent_required" or "none".
+    Absent means nobody asked, and that is a third state, not a synonym
+    for "none"; see the 0068 migration.
     """
     return {
         "source": HC_SOURCE,
@@ -300,6 +355,8 @@ def _hc_activity_values(
         "max_hr": w.max_hr,
         "kcal": w.kcal,
         "distance_m": (distance_by_start or {}).get(source_id),
+        "polyline": (polyline_by_start or {}).get(source_id),
+        "route_state": (route_state_by_start or {}).get(source_id),
         # `name` deliberately omitted. `workouts.title` comes from
         # whichever app wrote the HC record, and the feed already
         # renders the type; a borrowed title adds nothing and can
@@ -311,6 +368,8 @@ async def promote_health_connect_workouts(
     db: AsyncSession,
     since: datetime | None = None,
     distance_by_start: dict[str, float] | None = None,
+    polyline_by_start: dict[str, str] | None = None,
+    route_state_by_start: dict[str, str] | None = None,
 ) -> dict[str, int]:
     """Copy Health Connect exercise sessions into the activities feed.
 
@@ -320,16 +379,22 @@ async def promote_health_connect_workouts(
     first GPS fix, the watch on the button press — and a fixed ± window
     either misses real duplicates or merges genuinely separate sessions.
 
-    Providers with GPS are strictly richer: they carry elevation and a
-    polyline Health Connect has no equivalent for, and their distance is
-    measured from GPS rather than a step-count estimate. (Earlier text here
-    claimed Health Connect's session record carries no distance at all —
-    true of the *session* record, but Health Connect also exposes a
+    Providers with GPS are still treated as richer: they carry elevation,
+    their distance is measured from GPS rather than a step-count estimate,
+    and a Strava or Garmin track is a full-fidelity recording where Health
+    Connect's is whatever the writing app chose to publish. (Two earlier
+    claims here have now both been corrected by measurement. The first said
+    Health Connect's session record carries no distance at all — true of
+    the *session* record, but Health Connect also exposes a
     `DistanceRecord` aggregate over the session's own window, which
-    `HealthConnectGateway` now reads. That was the actual gap, not a
-    platform limitation, and SA-P1 closed it.) So when both have a session,
-    the existing one wins and this does nothing. This fills gaps; it never
-    overwrites.
+    `HealthConnectGateway` now reads; SA-P1 closed that. The second said it
+    has "no equivalent" for a polyline. It does: `ExerciseRouteResult`
+    carries one, and the probe that shipped with SA-P1 came back
+    `CONSENT_REQUIRED` — a route existed and was being withheld, not
+    absent. SA-P3 closed that too. Neither was a platform limitation; both
+    were things this app had never asked for.) So when both providers have
+    a session, the existing one wins and this does nothing. This fills
+    gaps; it never overwrites.
 
     ``distance_by_start`` is an optional ``{start.isoformat(): meters}`` map
     for the distance Health Connect reported for each session, keyed the
@@ -550,11 +615,20 @@ async def promote_health_connect_workouts(
             .limit(1)
         )).scalar_one_or_none()
 
+        values = _hc_activity_values(
+            w, hc_type, start, source_id, distance_by_start,
+            polyline_by_start, route_state_by_start,
+        )
         await upsert_activity(
             db,
-            _hc_activity_values(w, hc_type, start, source_id, distance_by_start),
-            # No GPS on these, so there is no trail to match.
-            link_trail=False,
+            values,
+            # Until SA-P3 these never had GPS, so there was never a trail to
+            # match and this was unconditionally False. Now a promoted
+            # session may carry a route, and `_auto_link_trail` is exactly
+            # the thing that should run when it does. Still False without
+            # one: that path reads `act.polyline` and would do nothing but
+            # cost a query on every indoor session.
+            link_trail=values.get("polyline") is not None,
         )
         if exists is None:
             promoted += 1

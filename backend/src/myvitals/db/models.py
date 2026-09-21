@@ -462,6 +462,14 @@ class Activity(Base):
     # Derived + lazily backfilled — null means "not computed yet", never
     # "no GPS". `polyline` stays the source of truth.
     polyline_simple: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Why there is no `polyline`, when the provider was asked and could
+    #: say (0068, SA-P3). `"consent_required"` — Health Connect holds a
+    #: route and is withholding it pending the route grant;
+    #: `"none"` — Health Connect was asked and has no route for this
+    #: session; NULL — nobody asked, which is every row written before
+    #: the phone read routes at all. NULL is not "no route": the whole
+    #: point of the column is that those are different answers.
+    route_state: Mapped[str | None] = mapped_column(String(24), nullable=True)
     raw: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)), nullable=True)

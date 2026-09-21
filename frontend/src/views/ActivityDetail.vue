@@ -263,6 +263,32 @@ const activityCentroid = computed<[number, number] | null>(() => {
   return [sLat / polylineCoords.length, sLng / polylineCoords.length];
 });
 
+/**
+ * SA-P3 — which of the three no-route states this activity is in, in
+ * words. Derived, never decided here: the state is computed on the phone
+ * against Health Connect and stored on the row, for the same reason
+ * `analytics/compare.py` owns `better` and `_goal_progress` owns
+ * `state_tone` — a client guessing at it would eventually tell the user a
+ * route is waiting for them when Health Connect has already said there
+ * is none.
+ *
+ * `null` is deliberately NOT read as "no route". It means nobody has
+ * asked, which is every activity ingested before routes were read, and
+ * saying "there is no GPS track" about data that was never requested is
+ * the same class of false confidence the null-is-not-zero rule exists to
+ * prevent everywhere else in this app.
+ */
+const routeEmptyText = computed(() => {
+  switch (activity.value?.route_state) {
+    case "consent_required":
+      return "Health Connect has a GPS track for this session and is holding it back until route access is granted on your phone.";
+    case "none":
+      return "Health Connect was asked and has no GPS track for this session.";
+    default:
+      return "No route has been requested for this session yet — it was recorded before this app read exercise routes.";
+  }
+});
+
 const nearbyTrails = computed(() => {
   const c = activityCentroid.value;
   if (!c) return [];
@@ -731,6 +757,37 @@ async function submitEdit() {
           <div ref="mapEl" class="map"></div>
         </Card>
 
+        <Card v-else-if="activity.source === 'healthconnect'" title="Route">
+          <!--
+            SA-P3 — the Route card when there is no route. Until now this
+            card simply was not rendered without a polyline, which is why a
+            walk whose GPS track was sitting in Health Connect read as a
+            broken map rather than as missing data. Three states, and they
+            are not interchangeable: a track that exists and is withheld, a
+            session that genuinely has none, and a session nobody has asked
+            about yet.
+
+            Only for `healthconnect`. Strava and Garmin either send a track
+            or never had one, and there is no second place to go and ask,
+            so a card there would be an explanation with no action.
+
+            The action lives on the PHONE, and this says so rather than
+            offering a button that cannot work: the route is in Health
+            Connect on the device, the browser has no path to it, and
+            Google requires the read to happen while the user is engaged
+            with the app's own UI.
+          -->
+          <p class="route-empty">{{ routeEmptyText }}</p>
+          <p v-if="activity.route_state !== 'none'" class="route-empty hint">
+            Open this activity in the phone app and tap
+            <strong>Fetch route from Health Connect</strong>. Health Connect will
+            ask about this session specifically — routes are released one at a
+            time unless <em>Exercise routes</em> is switched on for myvitals in
+            Health Connect &rarr; App permissions. Either way the asking has to
+            happen on the phone; a browser has no path to the data.
+          </p>
+        </Card>
+
         <Card v-if="hrZoneStreamOption" title="HR zones over time">
           <div class="chart"><VChart ref="streamChartRef" :option="hrZoneStreamOption" autoresize @updateAxisPointer="onStreamChartAxisPointer"/></div>
         </Card>
@@ -940,6 +997,8 @@ dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
 .zone-pct { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
 
 .empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
+.route-empty { color: var(--text); margin: 0 0 0.5rem; line-height: 1.5; }
+.route-empty.hint { color: var(--muted-2); font-size: 0.85rem; margin-bottom: 0; }
 .err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
 
 .tag-row { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.6rem; }

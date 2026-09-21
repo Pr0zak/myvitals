@@ -20,7 +20,7 @@ import app.myvitals.data.BufferedBatch
 import app.myvitals.data.SettingsRepository
 import app.myvitals.health.DataMapper
 import app.myvitals.health.HealthConnectGateway
-import app.myvitals.health.RouteAvailability
+import app.myvitals.health.RouteRead
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
@@ -358,16 +358,29 @@ class SyncWorker(
             val exerciseDistances = exercise.map { session ->
                 safeDistance(session.startTime, session.endTime)
             }
-            // SA-P2 probe: log which of HC's three route states came back
-            // for each exercise session — a category, never a coordinate.
-            // Not the route feature; see docs/sa-findings.json SA-P2.
-            // Capped per slice so a months-long manual backfill can't turn
-            // a diagnostic into hundreds of extra binder round-trips —
-            // production has only ever seen 18 HC-sourced activities total,
-            // so this bound should never actually bind in practice.
-            exercise.take(MAX_ROUTE_PROBES_PER_SLICE).forEach { session ->
-                val availability = safeRouteProbe(session.metadata.id)
-                if (availability != null) {
+            // SA-P3: read each session's route, and keep SA-P2's probe
+            // line while doing it — the log is how a regression here
+            // becomes visible, since a route silently reverting to
+            // CONSENT_REQUIRED looks identical to a walk with no GPS.
+            // Still a category and a count, never a coordinate.
+            //
+            // This will mostly answer CONSENT_REQUIRED however the
+            // permission is granted, and that is not a bug to chase:
+            // Health Connect refuses routes written by other apps to a
+            // caller running in the background, which a WorkManager tick
+            // always is. The value of doing it anyway is the state — it
+            // is what lets the Route card say "a route exists, grant
+            // access" instead of disappearing. RouteBackfill, launched
+            // from the foreground, is what actually produces a map.
+            //
+            // Capped per slice so a months-long manual backfill can't
+            // turn one extra binder round-trip per session into hundreds.
+            // Sessions past the cap get a null entry, which DataMapper
+            // reads as "nobody asked" rather than "no route".
+            val exerciseRoutes = exercise.mapIndexed { index, session ->
+                if (index >= MAX_ROUTE_PROBES_PER_SLICE) return@mapIndexed null
+                val route = safeRouteProbe(session.metadata.id)
+                if (route != null) {
                     // Writer package, not a coordinate — evidence for this
                     // finding already showed more than one app publishing
                     // exercise sessions (Fitbit + a third-party sync app),
@@ -375,13 +388,15 @@ class SyncWorker(
                     val writer = session.metadata.dataOrigin.packageName.takeIf { it.isNotBlank() }
                         ?: "unknown"
                     Timber.tag(ROUTE_PROBE_TAG).i(
-                        "type=%s writer=%s duration_s=%d result=%s",
+                        "type=%s writer=%s duration_s=%d result=%s points=%d",
                         DataMapper.exerciseTypeName(session.exerciseType),
                         writer,
                         session.endTime.epochSecond - session.startTime.epochSecond,
-                        availability,
+                        route.probeLabel,
+                        (route as? RouteRead.Track)?.points ?: 0,
                     )
                 }
+                route
             }
             Timber.i(
                 "HC reads %s..%s: hr=%d hrv=%d steps=%d sleep=%d exercise=%d weight=%d bodyFat=%d leanMass=%d bp=%d skinTemp=%d distanceHits=%d",
@@ -389,6 +404,9 @@ class SyncWorker(
                 exercise.size, weight.size, bodyFat.size, leanMass.size, bp.size,
                 skinTemp.size, exerciseDistances.count { it != null },
             )
+            exerciseRoutes.count { it is RouteRead.Track }.takeIf { it > 0 }?.let {
+                Timber.i("HC routes: %d session(s) released a track", it)
+            }
             state.recordsPulled += hr.size + hrv.size + steps.size + sleep.size +
                 exercise.size + weight.size + bodyFat.size + leanMass.size +
                 bp.size + skinTemp.size
@@ -396,6 +414,7 @@ class SyncWorker(
             val batch = DataMapper.toBatch(
                 hr, hrv, steps, sleep, exercise,
                 exerciseDistances = exerciseDistances,
+                exerciseRoutes = exerciseRoutes,
                 weight = weight, bodyFat = bodyFat, leanMass = leanMass,
                 bloodPressure = bp, skinTemp = skinTemp,
             )
@@ -554,9 +573,9 @@ class SyncWorker(
      * it must never turn into a retry or a heartbeat error for a probe
      * nobody but this finding is watching.
      */
-    private suspend fun safeRouteProbe(sessionId: String): RouteAvailability? {
+    private suspend fun safeRouteProbe(sessionId: String): RouteRead? {
         return try {
-            gateway.routeAvailabilityFor(sessionId)
+            gateway.routeFor(sessionId)
         } catch (e: SecurityException) {
             Timber.tag(ROUTE_PROBE_TAG).w("denied for session %s: %s", sessionId, e.message?.take(160))
             null

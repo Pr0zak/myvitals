@@ -46,6 +46,21 @@ class SettingsRepository(context: Context) {
         set(value) = plain.edit().putLong(KEY_LAST_DEEP_SWEEP, value).apply()
 
     /**
+     * SA-P3 — last time a FOREGROUND exercise-route backfill ran.
+     *
+     * Routes cannot be collected by `SyncWorker`: Health Connect refuses a
+     * route written by another app to a caller running in the background,
+     * whatever permission is held, and every route on this install is
+     * written by another app. So the only opportunity is while the user
+     * has the app open, and `MainActivity` takes it on launch. Throttled
+     * through this key so re-entering the app ten times in an afternoon is
+     * not ten passes over every session in the window.
+     */
+    var lastRouteBackfillEpochSeconds: Long
+        get() = plain.getLong(KEY_LAST_ROUTE_BACKFILL, 0L)
+        set(value) = plain.edit().putLong(KEY_LAST_ROUTE_BACKFILL, value).apply()
+
+    /**
      * Start of a user-requested historical backfill, or 0 for none.
      *
      * Kept separate from [lastSyncEpochSeconds] because the two mean
@@ -159,6 +174,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_TOKEN = "bearer_token"
         private const val KEY_LAST_SYNC = "last_sync_epoch_s"
         private const val KEY_LAST_DEEP_SWEEP = "last_deep_sweep_epoch_s"
+        private const val KEY_LAST_ROUTE_BACKFILL = "last_route_backfill_epoch_s"
         private const val KEY_BACKFILL_FROM = "backfill_from_epoch_s"
         private const val KEY_LAST_SUCCESS = "last_success_epoch_s"
         private const val KEY_PERMS_LOST = "perms_lost"

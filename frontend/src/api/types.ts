@@ -209,6 +209,16 @@ export interface Activity {
   kcal: number | null;
   suffer_score: number | null;
   polyline: string | null;
+  /**
+   * SA-P3 — why there is no `polyline`, when the provider was asked and
+   * could answer. `"consent_required"`: Health Connect holds a GPS track
+   * for this session and is withholding it until route access is granted
+   * on the phone. `"none"`: it was asked and there is no track.
+   * `null`/absent: nobody asked — every activity ingested before routes
+   * were read, and a genuinely different answer from `"none"`. Optional
+   * because a backend older than v0.42 does not send it.
+   */
+  route_state?: string | null;
   notes?: string | null;
   tags?: string[] | null;
   trail_id?: number | null;

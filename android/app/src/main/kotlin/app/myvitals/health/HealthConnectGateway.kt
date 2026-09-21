@@ -7,6 +7,7 @@ import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.BloodPressureRecord
 import androidx.health.connect.client.records.BodyFatRecord
 import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.ExerciseRoute
 import androidx.health.connect.client.records.ExerciseRouteResult
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
@@ -27,26 +28,58 @@ import java.time.Instant
 import kotlin.reflect.KClass
 
 /**
- * SA-P2: the three states Health Connect reports for one exercise
- * session's route — never the route itself, which this app never reads.
+ * SA-P3: one session's route, read rather than merely classified.
  *
- * - [AVAILABLE] — HC holds route data AND this app already has standing
- *   to read it. Since neither `READ_EXERCISE_ROUTE` nor a per-session
- *   consent grant has ever been requested as of this probe, this value
- *   is not expected to appear yet; if it does, something upstream
- *   already granted access.
- * - [CONSENT_REQUIRED] — HC holds route data for this session, but this
- *   app hasn't been granted it. This is the useful "yes": it proves the
- *   writing app (whatever wrote this session — Fitbit / Google Health /
- *   the phone) DOES attach a route to at least some sessions, discovered
- *   without requesting any new permission.
- * - [NO_DATA] — HC has no route for this session at all. If every recent
- *   outdoor session (running/walking/biking) comes back this way, that
- *   matches the historical belief that Fitbit doesn't write
- *   `ExerciseRoute`, and SA-P2 can close as a documented refusal instead
- *   of an open question.
+ * Replaces SA-P2's `RouteAvailability` enum, which only named the three
+ * states. That was the right shape while the question was "does a route
+ * exist"; the probe answered it (CONSENT_REQUIRED, from both writers, on
+ * the 2026-09-19 walk) and the question is now "give me the track". The
+ * enum is gone rather than kept beside this, so there is one vocabulary
+ * for the three states and not two that can drift.
+ *
+ * Deliberately not `ExerciseRoute?` — null would collapse the two ways of
+ * having no track back into one, which is the exact mistake the Route card
+ * made by simply vanishing. A withheld route and an indoor session are
+ * different facts and the user can act on only one of them.
+ *
+ * [Track.polyline] is already ENCODED. The raw coordinates never leave
+ * [HealthConnectGateway.routeFor]: nothing upstream of it has a use for a
+ * list of lat/lngs, and a value that cannot be held cannot be logged by
+ * accident.
  */
-enum class RouteAvailability { AVAILABLE, CONSENT_REQUIRED, NO_DATA }
+sealed interface RouteRead {
+    /** A drawable track, Google-encoded at precision 5. [points] is the
+     *  number of fixes it was built from — a count, never a coordinate. */
+    data class Track(val polyline: String, val points: Int) : RouteRead
+
+    /** Health Connect holds a route and will not release it yet. */
+    data object ConsentRequired : RouteRead
+
+    /** Health Connect was asked and has no route for this session. */
+    data object NoData : RouteRead
+
+    /** The wire value for `WorkoutSample.route_state`, or null for a
+     *  [Track] — a row with a polyline needs no excuse for not having
+     *  one. Kept next to the states themselves so the two clients and the
+     *  backend column cannot drift apart into different spellings. */
+    val wireState: String?
+        get() = when (this) {
+            is Track -> null
+            ConsentRequired -> "consent_required"
+            NoData -> "none"
+        }
+
+    /** The probe vocabulary SA-P2 shipped, preserved verbatim so the
+     *  existing `HCRouteProbe` log lines stay greppable across the
+     *  change — a regression here is meant to be visible in the same
+     *  query that found the original answer. */
+    val probeLabel: String
+        get() = when (this) {
+            is Track -> "AVAILABLE"
+            ConsentRequired -> "CONSENT_REQUIRED"
+            NoData -> "NO_DATA"
+        }
+}
 
 class HealthConnectGateway(private val context: Context) {
 
@@ -74,6 +107,70 @@ class HealthConnectGateway(private val context: Context) {
         // being granted. Required on Android 14+ / HC 1.1+.
         HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND,
     )
+
+    /**
+     * SA-P3 — the all-routes grant. Declared, checked, and NEVER
+     * requested, because requesting it does nothing.
+     *
+     * The platform javadoc for
+     * `android.health.connect.HealthPermissions.READ_EXERCISE_ROUTES` is
+     * explicit: "This permission can only be granted manually by a user in
+     * Health Connect settings or in the route request activity which can
+     * be launched using ACTION_REQUEST_EXERCISE_ROUTE. **Attempts to
+     * request the permission by applications will be ignored.**" It is
+     * also API 35+, where minSdk here is 28. So the ordinary permission
+     * sheet is not a path to it on any device, and on most devices there
+     * is no such permission at all — which is why the button on the Route
+     * card launches [ExerciseRouteRequestContract] (that is
+     * ACTION_REQUEST_EXERCISE_ROUTE, verified by decompiling the contract)
+     * rather than a permission request, and why the copy names Health
+     * Connect settings as the other way in.
+     *
+     * Declaring it still matters: without the manifest entry the grant
+     * cannot be turned on in Health Connect settings either, and when it
+     * IS on, [routeFor] returns every route in one foreground pass instead
+     * of one dialog per walk.
+     *
+     * Held SEPARATELY from [requiredPermissions] on purpose.
+     *
+     * Adding it to the required set would have made
+     * [hasAllPermissionsAsync] PERMANENTLY false — unrequestable, and on
+     * pre-Android-15 devices not even defined — and that is the gate
+     * `SyncWorker` checks before reading anything at all — so one declined map would have stopped heart
+     * rate, HRV, sleep, steps and body metrics from syncing, and reported
+     * itself through the "Health Connect permissions lost" banner as
+     * though the whole grant had been revoked. CLAUDE.md already records
+     * that HC grants break across APK upgrades; this is the same failure
+     * with a self-inflicted trigger. Routes are a nice-to-have on top of
+     * telemetry that is not.
+     *
+     * The string is spelled out rather than taken from a constant because
+     * androidx.health.connect:connect-client 1.1.0-alpha11 does not define
+     * one: `HealthPermission` carries `PERMISSION_WRITE_EXERCISE_ROUTE`
+     * and no read counterpart (checked by decompiling the AAR, not
+     * guessed). The platform does —
+     * `android.health.connect.HealthPermissions.READ_EXERCISE_ROUTES` in
+     * the API 35 android.jar, whose value is exactly this — but that class
+     * needs API 34+, and minSdk here is 28.
+     *
+     * [hasRoutePermission] can still see it once the user turns it on:
+     * `getGrantedPermissions()` on API 34+ reports back anything under the
+     * `android.permission.health.` prefix that the package manager says is
+     * granted, with no allowlist filtering (checked by decompiling
+     * `HealthConnectClientUpsideDownImpl`, not assumed).
+     */
+    val routePermission: String = "android.permission.health.READ_EXERCISE_ROUTES"
+
+    /**
+     * True when the all-routes grant is held. Its own check rather than a
+     * member of [missingPermissionShortNames] so the permission banner —
+     * which means "telemetry is not reaching the server" — never lights up
+     * over a map.
+     */
+    suspend fun hasRoutePermission(): Boolean {
+        if (!isAvailable()) return false
+        return routePermission in client().permissionController.getGrantedPermissions()
+    }
 
     fun isAvailable(): Boolean =
         HealthConnectClient.getSdkStatus(context) == HealthConnectClient.SDK_AVAILABLE
@@ -176,42 +273,108 @@ class HealthConnectGateway(private val context: Context) {
     }
 
     /**
-     * SA-P2 probe. Resolves which of the three [RouteAvailability] states
-     * applies to one exercise session — a category, never a coordinate.
-     * Deliberately does NOT touch `ExerciseRouteResult.Data.exerciseRoute`
-     * (the actual list of lat/lng points): only the sealed subtype of the
-     * result is inspected, so a GPS point can never reach this function's
-     * caller, let alone a log line.
+     * SA-P3 — the probe's read, now taking the track when there is one.
      *
-     * `exerciseRouteResult` is populated only on a record fetched
-     * INDIVIDUALLY by ID via [HealthConnectClient.readRecord] — per HC's
-     * documented "read exercise route" workflow, the bulk
-     * `readRecords()` path [read] uses above does not carry route data
-     * (it's excluded from paged/list projections). So this deliberately
-     * costs one binder round-trip per session, the same shape as
-     * [distanceMetersFor] / `SyncWorker.safeDistance` — call it once per
-     * session, never once for a whole sync window.
+     * Same single-record round trip [routeAvailabilityFor] always made:
+     * `exerciseRouteResult` is populated only on a record fetched by ID via
+     * [HealthConnectClient.readRecord], never on the paged `readRecords()`
+     * list [read] uses. Call it once per session.
      *
-     * No new permission is requested or required for this: reading the
-     * session itself only needs `READ_EXERCISE` (already granted), and
-     * [RouteAvailability.CONSENT_REQUIRED] is exactly HC's way of saying
-     * "a route exists but you don't have standing to see it" WITHOUT
-     * that standing ever being requested. Declaring
-     * `READ_EXERCISE_ROUTE` only becomes a real question once this probe
-     * says the answer is worth having — see SA-P2 in
-     * `docs/sa-findings.json` for why that's deliberately deferred.
+     * **This will return [RouteRead.ConsentRequired] from a background
+     * worker no matter what is granted**, when the route was written by
+     * another app — which is every route on this install. Google:
+     * "When your app runs in the background and tries to read an exercise
+     * route created by another app, Health Connect returns an
+     * ExerciseRouteResult.ConsentRequired response, even if your app has
+     * Always allow access to exercise route data." So `SyncWorker` calling
+     * this is worth doing (it costs one round-trip, it keeps the
+     * `HCRouteProbe` line, and it records the state the UI explains) but
+     * it is not the path that produces a map. `RouteBackfill`, run from
+     * the foreground on a user tap, is.
      *
-     * Throws on the same conditions [read] does (a denied permission, HC
-     * unavailable) so callers apply the same try/catch idiom as
-     * `SyncWorker.safeRead`.
+     * The coordinates are encoded here and discarded. Nothing above this
+     * function ever holds a lat/lng, which is the cheapest way to keep one
+     * out of a log line: [RouteRead.Track] carries a polyline and a point
+     * count and has nowhere to put a position.
      */
-    suspend fun routeAvailabilityFor(sessionId: String): RouteAvailability {
+    suspend fun routeFor(sessionId: String): RouteRead {
         val session = client().readRecord(ExerciseSessionRecord::class, sessionId).record
-        return when (session.exerciseRouteResult) {
-            is ExerciseRouteResult.Data -> RouteAvailability.AVAILABLE
-            is ExerciseRouteResult.ConsentRequired -> RouteAvailability.CONSENT_REQUIRED
-            is ExerciseRouteResult.NoData -> RouteAvailability.NO_DATA
-            else -> RouteAvailability.NO_DATA
+        return when (val result = session.exerciseRouteResult) {
+            is ExerciseRouteResult.Data -> {
+                val points = result.exerciseRoute.route
+                    // Health Connect orders `route` by time already, but it
+                    // is a plain list and nothing in the contract promises
+                    // it. Sorting is cheap and a track drawn in the wrong
+                    // order is a scribble, not a path.
+                    .sortedBy { it.time }
+                    .map { it.latitude to it.longitude }
+                Polylines.encodeOrNull(points)
+                    ?.let { RouteRead.Track(it, points.size) }
+                // A Data result carrying fewer than two fixes draws
+                // nothing. Reporting it as a track would put an empty map
+                // card on the screen, which is worse than the honest
+                // "there is no route here".
+                    ?: RouteRead.NoData
+            }
+            is ExerciseRouteResult.ConsentRequired -> RouteRead.ConsentRequired
+            is ExerciseRouteResult.NoData -> RouteRead.NoData
+            else -> RouteRead.NoData
         }
+    }
+
+    /**
+     * Every exercise session in the window, by ID, so a foreground
+     * backfill can resolve which Health Connect record corresponds to an
+     * activity the feed already shows. Returns the session's start instant
+     * alongside its ID, because `activities.source_id` for a promoted
+     * Health Connect session IS that start instant's isoformat — that is
+     * the natural key `promote_health_connect_workouts` writes.
+     */
+    suspend fun exerciseSessionsIn(
+        since: Instant,
+        until: Instant = Instant.now(),
+    ): List<ExerciseSessionRecord> = read(ExerciseSessionRecord::class, since, until)
+
+    /**
+     * The Health Connect session behind one activity row, found by its
+     * start instant.
+     *
+     * `activities.source_id` for a promoted Health Connect session IS the
+     * session's start instant in isoformat — that is the natural key
+     * `promote_health_connect_workouts` writes — so this is a lookup, not
+     * a heuristic. It is still tolerant to [TOLERANCE_S], because the
+     * instant makes a round trip through Pydantic and Postgres on the way
+     * to the client and back, and an equality test on a re-parsed
+     * timestamp is the kind of thing that works until it does not.
+     *
+     * Nearest start wins, so two sessions inside the tolerance cannot
+     * silently resolve to the wrong one.
+     */
+    suspend fun sessionStartingAt(start: Instant): ExerciseSessionRecord? =
+        exerciseSessionsIn(
+            start.minusSeconds(TOLERANCE_S), start.plusSeconds(TOLERANCE_S),
+        ).minByOrNull { kotlin.math.abs(it.startTime.epochSecond - start.epochSecond) }
+
+    /**
+     * Encode a route handed back by the per-session request activity.
+     *
+     * Same encoder and the same "fewer than two fixes is not a route"
+     * rule as [routeFor], so the two paths into `activities.polyline`
+     * cannot produce different geometry for the same track.
+     */
+    fun encodeRoute(route: ExerciseRoute): RouteRead {
+        val points = route.route.sortedBy { it.time }
+            .map { it.latitude to it.longitude }
+        return Polylines.encodeOrNull(points)
+            ?.let { RouteRead.Track(it, points.size) }
+            ?: RouteRead.NoData
+    }
+
+    companion object {
+        /** Window either side of an activity's start when resolving its
+         *  Health Connect session. Two minutes: wide enough for any
+         *  serialisation drift, far tighter than the gap between two real
+         *  sessions. */
+        private const val TOLERANCE_S = 120L
     }
 }

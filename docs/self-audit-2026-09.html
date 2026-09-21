@@ -182,9 +182,9 @@ td:first-child{color:var(--mv);font-family:var(--mono);font-size:12.5px;white-sp
   was done. Nothing makes it run.</p>
 </div>
 <div class="prog">
-<h4>Progress · 45 of 49 shipped</h4>
-<div class="bar"><i class="b-ship" style="width:92%"></i><i class="b-wip" style="width:0%"></i></div>
-<div class="legend"><span><b style="background:var(--done)"></b> shipped 45</span><span><b style="background:var(--warn)"></b> in progress 0</span><span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 3</span><span><b style="border:1px dashed var(--rule)"></b> declined 1</span></div>
+<h4>Progress · 46 of 49 shipped</h4>
+<div class="bar"><i class="b-ship" style="width:94%"></i><i class="b-wip" style="width:0%"></i></div>
+<div class="legend"><span><b style="background:var(--done)"></b> shipped 46</span><span><b style="background:var(--warn)"></b> in progress 0</span><span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 2</span><span><b style="border:1px dashed var(--rule)"></b> declined 1</span></div>
 <p style="margin:14px 0 0;font-size:14px;color:var(--ink-2)">Tracked as <code>SA-*</code> in the repo's <code>TODO.md</code>. Status lives in <code>docs/sa-findings.json</code> and this page is regenerated from it by <code>scripts/sa_report.py</code> — the chips cannot drift from the tracker because they are the same file.</p>
 </div>
 <h2>Method</h2>
@@ -206,7 +206,7 @@ invariants. Those corrections are printed with each item, under
 <tr><td>The numbers behind the numbers</td><td><strong>8</strong></td><td>7</td><td></td></tr>
 <tr><td>Reachability</td><td><strong>4</strong></td><td>4</td><td>built, shipped, and with no door</td></tr>
 <tr><td>Operations</td><td><strong>6</strong></td><td>6</td><td>what happens when nobody is watching</td></tr>
-<tr><td>Phone telemetry</td><td><strong>4</strong></td><td>2</td><td>permissioned, counted as granted, never read</td></tr>
+<tr><td>Phone telemetry</td><td><strong>4</strong></td><td>3</td><td>permissioned, counted as granted, never read</td></tr>
 <tr><td>Dead weight</td><td><strong>14</strong></td><td>13</td><td>things to delete rather than build</td></tr>
 <tr><td>Refuted</td><td><strong>10</strong></td><td>—</td><td>printed in full, with the measurement that killed them</td></tr>
 </tbody></table></div>
@@ -1272,7 +1272,7 @@ Production: zero of 18 `source='healthconnect'` activities have a non-null `poly
 <div class="rk">
 <div class="top"><div class="t">Routes exist and are one consent away — the probe came back CONSENT_REQUIRED, not NO_DATA</div><div class="m">
 <span class="chip c-id">SA-P3</span>
-<span class="chip c-todo">not started</span>
+<span class="chip c-ship">shipped</span>
 <span class="chip c-v4">value 4</span>
 <span class="chip c-eff">M</span>
 <span class="chip c-eff">both</span>

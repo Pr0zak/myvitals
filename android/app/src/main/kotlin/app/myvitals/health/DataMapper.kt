@@ -52,6 +52,15 @@ object DataMapper {
         // A missing/short entry (an older caller that never resolved
         // distances) reads as null via getOrNull, never as 0.0.
         exerciseDistances: List<Double?> = emptyList(),
+        // SA-P3: one entry per `exercise` session, same order, same
+        // reason as exerciseDistances above — reading a route is a
+        // suspend HC round-trip and this mapper is pure, so SyncWorker
+        // resolves them first and hands the parallel list in. A
+        // missing/short entry (an older caller, or a slice where the
+        // route read was skipped) reads as null via getOrNull, which
+        // posts neither a polyline nor a route_state: "nobody asked",
+        // which is the truth, rather than "there is no route".
+        exerciseRoutes: List<RouteRead?> = emptyList(),
         weight: List<WeightRecord> = emptyList(),
         bodyFat: List<BodyFatRecord> = emptyList(),
         leanMass: List<LeanBodyMassRecord> = emptyList(),
@@ -152,11 +161,14 @@ object DataMapper {
                 )
             },
             workouts = exercise.mapIndexed { index, session ->
+                val route = exerciseRoutes.getOrNull(index)
                 WorkoutSample(
                     time = session.startTime.toString(),
                     type = exerciseTypeName(session.exerciseType),
                     durationS = (session.endTime.epochSecond - session.startTime.epochSecond).toInt(),
                     distanceM = exerciseDistances.getOrNull(index),
+                    polyline = (route as? RouteRead.Track)?.polyline,
+                    routeState = route?.wireState,
                     source = session.metadata.dataOrigin.packageName.takeIf { it.isNotBlank() },
                     title = session.title,
                 )

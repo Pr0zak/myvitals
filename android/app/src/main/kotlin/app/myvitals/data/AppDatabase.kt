@@ -10,6 +10,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "buffered_batches")
@@ -154,12 +156,40 @@ interface BufferedWorkoutWriteDao {
     suspend fun count(): Int
 }
 
+
+/**
+ * v4 -> v5: add the index SA-C3 declared on `logs`.
+ *
+ * SA-C3 added `Index(value = ["uploadedAt", "tsEpochMs"])` to [LogEntry] and
+ * left `version = 4`. Room hashes the schema and compares it on open, so the
+ * mismatch threw `IllegalStateException: Room cannot verify the data
+ * integrity` — and `fallbackToDestructiveMigration` did NOT rescue it, because
+ * that only applies when the version number moves. With the database
+ * unopenable, `SyncWorker`'s strength flush threw on every tick and took the
+ * whole sync down with it: no telemetry reached the server for nine hours,
+ * across v0.40.1 and v0.41.0.
+ *
+ * A destructive fallback would have been one character cheaper and would have
+ * silently discarded `buffered_strength_sets` and `buffered_workout_writes` —
+ * offline set logs and status patches that exist because they have not been
+ * delivered yet. This creates the index instead, matching the name Room
+ * derives for that entity, and leaves every row in place.
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_logs_uploadedAt_tsEpochMs " +
+                "ON logs (uploadedAt, tsEpochMs)"
+        )
+    }
+}
+
 @Database(
     entities = [
         BufferedBatch::class, LogEntry::class,
         BufferedStrengthSet::class, BufferedWorkoutWrite::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -177,7 +207,13 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 "myvitals.db",
             )
+                .addMigrations(MIGRATION_4_5)
                 // Pre-1.0 schema; cheaper to drop than to maintain migrations.
+                // That still holds for a table shape change, but NOT for the
+                // buffered-write tables: dropping those loses sets and status
+                // patches logged while offline, which exist precisely because
+                // they could not be sent yet. Anything touching them gets a
+                // real migration.
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }

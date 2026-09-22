@@ -9,7 +9,7 @@
   "survived": 42,
   "refuted": 10,
   "ranked": 51,
-  "released": "v0.40.1, deployed 2026-09-20"
+  "released": "v0.43.0, deployed 2026-09-22 (audit shipped v0.40.1; routes v0.42.x; dedupe v0.43.0)"
  },
  "items": [
   {

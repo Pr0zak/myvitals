@@ -8,7 +8,7 @@
   "found": 52,
   "survived": 42,
   "refuted": 10,
-  "ranked": 49,
+  "ranked": 51,
   "released": "v0.40.1, deployed 2026-09-20"
  },
  "items": [
@@ -898,6 +898,42 @@
    "proposal": "Drive a banner from consecutive `success = false` attempts rather than from staleness — the count is the signal, and it avoids the false-positive trap the earlier refusal identified, because a healthy phone never accumulates failures. Surface `error_summary` verbatim; it named this bug exactly. Two failed attempts in a row is already abnormal for a 15-minute worker, so the threshold can be low without crying wolf. Consider also that the strength flush took the whole sync down with it: one subsystem's exception should not prevent telemetry from being delivered, which is a separate hardening worth its own look.",
    "correction": "Not independently refuted. Measured directly from production `sync_heartbeat` during the v0.41.1 incident. Note the honest scope: this would not have prevented the outage, only shortened it from nine hours to roughly thirty minutes.",
    "evidence": "`select app_version, success, count(*) from sync_heartbeat where attempt_at > now() - interval '3 days' group by 1,2` on 2026-09-21: `0.39.1/true 135`, then `0.40.1/false 9`, `0.41.0/false 21`, `0.41.1/true 1`. Every failed row carried `perms_granted = 13`, `perms_required = 13`, `permissions_lost = false`, and an `error_summary` beginning `strength flush: IllegalStateException`.",
+   "also_found_by": []
+  },
+  {
+   "id": "SA-P5",
+   "batch": "gap",
+   "status": "todo",
+   "title": "`_retire_promotion(winner=None)` deletes with no carry at all",
+   "task": "The self-duplicate path retires a promoted row without a winner to carry to, so `CARRYABLE_COLUMNS` never runs — only the older two-column user-owned veto protects it",
+   "lens": "found-while-fixing",
+   "kind": "risk",
+   "surface": "backend",
+   "size": "S",
+   "value": 2,
+   "problem": "v0.43.0 made the carry complete, driven off `CARRYABLE_COLUMNS`, but only on the branch that has a `winner`. `_retire_promotion` is also called with `winner=None` for the within-Health-Connect duplicate case, and there the new machinery does not run: the row is deleted after only the original user-owned veto is checked. A GPS track, a distance, or anything else on that row goes with it. Pre-existing in shape — the v0.43.0 work did not introduce it — but the module's stated discipline is that it answers what can be lost, and this path does not.",
+   "impact": "Today: two Health Connect writers publishing one session, which production does — the 2026-09-19 walk came from both `com.fitbit.FitbitMobile` and `nl.appyhapps.healthsync` four seconds apart — can retire the copy that holds the route, with no transfer, if it is the one the dedupe drops. The route the user granted consent for would simply be gone. After: the same carry runs on both paths, or the delete refuses when there is something to lose and nowhere to put it.",
+   "proposal": "Give the `winner=None` path the same treatment. Where there is genuinely no surviving row, the honest answer is probably to refuse the delete when the row carries a track, exactly as the user-owned veto already refuses — a visible duplicate is better than a silently destroyed GPS track. Check which of the two HC writers actually wins today before assuming the survivor is the one with the route.",
+   "correction": "Not independently refuted; identified by the v0.43.0 batch reviewer while probing past the cases it was asked to check, and confirmed as pre-existing rather than newly introduced.",
+   "evidence": "`backend/src/myvitals/integrations/activity_sink.py` — the `CARRYABLE_COLUMNS` transfer and the track-choice both sit inside `if winner is not None`; the terminal delete is unconditional. Production has the two-writer case: `HCRouteProbe` logged the same 2026-09-19 walk from `com.fitbit.FitbitMobile` (8217 s) and `nl.appyhapps.healthsync` (8213 s).",
+   "also_found_by": []
+  },
+  {
+   "id": "SA-P6",
+   "batch": "gap",
+   "status": "todo",
+   "title": "The gap-fill fast path carries a track without checking it decodes",
+   "task": "`track_is_materially_better` short-circuits `if not incumbent: return True`, so a corrupt or truncated polyline is carried onto the survivor unvalidated",
+   "lens": "found-while-fixing",
+   "kind": "risk",
+   "surface": "backend",
+   "size": "S",
+   "value": 1,
+   "problem": "The coverage comparison decodes both tracks and refuses to let one that measures `(0, 0)` displace a real one — but only on the branch where the survivor already has a track. When it has none, the function returns True immediately and the candidate is carried without ever being decoded. A truncated polyline raises `IndexError` in `polyline.decode`, which the comparison path handles deliberately; the fast path never reaches it.",
+   "impact": "Today: an unreadable track can replace nothing with something unreadable, which renders as a broken or absent map rather than as the honest 'no route' state the app now distinguishes. Low value because nothing in production is known to produce one. After: a track that cannot be decoded is treated as no track, consistently on both paths.",
+   "proposal": "Validate on the fast path too — decode once and require it to measure as something before carrying. The decode is already written and already handles the error.",
+   "correction": "Not independently refuted; identified by the v0.43.0 batch reviewer while probing past the asked cases, and confirmed pre-existing.",
+   "evidence": "`track_is_materially_better` in `backend/src/myvitals/integrations/activity_sink.py`: `if not incumbent: return True` precedes any call to `analytics/geo.track_extent`.",
    "also_found_by": []
   }
  ],

@@ -182,9 +182,9 @@ td:first-child{color:var(--mv);font-family:var(--mono);font-size:12.5px;white-sp
   was done. Nothing makes it run.</p>
 </div>
 <div class="prog">
-<h4>Progress · 46 of 49 shipped</h4>
-<div class="bar"><i class="b-ship" style="width:94%"></i><i class="b-wip" style="width:0%"></i></div>
-<div class="legend"><span><b style="background:var(--done)"></b> shipped 46</span><span><b style="background:var(--warn)"></b> in progress 0</span><span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 2</span><span><b style="border:1px dashed var(--rule)"></b> declined 1</span></div>
+<h4>Progress · 46 of 51 shipped</h4>
+<div class="bar"><i class="b-ship" style="width:90%"></i><i class="b-wip" style="width:0%"></i></div>
+<div class="legend"><span><b style="background:var(--done)"></b> shipped 46</span><span><b style="background:var(--warn)"></b> in progress 0</span><span><b style="background:var(--surface-2);border:1px solid var(--rule)"></b> not started 4</span><span><b style="border:1px dashed var(--rule)"></b> declined 1</span></div>
 <p style="margin:14px 0 0;font-size:14px;color:var(--ink-2)">Tracked as <code>SA-*</code> in the repo's <code>TODO.md</code>. Status lives in <code>docs/sa-findings.json</code> and this page is regenerated from it by <code>scripts/sa_report.py</code> — the chips cannot drift from the tracker because they are the same file.</p>
 </div>
 <h2>Method</h2>
@@ -206,7 +206,7 @@ invariants. Those corrections are printed with each item, under
 <tr><td>The numbers behind the numbers</td><td><strong>8</strong></td><td>7</td><td></td></tr>
 <tr><td>Reachability</td><td><strong>4</strong></td><td>4</td><td>built, shipped, and with no door</td></tr>
 <tr><td>Operations</td><td><strong>6</strong></td><td>6</td><td>what happens when nobody is watching</td></tr>
-<tr><td>Phone telemetry</td><td><strong>4</strong></td><td>3</td><td>permissioned, counted as granted, never read</td></tr>
+<tr><td>Phone telemetry</td><td><strong>6</strong></td><td>3</td><td>permissioned, counted as granted, never read</td></tr>
 <tr><td>Dead weight</td><td><strong>14</strong></td><td>13</td><td>things to delete rather than build</td></tr>
 <tr><td>Refuted</td><td><strong>10</strong></td><td>—</td><td>printed in full, with the measurement that killed them</td></tr>
 </tbody></table></div>
@@ -1300,6 +1300,34 @@ Both describe the same 2026-09-19 walk. `ExerciseRouteResult` distinguishes Data
 <p><span class="lab">Change</span>Drive a banner from consecutive <code>success = false</code> attempts rather than from staleness — the count is the signal, and it avoids the false-positive trap the earlier refusal identified, because a healthy phone never accumulates failures. Surface <code>error_summary</code> verbatim; it named this bug exactly. Two failed attempts in a row is already abnormal for a 15-minute worker, so the threshold can be low without crying wolf. Consider also that the strength flush took the whole sync down with it: one subsystem's exception should not prevent telemetry from being delivered, which is a separate hardening worth its own look.</p>
 <p class="corr"><span class="lab">Refuter</span>Not independently refuted. Measured directly from production <code>sync_heartbeat</code> during the v0.41.1 incident. Note the honest scope: this would not have prevented the outage, only shortened it from nine hours to roughly thirty minutes.</p>
 <details><summary>Evidence</summary><pre>`select app_version, success, count(*) from sync_heartbeat where attempt_at &gt; now() - interval '3 days' group by 1,2` on 2026-09-21: `0.39.1/true 135`, then `0.40.1/false 9`, `0.41.0/false 21`, `0.41.1/true 1`. Every failed row carried `perms_granted = 13`, `perms_required = 13`, `permissions_lost = false`, and an `error_summary` beginning `strength flush: IllegalStateException`.</pre></details></div>
+<div class="rk">
+<div class="top"><div class="t"><code>_retire_promotion(winner=None)</code> deletes with no carry at all</div><div class="m">
+<span class="chip c-id">SA-P5</span>
+<span class="chip c-todo">not started</span>
+<span class="chip c-eff">value 2</span>
+<span class="chip c-eff">S</span>
+<span class="chip c-eff">backend</span>
+<span class="chip c-lens">found-while-fixing</span>
+</div></div>
+<p>v0.43.0 made the carry complete, driven off <code>CARRYABLE_COLUMNS</code>, but only on the branch that has a <code>winner</code>. <code>_retire_promotion</code> is also called with <code>winner=None</code> for the within-Health-Connect duplicate case, and there the new machinery does not run: the row is deleted after only the original user-owned veto is checked. A GPS track, a distance, or anything else on that row goes with it. Pre-existing in shape — the v0.43.0 work did not introduce it — but the module's stated discipline is that it answers what can be lost, and this path does not.</p>
+<p><span class="lab">Today</span>Today: two Health Connect writers publishing one session, which production does — the 2026-09-19 walk came from both <code>com.fitbit.FitbitMobile</code> and <code>nl.appyhapps.healthsync</code> four seconds apart — can retire the copy that holds the route, with no transfer, if it is the one the dedupe drops. The route the user granted consent for would simply be gone. After: the same carry runs on both paths, or the delete refuses when there is something to lose and nowhere to put it.</p>
+<p><span class="lab">Change</span>Give the <code>winner=None</code> path the same treatment. Where there is genuinely no surviving row, the honest answer is probably to refuse the delete when the row carries a track, exactly as the user-owned veto already refuses — a visible duplicate is better than a silently destroyed GPS track. Check which of the two HC writers actually wins today before assuming the survivor is the one with the route.</p>
+<p class="corr"><span class="lab">Refuter</span>Not independently refuted; identified by the v0.43.0 batch reviewer while probing past the cases it was asked to check, and confirmed as pre-existing rather than newly introduced.</p>
+<details><summary>Evidence</summary><pre>`backend/src/myvitals/integrations/activity_sink.py` — the `CARRYABLE_COLUMNS` transfer and the track-choice both sit inside `if winner is not None`; the terminal delete is unconditional. Production has the two-writer case: `HCRouteProbe` logged the same 2026-09-19 walk from `com.fitbit.FitbitMobile` (8217 s) and `nl.appyhapps.healthsync` (8213 s).</pre></details></div>
+<div class="rk">
+<div class="top"><div class="t">The gap-fill fast path carries a track without checking it decodes</div><div class="m">
+<span class="chip c-id">SA-P6</span>
+<span class="chip c-todo">not started</span>
+<span class="chip c-eff">value 1</span>
+<span class="chip c-eff">S</span>
+<span class="chip c-eff">backend</span>
+<span class="chip c-lens">found-while-fixing</span>
+</div></div>
+<p>The coverage comparison decodes both tracks and refuses to let one that measures <code>(0, 0)</code> displace a real one — but only on the branch where the survivor already has a track. When it has none, the function returns True immediately and the candidate is carried without ever being decoded. A truncated polyline raises <code>IndexError</code> in <code>polyline.decode</code>, which the comparison path handles deliberately; the fast path never reaches it.</p>
+<p><span class="lab">Today</span>Today: an unreadable track can replace nothing with something unreadable, which renders as a broken or absent map rather than as the honest 'no route' state the app now distinguishes. Low value because nothing in production is known to produce one. After: a track that cannot be decoded is treated as no track, consistently on both paths.</p>
+<p><span class="lab">Change</span>Validate on the fast path too — decode once and require it to measure as something before carrying. The decode is already written and already handles the error.</p>
+<p class="corr"><span class="lab">Refuter</span>Not independently refuted; identified by the v0.43.0 batch reviewer while probing past the asked cases, and confirmed pre-existing.</p>
+<details><summary>Evidence</summary><pre>`track_is_materially_better` in `backend/src/myvitals/integrations/activity_sink.py`: `if not incumbent: return True` precedes any call to `analytics/geo.track_extent`.</pre></details></div>
 </div>
 <h2>Dead weight — things to delete rather than build</h2>
 <p>Eleven items where the right change removes code, rows or megabytes. Listed last not because they matter least but because none of them is urgent; several are the cheapest wins on the page.</p>
@@ -1792,7 +1820,7 @@ re-walked.</p>
 
 <div class="foot">
   myvitals · internal audit, first pass · 2026-09-18 · against v0.39.1 (a5e5e49)<br>
-  13 lenses · 52 findings · 42 survived adversarial refutation · 49 ranked here, 3 merged into a sibling<br>
+  13 lenses · 52 findings · 42 survived adversarial refutation · 51 ranked here, 3 merged into a sibling<br>
   Generated by <code>scripts/sa_report.py</code> from <code>docs/sa-findings.json</code>. Do not edit
   this file by hand.
 </div></div>

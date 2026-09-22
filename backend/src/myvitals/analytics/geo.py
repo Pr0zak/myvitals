@@ -12,6 +12,8 @@ points while switchbacks keep their shape. At the default 1e-4 degrees
 """
 from __future__ import annotations
 
+import math
+
 import polyline as _polyline
 
 # ~11 m at the equator. Detail below this is invisible at overview zoom.
@@ -107,6 +109,71 @@ def simplify_encoded(
         return "", 0, 0
     simplified = _decimate(rdp(points, epsilon), max_points)
     return _polyline.encode(simplified), len(points), len(simplified)
+
+
+#: Mean Earth radius. Only ever used to turn a degree difference into a
+#: rough metre figure for COMPARING two tracks of the same event, never to
+#: report a distance to the user -- `distance_m` comes from the provider.
+EARTH_RADIUS_M = 6_371_000.0
+
+
+def _metres(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
+    """Equirectangular approximation, in metres.
+
+    Exact enough at the scale of one activity (sub-0.1% out to ~50 km) and
+    far cheaper than haversine, which matters because `track_extent` walks
+    every point of a raw watch track -- the 2026-09-19 walk is 5,598 of
+    them.
+    """
+    mean_lat = math.radians((lat_a + lat_b) / 2.0)
+    dlat = math.radians(lat_b - lat_a)
+    dlon = math.radians(lon_b - lon_a) * math.cos(mean_lat)
+    return EARTH_RADIUS_M * math.hypot(dlat, dlon)
+
+
+def track_extent(encoded: str | None) -> tuple[float, float]:
+    """How much of a route a track describes: `(span_m, path_m)`.
+
+    * `span_m` -- the great-circle diagonal of the track's bounding box, so
+      "how much ground does this reach".
+    * `path_m` -- the traversed length, point to point, so "how far along
+      the route does this actually go".
+
+    Both are deliberately sampling-rate invariant measures, which is the
+    whole reason they exist: the two recordings of a single event that the
+    dedupe has to choose between are produced by different encoders. A
+    provider track in this database is decimated before it is ever stored
+    (`integrations/fit_tracks._MAX_POLYLINE_POINTS` is 500, and Strava's
+    OAuth path stored `map.summary_polyline`, which Strava thins server
+    side), where a Health Connect route is the raw sample stream. Measured
+    on production: the median Strava track is 334 points and the one Health
+    Connect route in the table is 5,598. A point count therefore measures
+    the encoder, not the recording.
+
+    Returns `(0.0, 0.0)` for an absent, empty or undecodable track rather
+    than raising -- `polyline.decode` throws `IndexError` on a truncated
+    string, and one corrupt row must not take down an ingest. Same
+    discipline as `simplify_encoded`.
+    """
+    if not encoded:
+        return 0.0, 0.0
+    try:
+        points = _polyline.decode(encoded)
+    except Exception:  # noqa: BLE001
+        return 0.0, 0.0
+    if len(points) < 2:
+        return 0.0, 0.0
+
+    lats = [p[0] for p in points]
+    lons = [p[1] for p in points]
+    span = _metres(min(lats), min(lons), max(lats), max(lons))
+
+    path = 0.0
+    prev_lat, prev_lon = points[0]
+    for lat, lon in points[1:]:
+        path += _metres(prev_lat, prev_lon, lat, lon)
+        prev_lat, prev_lon = lat, lon
+    return span, path
 
 
 def bounds_of(points: list[tuple[float, float]]) -> list[float] | None:

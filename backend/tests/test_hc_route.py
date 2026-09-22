@@ -420,12 +420,40 @@ class TestARetiredDuplicateDoesNotTakeTheTrackWithIt:
         src = inspect.getsource(activity_sink._retire_promotion)
         assert "winner.polyline = stale.polyline" in src
 
-    def test_only_onto_a_survivor_that_has_none(self):
-        """Strictly gap-filling. A Strava or Garmin row that clashed and won
-        keeps its own full-fidelity track -- the carry must never be a
-        downgrade dressed as a rescue."""
+    def test_the_carry_is_decided_on_coverage_not_on_the_provider(self):
+        """This used to be strictly gap-filling: carried ONLY onto a winner
+        with no polyline at all, on the premise that a provider's own track
+        is always the better one.
+
+        The 2026-09-19 walk is what falsified that premise. Health Connect
+        held a 5,598-point route and Strava held none, so the gap-fill
+        happened to produce the right row -- but only because the winner was
+        empty. Where the winner holds its own coarser track the old guard
+        declines, and the better track is simply deleted with the row.
+
+        The carry now asks which track describes more of the route.
+        """
         src = inspect.getsource(activity_sink._retire_promotion)
-        assert "if winner is not None and stale.polyline and not winner.polyline:" in src
+        assert "track_is_materially_better(" in src
+        assert "stale.polyline, winner.polyline," in src
+        # And the old premise is gone, not merely shadowed.
+        assert "stale.polyline and not winner.polyline" not in src
+
+    def test_a_coarser_track_on_the_winner_is_still_not_displaced(self):
+        """The other half of the same rule, and the reason it is a margin
+        rather than a comparison: two recordings of one route at different
+        sampling rates must not swap places on every sync."""
+        import polyline as pl
+
+        from myvitals.integrations.activity_sink import (
+            track_is_materially_better,
+        )
+
+        # One route, sampled densely and sparsely. Same ground either way.
+        dense = pl.encode([(41.0 + i * 0.0001, -87.0) for i in range(500)])
+        sparse = pl.encode([(41.0 + i * 0.001, -87.0) for i in range(50)])
+        assert not track_is_materially_better(dense, sparse)
+        assert not track_is_materially_better(sparse, dense)
 
     def test_the_cached_simplification_goes_with_the_old_track(self):
         """`polyline_simple` is derived from the value being replaced. Left
@@ -435,8 +463,13 @@ class TestARetiredDuplicateDoesNotTakeTheTrackWithIt:
         assert "winner.polyline_simple = None" in src
 
     def test_the_explanation_is_carried_too(self):
+        """`route_state` used to have its own named line here. It is now one
+        entry in `CARRYABLE_COLUMNS`, which is the same guarantee expressed
+        so that the NEXT column cannot be forgotten -- the reason the track
+        itself was at risk for a release."""
+        assert "route_state" in activity_sink.CARRYABLE_COLUMNS
         src = inspect.getsource(activity_sink._retire_promotion)
-        assert "winner.route_state = stale.route_state" in src
+        assert "for col in CARRYABLE_COLUMNS:" in src
 
     def test_the_carry_happens_before_the_delete(self):
         """Reading it off the row afterwards would read nothing."""
@@ -453,8 +486,17 @@ class TestARetiredDuplicateDoesNotTakeTheTrackWithIt:
         the row that holds it is not being deleted for a reason this
         function chose."""
         src = inspect.getsource(activity_sink._retire_promotion)
-        # Both carries are guarded on a winner existing.
-        assert src.count("if winner is not None and stale.") == 2
+        # Every carry is inside a `winner is not None` guard: the bulk
+        # gap-fill loop and the track.
+        assert "if winner is not None:" in src
+        assert "if winner is not None and track_is_materially_better(" in src
+        # Nothing is written to `winner` outside one of those two guards.
+        body = src.split('"""', 2)[-1]
+        for line in body.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("winner.") and "=" in stripped:
+                indent = len(line) - len(line.lstrip())
+                assert indent >= 8, line
 
 
 class TestTheBulkImportPathCannotWipeIt:

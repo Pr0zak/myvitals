@@ -34,6 +34,42 @@ The sink fixes all three by being the only writer. Two rules keep it safe:
 * **Auto-link a trail only when there is none.** A user who deliberately
   unlinked an activity must not have the proximity heuristic put it back on
   the next sync.
+
+**Health Connect dedupe runs from both sides, and still only ever deletes a
+Health Connect row.**
+
+``reconcile_promotions`` closes the half that was missing: a provider sync
+that supersedes an already-promoted session now takes the duplicate back
+itself, instead of waiting for a later Health Connect batch to happen to
+contain that session again (for one recorded days ago, never).
+
+Choosing the survivor genuinely on content — sometimes deleting the provider
+row — was considered and rejected, and the reason is structural rather than
+a preference:
+
+* **Deleting a promotion is terminal; deleting a provider row is a loop.**
+  ``promote_health_connect_workouts`` checks for a clash BEFORE it writes, so
+  once a provider row exists the promotion is never recreated and the
+  decision is settled for good. No provider sync has an equivalent check —
+  ``strava_web`` and ``concept2`` call ``upsert_activity`` unconditionally —
+  so a deleted Strava row is rebuilt by the next cookie sync, reconciled
+  away again, and rebuilt again, re-downloading the FIT and re-cutting the
+  heart-rate window every time. Making that safe needs a tombstone table,
+  which is a new schema concept whose own failure mode (a tombstone that
+  outlives its reason silently suppressing a real activity) is worse than
+  the duplicate it prevents.
+* **A provider row's identity cannot be carried.** ``source_id`` IS the
+  Strava activity id, and ``raw`` is that provider's payload in that
+  provider's schema. There is no way to move either onto a Health Connect
+  row, so "carry everything, then delete" is not actually available in that
+  direction. ``strength_workouts.completed_by_activity_source(_id)`` also
+  points at an activity by that pair with no foreign key behind it.
+
+So the scope stays. What changes is that the CARRY is complete rather than
+gap-filling (``CARRYABLE_COLUMNS``), and that the GPS track is chosen on
+measured coverage rather than on which provider wrote it
+(``track_is_materially_better``) — because SA-P3 falsified the premise the
+old rule rested on, that a provider row is strictly the richer one.
 """
 
 from __future__ import annotations
@@ -69,6 +105,130 @@ PROVIDER_COLUMNS: tuple[str, ...] = (
 # Columns the user owns. Listed so the rule is documented in code rather than
 # implied by their absence from the allowlist above.
 USER_OWNED_COLUMNS: tuple[str, ...] = ("notes", "tags", "trail_id")
+
+# Columns a retiring duplicate may hand to the row that survives it.
+#
+# `_retire_promotion` DELETES a row, so anything that row alone holds is
+# gone unless it moves first. Until SA-P3 the carry was a special case for
+# the two columns that had been noticed (the user's own, then the route),
+# which is the wrong shape: the question is not "which fields did we
+# remember to think about" but "which fields can be lost". Derived from
+# `PROVIDER_COLUMNS` so a column added there has to be considered here too.
+#
+# Four are deliberately excluded, and not because they are unimportant:
+#
+# * `type`, `start_at`, `duration_s` -- the survivor's OWN account of the
+#   event. A second recorder disagreeing about when a walk started is not a
+#   gap in the survivor's row, and splicing one recorder's duration onto
+#   another's start produces an interval neither of them observed.
+# * `name` -- Health Connect promotions never set it, on purpose: it comes
+#   from whichever app wrote the record and is exactly the field that
+#   carries a location (`test_hc_promotion.TestPrivacy`). Carrying it here
+#   would reintroduce that by the back door.
+# * `raw` -- the provider's own payload, in the provider's own schema.
+#   Merging two providers' blobs into one column makes it unreadable by
+#   whoever parses it, and the survivor's next sync overwrites the column
+#   wholesale anyway, so a carried value would silently disappear.
+#
+# `polyline` IS in the set, but it does not use the plain gap-fill rule --
+# see `track_is_materially_better`.
+_NOT_CARRYABLE: frozenset[str] = frozenset({
+    "type", "name", "start_at", "duration_s", "raw",
+})
+CARRYABLE_COLUMNS: tuple[str, ...] = tuple(
+    c for c in PROVIDER_COLUMNS if c not in _NOT_CARRYABLE
+)
+
+#: How much more of a route one track has to describe before it displaces
+#: another.
+#:
+#: Sourced from the overlapping pairs in this database that carry a track on
+#: BOTH sides -- the only direct evidence available for what two recordings
+#: of one event look like. There are four. Their span ratios (larger over
+#: smaller) are 1.00, 1.08, 3.51 and 11.83; their path ratios are 1.22,
+#: 1.90, 3.07 and 3.68. Both distributions are bimodal with an empty band in
+#: the middle, and the two pairs above the band are the ones where the
+#: loser is visibly a fragment: a 149 m bounding box for a walk both rows
+#: agree was 1,965.9 m, and a 1,096 m box for a 20,940 m ride. The two below
+#: it describe the same ground at different sampling rates. 2.0 sits inside
+#: both empty bands.
+#:
+#: It is close to the top of the path band (1.90), and that costs nothing:
+#: the pair at 1.90 is the one where both tracks cover an identical 771 m
+#: box, so swapping or not swapping there changes which sampling of the
+#: same route is kept and loses no part of it.
+TRACK_MARGIN = 2.0
+
+
+def track_is_materially_better(
+    candidate: str | None, incumbent: str | None,
+) -> bool:
+    """Does `candidate` describe materially more of the route than `incumbent`?
+
+    The premise the dedupe was built on -- "providers with GPS are strictly
+    richer" -- was true until SA-P3 and is now false: a Health Connect row
+    can carry a route, and on 2026-09-19 it carried a 5,598-point track
+    while the Strava row that beat it carried none at all. So a track has to
+    be compared on its content.
+
+    **Not by point count.** It is the available and obvious number and it is
+    the wrong one. Every provider track here is decimated before storage --
+    `fit_tracks._MAX_POLYLINE_POINTS` caps a FIT decode at 500 points, and
+    the retired OAuth path stored Strava's server-thinned
+    `map.summary_polyline` -- where a Health Connect route is the raw sample
+    stream. Measured on production: Strava's median track is 334 points and
+    the single Health Connect route is 5,598. Point count would hand Health
+    Connect every contested decision seventeen times over, for a reason that
+    is entirely about the encoder. Worse, it points the wrong way on real
+    data: of the four overlapping pairs in this table where both rows carry
+    a track, the denser side has more points in all four and is the poorer
+    description of the route in three -- including 1,760 points confined to
+    a 149 m box for a walk of 1,965.9 m.
+
+    So: coverage, measured two ways by `geo.track_extent`, both invariant to
+    sampling rate.
+
+    * **Span** -- the bounding-box diagonal. This is what collapses when a
+      track is truncated or is a stationary fragment, and it is immune to
+      the jitter that inflates a 1 Hz stream's length.
+    * **Path** -- the traversed length, as a second opinion for the case
+      span is blind to: half the laps of a circuit reach the same ground.
+      Only consulted when the spans are comparable, so a jittery fragment
+      cannot win on length alone.
+
+    Gap-filling is the same question with a trivial answer: any track beats
+    none.
+
+    Equal coverage keeps the INCUMBENT, which is what makes the outcome
+    stable. It is also why nothing is lost by keeping a decimated track over
+    a raw one: this app renders tracks through `geo.simplify_encoded`, whose
+    own sourced constants say 400 points and ~11 m of detail are enough for
+    every map it draws, and `fit_tracks` says 500 is "plenty" for the detail
+    view. Two tracks that reach the same ground are the same track to every
+    consumer here.
+    """
+    if not candidate:
+        return False
+    if not incumbent:
+        return True
+
+    from ..analytics.geo import track_extent
+
+    cand_span, cand_path = track_extent(candidate)
+    inc_span, inc_path = track_extent(incumbent)
+    if cand_span <= 0.0 and cand_path <= 0.0:
+        # Undecodable, empty, or a single point. Never displaces a track
+        # that measures as something.
+        return False
+    if cand_span >= inc_span * TRACK_MARGIN:
+        return True
+    # Comparable ground covered -- now the length is allowed to speak. The
+    # span floor is what stops a track that wanders inside a small box from
+    # beating one that actually goes somewhere.
+    return (
+        cand_span * TRACK_MARGIN >= inc_span
+        and cand_path >= inc_path * TRACK_MARGIN
+    )
 
 
 # ── HC-1: Health Connect exercise sessions → the activities feed ─────
@@ -158,11 +318,17 @@ async def _retire_promotion(
     column. Two different trails on two rows is a genuine conflict between
     two of the user's own decisions, and this is not the code to resolve it.
 
-    A GPS track is carried too, though it is not user-owned (SA-P3). It is
-    carried for the plainer reason that this function deletes the row it is
-    on, and until routes existed there was never one to lose. Strictly onto
-    a winner that has none — a richer provider's own track is never
-    replaced.
+    Every other column the row holds is carried too, not just the ones
+    someone noticed — `CARRYABLE_COLUMNS`, gap-filled. A function that
+    deletes a row has to answer "what can be lost here", and answering it
+    one field at a time is how the GPS track came to be at risk for a
+    release.
+
+    The track (SA-P3) is the one column where a value can displace another
+    value rather than only fill a hole, because two tracks of one event are
+    two descriptions of the same route and one of them can be strictly more
+    of it. Which one is decided by `track_is_materially_better`, on measured
+    coverage — not by which provider wrote it, and not by point count.
 
     Same discipline as MEAL-3's shopping list, where only a demonstrably
     complete cancellation may drop a line.
@@ -208,23 +374,68 @@ async def _retire_promotion(
             winner.source, winner.source_id,
         )
 
+    # Everything else this row holds that the survivor does not.
+    #
+    # This used to be two hand-picked columns -- the user's own, then the
+    # route when SA-P3 made one possible -- which is the wrong shape for a
+    # function that deletes a row. The question is not "which fields did
+    # someone remember" but "which fields can be lost", so the carry is
+    # driven off `CARRYABLE_COLUMNS` and a new provider column has to be
+    # classified there rather than quietly falling through the gap.
+    #
+    # Plain gap-fill: a value beats no value. Two values are two recorders'
+    # own measurements of one event, and a row assembled from both is a row
+    # neither of them observed, so the survivor's own account stands
+    # unaltered. `polyline` is the one exception and is handled below --
+    # there a second value can be strictly MORE of the same route rather
+    # than a competing opinion about it.
+    if winner is not None:
+        filled = []
+        for col in CARRYABLE_COLUMNS:
+            if col == "polyline":
+                continue
+            val = getattr(stale, col, None)
+            if val is None or getattr(winner, col, None) is not None:
+                continue
+            setattr(winner, col, val)
+            filled.append(col)
+        if filled:
+            log.info(
+                "activity_sink: filled %s on %s/%s from HC promotion %s",
+                ", ".join(sorted(filled)), winner.source, winner.source_id,
+                source_id,
+            )
+
     # SA-P3 — the track is not user-owned, and until routes existed there
     # was never one on a promoted row, so it was never at risk here. Now
     # there can be, and this function DELETES the row.
     #
-    # The 2026-09-19 walk is the case: two Health Connect writers published
-    # it, `com.fitbit.FitbitMobile` at 8217 s and `nl.appyhapps.healthsync`
-    # at 8213 s, four seconds apart. The dedupe keeps one and deletes the
-    # other, and nothing says the survivor is the one whose route Health
-    # Connect released. Deleting the only copy of a track the user just
-    # granted access to would be the worst possible outcome of a feature
-    # whose entire point is that the track appears.
+    # The 2026-09-19 walk is the case, and it is the case that falsified the
+    # rule above it. Health Connect published the walk with a 5,598-point
+    # route; Strava published the same walk with NO polyline at all. The
+    # dedupe called Strava the richer provider on principle, kept it, and
+    # only came out right because the carry moved the track across. The rule
+    # picked the wrong winner and a transfer undid it -- which works exactly
+    # once, in the case where the winner happens to hold nothing.
     #
-    # Strictly gap-filling, never a downgrade: carried ONLY onto a winner
-    # that has no polyline at all, so a Strava or Garmin recording keeps
-    # its own. `polyline_simple` is a cached simplification of the OLD
-    # value and has to go with it -- same reasoning as `upsert_activity`.
-    if winner is not None and stale.polyline and not winner.polyline:
+    # So the carry is no longer gap-filling. It asks which track describes
+    # more of the route (`track_is_materially_better`), and a Strava or
+    # Garmin recording keeps its own unless the Health Connect one is
+    # materially more of the same ride. `polyline_simple` is a cached
+    # simplification of the OLD value and has to go with it -- same
+    # reasoning as `upsert_activity`.
+    #
+    # The same day is also the intra-Health-Connect case, which the coverage
+    # rule handles by the same comparison: TWO Health Connect writers
+    # published that walk, `com.fitbit.FitbitMobile` at 8217 s and
+    # `nl.appyhapps.healthsync` at 8213 s, four seconds apart, both answering
+    # CONSENT_REQUIRED to the probe. Nothing says the one the dedupe keeps is
+    # the one whose route Health Connect released, and losing the only copy
+    # of a track the user had just granted access to would look exactly like
+    # the grant not working.
+    if winner is not None and track_is_materially_better(
+        stale.polyline, winner.polyline,
+    ):
         winner.polyline = stale.polyline
         winner.polyline_simple = None
         log.info(
@@ -232,10 +443,6 @@ async def _retire_promotion(
             "before retiring it",
             source_id, winner.source, winner.source_id,
         )
-    # Same for the explanation, and for the same reason: the surviving row
-    # would otherwise say "nobody asked" about a session that was asked.
-    if winner is not None and stale.route_state and not winner.route_state:
-        winner.route_state = stale.route_state
 
     await db.execute(
         delete(models.Activity)
@@ -379,22 +586,29 @@ async def promote_health_connect_workouts(
     first GPS fix, the watch on the button press — and a fixed ± window
     either misses real duplicates or merges genuinely separate sessions.
 
-    Providers with GPS are still treated as richer: they carry elevation,
-    their distance is measured from GPS rather than a step-count estimate,
-    and a Strava or Garmin track is a full-fidelity recording where Health
-    Connect's is whatever the writing app chose to publish. (Two earlier
-    claims here have now both been corrected by measurement. The first said
-    Health Connect's session record carries no distance at all — true of
-    the *session* record, but Health Connect also exposes a
-    `DistanceRecord` aggregate over the session's own window, which
-    `HealthConnectGateway` now reads; SA-P1 closed that. The second said it
-    has "no equivalent" for a polyline. It does: `ExerciseRouteResult`
-    carries one, and the probe that shipped with SA-P1 came back
-    `CONSENT_REQUIRED` — a route existed and was being withheld, not
-    absent. SA-P3 closed that too. Neither was a platform limitation; both
-    were things this app had never asked for.) So when both providers have
-    a session, the existing one wins and this does nothing. This fills
-    gaps; it never overwrites.
+    **The provider row is the one that survives — but not because it is the
+    richer one.** Three successive versions of this paragraph claimed it
+    was, and measurement has now falsified all three. The first said Health
+    Connect's session record carries no distance at all: true of the
+    *session* record, but Health Connect also exposes a `DistanceRecord`
+    aggregate over the session's own window, which `HealthConnectGateway`
+    now reads (SA-P1). The second said it has "no equivalent" for a
+    polyline: it does — `ExerciseRouteResult` carries one, and the probe
+    that shipped with SA-P1 came back `CONSENT_REQUIRED`, meaning a route
+    existed and was being withheld (SA-P3). The third, that a provider
+    track is full-fidelity where Health Connect's is whatever the writing
+    app published, is backwards: every provider track here is decimated
+    before storage at `fit_tracks._MAX_POLYLINE_POINTS`, and on 2026-09-19
+    the Health Connect row held a 5,598-point route while the Strava row
+    that beat it held none at all.
+
+    What actually makes the provider row the right survivor is that the
+    delete has to be safe and has to stay decided — see the module
+    docstring. The CONTENT question is answered separately, by carrying
+    everything the retired row holds onto the survivor
+    (`CARRYABLE_COLUMNS`) and by choosing the GPS track on measured
+    coverage (`track_is_materially_better`). So this still fills gaps and
+    never overwrites; it no longer assumes which side the gap is on.
 
     ``distance_by_start`` is an optional ``{start.isoformat(): meters}`` map
     for the distance Health Connect reported for each session, keyed the
@@ -629,6 +843,10 @@ async def promote_health_connect_workouts(
             # one: that path reads `act.polyline` and would do nothing but
             # cost a query on every indoor session.
             link_trail=values.get("polyline") is not None,
+            # The recursion guard. This function IS the promotion scan;
+            # letting the row it just wrote reconcile against promotions
+            # would have it retire itself.
+            reconcile=False,
         )
         if exists is None:
             promoted += 1
@@ -647,18 +865,112 @@ async def promote_health_connect_workouts(
     }
 
 
+async def reconcile_promotions(
+    db: AsyncSession, act: models.Activity,
+) -> int:
+    """Retire any Health Connect promotion this provider row supersedes.
+
+    The other half of `promote_health_connect_workouts`'s overlap rule, read
+    from the provider side.
+
+    Until this existed the rule only ever ran in one direction. Both calls to
+    `_retire_promotion` sat inside the promotion scan, which walks the Health
+    Connect sessions in the batch being ingested — so a Strava, Garmin or
+    Concept2 sync that superseded an already-promoted row triggered nothing
+    at all. The clash was noticed only if a later Health Connect batch
+    happened to carry that same session again, and for a session recorded
+    days ago it never does. The 2026-09-19 walk sat duplicated in the feed
+    until a human ran the maintenance endpoint by hand.
+
+    **The predicate is the promotion's own, with the roles swapped.**
+    Promotion asks "is there an activity from another source whose interval
+    overlaps this session"; this asks "is there a Health Connect promotion
+    whose interval overlaps this row". Identical inequality, and that is not
+    tidiness — it is what makes the two halves incapable of disagreeing.
+    There is no state in which this retires a row the scan would re-promote,
+    or leaves one the scan would have skipped, so the feed's contents stop
+    depending on which provider happened to sync first.
+
+    Note it retires EVERY overlapping promotion, not the first: promotion
+    tests each session independently and would have skipped all of them, so
+    stopping at one would leave the rest behind. The three 20-minute
+    `workout` sessions on 2026-08-23 are the shape that needs it.
+
+    Returns how many rows it took back. Never deletes a provider row — see
+    the module docstring for why that scope is deliberate.
+    """
+    if act.source == HC_SOURCE:
+        # Belt to `upsert_activity`'s braces. A promotion reconciling
+        # against promotions would delete the row it just wrote.
+        return 0
+
+    start = act.start_at
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    end = start + timedelta(seconds=int(act.duration_s or 0))
+
+    # Just the keys, not the rows. `_retire_promotion` re-reads the row it
+    # is about to delete anyway, and holding ORM instances across a delete
+    # that expunges them from the session is a way to make the second
+    # iteration of this loop raise on a row the first one removed.
+    stale_ids = (await db.execute(
+        select(models.Activity.source_id)
+        .where(models.Activity.source == HC_SOURCE)
+        .where(models.Activity.start_at < end)
+        # `hc.start + hc.duration > this.start`, as a seconds difference
+        # rather than a constructed INTERVAL — the same expression the
+        # promotion scan uses, for the same SQLAlchemy reason.
+        .where(
+            func.extract("epoch", start - models.Activity.start_at)
+            < func.coalesce(models.Activity.duration_s, 0)
+        )
+    )).scalars().all()
+
+    removed = 0
+    for stale_id in stale_ids:
+        if await _retire_promotion(
+            db, stale_id,
+            f"superseded by {act.source} {act.source_id}",
+            winner=act,
+        ):
+            removed += 1
+    return removed
+
+
 async def upsert_activity(
     db: AsyncSession,
     values: dict[str, Any],
     *,
     link_trail: bool = True,
     complete_cardio_day: bool = True,
+    reconcile: bool = True,
 ) -> models.Activity | None:
     """Insert or update one activity, then run the ingest side-effects.
 
     ``values`` must carry ``source`` and ``source_id``; everything else is
     optional, and any provider column whose value is None is left alone on
     an update rather than overwriting what is already stored.
+
+    ``reconcile`` runs `reconcile_promotions` when this call INSERTS a row
+    from a provider — the Health Connect dedupe, read from the side that
+    previously never triggered it. Three things bound it:
+
+    * **It cannot recurse.** The Health Connect promotion is itself a caller
+      of this function, and it passes ``reconcile=False``.
+      `reconcile_promotions` also returns immediately for `HC_SOURCE`, so
+      neither the flag nor the guard is load-bearing alone.
+    * **It does not fire on an ordinary update.** Gated on the row being
+      new. A re-sync changes no row's existence, so there is nothing for the
+      overlap rule to notice that it did not notice the first time; firing
+      on every Strava poll would re-ask a settled question forever.
+    * **It cannot make a bulk import quadratic.** It is one indexed lookup
+      per newly inserted row, against the handful of rows carrying
+      `HC_SOURCE` — not a scan, and nothing per existing row. The historical
+      importers do not reach it at all: `api/imports._upsert_activities_chunk`
+      is deliberately the one Activity writer outside this sink, precisely
+      so a three-year backfill does not fire per-row side-effects. Those
+      imports are still reconciled, from the promotion side, by the
+      full-history sweep behind `POST /activities/promote-health-connect`.
 
     Returns the persisted row. Does not commit -- the caller owns the
     transaction, because most callers are ingesting a batch.
@@ -692,7 +1004,27 @@ async def upsert_activity(
     )).scalar_one_or_none()
     new_polyline = update_set.get("polyline")
     if new_polyline is not None and existing is not None and existing.polyline != new_polyline:
-        update_set["polyline_simple"] = None
+        # A sync must not replace a stored track with materially less of the
+        # same route. This is the founding rule of the module ("a poorer
+        # sync can no longer erase a richer one") applied to the case it
+        # originally only covered for None: a FIT that parses to five points
+        # is not an absent track, so skip-None lets it through, and it would
+        # overwrite a complete one. There is such a row in production — a
+        # Strava ride stored as a 5-point, 25 m track.
+        #
+        # It matters most for a track this module CARRIED here from a row it
+        # then deleted. That copy is the only one left, and without this the
+        # next provider sync could quietly drop it.
+        if track_is_materially_better(existing.polyline, new_polyline):
+            log.info(
+                "activity_sink: keeping the stored track on %s/%s — the "
+                "incoming one describes materially less of the route",
+                source, source_id,
+            )
+            update_set.pop("polyline", None)
+            new_polyline = None
+        else:
+            update_set["polyline_simple"] = None
 
     stmt = pg_insert(models.Activity).values(**insert_values)
     if update_set:
@@ -710,6 +1042,21 @@ async def upsert_activity(
     )).scalar_one_or_none()
     if act is None:
         return None
+
+    # Before the two side-effects below, because a carry can hand this row
+    # the user's trail link (which must then stop `_auto_link_trail`
+    # guessing over it) or a GPS track (which is exactly what should make it
+    # run).
+    if reconcile and existing is None and source != HC_SOURCE:
+        try:
+            await reconcile_promotions(db, act)
+        except Exception:  # noqa: BLE001
+            # Same rule as the other side-effects: the row is the valuable
+            # part. A failure here leaves the duplicate on screen, which is
+            # exactly the state that existed before this ran, and the
+            # maintenance sweep still clears it.
+            log.warning("HC reconciliation failed for %s/%s",
+                        act.source, act.source_id, exc_info=True)
 
     if complete_cardio_day:
         from .cardio_completion import maybe_complete_cardio_day

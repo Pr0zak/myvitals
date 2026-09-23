@@ -470,6 +470,11 @@ class Activity(Base):
     #: the phone read routes at all. NULL is not "no route": the whole
     #: point of the column is that those are different answers.
     route_state: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    # What the device originally called this activity, set only when the
+    # user corrects `type` (a watch that files mowing as "cycling"). Non-NULL
+    # means `type` is the user's decision and no provider may overwrite it.
+    # Migration 0069.
+    recorded_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     raw: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)), nullable=True)

@@ -247,7 +247,10 @@ class TestSelfHealingIsConservative:
         """
         src = inspect.getsource(activity_sink._retire_promotion)
         assert "for col in USER_OWNED_COLUMNS" in src
-        assert activity_sink.USER_OWNED_COLUMNS == ("notes", "tags", "trail_id")
+        # 0069 added recorded_type: a user's correction of the activity type
+        # is their decision exactly as a note or a trail link is.
+        assert activity_sink.USER_OWNED_COLUMNS == (
+            "notes", "tags", "trail_id", "recorded_type")
 
     def test_the_delete_is_scoped_to_health_connect(self):
         """A DELETE in an ingest path is worth reading twice.

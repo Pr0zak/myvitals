@@ -23,6 +23,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Category
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import app.myvitals.ui.common.userMessage
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -103,6 +111,35 @@ fun ActivityDetailScreen(
     var saving by remember { mutableStateOf(false) }
     var showEdit by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
+    // Type correction — any source (migration 0069).
+    var showTypeEdit by remember { mutableStateOf(false) }
+    var typeChoices by remember { mutableStateOf<List<app.myvitals.sync.ActivityTypeChoice>>(emptyList()) }
+    var savingType by remember { mutableStateOf(false) }
+    var typeError by remember { mutableStateOf<String?>(null) }
+
+    fun saveType(body: app.myvitals.sync.ActivityEditBody) {
+        val a = activity ?: return
+        if (savingType) return
+        savingType = true
+        typeError = null
+        scope.launch {
+            try {
+                val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                val updated = withContext(Dispatchers.IO) {
+                    api.editActivity(source = a.source, sourceId = a.sourceId, body = body)
+                }
+                activity = updated
+                app.myvitals.data.JsonCache.write(
+                    context, "activity_detail_${a.source}_${a.sourceId}",
+                    ActivityRow::class.java, updated,
+                )
+                showTypeEdit = false
+            } catch (e: Exception) {
+                Timber.w(e, "activity type change failed")
+                typeError = e.userMessage("Could not change the type")
+            } finally { savingType = false }
+        }
+    }
 
     val cacheKey = remember(source, sourceId) { "activity_detail_${source}_${sourceId}" }
 
@@ -207,6 +244,26 @@ fun ActivityDetailScreen(
             // Manual-source activities are user-authored — let the user
             // edit name / duration / start. Strava / Concept2 / HC rows
             // are read-only because their source is authoritative.
+            // Any source: a watch guesses the activity type and can be wrong
+            // (mowing arrives as "cycling"). The server keeps the device's
+            // word, so this is always undoable and a re-sync won't revert it.
+            if (activity != null) {
+                IconButton(onClick = {
+                    typeError = null
+                    showTypeEdit = true
+                    if (typeChoices.isEmpty()) scope.launch {
+                        try {
+                            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                            typeChoices = withContext(Dispatchers.IO) { api.activityTypeChoices() }
+                        } catch (e: Exception) {
+                            typeError = e.userMessage("Could not load activity types")
+                        }
+                    }
+                }) {
+                    Icon(Icons.Outlined.Category, contentDescription = "Change activity type",
+                        tint = ink)
+                }
+            }
             if (activity?.source == "manual") {
                 IconButton(onClick = { showEdit = true }) {
                     Icon(
@@ -229,6 +286,18 @@ fun ActivityDetailScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    a.recordedType?.let { rec ->
+                        item {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Recorded as ${prettyType(rec)}", color = muted,
+                                    fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                TextButton(
+                                    enabled = !savingType,
+                                    onClick = { saveType(app.myvitals.sync.ActivityEditBody(resetType = true)) },
+                                ) { Text("Undo") }
+                            }
+                        }
+                    }
                     item { StatsCard(a, neon) }
                     if (!a.polyline.isNullOrBlank() ||
                         (a.trailId != null && trails.any { it.id == a.trailId && it.latitude != null })) {
@@ -361,6 +430,63 @@ fun ActivityDetailScreen(
                     }
                 }
             }
+        }
+
+        if (showTypeEdit && activity != null) {
+            val current = activity!!.type
+            var picked by remember(current) { mutableStateOf(current) }
+            AlertDialog(
+                onDismissRequest = { if (!savingType) showTypeEdit = false },
+                title = { Text("What was this?") },
+                text = {
+                    Column {
+                        Text(
+                            "Watches guess the activity type. Pick what it really was — " +
+                                "stats, icons and training load follow, and a re-sync " +
+                                "won't change it back.",
+                            fontSize = 13.sp, color = muted,
+                        )
+                        typeError?.let {
+                            Spacer(Modifier.height(6.dp))
+                            Text(it, color = errColor, fontSize = 12.sp)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        if (typeChoices.isEmpty() && typeError == null) {
+                            Text("Loading…", color = muted, fontSize = 13.sp)
+                        }
+                        Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                            typeChoices.forEach { c ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                        .selectable(
+                                            selected = picked == c.type,
+                                            role = androidx.compose.ui.semantics.Role.RadioButton,
+                                            onClick = { picked = c.type },
+                                        ),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    RadioButton(selected = picked == c.type, onClick = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(c.label)
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = !savingType && picked != current,
+                        onClick = { saveType(app.myvitals.sync.ActivityEditBody(type = picked)) },
+                    ) { Text(if (savingType) "Saving…" else "Save") }
+                },
+                dismissButton = {
+                    TextButton(enabled = !savingType, onClick = { showTypeEdit = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
         }
 
         if (showEdit && activity != null) {

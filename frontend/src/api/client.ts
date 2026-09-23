@@ -985,8 +985,16 @@ export const api = {
     return data;
   },
 
+  /** Types offered when correcting an activity's type (server-owned list). */
+  async activityTypeChoices(): Promise<Array<{ type: string; label: string }>> {
+    const { data } = await http.get("/activities/type-choices");
+    return data;
+  },
+
+  /** `type` / `reset_type` work on any source; the other fields only on
+   *  source=manual (the server returns 403 otherwise). */
   async editActivity(source: string, sourceId: string, body: {
-    name?: string; type?: string;
+    name?: string; type?: string; reset_type?: boolean;
     duration_minutes?: number; start_at?: string; notes?: string;
   }): Promise<import("./types").Activity> {
     const { data } = await http.patch(

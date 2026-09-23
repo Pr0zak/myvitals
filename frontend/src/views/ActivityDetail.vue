@@ -181,6 +181,11 @@ async function loadZones() {
   } catch { /* leave null — the zone cards stay hidden */ }
 }
 onMounted(loadZones);
+// Labels for the type chip ("Yard work", not "yard_work"). Optional: the
+// chip falls back to the raw key if this fails.
+onMounted(async () => {
+  try { typeChoices.value = await api.activityTypeChoices(); } catch { /* raw key */ }
+});
 
 /** 0-indexed zone for a bpm reading, looked up against the *server's*
  *  boundaries. Used only to colour things (the map heat overlay), never to
@@ -597,6 +602,46 @@ const editing = ref(false);
 function localHHMM(d: Date): string {
   return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
 }
+// Type correction — any source (migration 0069). A watch guesses the
+// activity, and it guesses wrong: mowing arrived as "cycling". The server
+// keeps what the device said in `recorded_type`, so this can always be
+// undone, and a re-sync does not put the guess back.
+const showTypeEdit = ref(false);
+const typeChoices = ref<Array<{ type: string; label: string }>>([]);
+const pickedType = ref("");
+const savingType = ref(false);
+const typeError = ref<string | null>(null);
+
+function typeLabel(t: string | null | undefined): string {
+  if (!t) return "";
+  return typeChoices.value.find((c) => c.type === t)?.label ?? t.replace(/_/g, " ");
+}
+
+async function openTypeEdit() {
+  if (!activity.value) return;
+  typeError.value = null;
+  pickedType.value = activity.value.type;
+  showTypeEdit.value = true;
+  if (!typeChoices.value.length) {
+    try { typeChoices.value = await api.activityTypeChoices(); }
+    catch (e) { typeError.value = e instanceof Error ? e.message : "could not load types"; }
+  }
+}
+
+async function saveType(body: { type?: string; reset_type?: boolean }) {
+  if (!activity.value) return;
+  savingType.value = true;
+  typeError.value = null;
+  try {
+    activity.value = await api.editActivity(activity.value.source, activity.value.source_id, body);
+    showTypeEdit.value = false;
+  } catch (e) {
+    typeError.value = e instanceof Error ? e.message : "could not save";
+  } finally {
+    savingType.value = false;
+  }
+}
+
 function openEdit() {
   if (!activity.value) return;
   editName.value = activity.value.name ?? "";
@@ -650,7 +695,13 @@ async function submitEdit() {
         <div>
           <h1>{{ activity.name ?? "(untitled)" }}</h1>
           <p class="meta">
-            <span class="type">{{ activity.type }}</span>
+            <button class="type type-btn" title="Change activity type"
+                    @click="openTypeEdit">{{ typeLabel(activity.type) }} ✎</button>
+            <template v-if="activity.recorded_type">
+              <span class="recorded">(recorded as {{ typeLabel(activity.recorded_type) }}
+                · <button class="link-btn" :disabled="savingType"
+                          @click="saveType({ reset_type: true })">undo</button>)</span>
+            </template>
             ·
             {{ fmtDateTime(activity.start_at) }}
             ·
@@ -660,6 +711,34 @@ async function submitEdit() {
         <button v-if="activity.source === 'manual'" class="edit-btn"
                 @click="openEdit">Edit</button>
       </header>
+
+      <!-- Type correction (any source) -->
+      <div v-if="showTypeEdit" class="modal-backdrop" @click.self="showTypeEdit = false">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="type-edit-title"
+             @keydown.esc="showTypeEdit = false">
+          <h3 id="type-edit-title">What was this?</h3>
+          <p class="hint">
+            Watches guess the activity type. Pick what it really was — stats,
+            icons and training load follow. A re-sync won't change it back.
+          </p>
+          <div v-if="typeError" class="err">{{ typeError }}</div>
+          <div class="type-grid">
+            <button v-for="c in typeChoices" :key="c.type"
+                    :class="['type-choice', { on: pickedType === c.type }]"
+                    :aria-pressed="pickedType === c.type"
+                    @click="pickedType = c.type">{{ c.label }}</button>
+          </div>
+          <div class="modal-actions">
+            <button class="ghost" :disabled="savingType"
+                    @click="showTypeEdit = false">Cancel</button>
+            <button class="primary"
+                    :disabled="savingType || !pickedType || pickedType === activity.type"
+                    @click="saveType({ type: pickedType })">
+              {{ savingType ? 'Saving…' : 'Save' }}
+            </button>
+          </div>
+        </div>
+      </div>
 
       <!-- Edit dialog (manual activities only) -->
       <div v-if="showEdit" class="modal-backdrop" @click.self="showEdit = false">
@@ -888,6 +967,16 @@ async function submitEdit() {
   cursor: pointer; font-size: 0.85rem;
 }
 .edit-btn:hover { background: rgba(255, 255, 255, 0.06); }
+.type-btn { background: none; border: 0; padding: 0.2rem 0; cursor: pointer; font: inherit; }
+.type-btn:hover { text-decoration: underline; }
+.recorded { color: var(--muted, #94a3b8); font-size: 0.8rem; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
+.type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: 0.4rem; margin-bottom: 1rem; }
+.type-choice {
+  min-height: 44px; padding: 0.5rem; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border, rgba(148, 163, 184, 0.3)); background: none; color: inherit; font: inherit;
+}
+.type-choice.on { border-color: var(--accent); background: rgba(56, 189, 248, 0.12); font-weight: 600; }
 .modal-backdrop {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
   display: flex; align-items: center; justify-content: center;

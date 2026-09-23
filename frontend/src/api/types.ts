@@ -221,6 +221,8 @@ export interface Activity {
    * because a backend older than v0.42 does not send it.
    */
   route_state?: string | null;
+  /** What the device originally called it, when the user corrected `type`. */
+  recorded_type?: string | null;
   notes?: string | null;
   tags?: string[] | null;
   trail_id?: number | null;

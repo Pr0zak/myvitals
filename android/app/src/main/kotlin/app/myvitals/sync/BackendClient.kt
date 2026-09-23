@@ -473,6 +473,9 @@ interface BackendApi {
         @Body body: ActivityLinkTrailBody,
     ): Response<okhttp3.ResponseBody>
 
+    @GET("activities/type-choices")
+    suspend fun activityTypeChoices(): List<ActivityTypeChoice>
+
     @retrofit2.http.PATCH("activities/{source}/{sourceId}")
     suspend fun editActivity(
         @Path("source") source: String,

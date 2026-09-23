@@ -78,7 +78,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -104,7 +104,27 @@ PROVIDER_COLUMNS: tuple[str, ...] = (
 
 # Columns the user owns. Listed so the rule is documented in code rather than
 # implied by their absence from the allowlist above.
-USER_OWNED_COLUMNS: tuple[str, ...] = ("notes", "tags", "trail_id")
+#
+# `recorded_type` is the flag that `type` has been corrected by the user (a
+# watch that filed mowing as "cycling"). The correction itself lives in
+# `type`, which IS a provider column, so it is protected separately by
+# `protected_type` on every write path rather than by leaving it out of the
+# allowlist -- a row nobody corrected must keep taking the provider's type.
+USER_OWNED_COLUMNS: tuple[str, ...] = ("notes", "tags", "trail_id", "recorded_type")
+
+
+def protected_type(incoming: Any) -> Any:
+    """The ON CONFLICT value for `type`: the incoming one, unless the user
+    has corrected this row, in which case the stored one.
+
+    Evaluated by Postgres against the existing row, so it holds for the
+    single-row sink and the bulk importer alike, and cannot race a PATCH
+    that lands between a read and a write.
+    """
+    return case(
+        (models.Activity.recorded_type.is_(None), incoming),
+        else_=models.Activity.type,
+    )
 
 # Columns a retiring duplicate may hand to the row that survives it.
 #
@@ -367,7 +387,17 @@ async def _retire_promotion(
             )
             return False
         for col, val in carried.items():
+            if col == "recorded_type":
+                continue
             setattr(winner, col, val)
+        # A type correction is two columns, not one: `recorded_type` flags
+        # it, `type` holds it. What moves is the user's CHOICE; the
+        # survivor's `recorded_type` is its OWN device's word, so an undo on
+        # it restores what that provider said, not what the retired one did.
+        if "recorded_type" in carried and winner.type != stale.type:
+            if winner.recorded_type is None:
+                winner.recorded_type = winner.type
+            winner.type = stale.type
         log.info(
             "activity_sink: carried %s from HC promotion %s to %s/%s",
             ", ".join(sorted(carried)), source_id,
@@ -1025,6 +1055,11 @@ async def upsert_activity(
             new_polyline = None
         else:
             update_set["polyline_simple"] = None
+
+    if "type" in update_set:
+        # A type the user corrected is theirs; a re-sync must not put the
+        # device's guess back (migration 0069).
+        update_set["type"] = protected_type(update_set["type"])
 
     stmt = pg_insert(models.Activity).values(**insert_values)
     if update_set:

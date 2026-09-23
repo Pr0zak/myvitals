@@ -97,6 +97,10 @@ class ActivityOut(BaseModel):
     #: to tell a withheld route from a session that never had one; before
     #: this the Route card just vanished for both.
     route_state: str | None = None
+    #: What the device originally called this activity, when the user has
+    #: corrected `type`; null when they have not (migration 0069). The
+    #: clients show "recorded as <x>" and offer an undo from it.
+    recorded_type: str | None = None
     notes: str | None = None
     tags: list[str] | None = None
     trail_id: int | None = None
@@ -109,15 +113,44 @@ class ActivityNotesIn(BaseModel):
 
 
 class ActivityEditIn(BaseModel):
-    """PATCH body for manual (source=manual) Activity edits. All fields
-    optional — only set keys are applied. Server validates and re-runs
-    the HR-sample scan when start_at or duration_minutes changes so the
-    avg/max HR stay anchored to the user's window."""
+    """PATCH body for Activity edits. All fields optional — only set keys
+    are applied. `type` and `reset_type` work on any source; the rest only
+    on source=manual. Server re-runs the HR-sample scan when start_at or
+    duration_minutes changes so the avg/max HR stay anchored to the user's
+    window."""
     name: str | None = Field(default=None, max_length=255)
     type: str | None = Field(default=None, max_length=64)
+    #: Put back the type the device recorded, undoing a correction.
+    reset_type: bool | None = None
     duration_minutes: float | None = Field(default=None, gt=0, le=24 * 60)
     start_at: datetime | None = None
     notes: str | None = Field(default=None, max_length=400)
+
+
+#: Types offered when correcting an activity (migration 0069). Kept on the
+#: server so both clients offer the same list. The keys are ones the clients'
+#: category mapping already recognises, so a corrected activity gets the
+#: right icon and colour; anything not listed (yard work, housework) falls
+#: to "Other", which is the honest category for it.
+ACTIVITY_TYPE_CHOICES: tuple[tuple[str, str], ...] = (
+    ("walking", "Walk"),
+    ("hiking", "Hike"),
+    ("running", "Run"),
+    ("cycling", "Ride"),
+    ("rowing", "Row"),
+    ("swimming", "Swim"),
+    ("elliptical", "Elliptical"),
+    ("strength_training", "Strength training"),
+    ("yoga", "Yoga"),
+    ("yard_work", "Yard work"),
+    ("housework", "Housework"),
+    ("other", "Other"),
+)
+
+
+class ActivityTypeChoice(BaseModel):
+    type: str
+    label: str
 
 
 class ActivityLinkTrailIn(BaseModel):
@@ -261,6 +294,7 @@ def _activity_to_out(
         avg_power_w=a.avg_power_w, max_power_w=a.max_power_w,
         kcal=a.kcal, suffer_score=a.suffer_score, polyline=a.polyline,
         route_state=a.route_state,
+        recorded_type=a.recorded_type,
         notes=a.notes, tags=a.tags,
         trail_id=a.trail_id, trail_name=trail_name,
     )
@@ -647,6 +681,13 @@ async def link_activity_trail(
     }
 
 
+@router.get("/activities/type-choices", response_model=list[ActivityTypeChoice],
+            dependencies=[Depends(require_any)])
+async def activity_type_choices() -> list[ActivityTypeChoice]:
+    """The types offered when correcting an activity (migration 0069)."""
+    return [ActivityTypeChoice(type=t, label=l) for t, l in ACTIVITY_TYPE_CHOICES]
+
+
 @router.patch("/activities/{source}/{source_id}",
               response_model=ActivityOut,
               dependencies=[Depends(require_any)])
@@ -656,16 +697,27 @@ async def edit_activity(
     body: ActivityEditIn,
     db: AsyncSession = Depends(get_session),
 ) -> ActivityOut:
-    """Edit a manually-logged Activity row. Restricted to source=manual
-    so re-syncs from Strava / Concept2 / Health Connect can't be quietly
-    overwritten (they'd just bounce back to source values on the next
-    sync, surprising the user). When the time window changes we re-scan
+    """Edit an Activity row.
+
+    The TYPE can be corrected on any source — a watch that files mowing as
+    "cycling" is the case that asked for it. The correction goes into `type`
+    so every reader sees it, and `recorded_type` keeps the device's word,
+    which is also what stops a re-sync from reverting it (see
+    `activity_sink.protected_type`). `reset_type` puts the device's word
+    back.
+
+    Everything else stays restricted to source=manual: a provider owns its
+    own start, duration and name, and would write them back on the next
+    sync, surprising the user. When the time window changes we re-scan
     HeartRate samples so avg_hr/max_hr stay anchored to reality."""
-    if source != "manual":
+    data = body.model_dump(exclude_unset=True)
+    manual_only = {"name", "notes", "start_at", "duration_minutes"} & data.keys()
+    if source != "manual" and manual_only:
         raise HTTPException(
             status_code=403,
-            detail=f"only manual activities are editable, "
-                   f"got source={source!r}",
+            detail=f"only the type can be changed on a {source} activity; "
+                   f"{', '.join(sorted(manual_only))} belong to the device "
+                   f"that recorded it",
         )
     a = (await db.execute(
         select(models.Activity)
@@ -675,9 +727,28 @@ async def edit_activity(
     if a is None:
         raise HTTPException(404, "activity not found")
 
-    data = body.model_dump(exclude_unset=True)
+    if data.get("reset_type"):
+        if a.recorded_type is not None:
+            a.type = a.recorded_type
+            a.recorded_type = None
+    elif data.get("type"):
+        new_type = data["type"].strip().lower().replace(" ", "_")
+        if not new_type:
+            raise HTTPException(422, "type cannot be blank")
+        if source == "manual":
+            # A manual row has no device to disagree with; the type is
+            # simply the user's, and there is nothing to undo to.
+            a.type = new_type
+        elif new_type == (a.recorded_type or a.type):
+            # Choosing what the device said is an undo, not a correction.
+            if a.recorded_type is not None:
+                a.type = a.recorded_type
+                a.recorded_type = None
+        else:
+            if a.recorded_type is None:
+                a.recorded_type = a.type
+            a.type = new_type
     if "name" in data: a.name = data["name"]
-    if "type" in data: a.type = data["type"] or a.type
     if "notes" in data: a.notes = data["notes"]
 
     window_changed = False

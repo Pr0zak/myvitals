@@ -1405,6 +1405,9 @@ data class ActivityRow(
     // a backend older than v0.42 keeps deserialising; the detail screen
     // reads that as "unknown", which is what it is.
     @Json(name = "route_state") val routeState: String? = null,
+    // What the device originally called it, when the user corrected `type`
+    // (migration 0069). Null = never corrected.
+    @Json(name = "recorded_type") val recordedType: String? = null,
     val notes: String? = null,
     val tags: List<String>? = null,
     @Json(name = "trail_id") val trailId: Long? = null,
@@ -1419,9 +1422,16 @@ data class ActivityLinkTrailBody(
 /** PATCH /activities/{source}/{sourceId}. Only set fields are applied;
  *  backend re-scans HR samples when start_at or duration changes. */
 @JsonClass(generateAdapter = true)
+data class ActivityTypeChoice(
+    val type: String,
+    val label: String,
+)
+
+/** `type` / `resetType` work on any source; the rest only on source=manual. */
 data class ActivityEditBody(
     val name: String? = null,
     val type: String? = null,
+    @Json(name = "reset_type") val resetType: Boolean? = null,
     @Json(name = "duration_minutes") val durationMinutes: Double? = null,
     @Json(name = "start_at") val startAt: String? = null,
     val notes: String? = null,

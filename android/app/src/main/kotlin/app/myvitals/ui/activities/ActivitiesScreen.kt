@@ -763,7 +763,11 @@ internal fun iconForType(type: String): ImageVector = when {
 }
 
 internal fun prettyType(type: String): String =
+    // "VirtualRide" → "Virtual Ride", and "yard_work" (the corrected-type
+    // keys, migration 0069) → "Yard work".
     type.replace(Regex("([a-z])([A-Z])"), "$1 $2")
+        .replace('_', ' ')
+        .replaceFirstChar { it.uppercase() }
 
 internal fun fmtAge(iso: String?, nowMs: Long): String {
     if (iso.isNullOrBlank()) return ""

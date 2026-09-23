@@ -141,6 +141,10 @@ async def _upsert_activities_chunk(db: AsyncSession, rows: list[dict[str, Any]])
 
     writable = set(PROVIDER_COLUMNS) - {"polyline", "route_state"}
     update_cols = {c.name: c for c in stmt.excluded if c.name in writable}
+    # A type the user corrected survives a re-import (migration 0069).
+    from ..integrations.activity_sink import protected_type
+    if "type" in update_cols:
+        update_cols["type"] = protected_type(stmt.excluded.type)
     stmt = stmt.on_conflict_do_update(index_elements=["source", "source_id"], set_=update_cols)
     await db.execute(stmt)
 

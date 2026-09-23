@@ -1,11 +1,14 @@
 # myvitals — Pending Work
 
-Snapshot updated **2026-08-23** after shipping **v0.26.9**; prior snapshot
-**2026-08-01** after **v0.7.347**. The gap between those two is large: the
-version line jumped from `0.7.x` to `0.15.0` for the meals feature and ran
-to `0.26.9`, covering MEAL-1 through MEAL-9, the AI-CLI provider, and two
-rounds of food-search ranking fixes. All deployed and verified live on
-CT 104.
+Snapshot updated **2026-09-22** after shipping **v0.43.0**. The #SA
+thirteen-lens internal audit ran this session: 51 items, 46 shipped, 1 declined
+on measurement, 4 open. Released across v0.40.0 → v0.43.0, including exercise
+routes (SA-P3) and the activity dedupe they broke. Prior snapshot **2026-08-23**
+after **v0.26.9**; before that **2026-08-01** after **v0.7.347**.
+
+**#SA status is generated, not hand-kept** — it lives in `docs/sa-findings.json`
+and `python3 scripts/sa_report.py SA-L1 shipped` rewrites both the tables below
+and the report's chips. Do not hand-edit either.
 
 Numeric task IDs are session-scoped. Use **mnemonics** (e.g. `FITBIT-2`)
 as the durable identifier. At the start of a new session, ask Claude to
@@ -19,6 +22,277 @@ acting on it.
 ---
 
 ## Active — actionable now
+
+## #UX — user-experience scan (2026-09-22)
+
+Four read-only lenses over the code as it stands after v0.43.0: web
+dashboard, Android app, backend, and web↔phone flows. Anything already in
+`docs/sa-findings.json` or the #SA/#OG2/#OG3 sections was excluded. The three
+highest-severity backend claims (UX-D1, UX-D2, UX-D5) were re-read in source
+before this was written. Everything else is as the lens reported it — re-read
+the cited line before building.
+
+The recurring shape: **failure rendered as absence.** Almost every client
+catches an error and falls through to its empty state, so "the request failed"
+reads as "you have no goals" / "rest day" / "nothing is flashing red". That is
+the same null-is-not-zero rule the backend already enforces, missing one layer
+up.
+
+### Batch 1 — wrong numbers and wrong days (done in the working tree 2026-09-22, not yet released)
+
+UX-D8 measured before changing: over 30 days one source had ~800 minutes
+holding more than one row, ~21k steps between SUM and per-minute MAX. The
+rows are distinct readings seconds apart and `(time, source)` is the primary key, so SUM is right and MAX was dropping
+real steps. Stored days in a two-week window ending early September read low; the SA-L1
+staleness check will re-flag and rebuild them, `MAX_LAZY_RECOMPUTES` at a
+time, on the next `/summary/range` loads.
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| UX-D1 | `_check_goals_for_completion` assumes weight goals go DOWN (`latest <= target`) — a weight-GAIN goal auto-closes as "reached" on the next `/ai/alerts` call, which runs every page load | S | backend | done — unreleased |
+| UX-D2 | Fasting streak counts back from the UTC day over UTC `ended_at`, within a 90-day window — reads 0 until today's fast ends, evening fasts land on tomorrow, long streaks truncate | S | backend | done — unreleased |
+| UX-D3 | `_current_values_for_goals` + the completion check resolve "today" in UTC — steps goal reads no-data 19:00-24:00 CDT; `ai.py` not in `DAY_FACING_MODULES` | S | backend | done — unreleased |
+| UX-D4 | `/profile` steps schedule `effective_today` resolved in UTC — shows tomorrow's weekday target after 19:00 | S | backend | done — unreleased |
+| UX-D5 | Web `meals/Today.vue` freezes `today` at mount — a tab left open overnight logs to yesterday | S | web | done — unreleased |
+| UX-D6 | Weight "to go" has opposite signs: web `latest - goal`, phone `goal - latest` | S | both | done — unreleased |
+| UX-D7 | `Trends.vue` keeps its own localStorage weight goal, a default 178 cm height, and a client-side ETA that never refuses — contradicts the server projection | S | web | done — unreleased |
+| UX-D8 | `live_steps_today` is plain SUM; `canonical_steps_total` + `/query/steps` are per-minute MAX then SUM — home and Steps can disagree. Measure duplicate-minute rows first | S | backend | done — unreleased |
+| UX-D9 | `/summary/today` `last_sync` lacks `real_install_heartbeat_filter()` — the SA-O2 debug-build heartbeat bug on a second path | S | backend | done — unreleased |
+| UX-D10 | Steps detail (web + phone) uses flat `steps_goal`, ignores the per-weekday schedule; "days ≥ goal" denominators differ between clients | S | both | done — unreleased |
+| UX-D11 | One shared `local_today()` helper (11 copies exist) and flip the day guard to cover all of `api/` + `analytics/` with named exemptions | M | backend | partial — `localtime.py` + guard widened to 8 modules and the two-line shape; the 11 private copies not yet folded in |
+| UX-E1 | AI provider errors (`CliError`, `LlmError`, Anthropic) reach clients as bare 500; `friendly_error()` text exists and is never shown. Map to 503/429 with `detail`; web reads `detail` not `e.message` | S | both | done — unreleased |
+
+### Batch 2 — failure is not absence
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| UX-F1 | Phone Train tab renders "Rest Day" on any fetch failure; no error, no refresh, no cache | M | phone | todo |
+| UX-F2 | Web You/Train/CoachHub/Rings/Body never render `loading`, and `.catch(() => null)` turns errors into empty states ("No active goals yet", "Nothing is flashing red") | M | web | todo |
+| UX-F3 | Phone Home (`RingsScreen`) and You have no JsonCache SWR — "Loading…" every tab switch; You says "No active goals yet" offline | M | phone | todo |
+| UX-F4 | `today_snapshot` `safe()` nulls a failed section silently — add `failed: [...]` and render it | S | both | todo |
+| UX-F5 | 110 raw `e.message` renders on phone — one error→copy mapper | S-M | phone | todo |
+| UX-F6 | CoachHub: fallback tone "balanced"/"Nothing is flashing red" on no data; synthetic sparklines; disabled Ask input though ASK-1 works; hero mislinks to /heart-rate | S | web | todo |
+
+### Batch 3 — phone behaviour
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| UX-P1 | `onNewIntent` only calls `setIntent` — notification/widget/shortcut taps do nothing when the app is already running | S | phone | todo |
+| UX-P2 | Rest-done alert is driven from composition — likely silent with the screen off (inferred; verify on device). Schedule via AlarmManager or a chronometer notification | M | phone | todo |
+| UX-P3 | Zero `rememberSaveable` in the app — rotation/dark-mode switch wipes rest timer, half-filled food-log dialog, range pickers | M | phone | todo |
+| UX-P4 | Food log: double-tap Save duplicates; errors cleared by the following `fetch()`; dialog closes before the request resolves; "repeat yesterday" reports every failure as "nothing logged" | S | phone | todo |
+| UX-P5 | Hard-coded unit labels beside converted values (`WeightDetailScreen:228` "lb", `ActivityYtd:143` "mi", `PrepTab:342` "kg a week"); weekly-volume card summed on device | S | phone | todo |
+| UX-P6 | Steps widget falls back to `0` not "—"; widgets `runBlocking` up to 4 s in `onUpdate` | S | phone | todo |
+| UX-P7 | Six 15-min periodic workers; TrailAlert/AiAlert redundant with SyncWorker's post-sync trigger; widget refresh scheduled with no widgets placed | M | phone | todo |
+| UX-P8 | "Sync now" is not unique work — can overlap the periodic sync on the checkpoint write | S | phone | todo |
+| UX-P9 | HC permissions-lost banner is Settings-only on phone; web shows it on every page | S | phone | todo |
+| UX-P10 | Catalog favourite/avoid/disable icons: no contentDescription, no toggle state, 36 dp | S | phone | todo |
+| UX-P11 | Widgets all route to Body tab; in-app `open()` lacks `launchSingleTop` | S | phone | todo |
+
+### Batch 4 — web layout and reachability
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| UX-W1 | Neon views use `margin: -1.25rem -1.5rem` against 0.9rem mobile padding — ~10 px horizontal scroll on 11 views | S | web | todo |
+| UX-W2 | `StrengthToday.vue` set table ~600 px wide on a 360 px phone, no mobile rule | M | web | todo |
+| UX-W3 | Neon shell cannot reach /meals/nutrition, /meals/foods, /meals/log, /day, /watch, /logs; hiding a Body tile orphans its detail view | S | web | todo |
+| UX-W4 | One-tap permanent delete with no undo (recipes, shopping, pantry, foods, log) on ~20 px icons; `.icon-btn` redefined in 6 files | M | web | todo |
+| UX-W5 | Train Strength/Cardio toggle is inert; YTD distance hard-coded mi; upcoming cells all open today | S | web | todo |
+| UX-W6 | Modals: no Escape, no role=dialog, no focus trap, background scrolls — one shared `Modal.vue` | M | web | todo |
+| UX-W7 | NeonNav `activeIndex` falls back to Today; no back affordance in `PageHeader` | S | web | todo |
+| UX-W8 | Unsaved equipment/profile edits dropped silently on navigation | S | web | todo |
+| UX-W9 | Settings mounts every pane — 11 loads + 3 s `/jobs` poll when deep-linked to profile | S | web | todo |
+| UX-W10 | Meals Today: unlabeled "+" button, bare kcal numbers, manual inputs coerce "1,5" / "300kcal" to null silently | S | web | todo |
+
+### Batch 5 — performance and features
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| UX-X1 | Web has no cache between route changes; Train pulls 2,000 activities per visit; readinessDetail fetched twice on home | M | web | todo |
+| UX-X2 | Activity list/stats endpoints load full `polyline` + `raw`; serve `polyline_simple` in lists, aggregate stats in SQL | S | backend | todo |
+| UX-X3 | `/ai/alerts` cooldown keys on newest alert — a scan that writes nothing re-scans every page load, and `phrase_anomaly` runs un-quota'd inside a GET | S-M | backend | todo |
+| UX-X4 | Strength review bumps quota BEFORE the cache lookup (and possibly twice); no `/latest` read | S | both | todo |
+| UX-X5 | `discoveries` runs 19 per-metric queries though `all_daily_summary_metrics` exists; `tiles.py` ~12 over the same 14 rows | S | backend | todo |
+| UX-X6 | Food log entries cannot be edited on either surface — add `PATCH /meals/log/{id}` | S-M | both | todo |
+| UX-X7 | Food log + shopping ticks have no offline path on phone (strength flow does) | M | phone | todo |
+| UX-X8 | Label/barcode scan cannot log directly; prep → shopping list is a dead end | M | both | todo |
+| UX-X9 | Phone cannot create/edit/delete goals or show goal ETA | M | phone | todo |
+| UX-X10 | Detail-screen stats (HR/HRV/BP/skin-temp averages, weekday patterns) computed per client and disagree — one `/query/<metric>/stats` each | M | both | todo |
+| UX-X11 | Web-only actions with no phone path: alert dismiss, manual BP entry, compare, activity notes — decide which are intentional and list them in `parity_check.py` | M | phone | todo |
+
+---
+
+
+## #SA — thirteen-lens internal audit (2026-09-18)
+
+The first pass that is **not** a teardown of someone else's project. Thirteen
+independent lenses were pointed at this codebase and at the live production
+database: dormant surfaces, unsurfaced data, truth, parity, reliability,
+performance, the AI layer, security, the test gates, the Android app,
+operations, statistical headroom, and a scan of comparable projects that are
+not openGym. Each lens measured before it claimed; each finding was then handed
+to a refuter told to kill it. **52 findings, 42 survived, 10 refuted.** The
+refuter also corrected 39 of the survivors — a scale overstated, an impact
+claimed on a screen that does not exist, a proposal that would have broken one
+of this project's own invariants. Those corrections are in the report and
+several of them change what the fix should be, so read the item before building
+it.
+
+**The headline.** The judgement in this codebase is sound and it is applied
+where a human remembered to apply it. 1,936 tests pass in 34 seconds, including
+every hand-written AST guard, and **nothing runs them** — no CI job, no release
+step. The tag that publishes `:latest` is pulled into production within fifteen
+minutes by a cron that health-probes the container and rolls back if it fails
+to boot, and is blind by construction to a red test or a lint error. Five of
+the six live untruths below would have been caught by something this project
+already owns. That is why `SA-G1` is not a chore item: it is the reason the
+rest of this list exists.
+
+Report artifact: `https://claude.ai/code/artifact/826f3170-a4b4-4f27-bad6-1c50e38c515e`
+Repo copy: `docs/self-audit-2026-09.html`, generated — not hand-written. Prior
+passes asked you to keep the chips in step with the table by hand, and the
+parity map in `SA-G2` is what that habit produces, so this one is wired instead:
+the tables below and the report's chips are both emitted from
+`docs/sa-findings.json`. Republish by passing the existing URL so the link the
+user holds keeps working.
+
+<!-- SA-TABLES:BEGIN -->
+
+### Live — the app states something false right now
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| SA-L1 | `daily_summary.steps_total` freezes at a partial count; nothing recomputes it. 32 of the last 100 days wrong, stored history 23% short. Every surface but the Steps detail screen reads the frozen column | M | backend | shipped ✅ |
+| SA-L2 | `You.vue` re-maps `/ai/goals` and drops every GOAL-STATE field, so **every** goal card renders "No reading yet" — the v0.32.0 bug re-created one layer up | S | web | shipped ✅ |
+| SA-L3 | `daily_training_stress` early-returns on a day with no Strava activity, so a lifting day carries zero load. CTL/ATL/TSB pinned at 0.0; Compare reports "Fitness −100%, worse" | S | backend | shipped ✅ |
+| SA-L4 | All five phone Coach POSTs declare `@Body Map<String, Any>` → Java wildcard → Retrofit rejects the method. Three of six Coach cards have never once run | S | phone | shipped ✅ |
+| SA-L5 | Two F821 NameErrors in shipped code. `add_exercise` raises *after* commit, so each retry writes another phantom slot | S | backend | shipped ✅ |
+| SA-L6 | `last_sync` on `/summary/today` is `max(heartrate.time)`, not a sync. Amber-and-false 22% of wall-clock time, pointing at the wrong fault | S | both | shipped ✅ |
+
+### Exposure — the token model has a door cut around it
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| SA-S1 | Postgres `ports:` published on every interface, no consumer, no firewall — the LAN and the tailnet reach the health DB and eight plaintext third-party credentials, bypassing the token model | S | ops | shipped ✅ |
+| SA-S2 | `_check_and_bump_quota` still gates on `anthropic_api_key`; 21 AI endpoints break if the unused key is cleared | S | backend | shipped ✅ |
+| SA-S3 | More call sites still use the guard `_credentials_missing(cfg)` was written to replace | S | backend | shipped ✅ |
+| SA-S4 | Neither image builds from a lockfile, and the CT force-recreates from `:latest` every 15 min | S | ops | shipped ✅ |
+
+### The gates — what is meant to catch this class, and does not run
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| SA-G1 | **No CI runs the tests, ruff, or the Android test.** 1,936 tests pass in 34 s; nothing executes them. `images.yml` should `needs: [tests]` — that is what closes the loop with the auto-update cron | S | ops | shipped ✅ |
+| SA-G2 | The parity pair map stopped being updated — six live web↔phone counterparts unregistered | S | ops | shipped ✅ |
+| SA-G3 | `parity_check.py` passes a pair when both files moved in the range — so a fix applied to one surface and not the other reads green. HeartRate.vue ↔ HrDetailScreen.kt matched clean on a commit where the phone chart still lacked the fix | M | ops | shipped ✅ |
+
+### The numbers behind the numbers
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| SA-N1 | The nightly RHR/HRV window is 22:00–09:00 **UTC** = 17:00–04:00 local. Adds variance, misses the last two hours of sleep. The AST day-boundary guard cannot see a clock-hour window | M | backend | shipped ✅ |
+| SA-N2 | `/summary/range` re-derives the same ~77 days on every call and never converges (~1.6–2.0 s for 30 days). No wrong number — pure wasted latency | S | backend | shipped ✅ |
+| SA-N3 | "Sleep quality" is the duration score wearing a quality label; the architecture term is pinned at 100 | M | both | shipped ✅ |
+| SA-N4 | The recovery verdict is one night of HRV against a 7-day mean, and reverses itself on 57% of consecutive days | S | both | shipped ✅ |
+| SA-N5 | The projection's refuse-when-noisy gate is measured on the smoothed series, so it cannot fire | S | backend | shipped ✅ |
+| SA-N6 | The skin-temp carry-forward does not declare itself; the side nav shows a 5-day-old value as current | S | backend | shipped ✅ |
+| SA-N7 | `backfill_analytics` computes `today = datetime.now(timezone.utc).date()` — the local-day bug class, in a module `DAY_FACING_MODULES` does not cover | S | backend | shipped ✅ |
+| SA-N8 | `readiness` weights hrv 0.40 / rhr 0.30 / sleep_score 0.15 / sleep_duration 0.15 — but `sleep_score` is itself ~60% duration, so sleep enters twice and the two terms correlate at r=0.573 (measured) | M | backend | declined ✖ |
+
+### Reachability — built, shipped, and with no door
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| SA-R1 | Two Key-metrics cards navigate somewhere other than themselves; its Edit link opens the wrong Settings pane | S | web | shipped ✅ |
+| SA-R2 | Web Today omits the weekly training-load card the phone Today shows, and fetches four endpoints it does not render | S | web | shipped ✅ |
+| SA-R3 | Nine registered parity pairs have a web half with no route into it on the default (neon) shell | S | web | shipped ✅ |
+| SA-R4 | Meals is 3-of-11 reachable on the default web shell; the pill's own subtitle promises two views you cannot open | S | web | shipped ✅ |
+
+### Operations — what happens when nobody is watching
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| SA-O1 | Settings' "Preview payload" can render 1 of 15 builders — and 14 of 24 real AI results came from the ones it cannot show | M | web | shipped ✅ |
+| SA-O2 | A second install poisons `sync_heartbeat`, the only sync-health signal the web reads (222 ghost rows) | S | both | shipped ✅ |
+| SA-O3 | The pre-migration restore point survives a median of 10 h; the bugs it exists for take days to notice | S | ops | shipped ✅ |
+| SA-O4 | Nothing outside the app watches the app; `/health` is a literal constant | S | ops | shipped ✅ |
+| SA-O5 | The weekly docker prune has never run once — not executable; cron has been mailing the error | S | ops | shipped ✅ |
+| SA-O6 | Nothing the backend logs reaches a surface — 265k `app_logs` rows, zero from the server | S | backend | shipped ✅ |
+
+### Phone telemetry — permissioned, counted as granted, never read
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| SA-P1 | `DistanceRecord` is in the manifest and in `HealthConnectGateway`'s permission list but is never read; `WorkoutSample` has no distance field on either side of the wire, so all 18 Health Connect activities have `distance_m` NULL | S | both | shipped ✅ |
+| SA-P2 | `READ_EXERCISE_ROUTE` is absent from the manifest and `ExerciseRoute` appears nowhere in the app, so `activities.polyline` is NULL for every Health Connect activity and the Route card is hidden | M | both | shipped ✅ |
+| SA-P3 | Health Connect holds a route for the walk and withholds it pending `READ_EXERCISE_ROUTE`; declare the permission, request it through the route consent flow, and carry a polyline on the wire so phone-ingested activities can draw a map | M | both | shipped ✅ |
+| SA-P4 | `sync_heartbeat` recorded 30 consecutive failures across nine hours while reporting 13/13 permissions granted, and nothing on either client said so — the dashboard's only ingest signal is the permission banner | M | both | todo |
+| SA-P5 | The self-duplicate path retires a promoted row without a winner to carry to, so `CARRYABLE_COLUMNS` never runs — only the older two-column user-owned veto protects it | S | backend | todo |
+| SA-P6 | `track_is_materially_better` short-circuits `if not incumbent: return True`, so a corrupt or truncated polyline is carried onto the survivor unvalidated | S | backend | todo |
+
+### Dead weight — things to delete rather than build
+
+| ID | Task | Size | Surface | Status |
+|---|---|---|---|---|
+| SA-C1 | Release APK 62.4 MB with R8 disabled; one dependency shipped whole for 104 icons is most of it | M | phone | shipped ✅ |
+| SA-C2 | 996 MB of Chromium in every backend image, for a Strava login this account cannot use | S | ops | shipped ✅ |
+| SA-C3 | The phone log table's prune query has zero callers — ~68 MB of text | S | phone | shipped ✅ |
+| SA-C4 | 463k trail snapshots feed an endpoint no view calls and a client method with no callers | M | both | shipped ✅ |
+| SA-C5 | `trail_status_snapshots` is 99.62% exact duplicates — 76 MB storing 1,746 facts | S | data | shipped ✅ |
+| SA-C6 | ~4,600 statistical alerts, incl. 14 stage-2 BP alerts, written where no client reads them | S | backend | todo |
+| SA-C7 | Three of the four AI rows on the workout page are dead, on a page used daily | S | both | shipped ✅ |
+| SA-C8 | The body-circumference screen has no door on either surface | S | both | shipped ✅ |
+| SA-C9 | The Fasting ring holds half the Habits row and has rendered an em-dash since it shipped | S | both | shipped ✅ |
+| SA-C10 | The AI model picker states the wrong cost, and switching model cannot change a cached card | S | web | shipped ✅ |
+| SA-C11 | The unbounded `MAX()` pattern costs 530 ms of planning against 17 ms of execution | S | backend | shipped ✅ |
+| SA-C12 | No `frontend/.dockerignore` — a developer's local `node_modules` (227 MB when measured) is sent to the daemon and copied over the image's own installed tree by `COPY . .` | S | ops | shipped ✅ |
+| SA-C13 | SA-O6's allowlist was audited line by line for physiological values; the `uvicorn.error` catch-all beside it was not, and an exception *message* (Pydantic `ValidationError`, SQLAlchemy `IntegrityError`) can quote a health value into `app_logs` | S | backend | shipped ✅ |
+| SA-C14 | `loadUpdateStatus`, `checkUpdate` and the new `aiPreview` all call `axios.get("/api/...", { baseURL: apiBase.value || undefined })` — with a custom API base set, the wire URL becomes `<base>/api/...` and 404s, because hitting the backend directly bypasses the Caddy prefix strip | S | web | shipped ✅ |
+
+<!-- SA-TABLES:END -->
+
+**Status lives in `docs/sa-findings.json`.** The tables above and the chips in
+`docs/self-audit-2026-09.html` are both generated from it by
+`python3 scripts/sa_report.py SA-L1 shipped` — do not hand-edit either, and
+republish the report to the URL above so the reader's link keeps working.
+
+### Refused on measurement — do not re-open from intuition
+
+Ten findings did not survive the refuter, and three of them are worth knowing
+about specifically because they read well until the query was re-run.
+
+- **"The watch feed has been dead 58 h."** It had self-healed before the
+  refuter reached it. The gap was 43.3 h, not 58, it is the 120-day maximum,
+  and `device_status` shows heart rate resuming in the same minute the watch
+  went back on the wrist. There are zero worn-but-silent hours. A proposed 24 h
+  staleness alarm would have fired three times in four months on a healthy
+  watch — HEALTH-1's failure exactly.
+- **"10,955 SpO2 readings have no read endpoint."** The arithmetic is right and
+  it is already TODO's `SPO2` item, which asks for exactly the read endpoint
+  proposed. But ingest **stopped on 2026-09-07**: SpO2's only writer is the
+  Google Health poll, which is the dead `invalid_grant` grant of `OG3-L1`. A
+  chart built now plots a closed 40-day window. Fix the grant first.
+- **"The HA environment poll is registered in a paused state."** The job is not
+  registered at all — `settings.ha_url` / `ha_token` / `ha_entity_list` are
+  empty on the deployed CT, and the backend logs six scheduled jobs at boot
+  with no HA line among them. `env_readings` being empty is a configuration
+  choice, not a fault.
+
+The other seven: the deterministic alert tier (structurally true, every number
+attached to it wrong, and `ts` is write-time not event-time so the "readable
+volume" claim inverts); three unread `google_health_daily` columns (nothing in
+the app claims to collect them, so there is no untrue statement to correct, and
+the VO2 half already shipped); the Coach page being unreachable (`Analytics.vue`
+is a four-tab shell that mounts it, linked unconditionally from seven detail
+views); phone `records_pulled` (nobody reads it, and the fault it would diagnose
+did not exist); the CT's stale `docker-compose.yml` (byte-diff is two env vars
+whose compose defaults are identical to the code defaults — a provable no-op);
+the steps trend badge weekday artefact (no client renders a trend badge at all);
+and zone-time outside logged activities (the zones endpoint has never been wired
+to a screen on either surface).
+
+
+---
 
 ## #OG3 — openGym third-pass teardown (2026-09-16)
 

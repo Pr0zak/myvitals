@@ -131,9 +131,12 @@ async function repeatPrevious(day: string) {
     await meals.repeatLogDay(toLocalISO(d), day);
     await load();
   } catch (e) {
-    // A 404 here is informative, not a failure: it means the previous
-    // day was not logged either.
-    error.value = "nothing logged the day before, so there was nothing to copy";
+    // Only a 404 means the previous day was not logged. Offline or a server
+    // fault used to be reported as that too — matches the phone's LogTab.
+    const status = (e as { response?: { status?: number } })?.response?.status;
+    error.value = status === 404
+      ? "nothing logged the day before, so there was nothing to copy"
+      : e instanceof Error ? e.message : "could not copy the day before";
   } finally {
     saving.value = false;
   }

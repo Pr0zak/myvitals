@@ -87,8 +87,13 @@ fun TodayTab(settings: SettingsRepository, onOpenMore: () -> Unit) {
         }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            // Resolved per fetch, not captured from the first composition
+            // (UX-D5, the phone half): the LaunchedEffect's closure kept the
+            // date the tab opened on, so a tab resumed after midnight showed
+            // yesterday's log.
+            val day0 = LocalDate.now().toString()
             withContext(Dispatchers.IO) {
-                day = api.mealsLog(today, 1).firstOrNull()
+                day = api.mealsLog(day0, 1).firstOrNull()
                 // Each of these is optional context, never a reason to fail
                 // the screen: a missing target means the ring says so.
                 targets = runCatching { api.prepTargets() }.getOrNull()

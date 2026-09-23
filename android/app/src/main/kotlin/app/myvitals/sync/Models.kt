@@ -1419,15 +1419,23 @@ data class ActivityLinkTrailBody(
     @Json(name = "trail_id") val trailId: Long?,
 )
 
-/** PATCH /activities/{source}/{sourceId}. Only set fields are applied;
- *  backend re-scans HR samples when start_at or duration changes. */
+/** GET /activities/type-choices — one entry of the correction picker. */
 @JsonClass(generateAdapter = true)
 data class ActivityTypeChoice(
     val type: String,
     val label: String,
 )
 
-/** `type` / `resetType` work on any source; the rest only on source=manual. */
+/** PATCH /activities/{source}/{sourceId}. Only set fields are applied;
+ *  backend re-scans HR samples when start_at or duration changes.
+ *  `type` / `resetType` work on any source; the rest only on source=manual.
+ *
+ *  The annotation is load-bearing. v0.45.0 shipped this class without it
+ *  (a new class was inserted between it and its annotation), so Moshi fell
+ *  back to reflection over R8-renamed fields: the phone sent `type` under
+ *  an obfuscated key, the server ignored the unknown key and answered 200,
+ *  and the correction silently did nothing. `ModelsCodegenTest` pins it. */
+@JsonClass(generateAdapter = true)
 data class ActivityEditBody(
     val name: String? = null,
     val type: String? = null,

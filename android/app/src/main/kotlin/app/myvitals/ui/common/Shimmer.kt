@@ -27,24 +27,35 @@ import androidx.compose.ui.unit.dp
  *
  * Pass either `width` (fixed dp) or omit it and use `Modifier.fillMaxWidth()`.
  */
+/** Pins the shimmer sweep to a fixed position (-400..800). Null — always, on
+ *  the phone — means animate. Exists so a JVM screenshot test can render
+ *  frames of the sweep, which it cannot get by advancing a clock. */
+val LocalShimmerShift = androidx.compose.runtime.staticCompositionLocalOf<Float?> { null }
+
 @Composable
 fun ShimmerBlock(
     modifier: Modifier = Modifier,
     width: Dp? = null,
     height: Dp = 16.dp,
     cornerRadius: Dp = 6.dp,
+    /** Tints the sweep. Null keeps the neutral grey every existing caller
+     *  uses; the Today skeleton passes each section's own colour so the
+     *  motion reads at a glance on the dark ground. */
+    accent: Color? = null,
 ) {
     val transition = rememberInfiniteTransition(label = "shimmer")
-    val shift by transition.animateFloat(
+    val animated by transition.animateFloat(
         initialValue = -400f, targetValue = 800f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 1400, easing = LinearEasing),
         ),
         label = "shimmer-progress",
     )
+    // A screenshot test can pin the sweep position; the phone never sets it.
+    val shift = LocalShimmerShift.current ?: animated
 
     val base = Color(0xFF1F2937).copy(alpha = 0.5f)
-    val highlight = Color(0xFF374151).copy(alpha = 0.8f)
+    val highlight = accent?.copy(alpha = 0.22f) ?: Color(0xFF374151).copy(alpha = 0.8f)
     val brush = Brush.linearGradient(
         colors = listOf(base, highlight, base),
         start = androidx.compose.ui.geometry.Offset(shift, 0f),

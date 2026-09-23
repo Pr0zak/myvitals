@@ -327,28 +327,44 @@ fun RingsContent(
 
 
 /** Placeholder blocks in the shape of the loaded screen: hero, weekly
- *  load, health status, then a 2-up metric grid. */
+ *  load, health status, then a 2-up metric grid. Each block names what is
+ *  loading into it and sweeps in that section's own colour, so the page
+ *  reads as "on its way" rather than as a blank layout. */
 @Composable
 private fun TodaySkeleton() {
-    val sb = @Composable { h: androidx.compose.ui.unit.Dp, m: Modifier ->
-        app.myvitals.ui.common.ShimmerBlock(m, height = h, cornerRadius = 20.dp)
+    @Composable
+    fun Block(label: String, accent: Color, height: androidx.compose.ui.unit.Dp, modifier: Modifier) {
+        Box(modifier.height(height)) {
+            app.myvitals.ui.common.ShimmerBlock(
+                Modifier.fillMaxWidth(), height = height, cornerRadius = 20.dp, accent = accent,
+            )
+            Text(
+                label, color = accent.copy(alpha = 0.75f), fontSize = 12.sp,
+                modifier = Modifier.padding(14.dp),
+            )
+        }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        sb(200.dp, Modifier.weight(1f))
+        Block("Weekly steps", NeonMV.Lime, 200.dp, Modifier.weight(1f))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            repeat(3) { sb(60.dp, Modifier.fillMaxWidth()) }
+            Block("Steps", NeonMV.Lime, 60.dp, Modifier.fillMaxWidth())
+            Block("Readiness", NeonMV.Cyan, 60.dp, Modifier.fillMaxWidth())
+            Block("Sleep", NeonMV.Magenta, 60.dp, Modifier.fillMaxWidth())
         }
     }
     Spacer(Modifier.height(14.dp))
-    sb(230.dp, Modifier.fillMaxWidth())
+    Block("Training load", NeonMV.Lime, 230.dp, Modifier.fillMaxWidth())
     Spacer(Modifier.height(14.dp))
-    sb(48.dp, Modifier.fillMaxWidth())
+    Block("Health status", NeonMV.Cyan, 48.dp, Modifier.fillMaxWidth())
     Spacer(Modifier.height(14.dp))
-    repeat(2) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            sb(170.dp, Modifier.weight(1f)); sb(170.dp, Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(10.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Block("HRV", NeonMV.Cyan, 170.dp, Modifier.weight(1f))
+        Block("Resting HR", NeonMV.Cyan, 170.dp, Modifier.weight(1f))
+    }
+    Spacer(Modifier.height(10.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Block("Sleep", NeonMV.Magenta, 170.dp, Modifier.weight(1f))
+        Block("Recovery", NeonMV.Cyan, 170.dp, Modifier.weight(1f))
     }
 }
 

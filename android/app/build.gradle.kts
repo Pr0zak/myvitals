@@ -145,3 +145,10 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+
+// `-PanimFrames` turns on TodayLoadingAnimationTest, which records frames of
+// a clock-driven animation for previews. Off by default: an animation is not
+// something a golden image should pin.
+tasks.withType<Test>().configureEach {
+    if (project.hasProperty("animFrames")) systemProperty("animFrames", "1")
+}

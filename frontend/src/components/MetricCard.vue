@@ -243,13 +243,20 @@ const emptyNote = computed(() => {
 const plottable = computed(
   () => week.value.filter((p) => p.value != null).length >= 1,
 );
+
+/** Size step for long values (see `.v6` / `.v7`). Same thresholds as the
+ *  phone: up to 5 characters full size, 6 one step down, 7+ two. */
+const valueSize = computed(() => {
+  const n = String(props.value ?? "").length;
+  return n <= 5 ? "" : n === 6 ? "v6" : "v7";
+});
 </script>
 
 <template>
   <div class="mc" :style="{ '--mc-accent': accent }">
     <div class="name">{{ name }}</div>
 
-    <div v-if="hasData" class="value">
+    <div v-if="hasData" class="value" :class="valueSize">
       {{ value }}<span v-if="unit" class="unit">{{ unit }}</span>
     </div>
     <div v-else class="value nodata">No data</div>
@@ -377,6 +384,10 @@ const plottable = computed(
   font-variant-numeric: tabular-nums;
 }
 .value.nodata { font-size: 1.45rem; font-weight: 300; letter-spacing: -0.5px; }
+/* Step down for long values, matching the phone's MetricCard. "121/78" at
+   2.5rem filled a 2-up card and the ellipsis ate the unit. */
+.value.v6 { font-size: 2rem; }
+.value.v7 { font-size: 1.75rem; }
 .unit { font-size: .85rem; font-weight: 400; color: #b9bec6; margin-left: 4px; }
 .qual { font-size: .7rem; color: #8d949d; margin-top: 2px; }
 

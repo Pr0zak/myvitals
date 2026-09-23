@@ -174,13 +174,68 @@ fun RingsScreen(
     // numbers after an overnight suspend.
     app.myvitals.ui.common.LifecycleResumeEffect { scope.launch { load() } }
 
-    val sleepScore = summary?.sleepScore
-    val recoveryScore = summary?.recoveryScore
-    val steps = summary?.stepsTotal
-    val stepGoal = profile?.stepsGoal() ?: 10_000
-    val movePct: Float = if (steps != null && stepGoal > 0)
-        min(100f, (steps.toFloat() / stepGoal.toFloat()) * 100f) else 0f
+    RingsContent(
+        summary = summary,
+        readiness = readiness,
+        rollup = rollup,
+        vitalTiles = vitalTiles,
+        week = week,
+        tilePrefs = tilePrefs,
+        groupOrder = groupOrder,
+        narrativeEvents = narrativeEvents,
+        focusCounts = focusCounts,
+        error = error,
+        loading = loading,
+        refreshing = refreshing,
+        contentPadding = contentPadding,
+        onOpen = onOpen,
+        weeklyLoad = { app.myvitals.ui.common.WeeklyLoad(settings) },
+        onRefresh = {
+            scope.launch { refreshing = true; try { load() } finally { refreshing = false } }
+        },
+        onVote = { id, vote ->
+            // Optimistic: reflect the tap now, write after. A rejected
+            // write reverts rather than leaving a thumb lit for a vote
+            // the server never took.
+            val before = narrativeEvents
+            narrativeEvents = narrativeEvents.map {
+                if (it.id == id) it.copy(feedback = vote) else it
+            }
+            scope.launch {
+                runCatching {
+                    BackendClient.create(settings.backendUrl, settings.bearerToken)
+                        .eventFeedback(id, app.myvitals.sync.EventFeedbackRequest(vote))
+                }.onFailure { narrativeEvents = before }
+            }
+        },
+    )
+}
 
+/**
+ * The Today screen from data, with no fetching of its own — so it renders
+ * in a JVM screenshot test exactly as it does on the phone. [RingsScreen]
+ * owns the state and the network; this owns the layout.
+ */
+@Composable
+fun RingsContent(
+    summary: DailySummary?,
+    readiness: app.myvitals.sync.ReadinessDetail?,
+    rollup: app.myvitals.sync.VitalTilesRollup?,
+    vitalTiles: List<app.myvitals.sync.VitalTile>,
+    week: app.myvitals.sync.WeekProgress?,
+    tilePrefs: app.myvitals.sync.TilePrefsOut?,
+    groupOrder: List<String>,
+    narrativeEvents: List<app.myvitals.sync.NarrativeEvent>,
+    focusCounts: Map<String, app.myvitals.sync.FocusCount>,
+    error: String?,
+    loading: Boolean,
+    refreshing: Boolean,
+    contentPadding: PaddingValues,
+    onOpen: (String) -> Unit,
+    weeklyLoad: @Composable () -> Unit,
+    onRefresh: () -> Unit,
+    onVote: (String, String?) -> Unit,
+) {
     NeonScreen(
         title = "Today",
         contentPadding = contentPadding,
@@ -198,10 +253,26 @@ fun RingsScreen(
             )
         },
         refreshing = refreshing,
-        onRefresh = {
-            scope.launch { refreshing = true; try { load() } finally { refreshing = false } }
-        },
+        onRefresh = onRefresh,
     ) {
+        // Nothing has loaded yet — first launch, or a cold start with the
+        // backend unreachable. The cards below used to render anyway, so a
+        // failed request read as "0% · 0 of 0" and "Readiness: No data · Not
+        // enough data yet", with the actual error further down the page.
+        // Failure is not absence: say which one it is, and skip the cards
+        // that would otherwise claim the user has no data.
+        val nothingYet = summary == null && vitalTiles.isEmpty()
+        if (nothingYet && error != null) {
+            NeonErrorBanner(error) { onRefresh() }
+            app.myvitals.ui.common.FocusAreas(onOpen, counts = focusCounts)
+            Spacer(Modifier.height(24.dp))
+            return@NeonScreen
+        }
+        if (nothingYet && loading) {
+            TodaySkeleton()
+            return@NeonScreen
+        }
+
         // Hero: weekly ring + saturated chips + actions, per the reference.
         app.myvitals.ui.common.TodayHero(
             tiles = vitalTiles,
@@ -213,7 +284,7 @@ fun RingsScreen(
         // Weekly load, replacing the daily-goal framing for training. Sits
         // directly under the hero because it answers the same question the
         // ring does — "am I on track this week" — for effort rather than steps.
-        app.myvitals.ui.common.WeeklyLoad(settings)
+        weeklyLoad()
 
         // Health status: the roll-up + Readiness as a MetricCard. The old
         // hero was a third card style stacked above the Focus pills and the
@@ -228,7 +299,6 @@ fun RingsScreen(
             },
         )
 
-
         // Key metrics — one card vocabulary, mirroring KeyMetrics.vue.
         app.myvitals.ui.common.KeyMetrics(
             tiles = vitalTiles,
@@ -239,42 +309,13 @@ fun RingsScreen(
             hidden = tilePrefs?.hidden?.toSet() ?: emptySet(),
             groupOrder = groupOrder,
         )
-        error?.let {
-            NeonErrorBanner(it) {
-                scope.launch { refreshing = true; try { load() } finally { refreshing = false } }
-            }
-        }
-        if (loading && summary == null) {
-            Text(
-                "Loading…",
-                color = NeonMV.Muted,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
-            )
-        }
-
-
-
+        error?.let { NeonErrorBanner(it) { onRefresh() } }
 
         // Narrative cards — what actually happened today, in plain words.
         app.myvitals.ui.common.NarrativeCards(
             events = narrativeEvents,
             onOpenDetail = { onOpen("vitals/SLEEP") },
-            onVote = { id, vote ->
-                // Optimistic: reflect the tap now, write after. A rejected
-                // write reverts rather than leaving a thumb lit for a vote
-                // the server never took.
-                val before = narrativeEvents
-                narrativeEvents = narrativeEvents.map {
-                    if (it.id == id) it.copy(feedback = vote) else it
-                }
-                scope.launch {
-                    runCatching {
-                        BackendClient.create(settings.backendUrl, settings.bearerToken)
-                            .eventFeedback(id, app.myvitals.sync.EventFeedbackRequest(vote))
-                    }.onFailure { narrativeEvents = before }
-                }
-            },
+            onVote = onVote,
         )
 
         // Focus areas — navigation, not a dashboard. Replaces the pill list.
@@ -284,6 +325,32 @@ fun RingsScreen(
     }
 }
 
+
+/** Placeholder blocks in the shape of the loaded screen: hero, weekly
+ *  load, health status, then a 2-up metric grid. */
+@Composable
+private fun TodaySkeleton() {
+    val sb = @Composable { h: androidx.compose.ui.unit.Dp, m: Modifier ->
+        app.myvitals.ui.common.ShimmerBlock(m, height = h, cornerRadius = 20.dp)
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        sb(200.dp, Modifier.weight(1f))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            repeat(3) { sb(60.dp, Modifier.fillMaxWidth()) }
+        }
+    }
+    Spacer(Modifier.height(14.dp))
+    sb(230.dp, Modifier.fillMaxWidth())
+    Spacer(Modifier.height(14.dp))
+    sb(48.dp, Modifier.fillMaxWidth())
+    Spacer(Modifier.height(14.dp))
+    repeat(2) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            sb(170.dp, Modifier.weight(1f)); sb(170.dp, Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(10.dp))
+    }
+}
 
 /** Canvas goal-ring arc with a soft neon glow (a wider, translucent under-pass). */
 

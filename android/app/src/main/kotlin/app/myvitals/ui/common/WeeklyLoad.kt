@@ -63,6 +63,13 @@ fun WeeklyLoad(settings: SettingsRepository, modifier: Modifier = Modifier) {
     }
 
     val d = data ?: return
+    WeeklyLoadCard(d, modifier)
+}
+
+/** The card itself, from data — split out so it renders without a backend
+ *  (screenshot tests; see `app/src/test/.../snapshots`). */
+@Composable
+fun WeeklyLoadCard(d: TrainingLoad, modifier: Modifier = Modifier) {
     val tone = when (d.band) {
         "under" -> NeonMV.Cyan
         "optimal" -> NeonMV.Lime

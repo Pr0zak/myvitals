@@ -118,13 +118,24 @@ fun MetricCard(
                 // tracking keeps a four-character value on one line at 2-up.
                 fontWeight = if (hasData) FontWeight.Bold else FontWeight.Light,
                 letterSpacing = if (hasData) (-1.6).sp else 0.sp,
-                fontSize = if (hasData) 40.sp else 23.sp,
+                // Step down for long values. A compound reading like
+                // "121/78" at 40sp filled the 2-up card, and the unit beside
+                // it was squeezed into one letter per line ("m/m/H/g").
+                fontSize = when {
+                    !hasData -> 23.sp
+                    (value?.length ?: 0) <= 5 -> 40.sp
+                    (value?.length ?: 0) == 6 -> 32.sp
+                    else -> 28.sp
+                },
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
             )
             if (hasData && unit.isNotBlank()) {
                 Spacer(Modifier.width(4.dp))
                 Text(
                     unit, color = Color(0xFFB9BEC6), fontSize = 13.sp,
+                    // A unit is one word; it never wraps.
+                    maxLines = 1, softWrap = false,
                     modifier = Modifier.padding(bottom = 3.dp),
                 )
             }

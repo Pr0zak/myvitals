@@ -3,4 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android") version "2.1.0" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.1.0" apply false
     id("com.google.devtools.ksp") version "2.1.0-1.0.29" apply false
+    // JVM screenshot tests — renders Compose screens to PNG with no device or
+    // emulator. `gradle :app:recordPaparazziDebug` writes the goldens.
+    id("app.cash.paparazzi") version "1.3.5" apply false
 }

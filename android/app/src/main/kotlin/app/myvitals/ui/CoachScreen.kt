@@ -1,6 +1,7 @@
 package app.myvitals.ui
 
 import androidx.compose.foundation.background
+import app.myvitals.ui.common.userMessage
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -123,7 +124,7 @@ fun CoachScreen(
                 withContext(Dispatchers.IO) { api.coachWorkout() }
             } else workout
         } catch (e: Exception) {
-            Timber.w(e, "workout coach failed"); workoutErr = e.message?.take(160)
+            Timber.w(e, "workout coach failed"); workoutErr = e.userMessage().take(160)
         } finally { workoutLoading = false }
     }
 
@@ -135,7 +136,7 @@ fun CoachScreen(
                 withContext(Dispatchers.IO) { api.coachCardio() }
             } else cardio
         } catch (e: Exception) {
-            Timber.w(e, "cardio coach failed"); cardioErr = e.message?.take(160)
+            Timber.w(e, "cardio coach failed"); cardioErr = e.userMessage().take(160)
         } finally { cardioLoading = false }
     }
 
@@ -147,7 +148,7 @@ fun CoachScreen(
                 withContext(Dispatchers.IO) { api.coachSleep() }
             } else sleep
         } catch (e: Exception) {
-            Timber.w(e, "sleep coach failed"); sleepErr = e.message?.take(160)
+            Timber.w(e, "sleep coach failed"); sleepErr = e.userMessage().take(160)
         } finally { sleepLoading = false }
     }
 
@@ -159,7 +160,7 @@ fun CoachScreen(
                 withContext(Dispatchers.IO) { api.coachRecovery() }
             } else recovery
         } catch (e: Exception) {
-            Timber.w(e, "recovery coach failed"); recoveryErr = e.message?.take(160)
+            Timber.w(e, "recovery coach failed"); recoveryErr = e.userMessage().take(160)
         } finally { recoveryLoading = false }
     }
 
@@ -171,7 +172,7 @@ fun CoachScreen(
                 withContext(Dispatchers.IO) { api.coachFasting() }
             } else fasting
         } catch (e: Exception) {
-            Timber.w(e, "fasting coach failed"); fastingErr = e.message?.take(160)
+            Timber.w(e, "fasting coach failed"); fastingErr = e.userMessage().take(160)
         } finally { fastingLoading = false }
     }
 
@@ -356,7 +357,7 @@ fun CoachScreen(
                             )
                         } catch (e: Exception) {
                             Timber.w(e, "ask failed")
-                            askErr = e.message?.take(160) ?: "Ask failed"
+                            askErr = e.userMessage("Ask failed").take(160)
                         } finally { askLoading = false }
                     }
                 }

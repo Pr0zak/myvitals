@@ -13,6 +13,7 @@ from ..analytics import cardio, tiles
 from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
+from ..localtime import local_today
 
 router = APIRouter(prefix="/profile", dependencies=[Depends(require_any)])
 
@@ -34,7 +35,7 @@ class ProfileIn(BaseModel):
 def _age_years(birth: date | None) -> int | None:
     if not birth:
         return None
-    today = date.today()
+    today = local_today()
     return today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
 
 
@@ -378,9 +379,9 @@ async def get_steps_schedule(
         "base": int(extra.get("steps_goal") or tiles.DEFAULT_STEPS_GOAL),
         "schedule": sched if isinstance(sched, dict) else {},
         "weekdays": list(tiles.WEEKDAY_KEYS),
-        "effective_today": tiles.resolve_steps_goal(
-            extra, datetime.now(timezone.utc).date(),
-        ),
+        # The user's weekday, not UTC's (UX-D4): after 7pm Central the UTC
+        # date is tomorrow, so a weekday override showed tomorrow's target.
+        "effective_today": tiles.resolve_steps_goal(extra, local_today()),
     }
 
 

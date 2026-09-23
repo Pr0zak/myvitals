@@ -1,6 +1,7 @@
 package app.myvitals.ui.meals
 
 import androidx.compose.foundation.background
+import app.myvitals.ui.common.userMessage
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
@@ -156,7 +157,7 @@ fun LogTab(settings: SettingsRepository) {
         if (busy) return
         busy = true
         scope.launch {
-            runCatching {
+            val failure = runCatching {
                 val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
                 withContext(Dispatchers.IO) {
                     api.mealsRepeatDay(
@@ -164,12 +165,19 @@ fun LogTab(settings: SettingsRepository) {
                                     target = day),
                     )
                 }
-            }.onFailure {
-                // A 404 is informative rather than a failure: it means the
-                // day before was not logged either.
-                error = "nothing logged the day before, so there was nothing to copy"
-            }
+            }.exceptionOrNull()
+            // Refresh FIRST: fetch() clears `error` on success, so setting it
+            // before the refresh made the message vanish the moment it
+            // appeared. Only a 404 means the day before was empty; offline or
+            // a server fault used to be reported as that too.
             fetch()
+            if (failure != null) {
+                error = if ((failure as? retrofit2.HttpException)?.code() == 404) {
+                    "nothing logged the day before, so there was nothing to copy"
+                } else {
+                    failure.userMessage("could not copy the day before")
+                }
+            }
             busy = false
         }
     }

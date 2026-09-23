@@ -16,6 +16,7 @@ from ..auth import require_any
 from ..config import settings
 from ..db import models
 from ..db.session import get_session
+from ..localtime import local_date, local_midnight, local_today
 from ..integrations.llm import LlmError, validate_base_url
 from ..integrations.claude import (
     build_ask_payload,
@@ -800,15 +801,26 @@ _anomaly_scan_lock = __import__("asyncio").Lock()
 
 async def _check_goals_for_completion(db: AsyncSession) -> None:
     """Auto-complete active AiGoals once their targets are crossed
-    (GOALS-6). Hardcoded direction convention by kind — `weight` going
-    down, the rest going up. Creates a 'good'-severity goal_reached
-    AiAlert with a per-goal dedup_key so re-firing is structurally
-    impossible.
+    (GOALS-6). Creates a 'good'-severity goal_reached AiAlert with a
+    per-goal dedup_key so re-firing is structurally impossible.
+
+    "Crossed" is whatever `_goal_progress` calls `achieved`, and the
+    current values come from `_current_values_for_goals` — the same two
+    functions the goal cards render from. This used to carry its own copy
+    of both, and the copy drifted twice (UX-D1, UX-D3):
+
+    - It hard-coded weight goals as going DOWN (`latest <= target`), long
+      after `_goal_progress` learned about gain goals. A goal of 80 kg set
+      at 70 kg was closed as "reached" on the very next `/ai/alerts` call,
+      which every page load makes.
+    - It resolved "today" in UTC, so from 7pm Central it looked up
+      tomorrow's `daily_summary` row, which does not exist yet.
+
+    A goal can only be closed by the rule that paints it green.
     """
-    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from datetime import datetime as _dt, timezone as _tz
     from sqlalchemy import func as _func
     now = _dt.now(_tz.utc)
-    today = now.date()
     goals = (await db.execute(
         select(models.AiGoal)
         .where(models.AiGoal.ended_at.is_(None))
@@ -817,97 +829,31 @@ async def _check_goals_for_completion(db: AsyncSession) -> None:
     if not goals:
         return
 
-    kinds = {g.kind for g in goals}
+    currents = await _current_values_for_goals(db, {g.kind for g in goals})
 
-    latest_weight_kg: float | None = None
-    if "weight" in kinds:
-        latest_weight_kg = (await db.execute(
-            select(models.BodyMetric.weight_kg)
-            .where(models.BodyMetric.weight_kg.is_not(None))
-            .order_by(models.BodyMetric.time.desc())
-            .limit(1)
-        )).scalar_one_or_none()
-
-    avg_sleep_h: float | None = None
-    if "sleep" in kinds:
-        since = today - _td(days=7)
-        rows = (await db.execute(
-            select(models.DailySummary.sleep_duration_s)
-            .where(models.DailySummary.date >= since)
-            .where(models.DailySummary.sleep_duration_s.is_not(None))
-        )).scalars().all()
-        if rows:
-            avg_sleep_h = sum(rows) / len(rows) / 3600.0
-
-    today_steps: int | None = None
-    if "steps" in kinds:
-        today_steps = (await db.execute(
-            select(models.DailySummary.steps_total)
-            .where(models.DailySummary.date == today)
-            .limit(1)
-        )).scalar_one_or_none()
-
-    sober_days: float | None = None
-    if "sober" in kinds:
-        s = (await db.execute(
-            select(models.SoberStreak)
-            .where(models.SoberStreak.end_at.is_(None))
-            .limit(1)
-        )).scalar_one_or_none()
-        if s is not None:
-            sober_days = (now - s.start_at).total_seconds() / 86400.0
-
-    # FAST-17: fast_streak. Sum daily_summary.fasting_hours over the
-    # trailing 7d and compare to the goal target value (interpreted as
-    # weekly cumulative fasting hours).
-    fast_streak_hours_7d: float | None = None
-    if "fast_streak" in kinds:
-        since = today - _td(days=6)
-        rows = (await db.execute(
-            select(models.DailySummary.fasting_hours)
-            .where(models.DailySummary.date >= since)
-            .where(models.DailySummary.date <= today)
-        )).all()
-        fast_streak_hours_7d = sum((r[0] or 0) for r in rows)
-
-    def _target_kg(g: models.AiGoal) -> float:
-        """Normalise a weight goal's target to kilograms regardless of
-        the unit the user typed it in. The /goals form lets users pick
-        either kg or lb; storing both unit + value lets us be robust
-        without forcing a migration.
-
-        The conversion itself lives in `analytics/targets.py` so every
-        reader of a weight goal shares one implementation. A 200 lb goal
-        read as 200 kg does not fail loudly — it concludes the user wants
-        to gain 86 kg and prescribes a surplus.
-        """
-        return goal_target_kg(g.target_value, g.target_unit)
+    def _evidence(g: models.AiGoal, cur: float) -> str:
+        if g.kind == "weight":
+            return f"{cur:.1f} kg vs target {goal_target_kg(g.target_value, g.target_unit):.1f} kg"
+        if g.kind == "sleep":
+            return f"{cur:.1f}h/night avg vs target {g.target_value:.1f}h"
+        if g.kind == "steps":
+            return f"{int(cur):,} steps today vs target {int(g.target_value):,}"
+        if g.kind == "sober":
+            return f"{cur:.0f} sober days vs target {int(g.target_value)}"
+        if g.kind == "fast_streak":
+            return f"{cur:.1f}h fasted in last 7d vs target {g.target_value:.0f}h/week"
+        return "—"
 
     new_alerts: list[models.AiAlert] = []
     for g in goals:
-        reached = False
-        evidence = "—"
-        if g.kind == "weight" and latest_weight_kg is not None:
-            target_kg = _target_kg(g)
-            reached = latest_weight_kg <= target_kg
-            evidence = f"{latest_weight_kg:.1f} kg vs target {target_kg:.1f} kg"
-        elif g.kind == "sleep" and avg_sleep_h is not None:
-            # target_unit on sleep goals is typically "h" or "h/night";
-            # value is hours either way.
-            reached = avg_sleep_h >= g.target_value
-            evidence = f"{avg_sleep_h:.1f}h/night avg vs target {g.target_value:.1f}h"
-        elif g.kind == "steps" and today_steps is not None:
-            reached = float(today_steps) >= g.target_value
-            evidence = f"{today_steps:,} steps today vs target {int(g.target_value):,}"
-        elif g.kind == "sober" and sober_days is not None:
-            reached = sober_days >= g.target_value
-            evidence = f"{sober_days:.0f} sober days vs target {int(g.target_value)}"
-        elif g.kind == "fast_streak" and fast_streak_hours_7d is not None:
-            reached = fast_streak_hours_7d >= g.target_value
-            evidence = (
-                f"{fast_streak_hours_7d:.1f}h fasted in last 7d "
-                f"vs target {g.target_value:.0f}h/week"
-            )
+        cur = currents.get(g.kind)
+        if cur is None:
+            continue
+        baseline = None
+        if g.kind == "weight":
+            baseline = await _baseline_weight_kg_for_goal(db, g.started_at)
+        reached = _goal_progress(g, cur, baseline)["progress_state"] == "achieved"
+        evidence = _evidence(g, cur)
         if not reached:
             continue
         g.ended_at = now
@@ -1098,7 +1044,10 @@ async def _current_values_for_goals(
     underlying data has landed yet."""
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
     now = _dt.now(_tz.utc)
-    today = now.date()
+    # The user's day, not the UTC one (UX-D3): from 7pm Central the UTC date
+    # is tomorrow, whose daily_summary row does not exist yet, and the steps
+    # goal read "no data" every evening.
+    today = local_today()
     out: dict[str, float | None] = {}
     if "weight" in kinds:
         out["weight"] = (await db.execute(
@@ -1291,15 +1240,16 @@ async def _goal_series(
         rows = (await db.execute(
             select(models.BodyMetric.time, models.BodyMetric.weight_kg)
             .where(models.BodyMetric.weight_kg.is_not(None))
-            .where(models.BodyMetric.time >= datetime.combine(
-                since, datetime.min.time(), tzinfo=timezone.utc))
+            .where(models.BodyMetric.time >= local_midnight(since))
             .order_by(models.BodyMetric.time)
         )).all()
         # Last weigh-in of each day wins — a morning and evening reading
-        # on the same day are not two data points about a trend.
+        # on the same day are not two data points about a trend. Bucketed
+        # on the user's day: an evening weigh-in bucketed in UTC lands on
+        # tomorrow, and can then shadow tomorrow morning's real reading.
         by_day: dict[Any, float] = {}
         for ts, kg in rows:
-            by_day[ts.date()] = float(kg)
+            by_day[local_date(ts)] = float(kg)
         return sorted(by_day.items())
 
     col = {

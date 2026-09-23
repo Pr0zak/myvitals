@@ -53,6 +53,9 @@ class TodaySummary(BaseModel):
     sleep_duration_s: int | None = None
     sleep_score: float | None = None
     steps_total: int | None = None
+    # The step target that applied on this day, weekday schedule included.
+    # Set by /summary/range; clients compare each day to its own target.
+    steps_goal: int | None = None
     weight_kg: float | None = None
     body_fat_pct: float | None = None
     bp_systolic_avg: float | None = None

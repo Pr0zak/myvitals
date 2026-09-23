@@ -1,6 +1,7 @@
 package app.myvitals.ui.strength
 
 import android.content.Intent
+import app.myvitals.ui.common.userMessage
 import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -1634,7 +1635,7 @@ fun StrengthTodayScreen(
                                         reviewError = null
                                         try { review = repo.aiReview(plan.id).review }
                                         catch (e: Exception) {
-                                            reviewError = e.message?.take(160)
+                                            reviewError = e.userMessage().take(160)
                                         } finally { reviewLoading = false }
                                     }
                                 },

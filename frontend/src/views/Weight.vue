@@ -348,6 +348,19 @@ const tableRows = computed(() => {
 function fmtDate(s: string): string {
   return new Date(s).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
 }
+/** Distance to the goal as a magnitude plus a direction word (UX-D6).
+ *  This was a signed delta — `latest - goal` here and `goal - latest` on
+ *  the phone — so the same weigh-in read "+53.9 to go" on one surface and
+ *  "−53.9 to go" on the other. A word cannot be read backwards. */
+const gapToGoal = computed(() => {
+  if (stats.value?.latest == null || goalKg.value == null) return "";
+  const gap = goalKg.value - stats.value.latest;
+  // Inside a tenth of the display unit reads as "at goal", matching the
+  // one-decimal precision the number is shown at.
+  if (Math.abs(weightVal(gap) ?? 0) < 0.05) return "at goal";
+  return `${fmtWeight(Math.abs(gap))} to ${gap < 0 ? "lose" : "gain"}`;
+});
+
 function fmtDelta(kg: number | null): string {
   if (kg == null) return "—";
   const v = weightVal(kg) as number;
@@ -400,7 +413,7 @@ function deltaCls(kg: number | null): string {
             <!-- The remaining gap is a distance, not progress: it does not
                  improve or worsen, so it takes no tone. It was previously
                  coloured green whenever the user was ABOVE their goal. -->
-            <span>({{ fmtDelta(stats.latest - goalKg) }} to go)</span>
+            <span>({{ gapToGoal }})</span>
           </div>
         </div>
         <div class="kpi">

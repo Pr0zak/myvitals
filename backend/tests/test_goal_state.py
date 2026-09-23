@@ -173,3 +173,89 @@ def test_goal_progress_includes_all_goal_state_fields_for_projection() -> None:
     r_no_data = _goal_progress(LOSS, None, 112.9)
     assert "progress_state" in r_no_data and r_no_data["progress_state"] == "no_data"
     assert "state_tone" in r_no_data and r_no_data["state_tone"] == "unknown"
+
+
+# ── Auto-completion uses the same rule the card does (UX-D1) ────────────
+#
+# `_check_goals_for_completion` runs inside GET /ai/alerts, which every page
+# load calls. It carried its own `latest <= target` for weight goals long
+# after `_goal_progress` learned about gain goals, so a bulk goal was closed
+# as "reached" — and a goal_reached alert fired — on the very next load.
+
+
+class _Rows:
+    def __init__(self, items=None, scalar=None):
+        self._items = items or []
+        self._scalar = scalar
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._items
+
+    def scalar_one(self):
+        return self._scalar
+
+
+class _Db:
+    def __init__(self, goals):
+        self.goals = goals
+        self.added: list = []
+        self.committed = False
+        self._first = True
+
+    async def execute(self, _stmt):
+        if self._first:
+            self._first = False
+            return _Rows(self.goals)
+        return _Rows(scalar=0)   # no existing alert with this dedup_key
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def commit(self):
+        self.committed = True
+
+
+async def _run_completion(monkeypatch, goal, current_kg, baseline_kg):
+    from myvitals.api import ai
+
+    async def _currents(_db, _kinds):
+        return {"weight": current_kg}
+
+    async def _baseline(_db, _started):
+        return baseline_kg
+
+    monkeypatch.setattr(ai, "_current_values_for_goals", _currents)
+    monkeypatch.setattr(ai, "_baseline_weight_kg_for_goal", _baseline)
+    db = _Db([goal])
+    await ai._check_goals_for_completion(db)
+    return db
+
+
+def _weight_goal(target_kg):
+    return SimpleNamespace(
+        id=7, kind="weight", title="Bulk", target_value=target_kg,
+        target_unit="kg", started_at=None, ended_at=None,
+    )
+
+
+async def test_a_gain_goal_below_its_target_is_not_auto_closed(monkeypatch) -> None:
+    goal = _weight_goal(80.0)
+    db = await _run_completion(monkeypatch, goal, current_kg=72.0, baseline_kg=70.0)
+    assert goal.ended_at is None
+    assert db.added == []
+
+
+async def test_a_gain_goal_that_reaches_its_target_is_closed(monkeypatch) -> None:
+    goal = _weight_goal(80.0)
+    db = await _run_completion(monkeypatch, goal, current_kg=80.4, baseline_kg=70.0)
+    assert goal.ended_at is not None
+    assert [a.kind for a in db.added] == ["goal_reached"]
+
+
+async def test_a_loss_goal_still_closes_when_reached(monkeypatch) -> None:
+    goal = _weight_goal(90.0)
+    await _run_completion(monkeypatch, goal, current_kg=89.8, baseline_kg=100.0)
+    assert goal.ended_at is not None

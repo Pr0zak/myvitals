@@ -211,10 +211,13 @@ async def get_steps(
     from ..analytics.jobs import pick_canonical_steps_source
     canonical = await pick_canonical_steps_source(db, start, end)
 
+    # SUM within the minute, not MAX (UX-D8): one source writes several
+    # readings seconds apart inside a minute, and MAX kept only the largest,
+    # so this chart's total ran below the home screen's for the same day.
     minute_col = func.date_trunc("minute", models.Steps.time)
     q = (
         select(minute_col.label("m"),
-               func.max(models.Steps.count).label("c"))
+               func.sum(models.Steps.count).label("c"))
         .where(models.Steps.time >= start)
         .where(models.Steps.time <= end)
         .group_by(minute_col)

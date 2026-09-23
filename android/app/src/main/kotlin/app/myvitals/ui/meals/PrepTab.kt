@@ -1,6 +1,7 @@
 package app.myvitals.ui.meals
 
 import androidx.compose.foundation.background
+import app.myvitals.ui.common.userMessage
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -138,7 +139,7 @@ fun PrepTab(settings: SettingsRepository) {
                 }
                 sub = "prep"
             } catch (e: Exception) {
-                error = e.message ?: "Could not plan the week"
+                error = e.userMessage("Could not plan the week")
             } finally {
                 generating = false
             }

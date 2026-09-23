@@ -44,6 +44,8 @@ export interface TodaySummary {
   sleep_duration_s: number | null;
   sleep_score: number | null;
   steps_total: number | null;
+  /** The target that applied that day (weekday schedule included); /summary/range only. */
+  steps_goal?: number | null;
   weight_kg: number | null;
   body_fat_pct: number | null;
   bp_systolic_avg: number | null;

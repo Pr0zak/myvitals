@@ -25,7 +25,10 @@ import { toLocalISO } from "@/dates";
 
 const SLOTS = ["breakfast", "lunch", "dinner", "snack"] as const;
 
-const today = toLocalISO(new Date());
+// Re-read on every load, not frozen at mount (UX-D5). A tab left open
+// overnight kept yesterday's date: the visibility refresh reloaded
+// yesterday's log, and new entries were written to yesterday.
+const today = ref(toLocalISO(new Date()));
 const day = ref<LogDay | null>(null);
 const targets = ref<PrepTargets | null>(null);
 const recents = ref<RecentEntry[]>([]);
@@ -44,9 +47,10 @@ const draftFat = ref("");
 
 async function load() {
   error.value = null;
+  today.value = toLocalISO(new Date());
   try {
     const [d, t, r, rc] = await Promise.all([
-      meals.getLog(today, 1),
+      meals.getLog(today.value, 1),
       meals.prepTargets().catch(() => null),
       meals.recentLogEntries(12).catch(() => [] as RecentEntry[]),
       recipes.value.length ? Promise.resolve(recipes.value) : meals.listRecipes(),
@@ -81,7 +85,7 @@ async function logRecent(r: RecentEntry) {
   saving.value = true;
   try {
     await meals.addLogEntry({
-      day: today, slot: r.usual_slot,
+      day: today.value, slot: r.usual_slot,
       food_id: r.food_id, recipe_id: r.recipe_id,
       label: r.food_id || r.recipe_id ? null : r.label,
       quantity: r.quantity, unit: r.unit, servings: r.servings,
@@ -94,14 +98,19 @@ async function logRecent(r: RecentEntry) {
 }
 
 async function repeatYesterday() {
-  const d = new Date(`${today}T00:00:00`);
+  const d = new Date(`${today.value}T00:00:00`);
   d.setDate(d.getDate() - 1);
   saving.value = true;
   try {
-    await meals.repeatLogDay(toLocalISO(d), today);
+    await meals.repeatLogDay(toLocalISO(d), today.value);
     await load();
-  } catch {
-    error.value = "nothing logged yesterday, so there was nothing to copy";
+  } catch (e) {
+    // Only a 404 means "nothing to copy"; offline or a server fault must
+    // not be reported as an empty yesterday.
+    const status = (e as { response?: { status?: number } })?.response?.status;
+    error.value = status === 404
+      ? "nothing logged yesterday, so there was nothing to copy"
+      : e instanceof Error ? e.message : "could not copy yesterday";
   } finally { saving.value = false; }
 }
 
@@ -115,7 +124,7 @@ async function add(slot: string) {
   saving.value = true;
   try {
     await meals.addLogEntry({
-      day: today, slot,
+      day: today.value, slot,
       food_id: draftFood.value?.id ?? null,
       recipe_id: null,
       label: draftFood.value ? null : draftLabel.value.trim(),

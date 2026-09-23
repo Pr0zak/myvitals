@@ -30,7 +30,15 @@ ANALYTICS = SRC / "analytics"
 # the point — the guard is only worth anything if it is allowed to fail.
 # SA-N7 added analytics.py: backfill_analytics and correlate both resolve
 # window boundaries as calendar dates the user sees.
-DAY_FACING_MODULES = ["analytics.py", "summary.py", "strava.py", "workout/strength.py", "meals.py"]
+# UX-D3/D4/D2 added ai.py, profile.py and fasting.py: the goal helpers
+# looked up tomorrow's daily_summary row every evening, the steps schedule
+# showed tomorrow's weekday target, and the fasting streak read zero until
+# the day's fast ended. ai.py's instance was the two-line shape described
+# in `_utc_today_calls`, which is why it was not caught sooner.
+DAY_FACING_MODULES = [
+    "analytics.py", "summary.py", "strava.py", "workout/strength.py", "meals.py",
+    "ai.py", "profile.py", "fasting.py",
+]
 
 # OG2-C1 widened the FIRST guard to the analytics layer, because the bug
 # reached production through the gap between the two guards in this file.
@@ -75,11 +83,41 @@ def _utc_today_calls(tree: ast.AST) -> list[int]:
         container runs TZ=UTC. This is the shape that slipped past the first
         version of this guard.
     """
+    def _is_utc_now(call: ast.AST) -> bool:
+        if not (isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "now"):
+            return False
+        return any(
+            (isinstance(a, ast.Attribute) and a.attr == "utc")
+            or (isinstance(a, ast.Name) and a.id == "utc")
+            for a in call.args
+        )
+
+    # Third shape (UX-D3): the instant bound to a name first, the date taken
+    # on the next line —
+    #     now = datetime.now(timezone.utc)
+    #     today = now.date()
+    # Each line is innocent alone, so the whole-chain match walked past it and
+    # the goal helpers in ai.py answered for tomorrow every evening. Names are
+    # tracked module-wide; a module that rebinds a UTC-instant name to a local
+    # one and then calls `.date()` on it will be flagged, which is the safe
+    # direction for a guard.
+    utc_names = {
+        t.id
+        for node in ast.walk(tree) if isinstance(node, ast.Assign) and _is_utc_now(node.value)
+        for t in node.targets if isinstance(t, ast.Name)
+    }
+
     hits = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         fn = node.func
+        if (isinstance(fn, ast.Attribute) and fn.attr == "date" and not node.args
+                and isinstance(fn.value, ast.Name) and fn.value.id in utc_names):
+            hits.append(node.lineno)
+            continue
         # `date.today()` / `datetime.today()` / `datetime.date.today()`.
         # Deliberately anchored on the receiver rather than the method name:
         # this module has an endpoint handler called `today()`, and matching
@@ -150,6 +188,14 @@ def test_the_guard_actually_catches_the_pattern():
         "d = date.today()\n"
     )
     assert _utc_today_calls(process_tz) == [2]
+
+    # The two-line shape (UX-D3).
+    split = ast.parse(
+        "now = datetime.now(timezone.utc)\n"
+        "today = now.date()\n"
+        "stamp = now.isoformat()\n"   # fine — not a date
+    )
+    assert _utc_today_calls(split) == [2]
 
 
 # ── Second shape of the same bug ────────────────────────────────────────

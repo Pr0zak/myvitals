@@ -168,7 +168,7 @@ fun StepsDetailScreen(
                         // empty) silently rendered the MOST RECENT day's step
                         // count under the selected day's heading.
                         val dayRow = rows.firstOrNull { it.date == selectedDay.toString() }
-                        TodayHero(dayRow, goal, color, selectedDay)
+                        TodayHero(dayRow, dayRow?.stepsGoal ?: goal, color, selectedDay)
                     }
                     hourly?.let { hr ->
                         if (hr.sum() > 0) item {
@@ -309,7 +309,7 @@ private fun DailyColumns(rows: List<DailySummary>, goal: Int, color: Color) {
                 val domain = niceDomain(
                     lo = 0f,
                     hi = (rows.maxOfOrNull { it.stepsTotal ?: 0 } ?: 0)
-                        .coerceAtLeast(goal).toFloat(),
+                        .coerceAtLeast(rows.lastOrNull()?.stepsGoal ?: goal).toFloat(),
                     zeroAnchored = true, targetTicks = 4, minStep = 1f,
                 )
                 val g = chartGeom(domain, ChartInsets(
@@ -325,11 +325,14 @@ private fun DailyColumns(rows: List<DailySummary>, goal: Int, color: Color) {
                     if (v <= 0f) continue
                     drawBar(
                         g, g.xBar(i, rows.size), barW, g.y(v),
-                        if (v >= goal) color else color.copy(alpha = 0.45f),
+                        if (v >= (r.stepsGoal ?: goal)) color else color.copy(alpha = 0.45f),
                     )
                 }
-                drawReferenceLine(g, goal.toFloat(), color, measurer,
-                    "goal ${"%,d".format(goal)}")
+                // Today's target on the line; each bar above is judged
+                // against its own day's target (UX-D10).
+                val lineGoal = rows.lastOrNull()?.stepsGoal ?: goal
+                drawReferenceLine(g, lineGoal.toFloat(), color, measurer,
+                    "goal ${"%,d".format(lineGoal)}")
                 drawXLabels(g, measurer, tok.onSurfaceDim, buildList {
                     rows.firstOrNull()?.date?.let { add(0f to shortDay(it)) }
                     if (rows.size >= 5) rows[rows.size / 2].date
@@ -347,7 +350,11 @@ private fun StepsStats(rows: List<DailySummary>, goal: Int) {
     val totals = rows.mapNotNull { it.stepsTotal }
     val total = totals.sum()
     val avg = if (totals.isNotEmpty()) totals.average() else 0.0
-    val daysHit = totals.count { it >= goal }
+    // Each day against its own target, out of days that have a reading —
+    // the same rule as the web. This used `rows.size`, so a day the watch
+    // was off counted as a missed goal here and not on the web (UX-D10).
+    val withData = rows.filter { it.stepsTotal != null }
+    val daysHit = withData.count { it.stepsTotal!! >= (it.stepsGoal ?: goal) }
     Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
         Column(Modifier.padding(14.dp)) {
             Text("STATS", color = tok.onSurfaceVariant,
@@ -356,7 +363,7 @@ private fun StepsStats(rows: List<DailySummary>, goal: Int) {
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 StatPair("Total", "%,d".format(total))
                 StatPair("Daily avg", "%,.0f".format(avg))
-                StatPair("Days ≥ goal", "$daysHit/${rows.size}")
+                StatPair("Days ≥ goal", "$daysHit/${withData.size}")
             }
         }
     }

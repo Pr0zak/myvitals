@@ -32,6 +32,19 @@ http.interceptors.request.use((cfg) => {
   return cfg;
 });
 
+// Surface the server's own words (UX-E1). Views render `e.message`, which
+// axios fills with "Request failed with status code 503" — so a rate limit
+// the backend had already explained in `detail` reached the user as a bare
+// status code. Only a string `detail` is lifted; FastAPI's validation errors
+// send a list there, and `e.response` is left untouched for status checks.
+http.interceptors.response.use(undefined, (err) => {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === "string" && detail.trim()) {
+    err.message = detail;
+  }
+  return Promise.reject(err);
+});
+
 // ── Fasting types ────────────────────────────────────────────────────
 export interface FastingSessionOut {
   id: number;

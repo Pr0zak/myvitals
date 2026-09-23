@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { normaliseRange } from "@/useDateRange";
-import { toLocalISO } from "@/dates";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import VChart from "@/echarts";
@@ -12,7 +11,7 @@ import LoadState from "@/components/LoadState.vue";
 import { api } from "@/api/client";
 import type { TodaySummary } from "@/api/types";
 import { chartTheme } from "@/theme";
-import { weightVal, weightUnit, fmtWeight, weightToKg, isImperial, tempUnit } from "@/units";
+import { weightVal, weightUnit, fmtWeight, isImperial, tempUnit } from "@/units";
 
 const route = useRoute();
 
@@ -62,42 +61,47 @@ type WeightPoint = { time: string; weight_kg: number | null; body_fat_pct: numbe
 const weightSeries = ref<WeightPoint[]>([]);
 const weightStats = ref<{ latest_kg: number | null; min_kg: number | null; max_kg: number | null; avg_kg: number | null }>({ latest_kg: null, min_kg: null, max_kg: null, avg_kg: null });
 
-// Goal tracker — persisted to localStorage (single-user app, no profile yet)
-const heightCm = ref<number>(parseFloat(localStorage.getItem("myvitals.height_cm") ?? "178"));
-const targetKg = ref<number | null>(
-  localStorage.getItem("myvitals.target_kg")
-    ? parseFloat(localStorage.getItem("myvitals.target_kg")!) : null,
-);
-const targetDateStr = ref<string>(localStorage.getItem("myvitals.target_date") ?? "");
-watch(heightCm, (v) => localStorage.setItem("myvitals.height_cm", String(v)));
-watch(targetKg, (v) => v == null ? localStorage.removeItem("myvitals.target_kg")
-                                  : localStorage.setItem("myvitals.target_kg", String(v)));
-watch(targetDateStr, (v) => v ? localStorage.setItem("myvitals.target_date", v)
-                              : localStorage.removeItem("myvitals.target_date"));
+// Goal, height and projection all come from the server (UX-D7).
+//
+// This card used to keep its OWN weight goal, goal date and height in
+// localStorage — height defaulting to an invented 178 cm — and fitted its
+// own regression for an ETA. So it was a second goal that could disagree
+// with the one on You, BMI bands drawn for a height nobody entered, and an
+// ETA that never refused: the server's projection declines to give a date
+// when the trend is flat, noisy or too far out, and this one gave one
+// anyway. Now it reads the profile and the weight goal's projection and
+// edits nothing; the goal is set where every other surface reads it.
+const heightCm = ref<number | null>(null);
+const goalKg = ref<number | null>(null);
+type GoalProjection = { per_week: number | null; eta_date: string | null; confidence: string | null; is_fallback: boolean; fallback_reason: string | null };
+const weightGoal = ref<{ target_date: string | null; target_unit: string | null; projection: GoalProjection | null } | null>(null);
 
-// Stored in kg, displayed in user units. Computed-setter keeps v-model snappy.
-const targetKgDisplay = computed({
-  get(): string {
-    if (targetKg.value == null) return "";
-    const v = weightVal(targetKg.value);
-    return v != null ? v.toFixed(1) : "";
-  },
-  set(v: string) {
-    if (v === "" || v == null) { targetKg.value = null; return; }
-    const n = parseFloat(v);
-    targetKg.value = Number.isFinite(n) ? weightToKg(n) : null;
-  },
-});
-const heightDisplay = computed({
-  get(): string {
-    if (!Number.isFinite(heightCm.value)) return "";
-    return isImperial.value ? (heightCm.value / 2.54).toFixed(1) : String(heightCm.value);
-  },
-  set(v: string) {
-    const n = parseFloat(v);
-    if (!Number.isFinite(n)) return;
-    heightCm.value = isImperial.value ? n * 2.54 : n;
-  },
+async function loadGoal() {
+  try {
+    const [p, goals] = await Promise.all([
+      api.getProfile().catch(() => null),
+      api.aiGoals(true).catch(() => []),
+    ]);
+    heightCm.value = p?.height_cm ?? null;
+    goalKg.value = p?.weight_goal_kg ?? null;
+    weightGoal.value = goals.find((g) => g.kind === "weight") ?? null;
+  } catch { /* the chart still renders without a goal */ }
+}
+
+/** Same caption as the goal row on You, from the same projection. */
+const goalCaption = computed<string | null>(() => {
+  const p = weightGoal.value?.projection;
+  if (!p) return null;
+  if (p.is_fallback) return p.fallback_reason;
+  const unit = weightGoal.value?.target_unit ?? "";
+  const rate = p.per_week != null
+    ? `${p.per_week > 0 ? "+" : ""}${p.per_week.toFixed(2)} ${unit}/wk`.replace("  ", " ")
+    : null;
+  if (p.eta_date) {
+    const conf = p.confidence === "low" ? " (rough)" : "";
+    return rate ? `${rate} · on track for ${p.eta_date}${conf}` : `On track for ${p.eta_date}${conf}`;
+  }
+  return rate;
 });
 
 async function load() {
@@ -168,19 +172,17 @@ const weightOption = computed(() => {
     .map((p) => [new Date(p.time).getTime(), p.body_fat_pct]);
 
   const series: Array<Record<string, unknown>> = [];
-  const heightM = (heightCm.value || 178) / 100;
-
   if (pts.length) {
     series.push({
       name: "Daily weight", type: "line", data: pts,
       symbol: "circle", symbolSize: 3, connectNulls: false,
       lineStyle: { width: 1, color: t.palette.accent, opacity: 0.45 },
       itemStyle: { color: t.palette.accent }, yAxisIndex: 0,
-      // Render BMI bands behind the daily line (only attached once).
-      markArea: {
-        silent: true,
-        data: bmiBands(heightM),
-      },
+      // BMI bands behind the daily line — only with a real height. Bands
+      // drawn for a guessed height are a wrong answer that looks precise.
+      ...(heightCm.value ? {
+        markArea: { silent: true, data: bmiBands(heightCm.value / 100) },
+      } : {}),
     });
   }
   if (ma.length) {
@@ -191,10 +193,11 @@ const weightOption = computed(() => {
     });
   }
   // Goal line: from earliest weight in window to target (in user units).
-  if (targetKg.value != null && targetDateStr.value && pts.length) {
+  const targetDate = weightGoal.value?.target_date;
+  if (goalKg.value != null && targetDate && pts.length) {
     const start = pts[0];
-    const targetTs = new Date(targetDateStr.value).getTime();
-    const targetDisplay = weightVal(targetKg.value);
+    const targetTs = new Date(`${targetDate}T00:00:00`).getTime();
+    const targetDisplay = weightVal(goalKg.value);
     if (Number.isFinite(targetTs) && targetDisplay != null) {
       series.push({
         name: "Goal", type: "line",
@@ -343,39 +346,7 @@ const skinTempOption = computed(() => {
 });
 const hasSkinTemp = computed(() => data.value.some((d) => d.skin_temp_delta_avg != null));
 
-// Goal arrival projection: linear regression on last 28d of 7d MA.
-const goalProjection = computed(() => {
-  if (targetKg.value == null) return null;
-  const raw = weightSeries.value
-    .filter((p) => p.weight_kg != null)
-    .map((p) => ({ t: new Date(p.time).getTime(), v: p.weight_kg as number }))
-    .sort((a, b) => a.t - b.t);
-  const ma = rolling7Avg(raw);
-  if (ma.length < 7) return null;
-  const cutoff = ma[ma.length - 1].t - 28 * 86400 * 1000;
-  const recent = ma.filter((p) => p.t >= cutoff);
-  if (recent.length < 5) return null;
-  // Simple OLS: v = a*t + b (t in days from first point)
-  const t0 = recent[0].t;
-  const xs = recent.map((p) => (p.t - t0) / 86400_000);
-  const ys = recent.map((p) => p.v);
-  const n = xs.length;
-  const mx = xs.reduce((s, x) => s + x, 0) / n;
-  const my = ys.reduce((s, y) => s + y, 0) / n;
-  let num = 0; let den = 0;
-  for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) ** 2; }
-  if (den === 0) return null;
-  const a = num / den;  // kg per day
-  if (Math.abs(a) < 0.001) return { etaDate: null, perDay: a, headed: "flat" as const };
-  const last = recent[recent.length - 1];
-  const headingTowards = (targetKg.value < last.v) === (a < 0);
-  if (!headingTowards) return { etaDate: null, perDay: a, headed: "wrong" as const };
-  const daysToGoal = (targetKg.value - last.v) / a;
-  const etaDate = new Date(last.t + daysToGoal * 86400_000);
-  return { etaDate, perDay: a, headed: "right" as const };
-});
-
-onMounted(load);
+onMounted(() => { load(); loadGoal(); });
 watch(range, load);
 
 // Sober resets that fall within the loaded date range. Drops the very first
@@ -618,23 +589,13 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
             <span class="muted">avg: {{ fmtWeight(weightStats.avg_kg) }}</span>
           </div>
           <div class="goal-row">
-            <span class="muted">Height ({{ isImperial ? 'in' : 'cm' }}):</span>
-            <input v-model="heightDisplay" type="number" class="goal-input"
-                   :min="isImperial ? 20 : 50" :max="isImperial ? 100 : 250" step="0.1"/>
-            <span class="muted" style="margin-left: 0.6rem;">Goal ({{ weightUnit }}):</span>
-            <input v-model="targetKgDisplay" type="number" class="goal-input"
-                   min="20" max="660" step="0.1" :placeholder="weightUnit"/>
-            <input v-model="targetDateStr" type="date" class="goal-input" style="width: 140px;"/>
-            <span v-if="goalProjection" class="muted" style="margin-left: 0.6rem;">
-              <template v-if="goalProjection.etaDate">
-                ETA: {{ toLocalISO(goalProjection.etaDate) }}
-                ({{ ((weightVal(goalProjection.perDay * 7) ?? 0)).toFixed(2) }} {{ weightUnit }}/wk)
-              </template>
-              <template v-else-if="goalProjection.headed === 'wrong'">
-                <span style="color: var(--bad);">⚠</span> trending away from goal
-              </template>
-              <template v-else>flat trend — no ETA</template>
-            </span>
+            <template v-if="goalKg != null">
+              <span class="muted">Goal:</span> <strong>{{ fmtWeight(goalKg) }}</strong>
+              <span v-if="goalCaption" class="muted" style="margin-left: 0.6rem;">{{ goalCaption }}</span>
+            </template>
+            <span v-else class="muted">No weight goal set.</span>
+            <RouterLink to="/goals" class="muted" style="margin-left: 0.6rem;">Edit goal</RouterLink>
+            <RouterLink v-if="!heightCm" to="/settings?tab=profile" class="muted" style="margin-left: 0.6rem;">Add height for BMI bands</RouterLink>
           </div>
           <div class="chart"><VChart :option="weightOption" autoresize/></div>
         </template>

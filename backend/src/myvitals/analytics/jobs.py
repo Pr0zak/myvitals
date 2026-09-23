@@ -119,10 +119,19 @@ async def canonical_steps_total(
 ) -> int | None:
     """Steps in [start, end] exactly as `daily_summary.steps_total` stores it.
 
-    One canonical source, per-minute MAX inside it. Shared by the write
+    One canonical source, plain SUM inside it. Shared by the write
     (`compute_daily_summary`) and by the staleness check that decides
     whether that write is out of date — two copies of this arithmetic
     would disagree and the row would be judged stale forever.
+
+    This used to take the per-minute MAX within the source, a leftover
+    from when it de-duplicated ACROSS sources. Inside one source it can
+    only lose steps: the primary key is (time, source), so a source cannot
+    write the same instant twice, and two rows in one minute are two real
+    readings seconds apart, of which MAX kept only the larger. Measured over
+    30 days, one source had ~800 such minutes and MAX dropped ~21k steps,
+    while `/summary/today` (which already summed) disagreed with the stored
+    row for the same day (UX-D8).
 
     None means no usable source covered the window; 0 means a source was
     there and recorded nothing, which is a fact about the day rather than
@@ -131,17 +140,11 @@ async def canonical_steps_total(
     canonical = await pick_canonical_steps_source(db, start, end)
     if canonical is None:
         return None
-    minute_col = func.date_trunc("minute", models.Steps.time)
-    per_min_subq = (
-        select(func.max(models.Steps.count).label("mx"))
+    total = (await db.execute(
+        select(func.coalesce(func.sum(models.Steps.count), 0))
         .where(models.Steps.time >= start)
         .where(models.Steps.time <= end)
         .where(models.Steps.source == canonical)
-        .group_by(minute_col)
-        .subquery()
-    )
-    total = (await db.execute(
-        select(func.coalesce(func.sum(per_min_subq.c.mx), 0))
     )).scalar()
     return int(total or 0)
 
@@ -157,22 +160,13 @@ async def canonical_steps_by_day(
     usable source are simply absent from the mapping.
     """
     local_day = cast(func.timezone(tzname, models.Steps.time), Date)
-    minute_col = func.date_trunc("minute", models.Steps.time)
-    per_min = (
-        select(
-            local_day.label("day"),
-            models.Steps.source.label("source"),
-            func.max(models.Steps.count).label("mx"),
-        )
+    # Plain SUM per source, the same arithmetic as `canonical_steps_total`.
+    rows = (await db.execute(
+        select(local_day, models.Steps.source, func.sum(models.Steps.count))
         .where(models.Steps.time >= start)
         .where(models.Steps.time <= end)
         .where(models.Steps.source != "unknown")
-        .group_by(local_day, models.Steps.source, minute_col)
-        .subquery()
-    )
-    rows = (await db.execute(
-        select(per_min.c.day, per_min.c.source, func.sum(per_min.c.mx))
-        .group_by(per_min.c.day, per_min.c.source)
+        .group_by(local_day, models.Steps.source)
     )).all()
     per_day: dict[date, list[tuple[str, int]]] = {}
     for d, src, total in rows:
@@ -226,14 +220,12 @@ async def compute_daily_summary(target_date: date | None = None) -> None:
         recovery = await recovery_score(db, target)
         sleep_pts, sleep_duration = await sleep_score(db, target)
 
-        # Steps total for the date — local-tz day, deduped per minute.
-        # See summary.py for rationale on both the TZ fix and the
-        # per-minute MAX (multi-source HC ingest dedupe).
+        # Steps total for the date — local-tz day, one canonical source.
         _local = _local_tz()
         day_start = datetime.combine(target, time.min, tzinfo=_local)
         day_end = datetime.combine(target, time.max, tzinfo=_local)
-        # A SINGLE canonical source (watch when present), summed as
-        # per-minute MAX within it. Crossing sources here over-counts
+        # A SINGLE canonical source (watch when present), summed within
+        # it. Crossing sources here over-counts
         # because the phone pedometer and the watch rarely fire on the
         # same minute boundary — what looks like per-minute MAX
         # de-duping turns into "add both totals together". The staleness

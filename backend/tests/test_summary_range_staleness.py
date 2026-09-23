@@ -73,6 +73,11 @@ class _FakeDb:
         assert self._queue, "summary_range issued more queries than queued"
         return self._queue.pop(0)
 
+    async def get(self, _model, _pk):
+        # The profile read for per-day step targets (UX-D10). No profile
+        # is the realistic default and resolves to the base goal.
+        return None
+
 
 def _daily_summary(d: date, **kw):
     fields = {"date": d, "sleep_duration_s": None, "hrv_avg": None,

@@ -225,7 +225,7 @@ private fun WeightHero(pts: List<WPoint>, goalKg: Double?) {
                 Text("%.1f".format(latestLb), color = tok.onSurface,
                     fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.width(6.dp))
-                Text("lb", color = tok.onSurfaceDim, fontSize = 12.sp,
+                Text(Units.weightUnit, color = tok.onSurfaceDim, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 6.dp))
             }
             val arrow = if (delta > 0.05) "↑" else if (delta < -0.05) "↓" else "→"
@@ -236,12 +236,20 @@ private fun WeightHero(pts: List<WPoint>, goalKg: Double?) {
                 WeightTone.CAUTION -> tok.caution
                 WeightTone.NEUTRAL -> tok.onSurfaceDim
             }
-            Text("$arrow %+.1f lb in window".format(delta),
+            Text("$arrow %+.1f ${Units.weightUnit} in window".format(delta),
                 color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             goalLb?.let {
+                // A magnitude plus a direction word (UX-D6). This was a
+                // signed `goal - latest` while the web showed `latest -
+                // goal`, so one weigh-in read "+53.9 to go" on the web and
+                // "−53.9 to go" here. The unit label was also hard-coded
+                // "lb" beside a value already converted to the user's unit.
                 val gap = it - latestLb
+                val u = Units.weightUnit
+                val gapText = if (kotlin.math.abs(gap) < 0.05) "at goal"
+                    else "%.1f %s to %s".format(kotlin.math.abs(gap), u, if (gap < 0) "lose" else "gain")
                 Text(
-                    "goal %.1f lb · %+.1f to go".format(it, gap),
+                    "goal %.1f %s · %s".format(it, u, gapText),
                     color = tok.onSurfaceVariant, fontSize = 11.sp,
                 )
             }

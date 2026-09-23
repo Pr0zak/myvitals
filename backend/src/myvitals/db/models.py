@@ -854,10 +854,8 @@ def real_install_heartbeat_filter():
     Every "most recent heartbeat" query should filter through this rather
     than re-deriving it — the same reasoning as `_is_watch_source` being
     imported instead of copied for steps. As of this fix that means
-    `api/query.py:get_last_sync` and `api/query.py:data_health`; the
-    identical query at `api/summary.py:327` (feeding `_resolve_last_sync`)
-    is owned by a different lane and was not touched here, so it is still
-    exposed to the same ghost until it applies this too.
+    `api/query.py:get_last_sync`, `api/query.py:data_health`, and the
+    `/summary/today` query feeding `_resolve_last_sync` (UX-D9).
 
     NULL `app_version` is let through deliberately: an install that
     predates this column, or a future client that omits it, is unknown,

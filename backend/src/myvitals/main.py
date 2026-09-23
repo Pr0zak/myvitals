@@ -37,6 +37,7 @@ from .api import (
     trails,
     update as update_api,
 )
+from .api import errors as api_errors
 from .api.workout import strength as workout_strength
 from .config import settings
 from .logging_config import configure_logging
@@ -240,6 +241,7 @@ async def _weekly_ai_digest() -> None:
 
 
 app = FastAPI(title="myvitals", version=version_mod.__version__, lifespan=lifespan)
+api_errors.install(app)
 
 app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
 app.include_router(query.router, prefix="/query", tags=["query"])

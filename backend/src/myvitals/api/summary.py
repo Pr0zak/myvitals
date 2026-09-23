@@ -323,8 +323,12 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     # stopped" confusion HEALTH-1 exists to prevent (SA-L6).
     last_hr_sample_result = await db.execute(select(func.max(models.HeartRate.time)))
     last_hr_sample_at = last_hr_sample_result.scalar()
+    # Filtered through the same predicate as `/query/last-sync` (UX-D9):
+    # without it the local debug build's heartbeat could supply the home
+    # screen's "last sync" — the SA-O2 ghost, on a path that fix missed.
     hb = (await db.execute(
         select(models.SyncHeartbeat)
+        .where(models.real_install_heartbeat_filter())
         .order_by(models.SyncHeartbeat.attempt_at.desc())
         .limit(1)
     )).scalar_one_or_none()
@@ -735,7 +739,7 @@ async def summary_range(
     # per-day NUMBER, because the stored column goes stale by being partial
     # rather than by being null — see the steps branch of
     # `_today_row_is_stale`. One query for the whole window, same canonical
-    # source + per-minute MAX arithmetic `compute_daily_summary` writes.
+    # source + plain SUM arithmetic `compute_daily_summary` writes.
     from ..analytics.jobs import canonical_steps_by_day, steps_total_is_stale
 
     steps_by_day = await canonical_steps_by_day(
@@ -785,9 +789,18 @@ async def summary_range(
         .order_by(models.DailySummary.date)
     )
     rows = result.scalars().all()
+    # Each day's own step target (UX-D10). The Steps screens drew one flat
+    # `steps_goal` line and counted "days ≥ goal" against it, ignoring the
+    # per-weekday schedule the home tile already honours — so a day could
+    # read as hit on home and missed on Steps. Resolved here, once, by the
+    # same function the tile uses.
+    from ..analytics.tiles import resolve_steps_goal
+    prof = await db.get(models.UserProfile, 1)
+    extra = (prof.extra if prof and prof.extra else {}) or {}
     return [
         TodaySummary(
             date=r.date,
+            steps_goal=resolve_steps_goal(extra, r.date),
             resting_hr=r.resting_hr,
             hrv_avg=r.hrv_avg,
             recovery_score=r.recovery_score,

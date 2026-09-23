@@ -139,6 +139,11 @@ const traceOption = computed(() => {
 });
 
 // ── Daily-bar option ──
+/** Today's target, weekday schedule included — the server resolves it per
+ *  row; the flat profile goal is only the fallback for an older backend. */
+const todayGoal = computed<number>(() =>
+  dailyRows.value[dailyRows.value.length - 1]?.steps_goal ?? stepsGoal.value);
+
 const dailyOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
@@ -168,7 +173,7 @@ const dailyOption = computed(() => {
       type: "value", scale: false, axisLabel: t.axisLabel, splitLine: t.splitLine,
       ...zeroAxisIncluding(
         data.map((d) => (typeof d[1] === "number" ? d[1] : null)),
-        stepsGoal.value || null,
+        todayGoal.value || null,
       ),
     },
     tooltip: { trigger: "axis", ...t.tooltip },
@@ -181,15 +186,15 @@ const dailyOption = computed(() => {
         type: "bar", name: "Steps",
         itemStyle: { color: stepsColor.value },
         data,
-        markLine: stepsGoal.value > 0 ? {
+        markLine: todayGoal.value > 0 ? {
           symbol: ["none", "none"], silent: true,
           lineStyle: { color: goalLineColor.value, type: "dashed" as const, opacity: 0.7 },
           // Default position is the right end, where the grid's 12px right
           // margin clips it to a single letter.
           label: { show: true, position: "insideStartTop" as const,
-                   formatter: `goal ${stepsGoal.value.toLocaleString()}`,
+                   formatter: `goal ${todayGoal.value.toLocaleString()}`,
                    color: t.axisLabel.color, fontSize: 9 },
-          data: [{ yAxis: stepsGoal.value }],
+          data: [{ yAxis: todayGoal.value }],
         } : undefined,
       },
       {
@@ -240,16 +245,19 @@ const weekdayOption = computed(() => {
 // ── Headline stats ──
 const stats = computed(() => {
   if (dailyRows.value.length === 0) return null;
-  const vals = dailyRows.value
-    .map((r) => r.steps_total)
-    .filter((v): v is number => v != null);
+  const withData = dailyRows.value.filter((r) => r.steps_total != null);
+  const vals = withData.map((r) => r.steps_total as number);
   if (vals.length === 0) return null;
   return {
     todayCount: dailyRows.value[dailyRows.value.length - 1]?.steps_total ?? 0,
     avg: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length),
     max: Math.max(...vals),
-    goalDays: vals.filter((v) => v >= stepsGoal.value).length,
-    totalDays: vals.length,
+    // Each day against ITS OWN target (UX-D10) — a weekday override is a
+    // different goal, and judging a lighter Sunday against Tuesday's number
+    // counted it as missed. Out of days that have a reading: a day the watch
+    // was off is not a day the goal was missed.
+    goalDays: withData.filter((r) => (r.steps_total as number) >= (r.steps_goal ?? stepsGoal.value)).length,
+    totalDays: withData.length,
   };
 });
 </script>

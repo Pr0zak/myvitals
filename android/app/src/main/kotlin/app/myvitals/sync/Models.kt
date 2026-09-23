@@ -1436,6 +1436,8 @@ data class DailySummary(
     @Json(name = "sleep_duration_s") val sleepDurationS: Int? = null,
     @Json(name = "sleep_score") val sleepScore: Double? = null,
     @Json(name = "steps_total") val stepsTotal: Int? = null,
+    /** The target that applied on this day, weekday schedule included (UX-D10). */
+    @Json(name = "steps_goal") val stepsGoal: Int? = null,
     @Json(name = "weight_kg") val weightKg: Double? = null,
     @Json(name = "body_fat_pct") val bodyFatPct: Double? = null,
     @Json(name = "bp_systolic_avg") val bpSystolicAvg: Double? = null,

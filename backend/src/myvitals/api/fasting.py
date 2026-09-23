@@ -24,9 +24,11 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..analytics import consistency
 from ..auth import require_any
 from ..db import models
 from ..db.session import get_session
+from ..localtime import local_date, local_today
 
 router = APIRouter(prefix="/fasting", dependencies=[Depends(require_any)])
 
@@ -257,18 +259,19 @@ async def stats(
     median = durations_h[len(durations_h) // 2] if durations_h else None
     longest = max(durations_h) if durations_h else None
 
-    # Streak — count back from today over consecutive days that have a
-    # completed fast ending that day.
-    by_day: dict[str, bool] = {}
-    for r in completed:
-        d = r.ended_at.date().isoformat()
-        by_day[d] = True
-    streak = 0
-    today = datetime.now(timezone.utc).date()
-    cursor = today
-    while by_day.get(cursor.isoformat()):
-        streak += 1
-        cursor = cursor - timedelta(days=1)
+    # Streak over the user's LOCAL days and their WHOLE history (UX-D2).
+    # This counted back from the UTC date over UTC-dated `ended_at`, within
+    # the `days` window: it read 0 every morning until that day's fast
+    # ended, a fast ending after 7pm Central counted toward tomorrow, and a
+    # streak older than the window was cut off at its edge. The shared
+    # helper already handles all three, including "today is not over yet".
+    ended = (await db.execute(
+        select(models.FastingSession.ended_at)
+        .where(models.FastingSession.ended_at.is_not(None))
+    )).scalars().all()
+    streak = consistency.compute_streaks(
+        {local_date(t) for t in ended}, local_today(),
+    ).current_days
 
     last_done = max((r.ended_at for r in completed), default=None)
 

@@ -61,3 +61,11 @@ export function fmtDateTime(d: Date | string | number): string {
 export function fmtDateTimeWithSec(d: Date | string | number): string {
   return asDate(d).toLocaleString([], dateTimeWithSecOpts());
 }
+
+/** An activity type key as words: "VirtualRide" → "Virtual Ride",
+ *  "yard_work" → "Yard work". Mirrors the phone's `prettyType`. */
+export function fmtActivityType(type: string | null | undefined): string {
+  if (!type) return "";
+  const s = type.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}

@@ -16,7 +16,7 @@ import ActivityYearCalendar from "@/components/ActivityYearCalendar.vue";
 import type { Activity, ActivityStats } from "@/api/types";
 import { chartTheme, isNeon } from "@/theme";
 import { fmtDistance, fmtElevation, distanceVal, distanceUnit } from "@/units";
-import { fmtDateTime } from "@/format";
+import { fmtDateTime, fmtActivityType } from "@/format";
 
 type SortKey = "date" | "distance" | "duration" | "avg_hr" | "suffer" | "kcal" | "elevation";
 type ViewMode = "grid" | "list";
@@ -702,7 +702,7 @@ const monthLabel = (key: string) =>
               <template v-if="viewMode === 'grid'">
                 <PolylineThumbnail :polyline="a.polyline" :activityType="a.type" :size="100" class="thumb"/>
                 <header class="card-head">
-                  <span class="type"><ActivityIcon :type="a.type" :size="14"/> {{ a.type }}</span>
+                  <span class="type"><ActivityIcon :type="a.type" :size="14"/> {{ fmtActivityType(a.type) }}</span>
                   <span class="when">{{ fmtDate(a.start_at) }}</span>
                 </header>
                 <h3>{{ a.name ?? "(untitled)" }}</h3>
@@ -747,7 +747,7 @@ const monthLabel = (key: string) =>
             <template v-if="viewMode === 'grid'">
               <PolylineThumbnail :polyline="a.polyline" :activityType="a.type" :size="100" class="thumb"/>
               <header class="card-head">
-                <span class="type"><ActivityIcon :type="a.type" :size="14"/> {{ a.type }}</span>
+                <span class="type"><ActivityIcon :type="a.type" :size="14"/> {{ fmtActivityType(a.type) }}</span>
                 <span class="when">{{ fmtDate(a.start_at) }}</span>
               </header>
               <h3>{{ a.name ?? "(untitled)" }}</h3>

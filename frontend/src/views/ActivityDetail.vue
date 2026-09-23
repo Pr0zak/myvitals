@@ -12,7 +12,7 @@ import { api } from "@/api/client";
 import type { Activity, HeartRateSeries } from "@/api/types";
 import { chartTheme, effectiveTheme, isNeon } from "@/theme";
 import { fmtDistance, fmtElevation, distanceVal, distanceUnit, isImperial } from "@/units";
-import { fmtDateTime } from "@/format";
+import { fmtActivityType, fmtDateTime } from "@/format";
 import { timeAxisFormatter } from "@/components/charts/chartHelpers";
 
 const route = useRoute();
@@ -614,7 +614,7 @@ const typeError = ref<string | null>(null);
 
 function typeLabel(t: string | null | undefined): string {
   if (!t) return "";
-  return typeChoices.value.find((c) => c.type === t)?.label ?? t.replace(/_/g, " ");
+  return typeChoices.value.find((c) => c.type === t)?.label ?? fmtActivityType(t);
 }
 
 async function openTypeEdit() {

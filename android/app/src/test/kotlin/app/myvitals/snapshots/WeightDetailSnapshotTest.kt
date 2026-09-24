@@ -10,6 +10,7 @@ import app.myvitals.ui.vitals.WeightDetailContent
 import org.junit.Rule
 import org.junit.Test
 import app.myvitals.snapshots.SampleDataDetail as D
+import app.myvitals.snapshots.SampleDataUiF1 as F
 
 /*
  * UI-4 — the four metric detail screens, each loaded (two scroll positions),
@@ -31,7 +32,8 @@ class WeightDetailSnapshotTest {
     private fun loaded(scroll: Int) = paparazzi.snapshot {
         NeonFrame(scroll) {
             WeightDetailContent(
-                range = VitalRange.MONTH, data = D.weight, tile = D.weightTile,
+                // UI-F1: with the server's histogram + days-at-min.
+                range = VitalRange.MONTH, data = F.weight, tile = D.weightTile,
                 winStart = winStart, winEnd = winEnd,
                 loading = false, refreshing = false, error = null,
                 onBack = {}, onRange = {}, onRefresh = {},

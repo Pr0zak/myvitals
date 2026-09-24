@@ -15,7 +15,10 @@
  * HR of 187 when the profile was thin, so a minute could be Z3 here and Z4
  * on Activities), the histogram, the weekday means, the prior-window deltas
  * and the per-activity-type HR averages — each a client-side copy of a
- * number. The last two have no server block yet and are deferred.
+ * number. UI-F1 brought the last two back as server fields:
+ * `resting_hr.vs_previous` (with the server's `better`/`tone`) and
+ * `hr_by_activity` (grouped by the server's activity categories), both on
+ * /summary/range/stats. They render verbatim here.
  */
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
@@ -162,6 +165,21 @@ const restChip = computed(() => {
   return `Resting ${Math.round(t.value)}${t.status_reason ? ` · ${t.status_reason}` : ""}`;
 });
 const rs = computed(() => stats.value?.resting_hr ?? null);
+// UI-F1 — server verdicts; amber for worse, never the crisis rose.
+const TONE_COLOR: Record<string, string | undefined> = { positive: "#5dff3b", caution: "#ffb52e", neutral: undefined };
+const vsPrev = computed(() => rs.value?.vs_previous ?? null);
+const byType = computed(() => stats.value?.hr_by_activity ?? null);
+const byTypeMax = computed(() => Math.max(1, ...(byType.value?.types ?? []).map((t) => t.avg_bpm)));
+const sparseText = computed(() => {
+  const sp = byType.value?.sparse ?? [];
+  if (!sp.length) return null;
+  return `Too few to average: ${sp.map((x) => `${x.label} (${x.n})`).join(", ")}`;
+});
+function signedBpm(v: number | null | undefined): string {
+  if (v == null) return "—";
+  const r = Math.round(v);
+  return r > 0 ? `+${r}` : String(r);
+}
 const zs = computed(() => hr.value?.stats ?? null);
 const r0 = (v: number | null | undefined) => (v == null ? "—" : String(Math.round(v)));
 
@@ -392,6 +410,25 @@ const yoyOption = computed(() => {
         <NeonStat :value="r0(rs?.avg)" label="Avg" :accent="CYAN" />
         <NeonStat :value="r0(rs?.max)" label="Max" />
       </div>
+      <DetailCard v-if="vsPrev && vsPrev.avg_now != null" :title="`vs the previous ${cur.label}`"
+                  :subtitle="vsPrev.avg_before == null ? 'No resting HR in the previous window to compare against.' : 'Average resting HR, this window against the one before it. Lower is better.'">
+        <div class="dstats">
+          <NeonStat :value="r0(vsPrev.avg_now)" label="This window" :accent="CYAN" />
+          <NeonStat :value="r0(vsPrev.avg_before)" label="Previous" />
+          <NeonStat :value="signedBpm(vsPrev.delta)" label="Change bpm" :accent="TONE_COLOR[vsPrev.tone]" />
+        </div>
+      </DetailCard>
+      <DetailCard v-if="byType && (byType.types.length || byType.sparse.length)" :title="`Avg HR by activity · ${cur.label}`"
+                  subtitle="Mean of each session's average HR">
+        <div v-for="t in byType.types" :key="t.category" class="trow">
+          <span class="tl">{{ t.label }}</span>
+          <span class="tbar"><i :style="{ width: `${(t.avg_bpm / byTypeMax) * 100}%` }"></i></span>
+          <b>{{ t.avg_bpm }}</b>
+          <span class="tn">{{ t.n }}×</span>
+        </div>
+        <p v-if="!byType.types.length" class="dnote">No activity type has {{ byType.min_n }}+ sessions with HR in this window.</p>
+        <p v-if="sparseText" class="dnote">{{ sparseText }}</p>
+      </DetailCard>
       <DetailCard v-if="weekdayOption" title="Resting HR by weekday" subtitle="Average on each weekday in this window">
         <div class="dchart"><VChart :option="weekdayOption" autoresize/></div>
       </DetailCard>
@@ -412,5 +449,11 @@ const yoyOption = computed(() => {
 .zrow i { width: 9px; height: 9px; border-radius: 2px; }
 .zl { color: #ececf5; }
 .zb, .zp { color: #9b9bb0; font-size: 11px; }
+.trow { display: grid; grid-template-columns: 84px 1fr 34px 30px; gap: 8px; align-items: center; font-size: 12px; padding: 3px 0; }
+.tl { color: #ececf5; }
+.tbar { height: 8px; border-radius: 4px; background: #272a3b; overflow: hidden; }
+.tbar i { display: block; height: 100%; background: #28e6ff; border-radius: 4px; }
+.trow b { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 600; text-align: right; }
+.tn { color: #9b9bb0; font-size: 11px; text-align: right; }
 .zrow b { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 600; }
 </style>

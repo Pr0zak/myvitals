@@ -44,6 +44,7 @@ Use these; do not re-draw rings per screen.
 
 Follow-ups the slices left, deliberately:
 - **UI-F1** Web features removed with UI-4 because they were browser-computed with no server equivalent yet: HR delta vs previous window + avg HR by activity type (HeartRate.vue), weight distribution histogram + "days at min" (Weight.vue), steps 24h trace (Steps.vue, duplicated the hourly bars). Bring back only with a server field.
+  **Done (unreleased)** — served from `analytics/detail_stats.py` (`resting_hr.vs_previous` + `hr_by_activity` on /summary/range/stats; `histogram` + `days_at_min` on /query/weight stats) and rendered on BOTH web and phone. The steps 24h trace is deliberately NOT restored: it drew the same day as the hourly bars at a finer grain and added nothing a user acts on.
 - **UI-F2** Web Activities lost its period stats banner, PR card and sort/grid/group-by-month (UI-5; the YTD hero replaces the banner, the phone never had the rest).
 - **UI-F3** ✅ done — Train reads `GET /activities/ytd` on both surfaces; `computeYtdComparison` deleted.
 - **UI-F4** ✅ done — `load_ladder_lb` on each workout slot (a window onto the micro-loader rounder's loads); phone + web weight steppers walk it, 2.5 lb only as the old-server fallback.

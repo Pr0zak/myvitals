@@ -33,6 +33,7 @@ import app.myvitals.data.Units
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.VitalTile
 import app.myvitals.sync.WeightDelta
+import app.myvitals.sync.WeightHistogram
 import app.myvitals.sync.WeightSeriesOut
 import app.myvitals.ui.neon.NeonErrorBanner
 import app.myvitals.ui.neon.NeonEyebrow
@@ -60,6 +61,10 @@ import java.time.ZoneId
  * the colour of a weight change is GOAL-STATE's decision, made once.
  *
  * All values arrive in kilograms and are shown in the user's unit.
+ *
+ * UI-F1: the distribution histogram (`stats.histogram`, kg bands) and
+ * "days at min" (`stats.days_at_min`, LOCAL days) are server fields too;
+ * this screen only converts the band edges to the user's unit.
  */
 @Composable
 fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
@@ -218,9 +223,21 @@ fun WeightDetailContent(
         }
         val times = data.points.filter { it.weightKg != null }
             .mapNotNull { runCatching { Instant.parse(it.time).toEpochMilli() }.getOrNull() }
+        s?.daysAtMin?.let { n ->
+            Spacer(Modifier.height(8.dp))
+            val low = Units.weight(s.minKg)?.let { "%.1f %s".format(it, u) } ?: "—"
+            Text("Lowest reading, $low, on $n day${if (n == 1) "" else "s"}",
+                color = NeonMV.Muted, fontSize = 11.sp)
+        }
         coverageNote(times, winStart, winEnd) { mdOf(it) }?.let {
             Spacer(Modifier.height(8.dp))
             Text(it, color = NeonMV.Muted, fontSize = 11.sp)
+        }
+        s?.histogram?.takeIf { it.bins.size >= 2 }?.let { h ->
+            DetailCard(
+                "Distribution",
+                subtitle = "Readings per %.1f-%s band".format(Units.weight(h.binKg) ?: h.binKg, u),
+            ) { WeightHistogramChart(h, accent) }
         }
         Spacer(Modifier.height(28.dp))
     }
@@ -293,6 +310,34 @@ private fun WeightTrendChart(data: WeightSeriesOut, color: Color, winStart: Long
         drawXLabels(g, measurer, NeonMV.Muted, listOf(
             0f to mdOf(winStart), 0.5f to mdOf(winStart + (winEnd - winStart) / 2), 1f to mdOf(winEnd),
         ))
+    }
+}
+
+/** UI-F1 — the server's kg bands as bars; edges converted for labels only. */
+@Composable
+private fun WeightHistogramChart(h: WeightHistogram, color: Color) {
+    val measurer = rememberTextMeasurer()
+    val bins = h.bins
+    Canvas(Modifier.fillMaxWidth().height(130.dp)) {
+        val domain = niceDomain(
+            lo = 0f, hi = (bins.maxOfOrNull { it.count } ?: 1).toFloat().coerceAtLeast(1f),
+            zeroAnchored = true, targetTicks = 3, minStep = 1f,
+        )
+        val g = chartGeom(domain, ChartInsets(
+            left = 24.dp.toPx(), top = 6.dp.toPx(), right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+        ))
+        drawGrid(g, measurer, NeonMV.Muted, NeonMV.Track, maxLabels = 3) { "%.0f".format(it) }
+        val barW = g.slot(bins.size) * 0.8f
+        bins.forEachIndexed { i, b ->
+            if (b.count <= 0) return@forEachIndexed
+            drawBar(g, g.xBar(i, bins.size), barW, g.y(b.count.toFloat()), color)
+        }
+        val lbl = { kg: Double -> Units.weight(kg)?.let { "%.1f".format(it) } ?: "" }
+        drawXLabels(g, measurer, NeonMV.Muted, buildList {
+            add(0f to lbl(bins.first().loKg))
+            if (bins.size >= 5) add(0.5f to lbl(bins[bins.size / 2].loKg))
+            add(1f to lbl(bins.last().hiKg))
+        })
     }
 }
 

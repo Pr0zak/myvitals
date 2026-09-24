@@ -2944,6 +2944,8 @@ data class RestingHrRangeStats(
     @Json(name = "latest_vs_avg") val latestVsAvg: Double? = null,
     @Json(name = "days_with_data") val daysWithData: Int = 0,
     @Json(name = "weekday_means") val weekdayMeans: List<WeekdayMean> = emptyList(),
+    /** UI-F1 — vs the previous equal-length window. */
+    @Json(name = "vs_previous") val vsPrevious: WindowChange? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -2962,6 +2964,8 @@ data class RangeStats(
     val steps: StepsRangeStats? = null,
     @Json(name = "resting_hr") val restingHr: RestingHrRangeStats? = null,
     val sleep: SleepRangeStats? = null,
+    /** UI-F1 — mean session HR per activity category over the window. */
+    @Json(name = "hr_by_activity") val hrByActivity: HrByActivity? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -3028,6 +3032,10 @@ data class WeightStats(
     val trend: WeightTrend? = null,
     @Json(name = "delta_7d") val delta7d: WeightDelta? = null,
     @Json(name = "delta_30d") val delta30d: WeightDelta? = null,
+    /** UI-F1 — readings per kg band; convert the edges for display only. */
+    val histogram: WeightHistogram? = null,
+    /** UI-F1 — distinct LOCAL days with a reading at the window minimum. */
+    @Json(name = "days_at_min") val daysAtMin: Int? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -3072,4 +3080,48 @@ data class StrengthNextUp(
     @Json(name = "set_number") val setNumber: Int = 1,
     @Json(name = "target_sets") val targetSets: Int = 0,
     val started: Boolean = false,
+)
+
+// ── UI-F1 ── detail-screen extras, served by analytics/detail_stats.py.
+
+/** A window mean against the previous equal-length window. [better] and
+ *  [tone] (positive | caution | neutral) are decided server-side. */
+@JsonClass(generateAdapter = true)
+data class WindowChange(
+    @Json(name = "avg_now") val avgNow: Double? = null,
+    @Json(name = "avg_before") val avgBefore: Double? = null,
+    val delta: Double? = null,
+    val better: String = "down",
+    val tone: String = "neutral",
+    @Json(name = "days_now") val daysNow: Int = 0,
+    @Json(name = "days_before") val daysBefore: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class HrByTypeRow(
+    val category: String,
+    val label: String = "",
+    val n: Int = 0,
+    @Json(name = "avg_bpm") val avgBpm: Int? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class HrByActivity(
+    val types: List<HrByTypeRow> = emptyList(),
+    /** Categories with too few sessions to average — count only. */
+    val sparse: List<HrByTypeRow> = emptyList(),
+    @Json(name = "min_n") val minN: Int = 2,
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightBin(
+    @Json(name = "lo_kg") val loKg: Double,
+    @Json(name = "hi_kg") val hiKg: Double,
+    val count: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightHistogram(
+    @Json(name = "bin_kg") val binKg: Double = 0.5,
+    val bins: List<WeightBin> = emptyList(),
 )

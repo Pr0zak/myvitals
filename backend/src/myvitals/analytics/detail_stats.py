@@ -289,6 +289,7 @@ def _delta_since(pts: Sequence[tuple[datetime, float]], days: int,
 def weight_stats(
     points: Sequence[tuple[datetime, float]], goal_kg: float | None,
     body_fat: Sequence[tuple[datetime, float, float | None]] | None = None,
+    tz: Any = None,
 ) -> dict[str, Any]:
     """Window stats + the trend line for a weight series, all in KILOGRAMS.
 
@@ -306,7 +307,7 @@ def weight_stats(
                 "first_kg": None, "latest_kg": None, "delta_kg": None,
                 "min_kg": None, "max_kg": None, "avg_kg": None,
                 "goal_kg": goal_kg, "goal_gap_kg": None, "tone": "neutral",
-                "trend": None}
+                "trend": None, "histogram": None, "days_at_min": None}
     ws = [w for _, w in pts]
     first, latest = ws[0], ws[-1]
     delta = round(latest - first, 2) if len(ws) >= 2 else None
@@ -350,4 +351,176 @@ def weight_stats(
         "goal_gap_kg": round(latest - goal_kg, 2) if goal_kg is not None else None,
         "tone": weight_tone(delta, latest, goal_kg),
         "trend": trend,
+        # UI-F1 — the distribution and the days-at-min figure the web used
+        # to compute on its own.
+        "histogram": weight_histogram(ws),
+        "days_at_min": days_at_min(pts, tz),
     }
+
+
+# ── UI-F1: the web-only extras UI-4 removed, now served ──────────────────
+
+#: A change in the window-mean resting HR smaller than this reads as "no
+#: change". Daily resting HR wanders by a beat or two on its own; a verdict
+#: that fires on that is wrong most weeks (HEALTH-1's lesson).
+RHR_CHANGE_BAND_BPM = 1.0
+
+
+def window_change(
+    now: Sequence[float | None], before: Sequence[float | None],
+    better: str = "down", band: float = RHR_CHANGE_BAND_BPM, digits: int = 1,
+) -> dict[str, Any]:
+    """Mean of this window against the mean of the previous equal-length one.
+
+    `better` is the direction that is good news ("down" for resting HR),
+    decided here so no client infers it. `tone` is positive | caution |
+    neutral — caution renders amber, never the crisis rose. Either window
+    with no readings makes the averages and delta null and the tone
+    neutral: a mean of nothing is not zero, and a delta against it is not a
+    number.
+    """
+    a = [float(v) for v in now if v is not None]
+    b = [float(v) for v in before if v is not None]
+    avg_now = round(sum(a) / len(a), digits) if a else None
+    avg_before = round(sum(b) / len(b), digits) if b else None
+    delta = (round(avg_now - avg_before, digits)
+             if avg_now is not None and avg_before is not None else None)
+    if delta is None or abs(delta) < band:
+        tone = "neutral"
+    else:
+        good = delta < 0 if better == "down" else delta > 0
+        tone = "positive" if good else "caution"
+    return {
+        "avg_now": avg_now, "avg_before": avg_before, "delta": delta,
+        "better": better, "tone": tone,
+        "days_now": len(a), "days_before": len(b),
+    }
+
+
+#: (key, label, substrings) in match order. The FIRST rule that matches
+#: wins, so the order is load-bearing: "vr" before everything (a VR ride is
+#: VR fitness, not a ride), and ride before run. Before this, the web
+#: (ActivityIcon.vue) and the phone (ActivitiesScreen.iconForType) each
+#: parsed the type string with their own lists. For this block the clients
+#: render `label` and map `category` to a glyph; they never parse `type`.
+ACTIVITY_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("vr", "VR fitness", ("vr",)),
+    ("ride", "Ride", ("ride", "cycl", "bike")),
+    ("run", "Run", ("run", "jog")),
+    ("hike", "Hike", ("hike", "hiking")),
+    ("walk", "Walk", ("walk",)),
+    ("swim", "Swim", ("swim",)),
+    ("row", "Row", ("row", "erg")),
+    ("paddle", "Paddle", ("kayak", "canoe", "paddle", "surf")),
+    ("snow", "Snow", ("ski", "snow")),
+    ("strength", "Strength", ("strength", "weight", "lift")),
+    ("hiit", "HIIT", ("hiit", "crossfit")),
+    ("yoga", "Yoga", ("yoga", "pilates", "stretch")),
+    ("cardio", "Cardio", ("cardio", "elliptical", "treadmill", "stair", "workout")),
+)
+OTHER_CATEGORY = ("other", "Other")
+
+#: A per-type average of one session is that session, not an average.
+HR_BY_TYPE_MIN_N = 2
+
+
+def activity_category(activity_type: str | None) -> tuple[str, str]:
+    """(key, label) for a raw activity type — Strava's "VirtualRide", HC's
+    "running", the corrected-type keys like "yard_work"."""
+    t = (activity_type or "").lower()
+    for key, label, needles in ACTIVITY_CATEGORIES:
+        if any(n in t for n in needles):
+            return key, label
+    return OTHER_CATEGORY
+
+
+def hr_by_activity_type(acts: Iterable[tuple[str | None, float | None]]) -> dict[str, Any]:
+    """Mean session avg-HR per activity category over a window.
+
+    Sessions without an avg HR are skipped (not counted as zero). A category
+    with fewer than HR_BY_TYPE_MIN_N sessions goes to `sparse` with its
+    count and NO average, so a client can say "1 hike — too few to average"
+    instead of printing one session as if it were a typical figure.
+    `types` is ordered by average HR, highest first.
+    """
+    groups: dict[str, tuple[str, list[float]]] = {}
+    for typ, hr in acts:
+        if hr is None:
+            continue
+        key, label = activity_category(typ)
+        groups.setdefault(key, (label, []))[1].append(float(hr))
+    types, sparse = [], []
+    for key, (label, vals) in groups.items():
+        if len(vals) >= HR_BY_TYPE_MIN_N:
+            types.append({"category": key, "label": label, "n": len(vals),
+                          "avg_bpm": round(sum(vals) / len(vals))})
+        else:
+            sparse.append({"category": key, "label": label, "n": len(vals)})
+    types.sort(key=lambda r: (-r["avg_bpm"], r["category"]))
+    sparse.sort(key=lambda r: r["category"])
+    return {"types": types, "sparse": sparse, "min_n": HR_BY_TYPE_MIN_N}
+
+
+#: Candidate histogram widths, kg. The narrowest giving at most
+#: WEIGHT_HIST_MAX_BINS bins wins — 0.5 kg normally; one bad scale reading
+#: 40 kg off widens the bins rather than drawing eighty slivers.
+WEIGHT_BIN_WIDTHS_KG = (0.5, 1.0, 2.0, 5.0, 10.0)
+WEIGHT_HIST_MAX_BINS = 40
+
+#: A reading this close to the window minimum counts as "at the minimum".
+#: Scales report to 0.1 kg (or 0.2 lb ≈ 0.09 kg); a difference below this
+#: is rounding, not a different weight.
+AT_MIN_TOLERANCE_KG = 0.05
+
+
+def weight_histogram(weights: Sequence[float]) -> dict[str, Any] | None:
+    """Readings per weight band, in KILOGRAMS. None with no readings.
+
+    Bins are half-open [lo, hi), aligned to multiples of `bin_kg`, and
+    zero-filled between the lowest and highest occupied bin so the shape is
+    honest. Counts are READINGS, not days: a morning with two weigh-ins
+    counts twice. Converting the edges to pounds is the client's one job.
+    """
+    if not weights:
+        return None
+    lo_w, hi_w = min(weights), max(weights)
+    width = WEIGHT_BIN_WIDTHS_KG[-1]
+    for w in WEIGHT_BIN_WIDTHS_KG:
+        if int(hi_w // w) - int(lo_w // w) + 1 <= WEIGHT_HIST_MAX_BINS:
+            width = w
+            break
+    first = int(lo_w // width)
+    last = int(hi_w // width)
+    counts = [0] * (last - first + 1)
+    for v in weights:
+        counts[int(v // width) - first] += 1
+    return {
+        "bin_kg": width,
+        "bins": [
+            {"lo_kg": round((first + i) * width, 2),
+             "hi_kg": round((first + i + 1) * width, 2), "count": c}
+            for i, c in enumerate(counts)
+        ],
+    }
+
+
+def days_at_min(points: Sequence[tuple[datetime, float]], tz: Any = None) -> int | None:
+    """How many days the window's minimum weight was on the scale.
+
+    Precisely: the number of distinct LOCAL calendar days (in `tz`; UTC when
+    None) on which at least one reading lies within AT_MIN_TOLERANCE_KG of
+    the window's lowest reading. Several readings on one day count once, so
+    a morning with two weigh-ins at the low is one day, not two (the old web
+    version counted readings and called them days). Days need not be
+    consecutive. None — not 0 — when the window has no readings; with any
+    reading it is at least 1.
+    """
+    from datetime import timezone as _tz
+
+    vals = [(t, float(w)) for t, w in points if w is not None]
+    if not vals:
+        return None
+    lo = min(w for _, w in vals)
+    zone = tz or _tz.utc
+    return len({t.astimezone(zone).date() for t, w in vals
+                if w - lo <= AT_MIN_TOLERANCE_KG + 1e-9})

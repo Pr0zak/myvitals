@@ -10,6 +10,7 @@ import app.myvitals.ui.vitals.WeightDetailContent
 import org.junit.Rule
 import org.junit.Test
 import app.myvitals.snapshots.SampleDataDetail as D
+import app.myvitals.snapshots.SampleDataUiF1 as F
 
 /*
  * UI-4 — the four metric detail screens, each loaded (two scroll positions),
@@ -36,15 +37,21 @@ class HrDetailSnapshotTest {
         }
     }
 
-    /** 30-day view: resting HR trend, server window stats, weekday means. */
-    @Test fun month() = paparazzi.snapshot {
-        NeonFrame {
+    /** 30-day view: resting HR trend, server window stats, weekday means.
+     *  UI-F1: month_2 scrolls to the vs-previous-window card (amber — resting
+     *  HR rose) and the HR-by-activity bars with a too-few-to-average line. */
+    @Test fun month() = month(0)
+    @Test fun month_2() = month(VIEWPORT_DP - 60)
+
+    private fun month(scroll: Int) = paparazzi.snapshot {
+        NeonFrame(scroll) {
             HrDetailContent(
-                range = VitalRange.MONTH, live = null, rows = D.stepRows, rangeStats = D.restingStats,
+                range = VitalRange.MONTH, live = null, rows = D.stepRows, rangeStats = F.restingStats,
                 restingTile = D.restingTile, bands = emptyList(), markers = emptyList(),
                 selectedDay = D.TODAY, today = D.TODAY, nowMs = D.NOW_MS,
                 loading = false, refreshing = false, error = null,
                 onBack = {}, onRange = {}, onRefresh = {},
+                hrByActivity = F.hrByActivity,
             )
         }
     }

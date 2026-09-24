@@ -863,6 +863,8 @@ export interface RestingHrRangeStats {
   avg: number | null; min: number | null; max: number | null;
   latest: number | null; latest_vs_avg: number | null;
   days_with_data: number; weekday_means: WeekdayMean[];
+  /** UI-F1 — vs the previous equal-length window. */
+  vs_previous?: WindowChange | null;
 }
 export interface SleepRangeStats {
   avg_s: number | null; min_s: number | null; max_s: number | null;
@@ -871,6 +873,8 @@ export interface SleepRangeStats {
 export interface RangeStats {
   since: string; until: string;
   steps: StepsRangeStats; resting_hr: RestingHrRangeStats; sleep: SleepRangeStats;
+  /** UI-F1 — mean session HR per activity category over the window. */
+  hr_by_activity?: HrByActivity | null;
 }
 export interface HrZoneTime {
   zone: string; label: string; lo_bpm: number; hi_bpm: number | null;
@@ -895,6 +899,10 @@ export interface WeightStats {
   rolling_7d: Array<{ time: string; kg: number }>;
   delta_7d: WeightDelta; delta_30d: WeightDelta;
   recomp: { label: string; tone: WeightTone; fat_delta_kg: number; lean_delta_kg: number } | null;
+  /** UI-F1 — readings per kg band (convert edges for display only). */
+  histogram?: WeightHistogram | null;
+  /** UI-F1 — distinct LOCAL days with a reading at the window minimum. */
+  days_at_min?: number | null;
 }
 
 // ── UI-1 ── Train tab: week-vs-last-week volume and the hero's next slot.
@@ -930,4 +938,21 @@ export interface StrengthNextUp {
   set_number: number;
   target_sets: number;
   started: boolean;
+}
+
+// ── UI-F1 ── detail-screen extras, served by analytics/detail_stats.py.
+export interface WindowChange {
+  avg_now: number | null; avg_before: number | null; delta: number | null;
+  better: "up" | "down"; tone: WeightTone;
+  days_now: number; days_before: number;
+  prev_since: string; prev_until: string;
+}
+export interface HrByActivity {
+  types: Array<{ category: string; label: string; n: number; avg_bpm: number }>;
+  sparse: Array<{ category: string; label: string; n: number }>;
+  min_n: number;
+}
+export interface WeightHistogram {
+  bin_kg: number;
+  bins: Array<{ lo_kg: number; hi_kg: number; count: number }>;
 }

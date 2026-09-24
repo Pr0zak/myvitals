@@ -522,6 +522,7 @@ async def get_weight(
     # against list indices; the web did its own. All in kilograms — clients
     # only convert units.
     from ..analytics.detail_stats import weight_stats
+    from ..localtime import local_tz
     goal_kg = (await db.execute(
         select(models.UserProfile.weight_goal_kg).limit(1)
     )).scalar_one_or_none()
@@ -529,6 +530,7 @@ async def get_weight(
         [(r[0], r[1]) for r in rows],
         float(goal_kg) if goal_kg else None,
         body_fat=[(r[0], r[1], r[2]) for r in rows if r[1] is not None],
+        tz=local_tz(),
     )
     return {
         "points": points,

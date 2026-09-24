@@ -41,6 +41,7 @@ import app.myvitals.data.JsonCache
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.DailySummary
+import app.myvitals.sync.HrByActivity
 import app.myvitals.sync.HrZoneStats
 import app.myvitals.sync.RangeStats
 import app.myvitals.sync.RestingHrRangeStats
@@ -52,6 +53,7 @@ import app.myvitals.ui.neon.NeonHeroCard
 import app.myvitals.ui.neon.NeonMV
 import app.myvitals.ui.neon.NeonNumber
 import app.myvitals.ui.neon.NeonScreen
+import app.myvitals.ui.neon.NeonStatTile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -88,6 +90,10 @@ data class HrMarker(val ms: Long, val glyph: String)
  * normal band and baseline from /summary/tiles; below it the server's
  * weekday means. Every figure is rendered verbatim from the server — zones
  * come from analytics/cardio.py, the same bounds the Activities screen uses.
+ *
+ * UI-F1 added, on the range views, resting HR against the previous window
+ * (`resting_hr.vs_previous`, tone decided server-side) and average HR by
+ * activity category (`hr_by_activity`) — both from /summary/range/stats.
  */
 @Composable
 fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
@@ -98,6 +104,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
     var live by remember { mutableStateOf<TimeSeries?>(null) }
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
     var rangeStats by remember { mutableStateOf<RestingHrRangeStats?>(null) }
+    var hrByActivity by remember { mutableStateOf<HrByActivity?>(null) }
     // Which range `rows` belong to, so a tab switch never draws the old
     // range's series under the new title.
     var rowsRange by remember { mutableStateOf<VitalRange?>(null) }
@@ -179,6 +186,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
                     JsonCache.write(context, "hr_detail_rows_${range.name.lowercase()}", rowsType, rows)
                     statsD.await()?.let {
                         rangeStats = it.restingHr
+                        hrByActivity = it.hrByActivity
                         JsonCache.write(context, "hr_detail_stats_${range.name.lowercase()}",
                             RangeStats::class.java, it)
                     }
@@ -194,14 +202,14 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
 
     LaunchedEffect(range, selectedDay) {
         if (rowsRange != null && rowsRange != range) {
-            rows = emptyList(); rowsRange = null; rangeStats = null
+            rows = emptyList(); rowsRange = null; rangeStats = null; hrByActivity = null
         }
         if (range != VitalRange.DAY) {
             val key = range.name.lowercase()
             JsonCache.read<List<DailySummary>>(context, "hr_detail_rows_$key", rowsType)
                 ?.let { rows = it.value; rowsRange = range; loading = false }
             JsonCache.read<RangeStats>(context, "hr_detail_stats_$key", RangeStats::class.java)
-                ?.let { rangeStats = it.value.restingHr }
+                ?.let { rangeStats = it.value.restingHr; hrByActivity = it.value.hrByActivity }
         } else {
             live = null
             loading = true
@@ -220,6 +228,7 @@ fun HrDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
         dayNav = {
             app.myvitals.ui.common.DayNav(selected = selectedDay, onSelectedChange = { selectedDay = it })
         },
+        hrByActivity = hrByActivity,
     )
 }
 
@@ -243,6 +252,7 @@ fun HrDetailContent(
     onRefresh: () -> Unit,
     dayNav: @Composable () -> Unit = {},
     contentPadding: PaddingValues = PaddingValues(0.dp),
+    hrByActivity: HrByActivity? = null,
 ) {
     val accent = Vital.HR.accent
     NeonScreen(
@@ -352,6 +362,27 @@ fun HrDetailContent(
                     rangeStats?.max?.let { "%.0f".format(it) } to "Max",
                 ),
             )
+            rangeStats?.vsPrevious?.takeIf { it.avgNow != null }?.let { vp ->
+                DetailCard(
+                    "vs the previous ${range.label}",
+                    subtitle = if (vp.avgBefore == null) "No resting HR in the previous window to compare against."
+                        else "Average resting HR, this window against the one before it. Lower is better.",
+                ) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        NeonStatTile(vp.avgNow?.let { "%.0f".format(it) } ?: "—", "This window",
+                            Modifier.weight(1f), accent = accent)
+                        NeonStatTile(vp.avgBefore?.let { "%.0f".format(it) } ?: "—", "Previous",
+                            Modifier.weight(1f))
+                        NeonStatTile(vp.delta?.let { signedBpm(it) } ?: "—", "Change bpm",
+                            Modifier.weight(1f), accent = changeToneColor(vp.tone))
+                    }
+                }
+            }
+            hrByActivity?.takeIf { it.types.isNotEmpty() || it.sparse.isNotEmpty() }?.let { bt ->
+                DetailCard("Avg HR by activity · ${range.label}", subtitle = "Mean of each session's average HR") {
+                    HrByTypeBars(bt, accent)
+                }
+            }
             rangeStats?.weekdayMeans?.takeIf { w -> w.any { it.mean != null } }?.let { wm ->
                 DetailCard("Resting HR by weekday", subtitle = "Average on each weekday in this window") {
                     WeekdayBars(wm.map { it.dow to it.mean }, accent, zeroAnchored = false,
@@ -360,6 +391,45 @@ fun HrDetailContent(
             }
         }
         Spacer(Modifier.height(28.dp))
+    }
+}
+
+/** Server tone → colour. Amber for worse, never the crisis rose. */
+private fun changeToneColor(tone: String?): Color? = when (tone) {
+    "positive" -> NeonMV.Lime
+    "caution" -> NeonMV.Amber
+    else -> null
+}
+
+private fun signedBpm(v: Double): String {
+    val r = kotlin.math.round(v).toInt()
+    return if (r > 0) "+$r" else "$r"
+}
+
+@Composable
+private fun HrByTypeBars(bt: HrByActivity, color: Color) {
+    val top = (bt.types.maxOfOrNull { it.avgBpm ?: 0 } ?: 1).coerceAtLeast(1)
+    for (t in bt.types) {
+        val bpm = t.avgBpm ?: continue
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 3.dp)) {
+            Text(t.label, color = NeonMV.Ink, fontSize = 12.sp, modifier = Modifier.width(84.dp))
+            Box(Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)).background(NeonMV.Track)) {
+                Box(Modifier.fillMaxWidth(bpm.toFloat() / top).height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)).background(color))
+            }
+            Text("$bpm", color = NeonMV.Ink, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.width(38.dp))
+            Text("${t.n}×", color = NeonMV.Muted, fontSize = 11.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.width(30.dp))
+        }
+    }
+    if (bt.types.isEmpty()) DetailNote("No activity type has ${bt.minN}+ sessions with HR in this window.")
+    if (bt.sparse.isNotEmpty()) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Too few to average: " + bt.sparse.joinToString(", ") { "${it.label} (${it.n})" },
+            color = NeonMV.Muted, fontSize = 11.sp,
+        )
     }
 }
 

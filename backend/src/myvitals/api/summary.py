@@ -874,12 +874,41 @@ async def summary_range_stats(
     sleep_end = datetime.combine(end, time(18, 0), tzinfo=tz)
     nights = await get_sleep_range(since=sleep_start, until=sleep_end, db=db)
     window_days = (end - since).days + 1
+
+    # UI-F1 — resting HR against the previous window of the same length
+    # (the `window_days` LOCAL days ending the day before `since`), read
+    # through /summary/range like the current window so both sides use the
+    # same recompute. `better` and `tone` are decided in detail_stats.
+    prev_until = since - timedelta(days=1)
+    prev_since = prev_until - timedelta(days=window_days - 1)
+    prev_rows = await summary_range(since=prev_since, until=prev_until, db=db)
+    resting = detail_stats.resting_hr_stats(rows)
+    resting["vs_previous"] = {
+        **detail_stats.window_change(
+            [r.resting_hr for r in rows], [r.resting_hr for r in prev_rows],
+            better="down"),
+        "prev_since": prev_since.isoformat(),
+        "prev_until": prev_until.isoformat(),
+    }
+
+    # UI-F1 — mean session HR per activity category over the same LOCAL
+    # days, from every activity source that carries an avg HR.
+    from ..localtime import local_midnight
+    acts = (await db.execute(
+        select(models.Activity.type, models.Activity.avg_hr)
+        .where(models.Activity.start_at >= local_midnight(since))
+        .where(models.Activity.start_at < local_midnight(end + timedelta(days=1)))
+        .where(models.Activity.avg_hr.is_not(None))
+    )).all()
+
     return {
         "since": since.isoformat(),
         "until": end.isoformat(),
         "steps": detail_stats.steps_stats(rows, window_days),
-        "resting_hr": detail_stats.resting_hr_stats(rows),
+        "resting_hr": resting,
         "sleep": detail_stats.sleep_stats(nights),
+        "hr_by_activity": detail_stats.hr_by_activity_type(
+            (t, hr) for t, hr in acts),
     }
 
 

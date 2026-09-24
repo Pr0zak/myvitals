@@ -11,8 +11,11 @@
  * user's unit.
  *
  * Removed with the move: the client-side KPI math, the rolling average,
- * the recomposition verdict (which painted "Fat gain" in the crisis rose),
- * and the distribution histogram, which had no server block and is deferred.
+ * and the recomposition verdict (which painted "Fat gain" in the crisis rose).
+ *
+ * UI-F1 brought back the distribution histogram and "days at min" as
+ * server fields (`stats.histogram` in kg bands, `stats.days_at_min` in
+ * LOCAL days); this view only converts the band edges to the user's unit.
  */
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
@@ -195,6 +198,32 @@ const mainOption = computed(() => {
   };
 });
 
+// UI-F1 — the server's kg bands, edges converted for display only.
+const histogramOption = computed(() => {
+  void weightUnit.value;
+  const bins = stats.value?.histogram?.bins ?? [];
+  if (bins.length < 2) return null;
+  const label = (kg: number) => weightVal(kg)?.toFixed(1) ?? "";
+  return {
+    grid: { left: 32, right: 8, top: 10, bottom: 30 },
+    xAxis: { type: "category", data: bins.map((b) => label(b.lo_kg)), axisLabel: axis.value,
+             name: weightUnit.value, nameLocation: "middle", nameGap: 20, nameTextStyle: axis.value },
+    yAxis: { type: "value", minInterval: 1, axisLabel: axis.value, splitLine: split },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip,
+               formatter: (p: any) => {
+                 const b = bins[p[0].dataIndex];
+                 return `${label(b.lo_kg)}–${label(b.hi_kg)} ${weightUnit.value}: ${b.count} reading${b.count === 1 ? "" : "s"}`;
+               } },
+    series: [{ type: "bar", data: bins.map((b) => b.count), barWidth: "85%",
+               itemStyle: { color: AMBER, borderRadius: [3, 3, 0, 0] } }],
+  };
+});
+const daysAtMinText = computed(() => {
+  const n = stats.value?.days_at_min;
+  if (n == null) return null;
+  return `Lowest reading, ${fmtWeight(stats.value?.min_kg ?? null)}, on ${n} day${n === 1 ? "" : "s"}`;
+});
+
 const sortDesc = ref(true);
 const tableRows = computed(() => (sortDesc.value ? [...sorted.value].reverse() : sorted.value));
 const fmtDate = (s: string) => new Date(s).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
@@ -248,7 +277,13 @@ const fmtDate = (s: string) => new Date(s).toLocaleDateString([], { year: "numer
           <NeonStat :value="weightVal(stats?.avg_kg ?? null)?.toFixed(1) ?? '—'" :label="`Avg ${weightUnit}`" />
           <NeonStat :value="weightVal(stats?.max_kg ?? null)?.toFixed(1) ?? '—'" :label="`Max ${weightUnit}`" />
         </div>
+        <p v-if="daysAtMinText && !yoy" class="dnote">{{ daysAtMinText }}</p>
         <p v-if="coverage" class="dnote">{{ coverage }}</p>
+
+        <DetailCard v-if="histogramOption && !yoy" title="Distribution"
+                    :subtitle="`Readings per ${weightVal(stats!.histogram!.bin_kg)?.toFixed(1)}-${weightUnit} band`">
+          <div class="dchart"><VChart :option="histogramOption" autoresize/></div>
+        </DetailCard>
 
         <DetailCard :title="`History · ${tableRows.length} readings`">
           <div class="hist-wrap">

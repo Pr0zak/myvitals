@@ -163,6 +163,20 @@ def ytd_compare(
     ]
     tw = weeks.get(this_week, [0, 0])
 
+    # UI-F2 — per-month totals for the feed's group-by-month headers, the
+    # same way as the weeks: every month with a session, newest first.
+    months: dict[date, list[int]] = {}
+    for e in entries:
+        if e.day > today:
+            continue
+        agg = months.setdefault(e.day.replace(day=1), [0, 0])
+        agg[0] += 1
+        agg[1] += max(0, e.duration_s or 0)
+    month_rows = [
+        {"month_start": m.isoformat(), "sessions": v[0], "duration_s": v[1]}
+        for m, v in sorted(months.items(), reverse=True)
+    ]
+
     return {
         "year": this_year,
         "prior_year": prior_year,
@@ -179,4 +193,5 @@ def ytd_compare(
             "duration_s": tw[1],
         },
         "weeks": week_rows,
+        "months": month_rows,
     }

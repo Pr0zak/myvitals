@@ -108,6 +108,15 @@ export interface ActivityStats {
    *  over the selected window in UTC — so it does not change when the date
    *  picker does. Null from a backend older than v0.10.1. */
   consistency?: TrainingConsistency | null;
+  /** UI-F2 — what the totals are made of: print "—", not 0, for a total
+   *  no row in the window carried. Absent from a pre-UI-F2 backend. */
+  n_strength?: number;
+  n_with_distance?: number;
+  n_with_elevation?: number;
+  n_with_kcal?: number;
+  window_since?: string | null;
+  window_until?: string | null;
+  category?: string;
 }
 
 export interface TrainingConsistency {
@@ -846,6 +855,8 @@ export interface ActivityYtd {
   cumulative_distance_m: { this_year: number[]; last_year: number[] };
   this_week: YtdWeek;
   weeks: YtdWeek[];
+  /** UI-F2 — per-month totals for the group-by-month headers. */
+  months?: YtdMonth[];
 }
 
 export interface TrailStatusCounts {
@@ -960,4 +971,42 @@ export interface HrByActivity {
 export interface WeightHistogram {
   bin_kg: number;
   bins: Array<{ lo_kg: number; hi_kg: number; count: number }>;
+}
+
+// ── UI-F2: activity personal records + month headers ─────────────────
+export interface YtdMonth {
+  month_start: string;
+  sessions: number;
+  duration_s: number;
+}
+
+export interface ActivityRecordRef {
+  source: string;
+  source_id: string;
+  name: string | null;
+  type: string;
+  start_at: string;
+  /** The user's LOCAL day. */
+  date: string;
+}
+
+/** One record from GET /activities/records. `value` is null — never 0 —
+ *  when no activity in the window qualifies. Units: "m", "s", "" (suffer
+ *  score) or "m/s" (fastest; `display` says pace or speed). */
+export interface ActivityRecord {
+  key: "longest_distance" | "longest_duration" | "most_elevation" | "highest_suffer" | "fastest";
+  label: string;
+  unit: string;
+  value: number | null;
+  activity: ActivityRecordRef | null;
+  display?: "pace" | "speed";
+  min_distance_m?: number;
+}
+
+export interface ActivityRecords {
+  category: string;
+  n_considered: number;
+  records: ActivityRecord[];
+  since: string | null;
+  until: string | null;
 }

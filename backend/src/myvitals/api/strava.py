@@ -173,6 +173,16 @@ class ActivityStatsOut(BaseModel):
     #: not over the selected window in UTC — see analytics/consistency.py
     #: for the three ways the previous inline version got this wrong.
     consistency: dict[str, Any] | None = None
+    # UI-F2 — what the totals above are made of, so a client can print
+    # "—" instead of "0 km" when nothing in the window carried a distance
+    # (null is not zero), and echo which window/filter they answer.
+    n_strength: int = 0
+    n_with_distance: int = 0
+    n_with_elevation: int = 0
+    n_with_kcal: int = 0
+    window_since: str | None = None
+    window_until: str | None = None
+    category: str = "all"
 
 
 def _mask(s: str) -> str:
@@ -318,38 +328,89 @@ def _activity_to_out(
             dependencies=[Depends(require_any)])
 async def activities_stats(
     days: int = Query(30, ge=1, le=3650),
+    # UI-F2 — the Activities feed's period banner asks for EXACTLY the
+    # window and filter chip on screen, so its totals describe the rows
+    # below it. `since`/`until` are the user's LOCAL days (until inclusive)
+    # and override `days`; `category` is a feed chip (analytics/
+    # activity_records.ACTIVITY_CATEGORIES, or "all"); `include_strength`
+    # adds completed generated workouts the way the feed and /activities/ytd
+    # count them. All optional: an old client asking `?days=30` gets the
+    # same answer it always did.
+    since: date_type | None = Query(None),
+    until: date_type | None = Query(None),
+    category: str | None = Query(None),
+    include_strength: bool = Query(False),
     db: AsyncSession = Depends(get_session),
 ) -> ActivityStatsOut:
-    """Aggregate stats over the past `days` days, plus comparison vs prior period."""
+    """Aggregate stats over the past `days` days (or `since`..`until`), plus
+    comparison vs the prior period of the same length."""
     from datetime import timedelta as _td
+    from ..analytics import energy
+    from ..analytics.activity_records import ACTIVITY_CATEGORIES, category_for_type
+    from ..localtime import local_midnight
+
+    cat = None if category in (None, "", "all") else category
+    if cat is not None and cat not in ACTIVITY_CATEGORIES:
+        raise HTTPException(422, f"unknown category {category!r}")
     now = datetime.now(timezone.utc)
-    period_start = now - _td(days=days)
-    prev_start = now - _td(days=2 * days)
+    if since is not None:
+        period_start = local_midnight(since)
+        now = min(now, local_midnight(until + _td(days=1))) if until else now
+        prev_start = period_start - (now - period_start)
+    else:
+        period_start = now - _td(days=days)
+        prev_start = now - _td(days=2 * days)
 
-    res = await db.execute(
+    # "strength" is the feed's generated-workout chip: those sessions are
+    # not Activity rows, so the chip selects workouts only (as the feed does).
+    want_activities = cat != "strength"
+    want_strength = include_strength and cat in (None, "strength")
+
+    all_rows = (await db.execute(
         select(models.Activity)
-        .where(models.Activity.start_at >= period_start)
-        .where(models.Activity.start_at <= now)
-    )
-    rows = res.scalars().all()
-
-    res_prev = await db.execute(
-        select(
-            func.count(models.Activity.source_id),
-            func.coalesce(func.sum(models.Activity.distance_m), 0),
-            func.coalesce(func.sum(models.Activity.duration_s), 0),
-            func.coalesce(func.sum(models.Activity.elevation_gain_m), 0),
-            func.coalesce(func.sum(models.Activity.kcal), 0),
-        )
         .where(models.Activity.start_at >= prev_start)
-        .where(models.Activity.start_at < period_start)
-    )
-    prev = res_prev.one()
-    pn, pd, pdur, pelev, pkcal = (float(x) for x in prev)
+        .where(models.Activity.start_at <= now)
+    )).scalars().all() if want_activities else []
+    if cat is not None:
+        all_rows = [a for a in all_rows if category_for_type(a.type) == cat]
+    rows = [a for a in all_rows if a.start_at >= period_start]
+    prev_rows = [a for a in all_rows if a.start_at < period_start]
 
-    n = len(rows)
+    n_strength = 0
+    strength_dur = 0
+    prev_strength = (0, 0)
+    if want_strength:
+        from ..localtime import local_date as _ld
+        wos = (await db.execute(
+            select(models.StrengthWorkout)
+            .where(models.StrengthWorkout.status == "completed")
+            .where(models.StrengthWorkout.date >= _ld(prev_start))
+            .where(models.StrengthWorkout.date <= _ld(now))
+        )).scalars().all()
+        p_n = p_d = 0
+        for w in wos:
+            # A cardio day auto-completed by an activity: that activity is
+            # already counted above.
+            if w.split_focus == "cardio" and w.completed_by_activity_source:
+                continue
+            net = energy.net_duration_s(w.started_at, w.completed_at, w.total_paused_s) or 0
+            if w.date >= _ld(period_start):
+                n_strength += 1
+                strength_dur += net
+            else:
+                p_n += 1
+                p_d += net
+        prev_strength = (p_n, p_d)
+
+    pn = float(len(prev_rows) + prev_strength[0])
+    pd = float(sum(a.distance_m or 0 for a in prev_rows))
+    pdur = float(sum(a.duration_s or 0 for a in prev_rows) + prev_strength[1])
+    pelev = float(sum(a.elevation_gain_m or 0 for a in prev_rows))
+    pkcal = float(sum(a.kcal or 0 for a in prev_rows))
+
+    n = len(rows) + n_strength
     total_distance = sum(a.distance_m or 0 for a in rows)
-    total_duration = sum(a.duration_s for a in rows)
+    total_duration = sum(a.duration_s or 0 for a in rows) + strength_dur
     total_elev = sum(a.elevation_gain_m or 0 for a in rows)
     total_kcal = sum(a.kcal or 0 for a in rows)
 
@@ -377,7 +438,11 @@ async def activities_stats(
             return 0.0 if curr == 0 else 100.0
         return ((curr - prev_val) / prev_val) * 100
 
-    if days >= 365 * 9:
+    if since is not None:
+        def _d(x: date_type) -> str:
+            return f"{x.strftime('%b')} {x.day}"
+        period_label = f"{_d(since)} – {_d(until)}" if until else f"Since {_d(since)}"
+    elif days >= 365 * 9:
         period_label = "All time"
     elif days >= 365:
         years = round(days / 365)
@@ -429,6 +494,13 @@ async def activities_stats(
             "elevation": pct(total_elev, pelev),
             "kcal": pct(total_kcal, pkcal),
         },
+        n_strength=n_strength,
+        n_with_distance=sum(1 for a in rows if (a.distance_m or 0) > 0),
+        n_with_elevation=sum(1 for a in rows if (a.elevation_gain_m or 0) > 0),
+        n_with_kcal=sum(1 for a in rows if (a.kcal or 0) > 0),
+        window_since=(since.isoformat() if since else None),
+        window_until=(until.isoformat() if until else None),
+        category=cat or "all",
     )
 
 
@@ -476,6 +548,53 @@ async def activities_ytd(db: AsyncSession = Depends(get_session)) -> dict[str, A
         entries.append(activity_ytd.Entry(day=w.date, duration_s=net or 0))
 
     return activity_ytd.ytd_compare(entries, today)
+
+
+@router.get("/activities/records", dependencies=[Depends(require_any)])
+async def activities_records(
+    category: str | None = Query(None),
+    since: date_type | None = Query(None),
+    until: date_type | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """UI-F2 — personal records over the feed's selected window and chip.
+
+    Longest distance, longest time, most climbing, highest suffer score,
+    and (ride / run only) the fastest effort over a minimum distance. Each
+    record names its activity so the card links to it; a record nothing
+    qualifies for is null, never 0. `since`/`until` are LOCAL days (until
+    inclusive); both omitted means all history. See
+    analytics/activity_records.py.
+    """
+    from datetime import timedelta as _td
+    from ..analytics import activity_records as ar
+    from ..localtime import local_date, local_midnight
+
+    cat = None if category in (None, "", "all") else category
+    if cat is not None and cat not in ar.ACTIVITY_CATEGORIES:
+        raise HTTPException(422, f"unknown category {category!r}")
+    stmt = select(
+        models.Activity.source, models.Activity.source_id, models.Activity.name,
+        models.Activity.type, models.Activity.start_at, models.Activity.duration_s,
+        models.Activity.distance_m, models.Activity.elevation_gain_m,
+        models.Activity.suffer_score,
+    )
+    if since is not None:
+        stmt = stmt.where(models.Activity.start_at >= local_midnight(since))
+    if until is not None:
+        stmt = stmt.where(models.Activity.start_at < local_midnight(until + _td(days=1)))
+    rows = [
+        ar.Row(
+            source=src, source_id=sid, name=name, type=typ, start_at=start,
+            day=local_date(start), duration_s=dur, distance_m=dist,
+            elevation_m=elev, suffer_score=suffer,
+        )
+        for src, sid, name, typ, start, dur, dist, elev, suffer in (await db.execute(stmt)).all()
+    ]
+    out = ar.personal_records(rows, cat)
+    out["since"] = since.isoformat() if since else None
+    out["until"] = until.isoformat() if until else None
+    return out
 
 
 class MapTrackOut(BaseModel):

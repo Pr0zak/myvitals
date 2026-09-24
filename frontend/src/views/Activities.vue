@@ -1,74 +1,131 @@
 <script setup lang="ts">
-import { toLocalISO } from "@/dates";
+/**
+ * Activities feed (UI-5). Phone twin: `ActivitiesScreen.kt`.
+ *
+ *   hero      year-to-date distance vs the same day last year, with the
+ *             cumulative line this year (cyan) over last year (dashed
+ *             periwinkle) — all from GET /activities/ytd
+ *   calendar  a 3-month strip that expands to the year
+ *   feed      grouped by local week; headers carry the server's week totals
+ *
+ * What changed and why: the YTD card was computed here from a raw 18-month
+ * dump — a third copy of a loop the phone and Train had their own versions
+ * of — and it printed "↑100%" whenever last year was zero and painted a
+ * shortfall red. The server owns the comparison now: a null percentage
+ * with a "new" note, and a `tone` that is amber for a shortfall. A failed
+ * refresh is an amber banner ABOVE the cached rows, never a replacement.
+ */
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
-import VChart from "@/echarts";
-import { Trophy, Mountain, Flame, Map as MapIcon, GitCompareArrows } from "lucide-vue-next";
-import Card from "@/components/Card.vue";
-import PageHeader from "@/components/PageHeader.vue";
-import RangeTabs from "@/components/RangeTabs.vue";
-import EmptyState from "@/components/EmptyState.vue";
-import LoadState from "@/components/LoadState.vue";
+import { Map as MapIcon, GitCompareArrows, RefreshCw } from "lucide-vue-next";
+import NeonPage from "@/components/neon/NeonPage.vue";
+import NeonHero from "@/components/neon/NeonHero.vue";
+import NeonEyebrow from "@/components/neon/NeonEyebrow.vue";
 import ActivityIcon from "@/components/ActivityIcon.vue";
 import PolylineThumbnail from "@/components/PolylineThumbnail.vue";
-import { api } from "@/api/client";
 import ActivityYearCalendar from "@/components/ActivityYearCalendar.vue";
-import type { Activity, ActivityStats } from "@/api/types";
-import { chartTheme, isNeon } from "@/theme";
-import { fmtDistance, fmtElevation, distanceVal, distanceUnit } from "@/units";
-import { fmtDateTime, fmtActivityType } from "@/format";
+import { api, activitiesYtd, activitiesWithRoutes } from "@/api/client";
+import type { Activity, ActivityYtd, YtdMetric, YtdWeek, SessionSummary } from "@/api/types";
+import { distanceVal, distanceUnit, elevationVal, elevationUnit, fmtDistance, weightVal, weightUnit } from "@/units";
+import { fmtActivityType } from "@/format";
+import { toLocalISO } from "@/dates";
+import { categoryColor, categoryForSplitFocus, categoryForType } from "@/utils/activityCategory";
 
-type SortKey = "date" | "distance" | "duration" | "avg_hr" | "suffer" | "kcal" | "elevation";
-type ViewMode = "grid" | "list";
 type RangeKey = "7d" | "30d" | "90d" | "ytd" | "365d" | "all";
-
-// YTD is dynamic — `daysInYearToDate()` returns the number of days
-// elapsed since Jan 1 of the current year. Read at the call site so
-// the value stays correct across the date boundary.
-function daysInYearToDate(): number {
-  const now = new Date();
-  const startOfYear = new Date(now.getFullYear(), 0, 1);
-  return Math.floor((now.getTime() - startOfYear.getTime()) / 86_400_000) + 1;
-}
-
-const RANGES: { key: RangeKey; label: string; days: number | null }[] = [
-  { key: "7d", label: "7d", days: 7 },
-  { key: "30d", label: "30d", days: 30 },
-  { key: "90d", label: "90d", days: 90 },
-  { key: "ytd", label: "YTD", days: -1 },  // -1 sentinel — resolved at fetch time
-  { key: "365d", label: "1y", days: 365 },
-  { key: "all", label: "all", days: null },
+const RANGES: { key: RangeKey; label: string }[] = [
+  { key: "7d", label: "7d" }, { key: "30d", label: "30d" }, { key: "90d", label: "90d" },
+  { key: "ytd", label: "YTD" }, { key: "365d", label: "1y" }, { key: "all", label: "All" },
 ];
 
-const activities = ref<Activity[]>([]);
-const stats = ref<ActivityStats | null>(null);
-const strengthWorkouts = ref<Array<{
+interface Workout {
   id: number; date: string; split_focus: string; status: string;
   started_at?: string | null; completed_at?: string | null;
-}>>([]);
-const loading = ref(false);
+  completed_by_activity_source?: string | null;
+  session_summary?: SessionSummary | null;
+}
+
+type FeedItem =
+  | { kind: "activity"; key: string; day: string; sort: number; a: Activity }
+  | { kind: "strength"; key: string; day: string; sort: number; w: Workout };
+
+function loadPref(key: string, def: string): string {
+  try { return localStorage.getItem(`myvitals.activities.${key}`) ?? def; } catch { return def; }
+}
+function savePref(key: string, val: string) {
+  try { localStorage.setItem(`myvitals.activities.${key}`, val); } catch { /* private mode */ }
+}
+
+const range = ref<RangeKey>(loadPref("range", "90d") as RangeKey);
+const typeFilter = ref<string>(loadPref("type", "all"));
+watch(range, (v) => savePref("range", v));
+watch(typeFilter, (v) => savePref("type", v));
+
+const activities = ref<Activity[]>([]);
+const workouts = ref<Workout[]>([]);
+const ytd = ref<ActivityYtd | null>(null);
+const loading = ref(true);
+const refreshing = ref(false);
 const error = ref<string | null>(null);
+const shown = ref(40);
 
-// SCS-4: Manual Strava sync trigger in the Activities header.
-// Hits the cookie-mode endpoint added in v0.7.275; if no cookie
-// is configured the call returns { error: "no cookie configured" }
-// which we surface as the toast.
 const syncing = ref(false);
-const syncToast = ref<string>("");
-
-// Cookie-session health — drives the "reconnect Strava" banner. A dead
-// cookie used to sync silently (0 rides, no error), so a stale ride
-// count looked identical to "no new rides". needs_reconnect surfaces it.
+const syncToast = ref("");
 const cookieNeedsReconnect = ref(false);
 const cookieError = ref<string | null>(null);
+
+function sinceFor(r: RangeKey): Date | null {
+  const now = new Date();
+  switch (r) {
+    case "7d": return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+    case "30d": return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
+    case "90d": return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 89);
+    case "ytd": return new Date(now.getFullYear(), 0, 1);
+    case "365d": return new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+    default: return null;
+  }
+}
+
+function errMsg(e: unknown): string {
+  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  return e instanceof Error ? e.message : "Couldn't reach the backend.";
+}
+
+async function load() {
+  refreshing.value = true;
+  const since = sinceFor(range.value);
+  try {
+    const [list, sw, y] = await Promise.all([
+      // Thumbnails only need the simplified track (UX-X2).
+      activitiesWithRoutes({ since: since ?? undefined, limit: 2000, polyline: "simple" }),
+      api.strengthWorkouts({ limit: 400 }).catch(() => null),
+      activitiesYtd().catch(() => null),
+    ]);
+    activities.value = list;
+    if (sw) {
+      workouts.value = sw.workouts
+        .filter((w) => w.status !== "regenerated" && w.status !== "planned" && w.status !== "skipped")
+        // A cardio day auto-completed by an activity: the activity is
+        // already in the feed.
+        .filter((w) => !(w.split_focus === "cardio" && w.completed_by_activity_source));
+    }
+    if (y) ytd.value = y;
+    error.value = null;
+  } catch (e) {
+    // Keep whatever is on screen; the banner says it is stale.
+    error.value = errMsg(e);
+  } finally {
+    loading.value = false;
+    refreshing.value = false;
+  }
+}
+
 async function loadCookieStatus() {
   try {
     const s = await api.stravaCookieStatus();
     cookieNeedsReconnect.value = !!s.needs_reconnect;
     cookieError.value = s.last_error;
-  } catch {
-    // Non-fatal — the banner just stays hidden if the status call fails.
-  }
+  } catch { /* the banner just stays hidden */ }
 }
 
 async function syncStravaNow() {
@@ -76,967 +133,404 @@ async function syncStravaNow() {
   syncToast.value = "";
   try {
     const r = await api.stravaCookieSync();
-    if (r.error) {
-      syncToast.value = `Sync error: ${r.error}`;
-    } else {
-      syncToast.value = r.upserted === 0
-        ? "No new rides since last sync."
+    if (r.error) syncToast.value = `Sync error: ${r.error}`;
+    else {
+      syncToast.value = r.upserted === 0 ? "No new rides since last sync."
         : `Synced ${r.upserted} new ${r.upserted === 1 ? "ride" : "rides"}.`;
       if (r.upserted > 0) await load();
     }
-    // Refresh the banner either way — a successful sync clears it,
-    // a failed one (dead cookie) raises it.
     await loadCookieStatus();
   } catch (e) {
-    syncToast.value = `Sync failed: ${e instanceof Error ? e.message : String(e)}`;
+    syncToast.value = `Sync failed: ${errMsg(e)}`;
   } finally {
     syncing.value = false;
     setTimeout(() => { syncToast.value = ""; }, 4000);
   }
 }
 
-// YTD + same-period-last-year — independent of the range selector so
-// "year-over-year" stays available even when the user is filtering 30d.
-const ytdActivities = ref<Activity[]>([]);
-const ytdLoading = ref(false);
+onMounted(() => { load(); loadCookieStatus(); });
+watch(range, () => { shown.value = 40; load(); });
+watch(typeFilter, () => { shown.value = 40; });
 
-const range = ref<RangeKey>(loadPref("range", "ytd") as RangeKey);
-const sortKey = ref<SortKey>(loadPref("sort", "date") as SortKey);
-const sortDesc = ref<boolean>(loadPref("sortDesc", "true") === "true");
-const typesActive = ref<Set<string>>(new Set(loadPref("types", "").split(",").filter(Boolean)));
-const viewMode = ref<ViewMode>(loadPref("viewMode", "grid") as ViewMode);
-const groupByMonth = ref(loadPref("groupByMonth", "false") === "true");
-
-function loadPref(key: string, def: string): string {
-  return localStorage.getItem(`myvitals.activities.${key}`) ?? def;
-}
-function savePref(key: string, val: string) {
-  localStorage.setItem(`myvitals.activities.${key}`, val);
-}
-
-watch(range, (v) => savePref("range", v));
-watch(sortKey, (v) => savePref("sort", v));
-watch(sortDesc, (v) => savePref("sortDesc", String(v)));
-watch(typesActive, (s) => savePref("types", [...s].join(",")), { deep: true });
-watch(viewMode, (v) => savePref("viewMode", v));
-watch(groupByMonth, (v) => savePref("groupByMonth", String(v)));
-
-async function load() {
-  loading.value = true;
-  error.value = null;
-  try {
-    const rangeCfg = RANGES.find((r) => r.key === range.value)!;
-    // -1 sentinel = YTD; resolve to "days since Jan 1" at fetch time so
-    // the window stays correct across day boundaries.
-    const days = rangeCfg.days === -1 ? daysInYearToDate() : rangeCfg.days;
-    const params: { since?: Date; limit: number } = { limit: 500 };
-    if (days !== null) {
-      const since = new Date();
-      since.setDate(since.getDate() - days);
-      params.since = since;
-    }
-    // For "all" we ask for 10 years of stats so the period covers everything.
-    const statsDays = days ?? 3650;
-    const [list, st, sw] = await Promise.all([
-      api.activities(params),
-      api.activitiesStats(statsDays),
-      api.strengthWorkouts({ limit: 200 }).catch(() => ({ count: 0, workouts: [] })),
-    ]);
-    stats.value = st;
-
-    // Feed the year calendar. Without this the ref stayed empty and the
-    // calendar rendered no strength days at all — the synth rows below go
-    // into a different ref that only drives the list.
-    strengthWorkouts.value = sw.workouts
-      .filter((w) => w.status !== "regenerated" && w.status !== "planned"
-        && w.status !== "skipped")
-      .filter((w) => !(w.split_focus === "cardio" && w.completed_by_activity_source));
-
-    // Synthesize Activity-shaped rows from strength workouts so they
-    // sort, group, filter, and render alongside the rest of the feed.
-    const sinceDate = params.since ?? new Date(0);
-    const synthStrength: Activity[] = sw.workouts
-      .filter((w) => w.status !== "regenerated" && w.status !== "planned" && w.status !== "skipped")
-      // Skip cardio days auto-completed by an Activity (Concept2 row,
-      // Strava bike). The underlying activity is already in the feed —
-      // showing the StrengthWorkout too would duplicate the row.
-      .filter((w) => !(w.split_focus === "cardio" && w.completed_by_activity_source))
-      .filter((w) => new Date(w.date + "T00:00:00") >= sinceDate)
-      .map((w) => {
-        const start = w.started_at ?? `${w.date}T17:00:00Z`;
-        // TD-4 — duration comes from the server's session summary, which
-        // nets out the accumulated pause. Deriving it here from gross
-        // elapsed time meant a session left open on the rack read as a
-        // multi-hour effort in this feed while the CTL/ATL model, which
-        // subtracts the pause, saw a realistic one.
-        const summary = w.session_summary ?? null;
-        const duration = summary?.net_duration_s ?? 0;
-        // Stuff a one-line stats summary into `notes` so the row
-        // shows useful info even when the table doesn't have a sets
-        // column.
-        const noteParts: string[] = [];
-        if (w.set_count) noteParts.push(`${w.set_count} working sets`);
-        if (w.total_reps) noteParts.push(`${w.total_reps} reps`);
-        if (w.total_volume_lb)
-          noteParts.push(`${Math.round(w.total_volume_lb).toLocaleString()} lb`);
-        if (w.rpe_avg) noteParts.push(`RPE ${w.rpe_avg.toFixed(1)}`);
-        if (summary?.kcal_est != null) {
-          // Say where the number came from. "est" alone would read as a
-          // hedge; naming the input tells the user how much to trust it.
-          noteParts.push(
-            `~${Math.round(summary.kcal_est)} kcal (${summary.kcal_method === "hr" ? "from HR" : "estimated"})`,
-          );
-        }
-        return {
-          source: "strength",
-          source_id: String(w.id),
-          // Yoga / cardio / strength each get their own type so the
-          // activity-icon + filter chip distinguish them. Cardio rows
-          // were rendering as the strength dumbbell before, which was
-          // visually misleading — they're auto-logged Z2 sessions via
-          // Concept2 ERG / Strava, not strength sessions.
-          type: w.split_focus === "yoga"
-            ? "yoga"
-            : w.split_focus === "cardio"
-              ? "cardio"
-              : "strength",
-          name: w.split_focus === "yoga"
-            ? "Yoga flow"
-            : w.split_focus === "cardio"
-              ? "Cardio day"
-              : `${w.split_focus.charAt(0).toUpperCase() + w.split_focus.slice(1)} day`,
-          start_at: start,
-          duration_s: duration,
-          distance_m: null, elevation_gain_m: null,
-          avg_hr: w.avg_hr ?? null,
-          max_hr: w.max_hr ?? null,
-          avg_power_w: null, max_power_w: null,
-          // Lifting used to contribute nothing to the energy picture: this
-          // was a hard-coded null, so every strength session was invisible
-          // in the day's totals.
-          kcal: summary?.kcal_est ?? null,
-          suffer_score: null, polyline: null,
-          notes: noteParts.length ? noteParts.join(" · ") : null,
-          // Backing data for the link target (clicking should open
-          // the strength day-view, not /activity/...).
-        } as Activity;
-      });
-    activities.value = [...list, ...synthStrength];
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    loading.value = false;
-  }
-}
-
-onMounted(() => { load(); loadYtd(); loadCookieStatus(); });
-watch(range, load);
-
-// Pull activities from Jan 1 of last year so we have both the current
-// YTD window and the equivalent same-period-last-year window in one
-// dataset for the YoY card.
-async function loadYtd() {
-  ytdLoading.value = true;
-  try {
-    const now = new Date();
-    const startOfLastYear = new Date(now.getFullYear() - 1, 0, 1);
-    const r = await api.activities({ since: startOfLastYear, limit: 2000 });
-    ytdActivities.value = r;
-  } catch {
-    ytdActivities.value = [];
-  } finally {
-    ytdLoading.value = false;
-  }
-}
-
-// === YTD + YoY comparison ===
-// Buckets activities into "this year YTD" and "same period last year".
-// Same-period = Jan 1 last year through MM-DD of today (inclusive).
-const ytdStats = computed(() => {
-  const now = new Date();
-  const thisYear = now.getFullYear();
-  const lastYear = thisYear - 1;
-  const startOfThisYear = new Date(thisYear, 0, 1);
-  const startOfLastYear = new Date(lastYear, 0, 1);
-  // End-of-same-period last year = today's MM-DD in last year.
-  const endOfLastYear = new Date(lastYear, now.getMonth(), now.getDate(),
-    23, 59, 59);
-
-  const empty = () => ({ n: 0, distance: 0, duration: 0, elevation: 0, kcal: 0 });
-  const ytd = empty();
-  const lyr = empty();
-
-  for (const a of ytdActivities.value) {
+// ── Feed ──
+const feed = computed<FeedItem[]>(() => {
+  const since = sinceFor(range.value);
+  const sinceIso = since ? toLocalISO(since) : null;
+  const items: FeedItem[] = [];
+  for (const a of activities.value) {
     const d = new Date(a.start_at);
-    const target = (() => {
-      if (d >= startOfThisYear && d <= now) return ytd;
-      if (d >= startOfLastYear && d <= endOfLastYear) return lyr;
-      return null;
-    })();
-    if (!target) continue;
-    target.n += 1;
-    target.distance += a.distance_m ?? 0;
-    target.duration += a.duration_s ?? 0;
-    target.elevation += a.elevation_gain_m ?? 0;
-    target.kcal += a.kcal ?? 0;
+    items.push({ kind: "activity", key: `a-${a.source}-${a.source_id}`, day: toLocalISO(d), sort: +d, a });
   }
-  // Strength arm. The phone's YTD card has always counted completed
-  // strength sessions (ui/common/ActivityYtd.kt), and the Train tile now
-  // does too — without this the same "Activities" figure read 108 on the
-  // phone and on /train but 78 here, and tapping the /train tile landed
-  // on a page that contradicted the number tapped.
-  for (const w of strengthWorkouts.value) {
-    if (w.status !== "completed" || !w.date) continue;
-    const d = new Date(w.date + "T00:00:00");
-    const target = d >= startOfThisYear && d <= now ? ytd
-      : d >= startOfLastYear && d <= endOfLastYear ? lyr : null;
-    if (!target) continue;
-    target.n += 1;
-    if (w.started_at && w.completed_at) {
-      target.duration += Math.max(0, Math.round(
-        (+new Date(w.completed_at) - +new Date(w.started_at)) / 1000));
-    }
+  for (const w of workouts.value) {
+    if (sinceIso && w.date < sinceIso) continue;
+    const t = w.started_at ? +new Date(w.started_at) : +new Date(`${w.date}T12:00:00`);
+    items.push({ kind: "strength", key: `s-${w.id}`, day: w.date, sort: t, w });
   }
-  function pct(now: number, prev: number): number {
-    if (prev === 0) return now === 0 ? 0 : 100;
-    return ((now - prev) / prev) * 100;
-  }
-  return {
-    thisYear, lastYear,
-    ytd, lyr,
-    pct: {
-      n: pct(ytd.n, lyr.n),
-      distance: pct(ytd.distance, lyr.distance),
-      duration: pct(ytd.duration, lyr.duration),
-      elevation: pct(ytd.elevation, lyr.elevation),
-      kcal: pct(ytd.kcal, lyr.kcal),
-    },
-  };
+  return items.sort((x, y) => y.sort - x.sort);
 });
 
-const allTypes = computed(() =>
-  Array.from(new Set(activities.value.map((a) => a.type))).sort()
+const typeChips = computed(() => {
+  const present = new Set<string>();
+  for (const a of activities.value) present.add(categoryForType(a.type));
+  const chips = [{ key: "all", label: "All" }];
+  for (const [k, label] of [["ride", "Ride"], ["run", "Run"], ["walk", "Walk / hike"], ["row", "Row"], ["other", "Other"]] as const) {
+    if (present.has(k)) chips.push({ key: k, label });
+  }
+  if (workouts.value.length) chips.push({ key: "strength", label: "Strength" });
+  return chips;
+});
+
+const filtered = computed(() => feed.value.filter((it) => {
+  const t = typeFilter.value;
+  if (t === "all") return true;
+  if (t === "strength") return it.kind === "strength";
+  return it.kind === "activity" && categoryForType(it.a.type) === t;
+}));
+
+function mondayOf(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y!, (m ?? 1) - 1, d ?? 1);
+  dt.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));
+  return toLocalISO(dt);
+}
+const thisWeek = computed(() => mondayOf(toLocalISO(new Date())));
+const weekTotals = computed<Record<string, YtdWeek>>(() =>
+  Object.fromEntries((ytd.value?.weeks ?? []).map((w) => [w.week_start, w])),
 );
-
-const filtered = computed(() => {
-  const types = typesActive.value;
-  if (types.size === 0) return activities.value;
-  return activities.value.filter((a) => types.has(a.type));
-});
-
-const sorted = computed(() => {
-  const arr = [...filtered.value];
-  const sign = sortDesc.value ? -1 : 1;
-  arr.sort((a, b) => {
-    const va = sortVal(a);
-    const vb = sortVal(b);
-    if (va === null && vb === null) return 0;
-    if (va === null) return 1;
-    if (vb === null) return -1;
-    return sign * (va < vb ? -1 : va > vb ? 1 : 0);
-  });
-  return arr;
-});
-
-function sortVal(a: Activity): number | null {
-  switch (sortKey.value) {
-    case "date": return new Date(a.start_at).getTime();
-    case "distance": return a.distance_m ?? null;
-    case "duration": return a.duration_s ?? null;
-    case "avg_hr": return a.avg_hr ?? null;
-    case "suffer": return a.suffer_score ?? null;
-    case "kcal": return a.kcal ?? null;
-    case "elevation": return a.elevation_gain_m ?? null;
+const groups = computed(() => {
+  const out: { week: string; items: FeedItem[] }[] = [];
+  for (const it of filtered.value.slice(0, shown.value)) {
+    const wk = mondayOf(it.day);
+    const last = out[out.length - 1];
+    if (last && last.week === wk) last.items.push(it);
+    else out.push({ week: wk, items: [it] });
   }
+  return out;
+});
+
+function weekLabel(wk: string): string {
+  if (wk === thisWeek.value) return "This week";
+  const [y, m, d] = wk.split("-").map(Number);
+  return "Week of " + new Date(y!, (m ?? 1) - 1, d ?? 1).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-const grouped = computed(() => {
-  if (!groupByMonth.value) return null;
-  const groups: Record<string, Activity[]> = {};
-  for (const a of sorted.value) {
-    const d = new Date(a.start_at);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    (groups[key] ??= []).push(a);
-  }
-  return Object.entries(groups).sort(([a], [b]) => (sortDesc.value ? b.localeCompare(a) : a.localeCompare(b)));
-});
-
-// === Personal records ===
-const records = computed(() => {
-  if (activities.value.length === 0) return null;
-  const cmp = (k: keyof Activity) => activities.value
-    .filter((a) => a[k] != null)
-    .sort((x, y) => ((y[k] as number) - (x[k] as number)))[0];
-  return {
-    longestDistance: cmp("distance_m"),
-    longestDuration: cmp("duration_s"),
-    mostElevation: cmp("elevation_gain_m"),
-    highestSuffer: cmp("suffer_score"),
-    mostKcal: cmp("kcal"),
-  };
-});
-
-type PRBadge = { label: string; icon: typeof Trophy };
-function isPR(a: Activity): PRBadge[] {
-  if (!records.value) return [];
-  const tags: PRBadge[] = [];
-  if (records.value.longestDistance?.source_id === a.source_id) tags.push({ label: "longest", icon: Trophy });
-  if (records.value.mostElevation?.source_id === a.source_id) tags.push({ label: "most climb", icon: Mountain });
-  if (records.value.highestSuffer?.source_id === a.source_id) tags.push({ label: "most suffer", icon: Flame });
-  return tags;
-}
-
-// === Mini activity heatmap ===
-/** Inclusive lower bound for the calendar, derived from the range chips so
- *  the selector still controls how many year strips render. Lifted out of
- *  the old heatmapOption when the calendar became a shared component. */
-const calMinDate = computed<string | null>(() => {
-  const cfg = RANGES.find((r) => r.key === range.value);
-  if (!cfg) return null;
-  if (cfg.key === "ytd") return `${new Date().getFullYear()}-01-01`;
-  if (cfg.days != null && cfg.days > 0) {
-    const d = new Date();
-    d.setDate(d.getDate() - cfg.days);
-    return toLocalISO(d);
-  }
-  return null;
-});
-
-
-// Reserve enough chart height for one strip per year so all calendars
-// render without overflow. Matches STRIP_H + TOP_PAD above so the
-// container hugs the rendered strips.
-
-// === Formatters ===
-function fmtDate(ts: string): string {
-  return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
-}
-function fmtDuration(s: number): string {
+function fmtHm(s: number | null | undefined): string {
+  if (!s || s <= 0) return "—";
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   return h ? `${h}h ${m}m` : `${m}m`;
 }
-function fmtKm(m: number | null): string { return fmtDistance(m, 2); }
-function fmtKmShort(m: number | null): string {
-  const v = distanceVal(m);
-  return v === null ? "—" : `${v.toFixed(1)}${distanceUnit.value}`;
-}
-function fmtPace(meters: number | null, seconds: number): string {
-  if (!meters || meters < 50) return "—";
-  const dist = distanceVal(meters)!;  // in km or mi
-  const minPerUnit = (seconds / 60) / dist;
-  const m = Math.floor(minPerUnit);
-  const s = Math.round((minPerUnit - m) * 60);
-  return `${m}:${s.toString().padStart(2, "0")}/${distanceUnit.value}`;
-}
-function fmtSpeed(meters: number | null, seconds: number): string {
-  if (!meters || meters < 50) return "—";
-  const dist = distanceVal(meters)!;
-  return `${(dist / (seconds / 3600)).toFixed(1)} ${distanceUnit.value}/h`;
-}
-function isRide(t: string): boolean { return t.includes("ride") || t.includes("bik"); }
 
-function intensityColor(s: number | null): string {
-  if (s === null) return "var(--muted-2)";
-  if (isNeon.value) {
-    // Neon intensity ramp on-palette: lime → amber → red. The top two
-    // suffer tiers both read as "high" (red); amber is the single
-    // caution step per the Vitality Neon palette.
-    if (s < 30) return "#5dff3b";
-    if (s < 80) return "#ffb52e";
-    return "#ff5d7a";
+function rowWhen(iso: string): string {
+  return new Date(iso).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+function dayLabel(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y!, (m ?? 1) - 1, d ?? 1).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+}
+
+const MUSCLES: Record<string, string> = {
+  push: "Chest · Shoulders · Triceps", pull: "Back · Biceps", legs: "Quads · Hams · Glutes",
+  upper: "Chest · Back · Arms", lower: "Quads · Hams · Glutes", full_body: "Full body",
+  yoga: "Mobility flow", cardio: "Z2 effort",
+};
+
+function strengthTitle(w: Workout): string {
+  if (w.split_focus === "yoga") return "Yoga flow";
+  if (w.split_focus === "cardio") return "Cardio day";
+  const f = w.split_focus.replace(/_/g, " ");
+  return `${f.charAt(0).toUpperCase()}${f.slice(1)} day`;
+}
+/** Tonnage leads a lifting day; a yoga or cardio day leads with its time.
+ *  Unfinished: nothing yet, and a dash would read as zero. */
+function strengthPrimary(w: Workout): string {
+  const s = w.session_summary;
+  if (s && s.total_volume_lb > 0) {
+    const v = weightVal(s.total_volume_lb * 0.45359237) ?? 0;
+    return `${Math.round(v).toLocaleString()} ${weightUnit.value}`;
   }
-  if (s < 30) return "#22c55e";
-  if (s < 80) return "#eab308";
-  if (s < 150) return "#f97316";
-  return "#ef4444";
+  if (s?.net_duration_s) return fmtHm(s.net_duration_s);
+  return "";
+}
+function strengthStatus(w: Workout): { label: string; tone: string } | null {
+  if (w.status === "completed") return null;
+  if (w.status === "in_progress" || w.status === "paused")
+    return { label: w.status === "paused" ? "Paused" : "In progress", tone: "amber" };
+  return { label: w.status.replace(/_/g, " "), tone: "muted" };
+}
+function tint(it: FeedItem): string {
+  return categoryColor(it.kind === "activity" ? categoryForType(it.a.type) : categoryForSplitFocus(it.w.split_focus), true);
 }
 
-function pctClass(v: number): string {
-  if (Math.abs(v) < 1) return "same";
-  return v > 0 ? "up" : "down";
-}
+// ── YTD hero ──
+const metric = (k: string): YtdMetric | null => ytd.value?.metrics.find((m) => m.key === k) ?? null;
+const dist = computed(() => metric("distance_m"));
 
-function toggleType(t: string) {
-  const s = new Set(typesActive.value);
-  if (s.has(t)) s.delete(t); else s.add(t);
-  typesActive.value = s;
+function deltaText(m: YtdMetric): string {
+  if (m.note === "new") return "new";
+  if (m.pct_change == null || m.direction === "flat") return "level";
+  return `${m.pct_change >= 0 ? "↑" : "↓"} ${Math.abs(m.pct_change).toFixed(0)}%`;
 }
+const TONE: Record<string, string> = { positive: "#5dff3b", caution: "#ffb52e", neutral: "#9b9bb0" };
+function fmtMetric(m: YtdMetric, v: number): string {
+  if (m.key === "distance_m") return Math.round(distanceVal(v) ?? 0).toLocaleString();
+  if (m.key === "elevation_m") return Math.round(elevationVal(v) ?? 0).toLocaleString();
+  if (m.key === "duration_s") return Math.round(v / 3600).toLocaleString();
+  return Math.round(v).toLocaleString();
+}
+function metricUnit(m: YtdMetric): string {
+  if (m.key === "distance_m") return distanceUnit.value;
+  if (m.key === "elevation_m") return elevationUnit.value;
+  if (m.key === "duration_s") return "h";
+  return "";
+}
+const SMALL = ["sessions", "duration_s", "elevation_m"];
 
-const monthLabel = (key: string) =>
-  new Date(`${key}-01`).toLocaleDateString([], { month: "long", year: "numeric" });
+const CW = 600, CH = 140;
+const chart = computed(() => {
+  const c = ytd.value?.cumulative_distance_m;
+  if (!c) return null;
+  const max = Math.max(1, ...c.this_year, ...c.last_year);
+  const toPts = (s: number[]) => s.map((v, i) => `${((i / 364) * CW).toFixed(1)},${(CH - (v / max) * CH).toFixed(1)}`).join(" ");
+  const last = c.this_year.length ? c.this_year[c.this_year.length - 1] : null;
+  return {
+    thisPts: toPts(c.this_year), lastPts: toPts(c.last_year),
+    dot: last == null ? null : { x: ((c.this_year.length - 1) / 364) * CW, y: CH - (last / max) * CH },
+  };
+});
+
+// ── Calendar: 3 months, expandable to the year ──
+const calExpanded = ref(false);
+const calDays = computed(() => {
+  const idx: Record<string, string> = {};
+  for (const a of activities.value) {
+    const d = toLocalISO(new Date(a.start_at));
+    idx[d] ??= categoryColor(categoryForType(a.type), true);
+  }
+  for (const w of workouts.value) {
+    if (w.status !== "completed") continue;
+    idx[w.date] ??= categoryColor(categoryForSplitFocus(w.split_focus), true);
+  }
+  const today = new Date();
+  const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - ((today.getDay() + 6) % 7));
+  const start = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - 12 * 7);
+  const cells: { x: number; y: number; color: string; iso: string }[] = [];
+  for (let col = 0; col < 13; col++) {
+    for (let row = 0; row < 7; row++) {
+      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + col * 7 + row);
+      if (d > today) continue;
+      const iso = toLocalISO(d);
+      cells.push({ x: col, y: row, color: idx[iso] ?? "#272a3b", iso });
+    }
+  }
+  return cells;
+});
+const yearMin = computed(() => `${new Date().getFullYear()}-01-01`);
+const calendarActivities = computed(() => activities.value);
 </script>
 
 <template>
-  <div class="activities">
-    <PageHeader title="Activities">
-      <button class="sync-btn" :disabled="syncing" @click="syncStravaNow"
-              title="Pull new Strava activities since the last sync">
-        {{ syncing ? "Syncing…" : "↻ Sync Strava" }}
-      </button>
-      <RangeTabs v-model="range" :options="RANGES" aria-label="Activities time range" />
-      <RouterLink to="/activities/map" class="map-link"><MapIcon :size="14"/> Map view</RouterLink>
-      <RouterLink to="/activities/compare" class="map-link"><GitCompareArrows :size="14"/> Compare</RouterLink>
-    </PageHeader>
-    <div v-if="syncToast" class="sync-toast">{{ syncToast }}</div>
-
-    <!-- Reconnect banner — the cookie session is dead, so no new rides
-         are coming in until the user re-establishes it in Settings. -->
-    <div v-if="cookieNeedsReconnect" class="reconnect-banner">
-      <span class="rb-icon">⚠</span>
-      <div class="rb-body">
-        <strong>Strava sync is disconnected</strong> — no new activities are being pulled in.
-        <span v-if="cookieError" class="rb-detail">{{ cookieError }}</span>
+  <NeonPage title="Activities" back="/train">
+    <template #trailing>
+      <div class="hdr-actions">
+        <RouterLink to="/activities/map" class="icon-btn" title="Activity map" aria-label="Activity map"><MapIcon :size="18" /></RouterLink>
+        <RouterLink to="/activities/compare" class="icon-btn" title="Compare two activities" aria-label="Compare"><GitCompareArrows :size="18" /></RouterLink>
+        <button class="icon-btn" :disabled="syncing" title="Pull new Strava activities" aria-label="Sync Strava" @click="syncStravaNow">
+          <RefreshCw :size="18" :class="{ spin: syncing }" />
+        </button>
       </div>
-      <RouterLink to="/settings" class="rb-action">Reconnect →</RouterLink>
+    </template>
+
+    <div v-if="error" class="stale" role="alert" @click="load">
+      <strong>{{ feed.length ? "Couldn't refresh — showing saved activities" : "Couldn't load activities" }}</strong>
+      <span>{{ error }}</span>
+      <em>Tap to retry</em>
+    </div>
+    <div v-if="cookieNeedsReconnect" class="stale">
+      <strong>Strava sync is disconnected</strong>
+      <span>{{ cookieError ?? "Reconnect Strava in Settings to resume pulling activities." }}</span>
+      <RouterLink to="/settings" class="stale-link">Reconnect →</RouterLink>
+    </div>
+    <p v-if="syncToast" class="toast">{{ syncToast }}</p>
+
+    <div v-if="ytd" class="pills">
+      <span class="pill cyan">This week · {{ ytd.this_week.sessions }}</span>
+      <span v-if="ytd.this_week.duration_s > 0" class="pill peri">{{ fmtHm(ytd.this_week.duration_s) }}</span>
     </div>
 
-    <!-- Stats banner -->
-    <Card v-if="stats && !loading" :title="`Stats — ${stats.period_label}`">
-      <div class="stat-row">
-        <div class="stat">
-          <div class="num">{{ stats.n_activities }}</div>
-          <div class="lbl">activities <span :class="pctClass(stats.period_pct_vs_prev.n)">
-            {{ stats.period_pct_vs_prev.n > 0 ? "↑" : stats.period_pct_vs_prev.n < 0 ? "↓" : "·" }}
-            {{ Math.abs(stats.period_pct_vs_prev.n).toFixed(0) }}%
-          </span></div>
+    <NeonHero v-if="ytd" accent="#28e6ff">
+      <NeonEyebrow style="margin-top: 0">{{ ytd.year }} year to date</NeonEyebrow>
+      <template v-if="dist">
+        <div class="ytd-top">
+          <span class="ytd-big">{{ fmtMetric(dist, dist.current) }}</span>
+          <span class="ytd-unit">{{ distanceUnit }}</span>
+          <span class="ytd-delta" :style="{ color: TONE[dist.tone] }">{{ deltaText(dist) }}</span>
         </div>
-        <div class="stat">
-          <div class="num">{{ distanceVal(stats.total_distance_m)?.toFixed(0) }} <span class="unit">{{ distanceUnit }}</span></div>
-          <div class="lbl">distance <span :class="pctClass(stats.period_pct_vs_prev.distance)">
-            {{ stats.period_pct_vs_prev.distance > 0 ? "↑" : "↓" }}
-            {{ Math.abs(stats.period_pct_vs_prev.distance).toFixed(0) }}%
-          </span></div>
-        </div>
-        <div class="stat">
-          <div class="num">{{ Math.round(stats.total_duration_s / 3600) }} <span class="unit">h</span></div>
-          <div class="lbl">moving time</div>
-        </div>
-        <div class="stat">
-          <div class="num">{{ Math.round(stats.total_elevation_m).toLocaleString() }} <span class="unit">m</span></div>
-          <div class="lbl">climbed</div>
-        </div>
-        <div class="stat">
-          <div class="num">{{ Math.round(stats.total_kcal).toLocaleString() }}</div>
-          <div class="lbl">kcal burned</div>
-        </div>
-        <div class="stat">
-          <div class="num">{{ stats.streak_days }} <span class="unit">d</span></div>
-          <div class="lbl">streak</div>
+        <p class="ytd-vs">vs {{ fmtMetric(dist, dist.prior) }} {{ distanceUnit }} by this day in {{ ytd.prior_year }}</p>
+      </template>
+      <svg v-if="chart" class="cum" :viewBox="`0 0 ${CW} ${CH}`" preserveAspectRatio="none" role="img"
+           :aria-label="`Cumulative distance ${ytd.year} against ${ytd.prior_year}`">
+        <line v-for="q in 3" :key="q" :x1="(CW * q) / 4" :x2="(CW * q) / 4" y1="0" :y2="CH" class="grid" />
+        <polyline :points="chart.lastPts" class="line-last" vector-effect="non-scaling-stroke" />
+        <polyline :points="chart.thisPts" class="line-glow" vector-effect="non-scaling-stroke" />
+        <polyline :points="chart.thisPts" class="line-this" vector-effect="non-scaling-stroke" />
+      </svg>
+      <div class="months"><span>Jan</span><span>Apr</span><span>Jul</span><span>Oct</span></div>
+      <div class="legend">
+        <span><i class="sw solid" /> {{ ytd.year }}</span>
+        <span><i class="sw dashed" /> {{ ytd.prior_year }}</span>
+      </div>
+      <div class="ytd-small">
+        <div v-for="k in SMALL" :key="k">
+          <template v-if="metric(k)">
+            <div class="ys-v">{{ fmtMetric(metric(k)!, metric(k)!.current) }}<small>{{ metricUnit(metric(k)!) }}</small></div>
+            <div class="ys-l">{{ metric(k)!.label }}</div>
+            <div class="ys-d" :style="{ color: TONE[metric(k)!.tone] }">{{ deltaText(metric(k)!) }}</div>
+          </template>
         </div>
       </div>
-    </Card>
+    </NeonHero>
+    <NeonHero v-else-if="loading" accent="#28e6ff">
+      <NeonEyebrow style="margin-top: 0">Year to date</NeonEyebrow>
+      <p class="muted">Loading the year…</p>
+    </NeonHero>
 
-    <!-- YTD + YoY -->
-    <Card v-if="!ytdLoading && ytdActivities.length > 0"
-          :title="`${ytdStats.thisYear} year-to-date · vs ${ytdStats.lastYear}`">
-      <div class="ytd-grid">
-        <div class="ytd-cell">
-          <div class="ytd-num">{{ ytdStats.ytd.n }}</div>
-          <div class="ytd-lbl">activities</div>
-          <div class="ytd-cmp">
-            <span class="ytd-prev">{{ ytdStats.lyr.n }} last year</span>
-            <span :class="pctClass(ytdStats.pct.n)">
-              {{ ytdStats.pct.n >= 0 ? "↑" : "↓" }}
-              {{ Math.abs(ytdStats.pct.n).toFixed(0) }}%
-            </span>
-          </div>
-        </div>
-        <div class="ytd-cell">
-          <div class="ytd-num">
-            {{ distanceVal(ytdStats.ytd.distance)?.toFixed(0) }}
-            <span class="unit">{{ distanceUnit }}</span>
-          </div>
-          <div class="ytd-lbl">distance</div>
-          <div class="ytd-cmp">
-            <span class="ytd-prev">{{ distanceVal(ytdStats.lyr.distance)?.toFixed(0) }}{{ distanceUnit }} last year</span>
-            <span :class="pctClass(ytdStats.pct.distance)">
-              {{ ytdStats.pct.distance >= 0 ? "↑" : "↓" }}
-              {{ Math.abs(ytdStats.pct.distance).toFixed(0) }}%
-            </span>
-          </div>
-        </div>
-        <div class="ytd-cell">
-          <div class="ytd-num">
-            {{ Math.round(ytdStats.ytd.duration / 3600) }} <span class="unit">h</span>
-          </div>
-          <div class="ytd-lbl">moving time</div>
-          <div class="ytd-cmp">
-            <span class="ytd-prev">{{ Math.round(ytdStats.lyr.duration / 3600) }}h last year</span>
-            <span :class="pctClass(ytdStats.pct.duration)">
-              {{ ytdStats.pct.duration >= 0 ? "↑" : "↓" }}
-              {{ Math.abs(ytdStats.pct.duration).toFixed(0) }}%
-            </span>
-          </div>
-        </div>
-        <div class="ytd-cell" v-if="ytdStats.ytd.elevation > 0 || ytdStats.lyr.elevation > 0">
-          <div class="ytd-num">
-            {{ Math.round(ytdStats.ytd.elevation).toLocaleString() }}
-            <span class="unit">m</span>
-          </div>
-          <div class="ytd-lbl">climbed</div>
-          <div class="ytd-cmp">
-            <span class="ytd-prev">{{ Math.round(ytdStats.lyr.elevation).toLocaleString() }}m last year</span>
-            <span :class="pctClass(ytdStats.pct.elevation)">
-              {{ ytdStats.pct.elevation >= 0 ? "↑" : "↓" }}
-              {{ Math.abs(ytdStats.pct.elevation).toFixed(0) }}%
-            </span>
-          </div>
-        </div>
-        <div class="ytd-cell" v-if="ytdStats.ytd.kcal > 0 || ytdStats.lyr.kcal > 0">
-          <div class="ytd-num">
-            {{ Math.round(ytdStats.ytd.kcal).toLocaleString() }}
-          </div>
-          <div class="ytd-lbl">kcal</div>
-          <div class="ytd-cmp">
-            <span class="ytd-prev">{{ Math.round(ytdStats.lyr.kcal).toLocaleString() }} last year</span>
-            <span :class="pctClass(ytdStats.pct.kcal)">
-              {{ ytdStats.pct.kcal >= 0 ? "↑" : "↓" }}
-              {{ Math.abs(ytdStats.pct.kcal).toFixed(0) }}%
-            </span>
-          </div>
-        </div>
+    <section v-if="feed.length" class="card cal">
+      <div class="cal-head">
+        <span class="eyebrow">{{ calExpanded ? `${new Date().getFullYear()} calendar` : "Last 3 months" }}</span>
+        <button class="link" @click="calExpanded = !calExpanded">{{ calExpanded ? "Show less" : "Show year" }}</button>
       </div>
-    </Card>
+      <ActivityYearCalendar v-if="calExpanded" :activities="calendarActivities" :workouts="workouts" :min-date="yearMin" compact />
+      <svg v-else class="strip" :viewBox="`0 0 ${13 * 17} ${7 * 17}`" role="img" aria-label="Activity over the last 13 weeks">
+        <rect v-for="c in calDays" :key="c.iso" :x="c.x * 17" :y="c.y * 17" width="14" height="14" rx="3" :fill="c.color">
+          <title>{{ c.iso }}</title>
+        </rect>
+      </svg>
+    </section>
 
-    <!-- Activity calendar — coloured by activity type, shared with the
-         phone via utils/activityCategory. The old single-hue minutes ramp
-         couldn't tell a ride from a lift; minutes survive in the tooltip. -->
-    <Card title="Activity calendar">
-      <ActivityYearCalendar
-        :activities="filtered"
-        :workouts="strengthWorkouts"
-        :min-date="calMinDate"
-      />
-    </Card>
+    <div class="chips" role="group" aria-label="Date range">
+      <button v-for="r in RANGES" :key="r.key" class="chip" :class="{ on: range === r.key }" @click="range = r.key">{{ r.label }}</button>
+    </div>
+    <div v-if="typeChips.length > 2" class="chips" role="group" aria-label="Activity type">
+      <button v-for="t in typeChips" :key="t.key" class="chip" :class="{ on: typeFilter === t.key }" @click="typeFilter = t.key">{{ t.label }}</button>
+    </div>
 
-    <!-- Personal records -->
-    <Card v-if="records" title="Personal records">
-      <div class="pr-grid">
-        <RouterLink v-if="records.longestDistance"
-                    :to="`/activity/${records.longestDistance.source}/${records.longestDistance.source_id}`"
-                    class="pr">
-          <div class="pr-label"><Trophy :size="14"/> Longest distance</div>
-          <div class="pr-val">{{ fmtKm(records.longestDistance.distance_m) }}</div>
-          <div class="pr-meta">{{ records.longestDistance.name ?? records.longestDistance.type }}</div>
-        </RouterLink>
-        <RouterLink v-if="records.longestDuration"
-                    :to="`/activity/${records.longestDuration.source}/${records.longestDuration.source_id}`"
-                    class="pr">
-          <div class="pr-label">⏱ Longest duration</div>
-          <div class="pr-val">{{ fmtDuration(records.longestDuration.duration_s) }}</div>
-          <div class="pr-meta">{{ records.longestDuration.name ?? records.longestDuration.type }}</div>
-        </RouterLink>
-        <RouterLink v-if="records.mostElevation"
-                    :to="`/activity/${records.mostElevation.source}/${records.mostElevation.source_id}`"
-                    class="pr">
-          <div class="pr-label"><Mountain :size="14"/> Most climbed</div>
-          <div class="pr-val">{{ fmtElevation(records.mostElevation.elevation_gain_m!) }}</div>
-          <div class="pr-meta">{{ records.mostElevation.name ?? records.mostElevation.type }}</div>
-        </RouterLink>
-        <RouterLink v-if="records.highestSuffer"
-                    :to="`/activity/${records.highestSuffer.source}/${records.highestSuffer.source_id}`"
-                    class="pr">
-          <div class="pr-label"><Flame :size="14"/> Highest suffer</div>
-          <div class="pr-val">{{ Math.round(records.highestSuffer.suffer_score!) }}</div>
-          <div class="pr-meta">{{ records.highestSuffer.name ?? records.highestSuffer.type }}</div>
-        </RouterLink>
-      </div>
-    </Card>
+    <p v-if="!feed.length && loading" class="muted">Loading activities…</p>
+    <!-- A failed load with nothing cached is not "no activities yet". -->
+    <template v-else-if="!feed.length && error" />
+    <p v-else-if="!feed.length" class="card quiet">No activities yet. Connect Strava in Settings or log a strength workout.</p>
+    <p v-else-if="!filtered.length" class="card quiet">No activities match these filters.</p>
 
-    <!-- Filter / sort bar -->
-    <Card title="Filter & sort">
-      <div class="bar">
-        <div class="chip-row">
-          <span class="hint">Types:</span>
-          <button v-for="t in allTypes" :key="t"
-                  class="chip" :class="{ active: typesActive.has(t) }"
-                  @click="toggleType(t)">
-            <span class="emoji"><ActivityIcon :type="t" :size="14"/></span> {{ t }}
-          </button>
-          <button v-if="typesActive.size > 0" class="chip-clear" @click="typesActive = new Set()">clear</button>
-        </div>
-        <div class="sort-row">
-          <span class="hint">Sort:</span>
-          <select v-model="sortKey" class="sel">
-            <option value="date">Date</option>
-            <option value="distance">Distance</option>
-            <option value="duration">Duration</option>
-            <option value="elevation">Elevation</option>
-            <option value="avg_hr">Avg HR</option>
-            <option value="suffer">Suffer score</option>
-            <option value="kcal">Calories</option>
-          </select>
-          <button class="dir" @click="sortDesc = !sortDesc">{{ sortDesc ? "↓ desc" : "↑ asc" }}</button>
-          <span class="spacer"></span>
-          <span class="hint">View:</span>
-          <button class="dir" :class="{ active: viewMode === 'grid' }" @click="viewMode = 'grid'">grid</button>
-          <button class="dir" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">list</button>
-          <label class="dir">
-            <input type="checkbox" v-model="groupByMonth"/> group by month
-          </label>
-        </div>
-      </div>
-    </Card>
-
-    <div v-if="error" class="err">{{ error }}</div>
-    <LoadState v-if="loading" variant="list" />
-    <EmptyState v-else-if="sorted.length === 0">
-      No activities matching the current filters.
-    </EmptyState>
-
-    <!-- Grouped or flat -->
     <template v-else>
-      <template v-if="grouped">
-        <div v-for="[key, list] in grouped" :key="key" class="group">
-          <h2 class="group-h">{{ monthLabel(key) }} <span class="group-n">{{ list.length }}</span></h2>
-          <div :class="viewMode === 'grid' ? 'list' : 'rows'">
-            <component :is="'RouterLink'" v-for="a in list" :key="`${a.source}-${a.source_id}`"
-                       :to="a.source === 'strength'
-                              ? `/workout/strength/day/${a.start_at.slice(0, 10)}`
-                              : `/activity/${a.source}/${a.source_id}`"
-                       :class="[
-                         viewMode === 'grid' ? 'card' : 'row',
-                         viewMode === 'list' && !a.polyline ? 'compact' : '',
-                       ]">
-              <template v-if="viewMode === 'grid'">
-                <PolylineThumbnail :polyline="a.polyline" :activityType="a.type" :size="100" class="thumb"/>
-                <header class="card-head">
-                  <span class="type"><ActivityIcon :type="a.type" :size="14"/> {{ fmtActivityType(a.type) }}</span>
-                  <span class="when">{{ fmtDate(a.start_at) }}</span>
-                </header>
-                <h3>{{ a.name ?? "(untitled)" }}</h3>
-                <div class="badges">
-                  <span v-for="b in isPR(a)" :key="b.label" class="badge"><component :is="b.icon" :size="12"/> {{ b.label }}</span>
-                </div>
-                <dl class="stats">
-                  <div><dt>Time</dt><dd>{{ fmtDuration(a.duration_s) }}</dd></div>
-                  <div><dt>Distance</dt><dd>{{ fmtKm(a.distance_m) }}</dd></div>
-                  <div v-if="a.elevation_gain_m"><dt>Elev</dt><dd>{{ fmtElevation(a.elevation_gain_m) }}</dd></div>
-                  <div><dt>{{ isRide(a.type) ? "Speed" : "Pace" }}</dt>
-                       <dd>{{ isRide(a.type) ? fmtSpeed(a.distance_m, a.duration_s) : fmtPace(a.distance_m, a.duration_s) }}</dd></div>
-                  <div v-if="a.avg_hr"><dt>HR</dt><dd>{{ Math.round(a.avg_hr) }} / {{ Math.round(a.max_hr ?? 0) }}</dd></div>
-                  <div v-if="a.suffer_score">
-                    <dt>Suffer</dt>
-                    <dd><span class="suffer" :style="{ color: intensityColor(a.suffer_score) }">{{ Math.round(a.suffer_score) }}</span></dd>
-                  </div>
-                </dl>
-              </template>
-              <template v-else>
-                <PolylineThumbnail v-if="a.polyline"
-                                   :polyline="a.polyline" :activityType="a.type" :size="48"/>
-                <span class="row-emoji"><ActivityIcon :type="a.type" :size="16"/></span>
-                <span class="row-when">{{ fmtDateTime(a.start_at) }}</span>
-                <span class="row-name">{{ a.name ?? "(untitled)" }}</span>
-                <span class="row-stat" v-if="a.distance_m">{{ fmtKmShort(a.distance_m) }}</span>
-                <span class="row-stat">{{ fmtDuration(a.duration_s) }}</span>
-                <span class="row-stat" v-if="a.elevation_gain_m">{{ fmtElevation(a.elevation_gain_m) }}</span>
-                <span class="row-stat" v-if="a.avg_hr">{{ Math.round(a.avg_hr) }} bpm</span>
-                <span class="row-stat" v-if="a.suffer_score" :style="{ color: intensityColor(a.suffer_score) }">{{ Math.round(a.suffer_score) }}</span>
-              </template>
-            </component>
-          </div>
+      <section v-for="g in groups" :key="g.week">
+        <div class="week-h">
+          <span>{{ weekLabel(g.week) }}</span>
+          <span v-if="weekTotals[g.week]">
+            {{ weekTotals[g.week].sessions }} session{{ weekTotals[g.week].sessions === 1 ? "" : "s" }} · {{ fmtHm(weekTotals[g.week].duration_s) }}
+          </span>
         </div>
-      </template>
-
-      <template v-else>
-        <div :class="viewMode === 'grid' ? 'list' : 'rows'">
-          <component :is="'RouterLink'" v-for="a in sorted" :key="`${a.source}-${a.source_id}`"
-                     :to="`/activity/${a.source}/${a.source_id}`"
-                     :class="viewMode === 'grid' ? 'card' : 'row'">
-            <template v-if="viewMode === 'grid'">
-              <PolylineThumbnail :polyline="a.polyline" :activityType="a.type" :size="100" class="thumb"/>
-              <header class="card-head">
-                <span class="type"><ActivityIcon :type="a.type" :size="14"/> {{ fmtActivityType(a.type) }}</span>
-                <span class="when">{{ fmtDate(a.start_at) }}</span>
-              </header>
-              <h3>{{ a.name ?? "(untitled)" }}</h3>
-              <div class="badges">
-                <span v-for="b in isPR(a)" :key="b.label" class="badge"><component :is="b.icon" :size="12"/> {{ b.label }}</span>
-              </div>
-              <dl class="stats">
-                <div><dt>Time</dt><dd>{{ fmtDuration(a.duration_s) }}</dd></div>
-                <div><dt>Distance</dt><dd>{{ fmtKm(a.distance_m) }}</dd></div>
-                <div v-if="a.elevation_gain_m"><dt>Elev</dt><dd>{{ fmtElevation(a.elevation_gain_m) }}</dd></div>
-                <div><dt>{{ isRide(a.type) ? "Speed" : "Pace" }}</dt>
-                     <dd>{{ isRide(a.type) ? fmtSpeed(a.distance_m, a.duration_s) : fmtPace(a.distance_m, a.duration_s) }}</dd></div>
-                <div v-if="a.avg_hr"><dt>HR</dt><dd>{{ Math.round(a.avg_hr) }} / {{ Math.round(a.max_hr ?? 0) }}</dd></div>
-                <div v-if="a.suffer_score">
-                  <dt>Suffer</dt>
-                  <dd><span class="suffer" :style="{ color: intensityColor(a.suffer_score) }">{{ Math.round(a.suffer_score) }}</span></dd>
-                </div>
-              </dl>
-            </template>
-            <template v-else>
-              <PolylineThumbnail v-if="a.polyline"
-                                 :polyline="a.polyline" :activityType="a.type" :size="48"/>
-              <span class="row-emoji"><ActivityIcon :type="a.type" :size="16"/></span>
-              <span class="row-when">{{ fmtDateTime(a.start_at) }}</span>
-              <span class="row-name">{{ a.name ?? "(untitled)" }}</span>
-              <span class="row-stat" v-if="a.distance_m">{{ fmtKmShort(a.distance_m) }}</span>
-              <span class="row-stat">{{ fmtDuration(a.duration_s) }}</span>
-              <span class="row-stat" v-if="a.elevation_gain_m">{{ fmtElevation(a.elevation_gain_m) }}</span>
-              <span class="row-stat" v-if="a.avg_hr">{{ Math.round(a.avg_hr) }} bpm</span>
-              <span class="row-stat" v-if="a.suffer_score" :style="{ color: intensityColor(a.suffer_score) }">{{ Math.round(a.suffer_score) }}</span>
-            </template>
-          </component>
-        </div>
-      </template>
+        <RouterLink v-for="it in g.items" :key="it.key" class="row"
+                    :to="it.kind === 'activity' ? `/activity/${it.a.source}/${it.a.source_id}` : `/workout/strength/day/${it.w.date}`">
+          <template v-if="it.kind === 'activity'">
+            <PolylineThumbnail v-if="it.a.polyline" class="thumb" :polyline="it.a.polyline" :activity-type="it.a.type" :size="44" :stroke="tint(it)" />
+            <span v-else class="ic" :style="{ color: tint(it), background: tint(it) + '24' }"><ActivityIcon :type="it.a.type" :size="20" /></span>
+            <span class="body">
+              <span class="title">{{ it.a.name || fmtActivityType(it.a.type) }}</span>
+              <span class="sub">{{ [rowWhen(it.a.start_at), it.a.distance_m ? fmtDistance(it.a.distance_m, 1) : null, it.a.trail_name].filter(Boolean).join(" · ") }}</span>
+            </span>
+            <span class="primary" :style="{ color: tint(it) }">{{ fmtHm(it.a.duration_s) }}</span>
+          </template>
+          <template v-else>
+            <span class="ic" :style="{ color: tint(it), background: tint(it) + '24' }"><ActivityIcon :type="it.w.split_focus === 'yoga' ? 'yoga' : it.w.split_focus === 'cardio' ? 'ride' : 'strength'" :size="20" /></span>
+            <span class="body">
+              <span class="title">{{ strengthTitle(it.w) }}</span>
+              <span class="sub">{{ [dayLabel(it.w.date), MUSCLES[it.w.split_focus] ?? it.w.split_focus, it.w.session_summary?.working_sets ? `${it.w.session_summary.working_sets} sets` : null].filter(Boolean).join(" · ") }}</span>
+            </span>
+            <span class="primary-col">
+              <span v-if="strengthPrimary(it.w)" class="primary" :style="{ color: tint(it) }">{{ strengthPrimary(it.w) }}</span>
+              <span v-if="strengthStatus(it.w)" class="status" :class="strengthStatus(it.w)!.tone">{{ strengthStatus(it.w)!.label }}</span>
+            </span>
+          </template>
+        </RouterLink>
+      </section>
+      <div v-if="filtered.length > shown" class="more">
+        <button class="pill cyan" @click="shown += 40">Show {{ Math.min(40, filtered.length - shown) }} more</button>
+      </div>
     </template>
-  </div>
+  </NeonPage>
 </template>
 
 <style scoped>
-.strength-list { list-style: none; padding: 0; margin: 0; }
-.strength-list li { border-bottom: 1px solid var(--line); }
-.strength-list li:last-child { border-bottom: none; }
-.strength-list a { display: flex; align-items: center; gap: 0.8rem;
-                   padding: 0.55rem 0.4rem; color: var(--text);
-                   text-decoration: none; }
-.strength-list a:hover { background: var(--bg-2); }
-.strength-list .date { color: var(--muted); font-size: 0.85rem;
-                       width: 9rem; flex: 0 0 auto;
-                       font-family: 'Geist Mono', ui-monospace, monospace; }
-.strength-list .focus { font-weight: 600; flex: 1; }
-.strength-list .status { font-size: 0.7rem; font-weight: 700;
-                         letter-spacing: 0.06em; text-transform: uppercase; }
-.strength-list .status.completed { color: #22c55e; }
-.strength-list .status.in_progress { color: #eab308; }
-.strength-list .status.skipped { color: var(--muted); }
-.strength-list .status.planned { color: var(--accent, #ef4444); }
+.hdr-actions { display: flex; gap: 8px; }
+.icon-btn { width: 42px; height: 42px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(40, 230, 255, .14); border: 1px solid rgba(40, 230, 255, .45); color: var(--rn-cyan); cursor: pointer; }
+.icon-btn:disabled { opacity: .5; cursor: default; }
+.icon-btn:focus-visible { outline: 2px solid var(--rn-cyan); outline-offset: 2px; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-.map-link { color: var(--accent); text-decoration: none; font-size: 0.9rem; padding: 0.3rem 0.6rem; border: 1px solid var(--border); border-radius: 4px; }
-.map-link:hover { border-color: var(--accent); }
-.sync-btn {
-  background: transparent; color: var(--text); border: 1px solid var(--border);
-  padding: 0.3rem 0.7rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem;
-}
-.sync-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.sync-toast {
-  background: var(--surface); border: 1px solid var(--border);
-  border-left: 3px solid var(--accent); padding: 0.5rem 0.8rem;
-  border-radius: 4px; margin-bottom: 0.8rem; font-size: 0.9rem;
-}
+.stale { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin-bottom: 12px; border-radius: 14px;
+  background: rgba(255, 181, 46, .10); border: 1px solid rgba(255, 181, 46, .32); cursor: pointer; }
+.stale strong { color: var(--rn-amber); font-size: 13px; }
+.stale span { color: var(--rn-mut); font-size: 12px; }
+.stale em { color: var(--rn-cyan); font-size: 12px; font-style: normal; font-weight: 600; }
+.stale-link { color: var(--rn-cyan); font-size: 12px; font-weight: 600; text-decoration: none; }
+.toast { color: var(--rn-mut); font-size: 12px; margin: 0 0 8px; }
+.muted { color: var(--rn-mut); font-size: 13px; }
 
-/* Reconnect banner — dead Strava cookie session. */
-.reconnect-banner {
-  display: flex; align-items: center; gap: 0.7rem;
-  background: color-mix(in srgb, var(--bad) 10%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--border));
-  border-left: 3px solid var(--bad);
-  padding: 0.6rem 0.9rem; border-radius: 4px; margin-bottom: 0.8rem;
-  font-size: 0.9rem;
-}
-.reconnect-banner .rb-icon { color: var(--bad); font-size: 1.1rem; line-height: 1; }
-.reconnect-banner .rb-body { flex: 1; }
-.reconnect-banner .rb-detail { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 0.15rem; }
-.reconnect-banner .rb-action {
-  color: var(--bad); font-weight: 600; text-decoration: none; white-space: nowrap;
-}
-.reconnect-banner .rb-action:hover { text-decoration: underline; }
+.pills { display: flex; gap: 8px; margin-bottom: 12px; }
+.pill { font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 12px; padding: 6px 12px; border-radius: 999px; border: 1px solid; }
+.pill.cyan { color: var(--rn-cyan); background: rgba(40, 230, 255, .12); border-color: rgba(40, 230, 255, .4); cursor: pointer; }
+.pill.peri { color: var(--rn-peri); background: rgba(111, 123, 255, .12); border-color: rgba(111, 123, 255, .4); }
 
-/* Stats banner */
-.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; }
-.stat .num { font-size: 1.6rem; font-weight: 300; color: var(--text); line-height: 1; }
-.stat .num .unit { font-size: 0.85rem; color: var(--muted); margin-left: 0.2rem; }
-.stat .lbl { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.3rem; }
-.stat .up { color: var(--good); margin-left: 0.3rem; }
-.stat .down { color: var(--bad); margin-left: 0.3rem; }
-.stat .same { color: var(--muted-2); margin-left: 0.3rem; }
+.ytd-top { display: flex; align-items: baseline; gap: 6px; }
+.ytd-big { font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 44px; letter-spacing: -1px; color: var(--rn-cyan); line-height: 1; }
+.ytd-unit { color: var(--rn-mut); font-size: 15px; }
+.ytd-delta { margin-left: auto; font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 15px; }
+.ytd-vs { color: var(--rn-mut); font-size: 12px; margin: 4px 0 10px; }
+.cum { width: 100%; height: 110px; display: block; }
+.cum .grid { stroke: var(--rn-track); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.line-last { fill: none; stroke: var(--rn-peri); stroke-width: 1.5; stroke-dasharray: 6 5; opacity: .85; }
+.line-glow { fill: none; stroke: var(--rn-cyan); stroke-width: 6; opacity: .25; stroke-linecap: round; }
+.line-this { fill: none; stroke: var(--rn-cyan); stroke-width: 2.5; stroke-linecap: round; }
+.months { display: grid; grid-template-columns: repeat(4, 1fr); color: var(--rn-mut); font-size: 10px; margin-top: 2px; }
+.legend { display: flex; gap: 14px; color: var(--rn-mut); font-size: 11px; margin-top: 4px; }
+.sw { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--rn-cyan); vertical-align: middle; margin-right: 4px; }
+.sw.dashed { border-top: 2px dashed var(--rn-peri); }
+.ytd-small { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.ys-v { font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 20px; }
+.ys-v small { color: var(--rn-mut); font-size: 11px; margin-left: 3px; font-weight: 500; }
+.ys-l { color: var(--rn-mut); font-size: 11px; }
+.ys-d { font-size: 11px; font-weight: 600; }
 
-/* YTD + YoY */
-.ytd-grid {
-  display: grid; gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-}
-.ytd-cell {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px; padding: 0.8rem 0.9rem;
-}
-.ytd-num { font-size: 1.5rem; font-weight: 300; color: var(--text); line-height: 1; }
-.ytd-num .unit { font-size: 0.8rem; color: var(--muted); margin-left: 0.15rem; }
-.ytd-lbl { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.3rem; }
-.ytd-cmp {
-  display: flex; justify-content: space-between; align-items: baseline;
-  margin-top: 0.5rem; font-size: 0.78rem;
-}
-.ytd-prev { color: var(--muted-2); }
-.ytd-cmp .up { color: var(--good); }
-.ytd-cmp .down { color: var(--bad); }
-.ytd-cmp .same { color: var(--muted-2); }
+.card { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px; padding: 14px; margin-bottom: 12px; }
+.quiet { color: var(--rn-mut); font-size: 14px; }
+.cal-head { display: flex; align-items: center; margin-bottom: 8px; }
+.eyebrow { flex: 1; font-family: 'Space Grotesk', monospace; font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--rn-mut); }
+.link { background: none; border: 0; color: var(--rn-cyan); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; min-height: 32px; padding: 0 8px; }
+.strip { width: 100%; max-width: 240px; display: block; }
 
-/* Heatmap */
+.chips { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 8px; padding-bottom: 2px; }
+.chip { min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--rn-line); background: var(--rn-card);
+  color: var(--rn-mut); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.chip.on { background: rgba(40, 230, 255, .14); border-color: rgba(40, 230, 255, .45); color: var(--rn-cyan); font-weight: 700; }
 
-/* PRs */
-.pr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.6rem; }
-.pr {
-  display: block; background: var(--surface-2); padding: 0.7rem; border-radius: 8px;
-  border: 1px solid var(--border); text-decoration: none; color: inherit;
-  transition: border-color 0.15s;
-}
-.pr:hover { border-color: var(--accent); }
-.pr-label { color: var(--muted-2); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.pr-val { color: var(--accent); font-size: 1.4rem; font-weight: 500; margin: 0.2rem 0; }
-.pr-meta { color: var(--muted); font-size: 0.8rem; }
-
-/* Filter bar */
-.bar { display: flex; flex-direction: column; gap: 0.6rem; }
-.chip-row { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
-.sort-row { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
-.hint { color: var(--muted-2); font-size: 0.8rem; }
-.spacer { flex: 1; }
-.chip {
-  background: var(--surface-2); color: var(--muted); border: 1px solid var(--border);
-  border-radius: 100px; padding: 0.25rem 0.7rem; font-size: 0.8rem; cursor: pointer; font-family: inherit;
-}
-.chip:hover { color: var(--text); }
-.chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-.chip .emoji { margin-right: 0.2rem; }
-.chip-clear { background: transparent; color: var(--bad); border: 0; cursor: pointer; font-size: 0.75rem; padding: 0.25rem 0.5rem; }
-.sel {
-  background: var(--surface); color: var(--text); border: 1px solid var(--border);
-  border-radius: 4px; padding: 0.3rem 0.5rem; font-size: 0.85rem; font-family: inherit;
-}
-.dir, label.dir {
-  background: var(--surface); color: var(--muted); border: 1px solid var(--border);
-  border-radius: 4px; padding: 0.3rem 0.6rem; font-size: 0.8rem; cursor: pointer; font-family: inherit;
-  display: inline-flex; align-items: center; gap: 0.3rem;
-}
-.dir.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-
-/* Group headers */
-.group { margin-top: 1rem; }
-.group-h { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin: 1rem 0 0.6rem; font-weight: 500; }
-.group-n { color: var(--muted-2); margin-left: 0.4rem; font-size: 0.75rem; }
-
-/* Grid view */
-.list { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
-.card {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-  padding: 1rem; text-decoration: none; color: inherit; display: block;
-  transition: border-color 0.15s, transform 0.15s;
-  position: relative;
-}
-.card:hover { border-color: var(--accent); transform: translateY(-1px); }
-.card .thumb { float: right; margin: 0 0 0.5rem 0.7rem; }
-.card-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 0.75rem; }
-.type { color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-.when { color: var(--muted-2); }
-.card h3 { margin: 0.3rem 0 0.4rem; font-size: 1rem; color: var(--text); font-weight: 500; clear: none; }
-.badges { margin-bottom: 0.5rem; }
-.badge { background: var(--surface-2); color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.7rem; margin-right: 0.3rem; }
-dl.stats { margin: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.4rem 1rem; font-size: 0.85rem; clear: both; }
-dl.stats > div { display: flex; flex-direction: column; }
-dt { color: var(--muted-2); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
-dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
-.suffer { font-weight: 600; }
-
-/* List view */
-.rows { display: flex; flex-direction: column; gap: 0.3rem; }
-.row {
-  display: grid;
-  grid-template-columns: 48px 24px 140px 1fr repeat(5, auto);
-  align-items: center; gap: 0.6rem;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-  padding: 0.4rem 0.7rem; text-decoration: none; color: inherit;
-  font-size: 0.85rem;
-}
-/* Strength / yoga rows have no map, no distance, no elevation — drop
-   the polyline column and tighten padding so they don't waste space. */
-.row.compact {
-  grid-template-columns: 24px 140px 1fr repeat(5, auto);
-  padding: 0.25rem 0.7rem;
-  font-size: 0.82rem;
-}
-.row:hover { border-color: var(--accent); }
-.row-emoji { font-size: 1.2rem; }
-.row-when { color: var(--muted); font-size: 0.75rem; }
-.row-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row-stat { color: var(--muted); font-variant-numeric: tabular-nums; }
-
-.err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
-
-/* ============================================================
-   Vitality Neon — scoped overrides (html[data-theme="neon"] only).
-   Classic / light / dark themes are byte-for-byte unchanged.
-   ============================================================ */
-html[data-theme="neon"] .activities {
-  --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
-  --rn-cyan: #28e6ff; --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-amber: #ffb52e;
-  --rn-red: #ff5d7a; --rn-track: #272a3b;
-  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
-  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
-}
-
-/* Big numeric readouts → Space Grotesk mono, neon ink */
-html[data-theme="neon"] .activities .stat .num,
-html[data-theme="neon"] .activities .ytd-num,
-html[data-theme="neon"] .activities .pr-val {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  letter-spacing: -0.5px; color: var(--rn-ink); font-weight: 700;
-}
-html[data-theme="neon"] .activities .stat .num .unit,
-html[data-theme="neon"] .activities .ytd-num .unit { color: var(--rn-mut); }
-
-/* Status / delta swatches → neon palette */
-html[data-theme="neon"] .activities .stat .up,
-html[data-theme="neon"] .activities .ytd-cmp .up { color: var(--rn-lime); }
-html[data-theme="neon"] .activities .stat .down,
-html[data-theme="neon"] .activities .ytd-cmp .down { color: var(--rn-red); }
-html[data-theme="neon"] .activities .stat .same,
-html[data-theme="neon"] .activities .ytd-cmp .same,
-html[data-theme="neon"] .activities .ytd-prev { color: var(--rn-mut); }
-
-/* Strength-list status pills → neon zone swatches */
-html[data-theme="neon"] .activities .strength-list .status.completed { color: var(--rn-lime); }
-html[data-theme="neon"] .activities .strength-list .status.in_progress { color: var(--rn-amber); }
-html[data-theme="neon"] .activities .strength-list .status.skipped { color: var(--rn-mut); }
-html[data-theme="neon"] .activities .strength-list .status.planned { color: var(--rn-cyan); }
-
-/* Surfaces → obsidian card with faint neon edge */
-html[data-theme="neon"] .activities .ytd-cell,
-html[data-theme="neon"] .activities .card,
-html[data-theme="neon"] .activities .row {
-  background: var(--rn-card); border-color: #21243450; border-radius: 14px;
-}
-html[data-theme="neon"] .activities .ytd-cell { border-radius: 14px; }
-
-/* PR cells — cyan accent value with subtle glow on the headline stat */
-html[data-theme="neon"] .activities .pr {
-  background: var(--rn-card); border-color: #21243450;
-}
-html[data-theme="neon"] .activities .pr:hover { border-color: rgba(40, 230, 255, 0.45); }
-html[data-theme="neon"] .activities .pr-val {
-  color: var(--rn-cyan);
-  text-shadow: 0 0 10px rgba(40, 230, 255, 0.45);
-}
-html[data-theme="neon"] .activities .pr-label,
-html[data-theme="neon"] .activities .pr-meta { color: var(--rn-mut); }
-
-/* Interactive accents → cyan */
-html[data-theme="neon"] .activities .card:hover,
-html[data-theme="neon"] .activities .row:hover { border-color: rgba(40, 230, 255, 0.45); }
-html[data-theme="neon"] .activities .type { color: var(--rn-cyan); }
-html[data-theme="neon"] .activities .map-link,
-html[data-theme="neon"] .activities .sync-btn { color: var(--rn-cyan); }
-html[data-theme="neon"] .activities .map-link:hover,
-html[data-theme="neon"] .activities .sync-btn:hover:not(:disabled) { border-color: var(--rn-cyan); }
-
-/* Filter chips + active states → cyan glow */
-html[data-theme="neon"] .activities .chip.active,
-html[data-theme="neon"] .activities .dir.active {
-  background: rgba(40, 230, 255, 0.14); color: var(--rn-cyan);
-  border-color: rgba(40, 230, 255, 0.45);
-}
-html[data-theme="neon"] .activities .badge {
-  background: rgba(40, 230, 255, 0.10); color: var(--rn-cyan);
-  border-color: rgba(40, 230, 255, 0.35);
-}
-
-/* Sync toast → cyan rail */
-html[data-theme="neon"] .activities .sync-toast {
-  background: var(--rn-card); border-color: #21243450;
-  border-left-color: var(--rn-cyan);
-}
+.week-h { display: flex; justify-content: space-between; margin: 16px 0 8px; font-family: 'Space Grotesk', monospace;
+  font-size: 11px; color: var(--rn-mut); }
+.week-h span:first-child { font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 8px; border-radius: 18px;
+  background: var(--rn-card); border: 1px solid var(--rn-line); color: inherit; text-decoration: none; }
+.row:hover { border-color: rgba(40, 230, 255, .45); }
+.row:focus-visible { outline: 2px solid var(--rn-cyan); outline-offset: 2px; }
+.ic { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.thumb { flex: 0 0 auto; }
+.body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.title { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub { color: var(--rn-mut); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.primary { font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 16px; white-space: nowrap; }
+.primary-col { display: flex; flex-direction: column; align-items: flex-end; }
+.status { font-size: 11px; font-weight: 700; }
+.status.amber { color: var(--rn-amber); }
+.status.muted { color: var(--rn-mut); text-transform: capitalize; }
+.more { display: flex; justify-content: center; margin: 8px 0 16px; }
 </style>

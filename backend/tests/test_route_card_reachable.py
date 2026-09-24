@@ -27,8 +27,11 @@ WEB = ROOT / "frontend/src/views/ActivityDetail.vue"
 def test_the_route_card_is_not_an_else_of_the_map_branch():
     src = PHONE.read_text()
     assert "RouteMissingCard(" in src, "the route card is gone from the phone"
-    # Find the guard immediately preceding the RouteMissingCard call site.
-    before = src[: src.index("RouteMissingCard(\n")]
+    # Find the guard immediately preceding the route card's call site. Since
+    # UI-5 the stateless Content renders it through the `routeMissing` slot
+    # (the wrapper binds that slot to RouteMissingCard).
+    assert "RouteMissingCard(a = a" in src, "the route slot no longer draws RouteMissingCard"
+    before = src[: src.index("routeMissing(a) }")]
     guard = before[before.rindex("if ("):]
     assert "else if" not in guard.split("\n")[0], (
         "the route card is gated by an `else if` again. It must be an "
@@ -49,7 +52,8 @@ def test_the_route_card_is_not_an_else_of_the_map_branch():
 def test_both_surfaces_decide_route_absence_the_same_way():
     """Neither surface may use trail state to decide a route is present."""
     web = WEB.read_text()
-    m = re.search(r'<Card v-else-if="([^"]+)" title="Route">', web)
+    # UI-5: the map is the hero, so the fallback is its own section.
+    m = re.search(r'<section v-if="([^"]*healthconnect[^"]*)" class="card">', web)
     assert m, "the web Route fallback card is gone or its condition changed shape"
     assert "trail" not in m.group(1).lower(), (
         "the web Route card started consulting trail state, which is the "

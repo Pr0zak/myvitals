@@ -795,3 +795,48 @@ export interface StepsSchedule {
   weekdays: string[];
   effective_today: number;
 }
+
+// ── UI-5 ─────────────────────────────────────────────────────────────
+/** One year-over-year line from GET /activities/ytd. `pct_change` is null
+ *  when last year was zero — render `note` ("new") or a dash, never an
+ *  invented percentage. `tone` is positive / neutral / caution: a
+ *  shortfall is amber, never the crisis colour. */
+export interface YtdMetric {
+  key: string;
+  label: string;
+  unit: string;
+  better: "higher";
+  current: number;
+  prior: number;
+  delta: number;
+  pct_change: number | null;
+  direction: "improved" | "worse" | "flat" | "new";
+  tone: "positive" | "neutral" | "caution";
+  note: string | null;
+}
+
+export interface YtdWeek {
+  week_start: string;
+  sessions: number;
+  duration_s: number;
+}
+
+export interface ActivityYtd {
+  year: number;
+  prior_year: number;
+  through: string;
+  prior_through: string;
+  metrics: YtdMetric[];
+  /** Whole metres; index 0 = 1 January. This year runs to today, last
+   *  year covers the whole year. */
+  cumulative_distance_m: { this_year: number[]; last_year: number[] };
+  this_week: YtdWeek;
+  weeks: YtdWeek[];
+}
+
+export interface TrailStatusCounts {
+  open: number;
+  delayed: number;
+  closed: number;
+  other: number;
+}

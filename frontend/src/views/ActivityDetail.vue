@@ -1,4 +1,17 @@
 <script setup lang="ts">
+/**
+ * Activity detail (UI-5) — map first. Phone twin: `ActivityDetailScreen.kt`.
+ *
+ * The route leads: a 300px map card with a scrim carrying the type, name
+ * and local start time (no route → a category-tinted card in its place).
+ * Below it three big numbers and a quiet stat line instead of a flat
+ * key/value grid. The HR chart shades the server's Z1-Z5 bands behind the
+ * line, and time-in-zone is ONE stacked bar with a legend. Max HR is Ink,
+ * or Amber when the session reached the top zone — never the crisis
+ * colour. A failed edit is an inline notice; it used to set the page-level
+ * error. Zones were requested with an undefined id (`params.source_id` on
+ * a route whose param is `id`), so the zone cards never rendered.
+ */
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import VChart from "@/echarts";
@@ -7,11 +20,14 @@ import polylineDecoder from "@mapbox/polyline";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-import Card from "@/components/Card.vue";
+import NeonPage from "@/components/neon/NeonPage.vue";
+import NeonEyebrow from "@/components/neon/NeonEyebrow.vue";
+import ActivityIcon from "@/components/ActivityIcon.vue";
 import { api } from "@/api/client";
+import { categoryColor, categoryForType } from "@/utils/activityCategory";
 import type { Activity, HeartRateSeries } from "@/api/types";
-import { chartTheme, effectiveTheme, isNeon } from "@/theme";
-import { fmtDistance, fmtElevation, distanceVal, distanceUnit, isImperial } from "@/units";
+import { chartTheme, isNeon } from "@/theme";
+import { fmtElevation, fmtPace, distanceVal, distanceUnit, isImperial } from "@/units";
 import { fmtActivityType, fmtDateTime } from "@/format";
 import { timeAxisFormatter } from "@/components/charts/chartHelpers";
 
@@ -21,6 +37,9 @@ const activity = ref<Activity | null>(null);
 const hr = ref<HeartRateSeries | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
+/** Failure of an ACTION on a loaded activity (edit, link, notes). Shown
+ *  inline; never replaces the page. */
+const notice = ref<string | null>(null);
 
 const mapEl = ref<HTMLDivElement | null>(null);
 let map: L.Map | null = null;
@@ -61,21 +80,19 @@ const savedFlag = ref(false);
 const tags = ref<string[]>([]);
 
 async function load() {
-  loading.value = true;
-  error.value = null;
+  loading.value = activity.value == null;
   try {
     const a = await api.activity(route.params.source as string, route.params.id as string);
+    error.value = null;
     activity.value = a;
     notesInput.value = a.notes ?? "";
     loadTrails();
     tags.value = a.tags ?? [];
-    // Pull HR for the activity window plus a bit of padding
+    // HR for exactly the activity window (the phone asks for the same).
     const start = new Date(a.start_at);
     const end = new Date(start.getTime() + a.duration_s * 1000);
-    hr.value = await api.heartRate({
-      since: new Date(start.getTime() - 5 * 60 * 1000),
-      until: new Date(end.getTime() + 5 * 60 * 1000),
-    });
+    try { hr.value = await api.heartRate({ since: start, until: end }); }
+    catch { hr.value = null; }
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Failed to load";
   } finally {
@@ -94,7 +111,7 @@ function renderMap() {
   polylineCoords = coords;
 
   map = L.map(mapEl.value, { zoomControl: true });
-  const dark = effectiveTheme.value === "dark";
+  const dark = true;
   L.tileLayer(baseTileUrl(dark), tileOptions()).addTo(map);
   L.tileLayer(labelTileUrl(dark), { ...tileOptions(), pane: "shadowPane" }).addTo(map);
 
@@ -155,7 +172,6 @@ onMounted(() => {
 });
 
 watch(activity, () => setTimeout(renderMap, 50));
-watch(effectiveTheme, () => setTimeout(renderMap, 50));
 
 onUnmounted(() => {
   if (map) { map.remove(); map = null; }
@@ -175,7 +191,7 @@ onUnmounted(() => {
 const zoneData = ref<import("../api/types").ActivityZones | null>(null);
 async function loadZones() {
   const src = route.params.source as string;
-  const sid = route.params.source_id as string;
+  const sid = route.params.id as string;
   try {
     zoneData.value = await api.activityZones(src, sid);
   } catch { /* leave null — the zone cards stay hidden */ }
@@ -208,11 +224,8 @@ const maxHrNote = computed<string | null>(() => {
   return `Zones from a default max HR of ${z.max_hr} bpm — no birth date or measured max on file, so these boundaries are a guess.`;
 });
 
-const ZONE_COLORS = computed<string[]>(() =>
-  isNeon.value
-    ? ["#6f7bff", "#28e6ff", "#5dff3b", "#ffb52e", "#ff5d7a"]
-    : ["#38bdf8", "#22c55e", "#eab308", "#f97316", "#ef4444"],
-);
+// Z1..Z5 cool to hot — the NeonMV tokens, same as the phone.
+const ZONE_COLORS = computed<string[]>(() => ["#6f7bff", "#28e6ff", "#5dff3b", "#ffb52e", "#ff5d7a"]);
 const ZONE_LABELS = ["Z1 Recovery", "Z2 Endurance", "Z3 Tempo", "Z4 Threshold", "Z5 VO2"];
 
 // Toggle map between solid-blue polyline and HR-colored segments.
@@ -457,51 +470,43 @@ const hrZoneStreamOption = computed(() => {
   };
 });
 
-// Donut of total time in zone. The value is seconds of work, which is what
-// "time in zone" has always meant — the previous version plotted the number
-// of HR samples that landed in each zone, so a session where the watch
-// sampled irregularly reported a distribution that was simply not the one
-// the user had trained.
-const hrZonePieOption = computed(() => {
-  void chartTheme.value;
-  const t = chartTheme.value;
-  const z = zoneData.value;
-  if (!z || z.total_seconds === 0) return null;
-  return {
-    tooltip: { ...t.tooltip, formatter: (p: any) =>
-      `${p.name}: ${fmtDur(p.value)} (${p.percent.toFixed(0)}%)` },
-    series: [{
-      type: "pie", radius: ["45%", "75%"],
-      label: { color: t.axisLabel.color, formatter: "{b}\n{d}%" },
-      data: z.zones.map((zone, i) => ({
-        value: zone.seconds, name: ZONE_LABELS[i],
-        itemStyle: { color: ZONE_COLORS.value[i] },
-      })),
-    }],
-  };
-});
-
 const hrChartOption = computed(() => {
   void chartTheme.value;
   const t = chartTheme.value;
   if (!hr.value || hr.value.points.length === 0 || !activity.value) return null;
-  const start = new Date(activity.value.start_at).getTime();
-  const end = start + activity.value.duration_s * 1000;
+  const zones = zoneData.value?.zones ?? [];
+  const avg = activity.value.avg_hr;
   return {
     grid: { left: 40, right: 12, top: 8, bottom: 28 },
     xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter }, splitLine: { show: false } },
     yAxis: { type: "value", axisLabel: t.axisLabel, splitLine: t.splitLine, scale: true },
     tooltip: { trigger: "axis", ...t.tooltip },
+    // Colour the line by the SERVER's zone boundaries; no client zone model.
+    visualMap: zones.length ? {
+      show: false, dimension: 1, seriesIndex: 0,
+      pieces: zones.map((z, i) => ({
+        gte: z.lo_bpm, ...(z.hi_bpm != null ? { lt: z.hi_bpm + 1 } : {}), color: ZONE_COLORS.value[i],
+      })),
+      outOfRange: { color: "#28e6ff" },
+    } : undefined,
     series: [{
       type: "line", smooth: true, showSymbol: false,
-      lineStyle: { color: t.palette.hr, width: 1.5 },
-      areaStyle: { color: `${t.palette.hr}22` },
+      lineStyle: { width: 2, color: "#28e6ff" },
       data: hr.value.points.map((p) => [p.time, p.value]),
-      markArea: {
+      // Z1-Z5 bands shaded behind the line.
+      markArea: zones.length ? {
         silent: true,
-        itemStyle: { color: t.palette.activity },
-        data: [[{ xAxis: new Date(start).toISOString() }, { xAxis: new Date(end).toISOString() }]],
-      },
+        data: zones.map((z, i) => [
+          { yAxis: z.lo_bpm, itemStyle: { color: ZONE_COLORS.value[i], opacity: 0.10 } },
+          { yAxis: z.hi_bpm ?? 260 },
+        ]),
+      } : undefined,
+      markLine: avg ? {
+        silent: true, symbol: "none",
+        lineStyle: { color: "#ececf5", type: "dashed", opacity: 0.55 },
+        label: { formatter: `avg ${Math.round(avg)}`, color: "#ececf5", position: "insideEndTop" },
+        data: [{ yAxis: avg }],
+      } : undefined,
     }],
   };
 });
@@ -526,9 +531,53 @@ function fmtDur(s: number): string {
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 
-function fmtKm(m: number | null): string {
-  return fmtDistance(m, 2);
-}
+// ── Hero + numbers ──
+const tintColor = computed(() => categoryColor(categoryForType(activity.value?.type), true));
+const heroWhen = computed(() => activity.value
+  ? new Date(activity.value.start_at).toLocaleString([], {
+    weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  })
+  : "");
+const isFoot = computed(() => /run|walk|hike/i.test(activity.value?.type ?? ""));
+/** m/s from the activity's own distance and time — a unit conversion of
+ *  two server numbers, rendered through units.ts like every other pace. */
+const speedMs = computed(() => {
+  const a = activity.value;
+  if (!a || !a.distance_m || a.distance_m <= 0 || a.duration_s <= 0) return null;
+  return a.distance_m / a.duration_s;
+});
+interface Big { label: string; value: string; unit: string | null }
+const bigs = computed<Big[]>(() => {
+  const a = activity.value;
+  if (!a) return [];
+  const out: Big[] = [];
+  if (a.distance_m && a.distance_m > 0) out.push({ label: "Distance", value: (distanceVal(a.distance_m) ?? 0).toFixed(2), unit: distanceUnit.value });
+  out.push({ label: "Time", value: fmtDur(a.duration_s), unit: null });
+  if (isFoot.value && speedMs.value) {
+    const [v, u] = fmtPace(speedMs.value).split(" ");
+    out.push({ label: "Pace", value: v ?? "—", unit: u ?? null });
+  } else if (a.avg_hr) out.push({ label: "Avg HR", value: String(Math.round(a.avg_hr)), unit: "bpm" });
+  if (out.length < 3 && a.kcal) out.push({ label: "Energy", value: String(Math.round(a.kcal)), unit: "kcal" });
+  return out.slice(0, 3);
+});
+const quiet = computed(() => {
+  const a = activity.value;
+  if (!a) return [];
+  const bigLabels = new Set(bigs.value.map((b) => b.label));
+  const topLo = zoneData.value?.zones.at(-1)?.lo_bpm ?? null;
+  const out: { label: string; value: string; amber?: boolean }[] = [];
+  if (a.elevation_gain_m != null) out.push({ label: "Climb", value: fmtElevation(a.elevation_gain_m) });
+  if (!bigLabels.has("Avg HR") && a.avg_hr) out.push({ label: "Avg HR", value: `${Math.round(a.avg_hr)} bpm` });
+  // Max HR is not a warning: Ink, or Amber when it reached the top zone.
+  if (a.max_hr) out.push({ label: "Max HR", value: `${Math.round(a.max_hr)} bpm`, amber: topLo != null && a.max_hr >= topLo });
+  if (!isFoot.value && speedMs.value) {
+    out.push({ label: "Speed", value: `${(distanceVal(speedMs.value * 3600) ?? 0).toFixed(1)} ${distanceUnit.value}/h` });
+  }
+  if (a.avg_power_w) out.push({ label: "Power", value: `${Math.round(a.avg_power_w)} W` });
+  if (!bigLabels.has("Energy") && a.kcal) out.push({ label: "Energy", value: `${Math.round(a.kcal)} kcal` });
+  if (a.suffer_score) out.push({ label: "Suffer", value: String(Math.round(a.suffer_score)) });
+  return out.slice(0, 6);
+});
 
 async function saveNotes() {
   if (!activity.value) return;
@@ -541,6 +590,8 @@ async function saveNotes() {
     });
     savedFlag.value = true;
     setTimeout(() => { savedFlag.value = false; }, 2000);
+  } catch (e) {
+    notice.value = `Couldn't save notes: ${e instanceof Error ? e.message : String(e)}`;
   } finally {
     savingNotes.value = false;
   }
@@ -587,6 +638,8 @@ async function applyTrailLink() {
     }
     linkedFlag.value = true;
     setTimeout(() => { linkedFlag.value = false; }, 2000);
+  } catch (e) {
+    notice.value = `Couldn't change the trail link: ${e instanceof Error ? e.message : String(e)}`;
   } finally {
     linkingTrail.value = false;
   }
@@ -637,6 +690,7 @@ async function saveType(body: { type?: string; reset_type?: boolean }) {
     showTypeEdit.value = false;
   } catch (e) {
     typeError.value = e instanceof Error ? e.message : "could not save";
+    if (!showTypeEdit.value) notice.value = `Couldn't change the type: ${typeError.value}`;
   } finally {
     savingType.value = false;
   }
@@ -675,8 +729,11 @@ async function submitEdit() {
     );
     activity.value = updated;
     showEdit.value = false;
+    notice.value = null;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    // Inline — this used to set the page error and hide the activity.
+    notice.value = `Edit failed: ${e instanceof Error ? e.message : String(e)}`;
+    showEdit.value = false;
   } finally {
     editing.value = false;
   }
@@ -684,495 +741,293 @@ async function submitEdit() {
 </script>
 
 <template>
-  <div class="detail">
-    <button class="back" @click="router.push('/activities')">← Back to activities</button>
+  <NeonPage title="Activity" back="/activities">
+    <template #trailing>
+      <div v-if="activity" class="hdr-actions">
+        <button class="icon-btn" title="Change activity type" aria-label="Change activity type" @click="openTypeEdit">✎</button>
+        <button v-if="activity.source === 'manual'" class="pill-btn" @click="openEdit">Edit</button>
+      </div>
+    </template>
 
-    <div v-if="error" class="err">{{ error }}</div>
-    <div v-if="loading" class="empty">Loading…</div>
+    <div v-if="notice" class="stale" role="alert" @click="notice = null">
+      <strong>{{ notice }}</strong><em>Dismiss</em>
+    </div>
 
-    <div v-else-if="activity">
-      <header class="head">
-        <div>
-          <h1>{{ activity.name ?? "(untitled)" }}</h1>
-          <p class="meta">
-            <button class="type type-btn" title="Change activity type"
-                    @click="openTypeEdit">{{ typeLabel(activity.type) }} ✎</button>
-            <template v-if="activity.recorded_type">
-              <span class="recorded">(recorded as {{ typeLabel(activity.recorded_type) }}
-                · <button class="link-btn" :disabled="savingType"
-                          @click="saveType({ reset_type: true })">undo</button>)</span>
-            </template>
-            ·
-            {{ fmtDateTime(activity.start_at) }}
-            ·
-            {{ fmtDur(activity.duration_s) }}
-          </p>
+    <template v-if="!activity">
+      <div v-if="loading" class="hero-map placeholder"><span>Loading activity…</span></div>
+      <div v-else-if="error" class="stale" role="alert" @click="load">
+        <strong>Couldn't load this activity</strong><span>{{ error }}</span><em>Tap to retry</em>
+      </div>
+      <p v-else class="muted">Not found.</p>
+    </template>
+
+    <template v-else>
+      <div v-if="error" class="stale" role="alert" @click="load">
+        <strong>Couldn't refresh — showing the saved copy</strong><span>{{ error }}</span><em>Tap to retry</em>
+      </div>
+
+      <!-- Map first. No route → a category-tinted card in the same place. -->
+      <section v-if="activity.polyline" class="hero-map">
+        <div ref="mapEl" class="map"></div>
+        <div class="scrim" aria-hidden="true"></div>
+        <div class="caption">
+          <button class="type" title="Change activity type" @click="openTypeEdit">{{ typeLabel(activity.type) }}</button>
+          <h2>{{ activity.name || typeLabel(activity.type) }}</h2>
+          <p>{{ heroWhen }}</p>
         </div>
-        <button v-if="activity.source === 'manual'" class="edit-btn"
-                @click="openEdit">Edit</button>
-      </header>
+      </section>
+      <section v-else class="hero-map no-route"
+               :style="{ background: `linear-gradient(135deg, ${tintColor}60, #1e2230 55%, #181b27)`, borderColor: tintColor + '4d' }">
+        <span class="big-ic" :style="{ color: tintColor }"><ActivityIcon :type="activity.type" :size="56" /></span>
+        <div class="caption">
+          <button class="type" title="Change activity type" @click="openTypeEdit">{{ typeLabel(activity.type) }}</button>
+          <h2>{{ activity.name || typeLabel(activity.type) }}</h2>
+          <p>{{ heroWhen }}</p>
+        </div>
+      </section>
+
+      <div v-if="activity.polyline" class="map-toolbar">
+        <button class="chip" :class="{ on: mapMode === 'line' }" @click="mapMode = 'line'">Line</button>
+        <button class="chip" :class="{ on: mapMode === 'heatmap' }" :disabled="!hr || hr.points.length === 0"
+                :title="!hr || hr.points.length === 0 ? 'No HR data for this activity' : 'Color the route by HR zone'"
+                @click="mapMode = 'heatmap'">HR heatmap</button>
+        <button v-if="nearbyTrails.length" class="chip" :class="{ on: trailLayerOpen }"
+                @click="trailLayerOpen = !trailLayerOpen">Trails ({{ nearbyTrails.length }})</button>
+      </div>
+      <div v-if="trailLayerOpen && nearbyTrails.length" class="card trail-legend">
+        <p class="hint">Nearby trails — click to pan, checkbox to hide</p>
+        <ul>
+          <li v-for="{ t, mi } in nearbyTrails" :key="t.id">
+            <input type="checkbox" :checked="!hiddenTrailIds.has(t.id)" @change="toggleTrail(t.id)" />
+            <span class="dot" :style="`background:${TRAIL_STATUS_COLOR[t.status ?? 'unknown']}`" />
+            <button class="trail-name" @click="panToTrail(t.id)">{{ t.name }}</button>
+            <span class="trail-meta">{{ t.status ?? 'unknown' }} · {{ mi.toFixed(1) }} mi</span>
+          </li>
+        </ul>
+      </div>
+
+      <p v-if="activity.recorded_type" class="recorded">
+        Recorded as {{ typeLabel(activity.recorded_type) }} ·
+        <button class="link" :disabled="savingType" @click="saveType({ reset_type: true })">Undo</button>
+      </p>
+
+      <div class="bigs">
+        <div v-for="b in bigs" :key="b.label">
+          <div class="big-v">{{ b.value }}<small v-if="b.unit">{{ b.unit }}</small></div>
+          <div class="big-l">{{ b.label }}</div>
+        </div>
+      </div>
+      <div v-if="quiet.length" class="card quiet">
+        <div v-for="q in quiet" :key="q.label">
+          <div class="q-v" :class="{ amber: q.amber }">{{ q.value }}</div>
+          <div class="q-l">{{ q.label }}</div>
+        </div>
+      </div>
+
+      <section v-if="!activity.polyline && activity.source === 'healthconnect'" class="card">
+        <NeonEyebrow style="margin-top: 0">Route</NeonEyebrow>
+        <!-- SA-P3: three different states — withheld, none, never asked. -->
+        <p class="route-empty">{{ routeEmptyText }}</p>
+        <p v-if="activity.route_state !== 'none'" class="hint">
+          Open this activity in the phone app and tap <strong>Fetch route from Health Connect</strong>.
+          Health Connect releases routes one session at a time unless <em>Exercise routes</em> is on for
+          myvitals in Health Connect → App permissions; a browser has no path to the data.
+        </p>
+      </section>
+
+      <section class="card">
+        <NeonEyebrow style="margin-top: 0">Heart rate</NeonEyebrow>
+        <div class="chart">
+          <VChart v-if="hrChartOption" ref="hrChartRef" :option="hrChartOption" autoresize @updateAxisPointer="onHrChartAxisPointer" />
+          <p v-else class="muted">No heart-rate samples for this activity.</p>
+        </div>
+      </section>
+
+      <section v-if="zoneBreakdown" class="card">
+        <NeonEyebrow style="margin-top: 0">Time in zone</NeonEyebrow>
+        <div class="zbar" role="img" :aria-label="zoneBreakdown.map((z) => `${z.name} ${z.pct.toFixed(0)}%`).join(', ')">
+          <span v-for="z in zoneBreakdown" :key="z.name" :style="{ width: z.pct + '%', background: z.color }" />
+        </div>
+        <div v-for="z in zoneBreakdown" :key="z.name" class="zrow">
+          <i :style="{ background: z.color }" />
+          <span class="zn">{{ z.name }}</span>
+          <span class="zr">{{ z.range }}</span>
+          <span class="zt">{{ fmtDur(z.seconds) }}</span>
+          <span class="zp">{{ z.pct.toFixed(0) }}%</span>
+        </div>
+        <p v-if="zoneData && !zoneData.sampled" class="hint">
+          No heart-rate series was recorded, so the whole duration is attributed to the zone its
+          average falls in. Treat the split as coarse.
+        </p>
+        <p v-if="maxHrNote" class="hint">{{ maxHrNote }}</p>
+      </section>
+
+      <section v-if="hrZoneStreamOption" class="card">
+        <NeonEyebrow style="margin-top: 0">Zones over time</NeonEyebrow>
+        <div class="chart"><VChart ref="streamChartRef" :option="hrZoneStreamOption" autoresize @updateAxisPointer="onStreamChartAxisPointer" /></div>
+      </section>
+
+      <section class="card">
+        <NeonEyebrow style="margin-top: 0">Trail</NeonEyebrow>
+        <p class="hint" v-if="activity.trail_name">Linked to <strong>{{ activity.trail_name }}</strong>
+          <RouterLink to="/trails" class="link-a">· view trails</RouterLink></p>
+        <p class="hint" v-else>Not linked to a trail yet.</p>
+        <div class="trail-pick">
+          <select v-model="trailSelection" class="field-in" aria-label="Trail">
+            <option value="">— None —</option>
+            <option v-for="t in trails" :key="t.id" :value="t.id">{{ t.name }}{{ t.city ? ` (${t.city})` : '' }}</option>
+          </select>
+          <button class="primary" :disabled="linkingTrail" @click="applyTrailLink">{{ linkingTrail ? "Saving…" : "Update" }}</button>
+          <span v-if="linkedFlag" class="saved">saved</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <NeonEyebrow style="margin-top: 0">Notes & tags</NeonEyebrow>
+        <div class="tag-row">
+          <span v-for="t in tags" :key="t" class="tag-chip">{{ t }}
+            <button class="tag-x" type="button" :aria-label="`Remove tag ${t}`" @click="removeTag(t)">×</button>
+          </span>
+          <input v-model="tagInput" class="field-in tag-input" placeholder="add tag (Enter)"
+                 @keydown.enter.prevent="addTag" @keydown.comma.prevent="addTag" />
+        </div>
+        <textarea v-model="notesInput" class="field-in notes" rows="4" placeholder="Felt strong, tail wind on the climb, etc." />
+        <div class="notes-actions">
+          <button class="primary" :disabled="savingNotes" @click="saveNotes">{{ savingNotes ? "Saving…" : "Save" }}</button>
+          <span v-if="savedFlag" class="saved">saved</span>
+        </div>
+      </section>
 
       <!-- Type correction (any source) -->
       <div v-if="showTypeEdit" class="modal-backdrop" @click.self="showTypeEdit = false">
-        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="type-edit-title"
-             @keydown.esc="showTypeEdit = false">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="type-edit-title" @keydown.esc="showTypeEdit = false">
           <h3 id="type-edit-title">What was this?</h3>
-          <p class="hint">
-            Watches guess the activity type. Pick what it really was — stats,
-            icons and training load follow. A re-sync won't change it back.
-          </p>
-          <div v-if="typeError" class="err">{{ typeError }}</div>
+          <p class="hint">Watches guess the activity type. Pick what it really was — stats, icons and training
+            load follow. A re-sync won't change it back.</p>
+          <p v-if="typeError" class="warn">{{ typeError }}</p>
           <div class="type-grid">
-            <button v-for="c in typeChoices" :key="c.type"
-                    :class="['type-choice', { on: pickedType === c.type }]"
-                    :aria-pressed="pickedType === c.type"
-                    @click="pickedType = c.type">{{ c.label }}</button>
+            <button v-for="c in typeChoices" :key="c.type" :class="['type-choice', { on: pickedType === c.type }]"
+                    :aria-pressed="pickedType === c.type" @click="pickedType = c.type">{{ c.label }}</button>
           </div>
           <div class="modal-actions">
-            <button class="ghost" :disabled="savingType"
-                    @click="showTypeEdit = false">Cancel</button>
-            <button class="primary"
-                    :disabled="savingType || !pickedType || pickedType === activity.type"
-                    @click="saveType({ type: pickedType })">
-              {{ savingType ? 'Saving…' : 'Save' }}
-            </button>
+            <button class="ghost" :disabled="savingType" @click="showTypeEdit = false">Cancel</button>
+            <button class="primary" :disabled="savingType || !pickedType || pickedType === activity.type"
+                    @click="saveType({ type: pickedType })">{{ savingType ? 'Saving…' : 'Save' }}</button>
           </div>
         </div>
       </div>
 
       <!-- Edit dialog (manual activities only) -->
       <div v-if="showEdit" class="modal-backdrop" @click.self="showEdit = false">
-        <div class="modal">
+        <div class="modal" role="dialog" aria-modal="true">
           <h3>Edit activity</h3>
-          <p class="hint">
-            Adjust name, duration, or end time. Avg/max HR will be
-            re-scanned over the new window.
-          </p>
-          <label class="field">
-            <span>Name</span>
-            <input v-model="editName" type="text" maxlength="120"
-                   :disabled="editing" />
-          </label>
-          <label class="field">
-            <span>Duration (minutes)</span>
-            <input v-model.number="editDuration" type="number"
-                   min="1" max="1440" :disabled="editing" />
-          </label>
-          <label class="field">
-            <span>Ended at</span>
-            <input v-model="editEndedAt" type="time" :disabled="editing" />
-            <small class="hint" style="margin: 0.2rem 0 0;">
-              Anchored to {{ fmtDateTime(activity.start_at).split(',')[0] }}
-              — change if you mis-timed it.
-            </small>
-          </label>
+          <p class="hint">Adjust name, duration, or end time. Avg/max HR will be re-scanned over the new window.</p>
+          <label class="field"><span>Name</span><input v-model="editName" class="field-in" type="text" maxlength="120" :disabled="editing" /></label>
+          <label class="field"><span>Duration (minutes)</span><input v-model.number="editDuration" class="field-in" type="number" min="1" max="1440" :disabled="editing" /></label>
+          <label class="field"><span>Ended at</span><input v-model="editEndedAt" class="field-in" type="time" :disabled="editing" />
+            <small class="hint">Anchored to {{ fmtDateTime(activity.start_at).split(',')[0] }} — change if you mis-timed it.</small></label>
           <div class="modal-actions">
-            <button class="ghost" :disabled="editing"
-                    @click="showEdit = false">Cancel</button>
-            <button class="primary"
-                    :disabled="editing || !editName.trim() || !editDuration || editDuration <= 0"
-                    @click="submitEdit">
-              {{ editing ? 'Saving…' : 'Save' }}
-            </button>
+            <button class="ghost" :disabled="editing" @click="showEdit = false">Cancel</button>
+            <button class="primary" :disabled="editing || !editName.trim() || !editDuration || editDuration <= 0"
+                    @click="submitEdit">{{ editing ? 'Saving…' : 'Save' }}</button>
           </div>
         </div>
       </div>
-
-      <div class="grid">
-        <Card title="Stats">
-          <dl class="kv">
-            <div><dt>Distance</dt><dd>{{ fmtKm(activity.distance_m) }}</dd></div>
-            <div v-if="activity.elevation_gain_m !== null"><dt>Elevation</dt><dd>{{ fmtElevation(activity.elevation_gain_m) }}</dd></div>
-            <div v-if="activity.avg_hr"><dt>Avg HR</dt><dd>{{ Math.round(activity.avg_hr) }} bpm</dd></div>
-            <div v-if="activity.max_hr"><dt>Max HR</dt><dd>{{ Math.round(activity.max_hr) }} bpm</dd></div>
-            <div v-if="activity.avg_power_w"><dt>Avg power</dt><dd>{{ Math.round(activity.avg_power_w) }} W</dd></div>
-            <div v-if="activity.max_power_w"><dt>Max power</dt><dd>{{ Math.round(activity.max_power_w) }} W</dd></div>
-            <div v-if="activity.kcal"><dt>Calories</dt><dd>{{ Math.round(activity.kcal) }} kcal</dd></div>
-            <div v-if="activity.suffer_score"><dt>Suffer</dt><dd>{{ Math.round(activity.suffer_score) }}</dd></div>
-          </dl>
-        </Card>
-
-        <Card v-if="activity.polyline" title="Route">
-          <div class="map-toolbar">
-            <button class="map-toggle" :class="{ on: mapMode === 'line' }"
-                    @click="mapMode = 'line'">Line</button>
-            <button class="map-toggle" :class="{ on: mapMode === 'heatmap' }"
-                    @click="mapMode = 'heatmap'"
-                    :disabled="!hr || hr.points.length === 0"
-                    :title="!hr || hr.points.length === 0 ? 'No HR data for this activity' : 'Color the route by HR zone'">
-              HR heatmap
-            </button>
-            <button v-if="nearbyTrails.length"
-                    class="map-toggle"
-                    :class="{ on: trailLayerOpen }"
-                    @click="trailLayerOpen = !trailLayerOpen"
-                    :title="`${nearbyTrails.length} trail(s) within ${25} mi`">
-              Trails ({{ nearbyTrails.length }})
-            </button>
-            <span v-if="mapMode === 'heatmap'" class="zone-legend">
-              <span v-for="(c, i) in ZONE_COLORS" :key="i"
-                    class="zone-swatch" :style="`background:${c}`"
-                    :title="`Z${i+1}`"/>
-              <span class="zone-legend-text">Z1 → Z5</span>
-            </span>
-          </div>
-          <div v-if="trailLayerOpen && nearbyTrails.length" class="trail-legend">
-            <p class="trail-legend-hint">Nearby trails — click to pan, checkbox to hide</p>
-            <ul>
-              <li v-for="{ t, mi } in nearbyTrails" :key="t.id">
-                <input type="checkbox"
-                       :checked="!hiddenTrailIds.has(t.id)"
-                       @change="toggleTrail(t.id)"/>
-                <span class="trail-status-dot"
-                      :style="`background:${ TRAIL_STATUS_COLOR[t.status ?? 'unknown'] }`"
-                      :title="t.status ?? 'unknown'"/>
-                <button class="trail-name" @click="panToTrail(t.id)">{{ t.name }}</button>
-                <span class="trail-meta">
-                  {{ t.status ?? 'unknown' }}{{ t.city ? ' · ' + t.city : '' }} · {{ mi.toFixed(1) }} mi
-                </span>
-              </li>
-            </ul>
-          </div>
-          <div ref="mapEl" class="map"></div>
-        </Card>
-
-        <Card v-else-if="activity.source === 'healthconnect'" title="Route">
-          <!--
-            SA-P3 — the Route card when there is no route. Until now this
-            card simply was not rendered without a polyline, which is why a
-            walk whose GPS track was sitting in Health Connect read as a
-            broken map rather than as missing data. Three states, and they
-            are not interchangeable: a track that exists and is withheld, a
-            session that genuinely has none, and a session nobody has asked
-            about yet.
-
-            Only for `healthconnect`. Strava and Garmin either send a track
-            or never had one, and there is no second place to go and ask,
-            so a card there would be an explanation with no action.
-
-            The action lives on the PHONE, and this says so rather than
-            offering a button that cannot work: the route is in Health
-            Connect on the device, the browser has no path to it, and
-            Google requires the read to happen while the user is engaged
-            with the app's own UI.
-          -->
-          <p class="route-empty">{{ routeEmptyText }}</p>
-          <p v-if="activity.route_state !== 'none'" class="route-empty hint">
-            Open this activity in the phone app and tap
-            <strong>Fetch route from Health Connect</strong>. Health Connect will
-            ask about this session specifically — routes are released one at a
-            time unless <em>Exercise routes</em> is switched on for myvitals in
-            Health Connect &rarr; App permissions. Either way the asking has to
-            happen on the phone; a browser has no path to the data.
-          </p>
-        </Card>
-
-        <Card v-if="hrZoneStreamOption" title="HR zones over time">
-          <div class="chart"><VChart ref="streamChartRef" :option="hrZoneStreamOption" autoresize @updateAxisPointer="onStreamChartAxisPointer"/></div>
-        </Card>
-
-        <Card v-if="hrZonePieOption" title="HR zone distribution">
-          <div class="chart" style="height: 240px;"><VChart :option="hrZonePieOption" autoresize/></div>
-        </Card>
-
-        <Card title="Heart rate during activity">
-          <div class="chart">
-            <VChart v-if="hrChartOption" ref="hrChartRef" :option="hrChartOption" autoresize @updateAxisPointer="onHrChartAxisPointer"/>
-            <div v-else class="empty">No HR data captured during this window</div>
-          </div>
-        </Card>
-
-        <Card v-if="zoneBreakdown" title="HR zones">
-          <div class="zones">
-            <div v-for="z in zoneBreakdown" :key="z.name" class="zone">
-              <div class="zone-label">{{ z.name }} <span class="zone-range">{{ z.range }}</span></div>
-              <div class="zone-bar"><div class="zone-fill" :style="{ width: z.pct + '%', background: z.color }"></div></div>
-              <div class="zone-pct">{{ fmtDur(z.seconds) }} · {{ z.pct.toFixed(0) }}%</div>
-            </div>
-          </div>
-          <p v-if="zoneData && !zoneData.sampled" class="hint">
-            No heart-rate series was recorded for this session, so the whole
-            duration is attributed to the zone its average heart rate falls in.
-            Treat the split as coarse.
-          </p>
-          <p v-if="maxHrNote" class="hint">{{ maxHrNote }}</p>
-        </Card>
-
-        <Card title="Trail">
-          <p v-if="activity?.trail_name" class="hint">
-            Linked to <strong>{{ activity.trail_name }}</strong>
-            <RouterLink to="/trails" class="trail-link">· view trail</RouterLink>
-          </p>
-          <p v-else class="hint">Not linked to any trail yet.</p>
-          <div class="trail-pick">
-            <select v-model="trailSelection" class="trail-select">
-              <option value="">— None —</option>
-              <option v-for="t in trails" :key="t.id" :value="t.id">
-                {{ t.name }}{{ t.city ? ` (${t.city})` : '' }}
-              </option>
-            </select>
-            <button class="primary" :disabled="linkingTrail" @click="applyTrailLink">
-              {{ linkingTrail ? "Saving…" : "Update" }}
-            </button>
-            <span v-if="linkedFlag" class="saved">saved</span>
-          </div>
-          <p class="hint" style="font-size: 0.7rem; color: var(--muted-2)">
-            Activities auto-link to the closest trail within 2 km of the start
-            point. Use this to override or fill in cases the auto-link missed.
-          </p>
-        </Card>
-
-        <Card title="Notes & tags">
-          <div class="tag-row">
-            <span v-for="t in tags" :key="t" class="tag-chip">
-              {{ t }}
-              <button class="tag-x" @click="removeTag(t)" type="button">×</button>
-            </span>
-            <input
-              v-model="tagInput"
-              @keydown.enter.prevent="addTag"
-              @keydown.comma.prevent="addTag"
-              placeholder="add tag (Enter)"
-              class="tag-input"
-            />
-          </div>
-          <textarea
-            v-model="notesInput"
-            placeholder="Felt strong, tail wind on the climb, etc."
-            class="notes-area"
-            rows="4"
-          />
-          <div class="notes-actions">
-            <button class="primary" :disabled="savingNotes" @click="saveNotes">
-              {{ savingNotes ? "Saving…" : "Save" }}
-            </button>
-            <span v-if="savedFlag" class="saved">saved</span>
-          </div>
-        </Card>
-      </div>
-    </div>
-  </div>
+    </template>
+  </NeonPage>
 </template>
 
 <style scoped>
-.back {
-  background: transparent; color: var(--accent); border: 0; cursor: pointer;
-  padding: 0.4rem 0; font-size: 0.9rem; margin-bottom: 0.5rem;
-}
-.head { margin-bottom: 1rem; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
-.head h1 { margin: 0; }
-.edit-btn {
-  background: transparent; border: 1px solid var(--line, #2a3445);
-  color: var(--text, #e6eaf2); padding: 0.4rem 0.9rem; border-radius: 6px;
-  cursor: pointer; font-size: 0.85rem;
-}
-.edit-btn:hover { background: rgba(255, 255, 255, 0.06); }
-.type-btn { background: none; border: 0; padding: 0.2rem 0; cursor: pointer; font: inherit; }
-.type-btn:hover { text-decoration: underline; }
-.recorded { color: var(--muted, #94a3b8); font-size: 0.8rem; }
-.link-btn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
-.type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: 0.4rem; margin-bottom: 1rem; }
-.type-choice {
-  min-height: 44px; padding: 0.5rem; border-radius: 8px; cursor: pointer;
-  border: 1px solid var(--border, rgba(148, 163, 184, 0.3)); background: none; color: inherit; font: inherit;
-}
-.type-choice.on { border-color: var(--accent); background: rgba(56, 189, 248, 0.12); font-weight: 600; }
-.modal-backdrop {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 100; padding: 1rem;
-}
-.modal {
-  background: var(--surface, #151d29); border: 1px solid var(--border, #1f2937);
-  border-radius: 10px; padding: 1.2rem; max-width: 420px; width: 100%;
-}
-.modal h3 { margin: 0 0 0.5rem; }
-.modal .hint { color: var(--muted, #94a3b8); font-size: 0.85rem; margin: 0 0 1rem; }
-.modal .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.8rem; }
-.modal .field > span { font-size: 0.8rem; color: var(--muted, #94a3b8); }
-.modal .field input {
-  background: var(--bg-1, #0f1620); border: 1px solid var(--line, #2a3445);
-  color: var(--text, #e6eaf2);
-  padding: 0.5rem 0.7rem; border-radius: 6px; font-size: 0.95rem;
-}
-.modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
-.modal-actions button.primary, .modal-actions button.ghost {
-  padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;
-  font-size: 0.9rem; border: 1px solid var(--line, #2a3445);
-}
-.modal-actions button.primary { background: var(--accent, #ef4444); color: #fff; border-color: var(--accent, #ef4444); }
-.modal-actions button.ghost { background: transparent; color: var(--text, #e6eaf2); }
-.modal-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
-.meta { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.9rem; }
-.type { color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem; }
+.hdr-actions { display: flex; gap: 8px; align-items: center; }
+.icon-btn { width: 42px; height: 42px; border-radius: 50%; background: rgba(40, 230, 255, .14);
+  border: 1px solid rgba(40, 230, 255, .45); color: var(--rn-cyan); font-size: 16px; cursor: pointer; }
+.pill-btn { min-height: 40px; padding: 0 16px; border-radius: 999px; background: rgba(40, 230, 255, .14);
+  border: 1px solid rgba(40, 230, 255, .45); color: var(--rn-cyan); font: inherit; font-weight: 700; cursor: pointer; }
 
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; }
+.stale { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin-bottom: 12px; border-radius: 14px;
+  background: rgba(255, 181, 46, .10); border: 1px solid rgba(255, 181, 46, .32); cursor: pointer; }
+.stale strong { color: var(--rn-amber); font-size: 13px; }
+.stale span { color: var(--rn-mut); font-size: 12px; }
+.stale em { color: var(--rn-cyan); font-size: 12px; font-style: normal; font-weight: 600; }
+.muted { color: var(--rn-mut); font-size: 13px; }
+.hint { color: var(--rn-mut); font-size: 12px; margin: 6px 0 0; }
+.warn { color: var(--rn-amber); font-size: 12px; }
 
-.kv { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.4rem 1rem; margin: 0; }
-.kv > div { display: flex; flex-direction: column; }
-dt { color: var(--muted-2); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
-dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
+.hero-map { position: relative; height: 300px; border-radius: 24px; overflow: hidden; margin-bottom: 12px;
+  border: 1px solid rgba(40, 230, 255, .22); background: var(--rn-card); }
+.hero-map.placeholder { display: flex; align-items: center; justify-content: center; color: var(--rn-mut); font-size: 13px; }
+.hero-map.no-route { height: 190px; border: 1px solid; }
+.map { position: absolute; inset: 0; z-index: 0; }
+.scrim { position: absolute; left: 0; right: 0; bottom: 0; height: 140px; z-index: 400; pointer-events: none;
+  background: linear-gradient(transparent, rgba(15, 17, 24, .92)); }
+.caption { position: absolute; left: 16px; right: 16px; bottom: 14px; z-index: 401; }
+.caption .type { background: none; border: 0; padding: 0; cursor: pointer; color: var(--rn-cyan);
+  font-family: 'Space Grotesk', monospace; font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.caption h2 { margin: 2px 0; font-size: 24px; font-weight: 800; line-height: 1.15; color: var(--rn-ink); }
+.caption p { margin: 0; font-size: 13px; color: rgba(236, 236, 245, .8); }
+.big-ic { position: absolute; top: 18px; right: 18px; opacity: .6; }
+.map-toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.chip { min-height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--rn-line); background: var(--rn-card);
+  color: var(--rn-mut); font: inherit; font-size: 12px; cursor: pointer; }
+.chip.on { background: rgba(40, 230, 255, .14); border-color: rgba(40, 230, 255, .45); color: var(--rn-cyan); font-weight: 700; }
+.chip:disabled { opacity: .45; cursor: default; }
+.recorded { color: var(--rn-mut); font-size: 12px; margin: 0 0 8px; }
+.link { background: none; border: 0; padding: 0; color: var(--rn-cyan); cursor: pointer; font: inherit; font-weight: 600; }
+.link-a { color: var(--rn-cyan); text-decoration: none; }
 
-.map { height: 360px; width: 100%; border-radius: 6px; }
-.map-toolbar {
-  display: flex; gap: 6px; align-items: center;
-  margin-bottom: 6px; flex-wrap: wrap;
-}
-.map-toggle {
-  font-size: 0.75rem; padding: 3px 10px; border-radius: 999px;
-  background: var(--surface, #1e293b); color: var(--muted, #94a3b8);
-  border: 1px solid var(--border, #334155); cursor: pointer;
-}
-.map-toggle.on {
-  background: var(--accent, #a78bfa); color: white;
-  border-color: var(--accent, #a78bfa);
-}
-.map-toggle:disabled { opacity: 0.4; cursor: not-allowed; }
-.zone-legend {
-  display: inline-flex; gap: 2px; align-items: center;
-  margin-left: auto;
-}
-.zone-swatch {
-  width: 14px; height: 4px; border-radius: 2px;
-}
-.zone-legend-text {
-  font-size: 0.7rem; color: var(--muted, #94a3b8); margin-left: 4px;
-}
-.trail-legend {
-  background: var(--surface, #1e293b);
-  border: 1px solid var(--border, #334155);
-  border-radius: 6px;
-  padding: 6px 10px;
-  margin-bottom: 6px;
-  max-height: 180px;
-  overflow-y: auto;
-}
-.trail-legend-hint {
-  font-size: 0.7rem; color: var(--muted, #94a3b8);
-  margin: 0 0 4px 0;
-}
-.trail-legend ul {
-  list-style: none; margin: 0; padding: 0;
-}
-.trail-legend li {
-  display: flex; align-items: center; gap: 6px;
-  padding: 2px 0; font-size: 0.78rem;
-}
-.trail-status-dot {
-  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-  flex: 0 0 auto;
-}
-.trail-name {
-  background: none; border: none; padding: 0;
-  color: var(--accent, #a78bfa); cursor: pointer; font-size: 0.78rem;
-  text-align: left;
-}
-.trail-name:hover { text-decoration: underline; }
-.trail-meta {
-  font-size: 0.7rem; color: var(--muted, #94a3b8); margin-left: auto;
-}
-:deep(.start-marker > div) { width: 14px; height: 14px; border-radius: 50%; background: #22c55e; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.5); }
-:deep(.end-marker > div)   { width: 14px; height: 14px; border-radius: 50%; background: #ef4444; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.5); }
+.bigs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 4px 0 14px; }
+.big-v { font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 30px; letter-spacing: -.5px; line-height: 1.1; }
+.big-v small { color: var(--rn-mut); font-size: 12px; margin-left: 3px; font-weight: 500; }
+.big-l, .q-l { font-family: 'Space Grotesk', monospace; font-size: 10px; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--rn-mut); }
+.card { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px; padding: 14px; margin-bottom: 12px; }
+.quiet { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.q-v { font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 15px; }
+.q-v.amber { color: var(--rn-amber); }
+.route-empty { margin: 0; line-height: 1.5; }
 
-.chart { width: 100%; height: 260px; }
+.chart { width: 100%; height: 240px; }
 .chart > * { width: 100%; height: 100%; }
+.zbar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--rn-track); margin-bottom: 10px; }
+.zbar span { height: 100%; }
+.zrow { display: grid; grid-template-columns: 10px 1fr auto 56px 42px; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
+.zrow i { width: 10px; height: 10px; border-radius: 3px; }
+.zr, .zp { color: var(--rn-mut); font-size: 11px; font-family: 'Space Grotesk', monospace; text-align: right; }
+.zt { font-family: 'Space Grotesk', monospace; text-align: right; }
 
-.zones { display: flex; flex-direction: column; gap: 0.4rem; }
-.zone { display: grid; grid-template-columns: 110px 1fr 50px; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--muted); }
-.zone-label { color: var(--text); }
-.zone-bar { height: 12px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
-.zone-fill { height: 100%; transition: width 0.3s; }
-.zone-range { color: var(--muted-2); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
-.zone-pct { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.trail-legend ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.trail-legend li { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 13px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.trail-name { background: none; border: 0; padding: 0; color: var(--rn-cyan); cursor: pointer; font: inherit; text-align: left; }
+.trail-meta { margin-left: auto; color: var(--rn-mut); font-size: 11px; }
+.trail-pick { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.field-in { background: var(--rn-bg); border: 1px solid var(--rn-line); color: var(--rn-ink); border-radius: 10px;
+  padding: 8px 10px; font: inherit; font-size: 14px; }
+select.field-in { flex: 1; min-width: 12rem; }
+.notes { width: 100%; box-sizing: border-box; resize: vertical; margin-top: 8px; }
+.tag-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tag-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px;
+  background: rgba(111, 123, 255, .14); border: 1px solid rgba(111, 123, 255, .4); font-size: 12px; }
+.tag-x { background: none; border: 0; color: var(--rn-mut); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
+.tag-input { border-radius: 999px; padding: 4px 12px; font-size: 12px; min-width: 120px; }
+.notes-actions { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+.primary { background: var(--rn-cyan); color: var(--rn-onacc); border: 0; border-radius: 10px; padding: 8px 16px;
+  font: inherit; font-weight: 700; cursor: pointer; }
+.primary:disabled { opacity: .5; cursor: default; }
+.ghost { background: transparent; color: var(--rn-ink); border: 1px solid var(--rn-line); border-radius: 10px; padding: 8px 16px; font: inherit; cursor: pointer; }
+.saved { color: var(--rn-lime); font-size: 13px; }
 
-.empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
-.route-empty { color: var(--text); margin: 0 0 0.5rem; line-height: 1.5; }
-.route-empty.hint { color: var(--muted-2); font-size: 0.85rem; margin-bottom: 0; }
-.err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); display: flex; align-items: center;
+  justify-content: center; z-index: 1000; padding: 16px; }
+.modal { background: var(--rn-high); border: 1px solid var(--rn-line); border-radius: 18px; padding: 18px; max-width: 440px; width: 100%; }
+.modal h3 { margin: 0 0 6px; }
+.field { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+.field > span { font-size: 12px; color: var(--rn-mut); }
+.type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: 6px; margin: 10px 0; }
+.type-choice { min-height: 44px; border-radius: 10px; border: 1px solid var(--rn-line); background: none; color: inherit; font: inherit; cursor: pointer; }
+.type-choice.on { border-color: rgba(40, 230, 255, .55); background: rgba(40, 230, 255, .12); font-weight: 700; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 
-.tag-row { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.6rem; }
-.tag-chip {
-  background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
-  border-radius: 100px; padding: 0.15rem 0.6rem; font-size: 0.8rem;
-  display: inline-flex; align-items: center; gap: 0.3rem;
-}
-.tag-x { background: transparent; color: var(--muted-2); border: 0; cursor: pointer; padding: 0; font-size: 1rem; line-height: 1; }
-.tag-x:hover { color: var(--bad); }
-.tag-input {
-  background: var(--surface); color: var(--text); border: 1px solid var(--border);
-  border-radius: 100px; padding: 0.2rem 0.7rem; font-size: 0.8rem; min-width: 120px; font-family: inherit;
-}
-.trail-pick { display: flex; gap: 0.5rem; align-items: center; margin: 0.4rem 0; flex-wrap: wrap; }
-.trail-select {
-  flex: 1; min-width: 12rem;
-  background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 6px; padding: 0.4rem 0.55rem;
-  color: var(--text); font-family: inherit; font-size: 0.85rem;
-}
-.trail-link { color: var(--accent, #ef4444); text-decoration: none; margin-left: 0.4rem; }
-.trail-link:hover { text-decoration: underline; }
-
-.notes-area {
-  background: var(--surface); color: var(--text); border: 1px solid var(--border);
-  border-radius: 6px; padding: 0.5rem 0.7rem; width: 100%; font-family: inherit;
-  font-size: 0.9rem; resize: vertical;
-}
-.notes-actions { margin-top: 0.6rem; display: flex; gap: 0.6rem; align-items: center; }
-.primary { background: var(--accent); color: var(--accent-text); border: 0; border-radius: 6px; padding: 0.4rem 0.9rem; cursor: pointer; font-weight: 500; }
-.primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.saved { color: var(--good); font-size: 0.85rem; }
-
-/* ── Vitality Neon — scoped overrides, neon theme only ───────────────────
-   Classic/light/dark are untouched: every rule below is gated behind
-   html[data-theme="neon"]. The trailing class still gets the scope attr,
-   so these stay component-scoped AND neon-only. */
-html[data-theme="neon"] .detail {
-  --rn-cyan: #28e6ff; --rn-amber: #ffb52e; --rn-ink: #ececf5;
-  --rn-mut: #9b9bb0; --rn-track: #272a3b;
-  min-height: 100vh; margin: calc(-1 * var(--main-pt, 1.25rem)) calc(-1 * var(--main-px, 1.5rem)) 0; padding: 18px 22px 32px;
-  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
-  color: var(--rn-ink);
-  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
-}
-html[data-theme="neon"] .detail .back { color: var(--rn-cyan); }
-html[data-theme="neon"] .detail .head h1 {
-  letter-spacing: -0.5px;
-  text-shadow: 0 0 18px rgba(40, 230, 255, 0.28);
-}
-html[data-theme="neon"] .detail .type { color: var(--rn-cyan); }
-
-/* Big numeric readouts → Space Grotesk mono numerics */
-html[data-theme="neon"] .detail dd,
-html[data-theme="neon"] .detail .zone-pct {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-}
-
-/* Map + chart shell — neon edge glow on the route card's accent */
-html[data-theme="neon"] .detail .map {
-  box-shadow: 0 0 0 1px rgba(40, 230, 255, 0.18),
-              0 8px 28px rgba(40, 230, 255, 0.10);
-}
-
-/* Active map/trail toggle pills glow cyan instead of violet */
-html[data-theme="neon"] .detail .map-toggle.on {
-  background: rgba(40, 230, 255, 0.16);
-  color: var(--rn-cyan);
-  border-color: rgba(40, 230, 255, 0.55);
-  box-shadow: 0 0 10px rgba(40, 230, 255, 0.32);
-}
-html[data-theme="neon"] .detail .trail-name { color: var(--rn-cyan); }
-html[data-theme="neon"] .detail .trail-link { color: var(--rn-cyan); }
-
-/* Zone bars get a soft inner glow track */
-html[data-theme="neon"] .detail .zone-fill {
-  filter: drop-shadow(0 0 4px currentColor);
-}
-
-/* Route start/end markers in neon palette */
-html[data-theme="neon"] .detail :deep(.start-marker > div) {
-  background: #5dff3b; box-shadow: 0 0 8px rgba(93, 255, 59, 0.7);
-}
-html[data-theme="neon"] .detail :deep(.end-marker > div) {
-  background: #ff5d7a; box-shadow: 0 0 8px rgba(255, 93, 122, 0.7);
-}
+:deep(.start-marker > div) { width: 14px; height: 14px; border-radius: 50%; background: #5dff3b; border: 2px solid white; box-shadow: 0 0 8px rgba(93, 255, 59, .7); }
+:deep(.end-marker > div) { width: 14px; height: 14px; border-radius: 50%; background: #ececf5; border: 2px solid #0f1118; box-shadow: 0 0 6px rgba(0, 0, 0, .5); }
 </style>

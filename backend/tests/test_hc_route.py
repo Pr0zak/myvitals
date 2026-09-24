@@ -369,7 +369,9 @@ class TestTheEmptyStateExistsOnBothSurfaces:
 
     def test_the_web_renders_a_route_card_without_a_polyline(self):
         web = self._read("frontend/src/views/ActivityDetail.vue")
-        assert "v-else-if=\"activity.source === 'healthconnect'\"" in web
+        # UI-5: the map is the hero now, so the card is gated on the
+        # missing polyline explicitly rather than being the map's v-else-if.
+        assert "!activity.polyline && activity.source === 'healthconnect'" in web
         assert "routeEmptyText" in web
 
     def test_the_phone_renders_one_too(self):

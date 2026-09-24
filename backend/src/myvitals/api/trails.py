@@ -140,7 +140,7 @@ async def list_trails(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
         select(models.Trail).order_by(models.Trail.name)
     )).scalars().all()
     if not trails:
-        return {"count": 0, "trails": []}
+        return {"count": 0, "trails": [], **status_summary([])}
 
     # DNIS — composes a top-of-page link to RainoutLine's full status
     # board. (Per-trail permalinks are still emitted in case the UI
@@ -223,7 +223,30 @@ async def list_trails(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
                 if dnis else None
             ),
         })
-    return {"count": len(out), "trails": out, "dnis_url": dnis_url}
+    return {
+        "count": len(out), "trails": out, "dnis_url": dnis_url,
+        **status_summary(out),
+    }
+
+
+def status_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """UI-5 — the Trails hero's numbers, counted once here.
+
+    `status_counts` buckets every trail into open / delayed / closed /
+    other ("other" is anything RainoutLine reports that is none of the
+    three, plus a trail with no snapshot yet — unknown is not closed).
+    `synced_at` is the newest snapshot fetch across all trails: when the
+    board was last read, which is what "synced 4m ago" claims.
+    """
+    counts = {"open": 0, "delayed": 0, "closed": 0, "other": 0}
+    synced: datetime | None = None
+    for r in rows:
+        st = r.get("status")
+        counts[st if st in ("open", "delayed", "closed") else "other"] += 1
+        f = r.get("fetched_at")
+        if f is not None and (synced is None or f > synced):
+            synced = f
+    return {"status_counts": counts, "synced_at": synced}
 
 
 # ------------------------------------------------------------------

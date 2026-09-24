@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date as date_type, datetime, timedelta, timezone
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -283,8 +283,22 @@ async def strava_disconnect(db: AsyncSession = Depends(get_session)) -> dict[str
 
 # --- Read activities (any source) ---
 
+def _route_for(a: models.Activity, route: str) -> str | None:
+    """The polyline to send for `route` mode (see list_activities)."""
+    if route == "none":
+        return None
+    if route == "simple":
+        if a.polyline_simple:
+            return a.polyline_simple
+        if not a.polyline:
+            return None
+        encoded, _, _ = geo.simplify_encoded(a.polyline)
+        return encoded or None
+    return a.polyline
+
+
 def _activity_to_out(
-    a: models.Activity, trail_name: str | None = None,
+    a: models.Activity, trail_name: str | None = None, route: str = "full",
 ) -> ActivityOut:
     return ActivityOut(
         source=a.source, source_id=a.source_id, type=a.type, name=a.name,
@@ -292,7 +306,7 @@ def _activity_to_out(
         distance_m=a.distance_m, elevation_gain_m=a.elevation_gain_m,
         avg_hr=a.avg_hr, max_hr=a.max_hr,
         avg_power_w=a.avg_power_w, max_power_w=a.max_power_w,
-        kcal=a.kcal, suffer_score=a.suffer_score, polyline=a.polyline,
+        kcal=a.kcal, suffer_score=a.suffer_score, polyline=_route_for(a, route),
         route_state=a.route_state,
         recorded_type=a.recorded_type,
         notes=a.notes, tags=a.tags,
@@ -416,6 +430,52 @@ async def activities_stats(
             "kcal": pct(total_kcal, pkcal),
         },
     )
+
+
+@router.get("/activities/ytd", dependencies=[Depends(require_any)])
+async def activities_ytd(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    """UI-5 — year-to-date totals vs the same day last year, the cumulative
+    distance lines the feed hero draws, and per-week totals for the feed's
+    week headers.
+
+    Counts every finished session the feed shows: activities from any
+    source plus completed strength days, minus cardio days auto-completed
+    by an activity (that activity is already counted). Strength time is
+    the NET duration (pause removed), the same figure the feed prints.
+    Days are the user's LOCAL days. See analytics/activity_ytd.py.
+    """
+    from ..analytics import activity_ytd, energy
+    from ..localtime import local_date, local_midnight, local_today
+
+    today = local_today()
+    since_day = date_type(today.year - 1, 1, 1)
+    since = local_midnight(since_day)
+
+    entries: list[activity_ytd.Entry] = []
+    acts = (await db.execute(
+        select(
+            models.Activity.start_at, models.Activity.duration_s,
+            models.Activity.distance_m, models.Activity.elevation_gain_m,
+        ).where(models.Activity.start_at >= since)
+    )).all()
+    for start_at, dur, dist, elev in acts:
+        entries.append(activity_ytd.Entry(
+            day=local_date(start_at), duration_s=int(dur or 0),
+            distance_m=dist, elevation_m=elev,
+        ))
+
+    workouts = (await db.execute(
+        select(models.StrengthWorkout)
+        .where(models.StrengthWorkout.date >= since_day)
+        .where(models.StrengthWorkout.status == "completed")
+    )).scalars().all()
+    for w in workouts:
+        if w.split_focus == "cardio" and w.completed_by_activity_source:
+            continue
+        net = energy.net_duration_s(w.started_at, w.completed_at, w.total_paused_s)
+        entries.append(activity_ytd.Entry(day=w.date, duration_s=net or 0))
+
+    return activity_ytd.ytd_compare(entries, today)
 
 
 class MapTrackOut(BaseModel):
@@ -830,6 +890,14 @@ async def list_activities(
     # on the Activities page can pull 18 months of history in one call
     # without truncating. Anything larger would still cap server-side.
     limit: int = Query(50, ge=1, le=5000),
+    # UX-X2 — how much route to send. A list renders at most a thumbnail,
+    # and the full-fidelity track is the single largest field on the row:
+    # 18 months of rides pulled whole just to draw 100px squiggles.
+    #   full   — the stored track (default, so older clients are unchanged)
+    #   simple — the RDP-simplified copy the all-activities map uses,
+    #            computed on the fly (never written back here) when missing
+    #   none   — no route at all; the phone feed draws no thumbnail
+    polyline: str = Query("full", pattern="^(full|simple|none)$"),
     db: AsyncSession = Depends(get_session),
 ) -> list[ActivityOut]:
     stmt = (
@@ -837,12 +905,34 @@ async def list_activities(
         .order_by(models.Activity.start_at.desc())
         .limit(limit)
     )
+    stmt = stmt.options(*_list_deferrals(polyline))
     if since:
         stmt = stmt.where(models.Activity.start_at >= since)
     if type:
         stmt = stmt.where(models.Activity.type == type)
     result = await db.execute(stmt)
-    return [_activity_to_out(a) for a in result.scalars().all()]
+    out: list[ActivityOut] = []
+    for a in result.scalars().all():
+        row = _activity_to_out(a, route=polyline)
+        out.append(row)
+    return out
+
+
+def _list_deferrals(mode: str) -> list[Any]:
+    """Columns a list response never reads, so the ORM never loads them.
+
+    `raw` (the provider's whole payload) is never part of ActivityOut. The
+    route columns are only loaded for the mode that sends them; touching a
+    deferred column would lazy-load it, which an async session refuses, so
+    `_activity_to_out` must not read one it was told not to send.
+    """
+    from sqlalchemy.orm import defer
+    opts: list[Any] = [defer(models.Activity.raw)]
+    if mode == "none":
+        opts += [defer(models.Activity.polyline), defer(models.Activity.polyline_simple)]
+    elif mode == "full":
+        opts.append(defer(models.Activity.polyline_simple))
+    return opts
 
 
 # ─────────────────────────────────────────────────────────────────

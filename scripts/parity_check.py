@@ -175,6 +175,14 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/views/workout/StrengthToday.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/strength/StrengthTodayScreen.kt",
      "Today's workout + set logging UI"),
+    # UI-2 split the phone screen into a wrapper plus the Now hero and the
+    # slot/set-grid composables; a change to either is the phone half.
+    ("frontend/src/views/workout/StrengthToday.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/strength/NowHero.kt",
+     "Today's workout — Now hero (target, steppers, rest ring)"),
+    ("frontend/src/views/workout/StrengthToday.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/strength/WorkoutSlots.kt",
+     "Today's workout — set grid and exercise slots"),
     # SA-G2. Drill-in from StrengthToday's week-ahead strip (tap a day ->
     # /workout/strength/day/:date). Unregistered since both files were
     # written; six one-sided commits had already passed unflagged.

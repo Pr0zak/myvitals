@@ -808,6 +808,15 @@ class WorkoutExerciseOut(BaseModel):
     # openGym's rule for the same case and the same reason the shopping list
     # flags an uncostable line instead of dropping it.
     equipment_missing: bool = False
+    # UI-F4: the loadable per-dumbbell weights around target_weight_lb,
+    # ascending, at most ~10 either side — what the logger's +/- steppers
+    # walk instead of a fixed 2.5 lb. A window onto the same load set the
+    # micro-loader rounder snaps prescriptions onto
+    # (strength_algo.load_ladder), so a stepper can never offer a weight the
+    # rack cannot make. Null for bodyweight / timed lifts and when no
+    # dumbbells are owned: no weight stepper at all. Absent on older servers,
+    # where clients fall back to 2.5 lb.
+    load_ladder_lb: list[float] | None = None
     # TD-6 — the per-set prescription, with server-resolved prefills. Clients
     # render these verbatim; they must not derive their own starting values.
     planned_sets: list[PlannedSetOut] = []
@@ -1152,6 +1161,23 @@ def _planned_sets(
     return out
 
 
+def _load_ladder_for(
+    wex: models.StrengthWorkoutExercise,
+    meta: dict[str, Any] | None,
+    pairs_lb: list[float] | None,
+    wrist_lb: list[float] | None,
+) -> list[float] | None:
+    """UI-F4: the stepper ladder for one slot, or None when the slot carries
+    no dumbbell load (bodyweight, timed hold, unknown to the catalog)."""
+    if meta is None or meta.get("is_timed"):
+        return None
+    if "dumbbell" not in (meta.get("equipment") or []):
+        return None
+    return strength_algo.load_ladder(
+        wex.target_weight_lb, pairs_lb or [], wrist_lb or [],
+    )
+
+
 def _wex_to_out(
     wex: models.StrengthWorkoutExercise,
     sets: list[models.StrengthSet],
@@ -1190,6 +1216,7 @@ def _wex_to_out(
         skipped=bool(wex.skipped),
         added_ad_hoc=bool(getattr(wex, "added_ad_hoc", False)),
         equipment_missing=missing_kit,
+        load_ladder_lb=_load_ladder_for(wex, meta, pairs_lb, wrist_lb),
         planned_sets=_planned_sets(wex, sets, last_sets, prog),
         sets=[_set_to_out(s) for s in sorted(sets, key=lambda x: x.set_number)],
     )

@@ -46,7 +46,7 @@ Follow-ups the slices left, deliberately:
 - **UI-F1** Web features removed with UI-4 because they were browser-computed with no server equivalent yet: HR delta vs previous window + avg HR by activity type (HeartRate.vue), weight distribution histogram + "days at min" (Weight.vue), steps 24h trace (Steps.vue, duplicated the hourly bars). Bring back only with a server field.
 - **UI-F2** Web Activities lost its period stats banner, PR card and sort/grid/group-by-month (UI-5; the YTD hero replaces the banner, the phone never had the rest).
 - **UI-F3** Train still computes YTD client-side (`computeYtdComparison`); switch it to `GET /activities/ytd` so Train and Activities cannot disagree.
-- **UI-F4** Workout steppers use a fixed 2.5 lb; an equipment-aware step needs a server field from the micro-loader rounder.
+- ~~**UI-F4**~~ done — `load_ladder_lb` on each workout slot (a window onto the micro-loader rounder's loads); phone + web weight steppers walk it, 2.5 lb only as the old-server fallback.
 - **UI-F5** Fasting ring on You has no stage ticks yet; UI-6 now serves `stages` on fasting sessions, so wire them in.
 
 

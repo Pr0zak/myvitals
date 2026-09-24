@@ -312,6 +312,11 @@ data class StrengthWorkoutExerciseRow(
     // rules for the same workout.
     @Json(name = "planned_sets") val plannedSets: List<PlannedSet> = emptyList(),
     val sets: List<StrengthSetRow> = emptyList(),
+    // UI-F4: the loadable per-dumbbell weights around the target, ascending,
+    // computed by the server's micro-loader rounder from the user's gear. The
+    // hero's weight steppers walk it. Null on bodyweight / timed slots and on
+    // an older server (the steppers then fall back to a fixed 2.5 lb).
+    @Json(name = "load_ladder_lb") val loadLadderLb: List<Double>? = null,
 )
 
 /**

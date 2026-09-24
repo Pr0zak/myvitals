@@ -15,7 +15,7 @@
  */
 import { onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
-import { api } from "@/api/client";
+import { api, activitiesYtd } from "@/api/client";
 import ActivityYearCalendar from "@/components/ActivityYearCalendar.vue";
 import ActivityIcon from "@/components/ActivityIcon.vue";
 import NeonPage from "@/components/neon/NeonPage.vue";
@@ -23,7 +23,7 @@ import NeonHero from "@/components/neon/NeonHero.vue";
 import NeonRing from "@/components/neon/NeonRing.vue";
 import NeonEyebrow from "@/components/neon/NeonEyebrow.vue";
 import { fmtDistance, distanceVal, distanceUnit, fmtElevation } from "@/units";
-import type {
+import type { ActivityYtd, YtdMetric,
   Activity, ActivityStats, StrengthWorkoutDetail, StrengthWeekVolume,
 } from "@/api/types";
 
@@ -64,7 +64,7 @@ async function settle<T>(p: Promise<T>): Promise<T | typeof FAILED> {
 
 async function load(): Promise<void> {
   loading.value = true;
-  const [w, acts, wkts, st, up, ss, mv] = await Promise.all([
+  const [w, acts, wkts, st, up, ss, mv, yt] = await Promise.all([
     settle(api.strengthToday()),
     settle(api.activities({ limit: 2000, since: ytdSince() })),
     settle(api.strengthWorkouts({ limit: 400 })),
@@ -72,6 +72,7 @@ async function load(): Promise<void> {
     settle(api.strengthUpcoming(7, 4)),
     settle(api.strengthStats(30)),
     settle(api.strengthMuscleVolume(7)),
+    settle(activitiesYtd()),
   ]);
   const failed: string[] = [];
   if (w === FAILED) failed.push("today's plan"); else workout.value = w ?? null;
@@ -89,6 +90,7 @@ async function load(): Promise<void> {
     strengthSessions7d.value = ss.consistency?.sessions_last_7d ?? null;
   }
   if (mv !== FAILED) { muscles.value = mv.muscles; muscleWindow.value = mv.window_days; }
+  if (yt !== FAILED) ytdData.value = yt;
   error.value = failed.length ? `Couldn't load ${failed.join(", ")}.` : null;
   loading.value = false;
 }
@@ -234,33 +236,23 @@ function pctOf(n: number): string {
   return `${Math.min(100, Math.max(0, (n / muscleScale.value) * 100))}%`;
 }
 
-// ── This year (existing shared computation) ─────────────────────────────
-const ytd = computed(() => {
-  const now = new Date();
-  const thisYear = now.getFullYear();
-  const lastYear = thisYear - 1;
-  const endLast = new Date(Date.UTC(lastYear, now.getMonth(), now.getDate()));
-  const a = { n: 0, dist: 0 };
-  const b = { n: 0, dist: 0 };
-  for (const r of activities.value) {
-    if (!r.start_at) continue;
-    const d = new Date(r.start_at);
-    const t = d.getFullYear() === thisYear && d <= now ? a
-      : d.getFullYear() === lastYear && d <= endLast ? b : null;
-    if (!t) continue;
-    t.n += 1; t.dist += r.distance_m ?? 0;
-  }
-  for (const w of workouts.value) {
-    if (w.status !== "completed" || !w.date) continue;
-    const d = new Date(w.date + "T00:00:00Z");
-    const t = d.getUTCFullYear() === thisYear && d <= now ? a
-      : d.getUTCFullYear() === lastYear && d <= endLast ? b : null;
-    if (!t) continue;
-    t.n += 1;
-  }
-  const pct = (x: number, y: number) => (y === 0 ? (x === 0 ? 0 : 100) : ((x - y) / y) * 100);
-  return { n: a.n, dist: distanceVal(a.dist) ?? 0, pctN: pct(a.n, b.n), pctDist: pct(a.dist, b.dist) };
-});
+// ── This year — from the server (UI-F3) ─────────────────────────────────
+// `/activities/ytd`, the same response the Activities hero renders. This
+// used to be a browser-side loop that invented "+100%" when last year was
+// zero and could disagree with Activities about the same year.
+const ytdData = ref<ActivityYtd | null>(null);
+function ytdMetric(key: string): YtdMetric | null {
+  return ytdData.value?.metrics.find((m) => m.key === key) ?? null;
+}
+/** "↑ 8%", "↓ 10%", "new", "level" — never an invented percentage. */
+function ytdDelta(m: YtdMetric): string {
+  if (m.note === "new") return "new";
+  if (m.pct_change == null || m.direction === "flat") return "level";
+  return `${m.pct_change >= 0 ? "↑" : "↓"} ${Math.abs(m.pct_change).toFixed(0)}%`;
+}
+function ytdTone(m: YtdMetric): string {
+  return m.tone === "positive" ? "lime" : m.tone === "caution" ? "amber" : "muted";
+}
 
 // ── Recent feed ─────────────────────────────────────────────────────────
 interface FeedRow {
@@ -470,23 +462,21 @@ const tiles = [
 
     <!-- 4. This year + calendar -->
     <template v-if="activities.length || workouts.length">
-      <NeonEyebrow>This year</NeonEyebrow>
-      <section class="ytd2">
-        <button class="ycell" @click="go('/activities')">
-          <span class="ylbl">Activities</span>
-          <span class="ynum num">{{ ytd.n }}</span>
-          <span class="ydelta" :class="ytd.pctN >= 0 ? 'lime' : 'amber'">
-            {{ ytd.pctN >= 0 ? '↑' : '↓' }} {{ Math.abs(ytd.pctN).toFixed(0) }}%
-          </span>
-        </button>
-        <button class="ycell" @click="go('/activities')">
-          <span class="ylbl">Distance</span>
-          <span class="ynum num">{{ ytd.dist.toFixed(0) }} <em>{{ distanceUnit }}</em></span>
-          <span class="ydelta" :class="ytd.pctDist >= 0 ? 'lime' : 'amber'">
-            {{ ytd.pctDist >= 0 ? '↑' : '↓' }} {{ Math.abs(ytd.pctDist).toFixed(0) }}%
-          </span>
-        </button>
-      </section>
+      <template v-if="ytdData">
+        <NeonEyebrow>This year</NeonEyebrow>
+        <section class="ytd2">
+          <button v-if="ytdMetric('sessions')" class="ycell" @click="go('/activities')">
+            <span class="ylbl">Activities</span>
+            <span class="ynum num">{{ ytdMetric('sessions')!.current.toFixed(0) }}</span>
+            <span class="ydelta" :class="ytdTone(ytdMetric('sessions')!)">{{ ytdDelta(ytdMetric('sessions')!) }} vs last year</span>
+          </button>
+          <button v-if="ytdMetric('distance_m')" class="ycell" @click="go('/activities')">
+            <span class="ylbl">Distance</span>
+            <span class="ynum num">{{ (distanceVal(ytdMetric('distance_m')!.current) ?? 0).toFixed(0) }} <em>{{ distanceUnit }}</em></span>
+            <span class="ydelta" :class="ytdTone(ytdMetric('distance_m')!)">{{ ytdDelta(ytdMetric('distance_m')!) }} vs last year</span>
+          </button>
+        </section>
+      </template>
       <NeonEyebrow>Activity calendar</NeonEyebrow>
       <section class="card calcard">
         <ActivityYearCalendar :activities="activities" :workouts="workouts" compact />
@@ -628,6 +618,7 @@ const tiles = [
 .mrange { width: 40px; font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 10px; color: var(--rn-mut); }
 
 /* This year */
+.ydelta.muted { color: var(--rn-mut, #9b9bb0); }
 .ytd2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .ycell { display: flex; flex-direction: column; gap: 4px; text-align: left; font: inherit; color: inherit; cursor: pointer;
   background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 14px; padding: 12px 14px; }

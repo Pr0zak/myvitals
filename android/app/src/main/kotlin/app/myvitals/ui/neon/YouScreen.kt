@@ -337,6 +337,12 @@ private fun FastingHalf(data: YouData, zone: ZoneId, modifier: Modifier, onClick
             color = NeonMV.Cyan,
             size = 112.dp,
             stroke = 9.dp,
+            // UI-F5: a tick at each stage threshold the server sends that
+            // falls inside the target — the same stages the Fasting ring
+            // marks. Nothing is drawn without a target to scale against.
+            ticks = if (f != null && target != null && target > 0)
+                f.stages.map { (it.atH / target).toFloat() }.filter { it > 0f && it < 1f }
+            else emptyList(),
         ) {
             when {
                 f != null -> {

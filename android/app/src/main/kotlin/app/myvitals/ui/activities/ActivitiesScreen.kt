@@ -466,23 +466,23 @@ private fun QuietCard(text: String) {
 
 // ── YTD hero ─────────────────────────────────────────────────────────
 
-private fun metricOf(y: ActivityYtd, key: String): YtdMetric? = y.metrics.firstOrNull { it.key == key }
+internal fun metricOf(y: ActivityYtd, key: String): YtdMetric? = y.metrics.firstOrNull { it.key == key }
 
 /** "↓ 12%", "new", "level" — never an invented percentage. */
-private fun deltaText(m: YtdMetric): String = when {
+internal fun deltaText(m: YtdMetric): String = when {
     m.note == "new" -> "new"
     m.pctChange == null || m.direction == "flat" -> "level"
     else -> (if (m.pctChange >= 0) "↑ " else "↓ ") + "%.0f%%".format(kotlin.math.abs(m.pctChange))
 }
 
-private fun fmtMetric(m: YtdMetric, v: Double): String = when (m.key) {
+internal fun fmtMetric(m: YtdMetric, v: Double): String = when (m.key) {
     "distance_m" -> "%,.0f".format(Units.distance(v) ?: 0.0)
     "elevation_m" -> "%,.0f".format(Units.elevation(v) ?: 0.0)
     "duration_s" -> "%,.0f".format(v / 3600.0)
     else -> "%,.0f".format(v)
 }
 
-private fun metricUnit(m: YtdMetric): String = when (m.key) {
+internal fun metricUnit(m: YtdMetric): String = when (m.key) {
     "distance_m" -> Units.distanceUnit
     "elevation_m" -> Units.elevationUnit
     "duration_s" -> "h"

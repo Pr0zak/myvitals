@@ -116,6 +116,14 @@ const STAGE_LABELS: Record<string, string> = {
 const activeFast = computed(() => (fasting.value?.is_active ? fasting.value : null));
 /** elapsed / target, both from /fasting/current. No target, no fraction —
  *  the ring stays empty rather than assume 16h. */
+/** UI-F5: a tick at each server-sent stage threshold inside the target —
+ *  the same stages the Fasting ring marks. None without a target. */
+const fastTicks = computed<number[]>(() => {
+  const f = activeFast.value;
+  const t = f?.target_hours;
+  if (!f || !t || t <= 0) return [];
+  return (f.stages ?? []).map((st) => st.at_h / t).filter((x) => x > 0 && x < 1);
+});
 const fastFrac = computed(() => {
   const f = activeFast.value;
   return f && f.target_hours ? f.elapsed_h / f.target_hours : 0;
@@ -218,7 +226,7 @@ function go(path: string): void {
         <div class="habits">
           <button class="half" aria-label="Fasting detail" @click="go('/fasting')">
             <span class="eyebrow cyan">Fasting</span>
-            <NeonRing :fraction="fastFrac" color="#28e6ff" :size="112" :stroke="9">
+            <NeonRing :fraction="fastFrac" color="#28e6ff" :size="112" :stroke="9" :ticks="fastTicks">
               <template v-if="activeFast">
                 <!-- "14.3h" over "OF 16H" — never "14:16", which reads as a clock. -->
                 <div class="rv">{{ activeFast.elapsed_h.toFixed(1) }}h</div>

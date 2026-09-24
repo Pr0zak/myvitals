@@ -32,6 +32,13 @@ object SampleDataYouBody {
         protocol = "16:8", mode = "time_restricted", targetHours = 16.0,
         targetEatingWindowH = 8.0, notes = null, elapsedH = 14.3,
         currentStage = "glycogen_depleting", nextStageAtH = 16.0, isActive = true,
+        // UI-F5: invented stage thresholds so the ring shows its ticks.
+        stages = listOf(
+            app.myvitals.sync.FastingStage("fed", "Fed", 0.0),
+            app.myvitals.sync.FastingStage("glycogen_depleting", "Glycogen depleting", 4.0),
+            app.myvitals.sync.FastingStage("fat_burning", "Fat burning", 12.0),
+            app.myvitals.sync.FastingStage("ketosis", "Ketosis", 16.0),
+        ),
     )
 
     val sober = SoberCurrentResponse(

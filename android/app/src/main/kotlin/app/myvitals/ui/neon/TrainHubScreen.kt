@@ -127,6 +127,7 @@ fun TrainHubScreen(
     var stats by remember { mutableStateOf<StrengthStats?>(null) }
     var muscles by remember { mutableStateOf<MuscleVolumeResponse?>(null) }
     var activityStats by remember { mutableStateOf<ActivityStatsOut?>(null) }
+    var ytd by remember { mutableStateOf<app.myvitals.sync.ActivityYtd?>(null) }
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -183,6 +184,11 @@ fun TrainHubScreen(
                 val actStatsD = async(Dispatchers.IO) {
                     runCatching { api.activitiesStats(days = 30) }
                 }
+                // UI-F3: this year vs last from the server, the same response
+                // the Activities hero renders.
+                val ytdD = async(Dispatchers.IO) {
+                    runCatching { api.activitiesYtd() }
+                }
                 workoutD.await().onSuccess { workout = it }.onFailure { failures += "today's plan" }
                 actsD.await().onSuccess { activities = it }.onFailure { failures += "activities" }
                 yearWkD.await().onSuccess { yearWorkouts = it }.onFailure { failures += "workouts" }
@@ -190,6 +196,7 @@ fun TrainHubScreen(
                 statsD.await().onSuccess { stats = it }.onFailure { failures += "volume" }
                 musclesD.await().onSuccess { muscles = it }
                 actStatsD.await().onSuccess { activityStats = it }
+                ytdD.await().onSuccess { ytd = it }
             }
         }.onFailure {
             Timber.w(it, "train hub load failed")
@@ -209,6 +216,7 @@ fun TrainHubScreen(
         activities = activities,
         yearWorkouts = yearWorkouts,
         activityStats = activityStats,
+        ytd = ytd,
         loading = loading,
         refreshing = refreshing,
         error = error,
@@ -232,6 +240,7 @@ fun TrainHubContent(
     activities: List<ActivityRow>,
     yearWorkouts: List<StrengthWorkoutSummary>,
     activityStats: ActivityStatsOut?,
+    ytd: app.myvitals.sync.ActivityYtd?,
     loading: Boolean,
     refreshing: Boolean,
     error: String?,
@@ -324,17 +333,12 @@ fun TrainHubContent(
         }
 
         // ── 4. This year + activity calendar ───────────────────────────
-        val ytd = remember(activities, yearWorkouts, today) {
-            app.myvitals.ui.common.computeYtdComparison(activities, yearWorkouts, today)
-        }
         val calIndex = remember(activities, yearWorkouts, today.year) {
             app.myvitals.ui.common.buildActivityCalendarIndex(activities, yearWorkouts, today.year)
         }
-        if (activities.isNotEmpty() || yearWorkouts.isNotEmpty()) {
+        ytd?.let { y ->
             NeonEyebrow("This year")
-            app.myvitals.ui.common.YtdStatPair(
-                cmp = ytd, neon = true, onClick = { onOpen("activities") },
-            )
+            app.myvitals.ui.common.YtdServerPair(y, onClick = { onOpen("activities") })
         }
         if (calIndex.isNotEmpty()) {
             NeonEyebrow("Activity calendar")

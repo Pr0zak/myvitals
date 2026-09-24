@@ -25,6 +25,7 @@ class TrainSnapshotTest {
                 activities = SampleDataTrain.activities,
                 yearWorkouts = SampleDataTrain.yearWorkouts,
                 activityStats = SampleDataTrain.activityStats,
+                ytd = SampleDataTrain.ytd,
                 loading = false, refreshing = false, error = null,
                 contentPadding = PaddingValues(0.dp),
                 onOpen = {}, onRefresh = {},
@@ -39,7 +40,7 @@ class TrainSnapshotTest {
             CompositionLocalProvider(LocalShimmerShift provides 200f) {
                 TrainHubContent(
                     workout = null, upcoming = emptyList(), stats = null, muscles = null,
-                    activities = emptyList(), yearWorkouts = emptyList(), activityStats = null,
+                    activities = emptyList(), yearWorkouts = emptyList(), activityStats = null, ytd = null,
                     loading = true, refreshing = false, error = null,
                     contentPadding = PaddingValues(0.dp),
                     onOpen = {}, onRefresh = {},
@@ -54,7 +55,7 @@ class TrainSnapshotTest {
         NeonFrame {
             TrainHubContent(
                 workout = null, upcoming = emptyList(), stats = null, muscles = null,
-                activities = emptyList(), yearWorkouts = emptyList(), activityStats = null,
+                activities = emptyList(), yearWorkouts = emptyList(), activityStats = null, ytd = null,
                 loading = false, refreshing = false,
                 error = "Couldn't load today's plan, activities, workouts, volume.",
                 contentPadding = PaddingValues(0.dp),

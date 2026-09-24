@@ -109,4 +109,13 @@ object SampleDataTrain {
     )
 
     val activityStats = ActivityStatsOut(consistency = TrainingConsistency(sessionsLast7d = 5))
+
+    /** UI-F3: invented year-to-date comparison, in the server's shape. */
+    val ytd = app.myvitals.sync.ActivityYtd(
+        year = 2026, priorYear = 2025, through = "2026-09-22",
+        metrics = listOf(
+            app.myvitals.sync.YtdMetric("sessions", "Sessions", "", 142.0, 131.0, 11.0, 8.4, "up", "positive"),
+            app.myvitals.sync.YtdMetric("distance_m", "Distance", "m", 1_602_000.0, 1_781_000.0, -179_000.0, -10.1, "down", "caution"),
+        ),
+    )
 }

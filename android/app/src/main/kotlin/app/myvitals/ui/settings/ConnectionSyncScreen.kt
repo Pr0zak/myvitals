@@ -258,7 +258,7 @@ fun ConnectionSyncContent(
             SettingsTextField(
                 "Access key", token, onToken,
                 secret = true, secretName = "access key", mono = true,
-                help = "The server's ingest token. It lets this phone send readings and read your data.",
+                help = "The key your server gave this phone when you set it up. It lets the phone send readings and read your data.",
             )
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),

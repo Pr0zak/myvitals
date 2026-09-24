@@ -433,6 +433,8 @@ export interface StrengthWorkoutDetail {
     sets_planned?: number; sets_projected?: number; status_projected?: string;
   }>;
   exercises: StrengthWorkoutExercise[];
+  /** UI-1 — the slot the Train hero's button names. */
+  next_up?: StrengthNextUp | null;
 }
 
 /** One tile from GET /summary/tiles. The verdict (`status`) is decided
@@ -845,4 +847,39 @@ export interface WeightStats {
   rolling_7d: Array<{ time: string; kg: number }>;
   delta_7d: WeightDelta; delta_30d: WeightDelta;
   recomp: { label: string; tone: WeightTone; fat_delta_kg: number; lean_delta_kg: number } | null;
+}
+
+// ── UI-1 ── Train tab: week-vs-last-week volume and the hero's next slot.
+
+/** One column of the Train week chart: a LOCAL day and the same weekday a
+ *  week earlier. A day with nothing logged is a real 0 lb. */
+export interface StrengthWeekDay {
+  date: string;
+  volume_lb: number;
+  sets: number;
+  prev_date: string;
+  prev_volume_lb: number;
+}
+
+/** `/workout/strength/stats` → `week`. `direction` is decided server-side;
+ *  null means there was no previous week to compare against. */
+export interface StrengthWeekVolume {
+  start: string;
+  end: string;
+  days: StrengthWeekDay[];
+  total_lb: number;
+  prev_total_lb: number;
+  delta_pct: number | null;
+  better: "higher" | "lower" | "context";
+  direction: "improved" | "worse" | "flat" | null;
+  unweighted_sets: number;
+}
+
+/** `WorkoutOut.next_up` — which slot and set the user would log next. */
+export interface StrengthNextUp {
+  exercise_id: string;
+  name: string;
+  set_number: number;
+  target_sets: number;
+  started: boolean;
 }

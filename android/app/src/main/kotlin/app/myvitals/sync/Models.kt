@@ -394,6 +394,9 @@ data class StrengthWorkoutDetail(
     @Json(name = "sets_done") val setsDone: Int = 0,
     @Json(name = "sets_total") val setsTotal: Int = 0,
     val exercises: List<StrengthWorkoutExerciseRow> = emptyList(),
+    /** UI-1 — the slot the Train hero's button names. Null when nothing is
+     *  left, on a finished session, or from an older backend. */
+    @Json(name = "next_up") val nextUp: StrengthNextUp? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -552,6 +555,9 @@ data class StrengthStats(
     /** CONS-1. Streaks and frequency over full history, so these do NOT
      *  change when `days` does. Null from a backend older than v0.10.1. */
     val consistency: TrainingConsistency? = null,
+    /** UI-1 — trailing 7 local days vs the 7 before, totals, change and
+     *  its direction. Render verbatim; never re-sum [daily]. */
+    val week: StrengthWeekVolume? = null,
 )
 
 /**
@@ -795,6 +801,9 @@ data class MuscleVolumeRow(
     @Json(name = "available_primary") val availablePrimary: Int? = null,
     @Json(name = "available_any") val availableAny: Int? = null,
     @Json(name = "pool_below_mev") val poolBelowMev: Boolean = false,
+    /** UI-1 — the sets today's plan adds to this muscle (projected rows
+     *  only). The Train hero's chips are the muscles where this is > 0. */
+    @Json(name = "sets_planned") val setsPlanned: Double? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -2961,4 +2970,42 @@ data class WeightStats(
 data class WeightSeriesOut(
     val points: List<WeightPointOut> = emptyList(),
     val stats: WeightStats? = null,
+)
+
+// ── UI-1 ── Train tab: week-vs-last-week volume and the hero's next slot.
+
+/** One column of the Train week chart: a LOCAL day and the same weekday a
+ *  week earlier. A day with nothing logged is a real 0 lb. */
+@JsonClass(generateAdapter = true)
+data class StrengthWeekDay(
+    val date: String,
+    @Json(name = "volume_lb") val volumeLb: Double = 0.0,
+    val sets: Int = 0,
+    @Json(name = "prev_date") val prevDate: String = "",
+    @Json(name = "prev_volume_lb") val prevVolumeLb: Double = 0.0,
+)
+
+/** `/workout/strength/stats` → `week`. [direction] is decided server-side
+ *  (improved / worse / flat, null = no previous week to compare against). */
+@JsonClass(generateAdapter = true)
+data class StrengthWeekVolume(
+    val start: String = "",
+    val end: String = "",
+    val days: List<StrengthWeekDay> = emptyList(),
+    @Json(name = "total_lb") val totalLb: Double = 0.0,
+    @Json(name = "prev_total_lb") val prevTotalLb: Double = 0.0,
+    @Json(name = "delta_pct") val deltaPct: Double? = null,
+    val better: String = "higher",
+    val direction: String? = null,
+    @Json(name = "unweighted_sets") val unweightedSets: Int = 0,
+)
+
+/** `WorkoutOut.next_up` — which slot and set the user would log next. */
+@JsonClass(generateAdapter = true)
+data class StrengthNextUp(
+    @Json(name = "exercise_id") val exerciseId: String,
+    val name: String,
+    @Json(name = "set_number") val setNumber: Int = 1,
+    @Json(name = "target_sets") val targetSets: Int = 0,
+    val started: Boolean = false,
 )

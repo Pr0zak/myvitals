@@ -25,7 +25,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy import values as sa_values
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...analytics import consistency, energy
+from ...analytics import consistency, energy, train_week
 from ...analytics import strength as strength_algo
 from ...auth import require_any
 from ...config import settings
@@ -911,6 +911,12 @@ class WorkoutOut(BaseModel):
     # toward the audited figure as sets are logged during the session.
     projected_muscle_volume: dict[str, dict[str, Any]] = {}
     exercises: list[WorkoutExerciseOut] = []
+    # UI-1 — the slot the Train hero's button names ("Continue · Goblet
+    # squat, set 3"). Decided here from `_exercise_done` / `_accounted_sets`,
+    # the predicates behind the counters above, so the button can never name
+    # an exercise the progress ring already counts as finished. Null when
+    # nothing is left, and always null on a completed or skipped session.
+    next_up: dict[str, Any] | None = None
 
 
 class WorkoutPatch(BaseModel):
@@ -1479,7 +1485,26 @@ async def _hydrate_workout(
         ),
         session_summary=await _session_summary(db, w),
         exercises=ex_out,
+        next_up=_next_up(w.status, ex_out),
     )
+
+
+def _next_up(status: str, ex_out: list[WorkoutExerciseOut]) -> dict[str, Any] | None:
+    """UI-1 — see `WorkoutOut.next_up`."""
+    if status in ("completed", "skipped", "regenerated"):
+        return None
+    return train_week.next_up([
+        {
+            "exercise_id": e.exercise_id,
+            "name": (strength_algo.CATALOG_BY_ID.get(e.exercise_id) or {}).get("name")
+            or e.exercise_id.replace("_", " ").replace("-", " ").strip().capitalize(),
+            "order_index": e.order_index,
+            "target_sets": e.target_sets,
+            "accounted_sets": _accounted_sets(e),
+            "done": _exercise_done(e),
+        }
+        for e in ex_out
+    ])
 
 
 @router.get("/workouts")
@@ -2784,7 +2809,18 @@ async def strength_stats(
     # CONS-1: the user's LOCAL today. Deriving the window from the UTC
     # date shifts it forward every evening after 7pm Central, so the
     # "last 90 days" chart silently starts a day late.
-    since = _local_today() - _td(days=days)
+    today_local = _local_today()
+    since = today_local - _td(days=days)
+    # UI-1: the week-vs-last-week card needs fourteen local days whatever
+    # `days` the caller asked for, so the fetch reaches back at least that
+    # far. Rows older than `since` feed ONLY the week block below — every
+    # other figure in this response still describes exactly `days`.
+    week_since = today_local - _td(days=2 * train_week.WINDOW_DAYS - 1)
+    fetch_since = min(since, week_since)
+    week_vol: dict[_date, float] = {}
+    week_sets: dict[_date, int] = {}
+    week_unweighted = 0
+    week_this_start = today_local - _td(days=train_week.WINDOW_DAYS - 1)
 
     # Pull every logged set in window with its parent workout date + exercise id.
     sets_q = await db.execute(
@@ -2804,7 +2840,7 @@ async def strength_stats(
         .join(models.StrengthWorkout,
               models.StrengthWorkoutExercise.workout_id ==
               models.StrengthWorkout.id)
-        .where(models.StrengthWorkout.date >= since)
+        .where(models.StrengthWorkout.date >= fetch_since)
         .order_by(models.StrengthWorkout.date)
     )
     rows = sets_q.all()
@@ -2844,6 +2880,16 @@ async def strength_stats(
         # whether it can contribute to a POUNDS total.
         kind = strength_algo.classify_set_row(skipped, reps, set_type, w_lb)
         if kind == strength_algo.SET_EXCLUDED:
+            continue
+        # UI-1 week block — same predicate, same volume formula as `daily`,
+        # so the week total reconciles with the series on the charts screen.
+        if d >= week_since:
+            week_sets[d] = week_sets.get(d, 0) + 1
+            if kind == strength_algo.SET_WEIGHTED:
+                week_vol[d] = week_vol.get(d, 0.0) + float(w_lb) * float(reps)
+            elif d >= week_this_start:
+                week_unweighted += 1
+        if d < since:
             continue
         date_iso = d.isoformat()
         workout_dates.add(date_iso)
@@ -2976,7 +3022,6 @@ async def strength_stats(
     # streak from it would report a shorter streak whenever the user
     # narrowed the chart range — a number that moves with the date picker
     # is describing the picker.
-    today_local = _local_today()
     all_dates = set((await db.execute(
         select(models.StrengthWorkout.date)
         .where(models.StrengthWorkout.status == "completed")
@@ -3041,6 +3086,13 @@ async def strength_stats(
                 k: round(v, 1) for k, v in sorted(rested.items(), key=lambda kv: -kv[1])
             },
         },
+        # UI-1 — this week's volume against last week's, one column per LOCAL
+        # day with the same weekday a week earlier beside it, plus the totals,
+        # the change and which direction is good. Always the trailing 7 days,
+        # independent of `days`. See analytics/train_week.py.
+        "week": train_week.week_volume(
+            week_vol, week_sets, today_local, week_unweighted,
+        ),
     }
 
 

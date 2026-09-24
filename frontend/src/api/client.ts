@@ -1281,6 +1281,8 @@ export const api = {
     progression_names: Record<string, string>;
     /** CONS-1. Streaks and frequency over full history, not `days`. */
     consistency?: TrainingConsistency | null;
+    /** UI-1 — trailing 7 local days vs the 7 before. Render verbatim. */
+    week?: import("./types").StrengthWeekVolume | null;
   }> {
     const { data } = await http.get("/workout/strength/stats", { params: { days } });
     return data;

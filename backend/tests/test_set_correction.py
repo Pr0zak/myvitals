@@ -52,9 +52,26 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 MIGRATION = REPO / "backend" / "alembic" / "versions" / "0021_strength_tables.py"
 MODELS = REPO / "backend" / "src" / "myvitals" / "db" / "models.py"
 WEB = REPO / "frontend" / "src" / "views" / "workout" / "StrengthToday.vue"
-PHONE = (
+_STRENGTH = (
     REPO / "android" / "app" / "src" / "main" / "kotlin" / "app" / "myvitals"
-    / "ui" / "strength" / "StrengthTodayScreen.kt"
+    / "ui" / "strength"
+)
+
+
+class _Surface:
+    """UI-2 split the phone screen across three files; read them as one."""
+
+    def __init__(self, *paths: pathlib.Path) -> None:
+        self.paths = paths
+
+    def read_text(self) -> str:
+        return "\n".join(p.read_text() for p in self.paths)
+
+
+PHONE = _Surface(
+    _STRENGTH / "StrengthTodayScreen.kt",
+    _STRENGTH / "NowHero.kt",
+    _STRENGTH / "WorkoutSlots.kt",
 )
 PHONE_REPO = (
     REPO / "android" / "app" / "src" / "main" / "kotlin" / "app" / "myvitals"
@@ -318,9 +335,11 @@ class TestTheFixesTheReviewFound:
         src = WEB.read_text()
         assert "reopenExercise" in src
         assert "isEditingExercise" in src
-        chips = src.index('class="done-summary"')
-        assert "isEditingExercise" in src[chips - 400:chips], (
-            "the done-summary branch must yield while a correction is open"
+        # UI-2: a finished slot is a `summary` card; the mode switch is what
+        # must yield to the full grid while one of its sets is being corrected.
+        mode = src.index('mode: !w.skipped && hasAccountedSets(w)')
+        assert "isEditingExercise(w)" in src[mode:mode + 200], (
+            "the summary line must yield while a correction is open"
         )
 
     def test_the_phone_gates_edit_on_the_session_not_the_slot(self):

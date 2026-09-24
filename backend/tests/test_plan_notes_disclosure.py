@@ -24,45 +24,60 @@ deliberate summary.
 Both surfaces, because both printed it unconditionally under the header —
 the phone since OG2-D-2 and the web since long before.
 """
-
 from __future__ import annotations
 
 import pathlib
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 WEB = REPO / "frontend" / "src" / "views" / "workout" / "StrengthToday.vue"
-PHONE = (
-    REPO / "android" / "app" / "src" / "main" / "kotlin" / "app" / "myvitals"
-    / "ui" / "strength" / "StrengthTodayScreen.kt"
+_STRENGTH = REPO / "android" / "app" / "src" / "main" / "kotlin" / "app" / "myvitals" / "ui" / "strength"
+
+
+class _Surface:
+    """UI-2 split the phone screen across three files; read them as one."""
+
+    def __init__(self, *paths: pathlib.Path) -> None:
+        self.paths = paths
+
+    def read_text(self) -> str:
+        return "\n".join(p.read_text() for p in self.paths)
+
+
+PHONE = _Surface(
+    _STRENGTH / "StrengthTodayScreen.kt",
+    _STRENGTH / "NowHero.kt",
+    _STRENGTH / "WorkoutSlots.kt",
 )
+
+
+# UI-2 moved the disclosure from an inline header into a chip on the banner
+# strip (phone: a bottom sheet; web: an expander under the strip). The
+# invariants are unchanged — collapsed by default, a count not a preview, one
+# row per note — and are asserted against the new markup.
 
 
 class TestItIsCollapsedByDefault:
     def test_the_phone_starts_closed(self):
         src = PHONE.read_text()
-        assert "var open by remember(plan.id) { mutableStateOf(false) }" in src
+        assert "var openSheet by mutableStateOf<String?>(null)" in src
 
     def test_the_web_starts_closed(self):
-        assert "const notesOpen = ref(false);" in WEB.read_text()
+        assert "const openChip = ref<ChipKey | null>(null);" in WEB.read_text()
 
     def test_the_phone_header_is_tappable(self):
         src = PHONE.read_text()
-        block = src[src.index('"Why this plan"') - 1200:]
-        assert "clickable { open = !open }" in block[:1200]
+        assert ".clickable { onOpen(c.key) }" in src
+        assert 'BannerChip("why", "Why this plan · $n"' in src
 
     def test_the_web_header_is_a_button(self):
-        src = WEB.read_text()
-        assert 'class="pn-head"' in src
-        assert "notesOpen = !notesOpen" in src
+        assert "@click=\"toggleChip('why')\"" in WEB.read_text()
 
 
 class TestTheSummaryIsACountNotAPreview:
     def test_both_surfaces_derive_the_count_from_the_lines(self):
         """Counted, not hard-coded — the number of notes varies per plan."""
         phone = PHONE.read_text()
-        block = phone[phone.index('"Why this plan"') - 900:]
-        assert "lines.size" in block[:1800]
-        assert "plan.notes!!.trim().lines()" in phone
+        assert "plan.notes.trim().lines().count { it.isNotBlank() }" in phone
         web = WEB.read_text()
         assert "planNotes.length" in web
         assert 'split("\\n")' in web
@@ -71,52 +86,43 @@ class TestTheSummaryIsACountNotAPreview:
         """A note cut mid-sentence is less useful than a number and reads as
         a rendering fault rather than a deliberate summary."""
         phone = PHONE.read_text()
-        block = phone[phone.index('"Why this plan"'):][:1800]
+        block = phone[phone.index('"why" -> {'):][:1200]
         assert ".take(" not in block
         assert "ellipsis" not in block.lower()
         web = WEB.read_text()
-        wblock = web[web.index("plan-notes"):][:1200]
-        assert "slice(" not in wblock
-        assert "text-overflow" not in wblock
+        assert "slice(" not in web[web.index('class="pn-list"'):][:300]
+        assert "text-overflow" not in web[web.index(".pn-list {"):][:200]
 
     def test_both_label_it_the_same(self):
-        assert "Why this plan" in WEB.read_text()
-        assert "Why this plan" in PHONE.read_text()
-
-    def test_singular_and_plural_are_both_handled(self):
-        assert '"1 note"' in PHONE.read_text()
-        assert "'note' : 'notes'" in WEB.read_text()
+        """Both chips read "Why this plan · N"."""
+        assert ('Why this plan<template v-if="planNotes.length"> · '
+                '{{ planNotes.length }}') in WEB.read_text()
+        assert '"Why this plan · $n"' in PHONE.read_text()
 
 
 class TestTheContentIsStillReachable:
     def test_the_phone_renders_every_note_when_open(self):
-        """OG2-D-7 changed HOW, not WHETHER. This used to assert the raw
-        string was printed; the invariant it was really protecting is that
-        opening the disclosure reaches every note, which iterating the same
-        `lines` the count was derived from satisfies exactly."""
+        """OG2-D-7 changed HOW, not WHETHER: opening the disclosure reaches
+        every note, by iterating the same lines the count came from."""
         src = PHONE.read_text()
-        block = src[src.index('"Why this plan"'):][:2500]
-        assert "if (open) {" in block
+        block = src[src.index('"why" -> {'):][:1200]
         assert "for (line in lines)" in block
 
     def test_the_web_renders_every_note_when_open(self):
         src = WEB.read_text()
-        assert 'v-if="notesOpen"' in src
+        assert "v-if=\"openChip === 'why' && whyVisible\"" in src
         assert 'v-for="(n, i) in planNotes"' in src
 
     def test_the_notes_cannot_run_together_into_one_sentence(self):
-        """The original concern, now structural rather than a CSS property.
-        `white-space: pre-line` over a joined string kept four statements
-        apart by preserving newlines; one element per note cannot merge them
-        at all, so the rule is enforced by the markup instead of by a style
-        that a later edit could drop without anything failing."""
+        """One element per note cannot merge them, so the rule is enforced by
+        the markup rather than by a `white-space: pre-line` a later edit could
+        drop without anything failing."""
         src = WEB.read_text()
-        assert "pn-item" in src
+        assert '<li v-for="(n, i) in planNotes"' in src
         assert "white-space: pre-line" not in src
 
     def test_the_cardio_day_card_is_untouched(self):
         """A cardio day comes back with exercises=[] and the prescription
-        itself in `notes`. There it IS the content of the screen, not an
-        explanation of it, so it stays a plain card."""
-        src = PHONE.read_text()
-        assert "plan.exercises.isEmpty() && !plan.notes.isNullOrBlank()" in src
+        itself in `notes`. There it IS the content of the screen, so it is
+        the hero, not a disclosure."""
+        assert "plan.exercises.isEmpty() -> PrescriptionHero(" in PHONE.read_text()

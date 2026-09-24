@@ -41,9 +41,26 @@ from myvitals.api.workout import strength as api
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 WEB = REPO / "frontend" / "src" / "views" / "workout" / "StrengthToday.vue"
-PHONE = (
+_STRENGTH = (
     REPO / "android" / "app" / "src" / "main" / "kotlin" / "app" / "myvitals"
-    / "ui" / "strength" / "StrengthTodayScreen.kt"
+    / "ui" / "strength"
+)
+
+
+class _Surface:
+    """UI-2 split the phone screen across three files; read them as one."""
+
+    def __init__(self, *paths: pathlib.Path) -> None:
+        self.paths = paths
+
+    def read_text(self) -> str:
+        return "\n".join(p.read_text() for p in self.paths)
+
+
+PHONE = _Surface(
+    _STRENGTH / "StrengthTodayScreen.kt",
+    _STRENGTH / "NowHero.kt",
+    _STRENGTH / "WorkoutSlots.kt",
 )
 
 
@@ -192,4 +209,6 @@ class TestBothSurfacesSayIt:
         A slot you cannot do today is worth noticing and is not a crisis.
         """
         assert "pal.caution" in PHONE.read_text()
-        assert ".kit-tag" in WEB.read_text()
+        web = WEB.read_text()
+        i = web.index('v-if="c.wex.equipment_missing"')
+        assert 'class="tag amber"' in web[i:i + 80]

@@ -9,14 +9,21 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { releaseWakeLock, requestWakeLock } from "@/wakeLock";
 import BodyMap from "@/components/BodyMap.vue";
 import { useRouter } from "vue-router";
-import { Play, Pause, RotateCw, Plus, SkipForward, Timer, Check } from "lucide-vue-next";
+import {
+  Play, Pause, RotateCw, Plus, Minus, Check, MoreVertical, Sparkles, Hourglass,
+  Feather, Info, ChevronDown, ChevronRight,
+} from "lucide-vue-next";
+import NeonPage from "@/components/neon/NeonPage.vue";
+import NeonHero from "@/components/neon/NeonHero.vue";
+import NeonRing from "@/components/neon/NeonRing.vue";
+import NeonEyebrow from "@/components/neon/NeonEyebrow.vue";
+import NeonStat from "@/components/neon/NeonStat.vue";
 import { api } from "@/api/client";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import { useConfirm } from "@/useConfirm";
 import { isNeon } from "@/theme";
 import { apiBase, queryToken } from "@/config";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
-import Card from "@/components/Card.vue";
 import CoachCard from "@/components/CoachCard.vue";
 import ExerciseDemo from "@/components/ExerciseDemo.vue";
 import type { StrengthExercise, StrengthWorkoutDetail, StrengthWorkoutExercise } from "@/api/types";
@@ -352,8 +359,16 @@ function tickRest() {
     notifyDone(restTotal.value);
     // Vibrate (Android Chrome only)
     if ("vibrate" in navigator) navigator.vibrate([200, 80, 200]);
-    stopRest();
+    // UI-2: the ring stays on "Rest complete" (Lime) until the next set is
+    // logged or Skip is tapped, instead of vanishing the instant it hits 0 —
+    // the moment the rest ends is exactly when you glance back at the page.
+    haltRestTick();
   }
+}
+function haltRestTick() {
+  if (restHandle !== null) { clearInterval(restHandle); restHandle = null; }
+  document.removeEventListener("visibilitychange", tickRest);
+  restEndsAt = 0;
 }
 
 function startRest(seconds: number) {
@@ -373,7 +388,7 @@ function stopRest() {
   restRemaining.value = null;
 }
 function addRest(s: number) {
-  if (!restEndsAt) return;
+  if (!restEndsAt) return;  // a finished rest is not extended
   restEndsAt += s * 1000;
   restTotal.value += s;
   tickRest();
@@ -1403,109 +1418,630 @@ function fmtRest(s: number): string {
   return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
+// ── UI-2: the active-workout layout ─────────────────────────────────────
+//
+// One focal "Now" hero instead of the NOW set buried in the Nth card, one
+// segmented progress bar instead of a header pip + a second bar, one strip
+// of chips instead of up to four stacked banners, and finished exercises
+// collapsed to a line. Every number is still the server's (counters,
+// session_summary, planned_sets prefill); the logging path is untouched.
+
+const CYAN = "#28e6ff";
+const LIME = "#5dff3b";
+const AMBER = "#ffb52e";
+
+function titleCase(s: string): string {
+  const t = s.replace(/_/g, " ");
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+const pageTitle = computed(() =>
+  workout.value ? `${titleCase(workout.value.split_focus)} day` : "Workout",
+);
+
+/** Sets on this slot the user has dealt with (logged or individually
+ *  skipped), capped at the prescription. Mirrors the backend's
+ *  `_accounted_sets` and the phone's `accountedSets`; the workout-level
+ *  counters still come from the server verbatim. */
+function accountedSets(wex: StrengthWorkoutExercise): number {
+  if (wex.skipped) return wex.target_sets;
+  return Math.min(
+    wex.sets.filter((s) => s.actual_reps != null || s.skipped).length,
+    wex.target_sets,
+  );
+}
+
+const byOrder = computed<StrengthWorkoutExercise[]>(() =>
+  [...(workout.value?.exercises ?? [])].sort((a, b) => a.order_index - b.order_index),
+);
+
+/** v0.7.161 ordering, shared with the phone: incomplete slots first; a
+ *  non-superset slot keeps its order_index place until all its sets are
+ *  done, superset partners alternate by accounted-count (the partner who is
+ *  behind goes next). Finished slots drop below for reference. The slot
+ *  skip flag is deliberately not consulted — tapping Skip never moves a row. */
+const orderedExercises = computed<StrengthWorkoutExercise[]>(() => {
+  const all = byOrder.value;
+  if (sessionOver.value) return all;
+  const setsComplete = (w: StrengthWorkoutExercise) =>
+    w.sets.filter((s) => s.actual_reps != null || s.skipped).length >= w.target_sets;
+  const incomplete = all.filter((w) => !setsComplete(w));
+  const complete = all.filter((w) => setsComplete(w));
+  const groups = new Map<string, StrengthWorkoutExercise[]>();
+  for (const w of incomplete) {
+    const k = w.superset_id ?? `solo-${w.id}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(w);
+  }
+  const grouped = [...groups.entries()].map(([k, exs]) =>
+    k.startsWith("solo-")
+      ? exs
+      : [...exs].sort((a, b) => accountedSets(a) - accountedSets(b) || a.order_index - b.order_index),
+  );
+  grouped.sort((a, b) =>
+    Math.min(...a.map((x) => x.order_index)) - Math.min(...b.map((x) => x.order_index)));
+  return [...grouped.flat(), ...complete];
+});
+
+// Tapping an up-next line makes it the hero's exercise (logging out of order
+// was always allowed; this is the one-tap way in). Falls back to the natural
+// NOW slot the moment the focused one closes.
+const focusWexId = ref<number | null>(null);
+const heroWex = computed<StrengthWorkoutExercise | null>(() => {
+  if (!workout.value || sessionOver.value) return null;
+  const f = focusWexId.value != null
+    ? workout.value.exercises.find((x) => x.id === focusWexId.value) ?? null
+    : null;
+  if (f && !isSlotClosed(f)) return f;
+  return orderedExercises.value.find((x) => !isSlotClosed(x)) ?? null;
+});
+/** The set the hero logs: the first prescribed set not yet accounted for. */
+const heroSet = computed<number | null>(() => {
+  const w = heroWex.value;
+  if (!w) return null;
+  for (let n = 1; n <= w.target_sets; n++) if (!isSetLogged(w, n)) return n;
+  return null;
+});
+const heroEntry = computed<SetEntry | null>(() =>
+  heroWex.value && heroSet.value != null ? entry(heroWex.value, heroSet.value) : null,
+);
+const heroPos = computed(() => {
+  const w = heroWex.value;
+  return w ? byOrder.value.findIndex((x) => x.id === w.id) + 1 : 0;
+});
+const heroOf = computed(() =>
+  workout.value?.exercises_total || workout.value?.exercises.length || 0,
+);
+function focusExercise(wex: StrengthWorkoutExercise) {
+  focusWexId.value = wex.id;
+  heroEditing.value = false;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function fmtLb(w: number | null | undefined): string {
+  if (w == null || Number.isNaN(w)) return "—";
+  return Number.isInteger(w) ? String(w) : String(Math.round(w * 100) / 100);
+}
+function repsRange(wex: StrengthWorkoutExercise): string {
+  return wex.target_reps_low === wex.target_reps_high
+    ? String(wex.target_reps_low)
+    : `${wex.target_reps_low}–${wex.target_reps_high}`;
+}
+/** The prescription line for the hero ("47.5 lb × 8"). */
+function heroTarget(wex: StrengthWorkoutExercise, n: number): string {
+  const ps = plannedSet(wex, n);
+  const reps = ps?.is_amrap ? `${wex.target_reps_low}+ (AMRAP)` : repsRange(wex);
+  const w = ps?.target_weight_lb ?? wex.target_weight_lb;
+  return w != null ? `${fmtLb(w)} lb × ${reps}` : `${reps} reps`;
+}
+function setHeading(wex: StrengthWorkoutExercise, n: number): string {
+  const side = bilateralSideLabel(wex, n);
+  const sideWord = side === "R" ? "Right side · " : side === "L" ? "Left side · " : "";
+  return `${sideWord}Set ${n} of ${wex.target_sets}`;
+}
+
+// Steppers. The micro-loader rounder lives on the server and no per-slot
+// step is exposed, so the weight steps a fixed 2.5 lb (reps by 1); the
+// server's prefill already landed on a loadable weight.
+const heroEditing = ref(false);
+function stepWeight(d: number) {
+  const e = heroEntry.value;
+  if (!e) return;
+  e.weight = fmtLb(Math.max(0, (parseFloat(e.weight) || 0) + d));
+}
+function stepReps(d: number) {
+  const e = heroEntry.value;
+  if (!e) return;
+  e.reps = String(Math.max(0, (parseInt(e.reps, 10) || 0) + d));
+}
+const HERO_RATINGS: { v: number; label: string; color: string; title: string }[] = [
+  { v: 1, label: "Fail", color: "#ff5d7a", title: "Failed — missed reps. Next session's weight drops about 7.5%." },
+  ...RATING_CHOICES.map((r) => ({ ...r, color: r.v === 2 ? AMBER : r.v === 4 ? LIME : CYAN })),
+];
+function ratingColor(r: number | null): string {
+  if (r == null) return "#9b9bb0";
+  return r === 1 ? "#ff5d7a" : r === 2 ? AMBER : r === 5 ? CYAN : LIME;
+}
+const canLogHero = computed(() => {
+  const e = heroEntry.value;
+  return !!e && e.rating !== null && e.reps.trim() !== ""
+    && !isPaused.value && busy.value !== `set-${heroWex.value?.id}-${heroSet.value}`;
+});
+/** "✓ Log set N" — the SAME logSet / logFailed paths the table always used,
+ *  so offline buffering, progression, bilateral and the server's
+ *  rest_after_s behave exactly as before. Fail keeps its confirmation. */
+async function logHero() {
+  const w = heroWex.value; const n = heroSet.value; const e = heroEntry.value;
+  if (!w || n == null || !e) return;
+  heroEditing.value = false;
+  if (e.rating === 1) await logFailed(w, n);
+  else await logSet(w, n);
+}
+
+// Rest ring inside the hero.
+const resting = computed(() => restRemaining.value !== null);
+const restDone = computed(() => restRemaining.value !== null && restRemaining.value <= 0);
+const restFraction = computed(() =>
+  restTotal.value > 0 && restRemaining.value != null
+    ? Math.max(0, Math.min(1, restRemaining.value / restTotal.value)) : 0,
+);
+
+// One segmented bar: a segment per exercise, filled from what the slot has
+// accounted for. The label is the server's counter, verbatim.
+const segments = computed(() => byOrder.value.map((w) => {
+  if (w.skipped) return { id: w.id, kind: "skipped", frac: 1 };
+  const a = accountedSets(w);
+  if (w.target_sets > 0 && a >= w.target_sets) return { id: w.id, kind: "done", frac: 1 };
+  if (a > 0) return { id: w.id, kind: "partial", frac: a / Math.max(1, w.target_sets) };
+  return { id: w.id, kind: "todo", frac: 0 };
+}));
+
+// The chip strip that replaces the stacked banners.
+type ChipKey = "coach" | "fast" | "deload" | "paused" | "why";
+const openChip = ref<ChipKey | null>(null);
+function toggleChip(k: ChipKey) { openChip.value = openChip.value === k ? null : k; }
+const sessionLive = computed(() =>
+  workout.value?.status === "planned" || workout.value?.status === "in_progress");
+const fastingActive = computed(() => {
+  const f = workout.value?.fasting_context;
+  return !!f && f.active && f.modulation !== "normal";
+});
+const deloadActive = computed(() =>
+  !!workout.value && (workout.value.deload_factor ?? 1) < 1 && sessionLive.value);
+const deloadPct = computed(() =>
+  Math.round((1 - (workout.value?.deload_factor ?? 1)) * 100));
+const deloadReasonLine = computed(() => {
+  const r = workout.value?.deload_reason || "low recovery";
+  return `${r.charAt(0).toUpperCase()}${r.slice(1)} — feeling strong?`;
+});
+const whyVisible = computed(() =>
+  (planNotes.value.length > 0 && (workout.value?.exercises.length ?? 0) > 0)
+  || workout.value?.recovery_score_used != null || workout.value?.sleep_h_used != null);
+const chipsVisible = computed(() =>
+  (!!queryToken.value && sessionLive.value) || fastingActive.value || deloadActive.value
+  || isPaused.value || whyVisible.value);
+
+// Finished exercises collapse to a line; tapping one expands its grid.
+const expanded = ref<Set<number>>(new Set());
+function toggleExpanded(id: number) {
+  const next = new Set(expanded.value);
+  if (next.has(id)) next.delete(id); else next.add(id);
+  expanded.value = next;
+}
+/** Slots other than the hero that are still open — the "up next" lines. */
+const upNext = computed(() =>
+  orderedExercises.value.filter((w) => !isSlotClosed(w) && w.id !== heroWex.value?.id));
+/** Closed slots — finished, declined, or on a session that is over. */
+const closedSlots = computed(() =>
+  (sessionOver.value ? byOrder.value : orderedExercises.value).filter((w) => isSlotClosed(w)));
+function slotSummary(wex: StrengthWorkoutExercise): string {
+  const logged = [...wex.sets]
+    .filter((s) => s.actual_reps != null || s.skipped)
+    .sort((a, b) => a.set_number - b.set_number);
+  if (!logged.length) return "";
+  if (isTimedExercise(wex)) {
+    return logged.map((s) => (s.skipped ? "fail" : `${s.actual_reps}s`)).join(" · ");
+  }
+  return logged.map((s) => (s.skipped ? "fail"
+    : s.actual_weight_lb != null ? `${fmtLb(s.actual_weight_lb)}×${s.actual_reps}` : `${s.actual_reps}`)).join(" · ");
+}
+function prescriptionShort(wex: StrengthWorkoutExercise): string {
+  const unit = isTimedExercise(wex) ? "s" : "";
+  const w = wex.target_weight_lb != null ? ` · ${fmtLb(wex.target_weight_lb)} lb` : "";
+  return `${wex.target_sets}×${repsRange(wex)}${unit}${w}`;
+}
+/** Render list: the hero's exercise as a full card, then the other open
+ *  slots as compact "up next" lines, then closed slots as one-line
+ *  summaries (a summary expands to its full grid on tap, or while one of
+ *  its sets is being corrected). */
+type CardMode = "full" | "next" | "summary";
+const cards = computed<{ wex: StrengthWorkoutExercise; mode: CardMode; head: string | null }[]>(() => {
+  const out: { wex: StrengthWorkoutExercise; mode: CardMode; head: string | null }[] = [];
+  if (heroWex.value) out.push({ wex: heroWex.value, mode: "full", head: null });
+  upNext.value.forEach((w, i) => out.push({ wex: w, mode: "next", head: i === 0 ? "Up next" : null }));
+  closedSlots.value.forEach((w, i) => out.push({
+    wex: w,
+    mode: !w.skipped && hasAccountedSets(w) && (expanded.value.has(w.id) || isEditingExercise(w))
+      ? "full" : "summary",
+    head: i === 0 ? (sessionOver.value ? "Exercises" : "Done") : null,
+  }));
+  return out;
+});
+function exPos(wex: StrengthWorkoutExercise): number {
+  return byOrder.value.findIndex((x) => x.id === wex.id) + 1;
+}
+function isPhoto(slug: string): boolean {
+  const u = imageUrl(slug, 0);
+  return !!u && /\.jpe?g($|\?)/i.test(u);
+}
+function loggedSet(wex: StrengthWorkoutExercise, n: number) {
+  return wex.sets.find((s) => s.set_number === n && s.actual_reps != null) ?? null;
+}
+
+// Completed-session hero tiles, from the server's session_summary.
+const summary = computed(() => workout.value?.session_summary ?? null);
+const tonnageText = computed(() =>
+  summary.value ? `${Math.round(summary.value.total_volume_lb).toLocaleString()} lb` : "—");
+const durationText = computed(() => {
+  const s = summary.value?.net_duration_s;
+  return s == null ? "—" : `${Math.round(s / 60)} min`;
+});
+
+const isCardioDay = computed(() =>
+  !!workout.value && workout.value.exercises.length === 0
+  && ["cardio", "active_recovery", "yoga"].includes(workout.value.split_focus));
+const menuOpen = ref(false);
+const started = computed(() =>
+  completedSetsCount.value > 0 || workout.value?.status === "in_progress");
+
 onMounted(loadAll);
 useVisibilityRefresh(loadAll);
 </script>
 
+
 <template>
-  <main class="strength-today">
-    <header class="page-head compact">
-      <div class="title-block">
-        <span class="eyebrow">WORKOUT</span>
-        <h1 v-if="workout">{{
-          workout.split_focus.charAt(0).toUpperCase() + workout.split_focus.slice(1).replace('_', ' ')
-        }} day</h1>
-        <h1 v-else>Today</h1>
-        <span v-if="workout" class="head-pip mono">
-          {{ completedSetsCount }}/{{ totalSetsCount }} sets
-        </span>
-        <span v-if="workout && workout.status !== 'planned' && workout.status !== 'in_progress'"
-              class="status-pip" :class="`s-${workout.status}`">
-          {{ workout.status.replace("_", " ") }}
-        </span>
-      </div>
-      <div class="head-actions">
-        <button v-if="workout && workout.exercises.length"
-                class="ghost"
-                title="Print this workout or save it as a PDF"
-                @click="printWorkout">Print</button>
-        <button v-if="workout && workout.status === 'planned'"
-                class="ghost"
-                :disabled="busy === 'regen'"
-                :title="'Re-runs the plan against the latest sleep / HRV / recovery / strength signals'"
-                @click="regenerate(true)">
-          {{ busy === 'regen' ? 'Regenerating…' : 'Regenerate ↻' }}
+  <NeonPage :title="pageTitle" back="/train" class="strength-today">
+    <template #trailing>
+      <div class="menu-wrap">
+        <button class="icon-btn" type="button" aria-label="More actions"
+                :aria-expanded="menuOpen" @click="menuOpen = !menuOpen">
+          <MoreVertical :size="20" />
         </button>
-        <button class="ghost" :disabled="swapBusyType !== null"
-                @click="swapMenuOpen = !swapMenuOpen">
-          {{ swapBusyType ? `Switching to ${swapBusyType}…` : "Swap day ▾" }}
-        </button>
-        <div v-if="swapMenuOpen" class="swap-menu">
-          <button class="swap-item" @click="doSwap('strength')">
-            <strong>Strength</strong>
-            <span class="dim">auto-pick today's split</span>
+        <div v-if="menuOpen" class="menu-scrim" @click="menuOpen = false" />
+        <div v-if="menuOpen" class="menu" role="menu" @click="menuOpen = false">
+          <button v-if="workout && workout.exercises.length" role="menuitem"
+                  title="Print this workout or save it as a PDF" @click="printWorkout">
+            Print / Save PDF
           </button>
-          <button class="swap-item" @click="doSwap('yoga')">
-            <strong>Yoga / mobility</strong>
-            <span class="dim">5 poses, 45 s holds</span>
-          </button>
-          <button class="swap-item" @click="doSwap('cardio')">
-            <strong>Cardio</strong>
-            <span class="dim">30-45 min Z2 effort</span>
-          </button>
-          <div class="swap-divider"></div>
-          <button class="swap-item"
-                  v-if="workout && workout.status === 'planned'"
+          <button v-if="workout && workout.status === 'planned'" role="menuitem"
                   :disabled="busy === 'regen'"
-                  @click="swapMenuOpen = false; regenerate(true)">
-            <strong>Regenerate plan</strong>
-            <span class="dim">re-pick exercises with same split</span>
+                  title="Re-runs the plan against the latest sleep / HRV / recovery / strength signals"
+                  @click="regenerate(true)">
+            {{ busy === 'regen' ? 'Regenerating…' : 'Regenerate plan' }}
+            <span>re-pick exercises with same split</span>
           </button>
-          <button class="swap-item"
-                  v-if="workout && (workout.status === 'planned' || workout.status === 'in_progress')"
-                  :disabled="busy === 'defer'"
-                  @click="swapMenuOpen = false; deferToday()">
-            <strong>Skip workout day</strong>
-            <span class="dim">undoable from the skipped banner</span>
+          <div class="menu-lbl">
+            {{ swapBusyType ? `Switching to ${swapBusyType}…` : "Swap day" }}
+          </div>
+          <button role="menuitem" :disabled="swapBusyType !== null" @click="doSwap('strength')">
+            Strength <span>auto-pick today's split</span>
           </button>
+          <button role="menuitem" :disabled="swapBusyType !== null" @click="doSwap('yoga')">
+            Yoga / mobility <span>5 poses, 45 s holds</span>
+          </button>
+          <button role="menuitem" :disabled="swapBusyType !== null" @click="doSwap('cardio')">
+            Cardio <span>30-45 min Z2 effort</span>
+          </button>
+          <template v-if="workout && sessionLive">
+            <div class="menu-sep" />
+            <button v-if="completedSetsCount > 0 && !isCardioDay" role="menuitem"
+                    :disabled="busy === 'pause'" @click="pauseWorkout">
+              Pause workout <span>time away won't count</span>
+            </button>
+            <button role="menuitem" class="warn" :disabled="busy === 'defer'" @click="deferToday">
+              Skip workout day <span>undoable from the skipped state</span>
+            </button>
+          </template>
         </div>
       </div>
-    </header>
+    </template>
 
-    <!-- OG2-D-7: the generator emits one note per decision it made — the
-         split choice, a missed session, accessory padding, the mobility
-         block — joined by newlines. Printed raw that is a paragraph of
-         diagnostics above the first exercise, on the page whose job is
-         logging sets. It explains WHY the plan looks like this, which is
-         worth reading occasionally and never worth reading before every
-         set. Collapsed and summarised by count, matching the phone.
-         No truncated preview: a note cut mid-sentence is less useful than
-         a count and reads as a rendering fault. -->
-    <div v-if="planNotes.length && workout?.exercises?.length" class="plan-notes">
-      <button type="button" class="pn-head" @click="notesOpen = !notesOpen">
-        <span class="pn-label">Why this plan</span>
-        <span class="pn-count">{{ planNotes.length }}
-          {{ planNotes.length === 1 ? 'note' : 'notes' }}</span>
-        <span class="pn-chev">{{ notesOpen ? '⌃' : '⌄' }}</span>
-      </button>
-      <!-- One ROW per note, not one paragraph. The generator already
-           produces a list; joining it for storage and printing the join is
-           what turned four separate statements into a block of prose. -->
-      <ul v-if="notesOpen" class="pn-list">
-        <li v-for="(n, i) in planNotes" :key="i" class="pn-item">{{ n }}</li>
-      </ul>
-    </div>
+    <p v-if="!queryToken" class="hint">Set your query token in Settings to load today's plan.</p>
 
-    <!-- FAST-18 — fasted-training banner. Appears when the workout
-         was generated against an active fast that crossed the 18h
-         volume-modulation threshold. -->
-    <div v-if="workout?.fasting_context
-               && workout.fasting_context.active
-               && workout.fasting_context.modulation !== 'normal'"
-         class="fast-banner">
-      <span class="fast-icon">⏳</span>
-      <span class="fast-text">
-        You're <strong>{{ workout.fasting_context.current_hours.toFixed(0) }}h fasted</strong>
+    <!-- Failure is not absence: a failed load never renders as "no plan".
+         Amber, never rose — this is a connection problem, not a crisis. -->
+    <button v-if="queryToken && error" class="errbanner" type="button" @click="loadAll">
+      <b>{{ workout ? "Something didn't go through" : "Couldn't load today's workout" }}</b>
+      <span>{{ error }}</span>
+      <em>Tap to retry</em>
+    </button>
+
+    <template v-if="!queryToken" />
+
+    <!-- First load: the hero's shape, shimmering. Refreshes keep the page. -->
+    <NeonHero v-else-if="loading && !workout" :accent="CYAN" class="sk-hero" aria-busy="true">
+      <div class="sk" style="width: 150px; height: 11px" />
+      <div class="sk" style="width: 70%; height: 24px; margin-top: 10px" />
+      <div class="sk" style="width: 55%; height: 13px; margin-top: 8px" />
+      <div class="sk" style="width: 80%; height: 44px; margin: 16px auto 0" />
+      <div class="sk-row">
+        <div class="sk" style="height: 40px" /><div class="sk" style="height: 40px" />
+      </div>
+      <div class="sk-row four">
+        <div v-for="i in 4" :key="i" class="sk" style="height: 40px" />
+      </div>
+      <div class="sk" style="height: 48px; margin-top: 12px; border-radius: 14px" />
+    </NeonHero>
+
+    <template v-else-if="!workout">
+      <NeonHero v-if="!error && recovery?.rest_day_recommended" :accent="AMBER">
+        <div class="eyebrow amber">Rest day recommended</div>
+        <p class="hero-text">{{ recovery.rest_day_reason }}.</p>
+        <p class="hint">
+          Recovery {{ Math.round(recovery.recovery_score ?? 0) }} ·
+          sleep {{ recovery.sleep_h?.toFixed(1) ?? '?' }}h ·
+          readiness {{ Math.round(recovery.readiness_score ?? 0) }}
+        </p>
+        <p class="hint">
+          Skipping a heavy session today and resting actively (walk, stretch,
+          mobility) will likely produce better results tomorrow than grinding
+          through this one. Generate anyway if you have a different read.
+        </p>
+        <button class="btn-ghost wide" :disabled="busy === 'regen'" @click="regenerate(true)">
+          {{ busy === 'regen' ? 'Generating…' : 'Generate anyway' }}
+        </button>
+      </NeonHero>
+      <NeonHero v-else-if="!error" :accent="CYAN">
+        <div class="eyebrow cyan">No plan yet</div>
+        <h2 class="now-name">Today's workout</h2>
+        <p class="hint">The planner builds it from your recovery, sleep and history.</p>
+        <button class="btn-log" :disabled="busy === 'regen'" @click="regenerate(false)">
+          <Play :size="16" /> {{ busy === 'regen' ? 'Generating…' : "Generate today's plan" }}
+        </button>
+      </NeonHero>
+    </template>
+
+    <template v-else>
+      <!-- ONE progress bar: a segment per exercise. The count is the
+           server's, verbatim — no second pip, no second bar. -->
+      <div v-if="workout.exercises.length" class="seg-wrap"
+           role="img" :aria-label="`${completedSetsCount} of ${totalSetsCount} sets done`">
+        <div class="segs">
+          <div v-for="sg in segments" :key="sg.id" class="seg" :class="sg.kind">
+            <i :style="{ width: `${Math.round(sg.frac * 100)}%` }" />
+          </div>
+        </div>
+        <span class="seg-label" :class="{ lime: allSetsDone }">
+          {{ completedSetsCount }}/{{ totalSetsCount }} sets
+        </span>
+      </div>
+
+      <!-- ── The hero ─────────────────────────────────────────────── -->
+      <NeonHero v-if="workout.status === 'skipped'" accent="#9b9bb0" class="hero">
+        <div class="eyebrow">Skipped</div>
+        <p class="hero-text"><b>Skipped today's workout day.</b></p>
+        <p class="hint">Tomorrow will generate fresh.</p>
+        <button class="btn-ghost wide" :disabled="busy === 'undo'" @click="undoSkip">
+          <RotateCw :size="14" /> {{ busy === 'undo' ? 'Restoring…' : 'Undo' }}
+        </button>
+      </NeonHero>
+
+      <NeonHero v-else-if="workout.status === 'completed'" :accent="LIME" class="hero">
+        <div class="hero-top">
+          <div class="eyebrow lime">Workout complete</div>
+          <button v-if="workout.exercises.length" class="btn-text" :disabled="busy === 'regen'"
+                  title="Run the same plan again — wipes today's logged sets"
+                  @click="regenerate(true)">
+            <RotateCw :size="13" /> Redo
+          </button>
+        </div>
+        <h2 class="now-name">{{ isCardioDay ? "Session logged" : "Nicely done" }}</h2>
+        <div class="tiles">
+          <NeonStat :value="tonnageText" label="Tonnage" :accent="LIME" />
+          <NeonStat :value="summary ? String(summary.working_sets) : '—'" label="Sets" />
+          <NeonStat :value="durationText" label="Duration" />
+        </div>
+        <p class="hint center">
+          {{ completedSetsCount }}/{{ totalSetsCount }} sets ·
+          {{ doneExercisesCount }}/{{ totalExercisesCount }} exercises
+        </p>
+      </NeonHero>
+
+      <NeonHero v-else-if="workout.exercises.length === 0" :accent="CYAN" class="hero">
+        <div class="eyebrow cyan">{{
+          workout.split_focus === 'cardio' ? 'Cardio prescription'
+          : workout.split_focus === 'yoga' ? 'Mobility flow'
+          : workout.split_focus === 'rest' ? 'Rest day' : titleCase(workout.split_focus)
+        }}</div>
+        <p class="hero-text">{{ workout.notes }}</p>
+        <p v-if="isCardioDay" class="hint">
+          Watch-tracked rides (Concept2, Strava) auto-link to today's
+          plan. For anything that doesn't push (Les Mills VR, treadmill,
+          outdoor walk without a watch), use "Log this workout" to add a
+          named session with duration — it'll show up in your activity
+          feed and on HR charts.
+        </p>
+        <button v-if="isCardioDay && sessionLive" class="btn-log"
+                :disabled="busy === 'complete'" @click="openCardioLog">
+          Log this workout
+        </button>
+      </NeonHero>
+
+      <NeonHero v-else-if="isPaused" :accent="CYAN" class="hero">
+        <div class="eyebrow cyan">Paused</div>
+        <h2 v-if="heroWex" class="now-name">{{ exName(heroWex.exercise_id) }}</h2>
+        <p class="hero-text">
+          Resume to keep logging — time away won't count toward your session length.
+        </p>
+        <button class="btn-log" :disabled="busy === 'resume'" @click="resumeWorkout">
+          <Play :size="16" /> {{ busy === 'resume' ? 'Resuming…' : 'Resume workout' }}
+        </button>
+      </NeonHero>
+
+      <NeonHero v-else-if="heroWex && heroSet != null && heroEntry" :accent="CYAN" class="hero now-hero">
+        <div class="hero-top">
+          <div class="eyebrow cyan">Now · Exercise {{ heroPos }} of {{ heroOf }}</div>
+          <select v-if="!isTimedExercise(heroWex)" v-model="heroEntry.setType"
+                  class="type-sel" aria-label="Set type">
+            <option value="working">work</option>
+            <option value="warmup">warm-up</option>
+            <option value="drop">drop</option>
+          </select>
+        </div>
+        <h2 class="now-name">{{ exName(heroWex.exercise_id) }}</h2>
+        <div class="now-sub">
+          {{ setHeading(heroWex, heroSet) }} · target {{ heroTarget(heroWex, heroSet) }}<span
+            v-if="sideLabel(heroWex)"> {{ sideLabel(heroWex) }}</span>
+        </div>
+        <div v-if="heroWex.superset_id" class="now-ss"
+             :style="{ color: supersetColor(heroWex.superset_id) }">
+          Superset {{ heroWex.superset_id }} — alternate with
+          {{ supersetPartnerName(heroWex.superset_id, heroWex.id) }}
+        </div>
+        <div v-if="heroWex.load_hint" class="now-hint">Load: {{ heroWex.load_hint }}</div>
+        <div v-if="lastSetsSummary(heroWex) && !isTimedExercise(heroWex)" class="now-hint">
+          ↩ last<template v-if="lastSetsWhen(heroWex)"> ({{ lastSetsWhen(heroWex) }})</template>:
+          {{ lastSetsSummary(heroWex) }}
+        </div>
+
+        <!-- Timed hold: the existing countdown + full-screen overlay. -->
+        <template v-if="isTimedExercise(heroWex)">
+          <div class="readout">
+            <template v-if="timerRemaining(heroWex.id, heroSet) !== null">
+              {{ fmtCountdown(timerRemaining(heroWex.id, heroSet) ?? 0) }}
+            </template>
+            <template v-else>{{ heroWex.target_reps_low }}<small>s hold</small></template>
+          </div>
+          <button v-if="timerRemaining(heroWex.id, heroSet) === null" class="btn-log"
+                  :disabled="busy === `set-${heroWex.id}-${heroSet}`"
+                  @click="startTimer(heroWex, heroSet)">
+            <Play :size="16" /> Start hold
+          </button>
+          <button v-else class="btn-ghost wide" @click="stopTimer(heroWex.id, heroSet)">Cancel</button>
+          <p class="hint center">Hold for the configured time — it logs itself at zero.</p>
+        </template>
+
+        <template v-else>
+          <!-- Rest lives inside the hero now: a ring around mm:ss. -->
+          <div v-if="resting" class="rest-row">
+            <NeonRing :fraction="restFraction" :color="restDone ? LIME : CYAN" :size="96" :stroke="8">
+              <b class="ring-num" :class="restDone ? 'lime' : 'cyan'">
+                {{ fmtRest(Math.max(0, restRemaining ?? 0)) }}
+              </b>
+              <span class="ring-cap">{{ restDone ? 'done' : `of ${fmtRest(restTotal)}` }}</span>
+            </NeonRing>
+            <div class="rest-body">
+              <div class="rest-state" :class="restDone ? 'lime' : 'cyan'">
+                {{ restDone ? 'Rest complete' : 'Resting' }}
+              </div>
+              <div class="rest-next">
+                Next: {{ heroEntry.weight || '—' }} lb × {{ heroEntry.reps || '—' }}
+              </div>
+              <div class="rest-actions">
+                <button v-if="!restDone" class="pill" @click="addRest(30)">+30s</button>
+                <button class="pill ghost" @click="stopRest">{{ restDone ? 'Dismiss' : 'Skip' }}</button>
+              </div>
+            </div>
+          </div>
+
+          <template v-else>
+            <div v-if="heroEditing" class="edit-row">
+              <label><span>lb</span>
+                <input v-model="heroEntry.weight" type="number" step="0.5" inputmode="decimal"
+                       :placeholder="heroWex.target_weight_lb?.toString() ?? '—'" /></label>
+              <label><span>reps</span>
+                <input v-model="heroEntry.reps" type="number" inputmode="numeric" /></label>
+              <button class="pill" @click="heroEditing = false">Done</button>
+            </div>
+            <button v-else class="readout" type="button" title="Tap to type the numbers"
+                    @click="heroEditing = true">
+              {{ heroEntry.weight || '—' }}<small>lb</small>
+              <span class="x">×</span>
+              {{ heroEntry.reps || '—' }}
+              <span v-if="plannedSet(heroWex, heroSet)?.is_amrap" class="amrap-tag">AMRAP</span>
+            </button>
+            <div class="steppers">
+              <div class="stp">
+                <button type="button" aria-label="Minus 2.5 lb" @click="stepWeight(-2.5)"><Minus :size="16" /></button>
+                <span>2.5 lb</span>
+                <button type="button" aria-label="Plus 2.5 lb" @click="stepWeight(2.5)"><Plus :size="16" /></button>
+              </div>
+              <div class="stp">
+                <button type="button" aria-label="One rep fewer" @click="stepReps(-1)"><Minus :size="16" /></button>
+                <span>1 rep</span>
+                <button type="button" aria-label="One rep more" @click="stepReps(1)"><Plus :size="16" /></button>
+              </div>
+            </div>
+          </template>
+
+          <div class="ratings" role="radiogroup" aria-label="How did the set feel?">
+            <button v-for="r in HERO_RATINGS" :key="r.v" type="button" class="rate"
+                    role="radio" :aria-checked="heroEntry.rating === r.v"
+                    :class="{ on: heroEntry.rating === r.v }" :style="{ '--c': r.color }"
+                    :title="r.title" @click="heroEntry.rating = r.v">
+              {{ r.label }}
+            </button>
+          </div>
+          <button class="btn-log" :disabled="!canLogHero" @click="logHero">
+            <Check :size="17" />
+            {{ busy === `set-${heroWex.id}-${heroSet}` ? 'Logging…' : `Log set ${heroSet}` }}
+          </button>
+        </template>
+      </NeonHero>
+
+      <NeonHero v-else-if="sessionLive" :accent="LIME" class="hero">
+        <div class="eyebrow lime">All sets done</div>
+        <h2 class="now-name">Finish the session</h2>
+        <p class="hero-text">All {{ totalSetsCount }} prescribed sets accounted for.</p>
+        <div v-if="resting" class="rest-row compact">
+          <NeonRing :fraction="restFraction" :color="restDone ? LIME : CYAN" :size="72" :stroke="7">
+            <b class="ring-num sm" :class="restDone ? 'lime' : 'cyan'">
+              {{ fmtRest(Math.max(0, restRemaining ?? 0)) }}
+            </b>
+          </NeonRing>
+          <button class="pill ghost" @click="stopRest">{{ restDone ? 'Dismiss' : 'Skip rest' }}</button>
+        </div>
+        <button class="btn-log lime" :disabled="busy === 'complete'" @click="requestComplete">
+          {{ busy === 'complete' ? 'Finishing…' : 'Finish workout' }}
+        </button>
+        <button class="btn-ghost wide" @click="openAdd"><Plus :size="15" /> Add exercise</button>
+      </NeonHero>
+
+      <!-- ── Chips: coach / fasting / deload / paused / why ─────────── -->
+      <div v-if="chipsVisible" class="chips">
+        <button v-if="queryToken && sessionLive" class="chip" :class="{ on: openChip === 'coach' }"
+                :style="{ '--c': CYAN }" :aria-expanded="openChip === 'coach'" @click="toggleChip('coach')">
+          <Sparkles :size="15" /> Coach
+        </button>
+        <button v-if="fastingActive && workout.fasting_context" class="chip"
+                :class="{ on: openChip === 'fast' }" :style="{ '--c': AMBER }"
+                :aria-expanded="openChip === 'fast'" @click="toggleChip('fast')">
+          <Hourglass :size="15" /> {{ workout.fasting_context.current_hours.toFixed(0) }}h fasted
+        </button>
+        <button v-if="deloadActive" class="chip" :class="{ on: openChip === 'deload' }"
+                :style="{ '--c': AMBER }" :aria-expanded="openChip === 'deload'" @click="toggleChip('deload')">
+          <Feather :size="15" /> Load eased ~{{ deloadPct }}%
+        </button>
+        <button v-if="isPaused" class="chip" :class="{ on: openChip === 'paused' }"
+                :style="{ '--c': CYAN }" :aria-expanded="openChip === 'paused'" @click="toggleChip('paused')">
+          <Pause :size="15" /> Paused
+        </button>
+        <button v-if="whyVisible" class="chip" :class="{ on: openChip === 'why' }"
+                :style="{ '--c': '#9b9bb0' }" :aria-expanded="openChip === 'why'" @click="toggleChip('why')">
+          <Info :size="15" /> Why this plan<template v-if="planNotes.length"> · {{ planNotes.length }}</template>
+        </button>
+      </div>
+
+      <!-- The coach stays MOUNTED while hidden (v-show) so its state —
+           loaded swaps, dismissals, the open section — survives closing the
+           chip, the same reason the phone hoists CoachCardState. -->
+      <div v-if="queryToken && sessionLive" v-show="openChip === 'coach'" class="chip-panel">
+        <CoachCard :workout-id="workout.id" :refresh-key="deloadRefreshKey"
+                   @accept-swap="acceptNudge" />
+      </div>
+      <div v-if="openChip === 'fast' && fastingActive && workout.fasting_context" class="chip-panel amber">
+        <!-- FAST-18 — generated against an active fast past the 18h
+             volume-modulation threshold. Text shared verbatim with the phone. -->
+        You're {{ workout.fasting_context.current_hours.toFixed(0) }}h fasted
         ({{ workout.fasting_context.stage.replace('_', ' ') }}) —
         <template v-if="workout.fasting_context.modulation === 'volume_-20%'">
           volume trimmed ~20%, rest +15s.
@@ -1513,79 +2049,268 @@ useVisibilityRefresh(loadAll);
         <template v-else>
           volume trimmed ~30%, rest +30s. A Z2 cardio block alongside is a strong option.
         </template>
-      </span>
-    </div>
-
-    <!-- Recovery deload banner — today's weights were auto-eased for low
-         recovery. Transparent + one-tap override to full weight. -->
-    <div v-if="workout && (workout.deload_factor ?? 1) < 1
-               && (workout.status === 'planned' || workout.status === 'in_progress')"
-         class="deload-banner">
-      <span class="deload-icon">🪶</span>
-      <span class="deload-text">
-        Today's load is <strong>eased ~{{ Math.round((1 - (workout.deload_factor ?? 1)) * 100) }}%</strong>
-        for {{ workout.deload_reason || 'low recovery' }}. Feeling strong?
-      </span>
-      <button class="primary small" :disabled="busy === 'regen'"
-              @click="regenerate(true, true)">
-        Use full weight
-      </button>
-    </div>
-
-    <!-- WP-14 paused banner. Logging is gated until the user resumes. -->
-    <div v-if="isPaused" class="paused-banner">
-      <span class="paused-icon"><Pause :size="16" /></span>
-      <span class="paused-text">
-        <strong>Workout paused.</strong> Resume to keep logging sets — the
-        time away won't count toward your session length.
-      </span>
-      <button class="primary small" :disabled="busy === 'resume'"
-              @click="resumeWorkout">
-        <Play :size="14" /> Resume
-      </button>
-    </div>
-    <!-- Why + Variety nudge moved below the exercise list. -->
-
-    <CoachCard v-if="queryToken && workout
-                     && (workout.status === 'planned' || workout.status === 'in_progress')"
-               :workout-id="workout.id"
-               :refresh-key="deloadRefreshKey"
-               @accept-swap="acceptNudge" />
-
-    <p v-if="!queryToken" class="hint">Set your query token in Settings to load today's plan.</p>
-    <p v-else-if="loading" class="hint">Loading…</p>
-    <p v-else-if="error" class="err">{{ error }}</p>
-
-    <!-- Rest day card -->
-    <Card v-else-if="!workout && recovery?.rest_day_recommended" title="Rest day recommended">
-      <p class="big">{{ recovery.rest_day_reason }}.</p>
-      <p class="hint">
-        Recovery {{ Math.round(recovery.recovery_score ?? 0) }} ·
-        sleep {{ recovery.sleep_h?.toFixed(1) ?? '?' }}h ·
-        readiness {{ Math.round(recovery.readiness_score ?? 0) }}
-      </p>
-      <p class="hint">
-        Skipping a heavy session today and resting actively (walk, stretch,
-        mobility) will likely produce better results tomorrow than grinding
-        through this one. Generate anyway if you have a different read.
-      </p>
-      <div class="actions">
-        <button class="primary" :disabled="busy === 'regen'" @click="regenerate(true)">
-          Generate anyway
+      </div>
+      <div v-if="openChip === 'deload' && deloadActive" class="chip-panel amber">
+        <b>Load eased ~{{ deloadPct }}% for recovery</b>
+        <p>{{ deloadReasonLine }}</p>
+        <button class="pill" :disabled="busy === 'regen'" @click="regenerate(true, true)">
+          {{ busy === 'regen' ? 'Regenerating…' : 'Full weight' }}
         </button>
       </div>
-    </Card>
+      <div v-if="openChip === 'paused' && isPaused" class="chip-panel">
+        <b>Workout paused</b>
+        <p>Resume to keep logging — time away won't count toward your session length.</p>
+        <button class="pill" :disabled="busy === 'resume'" @click="resumeWorkout">Resume</button>
+      </div>
+      <div v-if="openChip === 'why' && whyVisible" class="chip-panel">
+        <!-- OG2-D-7: one row per generator note; never printed raw. -->
+        <ul v-if="planNotes.length" class="pn-list">
+          <li v-for="(n, i) in planNotes" :key="i">{{ n }}</li>
+        </ul>
+        <p v-if="workout.recovery_score_used != null || workout.sleep_h_used != null" class="meta">
+          <span v-if="workout.recovery_score_used != null">recovery {{ Math.round(workout.recovery_score_used) }}</span>
+          <span v-if="workout.sleep_h_used != null"> · sleep {{ workout.sleep_h_used.toFixed(1) }}h</span>
+        </p>
+      </div>
 
-    <!-- No plan and no rest-day -->
-    <Card v-else-if="!workout" title="No plan generated">
-      <button class="primary" :disabled="busy === 'regen'" @click="regenerate(false)">
-        Generate today's plan
-      </button>
-    </Card>
+      <!-- ── Exercises ───────────────────────────────────────────── -->
+      <template v-for="c in cards" :key="c.wex.id">
+        <NeonEyebrow v-if="c.head">{{ c.head }}</NeonEyebrow>
 
-    <!-- Plan exists -->
-    <template v-else>
+        <!-- Up next: one compact line. Tap to make it the hero's exercise. -->
+        <button v-if="c.mode === 'next'" type="button" class="next-line"
+                :style="c.wex.superset_id ? { borderLeftColor: supersetColor(c.wex.superset_id) } : {}"
+                @click="focusExercise(c.wex)">
+          <span class="nl-main">
+            <span class="nl-name">{{ exPos(c.wex) }}. {{ exName(c.wex.exercise_id) }}</span>
+            <span class="nl-rx">{{ prescriptionShort(c.wex) }}</span>
+          </span>
+          <span class="nl-count">{{ accountedSets(c.wex) }}/{{ c.wex.target_sets }}</span>
+          <ChevronRight :size="16" class="nl-chev" />
+        </button>
+
+        <!-- Closed: a 56px summary line on a surface darker than a card. -->
+        <div v-else-if="c.mode === 'summary'" class="sum-line" :class="{ muted: c.wex.skipped || !hasAccountedSets(c.wex) }">
+          <button type="button" class="sum-main" :disabled="c.wex.skipped || !hasAccountedSets(c.wex)"
+                  :aria-expanded="false" @click="toggleExpanded(c.wex.id)">
+            <Check v-if="!c.wex.skipped && hasAccountedSets(c.wex)" :size="16" class="sum-ok" />
+            <span class="sum-name">{{ exPos(c.wex) }}. {{ exName(c.wex.exercise_id) }}</span>
+            <span class="sum-sets">
+              <template v-if="c.wex.skipped">Skipped</template>
+              <template v-else-if="!hasAccountedSets(c.wex)">Not logged</template>
+              <template v-else>{{ slotSummary(c.wex) }}</template>
+            </span>
+            <ChevronDown v-if="!c.wex.skipped && hasAccountedSets(c.wex)" :size="16" class="sum-chev" />
+          </button>
+          <!-- SKIP-1: Undo rides the same guard as Skip — never on a session
+               that is over (it would be a one-way write against the past). -->
+          <button v-if="c.wex.skipped && canSkipOrSwap(c.wex)" class="btn-text"
+                  :disabled="skipInFlight" @click="setExerciseSkipped(c.wex, false)">
+            {{ busy === `skip-ex-${c.wex.id}` ? 'Restoring…' : 'Undo' }}
+          </button>
+          <p v-if="skipError?.wexId === c.wex.id" class="card-err">{{ skipError.message }}</p>
+        </div>
+
+        <!-- Full card: the hero's exercise, or an expanded closed slot. -->
+        <article v-else class="ex-card" :class="{ current: heroWex?.id === c.wex.id, closed: isSlotClosed(c.wex) }"
+                 :style="c.wex.superset_id ? { borderLeftColor: supersetColor(c.wex.superset_id) } : {}">
+          <div v-if="c.wex.superset_id" class="ss-banner" :style="{ color: supersetColor(c.wex.superset_id) }">
+            ⇄ Superset {{ c.wex.superset_id }} — alternate with
+            <strong>{{ supersetPartnerName(c.wex.superset_id, c.wex.id) }}</strong>
+          </div>
+          <header class="ex-head">
+            <div class="ex-title">
+              <h3>{{ exPos(c.wex) }}. {{ exName(c.wex.exercise_id) }}</h3>
+              <div class="tags">
+                <!-- TD-10 / OG2-A6: plan vs improvisation, and kit no longer owned. -->
+                <span v-if="c.wex.added_ad_hoc" class="tag cyan"
+                      title="You added this — the planner didn't prescribe it">Added by you</span>
+                <span v-if="c.wex.equipment_missing" class="tag amber"
+                      title="Needs equipment your profile no longer lists — swap it or regenerate">Needs kit you no longer have</span>
+              </div>
+              <div class="prescription">
+                {{ c.wex.target_sets }} × {{ repsRange(c.wex) }}{{ isTimedExercise(c.wex) ? 's' : '' }}
+                <span v-if="sideLabel(c.wex)" class="side-label"> {{ sideLabel(c.wex) }}</span>
+                <span v-if="c.wex.target_weight_lb"> @ {{ fmtLb(c.wex.target_weight_lb) }} lb</span>
+                <span class="rest"> · {{ c.wex.target_rest_s }}s rest</span>
+              </div>
+            </div>
+            <div v-if="imageUrl(c.wex.exercise_id, 0)" class="thumb">
+              <ExerciseDemo v-if="isPhoto(c.wex.exercise_id)"
+                            :front="imageUrl(c.wex.exercise_id, 0)"
+                            :side="imageUrl(c.wex.exercise_id, 1)"
+                            :alt="exName(c.wex.exercise_id)" />
+              <div v-else class="ex-thumb" :title="exName(c.wex.exercise_id)"
+                   :style="`-webkit-mask-image: url('${imageUrl(c.wex.exercise_id, 0)}'); mask-image: url('${imageUrl(c.wex.exercise_id, 0)}')`" />
+            </div>
+          </header>
+
+          <!-- OG2-B3: why this weight, in the server's words. -->
+          <p v-if="c.wex.notes" class="why-target">{{ c.wex.notes }}</p>
+          <p v-if="c.wex.program_scheme" class="program-badge">Program · {{ c.wex.program_scheme }}</p>
+          <p v-if="c.wex.load_hint && !isSlotClosed(c.wex) && heroWex?.id !== c.wex.id" class="last-hint">
+            Load: {{ c.wex.load_hint }}
+          </p>
+          <p v-if="skipError?.wexId === c.wex.id" class="card-err">{{ skipError.message }}</p>
+
+          <div class="ex-actions">
+            <a class="act" :href="youtubeUrl(c.wex.exercise_id)" target="_blank" rel="noreferrer">YouTube ↗</a>
+            <template v-if="canSkipOrSwap(c.wex)">
+              <button class="act" @click="openSwap(c.wex.id)">Swap</button>
+              <button class="act" :disabled="skipInFlight" @click="setExerciseSkipped(c.wex, true)">
+                {{ busy === `skip-ex-${c.wex.id}` ? 'Skipping…' : 'Skip' }}
+              </button>
+            </template>
+            <button v-if="c.wex.added_ad_hoc && !isSlotClosed(c.wex) && c.wex.sets.length === 0"
+                    class="act" title="Remove this exercise" @click="removeExercise(c.wex.id)">Remove</button>
+            <button v-if="isSlotClosed(c.wex) && !isEditingExercise(c.wex)" class="act"
+                    @click="toggleExpanded(c.wex.id)">Collapse</button>
+          </div>
+
+          <!-- The set grid: SET | LB | REPS | ✓. Fits 360px (UX-W2). -->
+          <div class="grid" :class="{ timed: isTimedExercise(c.wex) }" role="table">
+            <div class="g-head" role="row">
+              <span>Set</span>
+              <template v-if="!isTimedExercise(c.wex)"><span>lb</span><span>Reps</span></template>
+              <span v-else class="span2">Hold</span>
+              <span class="c">✓</span>
+            </div>
+            <template v-for="n in c.wex.target_sets" :key="n">
+              <!-- Correction editor (OG2-A9): the same logSet path, plus Delete. -->
+              <div v-if="isEditing(c.wex.id, n) && !isTimedExercise(c.wex)" class="g-edit" role="row">
+                <div class="ge-top">
+                  <span class="ge-lbl">Set {{ bilateralSideLabel(c.wex, n) }}</span>
+                  <label><span>lb</span><input v-model="entry(c.wex, n).weight" type="number" step="0.5" inputmode="decimal" /></label>
+                  <label><span>reps</span><input v-model="entry(c.wex, n).reps" type="number" inputmode="numeric" /></label>
+                  <select v-model="entry(c.wex, n).setType" aria-label="Set type">
+                    <option value="working">work</option>
+                    <option value="warmup">warm</option>
+                    <option value="drop">drop</option>
+                  </select>
+                </div>
+                <div class="ge-rates">
+                  <button v-for="opt in RATING_CHOICES" :key="opt.v" type="button" class="rate"
+                          :class="{ on: entry(c.wex, n).rating === opt.v }" :style="{ '--c': ratingColor(opt.v) }"
+                          :title="opt.title" @click="setRating(c.wex.id, n, opt.v)">{{ opt.label }}</button>
+                </div>
+                <div class="ge-acts">
+                  <button class="pill ghost" @click="cancelEdit">Cancel</button>
+                  <button class="pill warn" :disabled="busy === `set-${c.wex.id}-${n}`"
+                          title="This set did not happen — remove it" @click="removeSet(c.wex, n)">Delete set</button>
+                  <button class="pill" :disabled="busy === `set-${c.wex.id}-${n}` || entry(c.wex, n).rating === null"
+                          @click="logSet(c.wex, n)">Save</button>
+                </div>
+              </div>
+
+              <div v-else class="g-row" role="row" :class="{
+                     logged: isSetLogged(c.wex, n),
+                     now: heroWex?.id === c.wex.id && heroSet === n,
+                     pending: !isSetLogged(c.wex, n) && !(heroWex?.id === c.wex.id && heroSet === n),
+                   }">
+                <span class="g-n" :class="{ side: bilateralSideLabel(c.wex, n) !== String(n) }">
+                  {{ bilateralSideLabel(c.wex, n) }}
+                </span>
+                <!-- Timed rows -->
+                <template v-if="isTimedExercise(c.wex)">
+                  <span class="span2">
+                    <template v-if="loggedSet(c.wex, n)">Held {{ loggedSet(c.wex, n)!.actual_reps }}s</template>
+                    <template v-else-if="isSetLogged(c.wex, n)">fail</template>
+                    <template v-else-if="timerRemaining(c.wex.id, n) !== null">
+                      {{ fmtCountdown(timerRemaining(c.wex.id, n) ?? 0) }} of {{ c.wex.target_reps_low }}s
+                    </template>
+                    <template v-else>{{ c.wex.target_reps_low }}s hold</template>
+                  </span>
+                  <span class="c">
+                    <Check v-if="isSetLogged(c.wex, n)" :size="16" class="lime" />
+                    <b v-else-if="heroWex?.id === c.wex.id && heroSet === n" class="now-tag">NOW</b>
+                  </span>
+                </template>
+                <!-- Rep rows -->
+                <template v-else-if="loggedSet(c.wex, n)">
+                  <span>{{ fmtLb(loggedSet(c.wex, n)!.actual_weight_lb) }}</span>
+                  <span>{{ loggedSet(c.wex, n)!.actual_reps }}
+                    <em class="g-rate" :style="{ color: ratingColor(loggedSet(c.wex, n)!.rating) }">
+                      {{ ratingLabel(loggedSet(c.wex, n)!.rating) }}</em>
+                    <span v-if="prFlash[`${c.wex.id}-${n}`]" class="pr-badge">{{ prFlash[`${c.wex.id}-${n}`] }}</span>
+                  </span>
+                  <span class="c">
+                    <!-- OG2-A9: correct a fat-fingered set. ≥40px target. -->
+                    <button v-if="!sessionOver && !isPaused" class="edit-btn" title="Correct this set"
+                            @click="beginEdit(c.wex.id, n)">edit</button>
+                    <Check v-else :size="16" class="lime" />
+                  </span>
+                </template>
+                <template v-else-if="isSetLogged(c.wex, n)">
+                  <span class="span2 muted">skipped</span><span class="c" />
+                </template>
+                <template v-else-if="heroWex?.id === c.wex.id && heroSet === n">
+                  <span>{{ entry(c.wex, n).weight || '—' }}</span>
+                  <span>{{ entry(c.wex, n).reps || '—' }}
+                    <span v-if="plannedSet(c.wex, n)?.is_amrap" class="amrap-tag">AMRAP</span></span>
+                  <span class="c"><b class="now-tag">NOW</b></span>
+                </template>
+                <template v-else>
+                  <span>{{ fmtLb(plannedSet(c.wex, n)?.target_weight_lb ?? c.wex.target_weight_lb) }}</span>
+                  <span>{{ plannedSet(c.wex, n)?.target_reps || c.wex.target_reps_low }}
+                    <span v-if="plannedSet(c.wex, n)?.is_amrap" class="amrap-tag">AMRAP</span></span>
+                  <span class="c" />
+                </template>
+              </div>
+            </template>
+          </div>
+          <p v-if="!isTimedExercise(c.wex) && !isSlotClosed(c.wex)" class="rating-legend">
+            <b>Hard</b> = stays the same · <b>Good</b> = +1 rep next time · <b>Easy</b> = +weight ·
+            <b>Fail</b> if you missed reps.
+          </p>
+        </article>
+      </template>
+
+      <!-- Complete (early) / Pause — the hero carries Finish once every
+           set is accounted for, so this is the walk-away path (SKIP-1). -->
+      <div v-if="sessionLive && workout.exercises.length && !allSetsDone" class="bottom">
+        <button class="btn-log lime" :disabled="busy === 'complete'" @click="requestComplete">
+          {{ busy === 'complete' ? 'Finishing…' : 'Complete workout' }}
+        </button>
+        <button v-if="completedSetsCount > 0" class="btn-ghost" :disabled="busy === 'pause'" @click="pauseWorkout">
+          <Pause :size="15" /> Pause
+        </button>
+      </div>
+
+      <!-- TD-10 — add an off-plan exercise while the session is open. -->
+      <div v-if="workout.status !== 'completed' && workout.status !== 'skipped' && workout.exercises.length"
+           class="add-row">
+        <button class="btn-text" @click="openAdd"><Plus :size="15" /> Add exercise</button>
+        <span v-if="addError" class="card-err">{{ addError }}</span>
+      </div>
+
+      <!-- Completed: the AI review below the summary hero. -->
+      <section v-if="workout.status === 'completed'" class="panel ai-review">
+        <button v-if="!review && !reviewLoading" class="btn-ghost wide" @click="loadReview">
+          Get AI workout review
+        </button>
+        <p v-if="reviewLoading" class="hint">Generating review…</p>
+        <p v-if="reviewError" class="card-err">{{ reviewError }}</p>
+        <div v-if="review" class="review-card" :class="`tone-${review.tone}`">
+          <h3>{{ review.headline }}</h3>
+          <ul v-if="review.highlights.length" class="hl">
+            <li v-for="(h, i) in review.highlights" :key="i">{{ h }}</li>
+          </ul>
+          <ul v-if="review.concerns && review.concerns.length" class="cn">
+            <li v-for="(c, i) in review.concerns" :key="i">{{ c }}</li>
+          </ul>
+          <p class="next"><strong>Next session:</strong> {{ review.next_session_suggestion }}</p>
+          <p class="cached">{{ reviewCached ? 'cached' : 'generated' }} · {{ reviewModel }}</p>
+        </div>
+      </section>
+
+      <!-- OG2-C2: projected silhouette, below the session. -->
+      <template v-if="projectedMuscles">
+        <NeonEyebrow>This week, after today</NeonEyebrow>
+        <div class="projected-map"><BodyMap :muscles="projectedMuscles" /></div>
+      </template>
+
       <!-- 7-day strip: past 3, today, projected 3 -->
+      <NeonEyebrow>This week</NeonEyebrow>
       <div class="week-strip">
         <RouterLink v-for="d in weekStrip" :key="d.iso"
              :to="{ name: 'workout-strength-day', params: { date: d.iso } }"
@@ -1597,7 +2322,6 @@ useVisibilityRefresh(loadAll);
                skipped: d.status === 'skipped',
                planned: d.status === 'planned',
                projected: d.projected,
-               past: d.isPast,
              }"
              :title="d.iso + (d.status ? ' · ' + d.status : (d.projected ? ' · projected workout day' : ' · rest day'))">
           <div class="dow">{{ d.label }}</div>
@@ -1605,570 +2329,12 @@ useVisibilityRefresh(loadAll);
         </RouterLink>
       </div>
 
-      <Card v-if="workout.status === 'skipped'" class="skip-banner" :flat="true">
-        <div class="skip-row">
-          <span>
-            <strong>Skipped today's workout day.</strong>
-            Tomorrow will generate fresh.
-          </span>
-          <button class="ghost" :disabled="busy === 'undo'" @click="undoSkip">
-            <RotateCw :size="14" /> {{ busy === 'undo' ? 'Restoring…' : 'Undo' }}
-          </button>
-        </div>
-      </Card>
-
-      <!-- ctx Card removed: sets count → header pip, status → header
-           pip, regenerate / skip → swap-day overflow menu, recovery /
-           sleep → workout.notes line above (rendered before WhyCard). -->
-      <div v-if="workout.recovery_score_used != null || workout.sleep_h_used != null"
-           class="ctx-meta dim">
-        <span v-if="workout.recovery_score_used != null">
-          recovery {{ Math.round(workout.recovery_score_used) }}
-        </span>
-        <span v-if="workout.sleep_h_used != null">
-          · sleep {{ workout.sleep_h_used.toFixed(1) }}h
-        </span>
-      </div>
-
-      <!-- Rest timer (redesigned per claude.ai/design workout bundle) -->
-      <div v-if="restRemaining !== null" class="rest-timer" :class="{ done: restRemaining <= 0 }">
-        <div class="icon-block">
-          <Timer v-if="restRemaining > 0" :size="18" />
-          <Check v-else :size="18" />
-        </div>
-        <div class="time-block">
-          <template v-if="restRemaining > 0">
-            <div class="big-time">{{ fmtRest(Math.max(0, restRemaining)) }}</div>
-            <div class="of">of <span class="mono">{{ restTotal }}s</span> rest</div>
-          </template>
-          <template v-else>
-            <div class="done-text">Rest done — go!</div>
-          </template>
-        </div>
-        <div v-if="restRemaining > 0" class="rt-actions">
-          <button class="rt-btn" @click="addRest(30)">+30s</button>
-          <button class="rt-btn ghost" @click="stopRest">Skip</button>
-        </div>
-      </div>
-
-      <!-- Cardio prescription — no exercise list, notes-only.
-           Renders the suggestion text + a "Log this workout" button
-           that opens a dialog for label + duration so the session
-           appears in the activity feed, on HR chart markers, and in
-           the weekly cardio dose. -->
-      <div v-if="workout.split_focus === 'cardio' && workout.exercises.length === 0"
-           class="cardio-card">
-        <h3>Cardio session</h3>
-        <p class="cardio-notes">{{ workout.notes }}</p>
-        <p class="hint">
-          Watch-tracked rides (Concept2, Strava) auto-link to today's
-          plan. For anything that doesn't push (Les Mills VR, treadmill,
-          outdoor walk without a watch), use "Log this workout" to add a
-          named session with duration — it'll show up in your activity
-          feed and on HR charts.
-        </p>
-        <button v-if="workout.status === 'planned' || workout.status === 'in_progress'"
-                class="primary" :disabled="busy === 'complete'"
-                @click="openCardioLog">
-          Log this workout
-        </button>
-        <p v-else-if="workout.status === 'completed'" class="ok">
-          ✓ Cardio session marked complete.
-        </p>
-      </div>
-
-      <!-- Cardio log dialog -->
-      <div v-if="showCardioLog" class="modal-backdrop" @click.self="showCardioLog = false">
-        <div class="modal">
-          <h3>Log this workout</h3>
-          <p class="hint">
-            The session will appear in your activity feed, as a marker
-            on HR charts, and count toward your weekly cardio dose.
-          </p>
-          <label class="field">
-            <span>Type</span>
-            <select v-model="cardioType" :disabled="busy === 'complete'"
-                    @change="onCardioPreset">
-              <option v-for="p in CARDIO_PRESETS" :key="p.type" :value="p.type">
-                {{ p.label }}
-              </option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Workout name</span>
-            <input v-model="cardioLabel" type="text" maxlength="120"
-                   placeholder="e.g. Les Mills VR"
-                   :disabled="busy === 'complete'" />
-          </label>
-          <label class="field">
-            <span>Duration (minutes)</span>
-            <input v-model.number="cardioDuration" type="number"
-                   min="1" max="1440" :disabled="busy === 'complete'" />
-          </label>
-          <label class="field">
-            <span>Ended at</span>
-            <input v-model="cardioEndedAt" type="time"
-                   :disabled="busy === 'complete'" />
-            <small class="hint" style="margin: 0.2rem 0 0;">
-              Adjust if you're logging this later — the HR sample window
-              anchors to this end time minus the duration above.
-            </small>
-          </label>
-          <div class="modal-actions">
-            <button class="ghost" :disabled="busy === 'complete'"
-                    @click="showCardioLog = false">Cancel</button>
-            <button class="primary"
-                    :disabled="busy === 'complete' || !cardioLabel.trim() || !cardioDuration || cardioDuration <= 0"
-                    @click="submitCardioLog">
-              {{ busy === 'complete' ? 'Logging…' : 'Log workout' }}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Exercise list -->
-      <div v-for="(wex, idx) in workout.exercises" :key="wex.id" class="ex-card"
-           :class="{ current: currentExercise?.id === wex.id, done: isSlotClosed(wex), superset: !!wex.superset_id }"
-           :style="wex.superset_id ? { borderLeftColor: supersetColor(wex.superset_id) } : {}">
-        <div v-if="wex.superset_id" class="ss-banner" :style="{ color: supersetColor(wex.superset_id) }">
-          ⇄ Superset {{ wex.superset_id }} — alternate with <strong>{{ supersetPartnerName(wex.superset_id, wex.id) }}</strong>
-        </div>
-        <header>
-          <h3>
-            {{ idx + 1 }}. {{ exName(wex.exercise_id) }}
-            <!-- TD-10: keep the plan and its improvisations distinguishable
-                 after the fact. The AI reviewer makes the same distinction. -->
-            <span v-if="wex.added_ad_hoc" class="adhoc-tag"
-                  title="You added this — the planner didn't prescribe it">added</span>
-            <!-- OG2-A6: the equipment changed after this plan was made, and
-                 it was too late to regenerate. Flagged, never removed:
-                 deleting work from a session already in front of the user
-                 is worse than saying it cannot be done. -->
-            <span v-if="wex.equipment_missing" class="kit-tag"
-                  title="Needs equipment your profile no longer lists — swap it or regenerate">no kit</span>
-            <button v-if="wex.added_ad_hoc && !isSlotClosed(wex) && wex.sets.length === 0"
-                    class="ghost tiny" title="Remove this exercise"
-                    @click="removeExercise(wex.id)">remove</button>
-          </h3>
-          <span class="prescription">
-            {{ wex.target_sets }} ×
-            {{ wex.target_reps_low === wex.target_reps_high
-              ? wex.target_reps_low : `${wex.target_reps_low}-${wex.target_reps_high}` }}
-            <!-- OG3-B3: rendered verbatim from the server. "3 × 10" on a
-                 One-Arm Row is ambiguous between per arm and in total, and
-                 both readings are plausible — so the words come from one
-                 place rather than each client wording it its own way. -->
-            <span v-if="sideLabel(wex)" class="side-label"> {{ sideLabel(wex) }}</span>
-            <span v-if="wex.target_weight_lb"> @ {{ wex.target_weight_lb }} lb</span>
-            <span class="rest"> · {{ wex.target_rest_s }}s rest</span>
-          </span>
-          <!-- OG2-B3: why this weight, in the server's words. It used to be
-               a single generic sentence behind a tap in the Coach card,
-               describing an RPE scale this app does not use — and derived
-               from a different query than the one that chose the number. -->
-          <p v-if="wex.notes" class="why-target">{{ wex.notes }}</p>
-        </header>
-
-        <!-- PROG-1: program-mode scheme badge on program lifts -->
-        <p v-if="wex.program_scheme" class="program-badge">
-          📈 {{ wex.program_scheme }}
-        </p>
-
-        <!-- LOAD-1: how to load it (only when micro-loaders are needed).
-             Both hints are instructions for work you're about to do, so
-             they're suppressed on any closed slot — including an unlogged
-             one on a session that's already over. -->
-        <p v-if="wex.load_hint && !isSlotClosed(wex)" class="load-hint">
-          🏋 {{ wex.load_hint }}
-        </p>
-
-        <!-- LOG-1: what you did last time (rep-based rows only) -->
-        <p v-if="lastSetsSummary(wex) && !isSlotClosed(wex) && !isTimedExercise(wex)"
-           class="last-hint">
-          ↩ last<template v-if="lastSetsWhen(wex)"> ({{ lastSetsWhen(wex) }})</template>:
-          {{ lastSetsSummary(wex) }}
-        </p>
-
-        <p v-if="skipError?.wexId === wex.id" class="err skip-err">
-          {{ skipError.message }}
-        </p>
-
-        <!-- Closed slots, in order of what they mean. Nothing below here
-             renders a live logging table — that's the whole point: a
-             finished session is a record, not a worksheet. -->
-
-        <!-- SKIP-1: declined slot — a muted strip with an Undo. -->
-        <div v-if="wex.skipped" class="skip-strip">
-          <span>Skipped</span>
-          <!-- Undo rides the same guard as Skip. On a session that's over,
-               un-skipping would drop the slot into the "Not logged" strip
-               below with no way back — a one-way write against a past
-               session. The phone blocks it for the same reason. -->
-          <button v-if="canSkipOrSwap(wex)" class="undo-btn"
-                  :disabled="skipInFlight"
-                  @click="setExerciseSkipped(wex, false)">
-            {{ busy === `skip-ex-${wex.id}` ? 'Restoring…' : 'Undo' }}
-          </button>
-        </div>
-
-        <!-- Completed state: collapse to chip summary instead of greyed-out
-             inputs. A partially logged slot on a finished session lands here
-             too — those sets are real work and must stay visible, rather
-             than being hidden behind the "Not logged" strip below. -->
-        <div v-else-if="!isEditingExercise(wex)
-                        && (isExerciseDone(wex) || (sessionOver && hasAccountedSets(wex)))"
-             class="done-summary">
-          <span v-for="s in [...wex.sets].sort((a, b) => a.set_number - b.set_number)"
-                :key="s.set_number"
-                class="set-chip"
-                :class="s.skipped ? 'fail' : 'ok'"
-                :title="`Set ${s.set_number} · ${ratingLabel(s.rating)}`"
-                :data-r="s.rating ?? 0">
-            <template v-if="s.skipped">fail</template>
-            <template v-else>{{ s.actual_weight_lb ?? '—' }}×{{ s.actual_reps }}</template>
-          </span>
-          <!-- OG2-A9: the correction affordance has to live HERE too, and
-               this is the common case. A finished exercise collapses to
-               chips, and that branch precedes the input table — so without
-               this a set could only be corrected while its siblings were
-               still outstanding, which is exactly not when you notice a
-               typo. Reopening restores the full table below. -->
-          <button v-if="!sessionOver" class="ghost tiny"
-                  title="Correct a set in this exercise"
-                  @click="reopenExercise(wex)">edit sets</button>
-        </div>
-
-        <!-- Session's over and this slot was never accounted for — the
-             pre-SKIP-1 sessions the server sweep never touched land here.
-             Stated, not offered: no Undo (there's nothing to undo) and no
-             logging controls (the session isn't writable). -->
-        <div v-else-if="sessionOver" class="skip-strip not-logged">
-          <span>Not logged</span>
-        </div>
-
-        <div v-else-if="ex(wex.exercise_id)" class="ex-body">
-          <div class="media">
-            <!-- Real demo photo wins over the violet-tinted icon.
-                 Photos are .jpg from the base catalog; icons are .png
-                 (from the Noun Project mask treatment). -->
-            <ExerciseDemo
-              v-if="imageUrl(wex.exercise_id, 0) && /\.jpe?g($|\?)/i.test(imageUrl(wex.exercise_id, 0)!)"
-              :front="imageUrl(wex.exercise_id, 0)"
-              :side="imageUrl(wex.exercise_id, 1)"
-              :alt="exName(wex.exercise_id)"
-            />
-            <div
-              v-else-if="imageUrl(wex.exercise_id, 0)"
-              class="ex-thumb"
-              :style="`-webkit-mask-image: url('${imageUrl(wex.exercise_id, 0)}'); mask-image: url('${imageUrl(wex.exercise_id, 0)}')`"
-              :title="exName(wex.exercise_id)"
-            />
-            <a class="yt" :href="youtubeUrl(wex.exercise_id)" target="_blank" rel="noreferrer">
-              Watch form video on YouTube ↗
-            </a>
-            <div v-if="canSkipOrSwap(wex)" class="slot-actions">
-              <button class="swap-btn" @click="openSwap(wex.id)">
-                Swap exercise
-              </button>
-              <button class="swap-btn" :disabled="skipInFlight"
-                      @click="setExerciseSkipped(wex, true)">
-                {{ busy === `skip-ex-${wex.id}` ? 'Skipping…' : 'Skip exercise' }}
-              </button>
-            </div>
-          </div>
-
-          <div class="sets">
-            <table>
-              <thead>
-                <tr v-if="!isTimedExercise(wex)">
-                  <th>#</th><th>Weight (lb)</th><th>Reps</th><th>Type</th><th>Rating</th><th></th>
-                </tr>
-                <tr v-else>
-                  <th>#</th><th colspan="3">Hold</th><th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <!-- Standard rep-based row -->
-                <tr v-for="n in wex.target_sets" :key="n"
-                    v-if="!isTimedExercise(wex)"
-                    :class="{ logged: isSetLogged(wex, n) }">
-                  <td :class="{ side: bilateralSideLabel(wex, n) !== String(n) }">
-                    {{ bilateralSideLabel(wex, n) }}
-                  </td>
-                  <td>
-                    <input
-                      type="number" step="0.5" inputmode="decimal"
-                      :placeholder="wex.target_weight_lb?.toString() ?? '—'"
-                      v-model="entry(wex, n).weight"
-                      :disabled="isSetLogged(wex, n) && !isEditing(wex.id, n)"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number" inputmode="numeric"
-                      :placeholder="plannedSet(wex, n)?.target_reps?.toString() ?? wex.target_reps_low.toString()"
-                      v-model="entry(wex, n).reps"
-                      :disabled="isSetLogged(wex, n) && !isEditing(wex.id, n)"
-                    />
-                    <!-- PROG-1 Greyskull: the last set is as-many-reps-as-
-                         possible. Labelling the input beats a badge the user
-                         has to read and then remember which set it meant. -->
-                    <span v-if="plannedSet(wex, n)?.is_amrap" class="amrap-tag"
-                          title="As many reps as possible — this is the set that drives the next weight jump">AMRAP</span>
-                  </td>
-                  <!-- TD-6: the phone has had a set-type picker since
-                       SETTYPE-1 shipped; the web hard-coded "working" with
-                       no way to record a warm-up. A warm-up counted as a
-                       working set skewed the volume audit and the ghost
-                       line for the next session. -->
-                  <td class="settype-cell">
-                    <select v-model="entry(wex, n).setType"
-                            :disabled="isSetLogged(wex, n) && !isEditing(wex.id, n)"
-                            aria-label="Set type">
-                      <option value="working">work</option>
-                      <option value="warmup">warm</option>
-                      <option value="drop">drop</option>
-                    </select>
-                  </td>
-                  <td class="rating-cell">
-                    <button
-                      v-for="opt in RATING_CHOICES" :key="opt.v"
-                      class="rating" :data-r="opt.v"
-                      :class="{ on: entry(wex, n).rating === opt.v }"
-                      :disabled="isSetLogged(wex, n) && !isEditing(wex.id, n)"
-                      :title="opt.title"
-                      @click="setRating(wex.id, n, opt.v)"
-                    >
-                      <span class="num">{{ opt.label }}</span>
-                    </button>
-                  </td>
-                  <td>
-                    <div v-if="!isSetLogged(wex, n)" class="row-actions">
-                      <button class="primary small"
-                              :disabled="busy === `set-${wex.id}-${n}` || entry(wex, n).rating === null"
-                              @click="logSet(wex, n)">
-                        Log
-                      </button>
-                      <button class="ghost small fail"
-                              :disabled="busy === `set-${wex.id}-${n}`"
-                              title="Mark this set failed (rating 1 — auto-deload next session)"
-                              @click="logFailed(wex, n)">
-                        Failed
-                      </button>
-                    </div>
-                    <template v-else-if="isEditing(wex.id, n)">
-                      <div class="row-actions">
-                        <button class="primary small"
-                                :disabled="busy === `set-${wex.id}-${n}` || entry(wex, n).rating === null"
-                                @click="logSet(wex, n)">Save</button>
-                        <button class="ghost small" @click="cancelEdit">Cancel</button>
-                        <button class="ghost small fail"
-                                :disabled="busy === `set-${wex.id}-${n}`"
-                                title="This set did not happen — remove it"
-                                @click="removeSet(wex, n)">Delete</button>
-                      </div>
-                    </template>
-                    <span v-else class="ok">
-                      ✓
-                      <!-- OG2-A9: a logged set was permanent from the UI, so a
-                           fat-fingered 225 instead of 25 stayed in the log,
-                           in the PR card, and in the average that picks next
-                           session's weight. -->
-                      <button v-if="!sessionOver" class="ghost tiny"
-                              title="Correct this set"
-                              @click="beginEdit(wex.id, n)">edit</button>
-                      <span v-if="prFlash[`${wex.id}-${n}`]" class="pr-badge">
-                        🏆 {{ prFlash[`${wex.id}-${n}`] }}
-                      </span>
-                    </span>
-                  </td>
-                </tr>
-
-                <!-- Timed (yoga / mobility) row -->
-                <tr v-for="n in wex.target_sets" :key="`t-${n}`"
-                    v-if="isTimedExercise(wex)"
-                    :class="{ logged: isSetLogged(wex, n) }">
-                  <td :class="{ side: bilateralSideLabel(wex, n) !== String(n) }">
-                    {{ bilateralSideLabel(wex, n) }}
-                  </td>
-                  <td colspan="3" class="timer-cell">
-                    <template v-if="isSetLogged(wex, n)">
-                      <span class="dim">Held {{ wex.target_reps_low }}s ✓</span>
-                    </template>
-                    <template v-else-if="timerRemaining(wex.id, n) !== null">
-                      <div class="countdown-block">
-                        <span class="countdown mono">
-                          {{ fmtCountdown(timerRemaining(wex.id, n) ?? 0) }}
-                        </span>
-                        <span class="dim small">of {{ wex.target_reps_low }}s</span>
-                      </div>
-                    </template>
-                    <template v-else>
-                      <span class="dim">{{ wex.target_reps_low }}s hold</span>
-                    </template>
-                  </td>
-                  <td>
-                    <div v-if="!isSetLogged(wex, n)" class="row-actions">
-                      <button v-if="timerRemaining(wex.id, n) === null"
-                              class="primary small"
-                              @click="startTimer(wex, n)">
-                        ▶ Start
-                      </button>
-                      <button v-else
-                              class="ghost small"
-                              @click="stopTimer(wex.id, n)">
-                        Cancel
-                      </button>
-                    </div>
-                    <span v-else class="ok">✓</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <p v-if="!isTimedExercise(wex)" class="rating-legend">
-              <span class="lbl">How did the set feel? <b>Hard</b> = stays the same · <b>Good</b> = +1 rep next time · <b>Easy</b> = +weight. Or tap <b>Failed</b> if you missed reps.</span>
-            </p>
-            <p v-else class="rating-legend">
-              <span class="lbl">Hold each pose for the configured time. Tap Start; auto-logs at zero.</span>
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Complete / Pause / Resume CTA -->
-      <div v-if="workout.status !== 'completed' && workout.status !== 'skipped'"
-           class="bottom">
-        <template v-if="isPaused">
-          <button class="primary big-btn" :disabled="busy === 'resume'"
-                  @click="resumeWorkout">
-            <Play :size="16" /> Resume workout
-          </button>
-        </template>
-        <template v-else>
-          <!-- Enabled for any live session: finishing one you walked away
-               from without logging a thing is the flagship SKIP-1 flow, and
-               a zero-sets gate here made it unreachable on web (the phone
-               never had one). The confirmation names what gets closed out. -->
-          <button class="primary big-btn" :disabled="busy === 'complete'"
-                  @click="requestComplete">
-            Complete workout
-            <small>({{ completedSetsCount }}/{{ totalSetsCount }} sets)</small>
-          </button>
-          <button v-if="completedSetsCount > 0" class="ghost big-btn"
-                  :disabled="busy === 'pause'" @click="pauseWorkout">
-            <Pause :size="16" /> Pause
-          </button>
-        </template>
-      </div>
-      <!-- Swap-exercise modal -->
-      <div v-if="swapWexId !== null" class="overlay" @click.self="closeSwap">
-        <div class="drawer swap-drawer">
-          <header>
-            <h2>Swap exercise</h2>
-            <button class="close" @click="closeSwap">✕</button>
-          </header>
-          <p v-if="swapError" class="err">{{ swapError }}</p>
-          <p v-if="swapAlternatives.length === 0" class="hint">
-            No alternatives in your equipment for this slot.
-          </p>
-          <ul v-else class="alts">
-            <li v-for="alt in swapAlternatives" :key="alt.id"
-                :class="{ disabled: swapBusy }" @click="applySwap(alt.id)">
-              <strong>{{ alt.name }}</strong>
-              <span class="tags">{{ alt.movement_pattern.replace('_', ' ') }} · {{ alt.primary_muscle }}</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-
-      <!-- TD-10 — add an off-plan exercise. Only offered while the session is
-           still open: appending to a finished workout would rewrite what was
-           performed rather than record it. -->
-      <div v-if="workout.status !== 'completed' && workout.status !== 'skipped'"
-           class="add-exercise-row">
-        <button class="ghost" @click="openAdd">+ Add exercise</button>
-        <span v-if="addError" class="err">{{ addError }}</span>
-      </div>
-
-      <div v-if="addOpen" class="overlay" @click.self="closeAdd">
-        <div class="drawer swap-drawer">
-          <header>
-            <h2>Add exercise</h2>
-            <button class="close" @click="closeAdd">✕</button>
-          </header>
-          <p class="hint">
-            The weight is prescribed from your history, the same way the
-            planner does it — you pick the movement.
-          </p>
-          <input v-model="addQuery" class="add-search" type="search"
-                 placeholder="Search by name or muscle…" aria-label="Search exercises"/>
-          <p v-if="addError" class="err">{{ addError }}</p>
-          <p v-if="addCandidates.length === 0" class="hint">
-            Nothing matches — every exercise in your equipment is either
-            already in today's session or filtered out.
-          </p>
-          <ul v-else class="alts">
-            <li v-for="alt in addCandidates" :key="alt.id"
-                :class="{ disabled: addBusy }" @click="addExercise(alt.id)">
-              <strong>{{ alt.name }}</strong>
-              <span class="tags">{{ alt.movement_pattern.replace('_', ' ') }} · {{ alt.primary_muscle }}</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-
-      <!-- Summary for a finished session. Was chained as the v-else of the
-           swap modal above, so it rendered on every status whenever the
-           swap drawer happened to be closed. -->
-      <Card v-if="workout.status === 'completed'" title="Workout complete"
-            :subtitle="`${completedSetsCount}/${totalSetsCount} sets · ${doneExercisesCount}/${totalExercisesCount} exercises`"
-            :flat="true">
-        <p class="hint">
-          Nicely done. Today's session is logged — you'll see the next-session
-          weight progression baked in tomorrow.
-        </p>
-
-        <div class="ai-review">
-          <button v-if="!review && !reviewLoading" class="ghost" @click="loadReview">
-            Get AI workout review
-          </button>
-          <p v-if="reviewLoading" class="hint">Generating review…</p>
-          <p v-if="reviewError" class="err">{{ reviewError }}</p>
-
-          <div v-if="review" class="review-card" :class="`tone-${review.tone}`">
-            <h3>{{ review.headline }}</h3>
-            <ul v-if="review.highlights.length" class="hl">
-              <li v-for="(h, i) in review.highlights" :key="i">{{ h }}</li>
-            </ul>
-            <ul v-if="review.concerns && review.concerns.length" class="cn">
-              <li v-for="(c, i) in review.concerns" :key="i">{{ c }}</li>
-            </ul>
-            <p class="next"><strong>Next session:</strong> {{ review.next_session_suggestion }}</p>
-            <p class="cached" v-if="reviewCached">cached · {{ reviewModel }}</p>
-            <p class="cached" v-else>generated · {{ reviewModel }}</p>
-          </div>
-        </div>
-      </Card>
-
-      <!-- Why + Variety + Deload + Focus are now consolidated into the
-           single CoachCard mounted near the top of the page. -->
-
-      <!-- OG2-C2: the same silhouette the charts page shows, but projected
-           forward through today's plan. Placed above "Next workouts" and
-           below the session, because it answers "what will this leave me
-           at" — a question you can still act on by swapping a slot. -->
-      <div v-if="projectedMuscles" class="projected-map">
-        <h3>This week, after today</h3>
-        <BodyMap :muscles="projectedMuscles" />
-      </div>
-
-      <!-- Next workouts moved to bottom — "look ahead" not "do now" -->
-      <div v-if="upcoming.filter(u => !u.is_today).length > 0" class="upcoming">
-        <h3>Next workouts</h3>
+      <template v-if="upcoming.filter(u => !u.is_today).length > 0">
+        <NeonEyebrow>Next workouts</NeonEyebrow>
         <div class="upcoming-grid">
           <div v-for="u in upcoming.filter(x => !x.is_today).slice(0, 3)" :key="u.date" class="up-card">
             <div class="up-head">
-              <strong>{{ new Date(u.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) }}</strong>
+              <strong>{{ new Date(u.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) }}</strong>
               <span class="focus">{{ u.split_focus.replace('_', ' ') }}</span>
             </div>
             <ul>
@@ -2179,12 +2345,104 @@ useVisibilityRefresh(loadAll);
             </ul>
           </div>
         </div>
+      </template>
+
+      <!-- Swap-exercise sheet -->
+      <div v-if="swapWexId !== null" class="overlay" @click.self="closeSwap">
+        <div class="sheet" role="dialog" aria-modal="true" aria-label="Swap exercise">
+          <header>
+            <h2>Swap exercise</h2>
+            <button class="icon-btn" aria-label="Close" @click="closeSwap">✕</button>
+          </header>
+          <p v-if="swapError" class="card-err">{{ swapError }}</p>
+          <p v-if="swapAlternatives.length === 0" class="hint">
+            No alternatives in your equipment for this slot.
+          </p>
+          <ul v-else class="alts">
+            <li v-for="alt in swapAlternatives" :key="alt.id">
+              <button type="button" :disabled="swapBusy" @click="applySwap(alt.id)">
+                <strong>{{ alt.name }}</strong>
+                <span class="tags-line">{{ alt.movement_pattern.replace('_', ' ') }} · {{ alt.primary_muscle }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- TD-10 add-exercise sheet -->
+      <div v-if="addOpen" class="overlay" @click.self="closeAdd">
+        <div class="sheet" role="dialog" aria-modal="true" aria-label="Add exercise">
+          <header>
+            <h2>Add exercise</h2>
+            <button class="icon-btn" aria-label="Close" @click="closeAdd">✕</button>
+          </header>
+          <p class="hint">
+            The weight is prescribed from your history, the same way the
+            planner does it — you pick the movement.
+          </p>
+          <input v-model="addQuery" class="add-search" type="search"
+                 placeholder="Search by name or muscle…" aria-label="Search exercises" />
+          <p v-if="addError" class="card-err">{{ addError }}</p>
+          <p v-if="addCandidates.length === 0" class="hint">
+            Nothing matches — every exercise in your equipment is either
+            already in today's session or filtered out.
+          </p>
+          <ul v-else class="alts">
+            <li v-for="alt in addCandidates" :key="alt.id">
+              <button type="button" :disabled="addBusy" @click="addExercise(alt.id)">
+                <strong>{{ alt.name }}</strong>
+                <span class="tags-line">{{ alt.movement_pattern.replace('_', ' ') }} · {{ alt.primary_muscle }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Cardio log dialog -->
+      <div v-if="showCardioLog" class="overlay center" @click.self="showCardioLog = false">
+        <div class="dialog" role="dialog" aria-modal="true" aria-label="Log this workout">
+          <h2>Log this workout</h2>
+          <p class="hint">
+            The session will appear in your activity feed, as a marker
+            on HR charts, and count toward your weekly cardio dose.
+          </p>
+          <label class="field">
+            <span>Type</span>
+            <select v-model="cardioType" :disabled="busy === 'complete'" @change="onCardioPreset">
+              <option v-for="p in CARDIO_PRESETS" :key="p.type" :value="p.type">{{ p.label }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Workout name</span>
+            <input v-model="cardioLabel" type="text" maxlength="120"
+                   placeholder="e.g. Les Mills VR" :disabled="busy === 'complete'" />
+          </label>
+          <label class="field">
+            <span>Duration (minutes)</span>
+            <input v-model.number="cardioDuration" type="number" min="1" max="1440"
+                   :disabled="busy === 'complete'" />
+          </label>
+          <label class="field">
+            <span>Ended at</span>
+            <input v-model="cardioEndedAt" type="time" :disabled="busy === 'complete'" />
+            <small class="hint">
+              Adjust if you're logging this later — the HR sample window
+              anchors to this end time minus the duration above.
+            </small>
+          </label>
+          <div class="dialog-actions">
+            <button class="d-dismiss" :disabled="busy === 'complete'" @click="showCardioLog = false">Cancel</button>
+            <button class="d-confirm"
+                    :disabled="busy === 'complete' || !cardioLabel.trim() || !cardioDuration || cardioDuration <= 0"
+                    @click="submitCardioLog">
+              {{ busy === 'complete' ? 'Logging…' : 'Log workout' }}
+            </button>
+          </div>
+        </div>
       </div>
     </template>
 
-    <!-- Full-screen HOLD countdown. Renders whenever a timed hold is
-         running so the number is legible across the room. Solid theme
-         background (CSS vars) covers everything beneath it. -->
+    <!-- Full-screen HOLD countdown (timed exercises) — unchanged flow. -->
     <div v-if="activeTimer" class="hold-overlay" role="dialog" aria-live="polite">
       <div class="hold-name">{{ exName(activeTimer.wex.exercise_id) }}</div>
       <div class="hold-center">
@@ -2194,42 +2452,29 @@ useVisibilityRefresh(loadAll);
                   :stroke-dasharray="289.0265"
                   :stroke-dashoffset="289.0265 * (1 - activeTimer.fraction)" />
         </svg>
-        <div class="hold-count mono">{{ fmtHold(activeTimer.remaining) }}</div>
-        <div class="hold-of mono">of {{ fmtHold(activeTimer.totalS) }}</div>
+        <div class="hold-count">{{ fmtHold(activeTimer.remaining) }}</div>
+        <div class="hold-of">of {{ fmtHold(activeTimer.totalS) }}</div>
       </div>
       <div class="hold-actions">
-        <button class="hold-btn fail"
-                @click="failTimedNow(activeTimer.wex, activeTimer.setNum)">
-          Fail
-        </button>
-        <button class="hold-btn done"
-                @click="finishTimedNow(activeTimer.wex, activeTimer.setNum)">
-          Done
-        </button>
+        <button class="hold-btn fail" @click="failTimedNow(activeTimer.wex, activeTimer.setNum)">Fail</button>
+        <button class="hold-btn done" @click="finishTimedNow(activeTimer.wex, activeTimer.setNum)">Done</button>
       </div>
     </div>
 
-    <!-- Workout-complete confirmation, in two modes. "auto" pops on the
-         false → true transition of allSetsDone; user can finish now or
-         keep going (e.g. bonus sets), and keeping going suppresses it for
-         the session. "preflight" opens from the Complete CTA when slots
-         are still unlogged, names them (SKIP-1) and closes them out as
-         skipped on finish — its "Go back" is a pure cancel. -->
-    <div v-if="showCompleteDialog" class="cd-backdrop" @click.self="dismissCompleteDialog">
-      <div class="cd-card">
+    <!-- Workout-complete confirmation (auto / SKIP-1 preflight). -->
+    <div v-if="showCompleteDialog" class="overlay center" @click.self="dismissCompleteDialog">
+      <div class="dialog" role="dialog" aria-modal="true" :aria-label="completeDialogTitle">
         <h2>{{ completeDialogTitle }}</h2>
-        <p class="cd-sub">{{ completeDialogBody }}</p>
-        <div class="cd-actions">
-          <button class="ghost" @click="dismissCompleteDialog">
-            {{ completeDialogDismissLabel }}
-          </button>
-          <button class="primary" :disabled="busy === 'complete'" @click="finishFromDialog">
+        <p class="hint">{{ completeDialogBody }}</p>
+        <div class="dialog-actions">
+          <button class="d-dismiss" @click="dismissCompleteDialog">{{ completeDialogDismissLabel }}</button>
+          <button class="d-confirm" :disabled="busy === 'complete'" @click="finishFromDialog">
             {{ busy === 'complete' ? 'Finishing…' : 'Finish workout' }}
           </button>
         </div>
       </div>
     </div>
-  </main>
+  </NeonPage>
 
   <!-- OG3-M5: the app draws its own confirmation for the two set
        operations that rewrite progression history. -->
@@ -2242,1126 +2487,345 @@ useVisibilityRefresh(loadAll);
 </template>
 
 <style scoped>
-.side-label { color: var(--muted); font-weight: 600; }
-.strength-today { max-width: 880px; }
-h1 { margin: 0 0 0.6rem; }
-h1 small { color: var(--muted); font-weight: 400; text-transform: capitalize; }
-.hint { color: var(--muted); font-size: 0.85rem; margin: 0.4rem 0; }
-.err { color: #f87171; }
+/* UI-2 — the active workout on the shared neon kit. Tokens (--rn-*) come
+   from NeonPage. Everything must fit a 360px viewport with no horizontal
+   scroll (UX-W2): no fixed widths wider than the column, min-width: 0 on
+   every flex/grid child that holds text. */
+.strength-today { --dark: #12141d; }
+.strength-today :deep(*) { box-sizing: border-box; }
+.hint { color: var(--rn-mut); font-size: 13px; line-height: 1.45; margin: 6px 0; }
+.hint.center { text-align: center; }
+.lime { color: var(--rn-lime); } .cyan { color: var(--rn-cyan); } .amber { color: var(--rn-amber); }
+.muted { color: var(--rn-mut); }
 
-.ctx-row {
-  display: flex; gap: 1rem; flex-wrap: wrap; align-items: baseline;
-  font-size: 0.85rem; color: var(--muted);
-  font-family: 'Geist Mono', ui-monospace, monospace;
-}
-.ctx-row strong { color: var(--text); font-weight: 600; }
-.ctx-row .status {
-  margin-left: auto; padding: 0.15rem 0.5rem; border-radius: 4px;
-  background: var(--bg-2); border: 1px solid var(--line);
-  text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.7rem;
-}
-.notes { margin-top: 0.4rem; color: var(--muted); font-size: 0.78rem; }
-.actions { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
+/* Overflow menu */
+.menu-wrap { position: relative; }
+.icon-btn { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--rn-line);
+  background: var(--rn-card); color: var(--rn-ink); display: inline-flex; align-items: center;
+  justify-content: center; cursor: pointer; font-size: 16px; }
+.menu-scrim { position: fixed; inset: 0; z-index: 40; }
+.menu { position: absolute; right: 0; top: 46px; z-index: 41; min-width: 230px; max-width: calc(100vw - 32px);
+  background: var(--rn-high); border: 1px solid var(--rn-track); border-radius: 16px; padding: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .5); display: flex; flex-direction: column; }
+.menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left;
+  min-height: 44px; padding: 8px 12px; border: 0; border-radius: 10px; background: transparent;
+  color: var(--rn-ink); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.menu button span { font-size: 11.5px; font-weight: 400; color: var(--rn-mut); }
+.menu button:hover:not(:disabled) { background: rgba(40, 230, 255, .07); }
+.menu button:disabled { opacity: .5; cursor: default; }
+.menu button.warn { color: var(--rn-amber); }
+.menu-lbl { font-family: 'Space Grotesk', monospace; font-size: 10.5px; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--rn-mut); padding: 10px 12px 2px; }
+.menu-sep { height: 1px; background: var(--rn-track); margin: 6px 4px; }
 
-/* Rest timer — claude.ai/design bundle layout: icon block + mono digits + side actions */
-.rest-timer {
-  position: sticky; top: 0; z-index: 10;
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  padding: 0.6rem 0.75rem; border-radius: 12px; margin: 0.6rem 0;
-  display: flex; gap: 0.7rem; align-items: center;
-  transition: background 150ms ease-in-out, border-color 150ms ease-in-out;
-}
-.rest-timer.done {
-  background: rgba(34, 197, 94, 0.10);
-  border-color: rgba(34, 197, 94, 0.55);
-}
-.rest-timer .icon-block {
-  width: 36px; height: 36px; border-radius: 10px;
-  background: var(--bg-1); border: 1px solid var(--line);
-  display: inline-flex; align-items: center; justify-content: center;
-  color: var(--muted); flex: 0 0 auto;
-}
-.rest-timer.done .icon-block {
-  background: rgba(34, 197, 94, 0.15);
-  border-color: rgba(34, 197, 94, 0.45);
-  color: #22c55e;
-}
-.rest-timer .time-block { flex: 1; min-width: 0; }
-.rest-timer .big-time {
-  font-family: 'Geist Mono', ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
-  font-size: 1.55rem; font-weight: 600; color: var(--text);
-  line-height: 1; letter-spacing: -0.02em;
-}
-.rest-timer .of { font-size: 0.7rem; color: var(--muted-2); margin-top: 2px; }
-.rest-timer .of .mono { font-family: 'Geist Mono', ui-monospace, monospace; }
-.rest-timer .done-text { font-size: 0.95rem; font-weight: 600; color: #22c55e; }
-.rest-timer .rt-actions { display: flex; gap: 0.35rem; flex: 0 0 auto; }
-.rest-timer .rt-btn {
-  padding: 0.32rem 0.6rem; border-radius: 7px;
-  background: var(--bg-1); border: 1px solid var(--line);
-  color: var(--text); font-size: 0.78rem; font-weight: 500; cursor: pointer;
-}
-.rest-timer .rt-btn.ghost { background: transparent; color: var(--muted); }
-.rest-timer .rt-btn:hover { color: var(--text); border-color: var(--accent, #ef4444); }
+/* Error banner — amber, never rose */
+.errbanner { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; cursor: pointer;
+  background: rgba(255, 181, 46, .10); border: 1px solid rgba(255, 181, 46, .30); border-radius: 14px;
+  padding: 12px 14px; margin-bottom: 12px; color: var(--rn-mut); font: inherit; font-size: 12px;
+  overflow-wrap: anywhere; }
+.errbanner b { color: var(--rn-amber); font-size: 13px; }
+.errbanner em { font-style: normal; color: var(--rn-cyan); font-weight: 600; }
+.card-err { color: var(--rn-amber); font-size: 12px; margin: 6px 0 0; overflow-wrap: anywhere; }
 
-.cardio-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-left: 3px solid #38bdf8;
-  border-radius: 8px;
-  padding: 1rem 1.2rem;
-  margin-bottom: 1rem;
-}
-.cardio-card h3 { margin: 0 0 0.5rem; }
-.cardio-notes { color: var(--text); line-height: 1.5; margin: 0 0 0.6rem; }
-.cardio-card .hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.8rem; }
-.cardio-card .ok { color: var(--good); margin: 0; }
+/* Skeleton */
+.sk { background: linear-gradient(90deg, #1f2433 0%, rgba(40, 230, 255, .16) 50%, #1f2433 100%);
+  background-size: 200% 100%; border-radius: 8px; animation: sk 1.4s linear infinite; }
+@keyframes sk { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.sk-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.sk-row.four { grid-template-columns: repeat(4, 1fr); }
 
-.modal-backdrop {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 100; padding: 1rem;
-}
-.modal {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 10px; padding: 1.2rem; max-width: 420px; width: 100%;
-}
-.modal h3 { margin: 0 0 0.5rem; }
-.modal .hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem; }
-.modal .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.8rem; }
-.modal .field span { font-size: 0.8rem; color: var(--muted); }
-.modal .field input {
-  background: var(--bg-1); border: 1px solid var(--line); color: var(--text);
-  padding: 0.5rem 0.7rem; border-radius: 6px; font-size: 0.95rem;
-}
-.modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
+/* Segmented progress */
+.seg-wrap { display: flex; align-items: center; gap: 10px; margin: -4px 0 12px; }
+.segs { flex: 1; min-width: 0; display: flex; gap: 3px; }
+.seg { flex: 1; height: 8px; border-radius: 4px; background: var(--rn-track); overflow: hidden; }
+.seg i { display: block; height: 100%; border-radius: 4px; }
+.seg.done i { background: var(--rn-lime); box-shadow: 0 0 8px rgba(93, 255, 59, .45); }
+.seg.partial i { background: var(--rn-cyan); }
+.seg.skipped i { background: rgba(155, 155, 176, .35); }
+.seg-label { font-family: 'Space Grotesk', monospace; font-size: 12px; font-weight: 700;
+  color: var(--rn-mut); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-.ex-card {
-  border: 1px solid var(--line); border-radius: 10px;
-  padding: 0.8rem 1rem; margin: 0.6rem 0;
-  background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
-}
-.ex-card.current { border-color: var(--accent, #ef4444); }
-.ex-card.done { opacity: 0.6; }
-.ex-card.superset { border-left-width: 4px; }
-.ss-banner {
-  font-size: 0.75rem; padding: 0 0.4rem 0.4rem;
-  font-family: 'Geist Mono', ui-monospace, monospace;
-  letter-spacing: 0.02em;
-}
-.ss-banner strong { color: var(--text); font-weight: 600; }
-.ex-card header {
-  display: flex; justify-content: space-between; align-items: baseline;
-  flex-wrap: wrap; gap: 0.4rem;
-}
-.ex-card h3 { margin: 0; font-size: 1rem; }
-.ex-card h3 small { color: var(--muted); font-weight: 400; }
-.prescription {
-  font-family: 'Geist Mono', ui-monospace, monospace;
-  font-size: 0.82rem; color: var(--muted);
-}
-.prescription .rest { color: var(--muted-2); }
-.load-hint {
-  margin: 0.15rem 0 0;
-  font-size: 0.76rem;
-  color: var(--muted-2);
-  font-family: 'Geist Mono', ui-monospace, monospace;
-}
-.program-badge {
-  margin: 0.15rem 0 0;
-  font-size: 0.74rem;
-  color: var(--accent, #ef4444);
-  font-family: 'Geist Mono', ui-monospace, monospace;
-  font-weight: 600;
-}
-.last-hint {
-  margin: 0.1rem 0 0;
-  font-size: 0.76rem;
-  color: var(--muted-2);
-  font-family: 'Geist Mono', ui-monospace, monospace;
+/* Hero */
+.hero-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.eyebrow { font-family: 'Space Grotesk', monospace; font-size: 11px; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--rn-mut); min-width: 0; }
+.now-name { margin: 6px 0 2px; font-size: 22px; font-weight: 800; letter-spacing: -.3px; line-height: 1.15;
+  color: var(--rn-ink); overflow-wrap: anywhere; }
+.now-sub { font-size: 13px; color: var(--rn-mut); }
+.now-ss { font-size: 12px; font-weight: 600; margin-top: 3px; }
+.now-hint { font-size: 12px; color: var(--rn-mut); margin-top: 3px; font-family: 'Space Grotesk', monospace; }
+.hero-text { margin: 8px 0; font-size: 14px; line-height: 1.45; color: var(--rn-ink); }
+.type-sel { background: var(--rn-card); color: var(--rn-mut); border: 1px solid var(--rn-line); border-radius: 8px;
+  font: inherit; font-size: 12px; padding: 4px 6px; min-height: 32px; }
+@media (min-height: 760px) {
+  /* Pinned under the header on screens tall enough to keep the list in view. */
+  .now-hero { position: sticky; top: 8px; z-index: 5; }
 }
 
-.ex-body { display: grid; grid-template-columns: 96px 1fr; gap: 0.9rem;
-  margin-top: 0.6rem; align-items: start; }
-@media (max-width: 600px) { .ex-body { grid-template-columns: 80px 1fr; } }
-.media img { width: 100%; border-radius: 8px; background: #111; }
-.media .ex-thumb {
-  width: 100%; aspect-ratio: 1 / 1;
-  border-radius: 8px;
-  background: var(--accent, #a78bfa);
-  -webkit-mask-size: 70%; mask-size: 70%;
-  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
-  -webkit-mask-position: center; mask-position: center;
-  /* faint violet wash so the silhouette sits in a card not on bare bg */
-  box-shadow: inset 0 0 0 999px rgba(167, 139, 250, 0.10);
-}
-.yt { display: inline-block; margin-top: 0.4rem; font-size: 0.78rem;
-  color: var(--muted); text-decoration: none; }
-.yt:hover { color: var(--accent, #ef4444); }
+.readout { display: flex; align-items: baseline; justify-content: center; gap: 6px; width: 100%;
+  margin: 12px 0 8px; padding: 4px 0; border: 0; background: transparent; cursor: pointer;
+  font-family: 'Space Grotesk', monospace; font-size: 40px; font-weight: 700; letter-spacing: -1px;
+  color: var(--rn-ink); font-variant-numeric: tabular-nums; line-height: 1.05; }
+.readout small { font-size: 16px; color: var(--rn-mut); font-weight: 600; letter-spacing: 0; }
+.readout .x { font-size: 24px; color: var(--rn-mut); margin: 0 2px; }
+.edit-row { display: flex; gap: 8px; align-items: flex-end; margin: 12px 0 8px; }
+.edit-row label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;
+  font-size: 11px; color: var(--rn-mut); }
+.edit-row input, .g-edit input { width: 100%; min-width: 0; background: var(--rn-card); color: var(--rn-ink);
+  border: 1px solid var(--rn-cyan); border-radius: 10px; font: inherit; font-size: 18px; font-weight: 700;
+  padding: 8px 10px; font-family: 'Space Grotesk', monospace; }
+.steppers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stp { display: flex; align-items: center; justify-content: space-between; min-width: 0;
+  background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 12px; }
+.stp span { font-size: 12px; color: var(--rn-mut); white-space: nowrap; }
+.stp button { width: 40px; height: 40px; border: 0; background: transparent; color: var(--rn-cyan);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; }
+.stp button:active { background: rgba(40, 230, 255, .12); border-radius: 12px; }
 
-.sets table { width: 100%; border-collapse: collapse;
-  font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.85rem; }
-.sets th { text-align: left; padding: 0.3rem 0.4rem; color: var(--muted);
-  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
-  border-bottom: 1px solid var(--line); font-weight: 500; }
-.sets td { padding: 0.3rem 0.4rem; vertical-align: middle; }
-.sets tr.logged input { background: transparent; }
-.sets input {
-  width: 5rem; padding: 0.3rem 0.4rem; border: 1px solid var(--line);
-  border-radius: 5px; background: var(--bg-1); color: var(--text);
-  font-family: inherit; font-size: 0.85rem;
-}
-.sets input:disabled { color: var(--muted); border-color: var(--line); }
+.ratings { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
+.rate { min-height: 40px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  background: var(--rn-card); color: var(--c); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.rate.on { background: var(--c); color: var(--rn-onacc); border-color: var(--c); }
+.btn-log { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 48px;
+  margin-top: 10px; border: 0; border-radius: 14px; background: var(--rn-cyan); color: var(--rn-onacc);
+  font: inherit; font-size: 15px; font-weight: 800; cursor: pointer; box-shadow: 0 0 18px rgba(40, 230, 255, .28); }
+.btn-log.lime { background: var(--rn-lime); box-shadow: 0 0 18px rgba(93, 255, 59, .25); }
+.btn-log:disabled { opacity: .4; cursor: default; box-shadow: none; }
+.btn-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px;
+  padding: 0 16px; border-radius: 14px; border: 1px solid var(--rn-track); background: var(--rn-card);
+  color: var(--rn-ink); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.btn-ghost.wide { width: 100%; margin-top: 10px; }
+.btn-ghost:disabled { opacity: .5; }
+.btn-text { display: inline-flex; align-items: center; gap: 4px; min-height: 40px; padding: 0 10px; border: 0;
+  background: transparent; color: var(--rn-cyan); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.btn-text:disabled { opacity: .5; }
+.pill { min-height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid var(--rn-cyan);
+  background: rgba(40, 230, 255, .12); color: var(--rn-cyan); font: inherit; font-size: 13px; font-weight: 700;
+  cursor: pointer; }
+.pill.ghost { border-color: var(--rn-track); background: transparent; color: var(--rn-ink); }
+.pill.warn { border-color: rgba(255, 181, 46, .5); background: rgba(255, 181, 46, .10); color: var(--rn-amber); }
+.pill:disabled { opacity: .5; }
 
-.rating-cell { display: flex; gap: 0.2rem; }
-.rating {
-  display: inline-flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 1px; flex: 1 1 0;
-  min-width: 3.1rem; min-height: 2.4rem; padding: 3px 4px;
-  border-radius: 6px; cursor: pointer;
-  border: 1px solid var(--line); background: var(--bg-2);
-  color: var(--muted); font-family: ui-sans-serif, system-ui;
-}
-.rating .num { font-weight: 700; font-size: 0.82rem; line-height: 1; }
-.rating .rir { font-size: 0.6rem; color: var(--muted-2); line-height: 1;
-  font-family: 'Geist Mono', ui-monospace, monospace; }
-.rating:hover:not(:disabled) { transform: translateY(-1px); }
-.rating:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Rest ring inside the hero */
+.rest-row { display: flex; align-items: center; gap: 14px; margin: 12px 0 4px; }
+.rest-row.compact { justify-content: center; margin: 8px 0; }
+.ring-num { font-family: 'Space Grotesk', monospace; font-size: 20px; font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.ring-num.sm { font-size: 15px; }
+.ring-cap { font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--rn-mut); }
+.rest-body { flex: 1; min-width: 0; }
+.rest-state { font-size: 16px; font-weight: 800; }
+.rest-next { font-size: 13px; color: var(--rn-mut); margin-top: 2px; font-family: 'Space Grotesk', monospace; }
+.rest-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 
-/* Color the number always; fill background when selected. */
-.rating[data-r="1"] { border-color: rgba(239,68,68,0.45); }
-.rating[data-r="1"] .num { color: #ef4444; }
-.rating[data-r="2"] { border-color: rgba(249,115,22,0.45); }
-.rating[data-r="2"] .num { color: #f97316; }
-.rating[data-r="3"] { border-color: rgba(245,158,11,0.45); }
-.rating[data-r="3"] .num { color: #f59e0b; }
-.rating[data-r="4"] { border-color: rgba(132,204,22,0.45); }
-.rating[data-r="4"] .num { color: #84cc16; }
-.rating[data-r="5"] { border-color: rgba(34,197,94,0.45); }
-.rating[data-r="5"] .num { color: #22c55e; }
+/* Completed tiles */
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.tiles :deep(.ns-v) { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.rating.on[data-r="1"] { background: rgba(239,68,68,0.45); border-color: #ef4444; }
-.rating.on[data-r="1"] .num, .rating.on[data-r="1"] .rir { color: #fff; }
-.rating.on[data-r="2"] { background: rgba(249,115,22,0.45); border-color: #f97316; }
-.rating.on[data-r="2"] .num, .rating.on[data-r="2"] .rir { color: #fff; }
-.rating.on[data-r="3"] { background: rgba(245,158,11,0.5); border-color: #f59e0b; }
-.rating.on[data-r="3"] .num, .rating.on[data-r="3"] .rir { color: #fff; }
-.rating.on[data-r="4"] { background: rgba(132,204,22,0.5); border-color: #84cc16; }
-.rating.on[data-r="4"] .num, .rating.on[data-r="4"] .rir { color: #fff; }
-.rating.on[data-r="5"] { background: rgba(34,197,94,0.5); border-color: #22c55e; }
-.rating.on[data-r="5"] .num, .rating.on[data-r="5"] .rir { color: #fff; }
+/* Chip strip */
+.chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 4px; margin-bottom: 8px;
+  scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px;
+  border-radius: 17px; border: 1px solid color-mix(in srgb, var(--c) 40%, transparent);
+  background: color-mix(in srgb, var(--c) 10%, transparent); color: var(--c); font: inherit; font-size: 13px;
+  font-weight: 700; cursor: pointer; white-space: nowrap; }
+.chip.on { background: color-mix(in srgb, var(--c) 22%, transparent); border-color: var(--c); }
+.chip-panel { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 16px; padding: 12px 14px;
+  margin-bottom: 12px; font-size: 13px; line-height: 1.5; color: var(--rn-ink); overflow-wrap: anywhere; }
+.chip-panel.amber { border-color: rgba(255, 181, 46, .35); background: rgba(255, 181, 46, .06); }
+.chip-panel p { margin: 4px 0 8px; color: var(--rn-mut); }
+.chip-panel .meta { margin: 6px 0 0; font-size: 12px; }
+.pn-list { margin: 0; padding-left: 18px; color: var(--rn-mut); }
+.pn-list li { margin: 3px 0; }
 
-.rating-legend { margin: 0.4rem 0 0; font-size: 0.7rem; color: var(--muted-2); }
-.row-actions { display: flex; gap: 0.3rem; align-items: center; }
-button.ghost.small.fail { color: #f87171; border-color: #b91c1c44; }
-button.ghost.small.fail:hover { color: #fff; background: #ef4444; border-color: #ef4444; }
+/* Up-next lines */
+.next-line { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 52px; margin-bottom: 6px;
+  padding: 8px 10px 8px 14px; border: 1px solid var(--rn-line); border-left: 3px solid var(--rn-track);
+  border-radius: 14px; background: var(--rn-card); color: var(--rn-ink); font: inherit; text-align: left;
+  cursor: pointer; }
+.nl-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.nl-rx { font-size: 12px; color: var(--rn-mut); white-space: nowrap; font-family: 'Space Grotesk', monospace; }
+.nl-count { font-size: 12px; font-weight: 700; color: var(--rn-cyan); font-family: 'Space Grotesk', monospace; }
+.nl-chev { color: var(--rn-mut); flex: 0 0 auto; }
+.nl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.nl-main .nl-name { flex: 0 0 auto; }
 
-.skip-err { font-size: 0.78rem; margin: 0.4rem 0 0; }
+/* Closed summary lines — darker than a card */
+.sum-line { display: flex; flex-wrap: wrap; align-items: center; min-height: 56px; margin-bottom: 6px;
+  padding: 0 6px 0 0; background: var(--dark); border: 1px solid var(--rn-line); border-radius: 14px; }
+.sum-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 0 12px;
+  border: 0; background: transparent; color: var(--rn-ink); font: inherit; text-align: left; cursor: pointer; }
+.sum-main:disabled { cursor: default; }
+.sum-ok { color: var(--rn-lime); flex: 0 0 auto; }
+.sum-name { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 600; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.sum-sets { flex: 0 1 auto; min-width: 0; font-size: 12px; color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 48%; }
+.sum-chev { color: var(--rn-mut); flex: 0 0 auto; }
+.sum-line.muted .sum-name { color: var(--rn-mut); }
+.sum-line .card-err { flex-basis: 100%; padding: 0 12px 10px; }
 
-/* SKIP-1 declined slot — one muted strip in place of the logging table */
-.skip-strip {
-  display: flex; align-items: center; gap: 0.6rem;
-  margin-top: 0.7rem; padding-top: 0.7rem;
-  border-top: 1px solid var(--line);
-  font-size: 0.78rem; color: var(--muted);
-  font-family: 'Geist Mono', ui-monospace, monospace;
-  letter-spacing: 0.04em; text-transform: uppercase;
-}
-.undo-btn {
-  padding: 0.15rem 0.5rem; font-size: 0.72rem;
-  color: var(--text-soft); background: var(--bg-2);
-  border: 1px solid var(--line); border-radius: 5px; cursor: pointer;
-  text-transform: none; letter-spacing: normal;
-}
-.undo-btn:hover { color: var(--text); border-color: var(--accent, #ef4444); }
-.undo-btn:disabled { opacity: 0.5; cursor: default; }
+/* Full exercise card */
+.ex-card { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px; padding: 14px;
+  margin-bottom: 10px; min-width: 0; }
+.ex-card.current { border-color: rgba(40, 230, 255, .35); }
+.ex-card[style*="border-left-color"] { border-left-width: 3px; }
+.ss-banner { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.ss-banner strong { color: var(--rn-ink); }
+.ex-head { display: flex; gap: 12px; align-items: flex-start; }
+.ex-title { flex: 1; min-width: 0; }
+.ex-head h3 { margin: 0; font-size: 16px; font-weight: 800; color: var(--rn-ink); overflow-wrap: anywhere; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.tag { font-size: 9.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; padding: 2px 6px;
+  border-radius: 6px; }
+.tag.cyan { background: rgba(40, 230, 255, .12); }
+.tag.amber { background: rgba(255, 181, 46, .12); }
+.prescription { font-family: 'Space Grotesk', monospace; font-size: 12.5px; color: var(--rn-mut); margin-top: 3px; }
+.prescription .rest { opacity: .8; }
+.side-label { font-weight: 600; }
+.thumb { width: 56px; flex: 0 0 56px; border-radius: 10px; overflow: hidden; background: rgba(255, 58, 216, .10); }
+.thumb :deep(img) { width: 56px; height: 56px; object-fit: cover; }
+.ex-thumb { width: 56px; height: 56px; background: var(--rn-mag); -webkit-mask-size: 70%; mask-size: 70%;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
+.why-target, .last-hint { margin: 6px 0 0; font-size: 12px; line-height: 1.4; color: var(--rn-mut); }
+.program-badge { margin: 4px 0 0; font-size: 12px; color: var(--rn-cyan); font-weight: 700;
+  font-family: 'Space Grotesk', monospace; }
+.ex-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 6px; }
+.act { display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; border-radius: 12px;
+  border: 1px solid var(--rn-track); background: var(--rn-high); color: var(--rn-ink); font: inherit;
+  font-size: 13px; font-weight: 600; text-decoration: none; cursor: pointer; }
+.act:disabled { opacity: .5; }
 
-/* Done-state chip summary — matches claude.ai/design workout bundle */
-.done-summary { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.7rem;
-                padding-top: 0.7rem; border-top: 1px solid var(--line); }
-.set-chip {
-  font-family: 'Geist Mono', ui-monospace, monospace;
-  font-size: 0.72rem; font-weight: 500;
-  padding: 0.18rem 0.45rem; border-radius: 5px;
-  border: 1px solid var(--line); background: var(--bg-1);
-  color: var(--muted);
-}
-.set-chip.fail {
-  color: #fca5a5; border-color: rgba(239,68,68,0.35);
-  background: rgba(239,68,68,0.07);
-}
-.set-chip.ok[data-r="1"] { color: #fca5a5; border-color: rgba(239,68,68,0.35); }
-.set-chip.ok[data-r="2"] { color: #fdba74; border-color: rgba(249,115,22,0.35); }
-.set-chip.ok[data-r="3"] { color: #fcd34d; border-color: rgba(245,158,11,0.35); }
-.set-chip.ok[data-r="4"] { color: #bef264; border-color: rgba(132,204,22,0.35); }
-.set-chip.ok[data-r="5"] { color: #86efac; border-color: rgba(34,197,94,0.35); }
+/* Set grid — SET | LB | REPS | ✓ */
+.grid { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.g-head, .g-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) minmax(0, 1.3fr) 52px; gap: 6px;
+  align-items: center; padding: 0 8px; }
+.g-head { font-family: 'Space Grotesk', monospace; font-size: 10.5px; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--rn-mut); min-height: 22px; }
+.g-row { min-height: 44px; border-radius: 10px; border: 1px solid transparent; font-family: 'Space Grotesk', monospace;
+  font-size: 15px; font-weight: 700; color: var(--rn-ink); font-variant-numeric: tabular-nums; }
+.g-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.span2 { grid-column: span 2; }
+.c { justify-self: end; display: inline-flex; align-items: center; }
+.g-n { color: var(--rn-mut); }
+.g-n.side { color: var(--rn-mag); }
+.g-row.logged { background: rgba(93, 255, 59, .08); }
+.g-row.now { border-color: var(--rn-cyan); background: rgba(40, 230, 255, .06); }
+.g-row.pending { color: var(--rn-mut); opacity: .75; font-weight: 500; }
+.g-rate { font-style: normal; font-size: 11px; font-weight: 700; margin-left: 4px; font-family: 'Plus Jakarta Sans', sans-serif; }
+.now-tag { font-size: 10px; letter-spacing: .08em; color: var(--rn-onacc); background: var(--rn-cyan);
+  padding: 2px 6px; border-radius: 6px; }
+.edit-btn { min-width: 44px; min-height: 40px; border: 0; border-radius: 10px; background: transparent;
+  color: var(--rn-cyan); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.edit-btn:hover { background: rgba(40, 230, 255, .10); }
+.g-edit { border: 1px solid var(--rn-cyan); border-radius: 12px; padding: 10px; background: rgba(40, 230, 255, .05); }
+.ge-top { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; align-items: end; }
+.ge-top label { display: flex; flex-direction: column; gap: 2px; font-size: 10.5px; color: var(--rn-mut); min-width: 0; }
+.ge-top input { font-size: 15px; padding: 6px 8px; }
+.ge-top select { background: var(--rn-card); color: var(--rn-ink); border: 1px solid var(--rn-line); border-radius: 8px;
+  font: inherit; font-size: 12px; min-height: 36px; }
+.ge-lbl { font-size: 12px; font-weight: 700; color: var(--rn-ink); padding-bottom: 8px; }
+.ge-rates { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+.ge-acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; margin-top: 8px; }
+.rating-legend { font-size: 11.5px; color: var(--rn-mut); margin: 8px 0 0; line-height: 1.45; }
+.rating-legend b { color: var(--rn-ink); }
+.amrap-tag { font-size: 9.5px; font-weight: 800; letter-spacing: .06em; color: var(--rn-amber);
+  background: rgba(255, 181, 46, .12); padding: 1px 5px; border-radius: 5px; margin-left: 4px;
+  font-family: 'Plus Jakarta Sans', sans-serif; vertical-align: middle; }
+.pr-badge { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 6px; font-size: 10px;
+  font-weight: 800; color: #3a2400; background: var(--rn-amber); animation: pr-pop .3s ease-out;
+  font-family: 'Plus Jakarta Sans', sans-serif; }
+@keyframes pr-pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
-.bottom { margin-top: 1rem; }
-.big-btn { font-size: 1rem; padding: 0.7rem 1.4rem; }
-.big-btn small { color: rgba(255,255,255,0.7); margin-left: 0.4rem; font-weight: 400; }
-.ok { color: #22c55e; font-weight: 600; }
-.pr-badge {
-  display: inline-block;
-  margin-left: 0.3rem;
-  padding: 0.05rem 0.35rem;
-  border-radius: 6px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: #78350f;
-  background: linear-gradient(180deg, #fde68a, #fbbf24);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
-  animation: pr-pop 0.3s ease-out;
-}
-@keyframes pr-pop {
-  from { transform: scale(0.6); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
-}
+.bottom { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.bottom .btn-log { margin-top: 0; flex: 1; }
+.add-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
 
-.ai-review { margin-top: 0.5rem; }
-.review-card {
-  margin-top: 0.6rem; padding: 0.9rem 1rem;
-  border-radius: 10px; border: 1px solid var(--line);
-  background: var(--bg-2);
-}
-.review-card.tone-good { border-color: #22c55e44; }
-.review-card.tone-warn { border-color: #f59e0b66; }
-.review-card.tone-bad { border-color: #ef444466; }
-.review-card h3 { margin: 0 0 0.5rem; font-size: 1rem; color: var(--text); }
-.review-card .hl { color: var(--text-soft); padding-left: 1.1rem; margin: 0.3rem 0; }
-.review-card .cn { color: #f59e0b; padding-left: 1.1rem; margin: 0.3rem 0; }
-.review-card .next { margin: 0.6rem 0 0; color: var(--text-soft); font-size: 0.88rem; }
-.review-card .cached { font-size: 0.7rem; color: var(--muted-2);
-  margin-top: 0.4rem; font-family: 'Geist Mono', ui-monospace, monospace; }
-
-.skip-banner { border-left: 3px solid #94a3b8; }
-.skip-row { display: flex; justify-content: space-between; align-items: center;
-  gap: 1rem; flex-wrap: wrap; }
-
-.plan-notes { margin: 6px 0 2px; }
-.pn-head {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  background: none; border: 0; padding: 6px 0; cursor: pointer;
-  font: inherit; color: inherit; text-align: left;
-}
-.pn-label { font-size: 12px; font-weight: 600; color: var(--muted, #64748b); }
-.pn-count { font-size: 11px; color: var(--muted, #64748b); opacity: 0.7; }
-.pn-chev { margin-left: auto; font-size: 13px; color: var(--muted, #64748b); }
-.pn-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 5px; }
-.pn-item {
-  font-size: 12px; line-height: 1.45; color: var(--muted, #64748b);
-  padding-left: 12px; position: relative;
-}
-.pn-item::before {
-  content: "";
-  position: absolute; left: 0; top: 0.6em;
-  width: 4px; height: 4px; border-radius: 50%;
-  background: currentColor; opacity: 0.5;
-}
-
-.projected-map { margin-top: 14px; }
-.projected-map h3 { font-size: 13px; margin: 0 0 6px; font-weight: 600; }
-.upcoming { margin-bottom: 1rem; }
-.upcoming h3 {
-  font-size: 0.75rem; color: var(--muted); letter-spacing: 0.08em;
-  text-transform: uppercase; margin: 0 0 0.5rem; font-weight: 600;
-}
-.upcoming-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 0.5rem;
-}
-.up-card {
-  background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 8px; padding: 0.6rem 0.7rem;
-  display: flex; flex-direction: column; gap: 0.3rem;
-}
-.up-head {
-  display: flex; justify-content: space-between; align-items: baseline;
-  gap: 0.4rem; font-size: 0.82rem;
-}
-.up-head strong { color: var(--text); }
-.up-head .focus {
-  color: var(--accent, #ef4444); text-transform: capitalize;
-  font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.72rem;
-}
-.up-card ul {
-  list-style: none; padding: 0; margin: 0;
-  font-size: 0.74rem; color: var(--text-soft);
-  display: flex; flex-direction: column; gap: 0.15rem;
-}
-.up-card .more { color: var(--muted-2); font-style: italic; }
-
-/* New design tokens — match claude.ai/design workout.html bundle */
-.page-head { display: flex; align-items: flex-end; justify-content: space-between;
-             padding: 0 0 0.6rem; margin-bottom: 0.6rem; }
-.head-actions { position: relative; }
-.head-actions .ghost {
-  background: transparent; color: var(--muted);
-  border: 1px solid var(--line); border-radius: 6px;
-  padding: 0.4rem 0.7rem; font-size: 0.82rem; cursor: pointer;
-  font-family: inherit;
-}
-.head-actions .ghost:hover { color: var(--text); border-color: var(--accent, #ef4444); }
-.head-actions .ghost:disabled { opacity: 0.5; cursor: wait; }
-.swap-menu {
-  position: absolute; top: 36px; right: 0; z-index: 20;
-  background: var(--surface, #1B2331);
-  border: 1px solid var(--line); border-radius: 10px; padding: 4px;
-  min-width: 220px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  display: flex; flex-direction: column; gap: 2px;
-}
-.swap-item {
-  display: flex; flex-direction: column; align-items: flex-start;
-  background: transparent; border: none; padding: 8px 10px;
-  border-radius: 6px; cursor: pointer; color: var(--text);
-  font-family: inherit; text-align: left;
-}
-.swap-item:hover { background: var(--bg-2, rgba(255,255,255,0.04)); }
-.swap-item strong { font-weight: 600; font-size: 0.9rem; }
-.swap-item .dim { font-size: 0.78rem; color: var(--muted); margin-top: 0.1rem; }
-.page-head h1 { font-size: 1.2rem; margin: 0; line-height: 1; font-weight: 600; }
-.page-head.compact .title-block {
-  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
-}
-.page-head.compact .eyebrow {
-  font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase;
-  color: var(--muted); font-weight: 600;
-}
-.head-pip {
-  background: var(--bg-2); color: var(--muted);
-  border: 1px solid var(--line); border-radius: 999px;
-  padding: 0.2rem 0.55rem; font-size: 0.78rem;
-  font-feature-settings: "tnum";
-}
-.status-pip {
-  background: var(--bg-2); color: var(--muted);
-  border: 1px solid var(--line); border-radius: 999px;
-  padding: 0.18rem 0.55rem; font-size: 0.7rem;
-  text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
-}
-.status-pip.s-completed { color: #22c55e; border-color: rgba(34,197,94,0.3); }
-.status-pip.s-skipped { color: #94a3b8; border-color: rgba(148,163,184,0.3); }
-.status-pip.s-in_progress { color: #f59e0b; border-color: rgba(245,158,11,0.3); }
-.status-pip.s-paused { color: #38bdf8; border-color: rgba(56,189,248,0.35); }
-.swap-divider { height: 1px; background: var(--line); margin: 4px 2px; }
-.hint.subtle { font-size: 0.78rem; color: var(--muted); margin: 0 0 0.5rem; }
-.ctx-meta {
-  display: flex; gap: 0.6rem; font-size: 0.78rem;
-  color: var(--muted); margin: 0.4rem 0 0.6rem;
-}
-.bottom-helpers {
-  display: flex; flex-direction: column; gap: 0.35rem;
-  margin-top: 1rem; padding-top: 0.7rem;
-  border-top: 1px solid var(--line);
-}
-
-.timer-cell { text-align: center; }
-.countdown-block {
-  display: inline-flex; align-items: baseline; gap: 0.4rem;
-  padding: 0.3rem 0.8rem;
-  background: rgba(167, 139, 250, 0.12);
-  border: 1px solid rgba(167, 139, 250, 0.35);
-  border-radius: 8px;
-}
-.countdown { font-size: 1.2rem; font-weight: 600; color: #a78bfa;
-             font-feature-settings: "tnum"; }
-.dim.small { font-size: 0.78rem; color: var(--muted); }
-
-/* ── Full-screen HOLD countdown ────────────────────────────────
-   Solid theme background so it reads across the room. The NUMBER
-   dominates; the ring is a thin secondary accent. */
-.hold-overlay {
-  position: fixed; inset: 0; z-index: 9000;
-  background: var(--bg-0);
-  color: var(--text);
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: space-between;
-  padding: max(1.2rem, env(safe-area-inset-top)) 1.2rem
-           max(1.2rem, env(safe-area-inset-bottom));
-  overscroll-behavior: contain;
-}
-.hold-name {
-  font-size: clamp(1.1rem, 4.5vw, 2rem);
-  font-weight: 600; text-align: center; line-height: 1.1;
-  color: var(--text); margin-top: 0.4rem;
-  max-width: 90vw;
-}
-.hold-center {
-  position: relative; flex: 1;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  width: 100%; min-height: 0;
-}
-.hold-ring {
-  position: absolute;
-  width: min(88vw, 78vh); height: min(88vw, 78vh);
-  transform: rotate(-90deg);
-  pointer-events: none; opacity: 0.85;
-}
-.hold-ring-track {
-  fill: none; stroke: var(--line); stroke-width: 1.5;
-}
-.hold-ring-fill {
-  fill: none; stroke: var(--brand, #ef4444); stroke-width: 2.5;
-  stroke-linecap: round;
-  transition: stroke-dashoffset 0.4s linear;
-}
-.hold-count {
-  position: relative; z-index: 1;
-  font-size: clamp(96px, 42vw, 340px);
-  font-weight: 700; line-height: 0.9;
-  letter-spacing: -0.03em;
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum";
-  color: var(--text);
-}
-.hold-of {
-  position: relative; z-index: 1; margin-top: 0.4rem;
-  font-size: clamp(0.9rem, 3.5vw, 1.4rem);
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.hold-actions {
-  display: flex; gap: 0.8rem; width: 100%;
-  max-width: 520px;
-}
-.hold-btn {
-  flex: 1; padding: 1.1rem 0.6rem; border-radius: 14px;
-  font-size: 1.25rem; font-weight: 700; cursor: pointer;
-  border: 1px solid var(--line); background: var(--bg-1);
-  color: var(--text);
-  min-height: 64px;
-}
-.hold-btn.fail {
-  color: #ef4444; border-color: rgba(239, 68, 68, 0.5);
-  background: rgba(239, 68, 68, 0.08);
-}
-.hold-btn.done {
-  color: #fff; background: var(--brand, #ef4444);
-  border-color: var(--brand, #ef4444);
-}
-.hold-btn:active { transform: scale(0.98); }
-
-.week-strip {
-  display: flex; gap: 0.4rem; margin: 0.4rem 0 0.8rem;
-  justify-content: space-between;
-}
-.week-strip .day {
-  flex: 1; padding: 0.5rem 0.3rem; text-align: center;
-  background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 8px; cursor: default;
-  display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
-}
-.week-strip .day .dow {
-  font-size: 0.68rem; color: var(--muted);
-  text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
-}
-.week-strip .day .dot {
-  width: 8px; height: 8px; border-radius: 50%; background: var(--line);
-}
-.week-strip .day.today { border-color: var(--accent, #ef4444); }
-.week-strip .day.today .dow { color: var(--text); }
-.week-strip .day.completed .dot { background: #22c55e; }
-.week-strip .day.in_progress .dot { background: #f59e0b; }
-.week-strip .day.skipped .dot { background: #94a3b8; }
-.week-strip .day.planned .dot { background: var(--accent, #ef4444); }
-.week-strip .day.projected .dot {
-  background: transparent; border: 1.5px solid var(--accent, #ef4444);
-}
-.week-strip .day.past:not(.completed):not(.in_progress):not(.skipped) {
-  opacity: 0.55;
-}
-
-.swap-btn {
-  display: inline-flex; align-items: center; gap: 0.3rem;
-  margin-top: 0.4rem; padding: 0.3rem 0.6rem;
-  font-size: 0.75rem; color: var(--text-soft);
-  background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 5px; cursor: pointer;
-}
-.swap-btn:hover { color: var(--text); border-color: var(--accent, #ef4444); }
-.swap-btn:disabled { opacity: 0.5; cursor: default; }
-/* Stack Swap / Skip — the media column is too narrow to sit them side by side */
-.slot-actions { display: flex; flex-direction: column; align-items: stretch;
-                gap: 0.3rem; margin-top: 0.4rem; }
-.slot-actions .swap-btn { margin-top: 0; justify-content: center; }
-.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100;
-  display: flex; justify-content: flex-end; }
-.drawer.swap-drawer { width: min(420px, 100%); height: 100%;
-  overflow-y: auto; background: var(--bg-1);
-  border-left: 1px solid var(--line); padding: 1rem 1.2rem; }
-.alts { list-style: none; padding: 0; margin: 0.4rem 0 0;
-  display: flex; flex-direction: column; gap: 0.4rem; }
-.alts li {
-  background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 8px; padding: 0.6rem 0.85rem; cursor: pointer;
-  display: flex; flex-direction: column; gap: 0.2rem;
-}
-.alts li:hover { border-color: var(--accent, #ef4444); }
-.alts li.disabled { opacity: 0.5; pointer-events: none; }
-.alts li strong { color: var(--text); font-size: 0.92rem; }
-.alts li .tags { color: var(--muted); font-size: 0.74rem;
-  font-family: 'Geist Mono', ui-monospace, monospace; }
-
-button.primary, button.ghost {
-  padding: 0.4rem 0.85rem; border-radius: 6px; font-size: 0.85rem;
-  cursor: pointer; display: inline-flex; align-items: center; gap: 0.4rem;
-  border: 1px solid var(--line);
-}
-button.primary { background: var(--accent, #ef4444); color: #fff; border-color: var(--accent, #ef4444); }
-button.primary.small { padding: 0.25rem 0.6rem; font-size: 0.78rem; }
-button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
-button.ghost { background: transparent; color: var(--text-soft); }
-button.ghost:hover { color: var(--text); border-color: var(--accent, #ef4444); }
-
-/* WP-14 paused banner */
-.paused-banner {
-  display: flex; align-items: center; gap: 0.6rem;
-  padding: 0.6rem 0.85rem; margin: 0 0 0.7rem;
-  background: rgba(56, 189, 248, 0.08);
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  border-left: 3px solid #38bdf8;
-  border-radius: 8px; color: var(--text);
-}
-.paused-icon { color: #38bdf8; display: inline-flex; }
-.paused-text { flex: 1; font-size: 0.9rem; }
-
-/* Soft sleep-stale warning banner */
-.stale-banner {
-  display: flex; align-items: center; gap: 0.6rem;
-  padding: 0.55rem 0.8rem; margin: 0 0 0.7rem;
-  background: rgba(250, 204, 21, 0.07);
-  border: 1px solid rgba(250, 204, 21, 0.35);
-  border-left: 3px solid #facc15;
-  border-radius: 8px; color: var(--text);
-}
-.stale-icon { color: #facc15; font-size: 1.05rem; }
-.stale-text { flex: 1; font-size: 0.83rem; line-height: 1.35; }
-.fast-banner {
-  display: flex; align-items: center; gap: 0.6rem;
-  padding: 0.55rem 0.8rem; margin: 0 0 0.7rem;
-  background: rgba(245, 158, 11, 0.07);
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  border-left: 3px solid #f59e0b;
-  border-radius: 8px; color: var(--text);
-}
-.fast-icon { color: #f59e0b; font-size: 1.05rem; }
-.fast-text { flex: 1; font-size: 0.83rem; line-height: 1.35; }
-
-.deload-banner {
-  display: flex; align-items: center; gap: 0.6rem;
-  padding: 0.55rem 0.8rem; margin: 0 0 0.7rem;
-  background: rgba(56, 189, 248, 0.07);
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  border-left: 3px solid #38bdf8;
-  border-radius: 8px; color: var(--text);
-}
-.deload-icon { font-size: 1.05rem; }
-.deload-text { flex: 1; font-size: 0.83rem; line-height: 1.35; }
-html[data-theme="neon"] .deload-banner {
-  background: rgba(40,230,255,0.08);
-  border-color: rgba(40,230,255,0.38);
-  border-left: 3px solid var(--rn-cyan);
-  border-radius: 8px;
-  color: var(--rn-ink);
-  box-shadow: 0 0 14px rgba(40,230,255,0.10);
-}
-html[data-theme="neon"] .deload-text strong { color: var(--rn-cyan); }
-
-/* Workout-complete confirmation dialog */
-.cd-backdrop {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 100; padding: 1rem;
-}
-.cd-card {
-  background: var(--bg-0); border: 1px solid var(--line);
-  border-radius: 12px; padding: 1.5rem; max-width: 24rem; width: 100%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-}
-.cd-card h2 { margin: 0 0 0.5rem; font-size: 1.15rem; color: var(--text); }
-.cd-sub { color: var(--text-soft); font-size: 0.88rem; line-height: 1.45;
-          margin: 0 0 1rem; }
-.cd-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
-
-/* ======================================================================
-   Vitality Neon overrides — scoped + neon-only. Classic light/dark are
-   untouched: every rule below is gated on html[data-theme="neon"].
-   Palette: cyan #28e6ff · magenta #ff3ad8 · lime #5dff3b · amber #ffb52e
-   · red #ff5d7a · periwinkle #6f7bff · track #272a3b · card #181b27
-   · ink #ececf5 · muted #9b9bb0.
-   ====================================================================== */
-html[data-theme="neon"] .strength-today {
-  --rn-cyan: #28e6ff; --rn-mag: #ff3ad8; --rn-lime: #5dff3b;
-  --rn-amber: #ffb52e; --rn-red: #ff5d7a; --rn-peri: #6f7bff;
-  --rn-track: #272a3b; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
-  margin: calc(-1 * var(--main-pt, 1.25rem)) calc(-1 * var(--main-px, 1.5rem)) 0; padding: 1.25rem 1.5rem 2rem;
-  min-height: 100vh;
-  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
-  color: var(--rn-ink);
-  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
-}
-html[data-theme="neon"] .strength-today .err { color: #ff5d7a; }
-
-/* Eyebrow + title */
-html[data-theme="neon"] .page-head.compact .eyebrow {
-  color: var(--rn-cyan); font-family: 'Space Grotesk', monospace;
-}
-html[data-theme="neon"] .page-head h1 { color: var(--rn-ink); letter-spacing: -0.3px; }
-/* The disclosure is secondary text. Without these it inherited --rn-ink and
-   read brighter than the exercise names it sits above. */
-html[data-theme="neon"] .pn-label,
-html[data-theme="neon"] .pn-count,
-html[data-theme="neon"] .pn-chev,
-html[data-theme="neon"] .pn-item { color: var(--rn-mut); }
-html[data-theme="neon"] .head-pip {
-  background: rgba(40,230,255,0.08); color: var(--rn-cyan);
-  border-color: rgba(40,230,255,0.30);
-  font-family: 'Space Grotesk', monospace;
-}
-html[data-theme="neon"] .head-actions .ghost {
-  color: var(--rn-mut); border-color: var(--rn-track);
-  background: rgba(255,255,255,0.02);
-}
-html[data-theme="neon"] .head-actions .ghost:hover {
-  color: var(--rn-cyan); border-color: rgba(40,230,255,0.45);
-}
-html[data-theme="neon"] .swap-menu {
-  background: #161a26; border-color: var(--rn-track);
-  box-shadow: 0 8px 28px rgba(0,0,0,0.55);
-}
-html[data-theme="neon"] .swap-item { color: var(--rn-ink); }
-html[data-theme="neon"] .swap-item:hover { background: rgba(40,230,255,0.07); }
-html[data-theme="neon"] .swap-item .dim { color: var(--rn-mut); }
-html[data-theme="neon"] .swap-divider { background: var(--rn-track); }
-
-/* Status pips → neon palette */
-html[data-theme="neon"] .status-pip {
-  background: rgba(255,255,255,0.03); color: var(--rn-mut);
-  border-color: var(--rn-track);
-}
-html[data-theme="neon"] .status-pip.s-completed {
-  color: var(--rn-lime); border-color: rgba(93,255,59,0.35);
-}
-html[data-theme="neon"] .status-pip.s-skipped {
-  color: var(--rn-mut); border-color: rgba(155,155,176,0.35);
-}
-html[data-theme="neon"] .status-pip.s-in_progress {
-  color: var(--rn-amber); border-color: rgba(255,181,46,0.35);
-}
-html[data-theme="neon"] .status-pip.s-paused {
-  color: var(--rn-cyan); border-color: rgba(40,230,255,0.40);
-}
+/* Review */
+.panel { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px; padding: 14px; }
+.review-card { border-radius: 14px; }
+.review-card h3 { margin: 0 0 6px; font-size: 15px; color: var(--rn-ink); }
+.review-card .hl { color: var(--rn-ink); padding-left: 18px; margin: 4px 0; font-size: 13px; }
+.review-card .cn { color: var(--rn-amber); padding-left: 18px; margin: 4px 0; font-size: 13px; }
+.review-card .next { margin: 8px 0 0; font-size: 13px; color: var(--rn-ink); }
+.review-card .cached { font-size: 11px; color: var(--rn-mut); margin: 6px 0 0; }
+.projected-map { max-width: 360px; margin: 0 auto; }
 
 /* Week strip */
-html[data-theme="neon"] .week-strip .day {
-  background: var(--rn-card); border-color: #21243450;
-}
-html[data-theme="neon"] .week-strip .day .dow { color: var(--rn-mut); }
-html[data-theme="neon"] .week-strip .day .dot { background: var(--rn-track); }
-html[data-theme="neon"] .week-strip .day.today {
-  border-color: rgba(40,230,255,0.55);
-  box-shadow: 0 0 0 1px rgba(40,230,255,0.25), 0 0 14px rgba(40,230,255,0.18);
-}
-html[data-theme="neon"] .week-strip .day.today .dow { color: var(--rn-ink); }
-html[data-theme="neon"] .week-strip .day.completed .dot {
-  background: var(--rn-lime); box-shadow: 0 0 6px rgba(93,255,59,0.6);
-}
-html[data-theme="neon"] .week-strip .day.in_progress .dot {
-  background: var(--rn-amber); box-shadow: 0 0 6px rgba(255,181,46,0.6);
-}
-html[data-theme="neon"] .week-strip .day.skipped .dot { background: var(--rn-mut); }
-html[data-theme="neon"] .week-strip .day.planned .dot {
-  background: var(--rn-cyan); box-shadow: 0 0 6px rgba(40,230,255,0.6);
-}
-html[data-theme="neon"] .week-strip .day.projected .dot {
-  background: transparent; border-color: var(--rn-cyan);
-}
+.week-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.week-strip .day { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 7px 0;
+  border-radius: 10px; border: 1px solid var(--rn-line); background: var(--rn-card); text-decoration: none; min-width: 0; }
+.week-strip .dow { font-size: 10px; font-weight: 700; color: var(--rn-mut); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 100%; }
+.week-strip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rn-track); }
+.week-strip .day.today { border-color: var(--rn-cyan); }
+.week-strip .day.today .dow { color: var(--rn-ink); }
+.week-strip .day.completed .dot { background: var(--rn-lime); }
+.week-strip .day.in_progress .dot { background: var(--rn-amber); }
+.week-strip .day.skipped .dot { background: var(--rn-mut); }
+.week-strip .day.planned .dot { background: var(--rn-cyan); }
+.week-strip .day.projected .dot { background: transparent; border: 1.5px solid var(--rn-cyan); }
 
-/* Rest timer — cyan glow active, lime on done */
-html[data-theme="neon"] .rest-timer {
-  background: rgba(40,230,255,0.06);
-  border-color: rgba(40,230,255,0.30);
-  box-shadow: 0 0 16px rgba(40,230,255,0.10);
-}
-html[data-theme="neon"] .rest-timer .icon-block {
-  background: rgba(40,230,255,0.10); border-color: rgba(40,230,255,0.30);
-  color: var(--rn-cyan);
-}
-html[data-theme="neon"] .rest-timer .big-time {
-  font-family: 'Space Grotesk', monospace; color: var(--rn-ink);
-}
-html[data-theme="neon"] .rest-timer .of { color: var(--rn-mut); }
-html[data-theme="neon"] .rest-timer.done {
-  background: rgba(93,255,59,0.10); border-color: rgba(93,255,59,0.50);
-  box-shadow: 0 0 18px rgba(93,255,59,0.16);
-}
-html[data-theme="neon"] .rest-timer.done .icon-block {
-  background: rgba(93,255,59,0.14); border-color: rgba(93,255,59,0.45);
-  color: var(--rn-lime);
-}
-html[data-theme="neon"] .rest-timer.done .done-text { color: var(--rn-lime); }
-html[data-theme="neon"] .rest-timer .rt-btn {
-  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
-  color: var(--rn-ink);
-}
-html[data-theme="neon"] .rest-timer .rt-btn.ghost { color: var(--rn-mut); }
-html[data-theme="neon"] .rest-timer .rt-btn:hover {
-  color: var(--rn-cyan); border-color: rgba(40,230,255,0.45);
-}
+/* Upcoming */
+.upcoming-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.up-card { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 14px; padding: 10px 12px;
+  min-width: 0; }
+.up-head { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; color: var(--rn-ink); }
+.up-head .focus { color: var(--rn-cyan); font-size: 12px; text-transform: capitalize; }
+.up-card ul { margin: 6px 0 0; padding-left: 16px; font-size: 12px; color: var(--rn-mut); }
+.up-card .more { font-style: italic; }
 
-/* Exercise cards */
-html[data-theme="neon"] .ex-card {
-  background: var(--rn-card); border-color: #21243450;
-}
-html[data-theme="neon"] .ex-card.current {
-  border-color: rgba(40,230,255,0.55);
-  box-shadow: 0 0 0 1px rgba(40,230,255,0.20), 0 0 16px rgba(40,230,255,0.12);
-}
-html[data-theme="neon"] .ex-card h3 { color: var(--rn-ink); }
-html[data-theme="neon"] .ss-banner strong { color: var(--rn-ink); }
-html[data-theme="neon"] .prescription {
-  color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
-}
-html[data-theme="neon"] .prescription .rest { color: var(--rn-mut); }
-html[data-theme="neon"] .load-hint,
-html[data-theme="neon"] .last-hint {
-  color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
-}
+/* Sheets + dialogs — themed (CardHigh, Lime confirm, Muted dismiss) */
+.overlay { position: fixed; inset: 0; z-index: 100; background: rgba(0, 0, 0, .6); display: flex;
+  align-items: flex-end; justify-content: center; }
+.overlay.center { align-items: center; padding: 16px; }
+.sheet { width: 100%; max-width: 560px; max-height: 85vh; overflow-y: auto; background: var(--rn-high);
+  border: 1px solid var(--rn-track); border-radius: 22px 22px 0 0; padding: 16px; color: var(--rn-ink); }
+.sheet header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.sheet h2, .dialog h2 { margin: 0; font-size: 18px; font-weight: 800; color: var(--rn-ink); }
+.alts { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.alts button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 52px;
+  padding: 10px 12px; border-radius: 12px; border: 1px solid var(--rn-line); background: var(--rn-card);
+  color: var(--rn-ink); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.alts button:disabled { opacity: .5; }
+.tags-line { font-size: 12px; color: var(--rn-mut); }
+.add-search { width: 100%; min-height: 44px; margin-top: 6px; padding: 0 12px; border-radius: 12px;
+  border: 1px solid var(--rn-track); background: var(--rn-card); color: var(--rn-ink); font: inherit; font-size: 15px; }
+.dialog { width: 100%; max-width: 420px; background: var(--rn-high); border: 1px solid var(--rn-track);
+  border-radius: 22px; padding: 18px; color: var(--rn-ink); box-shadow: 0 16px 40px rgba(0, 0, 0, .5); }
+.dialog .field { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: 12px; color: var(--rn-mut); }
+.dialog .field input, .dialog .field select { min-height: 42px; padding: 0 10px; border-radius: 10px;
+  border: 1px solid var(--rn-track); background: var(--rn-card); color: var(--rn-ink); font: inherit; font-size: 15px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 16px; }
+.d-dismiss, .d-confirm { min-height: 44px; padding: 0 16px; border: 0; border-radius: 12px; background: transparent;
+  font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.d-dismiss { color: var(--rn-mut); }
+.d-confirm { color: var(--rn-lime); }
+.d-confirm:disabled, .d-dismiss:disabled { opacity: .5; }
 
-/* Media — neon-tinted exercise silhouette */
-html[data-theme="neon"] .media .ex-thumb {
-  background: var(--rn-cyan);
-  box-shadow: inset 0 0 0 999px rgba(40,230,255,0.10);
-}
-html[data-theme="neon"] .yt { color: var(--rn-mut); }
-html[data-theme="neon"] .yt:hover { color: var(--rn-cyan); }
-html[data-theme="neon"] .swap-btn {
-  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
-  color: var(--rn-mut);
-}
-html[data-theme="neon"] .swap-btn:hover {
-  color: var(--rn-cyan); border-color: rgba(40,230,255,0.45);
-}
-
-/* Sets table — Space Grotesk numerics */
-html[data-theme="neon"] .sets table { font-family: 'Space Grotesk', monospace; }
-html[data-theme="neon"] .sets th { color: var(--rn-mut); border-color: var(--rn-track); }
-html[data-theme="neon"] .sets input {
-  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
-  color: var(--rn-ink); font-family: 'Space Grotesk', monospace;
-}
-html[data-theme="neon"] .sets input:disabled {
-  color: var(--rn-mut); border-color: var(--rn-track);
-}
-
-/* Rating buttons — Hard amber, Good lime, Easy cyan; Failed red */
-html[data-theme="neon"] .rating {
-  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
-  color: var(--rn-mut);
-}
-html[data-theme="neon"] .rating[data-r="1"] { border-color: rgba(255,93,122,0.45); }
-html[data-theme="neon"] .rating[data-r="1"] .num { color: var(--rn-red); }
-html[data-theme="neon"] .rating[data-r="2"] { border-color: rgba(255,181,46,0.45); }
-html[data-theme="neon"] .rating[data-r="2"] .num { color: var(--rn-amber); }
-html[data-theme="neon"] .rating[data-r="3"] { border-color: rgba(255,181,46,0.45); }
-html[data-theme="neon"] .rating[data-r="3"] .num { color: var(--rn-amber); }
-html[data-theme="neon"] .rating[data-r="4"] { border-color: rgba(93,255,59,0.45); }
-html[data-theme="neon"] .rating[data-r="4"] .num { color: var(--rn-lime); }
-html[data-theme="neon"] .rating[data-r="5"] { border-color: rgba(40,230,255,0.45); }
-html[data-theme="neon"] .rating[data-r="5"] .num { color: var(--rn-cyan); }
-
-html[data-theme="neon"] .rating.on[data-r="1"] {
-  background: rgba(255,93,122,0.22); border-color: var(--rn-red);
-  box-shadow: 0 0 12px rgba(255,93,122,0.30);
-}
-html[data-theme="neon"] .rating.on[data-r="1"] .num,
-html[data-theme="neon"] .rating.on[data-r="1"] .rir { color: #fff; }
-html[data-theme="neon"] .rating.on[data-r="2"],
-html[data-theme="neon"] .rating.on[data-r="3"] {
-  background: rgba(255,181,46,0.22); border-color: var(--rn-amber);
-  box-shadow: 0 0 12px rgba(255,181,46,0.30);
-}
-html[data-theme="neon"] .rating.on[data-r="2"] .num,
-html[data-theme="neon"] .rating.on[data-r="2"] .rir,
-html[data-theme="neon"] .rating.on[data-r="3"] .num,
-html[data-theme="neon"] .rating.on[data-r="3"] .rir { color: #0f1118; }
-html[data-theme="neon"] .rating.on[data-r="4"] {
-  background: rgba(93,255,59,0.22); border-color: var(--rn-lime);
-  box-shadow: 0 0 12px rgba(93,255,59,0.30);
-}
-html[data-theme="neon"] .rating.on[data-r="4"] .num,
-html[data-theme="neon"] .rating.on[data-r="4"] .rir { color: #0f1118; }
-html[data-theme="neon"] .rating.on[data-r="5"] {
-  background: rgba(40,230,255,0.22); border-color: var(--rn-cyan);
-  box-shadow: 0 0 12px rgba(40,230,255,0.30);
-}
-html[data-theme="neon"] .rating.on[data-r="5"] .num,
-html[data-theme="neon"] .rating.on[data-r="5"] .rir { color: #0f1118; }
-
-html[data-theme="neon"] .rating-legend { color: var(--rn-mut); }
-html[data-theme="neon"] button.ghost.small.fail {
-  color: var(--rn-red); border-color: rgba(255,93,122,0.35);
-}
-html[data-theme="neon"] button.ghost.small.fail:hover {
-  color: #fff; background: var(--rn-red); border-color: var(--rn-red);
-}
-html[data-theme="neon"] .ok { color: var(--rn-lime); }
-
-/* Skipped slot strip */
-html[data-theme="neon"] .skip-strip {
-  border-color: var(--rn-track); color: var(--rn-mut);
-  font-family: 'Space Grotesk', monospace;
-}
-html[data-theme="neon"] .undo-btn {
-  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
-  color: var(--rn-mut);
-}
-html[data-theme="neon"] .undo-btn:hover {
-  color: var(--rn-cyan); border-color: rgba(40,230,255,0.45);
-}
-
-/* Done-state chips — rating-tinted */
-html[data-theme="neon"] .done-summary { border-color: var(--rn-track); }
-html[data-theme="neon"] .set-chip {
-  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
-  color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
-}
-html[data-theme="neon"] .set-chip.fail {
-  color: var(--rn-red); border-color: rgba(255,93,122,0.35);
-  background: rgba(255,93,122,0.08);
-}
-html[data-theme="neon"] .set-chip.ok[data-r="1"] {
-  color: var(--rn-red); border-color: rgba(255,93,122,0.35);
-}
-html[data-theme="neon"] .set-chip.ok[data-r="2"],
-html[data-theme="neon"] .set-chip.ok[data-r="3"] {
-  color: var(--rn-amber); border-color: rgba(255,181,46,0.35);
-}
-html[data-theme="neon"] .set-chip.ok[data-r="4"] {
-  color: var(--rn-lime); border-color: rgba(93,255,59,0.35);
-}
-html[data-theme="neon"] .set-chip.ok[data-r="5"] {
-  color: var(--rn-cyan); border-color: rgba(40,230,255,0.35);
-}
-
-/* Timed (yoga) countdown — periwinkle/cyan glow + Space Grotesk */
-html[data-theme="neon"] .countdown-block {
-  background: rgba(111,123,255,0.14);
-  border-color: rgba(111,123,255,0.40);
-  box-shadow: 0 0 14px rgba(111,123,255,0.18);
-}
-html[data-theme="neon"] .countdown {
-  color: var(--rn-peri); font-family: 'Space Grotesk', monospace;
-}
-html[data-theme="neon"] .dim.small { color: var(--rn-mut); }
-
-/* Full-screen hold — neon: periwinkle ring + glowing count on ink bg */
-html[data-theme="neon"] .hold-overlay { background: #0f1118; color: var(--rn-ink); }
-html[data-theme="neon"] .hold-name { color: var(--rn-ink); }
-html[data-theme="neon"] .hold-count {
-  color: var(--rn-ink); font-family: 'Space Grotesk', monospace;
-  text-shadow: 0 0 22px rgba(111,123,255,0.55);
-}
-html[data-theme="neon"] .hold-of { color: var(--rn-mut); }
-html[data-theme="neon"] .hold-ring-track { stroke: var(--rn-track); }
-html[data-theme="neon"] .hold-ring-fill {
-  stroke: var(--rn-peri);
-  filter: drop-shadow(0 0 6px rgba(111,123,255,0.55));
-}
-html[data-theme="neon"] .hold-btn {
-  background: var(--rn-card); border-color: var(--rn-track); color: #fff;
-}
-html[data-theme="neon"] .hold-btn.fail {
-  color: var(--rn-red); border-color: rgba(255,93,122,0.5);
-  background: rgba(255,93,122,0.12);
-}
-html[data-theme="neon"] .hold-btn.done {
-  color: #0f1118; background: var(--rn-peri);
-  border-color: var(--rn-peri);
-  box-shadow: 0 0 16px rgba(111,123,255,0.35);
-}
-
-/* Cardio prescription card */
-html[data-theme="neon"] .cardio-card {
-  background: var(--rn-card); border-color: #21243450;
-  border-left-color: var(--rn-cyan);
-}
-html[data-theme="neon"] .cardio-card h3 { color: var(--rn-ink); }
-html[data-theme="neon"] .cardio-notes { color: var(--rn-ink); }
-html[data-theme="neon"] .cardio-card .hint { color: var(--rn-mut); }
-html[data-theme="neon"] .cardio-card .ok { color: var(--rn-lime); }
-
-/* Modals + drawers */
-html[data-theme="neon"] .modal,
-html[data-theme="neon"] .cd-card {
-  background: #161a26; border-color: var(--rn-track);
-  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-}
-html[data-theme="neon"] .modal h3,
-html[data-theme="neon"] .cd-card h2 { color: var(--rn-ink); }
-html[data-theme="neon"] .modal .hint,
-html[data-theme="neon"] .cd-sub { color: var(--rn-mut); }
-html[data-theme="neon"] .modal .field span { color: var(--rn-mut); }
-html[data-theme="neon"] .modal .field input,
-html[data-theme="neon"] .modal .field select {
-  background: rgba(255,255,255,0.03); border-color: var(--rn-track);
-  color: var(--rn-ink);
-}
-html[data-theme="neon"] .drawer.swap-drawer {
-  background: #11141d; border-left-color: var(--rn-track);
-}
-html[data-theme="neon"] .drawer.swap-drawer h2 { color: var(--rn-ink); }
-html[data-theme="neon"] .alts li {
-  background: var(--rn-card); border-color: var(--rn-track);
-}
-html[data-theme="neon"] .alts li:hover { border-color: rgba(40,230,255,0.45); }
-html[data-theme="neon"] .alts li strong { color: var(--rn-ink); }
-html[data-theme="neon"] .alts li .tags {
-  color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
-}
-
-/* Buttons */
-html[data-theme="neon"] button.primary {
-  background: var(--rn-cyan); color: #0f1118; border-color: var(--rn-cyan);
-  box-shadow: 0 0 14px rgba(40,230,255,0.25);
-}
-html[data-theme="neon"] button.primary:hover { box-shadow: 0 0 18px rgba(40,230,255,0.40); }
-html[data-theme="neon"] button.ghost {
-  color: var(--rn-ink); border-color: var(--rn-track);
-}
-html[data-theme="neon"] button.ghost:hover {
-  color: var(--rn-cyan); border-color: rgba(40,230,255,0.45);
-}
-html[data-theme="neon"] .big-btn small { color: rgba(15,17,24,0.7); }
-
-/* Banners */
-html[data-theme="neon"] .paused-banner {
-  background: rgba(40,230,255,0.07);
-  border-color: rgba(40,230,255,0.35);
-  border-left-color: var(--rn-cyan);
-  color: var(--rn-ink);
-}
-html[data-theme="neon"] .paused-icon { color: var(--rn-cyan); }
-html[data-theme="neon"] .stale-banner {
-  background: rgba(255,181,46,0.07);
-  border-color: rgba(255,181,46,0.35);
-  border-left-color: var(--rn-amber);
-  color: var(--rn-ink);
-}
-html[data-theme="neon"] .stale-icon { color: var(--rn-amber); }
-html[data-theme="neon"] .fast-banner {
-  background: rgba(255,181,46,0.08);
-  border-color: rgba(255,181,46,0.38);
-  border-left: 3px solid var(--rn-amber);
-  border-radius: 8px;
-  color: var(--rn-ink);
-  box-shadow: 0 0 14px rgba(255,181,46,0.10);
-}
-html[data-theme="neon"] .fast-icon { color: var(--rn-amber); }
-html[data-theme="neon"] .fast-text strong { color: var(--rn-amber); }
-html[data-theme="neon"] .skip-banner { border-left-color: var(--rn-mut); }
-
-/* Review card tones */
-html[data-theme="neon"] .review-card {
-  background: var(--rn-card); border-color: var(--rn-track);
-}
-html[data-theme="neon"] .review-card.tone-good { border-color: rgba(93,255,59,0.40); }
-html[data-theme="neon"] .review-card.tone-warn { border-color: rgba(255,181,46,0.45); }
-html[data-theme="neon"] .review-card.tone-bad { border-color: rgba(255,93,122,0.45); }
-html[data-theme="neon"] .review-card h3 { color: var(--rn-ink); }
-html[data-theme="neon"] .review-card .cn { color: var(--rn-amber); }
-html[data-theme="neon"] .review-card .cached {
-  color: var(--rn-mut); font-family: 'Space Grotesk', monospace;
-}
-
-/* Upcoming cards */
-html[data-theme="neon"] .upcoming h3 { color: var(--rn-mut); }
-html[data-theme="neon"] .up-card {
-  background: var(--rn-card); border-color: var(--rn-track);
-}
-html[data-theme="neon"] .up-head strong { color: var(--rn-ink); }
-html[data-theme="neon"] .up-head .focus {
-  color: var(--rn-cyan); font-family: 'Space Grotesk', monospace;
-}
-html[data-theme="neon"] .up-card .more { color: var(--rn-mut); }
-
-/* Misc text */
-html[data-theme="neon"] .hint,
-html[data-theme="neon"] .hint.subtle,
-html[data-theme="neon"] .ctx-meta,
-html[data-theme="neon"] .dim { color: var(--rn-mut); }
-html[data-theme="neon"] .big { color: var(--rn-ink); }
-
-/* TD-10 — add-an-exercise affordance and the marker for slots the user
-   added rather than the planner. */
-.add-exercise-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 10px 0 4px;
-  flex-wrap: wrap;
-}
-.add-search {
-  width: 100%;
-  font: inherit;
-  font-size: 0.85rem;
-  padding: 7px 10px;
-  margin-bottom: 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-}
-/* OG2-D-7: the italic went with the length. It set a whole wrapped
-   paragraph oblique at 11.5px directly under the numbers you came to read;
-   now it is one short line and the muted colour already marks it
-   secondary. */
-.why-target {
-  margin: 2px 0 0; font-size: 11.5px; line-height: 1.45;
-  color: var(--muted, #8a9a92);
-}
-.kit-tag {
-  font-size: 10px; font-weight: 600; letter-spacing: .04em;
-  text-transform: uppercase; padding: 1px 5px; border-radius: 3px;
-  background: rgba(217, 119, 6, .14); color: #b45309; vertical-align: middle;
-}
-html[data-theme="neon"] .kit-tag { background: rgba(255,176,32,.16); color: var(--rn-amber); }
-.adhoc-tag {
-  font-size: 0.62rem;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  font-weight: 700;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  padding: 1px 6px;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-
-/* TD-6 — per-set prescription markers. */
-.amrap-tag {
-  display: inline-block;
-  margin-left: 5px;
-  font-size: 0.58rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  color: var(--warn, #eab308);
-  border: 1px solid currentColor;
-  border-radius: 3px;
-  padding: 0 3px;
-  vertical-align: middle;
-}
-.settype-cell select {
-  font: inherit;
-  font-size: 0.72rem;
-  padding: 2px 4px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface);
-  color: var(--text);
-}
+/* Full-screen hold overlay (timed exercises) */
+.hold-overlay { position: fixed; inset: 0; z-index: 9000; background: #0f1118; color: var(--rn-ink);
+  display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+  padding: max(1.2rem, env(safe-area-inset-top)) 1.2rem max(1.2rem, env(safe-area-inset-bottom));
+  overscroll-behavior: contain; }
+.hold-name { font-size: clamp(1.1rem, 4.5vw, 2rem); font-weight: 700; text-align: center; line-height: 1.1;
+  margin-top: .4rem; max-width: 90vw; }
+.hold-center { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; width: 100%; min-height: 0; }
+.hold-ring { position: absolute; width: min(88vw, 78vh); height: min(88vw, 78vh); transform: rotate(-90deg);
+  pointer-events: none; }
+.hold-ring-track { fill: none; stroke: var(--rn-track); stroke-width: 1.5; }
+.hold-ring-fill { fill: none; stroke: var(--rn-peri); stroke-width: 2.5; stroke-linecap: round;
+  transition: stroke-dashoffset .4s linear; filter: drop-shadow(0 0 6px rgba(111, 123, 255, .55)); }
+.hold-count { position: relative; z-index: 1; font-size: clamp(96px, 42vw, 340px); font-weight: 700; line-height: .9;
+  letter-spacing: -.03em; font-variant-numeric: tabular-nums; font-family: 'Space Grotesk', monospace;
+  text-shadow: 0 0 22px rgba(111, 123, 255, .55); }
+.hold-of { position: relative; z-index: 1; margin-top: .4rem; font-size: clamp(.9rem, 3.5vw, 1.4rem); color: var(--rn-mut); }
+.hold-actions { display: flex; gap: .8rem; width: 100%; max-width: 520px; }
+.hold-btn { flex: 1; min-height: 64px; border-radius: 14px; font: inherit; font-size: 1.25rem; font-weight: 800;
+  cursor: pointer; border: 1px solid var(--rn-track); background: var(--rn-card); color: var(--rn-ink); }
+.hold-btn.fail { color: var(--rn-bad); border-color: rgba(255, 93, 122, .5); background: rgba(255, 93, 122, .12); }
+.hold-btn.done { color: #0f1118; background: var(--rn-peri); border-color: var(--rn-peri); }
 </style>

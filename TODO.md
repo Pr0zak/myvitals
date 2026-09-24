@@ -35,12 +35,19 @@ Use these; do not re-draw rings per screen.
 | ID | Task | Surface | Status |
 |---|---|---|---|
 | UI-0 | Shared kit + `--main-pt/--main-px` inset vars (fixes UX-W1 on 18 views) + Coach "bad" tone amber | both | done |
-| UI-1 | Train tab: session hero, weekly volume chart (server field), muscle range bars, tile grid, failure state | both | todo |
-| UI-2 | Active workout: "Now" hero with steppers + rest ring, segmented progress, chips for banners, collapsed done | both | todo |
-| UI-3 | You + Body: habits hero, goal rings by state_tone, recovery hero, two-tier metrics | both | todo |
-| UI-4 | Detail screens (Steps/HR/Sleep/Weight): neon scaffold, hero chart, server stats block, token colours | both | todo |
+| UI-1 | Train tab: session hero, weekly volume chart (server field), muscle range bars, tile grid, failure state | both | done — unreleased |
+| UI-2 | Active workout: "Now" hero with steppers + rest ring, segmented progress, chips for banners, collapsed done | both | done |
+| UI-3 | You + Body: habits hero, goal rings by state_tone, recovery hero, two-tier metrics | both | done — unreleased |
+| UI-4 | Detail screens (Steps/HR/Sleep/Weight): neon scaffold, hero chart, server stats block, token colours | both | done — unreleased |
 | UI-5 | Activities + Activity detail + Trails: map-first, zone bands, status hero, rose→amber, units | both | done |
-| UI-6 | Meals Today + Prep, Fasting, Sober: energy ring + per-meal fat, stage ring, calm reset, milestones server-side | both | todo |
+| UI-6 | Meals Today + Prep, Fasting, Sober: energy ring + per-meal fat, stage ring, calm reset, milestones server-side | both | done — unreleased |
+
+Follow-ups the slices left, deliberately:
+- **UI-F1** Web features removed with UI-4 because they were browser-computed with no server equivalent yet: HR delta vs previous window + avg HR by activity type (HeartRate.vue), weight distribution histogram + "days at min" (Weight.vue), steps 24h trace (Steps.vue, duplicated the hourly bars). Bring back only with a server field.
+- **UI-F2** Web Activities lost its period stats banner, PR card and sort/grid/group-by-month (UI-5; the YTD hero replaces the banner, the phone never had the rest).
+- **UI-F3** Train still computes YTD client-side (`computeYtdComparison`); switch it to `GET /activities/ytd` so Train and Activities cannot disagree.
+- **UI-F4** Workout steppers use a fixed 2.5 lb; an equipment-aware step needs a server field from the micro-loader rounder.
+- **UI-F5** Fasting ring on You has no stage ticks yet; UI-6 now serves `stages` on fasting sessions, so wire them in.
 
 
 ## #UX — user-experience scan (2026-09-22)
@@ -114,7 +121,7 @@ time, on the next `/summary/range` loads.
 | ID | Task | Size | Surface | Status |
 |---|---|---|---|---|
 | UX-W1 | Neon views use `margin: -1.25rem -1.5rem` against 0.9rem mobile padding — ~10 px horizontal scroll on 11 views | S | web | todo |
-| UX-W2 | `StrengthToday.vue` set table ~600 px wide on a 360 px phone, no mobile rule | M | web | todo |
+| UX-W2 | `StrengthToday.vue` set table ~600 px wide on a 360 px phone, no mobile rule | M | web | done (UI-2: SET/LB/REPS/✓ CSS grid, fits 360 px, no horizontal scroll) |
 | UX-W3 | Neon shell cannot reach /meals/nutrition, /meals/foods, /meals/log, /day, /watch, /logs; hiding a Body tile orphans its detail view | S | web | todo |
 | UX-W4 | One-tap permanent delete with no undo (recipes, shopping, pantry, foods, log) on ~20 px icons; `.icon-btn` redefined in 6 files | M | web | todo |
 | UX-W5 | Train Strength/Cardio toggle is inert; YTD distance hard-coded mi; upcoming cells all open today | S | web | todo |
@@ -730,6 +737,9 @@ screen — reset = remove+re-add, or add a "reset weight" action), OR move the
 state to a separate server-owned store. Deferred pending that call.
 
 ### WEB-WORKOUT-PARITY — port the phone v0.7.312 active-workout redesign to web
+**DONE in UI-2** — web now has the Now hero (steppers, one-tap Log set), the
+rest ring inside the hero, NOW-row highlight and one segmented progress bar,
+all on the same `logSet` path.
 Source: neon memory. Phone got the compact one-tap set-table + Canvas
 countdown-ring rest timer + NOW highlight + session progress bar in
 v0.7.312; web `StrengthToday.vue` is still the old `<input>` table

@@ -48,6 +48,29 @@ FASTING_STAGES: list[tuple[float, str]] = [
 ]
 
 
+# Human labels for the stages, served beside the thresholds (UI-6) so the
+# phone and web stop each carrying their own copy of this map.
+STAGE_LABELS: dict[str, str] = {
+    "fed": "Fed state",
+    "gut_rest": "Gut rest",
+    "glycogen_depleting": "Glycogen depleting",
+    "ketosis": "Ketosis",
+    "autophagy": "Autophagy",
+    "deep_autophagy": "Deep autophagy",
+    "extended_36": "36h territory",
+    "extended_48": "48h territory",
+    "extended_72": "72h+ territory",
+}
+
+
+def stage_list() -> list[dict[str, Any]]:
+    """Every stage threshold, for the ring's ticks."""
+    return [
+        {"key": label, "label": STAGE_LABELS.get(label, label), "at_h": h}
+        for h, label in FASTING_STAGES
+    ]
+
+
 def _stage_for(hours: float) -> tuple[str, float | None]:
     """Returns (current_stage_label, next_stage_at_hours_or_None)."""
     cur = FASTING_STAGES[0][1]
@@ -91,6 +114,16 @@ class FastingSessionOut(BaseModel):
     current_stage: str
     next_stage_at_h: float | None
     is_active: bool
+    # UI-6 — all derived here so the clients render and never compute.
+    current_stage_label: str | None = None
+    next_stage: str | None = None
+    next_stage_label: str | None = None
+    hours_to_next_stage: float | None = None
+    # started_at + target_hours; null when the fast has no target.
+    target_end_at: str | None = None
+    # elapsed >= target; null when there is no target to judge against.
+    reached_target: bool | None = None
+    stages: list[dict[str, Any]] = []
 
 
 class LogBody(BaseModel):
@@ -129,6 +162,9 @@ def _enrich(row: models.FastingSession) -> dict[str, Any]:
     elapsed_s = max(0.0, (end - row.started_at).total_seconds())
     elapsed_h = elapsed_s / 3600.0
     stage, next_at = _stage_for(elapsed_h)
+    next_key = next((lbl for h, lbl in FASTING_STAGES if h == next_at), None) \
+        if next_at is not None else None
+    target = row.target_hours
     return {
         "id": row.id,
         "started_at": row.started_at.isoformat(),
@@ -142,6 +178,15 @@ def _enrich(row: models.FastingSession) -> dict[str, Any]:
         "current_stage": stage,
         "next_stage_at_h": next_at,
         "is_active": row.ended_at is None,
+        "current_stage_label": STAGE_LABELS.get(stage, stage),
+        "next_stage": next_key,
+        "next_stage_label": STAGE_LABELS.get(next_key, next_key) if next_key else None,
+        "hours_to_next_stage": round(max(0.0, next_at - elapsed_h), 2)
+        if next_at is not None else None,
+        "target_end_at": (row.started_at + timedelta(hours=target)).isoformat()
+        if target else None,
+        "reached_target": (elapsed_h >= target) if target else None,
+        "stages": stage_list(),
     }
 
 

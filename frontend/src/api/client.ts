@@ -59,6 +59,14 @@ export interface FastingSessionOut {
   current_stage: string;
   next_stage_at_h: number | null;
   is_active: boolean;
+  // UI-6 — server-owned stage facts (older servers omit them).
+  current_stage_label?: string | null;
+  next_stage?: string | null;
+  next_stage_label?: string | null;
+  hours_to_next_stage?: number | null;
+  target_end_at?: string | null;
+  reached_target?: boolean | null;
+  stages?: FastingStageOut[];
 }
 export interface FastingStatsOut {
   sessions_count: number;
@@ -326,6 +334,13 @@ export const api = {
     days?: number;
     hours?: number;
     minutes?: number;
+    // UI-6 — milestones are server-owned.
+    milestones?: number[];
+    milestones_reached?: number;
+    next_milestone_days?: number | null;
+    next_milestone_at?: string | null;
+    next_milestone_in_seconds?: number | null;
+    milestone_progress?: number | null;
   }> {
     const { data } = await http.get("/sober/current");
     return data;
@@ -2765,3 +2780,11 @@ export const meals = {
   prepShoppingList,
   logPrepMeal,
 };
+
+// ── UI-6 ──
+/** One fasting stage threshold (ring tick), served with every session. */
+export interface FastingStageOut {
+  key: string;
+  label: string;
+  at_h: number;
+}

@@ -738,9 +738,20 @@ async def data_health(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
     problems = [s["key"] for s in streams if s["status"] == "stale"]
     problems += [i["key"] for i in integrations if i["status"] in ("error", "stale")]
 
+    phone = {
+        "last_attempt": hb.attempt_at if hb else None,
+        "last_success": hb.last_success_at if hb else None,
+        "permissions_lost": bool(hb.permissions_lost) if hb else False,
+        "perms_granted": hb.perms_granted if hb else None,
+        "perms_required": hb.perms_required if hb else None,
+        "error_summary": hb.error_summary if hb else None,
+        "app_version": hb.app_version if hb else None,
+    }
     return {
         "streams": streams,
         "integrations": integrations,
+        # Settings home status hero — see data_health.overview.
+        "overview": data_health_mod.overview(streams, integrations, phone, problems),
         "phone": {
             "last_attempt": hb.attempt_at if hb else None,
             "last_success": hb.last_success_at if hb else None,

@@ -97,4 +97,7 @@ class TestClearingStillWorks:
         with `.get(...)`, so a stored null and an absent key are the same
         downstream — which is what makes writing nulls through safe."""
         src = inspect.getsource(prof.put_profile)
-        assert '(body.extra or {}).get("steps_goal")' in src
+        # D1 (2026-09-24): only keys actually SENT sync a goal, but a sent
+        # null still reads as cleared through `.get(...)`.
+        assert '"steps_goal" in extra_in' in src
+        assert 'extra_in.get("steps_goal")' in src

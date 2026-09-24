@@ -446,3 +446,55 @@ async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
         entry("concept2", "Concept2", c2, stale_after_h=24 * 30),
     ]
     return out
+
+
+def overview(
+    streams: list[dict[str, Any]],
+    integrations: list[dict[str, Any]],
+    phone: dict[str, Any],
+    problems: list[str],
+) -> dict[str, Any]:
+    """The one-line answer a Settings home leads with (settings redesign).
+
+    Built from the same `problem_keys` verdict the rest of the response
+    carries, so the headline can never disagree with the detail below it.
+    The TONE is decided here, like `state_tone`: a client left to infer it
+    would eventually colour an ordinary stale weigh-in as a fault, which is
+    exactly what HEALTH-1 exists to prevent — `ad_hoc` streams are never
+    problems, so they never reach the headline.
+
+    Health Connect denying reads outranks everything: it silently empties
+    every phone-fed stream at once, and it is the one problem only the user
+    can fix (on the phone).
+    """
+    configured = [i for i in integrations if i.get("configured")]
+    ok = [i for i in configured if i.get("status") == "ok"]
+    stale = {s["key"]: s for s in streams if s["key"] in problems}
+    broken = [i for i in integrations if i["key"] in problems]
+
+    if phone.get("permissions_lost"):
+        headline = "Health Connect is denying reads on the phone"
+    elif stale:
+        first = next(iter(stale.values()))
+        age = first.get("age_hours")
+        headline = (f"{first['label']} not updated for {age:.0f}h"
+                    if age is not None else f"{first['label']} has no data")
+        if len(problems) > 1:
+            headline += f" (+{len(problems) - 1} more)"
+    elif broken:
+        headline = f"{broken[0]['label']} needs attention"
+        if len(broken) > 1:
+            headline += f" (+{len(broken) - 1} more)"
+    else:
+        headline = "Everything is arriving"
+
+    trouble = bool(problems) or bool(phone.get("permissions_lost"))
+    return {
+        # Amber, never rose: a stale stream is a caution, not a crisis.
+        "tone": "caution" if trouble else "positive",
+        "headline": headline,
+        "problem_count": len(problems) + (1 if phone.get("permissions_lost") else 0),
+        "integrations_ok": len(ok),
+        "integrations_total": len(configured),
+        "last_phone_sync_at": phone.get("last_success"),
+    }

@@ -149,30 +149,51 @@ async def put_profile(
     if p is None:
         p = models.UserProfile(id=1, updated_at=now)
         db.add(p)
-    p.birth_date = body.birth_date
-    p.sex = body.sex
-    p.height_cm = body.height_cm
+    # Only fields the caller actually SENT are applied (D1, 2026-09-24).
+    # Every field on ProfileIn defaults to None, and this used to assign all
+    # of them unconditionally — so a client that does not model a field
+    # erased it on every save. Neither client sends
+    # `fasting_target_hours_per_week`, so every web profile save nulled it;
+    # the phone's reminder toggle nulled the home location. Worse, the goal
+    # sync below then saw "changed to None" and blanked the target of every
+    # active sleep and fast_streak goal. Absent now means "leave alone" —
+    # the same protocol `extra` already follows — and an explicit null
+    # still clears.
+    sent = body.model_fields_set
+    extra_in = body.extra if "extra" in sent and body.extra is not None else {}
+
+    for field in ("birth_date", "sex", "height_cm"):
+        if field in sent:
+            setattr(p, field, getattr(body, field))
     # Detect goal-relevant changes before applying so we can propagate
     # to any active AiGoal of the matching kind (GOALS-1 bidirectional
-    # sync — see api/ai.py:_profile_target_for_kind).
+    # sync — see api/ai.py:_profile_target_for_kind). A goal is synced only
+    # when ITS field was sent; a save that does not mention it is not a
+    # request to change it.
     sync_pairs: list[tuple[str, float | None]] = []
-    if body.weight_goal_kg != p.weight_goal_kg:
+    if "weight_goal_kg" in sent and body.weight_goal_kg != p.weight_goal_kg:
         sync_pairs.append(("weight", body.weight_goal_kg))
-    new_sleep = (body.extra or {}).get("sleep_target_h") if body.extra else None
-    if new_sleep != p.sleep_target_h:
-        sync_pairs.append(("sleep", new_sleep))
-    new_steps = (body.extra or {}).get("steps_goal") if body.extra else None
-    cur_steps = (p.extra or {}).get("steps_goal") if p.extra else None
-    if new_steps != cur_steps:
-        sync_pairs.append(("steps", float(new_steps) if new_steps is not None else None))
-    if body.fasting_target_hours_per_week != p.fasting_target_hours_per_week:
+    # Both clients write `sleep_goal_h`; analytics read the
+    # `sleep_target_h` column, which only `extra.sleep_target_h` used to
+    # feed — so the sleep goal field silently did nothing (D2). Either key
+    # now sets the column.
+    sleep_key = next((k for k in ("sleep_target_h", "sleep_goal_h") if k in extra_in), None)
+    new_sleep = extra_in.get(sleep_key) if sleep_key else None
+    if sleep_key and new_sleep != p.sleep_target_h:
+        sync_pairs.append(("sleep", float(new_sleep) if new_sleep is not None else None))
+    if "steps_goal" in extra_in:
+        new_steps = extra_in.get("steps_goal")
+        cur_steps = (p.extra or {}).get("steps_goal") if p.extra else None
+        if new_steps != cur_steps:
+            sync_pairs.append(("steps", float(new_steps) if new_steps is not None else None))
+    if ("fasting_target_hours_per_week" in sent
+            and body.fasting_target_hours_per_week != p.fasting_target_hours_per_week):
         sync_pairs.append(("fast_streak", body.fasting_target_hours_per_week))
 
-    p.weight_goal_kg = body.weight_goal_kg
-    p.fasting_target_hours_per_week = body.fasting_target_hours_per_week
-    p.resting_hr_baseline = body.resting_hr_baseline
-    p.max_hr = body.max_hr
-    p.activity_level = body.activity_level
+    for field in ("weight_goal_kg", "fasting_target_hours_per_week",
+                  "resting_hr_baseline", "max_hr", "activity_level"):
+        if field in sent:
+            setattr(p, field, getattr(body, field))
     # Preserve keys the caller does not model.
     #
     # This used to be `p.extra = body.extra` — a wholesale replace. The
@@ -202,11 +223,12 @@ async def put_profile(
         merged = dict(p.extra or {})
         merged.update(body.extra)
         p.extra = merged
-    p.home_latitude = body.home_latitude
-    p.home_longitude = body.home_longitude
-    if new_sleep is not None:
+    for field in ("home_latitude", "home_longitude"):
+        if field in sent:
+            setattr(p, field, getattr(body, field))
+    if sleep_key:
         try:
-            p.sleep_target_h = float(new_sleep)
+            p.sleep_target_h = float(new_sleep) if new_sleep is not None else None
         except (TypeError, ValueError):
             pass
     p.updated_at = now

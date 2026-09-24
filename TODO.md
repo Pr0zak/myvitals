@@ -23,6 +23,30 @@ acting on it.
 
 ## Active — actionable now
 
+## #SET — Settings redesign (2026-09-24) — done, unreleased
+
+Audit → server fixes (d22c3dd) → web shell (B1), web integrations/AI/data
+(B2), phone (C). Same seven sections on both surfaces under a server-written
+status card (`/query/data-health` `overview`). Review page:
+https://claude.ai/artifact/KBh5KRhdm2uLEQsn7ygBeS
+
+- **D1** fixed — `PUT /profile` applied every field; absent fields were
+  erased (fasting target, home location) and active sleep/fast_streak goal
+  targets blanked. Now only `model_fields_set` is applied.
+- **D2** fixed — `extra.sleep_goal_h` (what both clients write) now sets
+  the `sleep_target_h` column analytics read.
+- **D3** fixed — a blank HA form no longer sends `realtime_enabled:false`.
+- UX-W8 (settings part), UX-W9, UX-P8, UX-P9 closed by the redesign.
+- Declared asymmetries (in `scripts/parity_check.py` DECLARED_ASYMMETRIES):
+  phone-only workout reminder + HC grant/sync/backfill/logs; web-only theme,
+  AI key/provider/instructions/payload preview, imports/exports, integration
+  setup, religious-calendar fasting, home location, weekly fasting target.
+- Open: Display theme/units/time format stay applied locally when the
+  server save fails (amber "not saved to your account · Retry") rather than
+  reverting — deliberate, revisit if confusing. UX-W8 still open for the
+  equipment page. Phone snapshots for Display/Integrations/AI/Data pages
+  not recorded yet.
+
 ## #UI — UI refresh, all screens (2026-09-23)
 
 Design page: `https://claude.ai/artifact/VwA1kyr1UcLAdHmuxxVBn2` (current vs option

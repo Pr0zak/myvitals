@@ -100,13 +100,19 @@ def test_the_evidence_commit_is_not_actually_asymmetric(pc):
     ).returncode != 0:
         pytest.skip("commit 1d006a7 is not in this clone (shallow checkout)")
 
-    counts = pc.diff_line_counts(
-        [
-            "frontend/src/views/HeartRate.vue",
-            "android/app/src/main/kotlin/app/myvitals/ui/vitals/HrDetailScreen.kt",
-        ],
-        "1d006a7~1",
-    )
+    # The commit's OWN diff, not `1d006a7~1...HEAD`: `diff_line_counts`
+    # measures up to HEAD, so any later edit to either file (UI-4 rewrote
+    # both) changed the numbers this pins without the claim changing at all.
+    out = subprocess.run(
+        ["git", "diff", "--numstat", "1d006a7~1", "1d006a7", "--",
+         "frontend/src/views/HeartRate.vue",
+         "android/app/src/main/kotlin/app/myvitals/ui/vitals/HrDetailScreen.kt"],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    ).stdout
+    counts = {}
+    for line in out.splitlines():
+        added, deleted, path = line.split("\t")
+        counts[path] = int(added) + int(deleted)
     web_lines = counts["frontend/src/views/HeartRate.vue"]
     phone_lines = counts[
         "android/app/src/main/kotlin/app/myvitals/ui/vitals/HrDetailScreen.kt"

@@ -2,20 +2,18 @@ package app.myvitals.ui.activities
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -25,9 +23,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.myvitals.sync.ActivityZones
+import app.myvitals.sync.TimePoint
+import app.myvitals.ui.neon.NeonCardShape
+import app.myvitals.ui.neon.NeonEyebrow
+import app.myvitals.ui.neon.NeonMV
+import app.myvitals.ui.neon.NeonNumberFamily
 import app.myvitals.ui.vitals.ChartInsets
 import app.myvitals.ui.vitals.chartGeom
 import app.myvitals.ui.vitals.drawGapBridge
@@ -35,226 +40,180 @@ import app.myvitals.ui.vitals.drawGrid
 import app.myvitals.ui.vitals.drawReferenceLine
 import app.myvitals.ui.vitals.drawXLabels
 import app.myvitals.ui.vitals.niceDomain
-import app.myvitals.ui.LocalAppTokens
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import app.myvitals.sync.TimePoint
-import app.myvitals.ui.MV
 import java.time.Instant
 
-private val ZONE_COLORS = listOf(
-    Color(0xFF38BDF8),  // Z1 — recovery
-    Color(0xFF22C55E),  // Z2 — endurance
-    Color(0xFFEAB308),  // Z3 — tempo
-    Color(0xFFF97316),  // Z4 — threshold
-    Color(0xFFEF4444),  // Z5 — VO2
+/*
+ * Heart rate during an activity (UI-5).
+ *
+ * Zones used to be computed HERE, from a hard-coded 60/70/80/90% of a
+ * profile max, while the zones card beside it showed the server's
+ * boundaries — so the chart's bands and the card's table could name
+ * different zones for the same beat. The chart also summed its own
+ * "time in zone" from samples. Now every boundary is the server's
+ * `zones[].loBpm/hiBpm`; the phone only decides colour. The totals
+ * live in [HrZonesSummary], which renders the server's seconds and percent.
+ */
+
+/** Z1..Z5, cool to hot — NeonMV tokens, matching the web palette. */
+val ZONE_COLORS: List<Color> = listOf(
+    NeonMV.Periwinkle, NeonMV.Cyan, NeonMV.Lime, NeonMV.Amber, NeonMV.Bad,
 )
-private val ZONE_LABELS = listOf("Z1", "Z2", "Z3", "Z4", "Z5")
+
+internal fun zoneColor(i: Int): Color = ZONE_COLORS.getOrElse(i) { ZONE_COLORS.last() }
 
 /** A gap longer than this is a dropout, not a reading. */
 private const val DROPOUT_MS = 60_000L
 
-private fun z0(bpm: Double, maxHr: Int): Int = zoneFor(bpm, maxHr)
+/** 0-based zone index for [bpm] against the server's boundaries (colour only). */
+internal fun zoneIndexFor(bpm: Double, zones: ActivityZones?): Int {
+    val z = zones?.zones ?: return -1
+    for (i in z.indices.reversed()) if (bpm >= z[i].loBpm) return i
+    return 0
+}
 
-/** "12:34" elapsed. */
 private fun fmtElapsed(secs: Long): String {
     val m = secs / 60
     return if (m >= 60) "%d:%02d".format(m / 60, m % 60) else "%d min".format(m)
 }
 
-private fun zoneFor(bpm: Double, maxHr: Int): Int {
-    val pct = bpm / maxHr
-    return when {
-        pct < 0.60 -> 0
-        pct < 0.70 -> 1
-        pct < 0.80 -> 2
-        pct < 0.90 -> 3
-        else -> 4
-    }
-}
-
 @Composable
-fun ActivityHrChart(points: List<TimePoint>, maxHr: Int = 190) {
-    // This chart hard-coded the classic MV.* palette while its host screen and
-    // the shell around it are theme-aware, so it rendered as a navy card in a
-    // neon app.
-    val tok = LocalAppTokens.current
+fun ActivityHrChart(
+    points: List<TimePoint>,
+    zones: ActivityZones?,
+    avgHr: Double?,
+) {
     val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
-        Column(Modifier.padding(14.dp)) {
-            Text("HEART RATE", color = tok.onSurfaceVariant,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            Spacer(Modifier.height(8.dp))
-            if (points.size < 2) {
-                Text("Not enough HR samples for this activity.",
-                    color = MV.OnSurfaceVariant, fontSize = 12.sp)
-                return@Card
+    Column(
+        Modifier.fillMaxWidth()
+            .padding(bottom = 12.dp)
+            .clip(NeonCardShape).background(NeonMV.Card)
+            .border(1.dp, NeonMV.Line, NeonCardShape)
+            .padding(14.dp),
+    ) {
+        NeonEyebrow("Heart rate", Modifier.padding(top = 0.dp))
+        val parsed = remember(points) {
+            points.mapNotNull { p ->
+                val t = runCatching { Instant.parse(p.time).toEpochMilli() }.getOrNull()
+                    ?: return@mapNotNull null
+                t to p.value
+            }.sortedBy { it.first }.distinctBy { it.first }
+        }
+        if (parsed.size < 2) {
+            Text("Not enough heart-rate samples for this activity.",
+                color = NeonMV.Muted, fontSize = 12.sp)
+            return@Column
+        }
+        // Downsample for perf — a 2k+ series is not worth pixel detail.
+        val sampled = remember(parsed) {
+            val cap = 600
+            if (parsed.size <= cap) parsed
+            else {
+                val stride = parsed.size.toDouble() / cap
+                (0 until cap).map { i -> parsed[(i * stride).toInt().coerceAtMost(parsed.lastIndex)] }
             }
-            val parsed = remember(points) {
-                points.mapNotNull { p ->
-                    val t = runCatching { Instant.parse(p.time).toEpochMilli() }
-                        .getOrNull() ?: return@mapNotNull null
-                    t to p.value
-                }.sortedBy { it.first }.distinctBy { it.first }
-            }
-            // Downsample for perf — Canvas can handle hundreds of segments
-            // but a 2k+ HR series isn't worth pixel-accurate detail anyway.
-            val sampled = remember(parsed) {
-                val cap = 600
-                if (parsed.size <= cap) parsed
-                else {
-                    val stride = parsed.size.toDouble() / cap
-                    (0 until cap).map { i ->
-                        parsed[(i * stride).toInt().coerceAtMost(parsed.lastIndex)]
-                    }
-                }
-            }
-            val minBpm = sampled.minOf { it.second }
-            val maxBpm = sampled.maxOf { it.second }
-            val avgBpm = sampled.map { it.second }.average()
+        }
+        val lo = sampled.minOf { it.second }
+        val hi = sampled.maxOf { it.second }
+        Canvas(Modifier.fillMaxWidth().height(190.dp)) {
+            val domain = niceDomain(lo = lo.toFloat(), hi = hi.toFloat(), targetTicks = 3, minStep = 1f)
+            val g = chartGeom(domain, ChartInsets(
+                left = 30.dp.toPx(), top = 6.dp.toPx(), right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+            ))
+            val tStart = sampled.first().first
+            val tEnd = sampled.last().first
+            val tSpan = (tEnd - tStart).toFloat().coerceAtLeast(1f)
 
-            // Time-in-zone (seconds) — sum of segment widths in each zone.
-            val zoneSecs = remember(sampled, maxHr) {
-                val out = LongArray(5)
-                for (i in 0 until sampled.size - 1) {
-                    val (t0, v) = sampled[i]
-                    val (t1, _) = sampled[i + 1]
-                    // Don't charge a recording gap to a zone.
-                    if (t1 - t0 > DROPOUT_MS) continue
-                    out[z0(v, maxHr)] += (t1 - t0) / 1000L
-                }
-                out
+            // Zone bands from the SERVER's boundaries, shaded behind the line.
+            zones?.zones?.forEachIndexed { i, z ->
+                val bLo = z.loBpm.toFloat()
+                val bHi = (z.hiBpm ?: 300).toFloat()
+                if (bHi < domain.min || bLo > domain.max) return@forEachIndexed
+                val y0 = g.y(bHi); val y1 = g.y(bLo)
+                drawRect(zoneColor(i).copy(alpha = 0.10f), Offset(g.left, y0),
+                    Size(g.width, (y1 - y0).coerceAtLeast(0f)))
             }
-
-            Canvas(Modifier.fillMaxWidth().height(190.dp)) {
-                val domain = niceDomain(
-                    lo = minBpm.toFloat(), hi = maxBpm.toFloat(),
-                    targetTicks = 3, minStep = 1f,
-                )
-                val g = chartGeom(domain, ChartInsets(
-                    left = 30.dp.toPx(), top = 6.dp.toPx(),
-                    right = 4.dp.toPx(), bottom = 16.dp.toPx(),
-                ))
-                val tStart = sampled.first().first
-                val tEnd = sampled.last().first
-                val tSpan = (tEnd - tStart).toFloat().coerceAtLeast(1f)
-
-                // Zone bands. The edge list used to start at 0.50 x maxHr while
-                // zoneFor() puts everything below 0.60 in Z1 — so an easy ride
-                // spent below 50% sat on unpainted background while the chart's
-                // own colouring called it Z1. Bands now follow the same
-                // thresholds the line colouring uses.
-                val zoneEdges = listOf(0.0, 0.60, 0.70, 0.80, 0.90, 10.0)
-                for (zi in 0..4) {
-                    val lo = (maxHr * zoneEdges[zi]).toFloat()
-                    val hi = (maxHr * zoneEdges[zi + 1]).toFloat()
-                    if (hi < domain.min || lo > domain.max) continue
-                    val y0 = g.y(hi); val y1 = g.y(lo)
-                    drawRect(
-                        color = ZONE_COLORS[zi].copy(alpha = 0.07f),
-                        topLeft = Offset(g.left, y0),
-                        size = Size(g.width, (y1 - y0).coerceAtLeast(0f)),
-                    )
-                }
-
-                // Labels used to be a SpaceBetween Column laid over the canvas
-                // with a stray zero-height Spacer as a fourth child, so free
-                // space split into three gaps and the middle number sat ~20dp
-                // below the gridline it named. It also read (min+max)/2 while
-                // the gridline was at the padded midpoint — two different
-                // numbers. One geometry now.
-                drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 3) {
-                    "%.0f".format(it)
-                }
-
-                // Per-segment coloured line — zone of the segment's mean.
-                for (i in 0 until sampled.size - 1) {
-                    val (t0, v0) = sampled[i]
-                    val (t1, v1) = sampled[i + 1]
-                    val x0 = g.left + ((t0 - tStart).toFloat() / tSpan) * g.width
-                    val x1 = g.left + ((t1 - tStart).toFloat() / tSpan) * g.width
-                    val y0 = g.y(v0.toFloat()); val y1 = g.y(v1.toFloat())
-                    // A gap in the recording is not a heart rate. Bridging it
-                    // with a solid coloured segment invented a reading AND
-                    // charged the missing minutes to whichever zone the
-                    // interpolation happened to cross.
-                    if (t1 - t0 > DROPOUT_MS) {
-                        drawGapBridge(Offset(x0, y0), Offset(x1, y1), tok.onSurfaceDim)
-                        continue
-                    }
-                    drawLine(
-                        color = ZONE_COLORS[zoneFor((v0 + v1) * 0.5, maxHr)],
-                        start = Offset(x0, y0), end = Offset(x1, y1),
-                        strokeWidth = 2.dp.toPx(),
-                    )
-                }
-
-                drawReferenceLine(g, avgBpm.toFloat(), tok.onSurfaceVariant,
-                    measurer, "avg ${avgBpm.toInt()}")
-                drawXLabels(g, measurer, tok.onSurfaceDim, listOf(
-                    0f to "0:00",
-                    1f to fmtElapsed((tEnd - tStart) / 1000L),
-                ))
+            drawGrid(g, measurer, NeonMV.Muted, NeonMV.Track, maxLabels = 3) { "%.0f".format(it) }
+            for (i in 0 until sampled.size - 1) {
+                val (t0, v0) = sampled[i]
+                val (t1, v1) = sampled[i + 1]
+                val x0 = g.left + ((t0 - tStart).toFloat() / tSpan) * g.width
+                val x1 = g.left + ((t1 - tStart).toFloat() / tSpan) * g.width
+                val p0 = Offset(x0, g.y(v0.toFloat())); val p1 = Offset(x1, g.y(v1.toFloat()))
+                // A gap in the recording is not a heart rate.
+                if (t1 - t0 > DROPOUT_MS) { drawGapBridge(p0, p1, NeonMV.Muted); continue }
+                val zi = zoneIndexFor((v0 + v1) * 0.5, zones)
+                drawLine(if (zi < 0) NeonMV.Cyan else zoneColor(zi), p0, p1, strokeWidth = 2.dp.toPx())
             }
-            Spacer(Modifier.height(6.dp))
-            Row {
-                Stat("Min", "${minBpm.toInt()} bpm")
-                Spacer(Modifier.width(16.dp))
-                Stat("Avg", "%.0f bpm".format(avgBpm))
-                Spacer(Modifier.width(16.dp))
-                Stat("Max", "${maxBpm.toInt()} bpm")
+            avgHr?.let {
+                drawReferenceLine(g, it.toFloat(), NeonMV.Ink, measurer, "avg ${it.toInt()}")
             }
-            Spacer(Modifier.height(12.dp))
-            Text("TIME IN ZONE", color = MV.OnSurfaceVariant,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            Spacer(Modifier.height(6.dp))
-            ZoneBar(zoneSecs)
-            Spacer(Modifier.height(8.dp))
-            Column {
-                for (zi in 0 until 5) {
-                    Row(verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = 1.dp)) {
-                        Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp))
-                            .background(ZONE_COLORS[zi]))
-                        Spacer(Modifier.width(6.dp))
-                        Text(ZONE_LABELS[zi], color = MV.OnSurface,
-                            fontSize = 11.sp, modifier = Modifier.width(28.dp))
-                        Text(fmtMins(zoneSecs[zi]), color = MV.OnSurfaceVariant,
-                            fontSize = 11.sp, modifier = Modifier.width(60.dp))
-                        val total = zoneSecs.sum().coerceAtLeast(1)
-                        val pct = (zoneSecs[zi].toDouble() / total * 100).toInt()
-                        Text("$pct%", color = MV.OnSurfaceDim, fontSize = 11.sp)
-                    }
-                }
-            }
+            drawXLabels(g, measurer, NeonMV.Muted, listOf(
+                0f to "0:00", 1f to fmtElapsed((tEnd - tStart) / 1000L),
+            ))
         }
     }
 }
 
+/**
+ * Time in zone as ONE stacked bar plus a legend — every number (seconds,
+ * percent, the bpm boundaries) straight from GET /activities/…/zones.
+ */
 @Composable
-private fun ZoneBar(zoneSecs: LongArray) {
-    val total = zoneSecs.sum().coerceAtLeast(1)
-    Row(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(3.dp))) {
-        for (zi in 0 until 5) {
-            val frac = (zoneSecs[zi].toFloat() / total)
-            if (frac > 0f) {
-                Box(Modifier.weight(frac).fillMaxSize()
-                    .background(ZONE_COLORS[zi]))
+fun HrZonesSummary(z: ActivityZones) {
+    Column(
+        Modifier.fillMaxWidth()
+            .padding(bottom = 12.dp)
+            .clip(NeonCardShape).background(NeonMV.Card)
+            .border(1.dp, NeonMV.Line, NeonCardShape)
+            .padding(14.dp),
+    ) {
+        NeonEyebrow("Time in zone", Modifier.padding(top = 0.dp))
+        Row(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp))
+            .background(NeonMV.Track)) {
+            z.zones.forEachIndexed { i, zone ->
+                val f = (zone.pct / 100.0).toFloat()
+                if (f > 0f) Box(Modifier.weight(f).fillMaxHeight().background(zoneColor(i)))
+            }
+            val rest = (1f - z.zones.sumOf { it.pct }.toFloat() / 100f)
+            if (rest > 0.001f) Spacer(Modifier.weight(rest))
+        }
+        Spacer(Modifier.height(10.dp))
+        z.zones.forEachIndexed { i, zone ->
+            val range = zone.hiBpm?.let { "${zone.loBpm}–$it" } ?: "${zone.loBpm}+"
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(10.dp).clip(RoundedCornerShape(3.dp)).background(zoneColor(i)))
+                Spacer(Modifier.width(8.dp))
+                Text("${zone.zone} ${zone.label}", color = NeonMV.Ink, fontSize = 13.sp,
+                    modifier = Modifier.weight(1f))
+                Text("$range bpm", color = NeonMV.Muted, fontSize = 11.sp,
+                    fontFamily = NeonNumberFamily, modifier = Modifier.width(76.dp))
+                Text(fmtDurationHm(zone.seconds), color = NeonMV.Ink, fontSize = 12.sp,
+                    fontFamily = NeonNumberFamily, textAlign = TextAlign.End,
+                    modifier = Modifier.width(56.dp))
+                Text("%.0f%%".format(zone.pct), color = NeonMV.Muted, fontSize = 12.sp,
+                    fontFamily = NeonNumberFamily, textAlign = TextAlign.End,
+                    fontWeight = FontWeight.Bold, modifier = Modifier.width(42.dp))
             }
         }
+        if (!z.sampled) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "No heart-rate series was recorded, so the whole session is attributed " +
+                    "to the zone its average falls in. Treat the split as coarse.",
+                color = NeonMV.Muted, fontSize = 11.sp,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            when (z.maxHrSource) {
+                "profile" -> "Zones from your max HR of ${z.maxHr} bpm."
+                "estimated" -> "Zones from an estimated max HR of ${z.maxHr} bpm " +
+                    "(Tanaka, age ${z.ageUsed}). Set a measured max in Settings → Profile."
+                else -> "Zones from a default max HR of ${z.maxHr} bpm — no birth date or " +
+                    "measured max on file, so these boundaries are a guess."
+            },
+            color = NeonMV.Muted, fontSize = 11.sp,
+        )
     }
-}
-
-@Composable
-private fun Stat(label: String, value: String) {
-    Column {
-        Text(label, color = MV.OnSurfaceDim, fontSize = 10.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(value, color = MV.OnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-private fun fmtMins(s: Long): String {
-    val m = s / 60
-    return if (m >= 60) "${m / 60}h ${m % 60}m" else "${m}m"
 }

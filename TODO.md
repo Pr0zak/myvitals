@@ -39,7 +39,7 @@ Use these; do not re-draw rings per screen.
 | UI-2 | Active workout: "Now" hero with steppers + rest ring, segmented progress, chips for banners, collapsed done | both | todo |
 | UI-3 | You + Body: habits hero, goal rings by state_tone, recovery hero, two-tier metrics | both | todo |
 | UI-4 | Detail screens (Steps/HR/Sleep/Weight): neon scaffold, hero chart, server stats block, token colours | both | todo |
-| UI-5 | Activities + Activity detail + Trails: map-first, zone bands, status hero, rose→amber, units | both | todo |
+| UI-5 | Activities + Activity detail + Trails: map-first, zone bands, status hero, rose→amber, units | both | done |
 | UI-6 | Meals Today + Prep, Fasting, Sober: energy ring + per-meal fat, stage ring, calm reset, milestones server-side | both | todo |
 
 
@@ -129,7 +129,7 @@ time, on the next `/summary/range` loads.
 | ID | Task | Size | Surface | Status |
 |---|---|---|---|---|
 | UX-X1 | Web has no cache between route changes; Train pulls 2,000 activities per visit; readinessDetail fetched twice on home | M | web | todo |
-| UX-X2 | Activity list/stats endpoints load full `polyline` + `raw`; serve `polyline_simple` in lists, aggregate stats in SQL | S | backend | todo |
+| UX-X2 | Activity list/stats endpoints load full `polyline` + `raw`; serve `polyline_simple` in lists, aggregate stats in SQL | S | backend | partial — lists: `?polyline=full / simple / none`, `raw` deferred (UI-5); stats-in-SQL still todo |
 | UX-X3 | `/ai/alerts` cooldown keys on newest alert — a scan that writes nothing re-scans every page load, and `phrase_anomaly` runs un-quota'd inside a GET | S-M | backend | todo |
 | UX-X4 | Strength review bumps quota BEFORE the cache lookup (and possibly twice); no `/latest` read | S | both | todo |
 | UX-X5 | `discoveries` runs 19 per-metric queries though `all_daily_summary_metrics` exists; `tiles.py` ~12 over the same 14 rows | S | backend | todo |

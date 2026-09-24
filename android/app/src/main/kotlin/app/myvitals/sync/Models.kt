@@ -1375,6 +1375,10 @@ data class TrailsResponse(
     val count: Int,
     val trails: List<Trail> = emptyList(),
     @Json(name = "dnis_url") val dnisUrl: String? = null,
+    // UI-5 — the hero's numbers, counted on the server. Null from an
+    // older backend; the screen then says nothing rather than counting.
+    @Json(name = "status_counts") val statusCounts: TrailStatusCounts? = null,
+    @Json(name = "synced_at") val syncedAt: String? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -2839,6 +2843,57 @@ data class FastingStage(
     val key: String,
     val label: String,
     @Json(name = "at_h") val atH: Double,
+)
+
+// ── UI-5 ──────────────────────────────────────────────────────────
+/** GET /trails `status_counts`. "other" includes a trail with no reading. */
+@JsonClass(generateAdapter = true)
+data class TrailStatusCounts(
+    val open: Int = 0,
+    val delayed: Int = 0,
+    val closed: Int = 0,
+    val other: Int = 0,
+)
+
+/** One year-over-year line. `pctChange` is null when last year was zero —
+ *  render `note` ("new") or a dash, never an invented percentage. `tone` is
+ *  positive / neutral / caution; a shortfall is amber, never a crisis. */
+@JsonClass(generateAdapter = true)
+data class YtdMetric(
+    val key: String,
+    val label: String = "",
+    val unit: String = "",
+    val current: Double = 0.0,
+    val prior: Double = 0.0,
+    val delta: Double = 0.0,
+    @Json(name = "pct_change") val pctChange: Double? = null,
+    val direction: String = "flat",
+    val tone: String = "neutral",
+    val note: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class YtdCumulative(
+    @Json(name = "this_year") val thisYear: List<Int> = emptyList(),
+    @Json(name = "last_year") val lastYear: List<Int> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class YtdWeek(
+    @Json(name = "week_start") val weekStart: String,
+    val sessions: Int = 0,
+    @Json(name = "duration_s") val durationS: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class ActivityYtd(
+    val year: Int = 0,
+    @Json(name = "prior_year") val priorYear: Int = 0,
+    val through: String = "",
+    val metrics: List<YtdMetric> = emptyList(),
+    @Json(name = "cumulative_distance_m") val cumulative: YtdCumulative = YtdCumulative(),
+    @Json(name = "this_week") val thisWeek: YtdWeek? = null,
+    val weeks: List<YtdWeek> = emptyList(),
 )
 
 // ── UI-4: metric detail screens — server-computed stat blocks ─────────────

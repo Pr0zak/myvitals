@@ -2793,6 +2793,37 @@ export interface FastingStageOut {
   at_h: number;
 }
 
+// ── UI-5 ──
+/** Year-to-date vs the same day last year, the cumulative distance lines
+ *  and per-week totals — all server-computed (analytics/activity_ytd.py). */
+export async function activitiesYtd(): Promise<import("./types").ActivityYtd> {
+  const { data } = await http.get<import("./types").ActivityYtd>("/activities/ytd");
+  return data;
+}
+
+/** The activity list with a chosen route fidelity (UX-X2): "simple" is the
+ *  RDP-simplified track — plenty for a thumbnail, a fraction of the bytes. */
+export async function activitiesWithRoutes(
+  opts: { since?: Date | string; limit?: number; polyline?: "full" | "simple" | "none" } = {},
+): Promise<import("./types").Activity[]> {
+  const params: Record<string, string | number> = { polyline: opts.polyline ?? "simple" };
+  if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;
+  if (opts.limit) params.limit = opts.limit;
+  const { data } = await http.get<import("./types").Activity[]>("/activities", { params });
+  return data;
+}
+
+/** GET /trails with the hero's server counts. Older servers omit them. */
+export async function trailsWithSummary(): Promise<
+  Awaited<ReturnType<typeof api.trails>> & {
+    status_counts?: import("./types").TrailStatusCounts;
+    synced_at?: string | null;
+  }
+> {
+  const { data } = await http.get("/trails");
+  return data;
+}
+
 // ── UI-4: metric detail screens ──
 /** Steps / resting-HR / sleep stats over a window of LOCAL days. */
 export async function summaryRangeStats(

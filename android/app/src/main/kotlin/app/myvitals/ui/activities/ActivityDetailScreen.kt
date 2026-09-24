@@ -1,6 +1,5 @@
 package app.myvitals.ui.activities
 
-import app.myvitals.data.Units
 import android.annotation.SuppressLint
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -8,6 +7,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,30 +16,28 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.Category
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.AlertDialog
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.heightIn
-import app.myvitals.ui.common.userMessage
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Category
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -51,33 +50,57 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.myvitals.data.SettingsRepository
+import app.myvitals.data.Units
 import app.myvitals.sync.ActivityLinkTrailBody
 import app.myvitals.sync.ActivityRow
+import app.myvitals.sync.ActivityZones
 import app.myvitals.sync.BackendClient
+import app.myvitals.sync.TimePoint
 import app.myvitals.sync.Trail
 import app.myvitals.ui.MV
-import app.myvitals.ui.neon.NeonBackgroundBrush
+import app.myvitals.ui.common.categoryForActivityType
+import app.myvitals.ui.common.userMessage
 import app.myvitals.ui.neon.NeonCardShape
+import app.myvitals.ui.neon.NeonEyebrow
 import app.myvitals.ui.neon.NeonMV
 import app.myvitals.ui.neon.NeonNumber
 import app.myvitals.ui.neon.NeonNumberFamily
-import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottom
-import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStart
-import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
+import app.myvitals.ui.neon.NeonScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.Box
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+/*
+ * Activity detail (UI-5) — map first.
+ *
+ *  - The route is the first thing on the screen: a 300dp map card with a
+ *    scrim carrying the type, name and local start time. No route → a
+ *    category-tinted gradient card in its place, not a hole.
+ *  - Eight identical stat tiles became three big numbers (distance, time,
+ *    and pace for foot sports or average HR otherwise) over a quiet line.
+ *  - Max HR was painted in the crisis colour though nothing was wrong. It
+ *    is Ink, or Amber when the session reached the top zone.
+ *  - Zone colours were hex copies; they are NeonMV tokens, and the chart's
+ *    bands are the server's zone boundaries (ActivityHrChart.kt).
+ *  - Elevation printed "ft" and pace "/mi" whatever the unit setting; both
+ *    go through Units now.
+ *  - A failed edit set the same `error` that replaced the loaded view, so a
+ *    typo in a duration made the whole activity disappear. Edit failures are
+ *    an inline banner above the content.
+ *  - The unused Vico HrChart is gone.
+ */
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,26 +110,16 @@ fun ActivityDetailScreen(
     sourceId: String,
     onBack: () -> Unit,
 ) {
-    val neon = settings.neonShellEnabled
-    // Hoisted palette: each value is byte-identical to the classic shell when
-    // neon is off, neon token when on. Never drop the classic value.
-    val bg = if (neon) NeonMV.Bg else MV.Bg
-    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
-    val ink = if (neon) NeonMV.Ink else MV.OnSurface
-    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
-    val errColor = if (neon) NeonMV.Bad else MV.Red
-
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     var activity by remember { mutableStateOf<ActivityRow?>(null) }
     var trails by remember { mutableStateOf<List<Trail>>(emptyList()) }
-    var hrPoints by remember {
-        mutableStateOf<List<app.myvitals.sync.TimePoint>>(emptyList())
-    }
-    var maxHr by remember { mutableStateOf(190) }
-    var zones by remember { mutableStateOf<app.myvitals.sync.ActivityZones?>(null) }
+    var hrPoints by remember { mutableStateOf<List<TimePoint>>(emptyList()) }
+    var zones by remember { mutableStateOf<ActivityZones?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Failures of an ACTION on a loaded activity. Never replaces the view.
+    var notice by remember { mutableStateOf<String?>(null) }
     var showPicker by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var showEdit by remember { mutableStateOf(false) }
@@ -116,6 +129,8 @@ fun ActivityDetailScreen(
     var typeChoices by remember { mutableStateOf<List<app.myvitals.sync.ActivityTypeChoice>>(emptyList()) }
     var savingType by remember { mutableStateOf(false) }
     var typeError by remember { mutableStateOf<String?>(null) }
+
+    val cacheKey = remember(source, sourceId) { "activity_detail_${source}_${sourceId}" }
 
     fun saveType(body: app.myvitals.sync.ActivityEditBody) {
         val a = activity ?: return
@@ -129,28 +144,21 @@ fun ActivityDetailScreen(
                     api.editActivity(source = a.source, sourceId = a.sourceId, body = body)
                 }
                 activity = updated
-                app.myvitals.data.JsonCache.write(
-                    context, "activity_detail_${a.source}_${a.sourceId}",
-                    ActivityRow::class.java, updated,
-                )
+                app.myvitals.data.JsonCache.write(context, cacheKey, ActivityRow::class.java, updated)
                 showTypeEdit = false
             } catch (e: Exception) {
                 Timber.w(e, "activity type change failed")
                 typeError = e.userMessage("Could not change the type")
+                // The Undo on the page has no dialog to report into.
+                if (!showTypeEdit) notice = typeError
             } finally { savingType = false }
         }
     }
 
-    val cacheKey = remember(source, sourceId) { "activity_detail_${source}_${sourceId}" }
-
     suspend fun load() {
         // Serve cached activity immediately so the screen renders offline.
-        app.myvitals.data.JsonCache.read<ActivityRow>(
-            context, cacheKey, ActivityRow::class.java,
-        )?.let {
-            activity = it.value
-            loading = false
-        }
+        app.myvitals.data.JsonCache.read<ActivityRow>(context, cacheKey, ActivityRow::class.java)
+            ?.let { activity = it.value; loading = false }
         if (!settings.isConfigured()) {
             if (activity == null) error = "Backend not configured."
             loading = false
@@ -162,12 +170,7 @@ fun ActivityDetailScreen(
                 Pair(api.activity(source, sourceId), api.trails())
             }
             activity = a
-            app.myvitals.data.JsonCache.write(
-                context, cacheKey, ActivityRow::class.java, a,
-            )
-            runCatching {
-                withContext(Dispatchers.IO) { api.profile() }
-            }.getOrNull()?.let { maxHr = it.maxHr() }
+            app.myvitals.data.JsonCache.write(context, cacheKey, ActivityRow::class.java, a)
             // TD-2 — zones are server-computed. buckets=0 skips the time
             // series the web streamgraph needs and the phone does not.
             zones = runCatching {
@@ -175,30 +178,20 @@ fun ActivityDetailScreen(
             }.getOrNull()
             trails = ts.trails.sortedBy { it.name }
             error = null
-            Timber.i(
-                "activity loaded: %s/%s — type=%s avg_hr=%s polyline_len=%d trail_id=%s",
-                a.source, a.sourceId, a.type,
-                a.avgHr?.toString() ?: "null",
-                a.polyline?.length ?: 0,
-                a.trailId?.toString() ?: "null",
-            )
-            // Pull the HR samples covering the activity window so we can
-            // render an in-line series under the stats card.
-            try {
-                val start = java.time.Instant.parse(a.startAt)
+            hrPoints = try {
+                val start = Instant.parse(a.startAt)
                 val end = start.plusSeconds(a.durationS.toLong())
-                val series = withContext(Dispatchers.IO) {
+                withContext(Dispatchers.IO) {
                     api.heartRateSeries(since = start.toString(), until = end.toString())
-                }
-                hrPoints = series.points
-                Timber.i("activity HR window: %d points", series.points.size)
+                }.points
             } catch (e: Exception) {
-                Timber.w(e, "activity HR fetch failed")
-                hrPoints = emptyList()
+                Timber.w(e, "activity HR fetch failed"); emptyList()
             }
         } catch (e: Exception) {
             Timber.w(e, "activity load failed for %s/%s", source, sourceId)
-            if (activity == null) error = e.message?.take(160)
+            // With a cached copy on screen this is a stale-data caution, not
+            // a replacement for the view.
+            error = e.userMessage("Couldn't reach the backend.")
         } finally { loading = false }
     }
 
@@ -209,332 +202,471 @@ fun ActivityDetailScreen(
             val resp = withContext(Dispatchers.IO) {
                 api.linkActivityTrail(source, sourceId, ActivityLinkTrailBody(trailId))
             }
-            if (resp.isSuccessful) {
-                showPicker = false
-                load()
-            }
+            if (resp.isSuccessful) { showPicker = false; load() }
+            else notice = "Couldn't change the trail link (HTTP ${resp.code()})."
         } catch (e: Exception) {
             Timber.w(e, "link failed")
+            notice = e.userMessage("Couldn't change the trail link")
         } finally { saving = false }
     }
 
     LaunchedEffect(source, sourceId) { load() }
 
-    // Under neon the root is the obsidian radial gradient (matching the shell
-    // home screens); classic keeps the flat fill byte-identical.
-    val rootBg = if (neon) Modifier.fillMaxSize().background(NeonBackgroundBrush)
-                 else Modifier.fillMaxSize().background(bg)
-    Column(rootBg) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    ActivityDetailContent(
+        activity = activity, trails = trails, hrPoints = hrPoints, zones = zones,
+        loading = loading, error = error, notice = notice,
+        zone = ZoneId.systemDefault(), savingType = savingType,
+        onBack = onBack,
+        onRetry = { scope.launch { load() } },
+        onDismissNotice = { notice = null },
+        onChangeType = {
+            typeError = null
+            showTypeEdit = true
+            if (typeChoices.isEmpty()) scope.launch {
+                try {
+                    val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                    typeChoices = withContext(Dispatchers.IO) { api.activityTypeChoices() }
+                } catch (e: Exception) {
+                    typeError = e.userMessage("Could not load activity types")
+                }
+            }
+        },
+        onUndoType = { saveType(app.myvitals.sync.ActivityEditBody(resetType = true)) },
+        onEdit = { showEdit = true },
+        onPickTrail = { showPicker = true },
+        map = { a, m -> ActivityMap(a, trails, m) },
+        routeMissing = { a ->
+            RouteMissingCard(a = a, neon = true, settings = settings,
+                onRefreshed = { scope.launch { load() } })
+        },
+    )
+
+    if (showPicker && activity != null) {
+        val a = activity!!
+        ModalBottomSheet(
+            onDismissRequest = { if (!saving) showPicker = false },
+            containerColor = NeonMV.Card,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = ink)
-            }
-            Text(
-                activity?.name?.takeIf { it.isNotBlank() }
-                    ?: activity?.let { prettyType(it.type) }
-                    ?: "Activity",
-                color = ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-            )
-            // Manual-source activities are user-authored — let the user
-            // edit name / duration / start. Strava / Concept2 / HC rows
-            // are read-only because their source is authoritative.
-            // Any source: a watch guesses the activity type and can be wrong
-            // (mowing arrives as "cycling"). The server keeps the device's
-            // word, so this is always undoable and a re-sync won't revert it.
-            if (activity != null) {
-                IconButton(onClick = {
-                    typeError = null
-                    showTypeEdit = true
-                    if (typeChoices.isEmpty()) scope.launch {
-                        try {
-                            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-                            typeChoices = withContext(Dispatchers.IO) { api.activityTypeChoices() }
-                        } catch (e: Exception) {
-                            typeError = e.userMessage("Could not load activity types")
-                        }
-                    }
-                }) {
-                    Icon(Icons.Outlined.Category, contentDescription = "Change activity type",
-                        tint = ink)
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text("Link to trail", color = NeonMV.Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                val pickable = remember(trails) {
+                    trails.filter { it.latitude != null && it.longitude != null }.sortedBy { it.name }
                 }
-            }
-            if (activity?.source == "manual") {
-                IconButton(onClick = { showEdit = true }) {
-                    Icon(
-                        Icons.Outlined.Edit, contentDescription = "Edit",
-                        tint = ink,
-                    )
-                }
-            }
-        }
-
-        when {
-            loading -> Text("Loading…", color = muted,
-                modifier = Modifier.padding(16.dp))
-            error != null -> Text(error!!, color = errColor, modifier = Modifier.padding(16.dp))
-            activity == null -> Text("Not found", color = muted,
-                modifier = Modifier.padding(16.dp))
-            else -> {
-                val a = activity!!
                 LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    Modifier.fillMaxWidth().height(360.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    a.recordedType?.let { rec ->
-                        item {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Recorded as ${prettyType(rec)}", color = muted,
-                                    fontSize = 12.sp, modifier = Modifier.weight(1f))
-                                TextButton(
-                                    enabled = !savingType,
-                                    onClick = { saveType(app.myvitals.sync.ActivityEditBody(resetType = true)) },
-                                ) { Text("Undo") }
-                            }
-                        }
-                    }
-                    item { StatsCard(a, neon) }
-                    if (!a.polyline.isNullOrBlank() ||
-                        (a.trailId != null && trails.any { it.id == a.trailId && it.latitude != null })) {
-                        item { ActivityMap(a, trails, neon) }
-                    }
-                    // SA-P3. This card used to not exist: with no polyline
-                    // the whole thing vanished, which is why a walk whose GPS
-                    // track was sitting in Health Connect read as a broken map
-                    // rather than as missing data. Only for Health Connect
-                    // sessions — it is the one source this app can go and ask.
-                    //
-                    // It is deliberately NOT an `else` of the branch above. A
-                    // trail link gives this activity a PIN, not a track, so the
-                    // map renders from `trail_id` alone and an `else` put the
-                    // fetch affordance behind a map that was already drawn —
-                    // which is exactly how the 2026-09-19 walk shipped with no
-                    // way to fetch its route: it is linked to trail 13, the
-                    // first branch won, and the button was unreachable. The
-                    // web half never had this bug because it gates on the
-                    // polyline alone.
-                    if (a.polyline.isNullOrBlank() && a.source == "healthconnect") {
-                        item {
-                            RouteMissingCard(
-                                a = a,
-                                neon = neon,
-                                settings = settings,
-                                onRefreshed = { scope.launch { load() } },
-                            )
-                        }
-                    }
-                    if (hrPoints.isNotEmpty()) {
-                        item { ActivityHrChart(hrPoints, maxHr = maxHr) }
-                    }
-                    zones?.takeIf { it.totalSeconds > 0 }?.let { z ->
-                        item { HrZonesCard(z, neon) }
-                    }
-                    item { TrailLinkCard(a, trails, neon, onPick = { showPicker = true }) }
-                    if (!a.notes.isNullOrBlank()) {
-                        item {
-                            if (neon) {
-                                Column(
-                                    Modifier.fillMaxWidth()
-                                        .clip(NeonCardShape)
-                                        .background(NeonMV.Card)
-                                        .border(1.dp, NeonMV.Periwinkle.copy(alpha = 0.16f),
-                                            NeonCardShape)
-                                        .padding(16.dp),
-                                ) {
-                                    Text("NOTES", color = NeonMV.Muted,
-                                        fontFamily = NeonNumberFamily,
-                                        fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.2.sp)
-                                    Spacer(Modifier.height(7.dp))
-                                    Text(a.notes, color = ink, fontSize = 14.sp)
-                                }
-                            } else {
-                                Card(colors = CardDefaults.cardColors(containerColor = card)) {
-                                    Column(Modifier.padding(12.dp)) {
-                                        Text("Notes", color = muted,
-                                            fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                                            letterSpacing = 1.5.sp)
-                                        Text(a.notes, color = ink, fontSize = 14.sp)
-                                    }
-                                }
+                    items(pickable, key = { it.id }) { t ->
+                        val isCurrent = t.id == a.trailId
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isCurrent) NeonMV.Cyan.copy(alpha = 0.15f)
+                                                 else NeonMV.BgElevated,
+                            ),
+                            modifier = Modifier.fillMaxWidth().clickable(enabled = !saving) {
+                                scope.launch { setTrail(t.id) }
+                            },
+                        ) {
+                            Row(Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text(t.name, modifier = Modifier.weight(1f), color = NeonMV.Ink, fontSize = 14.sp)
+                                val cs = listOfNotNull(t.city, t.state).joinToString(", ")
+                                if (cs.isNotEmpty()) Text(cs, color = NeonMV.Muted, fontSize = 11.sp)
                             }
                         }
                     }
                 }
-            }
-        }
-
-        if (showPicker && activity != null) {
-            val a = activity!!
-            ModalBottomSheet(
-                onDismissRequest = { if (!saving) showPicker = false },
-                containerColor = card,
-            ) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    Text("Link to trail", color = ink,
-                        fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(6.dp))
-                    val pickable = remember(trails) {
-                        trails.filter { it.latitude != null && it.longitude != null }
-                            .sortedBy { it.name }
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (a.trailId != null) {
+                        OutlinedButton(
+                            onClick = { scope.launch { setTrail(null) } },
+                            enabled = !saving, modifier = Modifier.weight(1f),
+                        ) { Text("Clear link") }
                     }
-                    LazyColumn(
-                        Modifier.fillMaxWidth().height(360.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        items(pickable, key = { it.id }) { t ->
-                            val isCurrent = t.id == a.trailId
-                            Card(
-                                colors = CardDefaults.cardColors(
-                                    containerColor =
-                                        if (isCurrent)
-                                            (if (neon) NeonMV.Cyan else MV.BrandRed)
-                                                .copy(alpha = 0.15f)
-                                        else if (neon) NeonMV.BgElevated
-                                        else MV.SurfaceContainerLow,
-                                ),
-                                modifier = Modifier.fillMaxWidth().clickable(enabled = !saving) {
-                                    scope.launch { setTrail(t.id) }
-                                },
-                            ) {
-                                Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically) {
-                                    Text(t.name, modifier = Modifier.weight(1f),
-                                        color = ink, fontSize = 14.sp)
-                                    val cs = listOfNotNull(t.city, t.state).joinToString(", ")
-                                    if (cs.isNotEmpty()) {
-                                        Text(cs, color = if (neon) NeonMV.Muted else MV.OnSurfaceDim,
-                                            fontSize = 11.sp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Row(Modifier.fillMaxWidth().padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (a.trailId != null) {
-                            OutlinedButton(
-                                onClick = { scope.launch { setTrail(null) } },
-                                enabled = !saving, modifier = Modifier.weight(1f),
-                            ) { Text("Clear link") }
-                        }
-                        TextButton(
-                            onClick = { if (!saving) showPicker = false },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("Cancel") }
-                    }
-                }
-            }
-        }
-
-        if (showTypeEdit && activity != null) {
-            val current = activity!!.type
-            var picked by remember(current) { mutableStateOf(current) }
-            AlertDialog(
-                onDismissRequest = { if (!savingType) showTypeEdit = false },
-                title = { Text("What was this?") },
-                text = {
-                    Column {
-                        Text(
-                            "Watches guess the activity type. Pick what it really was — " +
-                                "stats, icons and training load follow, and a re-sync " +
-                                "won't change it back.",
-                            fontSize = 13.sp, color = muted,
-                        )
-                        typeError?.let {
-                            Spacer(Modifier.height(6.dp))
-                            Text(it, color = errColor, fontSize = 12.sp)
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        if (typeChoices.isEmpty() && typeError == null) {
-                            Text("Loading…", color = muted, fontSize = 13.sp)
-                        }
-                        Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                            typeChoices.forEach { c ->
-                                Row(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(min = 48.dp)
-                                        .selectable(
-                                            selected = picked == c.type,
-                                            role = androidx.compose.ui.semantics.Role.RadioButton,
-                                            onClick = { picked = c.type },
-                                        ),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    RadioButton(selected = picked == c.type, onClick = null)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(c.label)
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
                     TextButton(
-                        enabled = !savingType && picked != current,
-                        onClick = { saveType(app.myvitals.sync.ActivityEditBody(type = picked)) },
-                    ) { Text(if (savingType) "Saving…" else "Save") }
-                },
-                dismissButton = {
-                    TextButton(enabled = !savingType, onClick = { showTypeEdit = false }) {
-                        Text("Cancel")
-                    }
-                },
-            )
-        }
-
-        if (showEdit && activity != null) {
-            val a = activity!!
-            ActivityEditDialog(
-                neon = neon,
-                initialName = a.name.orEmpty(),
-                initialDurationMin = (a.durationS / 60).coerceAtLeast(1),
-                initialStartAtIso = a.startAt,
-                submitting = editing,
-                onDismiss = { if (!editing) showEdit = false },
-                onSubmit = { name, durationMin, startAtIso ->
-                    scope.launch {
-                        editing = true
-                        try {
-                            val api = BackendClient.create(
-                                settings.backendUrl, settings.bearerToken,
-                            )
-                            val updated = kotlinx.coroutines.withContext(
-                                kotlinx.coroutines.Dispatchers.IO
-                            ) {
-                                api.editActivity(
-                                    source = a.source, sourceId = a.sourceId,
-                                    body = app.myvitals.sync.ActivityEditBody(
-                                        name = name,
-                                        durationMinutes = durationMin.toDouble(),
-                                        startAt = startAtIso,
-                                    ),
-                                )
-                            }
-                            activity = updated
-                            // Refresh HR window too — backend re-scanned.
-                            app.myvitals.data.JsonCache.write(
-                                context,
-                                "activity_detail_${a.source}_${a.sourceId}",
-                                ActivityRow::class.java, updated,
-                            )
-                            showEdit = false
-                            load()
-                        } catch (e: Exception) {
-                            Timber.w(e, "editActivity failed")
-                            error = "Edit failed: ${e.message?.take(120)}"
-                        } finally { editing = false }
-                    }
-                },
-            )
+                        onClick = { if (!saving) showPicker = false },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Cancel") }
+                }
+            }
         }
     }
+
+    if (showTypeEdit && activity != null) {
+        val current = activity!!.type
+        var picked by remember(current) { mutableStateOf(current) }
+        AlertDialog(
+            onDismissRequest = { if (!savingType) showTypeEdit = false },
+            title = { Text("What was this?") },
+            text = {
+                Column {
+                    Text(
+                        "Watches guess the activity type. Pick what it really was — " +
+                            "stats, icons and training load follow, and a re-sync " +
+                            "won't change it back.",
+                        fontSize = 13.sp, color = NeonMV.Muted,
+                    )
+                    typeError?.let {
+                        Spacer(Modifier.height(6.dp))
+                        Text(it, color = NeonMV.Amber, fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    if (typeChoices.isEmpty() && typeError == null) {
+                        Text("Loading…", color = NeonMV.Muted, fontSize = 13.sp)
+                    }
+                    Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                        typeChoices.forEach { c ->
+                            Row(
+                                Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
+                                    selected = picked == c.type,
+                                    role = androidx.compose.ui.semantics.Role.RadioButton,
+                                    onClick = { picked = c.type },
+                                ),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                RadioButton(selected = picked == c.type, onClick = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(c.label)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !savingType && picked != current,
+                    onClick = { saveType(app.myvitals.sync.ActivityEditBody(type = picked)) },
+                ) { Text(if (savingType) "Saving…" else "Save") }
+            },
+            dismissButton = {
+                TextButton(enabled = !savingType, onClick = { showTypeEdit = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (showEdit && activity != null) {
+        val a = activity!!
+        ActivityEditDialog(
+            neon = true,
+            initialName = a.name.orEmpty(),
+            initialDurationMin = (a.durationS / 60).coerceAtLeast(1),
+            initialStartAtIso = a.startAt,
+            submitting = editing,
+            onDismiss = { if (!editing) showEdit = false },
+            onSubmit = { name, durationMin, startAtIso ->
+                scope.launch {
+                    editing = true
+                    try {
+                        val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                        val updated = withContext(Dispatchers.IO) {
+                            api.editActivity(
+                                source = a.source, sourceId = a.sourceId,
+                                body = app.myvitals.sync.ActivityEditBody(
+                                    name = name,
+                                    durationMinutes = durationMin.toDouble(),
+                                    startAt = startAtIso,
+                                ),
+                            )
+                        }
+                        activity = updated
+                        app.myvitals.data.JsonCache.write(context, cacheKey, ActivityRow::class.java, updated)
+                        showEdit = false
+                        notice = null
+                        load()
+                    } catch (e: Exception) {
+                        Timber.w(e, "editActivity failed")
+                        // Inline, above the loaded activity — this used to set
+                        // the load `error` and replace the whole view.
+                        notice = "Edit failed: " + e.userMessage("could not save")
+                        showEdit = false
+                    } finally { editing = false }
+                }
+            },
+        )
+    }
+}
+
+private val HERO_TIME_FMT = DateTimeFormatter.ofPattern("EEE, MMM d · h:mm a")
+
+/**
+ * Stateless detail view. [map] draws the route into the hero box (a WebView
+ * in the app, a placeholder in screenshot tests); [routeMissing] is the
+ * Health Connect "fetch the route" card.
+ */
+@Composable
+fun ActivityDetailContent(
+    activity: ActivityRow?,
+    trails: List<Trail>,
+    hrPoints: List<TimePoint>,
+    zones: ActivityZones?,
+    loading: Boolean,
+    error: String?,
+    notice: String?,
+    zone: ZoneId,
+    savingType: Boolean,
+    onBack: () -> Unit,
+    onRetry: () -> Unit,
+    onDismissNotice: () -> Unit,
+    onChangeType: () -> Unit,
+    onUndoType: () -> Unit,
+    onEdit: () -> Unit,
+    onPickTrail: () -> Unit,
+    map: @Composable (ActivityRow, Modifier) -> Unit,
+    routeMissing: @Composable (ActivityRow) -> Unit = {},
+) {
+    NeonScreen(
+        title = "Activity",
+        contentPadding = PaddingValues(0.dp),
+        onBack = onBack,
+        headerTrailing = if (activity == null) null else {
+            {
+                Row {
+                    NeonIconButton(Icons.Outlined.Category, "Change activity type", onClick = onChangeType)
+                    // Manual activities are user-authored; imported rows are
+                    // read-only because their source is authoritative.
+                    if (activity.source == "manual") {
+                        NeonIconButton(Icons.Outlined.Edit, "Edit", onClick = onEdit)
+                    }
+                }
+            }
+        },
+    ) {
+        if (notice != null) {
+            StaleBanner(title = notice, message = null, onRetry = null,
+                modifier = Modifier.clickable(onClick = onDismissNotice))
+        }
+        if (activity == null) {
+            when {
+                loading -> Box(
+                    Modifier.fillMaxWidth().height(300.dp).clip(RoundedCornerShape(24.dp))
+                        .background(NeonMV.Card),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Loading activity…", color = NeonMV.Muted, fontSize = 13.sp) }
+                error != null -> StaleBanner("Couldn't load this activity", error, onRetry = onRetry)
+                else -> Text("Not found", color = NeonMV.Muted, modifier = Modifier.padding(vertical = 16.dp))
+            }
+            return@NeonScreen
+        }
+        val a = activity
+        if (error != null) {
+            StaleBanner("Couldn't refresh — showing the saved copy", error, onRetry = onRetry)
+        }
+
+        val hasRoute = !a.polyline.isNullOrBlank() ||
+            (a.trailId != null && trails.any { it.id == a.trailId && it.latitude != null })
+        DetailHero(a, zone, hasRoute, map)
+
+        a.recordedType?.let { rec ->
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+                Text("Recorded as ${prettyType(rec)}", color = NeonMV.Muted,
+                    fontSize = 12.sp, modifier = Modifier.weight(1f))
+                TextButton(enabled = !savingType, onClick = onUndoType) { Text("Undo", color = NeonMV.Cyan) }
+            }
+        }
+
+        BigNumbers(a)
+        QuietStats(a, zones)
+
+        // SA-P3: deliberately NOT an `else` of the map — a trail link gives
+        // the activity a PIN, not a track, and the fetch affordance must stay
+        // reachable when only the pin is drawn.
+        if (a.polyline.isNullOrBlank() && a.source == "healthconnect") {
+            Box(Modifier.padding(bottom = 12.dp)) { routeMissing(a) }
+        }
+        if (hrPoints.isNotEmpty()) ActivityHrChart(hrPoints, zones, a.avgHr)
+        zones?.takeIf { it.totalSeconds > 0 }?.let { HrZonesSummary(it) }
+        TrailLinkRow(a, trails, onPickTrail)
+        if (!a.notes.isNullOrBlank()) {
+            Column(
+                Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                    .clip(NeonCardShape).background(NeonMV.Card)
+                    .border(1.dp, NeonMV.Line, NeonCardShape).padding(16.dp),
+            ) {
+                NeonEyebrow("Notes", Modifier.padding(top = 0.dp))
+                Text(a.notes, color = NeonMV.Ink, fontSize = 14.sp)
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun DetailHero(
+    a: ActivityRow,
+    zone: ZoneId,
+    hasRoute: Boolean,
+    map: @Composable (ActivityRow, Modifier) -> Unit,
+) {
+    val tint = categoryForActivityType(a.type).color(true)
+    val shape = RoundedCornerShape(24.dp)
+    val whenStr = remember(a.startAt, zone) {
+        runCatching { Instant.parse(a.startAt).atZone(zone).format(HERO_TIME_FMT) }.getOrDefault("")
+    }
+    val caption: @Composable BoxScope.() -> Unit = {
+        Column(Modifier.align(Alignment.BottomStart).padding(16.dp)) {
+            Text(prettyType(a.type).uppercase(), color = NeonMV.Cyan, fontFamily = NeonNumberFamily,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
+            Text(
+                a.name?.takeIf { it.isNotBlank() } ?: prettyType(a.type),
+                color = NeonMV.Ink, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 28.sp,
+            )
+            if (whenStr.isNotEmpty()) Text(whenStr, color = NeonMV.Ink.copy(alpha = 0.8f), fontSize = 13.sp)
+        }
+    }
+    if (hasRoute) {
+        Box(
+            Modifier.fillMaxWidth().padding(bottom = 16.dp).height(300.dp)
+                .clip(shape).border(1.dp, NeonMV.Cyan.copy(alpha = 0.22f), shape),
+        ) {
+            map(a, Modifier.fillMaxSize())
+            // Bottom scrim so the caption reads over any tile colour.
+            Box(
+                Modifier.fillMaxWidth().height(140.dp).align(Alignment.BottomCenter)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, NeonMV.Bg.copy(alpha = 0.92f)))),
+            )
+            caption()
+        }
+    } else {
+        // No route: a category-tinted card in the same place, so the page
+        // keeps its shape instead of opening on a stats grid.
+        Box(
+            Modifier.fillMaxWidth().padding(bottom = 16.dp).height(190.dp)
+                .clip(shape)
+                .background(Brush.linearGradient(listOf(tint.copy(alpha = 0.38f), NeonMV.CardHigh, NeonMV.Card)))
+                .border(1.dp, tint.copy(alpha = 0.30f), shape),
+        ) {
+            Icon(iconForType(a.type), contentDescription = null, tint = tint.copy(alpha = 0.55f),
+                modifier = Modifier.align(Alignment.TopEnd).padding(18.dp).size(56.dp))
+            caption()
+        }
+    }
+}
+
+private data class Big(val label: String, val value: String, val unit: String?)
+
+private fun isFootSport(type: String): Boolean {
+    val t = type.lowercase()
+    return t.contains("run") || t.contains("walk") || t.contains("hike")
+}
+
+/** m/s from the activity's own distance and time — a unit conversion of
+ *  two server numbers, rendered through Units like every other pace. */
+private fun speedMs(a: ActivityRow): Double? {
+    val d = a.distanceM ?: return null
+    if (d <= 0.0 || a.durationS <= 0) return null
+    return d / a.durationS
+}
+
+private fun bigsFor(a: ActivityRow): List<Big> = buildList {
+    a.distanceM?.takeIf { it > 0 }?.let {
+        add(Big("Distance", "%.2f".format(Units.distance(it) ?: 0.0), Units.distanceUnit))
+    }
+    add(Big("Time", fmtDurationHm(a.durationS), null))
+    val pace = if (isFootSport(a.type)) speedMs(a) else null
+    if (pace != null) {
+        val (v, u) = Units.fmtPace(pace).split(" ").let { it[0] to it.getOrNull(1) }
+        add(Big("Pace", v, u))
+    } else a.avgHr?.let { add(Big("Avg HR", "%.0f".format(it), "bpm")) }
+    if (size < 3) a.kcal?.let { add(Big("Energy", "%.0f".format(it), "kcal")) }
+}
+
+@Composable
+private fun BigNumbers(a: ActivityRow) {
+    val bigs = bigsFor(a)
+    Row(Modifier.fillMaxWidth().padding(bottom = 14.dp)) {
+        bigs.take(3).forEach { b ->
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    NeonNumber(b.value, size = 30)
+                    if (b.unit != null) {
+                        Spacer(Modifier.width(3.dp))
+                        Text(b.unit, color = NeonMV.Muted, fontSize = 12.sp,
+                            modifier = Modifier.padding(bottom = 5.dp))
+                    }
+                }
+                Text(b.label.uppercase(), color = NeonMV.Muted, fontFamily = NeonNumberFamily,
+                    fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuietStats(a: ActivityRow, zones: ActivityZones?) {
+    val bigLabels = bigsFor(a).take(3).map { it.label }.toSet()
+    // Max HR is not a warning. Ink, or Amber when the session reached the
+    // top zone by the server's boundaries — never the crisis colour.
+    val topLo = zones?.zones?.lastOrNull()?.loBpm
+    val items = buildList<Triple<String, String, Color>> {
+        a.elevationGainM?.let { add(Triple("Climb", Units.fmtElevation(it), NeonMV.Ink)) }
+        if ("Avg HR" !in bigLabels) a.avgHr?.let { add(Triple("Avg HR", "%.0f bpm".format(it), NeonMV.Ink)) }
+        a.maxHr?.let {
+            val hot = topLo != null && it >= topLo
+            add(Triple("Max HR", "%.0f bpm".format(it), if (hot) NeonMV.Amber else NeonMV.Ink))
+        }
+        if ("Pace" !in bigLabels && !isFootSport(a.type)) {
+            speedMs(a)?.let { ms ->
+                val perHour = (Units.distance(ms * 3600.0) ?: 0.0)
+                add(Triple("Speed", "%.1f %s/h".format(perHour, Units.distanceUnit), NeonMV.Ink))
+            }
+        }
+        a.avgPowerW?.let { add(Triple("Power", "%.0f W".format(it), NeonMV.Ink)) }
+        if ("Energy" !in bigLabels) a.kcal?.let { add(Triple("Energy", "%.0f kcal".format(it), NeonMV.Ink)) }
+    }
+    if (items.isEmpty()) return
+    Column(
+        Modifier.fillMaxWidth().padding(bottom = 14.dp)
+            .clip(NeonCardShape).background(NeonMV.Card)
+            .border(1.dp, NeonMV.Line, NeonCardShape)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        items.chunked(3).take(2).forEach { row ->
+            Row(Modifier.fillMaxWidth()) {
+                row.forEach { (l, v, c) -> QuietStat(l, v, Modifier.weight(1f), color = c) }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrailLinkRow(a: ActivityRow, trails: List<Trail>, onPick: () -> Unit) {
+    val linked = a.trailId?.let { id -> trails.firstOrNull { it.id == id } }
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 12.dp)
+            .clip(NeonCardShape).background(NeonMV.Card)
+            .border(1.dp, NeonMV.Line, NeonCardShape)
+            .clickable { onPick() }
+            .heightIn(min = 56.dp)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Link, contentDescription = null, tint = NeonMV.Cyan, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(if (linked != null) "LINKED TRAIL" else "NOT LINKED", color = NeonMV.Muted,
+                fontFamily = NeonNumberFamily, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = 1.2.sp)
+            Text(linked?.name ?: (a.trailName ?: "Tap to link a trail"), color = NeonMV.Ink,
+                fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            if (linked != null && linked.visitsTotal > 0) {
+                Text("${linked.visitsTotal} all-time visit${if (linked.visitsTotal == 1) "" else "s"}",
+                    color = NeonMV.Muted, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+/** "1h 59m" past the hour, "47m" below it. */
+internal fun fmtDurationHm(seconds: Int): String {
+    if (seconds <= 0) return "—"
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    return if (h > 0) "${h}h ${m}m" else "${m}m"
 }
 
 @Composable
@@ -654,364 +786,6 @@ private fun ActivityEditDialog(
     )
 }
 
-@Composable
-private fun StatsCard(a: ActivityRow, neon: Boolean) {
-    if (neon) { NeonStatsCard(a); return }
-    val card = MV.SurfaceContainer
-    val muted = MV.OnSurfaceVariant
-    val ink = MV.OnSurface
-    Card(colors = CardDefaults.cardColors(containerColor = card)) {
-        Column(Modifier.padding(14.dp)) {
-            Text(prettyType(a.type), color = muted,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            Text(formatStartAt(a.startAt), color = ink, fontSize = 14.sp)
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                a.distanceM?.let { Stat("Distance", Units.fmtDistance(it, 2), neon) }
-                Stat("Duration", fmtDurationHm(a.durationS), neon)
-                a.elevationGainM?.let { Stat("Elev", "%.0f ft".format(it * 3.28084), neon) }
-            }
-            if (a.avgHr != null || a.kcal != null) {
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                    a.avgHr?.let { Stat("Avg HR", "%.0f bpm".format(it), neon) }
-                    a.maxHr?.let { Stat("Max HR", "%.0f bpm".format(it), neon) }
-                    a.kcal?.let { Stat("kcal", "%.0f".format(it), neon) }
-                }
-            }
-        }
-    }
-}
-
-/**
- * TD-2 — time-in-zone for the session, rendered from the server's numbers.
- *
- * Everything shown here (the bpm boundaries, the seconds, the percentage)
- * is computed in analytics/cardio.py. The phone deliberately owns no zone
- * model of its own: the web used to, and it counted HR samples rather than
- * seconds and divided by the session's own peak heart rate, so the same
- * ride reported a different distribution on each surface and neither matched
- * what the cardio coach was telling the user.
- */
-@Composable
-private fun HrZonesCard(z: app.myvitals.sync.ActivityZones, neon: Boolean) {
-    // Cool to hot, matching the web palette so a screenshot from either
-    // surface reads the same way.
-    val zoneColors = if (neon) {
-        listOf(Color(0xFF6F7BFF), Color(0xFF28E6FF), Color(0xFF5DFF3B),
-               Color(0xFFFFB52E), Color(0xFFFF5D7A))
-    } else {
-        listOf(Color(0xFF38BDF8), Color(0xFF22C55E), Color(0xFFEAB308),
-               Color(0xFFF97316), Color(0xFFEF4444))
-    }
-    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
-    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
-    val ink = if (neon) NeonMV.Ink else MV.OnSurface
-    val track = if (neon) NeonMV.Periwinkle.copy(alpha = 0.12f)
-                else MV.OnSurface.copy(alpha = 0.08f)
-
-    val body: @Composable () -> Unit = {
-        Column(Modifier.padding(14.dp)) {
-            Text("HR ZONES", color = muted,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            Spacer(Modifier.height(10.dp))
-            z.zones.forEachIndexed { i, zone ->
-                val range = zone.hiBpm?.let { "${zone.loBpm}–$it bpm" } ?: "${zone.loBpm}+ bpm"
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("${zone.zone} ${zone.label}", color = ink, fontSize = 12.sp,
-                        modifier = Modifier.width(104.dp))
-                    Box(
-                        Modifier.weight(1f).height(8.dp)
-                            .clip(RoundedCornerShape(4.dp)).background(track),
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth((zone.pct / 100.0).toFloat().coerceIn(0f, 1f))
-                                .fillMaxHeight()
-                                .background(zoneColors.getOrElse(i) { zoneColors.last() }),
-                        )
-                    }
-                    Text("%.0f%%".format(zone.pct), color = muted, fontSize = 11.sp,
-                        modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
-                }
-                Text("$range · ${fmtDurationHm(zone.seconds)}", color = muted, fontSize = 10.sp,
-                    modifier = Modifier.padding(start = 104.dp, bottom = 6.dp))
-            }
-            if (!z.sampled) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "No heart-rate series was recorded, so the whole session is " +
-                        "attributed to the zone its average falls in. Treat the split as coarse.",
-                    color = muted, fontSize = 10.sp,
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                when (z.maxHrSource) {
-                    "profile" -> "Zones from your max HR of ${z.maxHr} bpm."
-                    "estimated" ->
-                        "Zones from an estimated max HR of ${z.maxHr} bpm " +
-                            "(Tanaka, age ${z.ageUsed}). Set a measured max in Settings → Profile."
-                    else ->
-                        "Zones from a default max HR of ${z.maxHr} bpm — no birth date or " +
-                            "measured max on file, so these boundaries are a guess."
-                },
-                color = muted, fontSize = 10.sp,
-            )
-        }
-    }
-
-    if (neon) {
-        Column(
-            Modifier.fillMaxWidth().clip(NeonCardShape).background(card)
-                .border(1.dp, NeonMV.Periwinkle.copy(alpha = 0.16f), NeonCardShape),
-        ) { body() }
-    } else {
-        Card(colors = CardDefaults.cardColors(containerColor = card)) { body() }
-    }
-}
-
-@Composable
-private fun Stat(label: String, value: String, neon: Boolean) {
-    Column {
-        Text(label, color = if (neon) NeonMV.Muted else MV.OnSurfaceDim, fontSize = 10.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(value, color = if (neon) NeonMV.Cyan else MV.OnSurface,
-            fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-/**
- * Neon stats surface — a header tile (activity type + start time) above a flowed
- * grid of rounded accent-bordered stat tiles. Values render as Space Grotesk
- * [NeonNumber]; labels are uppercase Space Grotesk muted. Only the non-null
- * stats produce a tile, so the grid is dense with no empty slots. Crafted to
- * match BodyScreen's MetricCard idiom.
- */
-@Composable
-private fun NeonStatsCard(a: ActivityRow) {
-    // Build the present stats in display order, each carrying its accent.
-    // Every non-null field earns a tile; only the dense set renders so the
-    // grid never carries an empty slot. Pace is computed (not a raw field)
-    // and gated to foot sports with a real distance.
-    val tiles = buildList {
-        a.distanceM?.let {
-            add(NeonStatSpec("DISTANCE", "%.2f".format(Units.distance(it) ?: 0.0),
-                Units.distanceUnit, NeonMV.Lime))
-        }
-        // Split so the big number stays a number: "1h 59" + "m" past the
-        // hour, "47" + "min" below it. Raw minutes ("119 min") made anything
-        // over an hour take mental arithmetic to read.
-        if (a.durationS >= 3600) {
-            add(NeonStatSpec(
-                "DURATION",
-                "${a.durationS / 3600}h ${(a.durationS % 3600) / 60}",
-                "m", NeonMV.Cyan,
-            ))
-        } else {
-            add(NeonStatSpec("DURATION", "${a.durationS / 60}", "min", NeonMV.Cyan))
-        }
-        // Pace (min/mi) for Run / Walk / Hike with a positive distance —
-        // a foot-sport-only readout the web dashboard surfaces. duration
-        // (min) ÷ distance (mi) → "m:ss /mi".
-        computePaceMinPerMi(a)?.let { add(it) }
-        a.elevationGainM?.let {
-            add(NeonStatSpec("ELEVATION", "%.0f".format(it * 3.28084), "ft", NeonMV.Amber))
-        }
-        a.avgHr?.let {
-            add(NeonStatSpec("AVG HR", "%.0f".format(it), "bpm", NeonMV.Cyan))
-        }
-        a.maxHr?.let {
-            add(NeonStatSpec("MAX HR", "%.0f".format(it), "bpm", NeonMV.Bad))
-        }
-        a.avgPowerW?.let {
-            add(NeonStatSpec("AVG POWER", "%.0f".format(it), "W", NeonMV.Magenta))
-        }
-        a.kcal?.let {
-            add(NeonStatSpec("KCAL", "%.0f".format(it), null, NeonMV.Amber))
-        }
-    }
-    Column {
-        // Header tile: activity type (cyan accent) + human start time.
-        Column(
-            Modifier.fillMaxWidth()
-                .clip(NeonCardShape)
-                .background(NeonMV.Card)
-                .border(1.dp, NeonMV.Cyan.copy(alpha = 0.16f), NeonCardShape)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-        ) {
-            Text(
-                prettyType(a.type).uppercase(),
-                color = NeonMV.Cyan,
-                fontFamily = NeonNumberFamily,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.4.sp,
-            )
-            Spacer(Modifier.height(5.dp))
-            Text(formatStartAt(a.startAt), color = NeonMV.Ink, fontSize = 14.sp)
-        }
-        Spacer(Modifier.height(12.dp))
-        // Stat tiles flowed two-per-row so each gets equal width.
-        tiles.chunked(2).forEach { pair ->
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                pair.forEach { spec ->
-                    NeonStatTile(spec, Modifier.weight(1f))
-                }
-                // Pad an odd trailing row so the lone tile keeps half width.
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
-            }
-            Spacer(Modifier.height(12.dp))
-        }
-    }
-}
-
-/** "1h 59m" past the hour, "47m" below it. */
-internal fun fmtDurationHm(seconds: Int): String {
-    if (seconds <= 0) return "—"
-    val h = seconds / 3600
-    val m = (seconds % 3600) / 60
-    return if (h > 0) "${h}h ${m}m" else "${m}m"
-}
-
-private data class NeonStatSpec(
-    val label: String,
-    val value: String,
-    val unit: String?,
-    val accent: Color,
-)
-
-/**
- * Pace tile for foot sports (Run / Walk / Hike, case-insensitive substring)
- * with a positive distance. Returns null otherwise so the caller never adds
- * an empty tile. Value is "m:ss" minutes-per-mile; the unit carries "/mi".
- */
-private fun computePaceMinPerMi(a: ActivityRow): NeonStatSpec? {
-    val dist = a.distanceM ?: return null
-    if (dist <= 0.0 || a.durationS <= 0) return null
-    val t = a.type.lowercase()
-    val isFootSport = t.contains("run") || t.contains("walk") || t.contains("hike")
-    if (!isFootSport) return null
-    val miles = Units.distance(dist) ?: 0.0
-    if (miles <= 0.0) return null
-    val totalSecPerMile = a.durationS / miles
-    val min = (totalSecPerMile / 60).toInt()
-    val sec = (totalSecPerMile % 60).toInt()
-    return NeonStatSpec("PACE", "%d:%02d".format(min, sec), "/mi", NeonMV.Cyan)
-}
-
-@Composable
-private fun NeonStatTile(spec: NeonStatSpec, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .clip(NeonCardShape)
-            .background(NeonMV.Card)
-            .border(1.dp, spec.accent.copy(alpha = 0.16f), NeonCardShape)
-            .padding(horizontal = 14.dp, vertical = 13.dp),
-    ) {
-        Text(
-            spec.label,
-            color = NeonMV.Muted,
-            fontFamily = NeonNumberFamily,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.2.sp,
-        )
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
-            NeonNumber(spec.value, color = NeonMV.Ink, size = 25)
-            if (spec.unit != null) {
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    spec.unit,
-                    color = NeonMV.Muted,
-                    fontFamily = NeonNumberFamily,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 3.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TrailLinkCard(a: ActivityRow, trails: List<Trail>, neon: Boolean, onPick: () -> Unit) {
-    if (neon) { NeonTrailLinkCard(a, trails, onPick); return }
-    val card = MV.SurfaceContainer
-    val muted = MV.OnSurfaceVariant
-    val ink = MV.OnSurface
-    val linked = a.trailId?.let { id -> trails.firstOrNull { it.id == id } }
-    Card(
-        colors = CardDefaults.cardColors(containerColor = card),
-        modifier = Modifier.fillMaxWidth().clickable { onPick() },
-    ) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.Link, contentDescription = null,
-                tint = MV.OnSurfaceVariant,
-                modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f)) {
-                if (linked != null) {
-                    Text("Linked to", color = muted, fontSize = 11.sp)
-                    Text(linked.name, color = ink, fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold)
-                    val visits = linked.visitsTotal
-                    if (visits > 0) {
-                        Text("${visits} all-time visit${if (visits == 1) "" else "s"}",
-                            color = muted, fontSize = 11.sp)
-                    }
-                } else {
-                    Text("Not linked", color = muted, fontSize = 11.sp)
-                    Text("Tap to link a trail", color = ink, fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
-    }
-}
-
-/** Neon trail-link tile — rounded, cyan accent border, uppercase label. */
-@Composable
-private fun NeonTrailLinkCard(a: ActivityRow, trails: List<Trail>, onPick: () -> Unit) {
-    val linked = a.trailId?.let { id -> trails.firstOrNull { it.id == id } }
-    Row(
-        Modifier.fillMaxWidth()
-            .clip(NeonCardShape)
-            .background(NeonMV.Card)
-            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.16f), NeonCardShape)
-            .clickable { onPick() }
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.Outlined.Link, contentDescription = null,
-            tint = NeonMV.Cyan, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f)) {
-            if (linked != null) {
-                Text("LINKED TO", color = NeonMV.Muted,
-                    fontFamily = NeonNumberFamily, fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
-                Spacer(Modifier.height(3.dp))
-                Text(linked.name, color = NeonMV.Ink, fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold)
-                val visits = linked.visitsTotal
-                if (visits > 0) {
-                    Text("${visits} all-time visit${if (visits == 1) "" else "s"}",
-                        color = NeonMV.Muted, fontSize = 11.sp)
-                }
-            } else {
-                Text("NOT LINKED", color = NeonMV.Muted,
-                    fontFamily = NeonNumberFamily, fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
-                Spacer(Modifier.height(3.dp))
-                Text("Tap to link a trail", color = NeonMV.Ink, fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold)
-            }
-        }
-    }
-}
-
 /**
  * SA-P3 — the Route card when there is no route to draw.
  *
@@ -1054,7 +828,8 @@ private fun RouteMissingCard(
     val card = if (neon) NeonMV.Card else MV.SurfaceContainer
     val ink = if (neon) NeonMV.Ink else MV.OnSurface
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
-    val errColor = if (neon) NeonMV.Bad else MV.Red
+    // A route Health Connect would not release is a caution, not a crisis.
+    val errColor = if (neon) NeonMV.Amber else MV.Red
 
     val gateway = remember { app.myvitals.health.HealthConnectGateway(ctx) }
     // True once the user has turned on all-routes access in Health Connect
@@ -1228,7 +1003,8 @@ private fun RouteMissingCard(
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun ActivityMap(a: ActivityRow, trails: List<Trail>, neon: Boolean) {
+private fun ActivityMap(a: ActivityRow, trails: List<Trail>, modifier: Modifier = Modifier) {
+    val neon = true
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val leafletCss = remember { app.myvitals.ui.common.LeafletAssets.css(ctx) }
     val leafletJs = remember { app.myvitals.ui.common.LeafletAssets.js(ctx) }
@@ -1364,72 +1140,6 @@ try {
                 webview.tag = html
             }
         },
-        modifier = Modifier.fillMaxWidth().height(260.dp),
+        modifier = modifier,
     )
 }
-
-@Composable
-private fun HrChart(points: List<app.myvitals.sync.TimePoint>) {
-    val producer = remember {
-        com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer()
-    }
-    LaunchedEffect(points) {
-        if (points.size < 2) return@LaunchedEffect
-        runCatching {
-            // Parse + sort + dedupe by timestamp. Vico's series() expects
-            // strictly-increasing x values and can OOM/throw on huge or
-            // duplicate-x inputs — both common when watch HR is sampled
-            // at second-granularity for a multi-hour ride.
-            val pairs = points.mapNotNull { p ->
-                val ms = runCatching {
-                    java.time.Instant.parse(p.time).toEpochMilli()
-                }.getOrNull() ?: return@mapNotNull null
-                ms to p.value
-            }
-                .sortedBy { it.first }
-                .distinctBy { it.first }
-            if (pairs.size < 2) return@runCatching
-            // Cap to ~600 points so wide line layers stay performant.
-            val maxPoints = 600
-            val sampled = if (pairs.size > maxPoints) {
-                val stride = pairs.size.toDouble() / maxPoints
-                (0 until maxPoints).map { i ->
-                    pairs[(i * stride).toInt().coerceAtMost(pairs.lastIndex)]
-                }
-            } else pairs
-            val origin = sampled.first().first
-            val xs = sampled.map { (it.first - origin) / 60_000.0 }
-            val ys = sampled.map { it.second }
-            producer.runTransaction {
-                lineSeries { series(x = xs, y = ys) }
-            }
-        }.onFailure { Timber.w(it, "HrChart series build failed") }
-    }
-    Card(colors = CardDefaults.cardColors(containerColor = MV.SurfaceContainer)) {
-        Column(Modifier.padding(12.dp)) {
-            Text("HEART RATE", color = MV.OnSurfaceVariant,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                letterSpacing = 1.5.sp,
-                modifier = Modifier.padding(bottom = 8.dp))
-            com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost(
-                chart = com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart(
-                    com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer(),
-                    startAxis = com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis.rememberStart(),
-                    bottomAxis = com.patrykandpatrick.vico.core.cartesian.axis.HorizontalAxis.rememberBottom(),
-                    // imports above provide rememberStart/rememberBottom factories
-                ),
-                modelProducer = producer,
-                scrollState = com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState(),
-                zoomState = com.patrykandpatrick.vico.compose.cartesian.rememberVicoZoomState(),
-                modifier = Modifier.fillMaxWidth().height(180.dp),
-            )
-        }
-    }
-}
-
-private fun formatStartAt(iso: String): String =
-    try {
-        val ldt = java.time.OffsetDateTime.parse(iso)
-            .atZoneSameInstant(java.time.ZoneId.systemDefault())
-        ldt.format(java.time.format.DateTimeFormatter.ofPattern("EEE MMM d, h:mm a"))
-    } catch (_: Exception) { iso }

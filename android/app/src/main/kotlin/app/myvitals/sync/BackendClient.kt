@@ -742,6 +742,21 @@ interface BackendApi {
     @POST("ai/meals/read-label")
     suspend fun mealsReadLabel(@Body body: LabelIn): LabelScan
 
+    // ── UI-5 ──────────────────────────────────────────────────────
+    /** Year-to-date vs the same day last year, cumulative distance lines,
+     *  and per-week totals — all server-computed (analytics/activity_ytd). */
+    @GET("activities/ytd")
+    suspend fun activitiesYtd(): ActivityYtd
+
+    /** The activity list without routes (UX-X2) — the phone feed never
+     *  draws one, so the full-fidelity tracks were pure payload. */
+    @GET("activities")
+    suspend fun activitiesNoRoute(
+        @Query("limit") limit: Int = 50,
+        @Query("since") since: String? = null,
+        @Query("polyline") polyline: String = "none",
+    ): List<ActivityRow>
+
     // ── UI-4: metric detail screens ──
     /** Steps / resting-HR / sleep stats over a window of LOCAL days. */
     @GET("summary/range/stats")

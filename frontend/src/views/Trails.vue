@@ -1,8 +1,16 @@
 <script setup lang="ts">
 /**
  * /trails — RainoutLine status board for the user's local trail
- * network. Pull-to-refresh hits POST /trails/refresh; star toggle
- * subscribes for status-flip pings.
+ * network. Phone twin: `TrailsScreen.kt`.
+ *
+ * UI-5: the page leads with a status hero — "11 of 14 open" with the open
+ * count big in lime, a segmented bar (open lime / delayed amber / closed
+ * rose — rose here is the trail's literal status, not an alarm), a
+ * "synced 4m" pill and a non-interactive mini map of status pins that opens
+ * the full map. The counts are the server's `status_counts`. Starred
+ * trails sit in a carousel with how long since you rode each. A failed
+ * refresh is an amber banner ABOVE the cached trails; it used to replace
+ * them.
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
@@ -10,13 +18,16 @@ import { baseTileUrl, labelTileUrl, tileOptions } from "@/mapTiles";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "@/leaflet-icons";   // side-effect: fixes default marker URLs under Vite
-import { effectiveTheme, isNeon } from "@/theme";
-import { Star, RefreshCw, Navigation, Pencil, Map as MapIcon, MapPin, Route, Bike } from "lucide-vue-next";
-import { api } from "@/api/client";
+import { Star, RefreshCw, Pencil, Map as MapIcon, MapPin, Route, Bike, ChevronRight, Rows3, Rows2 } from "lucide-vue-next";
+import { api, trailsWithSummary } from "@/api/client";
+import type { TrailStatusCounts } from "@/api/types";
 import { queryToken } from "@/config";
-import Card from "@/components/Card.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import TrailMap from "@/components/TrailMap.vue";
+import NeonPage from "@/components/neon/NeonPage.vue";
+import NeonHero from "@/components/neon/NeonHero.vue";
+import NeonEyebrow from "@/components/neon/NeonEyebrow.vue";
+import { useRouter } from "vue-router";
 
 /** Condensed rows: name + age only, tighter padding, no comment or meta.
  *  Fits roughly three times as many trails on screen, which matters with
@@ -34,6 +45,9 @@ type Trail = Awaited<ReturnType<typeof api.trails>>["trails"][number];
 
 const trails = ref<Trail[]>([]);
 const dnisUrl = ref<string | null>(null);
+const counts = ref<TrailStatusCounts | null>(null);
+const syncedAt = ref<string | null>(null);
+const router = useRouter();
 const loading = ref(true);
 const refreshing = ref(false);
 const error = ref<string>("");
@@ -49,7 +63,7 @@ async function load() {
   loading.value = trails.value.length === 0;
   error.value = "";
   try {
-    const r = await api.trails();
+    const r = await trailsWithSummary();
     // Detect status flips before swapping refs.
     const prevStatus = new Map(trails.value.map((t) => [t.id, t.status]));
     const newlyFlipped: number[] = [];
@@ -61,6 +75,8 @@ async function load() {
     }
     trails.value = r.trails;
     dnisUrl.value = r.dnis_url ?? null;
+    counts.value = r.status_counts ?? null;
+    syncedAt.value = r.synced_at ?? null;
     if (newlyFlipped.length > 0) {
       const next = new Set(flipped.value);
       newlyFlipped.forEach((id) => next.add(id));
@@ -178,7 +194,7 @@ function initEditMap(t: Trail) {
     : KC_CENTER;
   editMap = L.map(editMapEl.value, { zoomControl: true })
     .setView(start, t.latitude != null ? 14 : 9);
-  const dark = effectiveTheme.value === "dark" || isNeon.value;
+  const dark = true;
   L.tileLayer(baseTileUrl(dark), tileOptions()).addTo(editMap);
   L.tileLayer(labelTileUrl(dark), { ...tileOptions(), pane: "shadowPane" }).addTo(editMap);
 
@@ -416,6 +432,49 @@ const grouped = computed(() => {
   return { open, closed, delayed, other };
 });
 
+// ── Hero ──
+const total = computed(() => counts.value
+  ? counts.value.open + counts.value.delayed + counts.value.closed + counts.value.other : 0);
+const segments = computed(() => {
+  const c = counts.value;
+  if (!c || total.value === 0) return [];
+  return [
+    { n: c.open, color: "#5dff3b", label: "open" },
+    { n: c.delayed, color: "#ffb52e", label: "delayed" },
+    { n: c.closed, color: "#ff5d7a", label: "closed" },
+    { n: c.other, color: "#272a3b", label: "unknown" },
+  ].filter((x) => x.n > 0);
+});
+const starred = computed(() => trails.value.filter((t) => t.subscribed));
+const STATUS_COLOR: Record<string, string> = { open: "#5dff3b", delayed: "#ffb52e", closed: "#ff5d7a" };
+const statusColor = (s: string | null | undefined) => STATUS_COLOR[s ?? ""] ?? "#9b9bb0";
+
+// Non-interactive mini map of status pins; the whole box opens /trails/map.
+const miniEl = ref<HTMLDivElement | null>(null);
+let mini: L.Map | null = null;
+function renderMini() {
+  if (!miniEl.value) return;
+  const pinned = trails.value.filter((t) => t.latitude != null && t.longitude != null);
+  if (!pinned.length) return;
+  if (mini) { mini.remove(); mini = null; }
+  mini = L.map(miniEl.value, {
+    zoomControl: false, attributionControl: false, dragging: false, touchZoom: false,
+    scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false,
+  });
+  L.tileLayer(baseTileUrl(true), tileOptions()).addTo(mini);
+  L.tileLayer(labelTileUrl(true), { ...tileOptions(), pane: "shadowPane" }).addTo(mini);
+  const b = L.latLngBounds([]);
+  for (const t of pinned) {
+    L.circleMarker([t.latitude!, t.longitude!], {
+      radius: 6, color: "#ffffff", weight: 2, fillColor: statusColor(t.status), fillOpacity: 1, interactive: false,
+    }).addTo(mini);
+    b.extend([t.latitude!, t.longitude!]);
+  }
+  mini.fitBounds(b.pad(0.15));
+}
+watch(() => trails.value.map((t) => `${t.id}:${t.status}:${t.latitude}`).join(","), () => nextTick(renderMini));
+onUnmounted(() => { if (mini) { mini.remove(); mini = null; } });
+
 onMounted(() => {
   load();
   tickHandle = window.setInterval(() => { tickNow.value = Date.now(); }, 60000);
@@ -425,235 +484,146 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
 </script>
 
 <template>
-  <main class="trails" :class="{ dense }">
-    <header>
-      <h1>Trails</h1>
-      <div class="header-actions">
-        <button class="refresh" @click="toggleDense"
-                :title="dense ? 'Switch to expanded rows' : 'Switch to condensed rows'">
-          {{ dense ? "Expanded" : "Condensed" }}
+  <NeonPage title="Trails">
+    <template #trailing>
+      <div class="hdr-actions">
+        <button class="icon-btn" :title="dense ? 'Switch to expanded rows' : 'Switch to condensed rows'"
+                :aria-label="dense ? 'Expanded rows' : 'Condensed rows'" @click="toggleDense">
+          <Rows2 v-if="dense" :size="18" /><Rows3 v-else :size="18" />
         </button>
-        <RouterLink to="/trails/map" class="refresh"
-                    title="View all trails on a map with status overlay">
-          <MapIcon :size="14" /> Map
-        </RouterLink>
-        <a v-if="dnisUrl" :href="dnisUrl" target="_blank" rel="noreferrer"
-           class="refresh dnis-link"
-           title="Open the full RainoutLine status board">
-          rainoutline ↗
-        </a>
-        <button class="refresh" :disabled="refreshing" @click="refresh">
-          <RefreshCw :size="16" :class="{ spinning: refreshing }" />
-          {{ refreshing ? "Refreshing…" : "Refresh" }}
-        </button>
-        <button class="refresh" :disabled="linking" @click="linkActivities"
-                title="Auto-link Strava / Garmin activities to trails by GPS proximity">
-          <Bike :size="14" /> {{ linking ? "Linking…" : "Link activities" }}
-        </button>
-        <button class="refresh" :disabled="fetchingOsm" @click="fetchAllOsm"
-                title="Pull official trail route geometry from OpenStreetMap (free, no key)">
-          <Route :size="14" /> {{ fetchingOsm ? "Fetching OSM…" : "OSM routes" }}
+        <button class="icon-btn" :disabled="refreshing" title="Refresh trail status" aria-label="Refresh" @click="refresh">
+          <RefreshCw :size="18" :class="{ spinning: refreshing }" />
         </button>
       </div>
-    </header>
-    <p v-if="linkResult" class="hint" style="text-align: right">{{ linkResult }}</p>
+    </template>
 
     <p v-if="!queryToken" class="hint">Set your query token in Settings to load trails.</p>
-    <div v-else-if="loading" class="skeleton-trails">
-      <div v-for="n in 6" :key="n" class="skel-row">
-        <Skeleton width="100%" height="58px" radius="8px"/>
-      </div>
-    </div>
-    <p v-else-if="error" class="err">{{ error }}</p>
-    <Card v-else-if="trails.length === 0" title="No trails seeded yet">
-      <p class="hint">
-        The trail poller runs on a 15-minute schedule; the first tick
-        seeds the catalog. Tap <strong>Refresh now</strong> to trigger
-        an immediate poll.
-      </p>
-    </Card>
 
     <template v-else>
-      <section v-if="grouped.open.length" class="group group-open">
-        <h2>Open · {{ grouped.open.length }}</h2>
-        <div class="grid">
-          <article v-for="t in grouped.open" :key="t.id" class="card status-open"
-                   :class="{ has_loc: t.latitude != null, flip: flipped.has(t.id) }"
-                   @click="openMaps(t)">
-            <header>
-              <span class="dot"></span>
-              <strong>{{ t.name }}</strong>
-              <button class="star" :class="{ on: t.subscribed }"
-                      :title="t.subscribed ? 'Unsubscribe' : 'Subscribe to status flips'"
-                      @click.stop="toggleSubscribe(t)">
-                <Star :size="16" />
-              </button>
-              <button v-if="t.latitude != null" class="star map-toggle"
-                      :class="{ on: expandedMaps.has(t.id) }"
-                      title="Show map + linked rides"
-                      @click.stop="toggleMap(t)">
-                <MapIcon :size="14" />
-              </button>
-              <button class="star edit-pin"
-                      title="Edit pin location"
-                      @click.stop="openEdit(t)">
-                <Pencil :size="14" />
-              </button>
-            </header>
-            <span v-if="dense" class="denseage">
-              {{ fmtAge(t.source_ts || t.fetched_at) }}
-            </span>
-            <p v-if="t.comment && !dense" class="comment">{{ t.comment }}</p>
-            <p v-if="!dense" class="meta">
-              <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
-              <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
-              <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
-              <RouterLink v-if="(t.visits_total ?? 0) > 0" class="visits visits-link"
-                    :to="`/trails/${t.id}/visits`"
-                    title="Show the activities linked to this trail"
-                    @click.stop
-                    :class="visitAgeClass(t.last_visit_at)">
-                · <Bike :size="11" class="bike-ic" /> {{ t.visits_total }} visit{{ t.visits_total === 1 ? '' : 's' }}
-                <span v-if="t.last_visit_at" class="last-visit">
-                  · last {{ fmtAge(t.last_visit_at) }}
-                </span>
-              </RouterLink>
-              <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
-            </p>
-            <TrailMap
-              v-if="expandedMaps.has(t.id) && t.latitude != null && t.longitude != null"
-              :trail-id="t.id" :name="t.name"
-              :latitude="t.latitude" :longitude="t.longitude"
-              @click.stop
-              @expand="openFullMap(t)"
-            />
-          </article>
-        </div>
-      </section>
+      <div v-if="error" class="stale" role="alert" @click="load">
+        <strong>{{ trails.length ? "Couldn't refresh — showing saved trail status" : "Couldn't load trails" }}</strong>
+        <span>{{ error }}</span><em>Tap to retry</em>
+      </div>
 
-      <section v-if="grouped.delayed.length" class="group group-delayed">
-        <h2>Delayed · {{ grouped.delayed.length }}</h2>
-        <div class="grid">
-          <article v-for="t in grouped.delayed" :key="t.id" class="card status-delayed"
-                   :class="{ has_loc: t.latitude != null, flip: flipped.has(t.id) }"
-                   @click="openMaps(t)">
-            <header>
-              <span class="dot"></span>
-              <strong>{{ t.name }}</strong>
-              <button class="star" :class="{ on: t.subscribed }"
-                      :title="t.subscribed ? 'Unsubscribe' : 'Subscribe to status flips'"
-                      @click.stop="toggleSubscribe(t)">
-                <Star :size="16" />
-              </button>
-              <button v-if="t.latitude != null" class="star map-toggle"
-                      :class="{ on: expandedMaps.has(t.id) }"
-                      title="Show map + linked rides"
-                      @click.stop="toggleMap(t)">
-                <MapIcon :size="14" />
-              </button>
-              <button class="star edit-pin"
-                      title="Edit pin location"
-                      @click.stop="openEdit(t)">
-                <Pencil :size="14" />
-              </button>
-            </header>
-            <span v-if="dense" class="denseage">
-              {{ fmtAge(t.source_ts || t.fetched_at) }}
-            </span>
-            <p v-if="t.comment && !dense" class="comment">{{ t.comment }}</p>
-            <p v-if="!dense" class="meta">
-              <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
-              <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
-              <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
-              <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
-            </p>
-            <TrailMap
-              v-if="expandedMaps.has(t.id) && t.latitude != null && t.longitude != null"
-              :trail-id="t.id" :name="t.name"
-              :latitude="t.latitude" :longitude="t.longitude"
-              @click.stop
-              @expand="openFullMap(t)"
-            />
-          </article>
-        </div>
-      </section>
+      <div v-if="loading && !trails.length" class="skeleton-trails">
+        <Skeleton width="100%" height="220px" radius="22px" />
+        <div v-for="n in 4" :key="n"><Skeleton width="100%" height="64px" radius="18px" /></div>
+      </div>
+      <!-- A failed first load is not "no trails seeded": the banner says why. -->
+      <template v-else-if="!trails.length && error" />
+      <p v-else-if="!trails.length" class="card hint">
+        No trails seeded yet. The poller runs every 15 minutes; tap Refresh to trigger an immediate poll.
+      </p>
 
-      <section v-if="grouped.closed.length" class="group group-closed">
-        <h2>Closed · {{ grouped.closed.length }}</h2>
-        <div class="grid">
-          <article v-for="t in grouped.closed" :key="t.id" class="card status-closed"
-                   :class="{ has_loc: t.latitude != null, flip: flipped.has(t.id) }"
-                   @click="openMaps(t)">
-            <header>
-              <span class="dot"></span>
-              <strong>{{ t.name }}</strong>
-              <button class="star" :class="{ on: t.subscribed }"
-                      :title="t.subscribed ? 'Unsubscribe' : 'Subscribe to status flips'"
-                      @click.stop="toggleSubscribe(t)">
-                <Star :size="16" />
-              </button>
-              <button v-if="t.latitude != null" class="star map-toggle"
-                      :class="{ on: expandedMaps.has(t.id) }"
-                      title="Show map + linked rides"
-                      @click.stop="toggleMap(t)">
-                <MapIcon :size="14" />
-              </button>
-              <button class="star edit-pin"
-                      title="Edit pin location"
-                      @click.stop="openEdit(t)">
-                <Pencil :size="14" />
-              </button>
-            </header>
-            <span v-if="dense" class="denseage">
-              {{ fmtAge(t.source_ts || t.fetched_at) }}
-            </span>
-            <p v-if="t.comment && !dense" class="comment">{{ t.comment }}</p>
-            <p v-if="!dense" class="meta">
-              <span>{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
-              <span v-if="t.city" class="loc">· {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</span>
-              <span v-else-if="t.latitude == null" class="loc nopin">· no pin</span>
-              <RouterLink v-if="(t.visits_total ?? 0) > 0" class="visits visits-link"
-                    :to="`/trails/${t.id}/visits`"
-                    title="Show the activities linked to this trail"
-                    @click.stop
-                    :class="visitAgeClass(t.last_visit_at)">
-                · <Bike :size="11" class="bike-ic" /> {{ t.visits_total }} visit{{ t.visits_total === 1 ? '' : 's' }}
-                <span v-if="t.last_visit_at" class="last-visit">
-                  · last {{ fmtAge(t.last_visit_at) }}
-                </span>
-              </RouterLink>
-              <Navigation v-if="t.latitude != null" :size="12" class="nav-ic" />
-            </p>
-            <TrailMap
-              v-if="expandedMaps.has(t.id) && t.latitude != null && t.longitude != null"
-              :trail-id="t.id" :name="t.name"
-              :latitude="t.latitude" :longitude="t.longitude"
-              @click.stop
-              @expand="openFullMap(t)"
-            />
-          </article>
-        </div>
-      </section>
+      <template v-else>
+        <NeonHero accent="#5dff3b">
+          <div class="hero-head">
+            <NeonEyebrow style="margin: 0">Trail status</NeonEyebrow>
+            <span v-if="syncedAt" class="pill peri">synced {{ fmtAge(syncedAt).replace(' ago', '') }}</span>
+          </div>
+          <template v-if="counts">
+            <div class="count-row">
+              <span class="count">{{ counts.open }}</span>
+              <span class="of">of {{ total }} open</span>
+            </div>
+            <div v-if="segments.length" class="seg" role="img"
+                 :aria-label="segments.map((x) => `${x.n} ${x.label}`).join(', ')">
+              <span v-for="x in segments" :key="x.label" :style="{ flex: x.n, background: x.color }" />
+            </div>
+            <div class="seg-legend">
+              <span v-for="x in segments" :key="x.label"><i :style="{ background: x.label === 'unknown' ? '#9b9bb0' : x.color }" />{{ x.n }} {{ x.label }}</span>
+            </div>
+          </template>
+          <!-- An older server without counts: say nothing rather than count here. -->
+          <p v-else class="hint">Status counts unavailable.</p>
+          <button class="mini" type="button" aria-label="Open the trail status map" @click="router.push('/trails/map')">
+            <div ref="miniEl" class="mini-map" />
+            <span class="pill cyan open-map"><MapIcon :size="13" /> Open map</span>
+          </button>
+        </NeonHero>
 
-      <section v-if="grouped.other.length" class="group">
-        <h2>Other · {{ grouped.other.length }}</h2>
-        <div class="grid">
-          <article v-for="t in grouped.other" :key="t.id" class="card">
-            <header>
+        <template v-if="starred.length">
+          <NeonEyebrow>Your trails</NeonEyebrow>
+          <div class="carousel">
+            <RouterLink v-for="t in starred" :key="t.id" class="tile"
+                        :to="(t.visits_total ?? 0) > 0 ? `/trails/${t.id}/visits` : '/trails'"
+                        :style="{ borderColor: statusColor(t.status) + '4d' }">
+              <span class="tile-st" :style="{ color: statusColor(t.status) }">
+                <i class="dot" :style="{ background: statusColor(t.status) }" />{{ t.status ?? "unknown" }}
+              </span>
               <strong>{{ t.name }}</strong>
-              <span class="status-tag">{{ t.status ?? "—" }}</span>
-              <button class="star" :class="{ on: t.subscribed }"
+              <span class="visits" :class="visitAgeClass(t.last_visit_at)">
+                {{ t.last_visit_at ? `ridden ${fmtAge(t.last_visit_at)}` : "not ridden yet" }}
+              </span>
+            </RouterLink>
+          </div>
+        </template>
+
+        <section v-for="g in [
+          { key: 'open', label: 'Open', list: grouped.open },
+          { key: 'delayed', label: 'Delayed', list: grouped.delayed },
+          { key: 'closed', label: 'Closed', list: grouped.closed },
+          { key: 'other', label: 'Other', list: grouped.other },
+        ]" :key="g.key" v-show="g.list.length" :class="{ dense }">
+          <NeonEyebrow>{{ g.label }} · {{ g.list.length }}</NeonEyebrow>
+          <article v-for="t in g.list" :key="t.id" class="trail"
+                   :class="{ flip: flipped.has(t.id), [`st-${t.status ?? 'other'}`]: true }"
+                   :style="{ borderColor: statusColor(t.status) + '2e' }">
+            <div class="trail-main">
+              <i class="dot glow" :style="{ background: statusColor(t.status), color: statusColor(t.status) }" />
+              <div class="trail-body">
+                <strong>{{ t.name }}</strong>
+                <template v-if="!dense">
+                  <p v-if="t.comment" class="comment">{{ t.comment }}</p>
+                  <p class="meta">
+                    {{ fmtAge(t.source_ts || t.fetched_at) }}
+                    <template v-if="t.city"> · {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</template>
+                    <span v-else-if="t.latitude == null" class="nopin"> · no pin</span>
+                  </p>
+                  <RouterLink v-if="(t.visits_total ?? 0) > 0" class="visit-chip visits" :class="visitAgeClass(t.last_visit_at)"
+                              :to="`/trails/${t.id}/visits`" title="Show the activities linked to this trail">
+                    <Bike :size="16" /> {{ t.visits_total }} ride{{ t.visits_total === 1 ? '' : 's' }}
+                    <template v-if="t.last_visit_at"> · {{ fmtAge(t.last_visit_at) }}</template>
+                    <ChevronRight :size="16" />
+                  </RouterLink>
+                </template>
+                <span v-else class="meta">{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
+              </div>
+              <button v-if="t.latitude != null" class="act" :class="{ on: expandedMaps.has(t.id) }"
+                      :aria-label="expandedMaps.has(t.id) ? 'Hide map' : 'Show map'" @click="toggleMap(t)">
+                <MapIcon :size="18" />
+              </button>
+              <button v-if="!dense" class="act" aria-label="Edit pin location" title="Edit pin location" @click="openEdit(t)">
+                <Pencil :size="16" />
+              </button>
+              <button class="act star" :class="{ on: t.subscribed }"
+                      :aria-label="t.subscribed ? 'Unsubscribe' : 'Subscribe to status flips'"
                       @click="toggleSubscribe(t)">
-                <Star :size="16" />
+                <Star :size="18" />
               </button>
-            </header>
-            <span v-if="dense" class="denseage">
-              {{ fmtAge(t.source_ts || t.fetched_at) }}
-            </span>
-            <p v-if="t.comment && !dense" class="comment">{{ t.comment }}</p>
+            </div>
+            <div v-if="expandedMaps.has(t.id) && t.latitude != null && t.longitude != null" class="inline-map">
+              <TrailMap :trail-id="t.id" :name="t.name" :latitude="t.latitude" :longitude="t.longitude"
+                        @expand="openFullMap(t)" />
+              <div class="inline-actions">
+                <button class="primary" @click="openMaps(t)">Navigate</button>
+                <button class="ghost" @click="openEdit(t)">Edit pin</button>
+              </div>
+            </div>
           </article>
+        </section>
+
+        <div class="tools">
+          <a v-if="dnisUrl" :href="dnisUrl" target="_blank" rel="noreferrer" class="chip">RainoutLine board ↗</a>
+          <button class="chip" :disabled="linking" title="Auto-link activities to trails by GPS proximity" @click="linkActivities">
+            <Bike :size="14" /> {{ linking ? "Linking…" : "Link activities" }}
+          </button>
+          <button class="chip" :disabled="fetchingOsm" title="Pull trail geometry from OpenStreetMap" @click="fetchAllOsm">
+            <Route :size="14" /> {{ fetchingOsm ? "Fetching OSM…" : "OSM routes" }}
+          </button>
         </div>
-      </section>
+        <p v-if="linkResult" class="hint">{{ linkResult }}</p>
+      </template>
     </template>
 
     <!-- Fullscreen map modal -->
@@ -661,388 +631,154 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
       <div class="full-map-wrap">
         <header class="full-map-head">
           <strong>{{ fullMapTrail.name }}</strong>
-          <span v-if="fullMapTrail.city" class="muted-suffix">
-            · {{ fullMapTrail.city }}{{ fullMapTrail.state ? ', ' + fullMapTrail.state : '' }}
-          </span>
-          <button class="close" @click="closeFullMap">✕</button>
+          <span v-if="fullMapTrail.city" class="muted-suffix">· {{ fullMapTrail.city }}{{ fullMapTrail.state ? ', ' + fullMapTrail.state : '' }}</span>
+          <button class="close" aria-label="Close map" @click="closeFullMap">✕</button>
         </header>
-        <TrailMap
-          v-if="fullMapTrail.latitude != null && fullMapTrail.longitude != null"
-          :trail-id="fullMapTrail.id" :name="fullMapTrail.name"
-          :latitude="fullMapTrail.latitude" :longitude="fullMapTrail.longitude"
-          :expandable="false" :fullscreen="true"
-        />
+        <TrailMap v-if="fullMapTrail.latitude != null && fullMapTrail.longitude != null"
+                  :trail-id="fullMapTrail.id" :name="fullMapTrail.name"
+                  :latitude="fullMapTrail.latitude" :longitude="fullMapTrail.longitude"
+                  :expandable="false" :fullscreen="true" />
       </div>
     </div>
 
-    <!-- Edit location modal -->
+    <!-- Edit location drawer -->
     <div v-if="editTrail" class="overlay" @click.self="closeEdit">
-      <div class="edit-drawer">
+      <div class="edit-drawer" role="dialog" aria-modal="true">
         <header>
           <h2>Edit location · {{ editTrail.name }}</h2>
-          <button class="close" @click="closeEdit">✕</button>
+          <button class="close" aria-label="Close" @click="closeEdit">✕</button>
         </header>
         <p class="hint">Search a place name, click the map, or use your GPS. Drag the pin to fine-tune.</p>
         <div class="search-row">
-          <input
-            v-model="placeQuery"
-            type="text"
-            placeholder='Place name, "lat, lon", or paste any Google Maps URL'
-            @keydown.enter="searchPlace"
-          />
-          <button class="ghost" :disabled="searching || !placeQuery.trim()"
-                  @click="searchPlace">
-            {{ searching ? "Searching…" : "Find" }}
-          </button>
+          <input v-model="placeQuery" class="field-in" type="text"
+                 placeholder='Place name, "lat, lon", or paste any Google Maps URL' @keydown.enter="searchPlace" />
+          <button class="ghost" :disabled="searching || !placeQuery.trim()" @click="searchPlace">{{ searching ? "Searching…" : "Find" }}</button>
         </div>
-        <p class="hint" style="font-size: 0.7rem; color: var(--muted-2); margin-top: 0">
-          Accepts place names, "38.92, -94.57", Maps share links, embed URLs,
-          and maps.app.goo.gl short links.
-        </p>
+        <p class="hint small">Accepts place names, "38.92, -94.57", Maps share links, embed URLs, and maps.app.goo.gl short links.</p>
         <div ref="editMapEl" class="edit-map" />
         <div class="quick-actions">
           <button class="ghost" @click="useMyLocation"><MapPin :size="13" /> Use my location</button>
           <button class="ghost" @click="openInMaps"><MapIcon :size="13" /> Open in Google Maps</button>
         </div>
         <div class="form-grid">
-          <label>Latitude<input type="number" step="0.0001" v-model="editLat" placeholder="e.g. 38.9881" /></label>
-          <label>Longitude<input type="number" step="0.0001" v-model="editLon" placeholder="e.g. -94.7625" /></label>
-          <label>City<input v-model="editCity" placeholder="optional" /></label>
-          <label>State<input v-model="editState" placeholder="KS / MO / …" maxlength="8" /></label>
+          <label>Latitude<input v-model="editLat" class="field-in" type="number" step="0.0001" placeholder="e.g. 38.9881" /></label>
+          <label>Longitude<input v-model="editLon" class="field-in" type="number" step="0.0001" placeholder="e.g. -94.7625" /></label>
+          <label>City<input v-model="editCity" class="field-in" placeholder="optional" /></label>
+          <label>State<input v-model="editState" class="field-in" placeholder="KS / MO / …" maxlength="8" /></label>
         </div>
-        <p v-if="editError" class="err">{{ editError }}</p>
+        <p v-if="editError" class="warn">{{ editError }}</p>
         <div class="actions">
-          <button class="primary" :disabled="editSaving" @click="saveEdit">
-            {{ editSaving ? "Saving…" : "Save" }}
-          </button>
+          <button class="primary" :disabled="editSaving" @click="saveEdit">{{ editSaving ? "Saving…" : "Save" }}</button>
           <button class="ghost" @click="closeEdit">Cancel</button>
         </div>
       </div>
     </div>
-  </main>
+  </NeonPage>
 </template>
 
 <style scoped>
-/* Condensed rows: the name and its age on one line. Everything the
-   expanded row adds — condition note, location, ride counts — is detail
-   you open a trail to read. */
-.dense .card { padding: 5px 12px; }
-.dense .card header { margin: 0; gap: 8px; }
-.dense .card strong { font-size: .92rem; }
-/* The map and edit-pin actions are detail affordances; in a scanning list
-   they set a height floor that defeats the point. The subscribe star stays
-   — it is the one action you use FROM the list. */
-.dense .card .map-toggle,
-.dense .card .edit-pin { display: none; }
-.dense .card .star { padding: 2px 4px; }
-.denseage { margin-left: auto; font-size: .74rem; color: var(--muted); }
-
-.trails { max-width: 880px; }
-header { display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 1rem; }
-header h1 { margin: 0; }
-.refresh {
-  display: inline-flex; align-items: center; gap: 0.4rem;
-  padding: 0.45rem 0.9rem; background: var(--bg-2);
-  border: 1px solid var(--line); border-radius: 6px;
-  color: var(--text-soft); cursor: pointer;
-}
-.refresh:hover { color: var(--text); border-color: var(--accent, #ef4444); }
-.refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+.hdr-actions { display: flex; gap: 8px; }
+.icon-btn { width: 42px; height: 42px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(40, 230, 255, .14); border: 1px solid rgba(40, 230, 255, .45); color: var(--rn-cyan); cursor: pointer; }
+.icon-btn:disabled { opacity: .5; cursor: default; }
 .spinning { animation: spin 1s linear infinite; }
 @keyframes spin { 100% { transform: rotate(360deg); } }
+.hint { color: var(--rn-mut); font-size: 13px; margin: 6px 0; }
+.hint.small { font-size: 11px; margin-top: 0; }
+.warn { color: var(--rn-amber); font-size: 12px; }
+.stale { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin-bottom: 12px; border-radius: 14px;
+  background: rgba(255, 181, 46, .10); border: 1px solid rgba(255, 181, 46, .32); cursor: pointer; }
+.stale strong { color: var(--rn-amber); font-size: 13px; }
+.stale span { color: var(--rn-mut); font-size: 12px; }
+.stale em { color: var(--rn-cyan); font-size: 12px; font-style: normal; font-weight: 600; }
+.skeleton-trails { display: flex; flex-direction: column; gap: 8px; }
+.card { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px; padding: 14px; }
 
-.hint { color: var(--muted); margin: 0.5rem 0; }
-.err { color: #f87171; }
+.hero-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.pill { font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 12px; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid; display: inline-flex; align-items: center; gap: 4px; }
+.pill.peri { color: var(--rn-peri); background: rgba(111, 123, 255, .12); border-color: rgba(111, 123, 255, .4); }
+.pill.cyan { color: var(--rn-cyan); background: rgba(15, 17, 24, .75); border-color: rgba(40, 230, 255, .45); }
+.count-row { display: flex; align-items: baseline; gap: 10px; }
+.count { font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 56px; line-height: 1; color: var(--rn-lime);
+  letter-spacing: -1px; text-shadow: 0 0 18px rgba(93, 255, 59, .35); }
+.of { font-size: 18px; font-weight: 600; }
+.seg { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 12px 0 8px; }
+.seg-legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--rn-mut); font-size: 12px; font-family: 'Space Grotesk', monospace; }
+.seg-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.mini { position: relative; display: block; width: 100%; height: 160px; margin-top: 12px; padding: 0; border: 1px solid var(--rn-line);
+  border-radius: 16px; overflow: hidden; background: var(--rn-bg); cursor: pointer; }
+.mini:focus-visible { outline: 2px solid var(--rn-cyan); outline-offset: 2px; }
+.mini-map { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+.open-map { position: absolute; right: 8px; bottom: 8px; z-index: 500; }
 
-.group { margin-bottom: 1.4rem; }
-.group h2 {
-  font-size: 0.78rem; color: var(--muted); letter-spacing: 0.08em;
-  text-transform: uppercase; margin: 0 0 0.6rem; font-weight: 600;
-}
-.grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 0.6rem;
-}
-.card {
-  background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 10px; padding: 0.7rem 0.9rem;
-  display: flex; flex-direction: column; gap: 0.3rem;
-}
-.card.status-open { border-left: 3px solid #22c55e; }
-.card.status-closed { border-left: 3px solid #ef4444; opacity: 0.85; }
-.card.status-delayed { border-left: 3px solid #eab308; }
-/* Status-flip animation — 2.5s flash in the new status color when a
-   trail's status changes between two refreshes. */
-@keyframes status-flip-open {
-  0% { background: rgba(34, 197, 94, 0.0); }
-  20% { background: rgba(34, 197, 94, 0.28); }
-  100% { background: rgba(34, 197, 94, 0.0); }
-}
-@keyframes status-flip-closed {
-  0% { background: rgba(239, 68, 68, 0.0); }
-  20% { background: rgba(239, 68, 68, 0.28); }
-  100% { background: rgba(239, 68, 68, 0.0); }
-}
-@keyframes status-flip-delayed {
-  0% { background: rgba(234, 179, 8, 0.0); }
-  20% { background: rgba(234, 179, 8, 0.28); }
-  100% { background: rgba(234, 179, 8, 0.0); }
-}
-.card.status-open.flip { animation: status-flip-open 2.5s ease-out; }
-.card.status-closed.flip { animation: status-flip-closed 2.5s ease-out; }
-.card.status-delayed.flip { animation: status-flip-delayed 2.5s ease-out; }
-.card.has_loc { cursor: pointer; transition: border-color 0.12s; }
-.card.has_loc:hover { border-color: var(--accent, #ef4444); }
-.nav-ic { color: var(--muted-2); margin-left: 0.4rem; vertical-align: middle; }
-.rainout-link { color: var(--muted); text-decoration: none; margin-left: 0.3rem; }
-.rainout-link:hover { color: var(--accent); }
-.skeleton-trails { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 1rem; }
-.loc { color: var(--muted); }
-.loc.nopin { color: #f59e0b; }
-.visits { font-weight: 500; }
-.visits-link { text-decoration: none; cursor: pointer; }
-.visits-link:hover { text-decoration: underline; }
-.visits.age-fresh   { color: #22c55e; }   /* < 7 days */
-.visits.age-recent  { color: #84cc16; }   /* 7-30 days */
-.visits.age-medium  { color: #f59e0b; }   /* 30-90 days */
-.visits.age-old     { color: #fb923c; }   /* 90-180 days */
-.visits.age-stale   { color: #94a3b8; }   /* > 180 days */
-.last-visit { color: var(--muted-2); font-weight: 400; font-size: 0.7rem; }
-.header-actions { display: flex; gap: 0.5rem; }
-.edit-pin { color: var(--muted-2); }
-.edit-pin:hover { color: var(--accent, #ef4444); }
-.map-toggle { color: var(--muted-2); }
-.map-toggle:hover { color: var(--accent, #ef4444); }
-.map-toggle.on { color: var(--accent, #ef4444); }
+.carousel { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.tile { flex: 0 0 150px; display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 18px; background: var(--rn-card);
+  border: 1px solid; color: inherit; text-decoration: none; }
+.tile strong { font-size: 14px; min-height: 2.5em; }
+.tile-st { font-family: 'Space Grotesk', monospace; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: 6px; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.dot.glow { width: 12px; height: 12px; box-shadow: 0 0 9px currentColor; margin-top: 5px; }
+.visits { font-size: 12px; font-weight: 600; }
+.visits.age-fresh, .visits.age-recent { color: var(--rn-lime); }
+.visits.age-medium, .visits.age-old { color: var(--rn-amber); }
+.visits.age-stale { color: var(--rn-mut); }
 
-.full-map-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 110;
-  display: flex; align-items: stretch; justify-content: center;
-  padding: 2vh 2vw;
-}
-.full-map-wrap {
-  flex: 1; max-width: 1400px; max-height: 96vh;
-  background: var(--bg-1); border: 1px solid var(--line);
-  border-radius: 12px; overflow: hidden;
-  display: flex; flex-direction: column;
-}
-.full-map-head {
-  display: flex; align-items: center; gap: 0.5rem;
-  padding: 0.7rem 1rem; border-bottom: 1px solid var(--line);
-  background: var(--bg-2);
-}
-.full-map-head strong { color: var(--text); font-size: 1rem; }
-.full-map-head .muted-suffix { color: var(--muted); font-size: 0.85rem; flex: 1; }
-.full-map-head .close {
-  background: none; border: none; color: var(--muted); cursor: pointer;
-  font-size: 1.2rem; padding: 0.2rem 0.5rem;
-}
-.full-map-head .close:hover { color: var(--text); }
+.trail { background: var(--rn-card); border: 1px solid; border-radius: 18px; margin-bottom: 8px; overflow: hidden; }
+.trail.st-closed { opacity: .9; }
+.trail-main { display: flex; align-items: flex-start; gap: 10px; padding: 10px 6px 10px 14px; }
+.dense .trail-main { padding-top: 4px; padding-bottom: 4px; align-items: center; }
+.dense .dot.glow { margin-top: 0; }
+.trail-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
+.trail-body strong { font-size: 15px; }
+.comment { color: #c4c4d4; font-size: 13px; margin: 0; }
+.meta { color: var(--rn-mut); font-size: 12px; margin: 0; font-family: 'Space Grotesk', monospace; }
+.nopin { color: var(--rn-amber); }
+.visit-chip { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; margin-top: 6px;
+  border-radius: 16px; border: 1px solid currentColor; background: color-mix(in srgb, currentColor 10%, transparent); text-decoration: none; }
+.act { width: 44px; height: 44px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%;
+  background: none; border: 0; color: var(--rn-mut); cursor: pointer; }
+.act:hover, .act.on { color: var(--rn-cyan); background: #ffffff10; }
+.act.star.on { color: var(--rn-amber); filter: drop-shadow(0 0 4px rgba(255, 181, 46, .55)); }
+.act:focus-visible { outline: 2px solid var(--rn-cyan); }
+.inline-map { border-top: 1px solid var(--rn-line); }
+.inline-actions { display: flex; gap: 8px; padding: 10px 12px; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--rn-line);
+  background: var(--rn-card); color: var(--rn-mut); font: inherit; font-size: 12px; cursor: pointer; text-decoration: none; }
+.chip:disabled { opacity: .5; }
 
-.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100;
-  display: flex; justify-content: flex-end; }
-.edit-drawer {
-  width: min(420px, 100%); height: 100%; overflow-y: auto;
-  background: var(--bg-1); border-left: 1px solid var(--line);
-  padding: 1rem 1.2rem;
-}
+@keyframes flip-open { 20% { box-shadow: 0 0 22px rgba(93, 255, 59, .45); background: rgba(93, 255, 59, .18); } }
+@keyframes flip-closed { 20% { box-shadow: 0 0 22px rgba(255, 93, 122, .45); background: rgba(255, 93, 122, .18); } }
+@keyframes flip-delayed { 20% { box-shadow: 0 0 22px rgba(255, 181, 46, .45); background: rgba(255, 181, 46, .18); } }
+.trail.st-open.flip { animation: flip-open 2.5s ease-out; }
+.trail.st-closed.flip { animation: flip-closed 2.5s ease-out; }
+.trail.st-delayed.flip { animation: flip-delayed 2.5s ease-out; }
+
+.primary { background: var(--rn-cyan); color: var(--rn-onacc); border: 0; border-radius: 10px; padding: 8px 16px; font: inherit; font-weight: 700; cursor: pointer; }
+.primary:disabled { opacity: .6; }
+.ghost { background: transparent; color: var(--rn-ink); border: 1px solid var(--rn-line); border-radius: 10px; padding: 8px 14px; font: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px; }
+.field-in { background: var(--rn-bg); border: 1px solid var(--rn-line); color: var(--rn-ink); border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 14px; }
+
+.full-map-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .7); z-index: 1100; display: flex; align-items: stretch;
+  justify-content: center; padding: 2vh 2vw; }
+.full-map-wrap { flex: 1; max-width: 1400px; max-height: 96vh; background: var(--rn-bg); border: 1px solid var(--rn-track);
+  border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; }
+.full-map-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--rn-card); }
+.full-map-head .muted-suffix { color: var(--rn-mut); font-size: 13px; flex: 1; }
+.close { background: none; border: 0; color: var(--rn-mut); cursor: pointer; font-size: 18px; min-width: 40px; min-height: 40px; }
+.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); z-index: 1100; display: flex; justify-content: flex-end; }
+.edit-drawer { width: min(420px, 100%); height: 100%; overflow-y: auto; background: var(--rn-bg); border-left: 1px solid var(--rn-track);
+  padding: 16px 18px; box-sizing: border-box; }
 .edit-drawer header { display: flex; justify-content: space-between; align-items: center; }
-.edit-drawer header h2 { margin: 0; font-size: 1rem; color: var(--text); }
-.edit-drawer .close { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; }
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-top: 1rem; }
-.form-grid label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.78rem; color: var(--muted); }
-.form-grid input {
-  background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 6px; padding: 0.4rem 0.55rem; color: var(--text);
-  font-family: inherit;
-}
-.edit-map {
-  height: 280px; border-radius: 8px; overflow: hidden;
-  border: 1px solid var(--line); margin: 0.5rem 0;
-}
-.search-row { display: flex; gap: 0.4rem; margin: 0.4rem 0; }
-.search-row input {
-  flex: 1; padding: 0.45rem 0.6rem; font-size: 0.85rem;
-  background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 6px; color: var(--text); font-family: inherit;
-}
-.search-row .ghost { white-space: nowrap; padding: 0.45rem 0.85rem;
-  font-size: 0.85rem; }
-.quick-actions { display: flex; gap: 0.4rem; margin: 0.5rem 0 0.6rem; flex-wrap: wrap; }
-.quick-actions .ghost { padding: 0.4rem 0.7rem; font-size: 0.78rem; }
-
-.actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
-.actions .primary {
-  background: var(--accent, #ef4444); color: #fff; border: none;
-  padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; cursor: pointer;
-}
-.actions .primary:disabled { opacity: 0.6; cursor: not-allowed; }
-.actions .ghost {
-  background: transparent; color: var(--muted); border: 1px solid var(--line);
-  padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;
-}
-
-.card header {
-  display: flex; align-items: center; gap: 0.5rem;
-  margin-bottom: 0.2rem;
-}
-.card header strong { flex: 1; font-size: 0.95rem; color: var(--text); }
-.card .dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  flex-shrink: 0;
-}
-.card.status-open .dot { background: #22c55e; }
-.card.status-closed .dot { background: #ef4444; }
-.card.status-delayed .dot { background: #eab308; }
-
-.star {
-  background: none; border: none; cursor: pointer; padding: 4px;
-  color: var(--muted); border-radius: 4px;
-}
-.star:hover { color: var(--accent, #ef4444); background: var(--bg-1); }
-.star.on { color: #f59e0b; }
-
-.status-tag { color: var(--muted); font-size: 0.75rem;
-  text-transform: uppercase; letter-spacing: 0.06em; }
-.comment { color: var(--text-soft); font-size: 0.82rem; margin: 0; }
-.meta { color: var(--muted-2); font-size: 0.74rem; margin: 0;
-  font-family: 'Geist Mono', ui-monospace, monospace; }
-
-/* ============================================================
-   Vitality Neon skin — scoped to html[data-theme="neon"] only.
-   Classic / dark / light themes are untouched. Matches the
-   TrailsHub.vue board: obsidian radial bg, glowing status dots,
-   18px cards, Space Grotesk numerics, brighter status-flip flash.
-   ============================================================ */
-html[data-theme="neon"] .trails {
-  --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
-  --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-cyan: #28e6ff; --rn-amber: #ffb52e;
-  --rn-bad: #ff5d7a; --rn-track: #272a3b;
-  min-height: 100vh; margin: calc(-1 * var(--main-pt, 1.25rem)) calc(-1 * var(--main-px, 1.5rem)) 0; padding: 54px 22px 12px;  /* OG3-M1: bar height reserved at the shell */
-  max-width: none;
-  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
-  color: var(--rn-ink); font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
-}
-html[data-theme="neon"] .trails > header { max-width: 880px; margin: 0 auto 1rem; }
-html[data-theme="neon"] .trails > header h1 {
-  font-size: 32px; font-weight: 800; letter-spacing: -0.5px; color: var(--rn-ink);
-}
-html[data-theme="neon"] .trails > .hint,
-html[data-theme="neon"] .trails > .err,
-html[data-theme="neon"] .trails > .skeleton-trails,
-html[data-theme="neon"] .trails > .group {
-  max-width: 880px; margin-left: auto; margin-right: auto;
-}
-
-html[data-theme="neon"] .trails .refresh {
-  background: rgba(40, 230, 255, 0.10);
-  border: 1px solid rgba(40, 230, 255, 0.32);
-  border-radius: 999px; color: var(--rn-cyan);
-  font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700;
-  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
-}
-html[data-theme="neon"] .trails .refresh:hover {
-  color: var(--rn-ink); border-color: var(--rn-cyan);
-  box-shadow: 0 0 10px rgba(40, 230, 255, 0.35);
-}
-html[data-theme="neon"] .trails .refresh:active { transform: scale(0.96); }
-html[data-theme="neon"] .trails .dnis-link { color: var(--rn-cyan); }
-
-html[data-theme="neon"] .trails .hint { color: var(--rn-mut); }
-html[data-theme="neon"] .trails .err { color: var(--rn-bad); }
-
-html[data-theme="neon"] .trails .group h2 {
-  color: var(--rn-mut);
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  font-weight: 700; letter-spacing: 0.10em;
-}
-
-html[data-theme="neon"] .trails .card {
-  background: var(--rn-card); border: 1px solid #21243450;
-  border-radius: 18px;
-  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
-}
-html[data-theme="neon"] .trails .card:active { transform: scale(0.985); }
-html[data-theme="neon"] .trails .card.status-open    { border-left: 3px solid var(--rn-lime); }
-html[data-theme="neon"] .trails .card.status-closed  { border-left: 3px solid var(--rn-bad); opacity: 0.82; }
-html[data-theme="neon"] .trails .card.status-delayed { border-left: 3px solid var(--rn-amber); }
-html[data-theme="neon"] .trails .card.has_loc:hover {
-  border-color: var(--rn-cyan);
-  box-shadow: 0 0 14px rgba(40, 230, 255, 0.18);
-}
-html[data-theme="neon"] .trails .card header strong { color: var(--rn-ink); }
-
-/* Glowing status dots — the primary accent element, à la TrailsHub. */
-html[data-theme="neon"] .trails .card .dot { box-shadow: 0 0 8px currentColor; }
-html[data-theme="neon"] .trails .card.status-open .dot {
-  background: var(--rn-lime); box-shadow: 0 0 9px var(--rn-lime);
-}
-html[data-theme="neon"] .trails .card.status-closed .dot {
-  background: var(--rn-bad); box-shadow: 0 0 9px var(--rn-bad);
-}
-html[data-theme="neon"] .trails .card.status-delayed .dot {
-  background: var(--rn-amber); box-shadow: 0 0 9px var(--rn-amber);
-}
-
-html[data-theme="neon"] .trails .star { color: var(--rn-mut); }
-html[data-theme="neon"] .trails .star:hover {
-  color: var(--rn-cyan); background: #ffffff10;
-}
-html[data-theme="neon"] .trails .star.on {
-  color: var(--rn-amber); filter: drop-shadow(0 0 4px rgba(255, 181, 46, 0.55));
-}
-html[data-theme="neon"] .trails .edit-pin:hover,
-html[data-theme="neon"] .trails .map-toggle:hover,
-html[data-theme="neon"] .trails .map-toggle.on { color: var(--rn-cyan); }
-
-html[data-theme="neon"] .trails .comment { color: #c4c4d4; }
-html[data-theme="neon"] .trails .meta {
-  color: var(--rn-mut); font-family: 'Space Grotesk', 'Geist Mono', monospace;
-}
-html[data-theme="neon"] .trails .loc { color: var(--rn-mut); }
-html[data-theme="neon"] .trails .loc.nopin { color: var(--rn-amber); }
-html[data-theme="neon"] .trails .last-visit { color: var(--rn-mut); }
-html[data-theme="neon"] .trails .nav-ic { color: var(--rn-cyan); }
-html[data-theme="neon"] .trails .status-tag { color: var(--rn-mut); }
-
-/* Visit-age heat scale, neon-mapped (fresh→lime … stale→muted). */
-html[data-theme="neon"] .trails .visits.age-fresh  { color: var(--rn-lime); }
-html[data-theme="neon"] .trails .visits.age-recent { color: var(--rn-lime); }
-html[data-theme="neon"] .trails .visits.age-medium { color: var(--rn-amber); }
-html[data-theme="neon"] .trails .visits.age-old    { color: var(--rn-amber); }
-html[data-theme="neon"] .trails .visits.age-stale  { color: var(--rn-mut); }
-
-/* Brighter status-flip flash under neon — punchier neon glow pulse. */
-@keyframes status-flip-open-neon {
-  0%   { background: rgba(93, 255, 59, 0.0);  box-shadow: none; }
-  18%  { background: rgba(93, 255, 59, 0.32); box-shadow: 0 0 22px rgba(93, 255, 59, 0.45); }
-  100% { background: rgba(93, 255, 59, 0.0);  box-shadow: none; }
-}
-@keyframes status-flip-closed-neon {
-  0%   { background: rgba(255, 93, 122, 0.0);  box-shadow: none; }
-  18%  { background: rgba(255, 93, 122, 0.32); box-shadow: 0 0 22px rgba(255, 93, 122, 0.45); }
-  100% { background: rgba(255, 93, 122, 0.0);  box-shadow: none; }
-}
-@keyframes status-flip-delayed-neon {
-  0%   { background: rgba(255, 181, 46, 0.0);  box-shadow: none; }
-  18%  { background: rgba(255, 181, 46, 0.32); box-shadow: 0 0 22px rgba(255, 181, 46, 0.45); }
-  100% { background: rgba(255, 181, 46, 0.0);  box-shadow: none; }
-}
-html[data-theme="neon"] .trails .card.status-open.flip    { animation: status-flip-open-neon 2.5s ease-out; }
-html[data-theme="neon"] .trails .card.status-closed.flip  { animation: status-flip-closed-neon 2.5s ease-out; }
-html[data-theme="neon"] .trails .card.status-delayed.flip { animation: status-flip-delayed-neon 2.5s ease-out; }
-
-/* Modals / drawers pick up the neon surface tokens. */
-html[data-theme="neon"] .trails .full-map-wrap,
-html[data-theme="neon"] .trails .edit-drawer {
-  background: var(--rn-bg); border-color: var(--rn-track);
-}
-html[data-theme="neon"] .trails .full-map-head { background: var(--rn-card); border-color: var(--rn-track); }
-html[data-theme="neon"] .trails .full-map-head strong,
-html[data-theme="neon"] .trails .edit-drawer header h2 { color: var(--rn-ink); }
-html[data-theme="neon"] .trails .actions .primary {
-  background: var(--rn-cyan); color: #0f1118;
-  box-shadow: 0 0 14px rgba(40, 230, 255, 0.35);
-}
+.edit-drawer h2 { margin: 0; font-size: 16px; }
+.search-row { display: flex; gap: 6px; margin: 6px 0; }
+.search-row .field-in { flex: 1; }
+.edit-map { height: 280px; border-radius: 12px; overflow: hidden; border: 1px solid var(--rn-line); margin: 8px 0; }
+.quick-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.form-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--rn-mut); }
+.actions { display: flex; gap: 8px; margin-top: 16px; }
 </style>

@@ -259,6 +259,7 @@ fun NeonAppShell(
                         onOpenActivity = { source, sourceId -> nav.navigate("activity/$source/$sourceId") },
                         onOpenStrengthDay = { date -> nav.navigate("workout/day/$date") },
                         onOpenMap = { nav.navigate("activities/map") },
+                        onBack = { nav.popBackStack() },
                     )
                 }
                 composable("activities/map") {

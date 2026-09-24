@@ -187,13 +187,13 @@ fun StepsDetailContent(
         Spacer(Modifier.height(6.dp))
         val hasContent = rows.isNotEmpty() || stats != null
         if (!hasContent) {
-            if (error != null && !loading) NeonErrorBanner(error) { onRefresh() }
+            if (error != null && !loading) NeonErrorBanner(error, title = "Couldn't load steps") { onRefresh() }
             else DetailSkeleton(accent)
             Spacer(Modifier.height(24.dp))
             return@NeonScreen
         }
         if (error != null) {
-            NeonErrorBanner("Showing your last saved copy. $error") { onRefresh() }
+            NeonErrorBanner("Showing your last saved copy. $error", title = "Couldn't refresh") { onRefresh() }
         }
 
         // No fallback to the most recent row: a day with no summary is shown

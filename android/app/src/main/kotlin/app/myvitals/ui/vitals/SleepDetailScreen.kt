@@ -230,13 +230,13 @@ fun SleepDetailContent(
         dayNav()
         Spacer(Modifier.height(6.dp))
         if (nights.isEmpty() && stats == null) {
-            if (error != null && !loading) NeonErrorBanner(error) { onRefresh() }
+            if (error != null && !loading) NeonErrorBanner(error, title = "Couldn't load sleep") { onRefresh() }
             else if (loading) DetailSkeleton(accent)
             else DetailNote("No sleep sessions in the last two weeks.")
             Spacer(Modifier.height(24.dp))
             return@NeonScreen
         }
-        if (error != null) NeonErrorBanner("Showing your last saved copy. $error") { onRefresh() }
+        if (error != null) NeonErrorBanner("Showing your last saved copy. $error", title = "Couldn't refresh") { onRefresh() }
 
         val isToday = selectedDay == today
         val night = nightEndingOn(nights, selectedDay)

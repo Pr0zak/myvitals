@@ -156,13 +156,13 @@ fun WeightDetailContent(
         ) { onRange(it) }
 
         if (data == null) {
-            if (error != null && !loading) NeonErrorBanner(error) { onRefresh() }
+            if (error != null && !loading) NeonErrorBanner(error, title = "Couldn't load weight") { onRefresh() }
             else DetailSkeleton(accent)
             Spacer(Modifier.height(24.dp))
             return@NeonScreen
         }
         // Above the cached chart, never replacing it.
-        if (error != null) NeonErrorBanner("Showing your last saved copy. $error") { onRefresh() }
+        if (error != null) NeonErrorBanner("Showing your last saved copy. $error", title = "Couldn't refresh") { onRefresh() }
 
         val s = data.stats
         NeonHeroCard(accent) {

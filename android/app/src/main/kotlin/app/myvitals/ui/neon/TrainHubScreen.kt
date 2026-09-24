@@ -291,7 +291,7 @@ fun TrainHubContent(
         onRefresh = onRefresh,
     ) {
         if (error != null) {
-            NeonErrorBanner(error, onRetry = onRefresh)
+            NeonErrorBanner(error, title = "Couldn't load training", onRetry = onRefresh)
         }
 
         // ── 1. Session hero ────────────────────────────────────────────

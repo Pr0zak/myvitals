@@ -24,7 +24,14 @@ import androidx.compose.ui.unit.sp
  * was no way to tell a broken connection from a quiet day. Tapping retries.
  */
 @Composable
-fun NeonErrorBanner(message: String, onRetry: () -> Unit) {
+fun NeonErrorBanner(
+    message: String,
+    /** What failed, in the user's words. It was hard-coded "Couldn't load
+     *  today", which read wrongly on the Sleep, Weight and Train screens
+     *  that now share this banner. */
+    title: String = "Couldn't load",
+    onRetry: () -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -35,7 +42,7 @@ fun NeonErrorBanner(message: String, onRetry: () -> Unit) {
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Text(
-            "Couldn't load today",
+            title,
             color = NeonMV.Bad, fontSize = 13.sp, fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(2.dp))

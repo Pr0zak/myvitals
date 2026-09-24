@@ -174,7 +174,7 @@ fun BodyContent(
     ) {
         if (tiles == null) {
             if (error != null && !loading) {
-                NeonErrorBanner(error) { onRefresh() }
+                NeonErrorBanner(error, title = "Couldn't load your metrics") { onRefresh() }
             } else {
                 BodySkeleton()
             }
@@ -183,7 +183,7 @@ fun BodyContent(
         }
         // A cached render whose refresh failed: keep the numbers, say so.
         if (error != null) {
-            NeonErrorBanner("Showing your last saved copy. $error") { onRefresh() }
+            NeonErrorBanner("Showing your last saved copy. $error", title = "Couldn't refresh") { onRefresh() }
         }
         if (tiles.tiles.isEmpty()) {
             NothingYetCard()

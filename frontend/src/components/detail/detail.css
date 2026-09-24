@@ -1,0 +1,22 @@
+/* UI-4 — shared layout for the four metric detail views (Steps, HeartRate,
+   Sleep, Weight). Imported unscoped by each; every class is d-prefixed. */
+.dhero-top { display: flex; align-items: center; gap: 16px; }
+.dhero-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.deb { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 11px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: #9b9bb0; }
+.dbig { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 52px; line-height: 1.02;
+  letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+.dbig small { font-size: 14px; font-weight: 500; color: #9b9bb0; margin-left: 6px; letter-spacing: 0; }
+.dsubline { font-size: 12.5px; color: #9b9bb0; }
+.dchart { width: 100%; height: 170px; margin-top: 12px; }
+.dchart.tall { height: 210px; }
+.dchart > * { width: 100%; height: 100%; }
+.dstats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 4px; }
+.dstats + .dstats { margin-top: 8px; }
+.dlegend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 11px; color: #9b9bb0; }
+.dlegend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.dnote { color: #9b9bb0; font-size: 12px; margin: 6px 0 0; }
+.dtabs { margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dicon { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 18px;
+  background: color-mix(in srgb, var(--a) 14%, transparent); border: 1px solid color-mix(in srgb, var(--a) 35%, transparent);
+  color: var(--a); }

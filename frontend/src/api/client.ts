@@ -150,6 +150,8 @@ export const api = {
   async weight(p: RangeParams = {}): Promise<{
     points: { time: string; weight_kg: number | null; body_fat_pct: number | null; bmi: number | null; lean_mass_kg: number | null; source: string }[];
     latest_kg: number | null; min_kg: number | null; max_kg: number | null; avg_kg: number | null;
+    /** UI-4 — window stats, trend and server-decided tone (kilograms). */
+    stats?: import("./types").WeightStats;
   }> {
     const { data } = await http.get("/query/weight", { params: rangeToQuery(p) });
     return data;
@@ -2787,4 +2789,17 @@ export interface FastingStageOut {
   key: string;
   label: string;
   at_h: number;
+}
+
+// ── UI-4: metric detail screens ──
+/** Steps / resting-HR / sleep stats over a window of LOCAL days. */
+export async function summaryRangeStats(
+  since: Date | string, until?: Date | string,
+): Promise<import("./types").RangeStats> {
+  const params: Record<string, string> = {
+    since: since instanceof Date ? toLocalISO(since) : since,
+  };
+  if (until) params.until = until instanceof Date ? toLocalISO(until) : until;
+  const { data } = await http.get("/summary/range/stats", { params });
+  return data;
 }

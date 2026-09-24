@@ -98,7 +98,11 @@ class TestNeitherSurfaceAssumesADirection:
         assert not re.search(r"function deltaCls\([^)]*lowerIsBetter", src), (
             "the down-is-good default is back in Weight.vue"
         )
-        assert "weightDeltaTone" in src
+        # UI-4: the tone is no longer derived in the view at all — it is the
+        # server's `stats.tone` / `delta_7d.tone` (analytics/detail_stats.py,
+        # same GOAL-STATE noise band), rendered through a fixed colour map.
+        assert "TONE_COLOR[" in src and ".tone" in src
+        assert "weightDeltaTone(" not in src, "Weight.vue is deriving tone again"
 
     def test_the_today_card_no_longer_hard_codes_invert(self):
         src = BODY_CARD.read_text()
@@ -115,8 +119,10 @@ class TestNeitherSurfaceAssumesADirection:
         distance does not improve or worsen, so it takes no tone.
         """
         src = WEIGHT_VIEW.read_text()
-        assert "to go" in src
         assert "deltaCls(stats.latest - goalKg" not in src
+        # UI-4: the goal distance is a status chip with no `status`, which
+        # renders muted — a distance takes no tone.
+        assert '<StatusChip :text="goalText" />' in src
 
 
 class TestTheGenericDeltaKeepsItsHonestUses:
@@ -153,15 +159,16 @@ class TestToneVocabulary:
     def test_away_from_goal_is_amber_not_rose(self):
         """GOAL-STATE: amber, never rose — rose is for the crisis surfaces.
 
-        Being two pounds off a target is worth noticing and is not a crisis,
-        and the previous class was #ef4444.
+        Being two pounds off a target is worth noticing and is not a crisis.
+        UI-4 moved the judgement to the server; the view only maps the
+        server's tone to a colour, and caution maps to amber.
         """
         src = WEIGHT_VIEW.read_text()
-        assert ".delta-bad" not in src
-        assert ".delta-warn" in src
-        # Scoped to the delta rule. #ef4444 also appears in the multi-year
-        # line palette and in `.recomp.bad`, neither of which is this.
-        assert ".delta-warn { color: #ef4444" not in src
+        m = re.search(r"TONE_COLOR[^=]*=\s*\{([^}]*)\}", src)
+        assert m, "Weight.vue no longer maps the server tone through TONE_COLOR"
+        body = m.group(1)
+        assert "caution: AMBER" in body
+        assert "#ff5d7a" not in body and "#ef4444" not in body
 
     def test_neutral_styles_nothing(self):
         """An unjudgeable figure must not borrow the reassurance of green.
@@ -175,65 +182,53 @@ class TestToneVocabulary:
 
 
 class TestThePhoneAgrees:
-    """OG2-D4, pulled forward because A5 left the two surfaces disagreeing.
+    """OG2-D4, then UI-4.
 
-    The phone painted a gain amber and a loss blue. Softer than the web's
-    red, but amber is this app's caution colour, so it was still a verdict —
-    and one reached without knowing which way the user was trying to move,
-    because the screen had no goal at all. It is also the device you stand
-    next to the scale with, which is the one place the target should be
-    visible.
+    OG2-D4 gave the phone a goal and a private copy of the three-way rule
+    (`weightDeltaTone`, with the band converted to pounds). UI-4 deleted that
+    copy: the tone is computed once on the server
+    (`analytics/detail_stats.weight_tone`, GOAL-STATE's noise band) and both
+    clients render it. These pin that the copy stays gone and the parts of
+    OG2-D4 that were about DRAWING survive.
     """
 
-    def test_the_phone_fetches_the_goal(self):
-        assert "weightGoalKg" in PHONE_WEIGHT.read_text()
-
-    def test_the_goal_fetch_fails_soft(self):
-        """A profile that will not load should cost the goal line, not the
-        chart. Separate requests, separate failures."""
-        assert "runCatching { goalKg" in PHONE_WEIGHT.read_text()
-
-    def test_the_phone_uses_the_same_three_way_rule(self):
+    def test_the_phone_no_longer_derives_the_tone(self):
         src = PHONE_WEIGHT.read_text()
-        assert "weightDeltaTone" in src
-        assert "WeightTone.NEUTRAL" in src
+        assert "fun weightDeltaTone" not in src
+        assert "WEIGHT_NOISE_BAND_LB" not in src
+        assert "s.tone" in src or "it.tone" in src
 
-    def test_the_phone_band_is_in_pounds(self):
-        """Everything on that screen is in pounds, so the band is too.
-
-        Reusing the kg value would be a factor-of-2.2 error that still looks
-        plausible on screen — the exact unit trap the GOAL-STATE note closes
-        by warning about.
-        """
-        assert "WEIGHT_NOISE_BAND_LB" in PHONE_WEIGHT.read_text()
+    def test_the_goal_comes_with_the_series(self):
+        """The goal rides in the same response as the stats it colours, so
+        the two cannot come from different moments."""
+        assert "goalKg" in PHONE_WEIGHT.read_text()
 
     def test_the_goal_is_folded_into_the_chart_domain(self):
         """A goal outside the plotted range does not widen an axis on its own.
 
         It then vanishes precisely when the user is furthest from the target,
-        which is when they most want to see the gap. Web left a note about
-        hitting this; `niceDomain` has taken includeLo/includeHi since it was
-        written and nothing had passed them.
+        which is when they most want to see the gap.
         """
         src = PHONE_WEIGHT.read_text()
-        assert "includeLo = goalLbF" in src
-        assert "includeHi = goalLbF" in src
+        assert "includeLo = goal" in src
+        assert "includeHi = goal" in src
 
     def test_the_verdict_colours_are_tokens_not_literals(self):
-        """The two shells disagree about which green means good.
-
-        A shared screen reaching for a hex literal is what AppTokens exists
-        to stop, and both palettes now carry the pair.
-        """
+        """Caution is the amber token, never Bad; no hex literals."""
         src = PHONE_WEIGHT.read_text()
-        assert "tok.good" in src
-        assert "tok.caution" in src
+        tone = src[src.index("private fun toneColor"):]
+        tone = tone[: tone.index("\n}\n")]
+        assert '"caution" -> NeonMV.Amber' in tone
+        assert "NeonMV.Bad" not in tone
         assert "0xFFFBBF24" not in src, "the hard-coded amber is back"
         assert "0xFF60A5FA" not in src, "the hard-coded blue is back"
 
-        tokens = PHONE_TOKENS.read_text()
-        assert "val good: Color" in tokens
-        assert "val caution: Color" in tokens
-        # Both palettes, or a neon user gets a classic-theme colour.
-        assert tokens.count("good =") == 2
-        assert tokens.count("caution =") == 2
+
+class TestTheServerOwnsTheRule:
+    def test_server_tone_uses_the_goal_state_band(self):
+        src = (REPO / "backend" / "src" / "myvitals" / "analytics" / "detail_stats.py").read_text()
+        assert "WEIGHT_NOISE_BAND_KG" in src
+        from myvitals.analytics.detail_stats import weight_tone
+        assert weight_tone(-3.0, 95.0, None) == "neutral"
+        assert weight_tone(3.0, 95.0, 90.0) == "caution"
+        assert weight_tone(-3.0, 95.0, 90.0) == "positive"

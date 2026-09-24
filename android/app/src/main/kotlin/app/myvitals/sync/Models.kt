@@ -1741,6 +1741,11 @@ data class TimeSeries(
     // mean. Server computes these from the unbucketed table.
     @Json(name = "min_bpm") val minBpm: Double? = null,
     @Json(name = "max_bpm") val maxBpm: Double? = null,
+    /** UI-4 — HR only: zones, time-in-zone and the band histogram for a
+     *  one-day trace, computed server-side. */
+    val stats: HrZoneStats? = null,
+    /** UI-4 — steps only: 24 LOCAL-hour buckets for a one-day window. */
+    val hourly: List<Int>? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -2825,4 +2830,135 @@ data class FastingStage(
     val key: String,
     val label: String,
     @Json(name = "at_h") val atH: Double,
+)
+
+// ── UI-4: metric detail screens — server-computed stat blocks ─────────────
+// Rendered verbatim. The screens used to derive every one of these in
+// Compose, and the web derived its own; see analytics/detail_stats.py.
+
+@JsonClass(generateAdapter = true)
+data class WeekdayMean(
+    val dow: String,
+    val mean: Double? = null,
+    val n: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class DatedValue(
+    val date: String,
+    val value: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class StepsRangeStats(
+    val avg: Int? = null,
+    val min: Int? = null,
+    val max: Int? = null,
+    val total: Int? = null,
+    @Json(name = "days_with_data") val daysWithData: Int = 0,
+    @Json(name = "goal_days") val goalDays: Int = 0,
+    @Json(name = "window_days") val windowDays: Int = 0,
+    @Json(name = "weekday_means") val weekdayMeans: List<WeekdayMean> = emptyList(),
+    @Json(name = "rolling_7d") val rolling7d: List<DatedValue> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class RestingHrRangeStats(
+    val avg: Double? = null,
+    val min: Double? = null,
+    val max: Double? = null,
+    val latest: Double? = null,
+    @Json(name = "latest_vs_avg") val latestVsAvg: Double? = null,
+    @Json(name = "days_with_data") val daysWithData: Int = 0,
+    @Json(name = "weekday_means") val weekdayMeans: List<WeekdayMean> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class SleepRangeStats(
+    @Json(name = "avg_s") val avgS: Int? = null,
+    @Json(name = "min_s") val minS: Int? = null,
+    @Json(name = "max_s") val maxS: Int? = null,
+    val nights: Int = 0,
+    val naps: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class RangeStats(
+    val since: String = "",
+    val until: String = "",
+    val steps: StepsRangeStats? = null,
+    @Json(name = "resting_hr") val restingHr: RestingHrRangeStats? = null,
+    val sleep: SleepRangeStats? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class HrZoneTime(
+    val zone: String,
+    val label: String = "",
+    @Json(name = "lo_bpm") val loBpm: Int = 0,
+    @Json(name = "hi_bpm") val hiBpm: Int? = null,
+    val seconds: Int = 0,
+    val pct: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class HrHistBin(
+    val lo: Int,
+    val hi: Int,
+    val minutes: Double = 0.0,
+)
+
+@JsonClass(generateAdapter = true)
+data class HrZoneStats(
+    @Json(name = "time_in_zone") val timeInZone: List<HrZoneTime> = emptyList(),
+    @Json(name = "tracked_s") val trackedS: Int = 0,
+    val histogram: List<HrHistBin> = emptyList(),
+    @Json(name = "max_hr") val maxHr: Int? = null,
+    @Json(name = "max_hr_source") val maxHrSource: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightPointOut(
+    val time: String,
+    @Json(name = "weight_kg") val weightKg: Double? = null,
+    @Json(name = "body_fat_pct") val bodyFatPct: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightDelta(
+    @Json(name = "delta_kg") val deltaKg: Double? = null,
+    /** positive | caution | neutral — decided server-side (GOAL-STATE band). */
+    val tone: String = "neutral",
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightTrend(
+    @Json(name = "start_time") val startTime: String,
+    @Json(name = "start_kg") val startKg: Double,
+    @Json(name = "end_time") val endTime: String,
+    @Json(name = "end_kg") val endKg: Double,
+    @Json(name = "per_week_kg") val perWeekKg: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightStats(
+    val count: Int = 0,
+    @Json(name = "first_kg") val firstKg: Double? = null,
+    @Json(name = "latest_kg") val latestKg: Double? = null,
+    @Json(name = "delta_kg") val deltaKg: Double? = null,
+    @Json(name = "min_kg") val minKg: Double? = null,
+    @Json(name = "max_kg") val maxKg: Double? = null,
+    @Json(name = "avg_kg") val avgKg: Double? = null,
+    @Json(name = "goal_kg") val goalKg: Double? = null,
+    @Json(name = "goal_gap_kg") val goalGapKg: Double? = null,
+    val tone: String = "neutral",
+    val trend: WeightTrend? = null,
+    @Json(name = "delta_7d") val delta7d: WeightDelta? = null,
+    @Json(name = "delta_30d") val delta30d: WeightDelta? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightSeriesOut(
+    val points: List<WeightPointOut> = emptyList(),
+    val stats: WeightStats? = null,
 )

@@ -847,6 +847,42 @@ async def summary_range(
     ]
 
 
+@router.get("/range/stats")
+async def summary_range_stats(
+    since: date = Query(...),
+    until: date | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """UI-4 — the numbers the Steps / Heart rate / Sleep detail screens print
+    for a window, computed once here instead of in Compose and Vue.
+
+    Read from exactly the rows those screens chart: the steps and resting-HR
+    blocks from `/summary/range` itself (called, not re-queried, so the
+    recompute and per-day goal logic are shared), the sleep block from
+    `/query/sleep/range` over the same LOCAL days. A night belongs to the
+    local day it ends on, so the sleep window runs from 18:00 the evening
+    before `since` to 18:00 on `until`.
+    """
+    from ..analytics import detail_stats
+    from ..localtime import local_today, local_tz
+    from .query import get_sleep_range
+
+    end = until or local_today()
+    rows = await summary_range(since=since, until=end, db=db)
+    tz = local_tz()
+    sleep_start = datetime.combine(since - timedelta(days=1), time(18, 0), tzinfo=tz)
+    sleep_end = datetime.combine(end, time(18, 0), tzinfo=tz)
+    nights = await get_sleep_range(since=sleep_start, until=sleep_end, db=db)
+    window_days = (end - since).days + 1
+    return {
+        "since": since.isoformat(),
+        "until": end.isoformat(),
+        "steps": detail_stats.steps_stats(rows, window_days),
+        "resting_hr": detail_stats.resting_hr_stats(rows),
+        "sleep": detail_stats.sleep_stats(nights),
+    }
+
+
 def _as_compare_rows(rows: list[Any]) -> list[dict[str, Any]]:
     """DailySummary ORM rows → the dict shape analytics.compare expects.
 

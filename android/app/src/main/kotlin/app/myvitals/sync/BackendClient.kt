@@ -741,6 +741,20 @@ interface BackendApi {
 
     @POST("ai/meals/read-label")
     suspend fun mealsReadLabel(@Body body: LabelIn): LabelScan
+
+    // ── UI-4: metric detail screens ──
+    /** Steps / resting-HR / sleep stats over a window of LOCAL days. */
+    @GET("summary/range/stats")
+    suspend fun summaryRangeStats(
+        @retrofit2.http.Query("since") since: String,
+        @retrofit2.http.Query("until") until: String? = null,
+    ): RangeStats
+
+    /** Weight series + the server's window stats, trend and tone. */
+    @GET("query/weight")
+    suspend fun weightSeriesStats(
+        @retrofit2.http.Query("since") since: String? = null,
+    ): WeightSeriesOut
 }
 
 object BackendClient {

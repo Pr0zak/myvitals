@@ -62,7 +62,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
 import app.myvitals.data.Units
+import app.myvitals.sync.ActivityRecord
+import app.myvitals.sync.ActivityRecordsOut
 import app.myvitals.sync.ActivityRow
+import app.myvitals.sync.ActivityStatsOut
 import app.myvitals.sync.ActivityYtd
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.StrengthWorkoutSummary
@@ -78,7 +81,9 @@ import app.myvitals.ui.neon.NeonMV
 import app.myvitals.ui.neon.NeonNumber
 import app.myvitals.ui.neon.NeonNumberFamily
 import app.myvitals.ui.neon.NeonScreen
+import app.myvitals.ui.neon.NeonStatTile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -107,6 +112,13 @@ import java.time.format.DateTimeFormatter
  *    Rows are one 18dp shape with a right-aligned 16sp primary number.
  *  - A failed refresh replaced the cached list with a line of red text. It
  *    is an amber banner ABOVE the cached rows now.
+ *
+ * UI-F2 added a period-stats row and a personal-records card for exactly
+ * the range + chip selected (GET /activities/stats?since=&category= and
+ * GET /activities/records), group-by-month headers from the server's month
+ * totals, and switched the type chips from substring matching to the
+ * shared category mapping so a chip, the stats and the records all mean
+ * the same set of activities.
  */
 
 // Combined feed entry — either a Strava-style activity or a strength
@@ -135,15 +147,19 @@ private enum class RangeFilter(val label: String) {
     }
 }
 
-/** Type chips. "Strength" keeps the interleaved strength-workout items;
- *  the rest match ActivityRow.type via case-insensitive substring. */
-private enum class TypeFilter(val label: String, val match: String?) {
-    ALL("All", null),
-    RIDE("Ride", "Ride"),
-    RUN("Run", "Run"),
-    WALK("Walk", "Walk"),
-    HIKE("Hike", "Hike"),
-    STRENGTH("Strength", null);
+/** Type chips — the web's chips, keyed by the shared category mapping
+ *  (`categoryForActivityType`) so the server's stats and records filter
+ *  the same set. "Strength" keeps the interleaved strength-workout items.
+ *  (UI-F2: these used to substring-match `type`, which disagreed with the
+ *  category the row's icon tint was drawn from.) */
+private enum class TypeFilter(val label: String, val key: String) {
+    ALL("All", "all"),
+    RIDE("Ride", "ride"),
+    RUN("Run", "run"),
+    WALK("Walk / hike", "walk"),
+    ROW("Row", "row"),
+    OTHER("Other", "other"),
+    STRENGTH("Strength", "strength");
 }
 
 /** The user's local calendar day for a feed entry. Unparseable → null. */
@@ -182,6 +198,10 @@ fun ActivitiesScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var strava by remember { mutableStateOf(StravaUi()) }
+    var periodStats by remember { mutableStateOf<ActivityStatsOut?>(null) }
+    var records by remember { mutableStateOf<ActivityRecordsOut?>(null) }
+    var summaryFailed by remember { mutableStateOf(false) }
+    var summaryJob by remember { mutableStateOf<Job?>(null) }
     LaunchedEffect(strava.toast) {
         if (strava.toast != null) { delay(4000); strava = strava.copy(toast = null) }
     }
@@ -259,8 +279,32 @@ fun ActivitiesScreen(
         while (true) { delay(60_000); nowMs = System.currentTimeMillis() }
     }
 
+    // UI-F2 — the period row and records card for the selection on screen.
+    // A newer selection cancels the older request; a failure keeps the last
+    // figures and says so rather than rendering an empty period.
+    fun loadSummary(since: LocalDate, category: String) {
+        if (!settings.isConfigured()) return
+        summaryJob?.cancel()
+        summaryJob = scope.launch {
+            val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+            val cat = category.takeIf { it != "all" }
+            val st = runCatching {
+                withContext(Dispatchers.IO) { api.activitiesStatsFor(since = since.toString(), category = cat) }
+            }
+            val rec = if (category == "strength") Result.success(null) else runCatching {
+                withContext(Dispatchers.IO) { api.activitiesRecords(category = cat, since = since.toString()) }
+            }
+            st.getOrNull()?.let { periodStats = it }
+            if (rec.isSuccess) records = rec.getOrNull()
+            summaryFailed = st.isFailure || rec.isFailure
+            if (summaryFailed) Timber.w("activities period summary failed")
+        }
+    }
+
     ActivitiesContent(
         rows = rows, workouts = workouts, ytd = ytd,
+        periodStats = periodStats, records = records, summaryFailed = summaryFailed,
+        onSelection = { since, category -> loadSummary(since, category) },
         loading = loading, refreshing = refreshing, error = error,
         nowMs = nowMs, today = LocalDate.now(), zone = ZoneId.systemDefault(),
         contentPadding = PaddingValues(0.dp),
@@ -315,16 +359,25 @@ fun ActivitiesContent(
     strava: StravaUi = StravaUi(),
     onSyncStrava: () -> Unit = {},
     onBack: (() -> Unit)? = null,
+    periodStats: ActivityStatsOut? = null,
+    records: ActivityRecordsOut? = null,
+    summaryFailed: Boolean = false,
+    onSelection: (since: LocalDate, category: String) -> Unit = { _, _ -> },
+    initialGroupByMonth: Boolean = false,
 ) {
     var rangeFilter by remember { mutableStateOf(RangeFilter.D90) }
     var typeFilter by remember { mutableStateOf(TypeFilter.ALL) }
+    var groupByMonth by remember { mutableStateOf(initialGroupByMonth) }
     var shown by remember { mutableIntStateOf(PAGE) }
+    LaunchedEffect(rangeFilter, typeFilter, today) {
+        onSelection(rangeFilter.cutoff(today), typeFilter.key)
+    }
 
     val feed = remember(rows, workouts) {
         (rows.map(FeedEntry::Activity) + workouts.map(FeedEntry::Strength))
             .sortedByDescending { it.sortKey }
     }
-    val hasHike = remember(rows) { rows.any { it.type.contains("Hike", ignoreCase = true) } }
+    val presentCategories = remember(rows) { rows.map { categoryForActivityType(it.type).key }.toSet() }
     val filtered = remember(feed, rangeFilter, typeFilter, today, zone) {
         val cutoff = rangeFilter.cutoff(today)
         feed.filter { e ->
@@ -336,11 +389,12 @@ fun ActivitiesContent(
                 TypeFilter.ALL -> true
                 TypeFilter.STRENGTH -> e is FeedEntry.Strength
                 else -> e is FeedEntry.Activity &&
-                    e.a.type.contains(typeFilter.match!!, ignoreCase = true)
+                    categoryForActivityType(e.a.type).key == typeFilter.key
             }
         }
     }
     val weekTotals = remember(ytd) { ytd?.weeks?.associateBy { it.weekStart } ?: emptyMap() }
+    val monthTotals = remember(ytd) { ytd?.months?.associateBy { it.monthStart } ?: emptyMap() }
 
     NeonScreen(
         title = "Activities",
@@ -400,8 +454,20 @@ fun ActivitiesContent(
             FilterBar(
                 range = rangeFilter, onRange = { rangeFilter = it; shown = PAGE },
                 type = typeFilter, onType = { typeFilter = it; shown = PAGE },
-                hasHike = hasHike,
+                present = presentCategories, hasWorkouts = workouts.isNotEmpty(),
+                groupByMonth = groupByMonth, onGroupByMonth = { groupByMonth = it },
             )
+            if (summaryFailed) {
+                Text(
+                    "Couldn't refresh the period totals" +
+                        if (periodStats != null || records != null) " — showing the last ones loaded." else ".",
+                    color = NeonMV.Amber, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
+            periodStats?.let { PeriodStatsRow(it) }
+            if (typeFilter != TypeFilter.STRENGTH) {
+                records?.let { RecordsCard(it, periodStats?.periodLabel, onOpenActivity) }
+            }
         }
 
         when {
@@ -418,14 +484,28 @@ fun ActivitiesContent(
             filtered.isEmpty() -> QuietCard("No activities match these filters.")
             else -> {
                 val page = filtered.take(shown)
-                var lastWeek: LocalDate? = null
+                var lastGroup: LocalDate? = null
                 val thisWeek = today.minusDays((today.dayOfWeek.value - 1).toLong())
+                val thisMonth = today.withDayOfMonth(1)
                 page.forEach { e ->
                     val day = entryDay(e, zone)
-                    val week = day?.minusDays((day.dayOfWeek.value - 1).toLong())
-                    if (week != null && week != lastWeek) {
-                        lastWeek = week
-                        WeekHeader(week, thisWeek, weekTotals[week.toString()])
+                    val group = if (groupByMonth) day?.withDayOfMonth(1)
+                        else day?.minusDays((day.dayOfWeek.value - 1).toLong())
+                    if (group != null && group != lastGroup) {
+                        lastGroup = group
+                        if (groupByMonth) {
+                            val t = monthTotals[group.toString()]
+                            GroupHeader(
+                                if (group == thisMonth) "This month" else group.format(MONTH_FMT),
+                                t?.sessions, t?.durationS,
+                            )
+                        } else {
+                            val t = weekTotals[group.toString()]
+                            GroupHeader(
+                                if (group == thisWeek) "This week" else "Week of ${group.format(WEEK_FMT)}",
+                                t?.sessions, t?.durationS,
+                            )
+                        }
                     }
                     when (e) {
                         is FeedEntry.Activity -> ActivityFeedRow(e.a, zone) {
@@ -670,7 +750,10 @@ private fun FilterBar(
     onRange: (RangeFilter) -> Unit,
     type: TypeFilter,
     onType: (TypeFilter) -> Unit,
-    hasHike: Boolean,
+    present: Set<String>,
+    hasWorkouts: Boolean,
+    groupByMonth: Boolean,
+    onGroupByMonth: (Boolean) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
         Row(
@@ -685,8 +768,112 @@ private fun FilterBar(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             for (t in TypeFilter.entries) {
-                if (t == TypeFilter.HIKE && !hasHike) continue
-                FilterChip(t.label, t == type) { onType(t) }
+                // The web's rule: a chip only for a kind that is present.
+                val show = when (t) {
+                    TypeFilter.ALL -> true
+                    TypeFilter.STRENGTH -> hasWorkouts
+                    else -> t.key in present
+                }
+                if (show || t == type) FilterChip(t.label, t == type) { onType(t) }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip("By week", !groupByMonth) { onGroupByMonth(false) }
+            FilterChip("By month", groupByMonth) { onGroupByMonth(true) }
+        }
+    }
+}
+
+// ── UI-F2: period stats + personal records ────────────────────────────
+
+/** Totals for the selected range + chip, straight from /activities/stats.
+ *  A total no row in the window carried prints "—", never 0. */
+@Composable
+private fun PeriodStatsRow(st: ActivityStatsOut) {
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 12.dp)) {
+        NeonEyebrow(st.periodLabel)
+        val dist = if (st.nWithDistance == 0) "—" else Units.fmtDistance(st.totalDistanceM, 0)
+        val elev = if (st.nWithElevation == 0) "—" else Units.fmtElevation(st.totalElevationM)
+        val kcal = if (st.nWithKcal == 0) "—" else "%,.0f".format(st.totalKcal)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NeonStatTile("%,d".format(st.nActivities),
+                if (st.nActivities == 1) "session" else "sessions", Modifier.weight(1f))
+            NeonStatTile(dist, "distance", Modifier.weight(1f))
+            NeonStatTile(fmtDurationHm(st.totalDurationS.toInt()), "time", Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NeonStatTile(elev, "climbed", Modifier.weight(1f))
+            NeonStatTile(kcal, "kcal", Modifier.weight(1f))
+        }
+    }
+}
+
+private val RECORD_DAY_FMT = DateTimeFormatter.ofPattern("MMM d, yyyy")
+
+internal fun fmtRecordValue(r: ActivityRecord): String {
+    val v = r.value ?: return "—"
+    return when (r.key) {
+        "longest_distance" -> Units.fmtDistance(v, 1)
+        "longest_duration" -> fmtDurationHm(v.toInt())
+        "most_elevation" -> Units.fmtElevation(v)
+        "highest_suffer" -> "%.0f".format(v)
+        "fastest" -> if (r.display == "pace") Units.fmtPace(v)
+            else "%.1f %s/h".format(Units.distance(v * 3600.0) ?: 0.0, Units.distanceUnit)
+        else -> "%.0f".format(v)
+    }
+}
+
+/** Personal records over the selection. Each tile opens its activity; a
+ *  record nothing qualifies for is left out (the server sends null, and
+ *  a "0 km" record would read as a measured result). */
+@Composable
+private fun RecordsCard(
+    rec: ActivityRecordsOut,
+    periodLabel: String?,
+    onOpenActivity: (source: String, sourceId: String) -> Unit,
+) {
+    val shown = rec.records.filter { it.value != null && it.activity != null }
+    Column(
+        Modifier.fillMaxWidth().padding(bottom = 12.dp)
+            .clip(NeonCardShape).background(NeonMV.Card)
+            .border(1.dp, NeonMV.Line, NeonCardShape)
+            .padding(14.dp),
+    ) {
+        Text(
+            "PERSONAL RECORDS" + (periodLabel?.let { " · ${it.uppercase()}" } ?: ""),
+            color = NeonMV.Muted, fontFamily = NeonNumberFamily, fontSize = 11.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        if (shown.isEmpty()) {
+            Text("No records in this range yet.", color = NeonMV.Muted, fontSize = 13.sp)
+        }
+        shown.chunked(2).forEachIndexed { i, pair ->
+            if (i > 0) Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (r in pair) {
+                    val a = r.activity!!
+                    val day = runCatching { LocalDate.parse(a.date).format(RECORD_DAY_FMT) }.getOrDefault(a.date)
+                    Column(
+                        Modifier.weight(1f).clip(NeonCardShape)
+                            .clickable { onOpenActivity(a.source, a.sourceId) },
+                    ) {
+                        NeonStatTile(fmtRecordValue(r), r.label, Modifier.fillMaxWidth(), accent = NeonMV.Cyan)
+                        Text(
+                            a.name?.takeIf { it.isNotBlank() } ?: prettyType(a.type),
+                            color = NeonMV.Ink, fontSize = 12.sp, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp, start = 4.dp, end = 4.dp),
+                        )
+                        Text(
+                            day, color = NeonMV.Muted, fontSize = 11.sp, maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 4.dp),
+                        )
+                    }
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
@@ -714,24 +901,27 @@ private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
 // ── Rows ────────────────────────────────────────────────────────
 
 private val WEEK_FMT = DateTimeFormatter.ofPattern("MMM d")
+private val MONTH_FMT = DateTimeFormatter.ofPattern("MMMM yyyy")
 private val ROW_DAY_FMT = DateTimeFormatter.ofPattern("EEE MMM d")
 private val ROW_TIME_FMT = DateTimeFormatter.ofPattern("EEE MMM d · h:mm a")
 
+/** Week or month header. Totals are the server's (/activities/ytd weeks /
+ *  months); null when the server has none for that group. */
 @Composable
-private fun WeekHeader(week: LocalDate, thisWeek: LocalDate, totals: app.myvitals.sync.YtdWeek?) {
+private fun GroupHeader(label: String, sessions: Int?, durationS: Int?) {
     Row(
         Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            (if (week == thisWeek) "This week" else "Week of ${week.format(WEEK_FMT)}").uppercase(),
+            label.uppercase(),
             color = NeonMV.Muted, fontFamily = NeonNumberFamily, fontSize = 11.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp, modifier = Modifier.weight(1f),
         )
-        if (totals != null) {
+        if (sessions != null && durationS != null) {
             Text(
-                "${totals.sessions} session${if (totals.sessions == 1) "" else "s"} · " +
-                    fmtDurationHm(totals.durationS),
+                "$sessions session${if (sessions == 1) "" else "s"} · " +
+                    fmtDurationHm(durationS),
                 color = NeonMV.Muted, fontFamily = NeonNumberFamily, fontSize = 11.sp,
             )
         }

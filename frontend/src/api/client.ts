@@ -2836,3 +2836,39 @@ export async function summaryRangeStats(
   const { data } = await http.get("/summary/range/stats", { params });
   return data;
 }
+
+// ── UI-F2: activity records + the feed's period banner ──
+export type ActivityFeedWindow = {
+  /** Local day (inclusive). Omitted = all history. */
+  since?: string | null;
+  until?: string | null;
+  /** A feed chip: all / ride / run / walk / row / other / strength. */
+  category?: string;
+};
+
+/** Personal records over the feed's window and chip (server-computed). */
+export async function activitiesRecords(
+  w: ActivityFeedWindow = {},
+): Promise<import("./types").ActivityRecords> {
+  const params: Record<string, string> = {};
+  if (w.since) params.since = w.since;
+  if (w.until) params.until = w.until;
+  if (w.category && w.category !== "all") params.category = w.category;
+  const { data } = await http.get("/activities/records", { params });
+  return data;
+}
+
+/** /activities/stats for exactly the window and chip on screen, with
+ *  completed strength sessions counted the way the feed shows them.
+ *  No `since` = all time (the endpoint's ten-year ceiling). */
+export async function activitiesStatsFor(
+  w: ActivityFeedWindow = {},
+): Promise<import("./types").ActivityStats> {
+  const params: Record<string, string | number | boolean> = { include_strength: true };
+  if (w.since) params.since = w.since;
+  else params.days = 3650;
+  if (w.until) params.until = w.until;
+  if (w.category && w.category !== "all") params.category = w.category;
+  const { data } = await http.get("/activities/stats", { params });
+  return data;
+}

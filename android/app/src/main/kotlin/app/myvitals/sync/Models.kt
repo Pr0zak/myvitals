@@ -602,6 +602,14 @@ data class ActivityStatsOut(
     @Json(name = "by_type") val byType: Map<String, Int> = emptyMap(),
     @Json(name = "streak_days") val streakDays: Int = 0,
     val consistency: TrainingConsistency? = null,
+    // UI-F2 — what the totals are made of: "—" instead of "0 km" when no
+    // row in the window carried that field (null is not zero).
+    @Json(name = "n_strength") val nStrength: Int = 0,
+    @Json(name = "n_with_distance") val nWithDistance: Int? = null,
+    @Json(name = "n_with_elevation") val nWithElevation: Int? = null,
+    @Json(name = "n_with_kcal") val nWithKcal: Int? = null,
+    @Json(name = "window_since") val windowSince: String? = null,
+    val category: String? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -2898,6 +2906,8 @@ data class ActivityYtd(
     @Json(name = "cumulative_distance_m") val cumulative: YtdCumulative = YtdCumulative(),
     @Json(name = "this_week") val thisWeek: YtdWeek? = null,
     val weeks: List<YtdWeek> = emptyList(),
+    /** UI-F2 — per-month totals for the group-by-month headers. */
+    val months: List<YtdMonth> = emptyList(),
 )
 
 // ── UI-4: metric detail screens — server-computed stat blocks ─────────────
@@ -3067,4 +3077,43 @@ data class StrengthNextUp(
     @Json(name = "set_number") val setNumber: Int = 1,
     @Json(name = "target_sets") val targetSets: Int = 0,
     val started: Boolean = false,
+)
+
+// ── UI-F2: activity personal records + month headers ─────────────────────
+
+@JsonClass(generateAdapter = true)
+data class YtdMonth(
+    @Json(name = "month_start") val monthStart: String,
+    val sessions: Int = 0,
+    @Json(name = "duration_s") val durationS: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class ActivityRecordRef(
+    val source: String,
+    @Json(name = "source_id") val sourceId: String,
+    val name: String? = null,
+    val type: String = "",
+    @Json(name = "start_at") val startAt: String = "",
+    /** The user's LOCAL day. */
+    val date: String = "",
+)
+
+/** One record. [value] is null — never 0 — when nothing qualifies. Units:
+ *  "m", "s", "" (suffer score), "m/s" (fastest; [display] pace|speed). */
+@JsonClass(generateAdapter = true)
+data class ActivityRecord(
+    val key: String,
+    val label: String = "",
+    val unit: String = "",
+    val value: Double? = null,
+    val activity: ActivityRecordRef? = null,
+    val display: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class ActivityRecordsOut(
+    val category: String = "all",
+    @Json(name = "n_considered") val nConsidered: Int = 0,
+    val records: List<ActivityRecord> = emptyList(),
 )

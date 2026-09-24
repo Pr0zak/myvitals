@@ -770,6 +770,25 @@ interface BackendApi {
     suspend fun weightSeriesStats(
         @retrofit2.http.Query("since") since: String? = null,
     ): WeightSeriesOut
+
+    // ── UI-F2: activity records + the feed's period banner ──
+    /** Personal records over the feed's window + chip (LOCAL days). */
+    @GET("activities/records")
+    suspend fun activitiesRecords(
+        @retrofit2.http.Query("category") category: String? = null,
+        @retrofit2.http.Query("since") since: String? = null,
+        @retrofit2.http.Query("until") until: String? = null,
+    ): ActivityRecordsOut
+
+    /** /activities/stats for exactly the window + chip on screen, strength
+     *  sessions counted the way the feed shows them. */
+    @GET("activities/stats")
+    suspend fun activitiesStatsFor(
+        @retrofit2.http.Query("since") since: String? = null,
+        @retrofit2.http.Query("category") category: String? = null,
+        @retrofit2.http.Query("include_strength") includeStrength: Boolean = true,
+        @retrofit2.http.Query("days") days: Int? = null,
+    ): ActivityStatsOut
 }
 
 object BackendClient {

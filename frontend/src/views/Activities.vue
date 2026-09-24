@@ -6,7 +6,14 @@
  *             cumulative line this year (cyan) over last year (dashed
  *             periwinkle) — all from GET /activities/ytd
  *   calendar  a 3-month strip that expands to the year
- *   feed      grouped by local week; headers carry the server's week totals
+ *   feed      grouped by local week or month; headers carry the server's
+ *             week / month totals (UI-F2 brought back month grouping, sort
+ *             newest / longest / farthest and a grid layout — ordering and
+ *             layout only, every number is still the server's)
+ *   period    UI-F2: a stats row for exactly the range + chip selected
+ *             (GET /activities/stats?since=&category=&include_strength) and
+ *             the personal-records card (GET /activities/records). Both used
+ *             to be summed in this file from whatever rows had loaded.
  *
  * What changed and why: the YTD card was computed here from a raw 18-month
  * dump — a third copy of a loop the phone and Train had their own versions
@@ -21,12 +28,20 @@ import { Map as MapIcon, GitCompareArrows, RefreshCw } from "lucide-vue-next";
 import NeonPage from "@/components/neon/NeonPage.vue";
 import NeonHero from "@/components/neon/NeonHero.vue";
 import NeonEyebrow from "@/components/neon/NeonEyebrow.vue";
+import NeonStat from "@/components/neon/NeonStat.vue";
 import ActivityIcon from "@/components/ActivityIcon.vue";
 import PolylineThumbnail from "@/components/PolylineThumbnail.vue";
 import ActivityYearCalendar from "@/components/ActivityYearCalendar.vue";
-import { api, activitiesYtd, activitiesWithRoutes } from "@/api/client";
-import type { Activity, ActivityYtd, YtdMetric, YtdWeek, SessionSummary } from "@/api/types";
-import { distanceVal, distanceUnit, elevationVal, elevationUnit, fmtDistance, weightVal, weightUnit } from "@/units";
+import { api, activitiesYtd, activitiesWithRoutes, activitiesRecords, activitiesStatsFor } from "@/api/client";
+import type { ActivityFeedWindow } from "@/api/client";
+import type {
+  Activity, ActivityYtd, YtdMetric, YtdWeek, YtdMonth, SessionSummary,
+  ActivityStats, ActivityRecords, ActivityRecord,
+} from "@/api/types";
+import {
+  distanceVal, distanceUnit, elevationVal, elevationUnit, fmtDistance, fmtElevation, fmtPace,
+  weightVal, weightUnit,
+} from "@/units";
 import { fmtActivityType } from "@/format";
 import { toLocalISO } from "@/dates";
 import { categoryColor, categoryForSplitFocus, categoryForType } from "@/utils/activityCategory";
@@ -59,6 +74,24 @@ const range = ref<RangeKey>(loadPref("range", "90d") as RangeKey);
 const typeFilter = ref<string>(loadPref("type", "all"));
 watch(range, (v) => savePref("range", v));
 watch(typeFilter, (v) => savePref("type", v));
+
+// UI-F2 — display ordering and layout of the server's rows. New pref keys:
+// the pre-UI-5 "sort" pref held different values.
+type SortKey = "newest" | "longest" | "farthest";
+type GroupKey = "week" | "month";
+type ViewMode = "list" | "grid";
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: "newest", label: "Newest" }, { key: "longest", label: "Longest" }, { key: "farthest", label: "Farthest" },
+];
+function pick<T extends string>(v: string, ok: readonly T[], def: T): T {
+  return (ok as readonly string[]).includes(v) ? (v as T) : def;
+}
+const sortKey = ref<SortKey>(pick(loadPref("feedSort", "newest"), ["newest", "longest", "farthest"], "newest"));
+const groupBy = ref<GroupKey>(pick(loadPref("groupBy", "week"), ["week", "month"], "week"));
+const viewMode = ref<ViewMode>(pick(loadPref("feedView", "list"), ["list", "grid"], "list"));
+watch(sortKey, (v) => savePref("feedSort", v));
+watch(groupBy, (v) => savePref("groupBy", v));
+watch(viewMode, (v) => savePref("feedView", v));
 
 const activities = ref<Activity[]>([]);
 const workouts = ref<Workout[]>([]);
@@ -148,9 +181,64 @@ async function syncStravaNow() {
   }
 }
 
-onMounted(() => { load(); loadCookieStatus(); });
-watch(range, () => { shown.value = 40; load(); });
-watch(typeFilter, () => { shown.value = 40; });
+// ── UI-F2: period stats + personal records for the selected range + chip ──
+const stats = ref<ActivityStats | null>(null);
+const records = ref<ActivityRecords | null>(null);
+const summaryFailed = ref(false);
+let summarySeq = 0;
+
+function feedWindow(): ActivityFeedWindow {
+  const since = sinceFor(range.value);
+  return { since: since ? toLocalISO(since) : null, category: typeFilter.value };
+}
+
+async function loadSummary() {
+  const seq = ++summarySeq;
+  const w = feedWindow();
+  // The strength chip is generated workouts only — no Activity rows, so
+  // no records to hold.
+  const wantRecords = typeFilter.value !== "strength";
+  const [st, rec] = await Promise.all([
+    activitiesStatsFor(w).then((v) => ({ ok: true as const, v }), () => ({ ok: false as const })),
+    wantRecords
+      ? activitiesRecords(w).then((v) => ({ ok: true as const, v }), () => ({ ok: false as const }))
+      : Promise.resolve({ ok: true as const, v: null }),
+  ]);
+  if (seq !== summarySeq) return; // a newer selection already answered
+  // A failed request keeps the previous figures and says so — it never
+  // renders as an empty period.
+  if (st.ok) stats.value = st.v;
+  if (rec.ok) records.value = rec.v;
+  summaryFailed.value = !st.ok || !rec.ok;
+}
+
+onMounted(() => { load(); loadCookieStatus(); loadSummary(); });
+watch(range, () => { shown.value = 40; load(); loadSummary(); });
+watch(typeFilter, () => { shown.value = 40; loadSummary(); });
+watch(sortKey, () => { shown.value = 40; });
+
+const shownRecords = computed<ActivityRecord[]>(() =>
+  (records.value?.records ?? []).filter((r) => r.value != null && r.activity != null),
+);
+
+/** Records can be years old, so the year is always shown. */
+function recordDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y!, (m ?? 1) - 1, d ?? 1).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+}
+function fmtRecord(r: ActivityRecord): string {
+  const v = r.value as number;
+  switch (r.key) {
+    case "longest_distance": return fmtDistance(v, 1);
+    case "longest_duration": return fmtHm(v);
+    case "most_elevation": return fmtElevation(v);
+    case "highest_suffer": return Math.round(v).toString();
+    case "fastest":
+      if (r.display === "pace") return fmtPace(v);
+      return `${(distanceVal(v * 3600) ?? 0).toFixed(1)} ${distanceUnit.value}/h`;
+  }
+  return String(v);
+}
 
 // ── Feed ──
 const feed = computed<FeedItem[]>(() => {
@@ -194,16 +282,49 @@ function mondayOf(iso: string): string {
   return toLocalISO(dt);
 }
 const thisWeek = computed(() => mondayOf(toLocalISO(new Date())));
+const thisMonth = computed(() => toLocalISO(new Date()).slice(0, 7) + "-01");
 const weekTotals = computed<Record<string, YtdWeek>>(() =>
   Object.fromEntries((ytd.value?.weeks ?? []).map((w) => [w.week_start, w])),
 );
-const groups = computed(() => {
-  const out: { week: string; items: FeedItem[] }[] = [];
-  for (const it of filtered.value.slice(0, shown.value)) {
-    const wk = mondayOf(it.day);
+const monthTotals = computed<Record<string, YtdMonth>>(() =>
+  Object.fromEntries((ytd.value?.months ?? []).map((m) => [m.month_start, m])),
+);
+
+/** The value a sort orders by. Null (no distance, an unfinished session)
+ *  sorts last — it is unknown, not zero. */
+function sortValue(it: FeedItem): number | null {
+  if (sortKey.value === "longest") {
+    return it.kind === "activity" ? (it.a.duration_s || null) : (it.w.session_summary?.net_duration_s || null);
+  }
+  return it.kind === "activity" ? (it.a.distance_m || null) : null;
+}
+const sorted = computed<FeedItem[]>(() => {
+  if (sortKey.value === "newest") return filtered.value;
+  return [...filtered.value].sort((x, y) => {
+    const a = sortValue(x), b = sortValue(y);
+    if (a == null && b == null) return y.sort - x.sort;
+    if (a == null) return 1;
+    if (b == null) return -1;
+    return b - a || y.sort - x.sort;
+  });
+});
+
+interface FeedGroup { key: string; label: string | null; total: { sessions: number; duration_s: number } | null; items: FeedItem[] }
+const groups = computed<FeedGroup[]>(() => {
+  const page = sorted.value.slice(0, shown.value);
+  // A ranked list is one list: headers by date would scatter it.
+  if (sortKey.value !== "newest") return [{ key: "ranked", label: null, total: null, items: page }];
+  const out: FeedGroup[] = [];
+  for (const it of page) {
+    const key = groupBy.value === "month" ? it.day.slice(0, 7) + "-01" : mondayOf(it.day);
     const last = out[out.length - 1];
-    if (last && last.week === wk) last.items.push(it);
-    else out.push({ week: wk, items: [it] });
+    if (last && last.key === key) last.items.push(it);
+    else out.push({
+      key,
+      label: groupBy.value === "month" ? monthLabel(key) : weekLabel(key),
+      total: (groupBy.value === "month" ? monthTotals.value[key] : weekTotals.value[key]) ?? null,
+      items: [it],
+    });
   }
   return out;
 });
@@ -212,6 +333,11 @@ function weekLabel(wk: string): string {
   if (wk === thisWeek.value) return "This week";
   const [y, m, d] = wk.split("-").map(Number);
   return "Week of " + new Date(y!, (m ?? 1) - 1, d ?? 1).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+function monthLabel(mk: string): string {
+  if (mk === thisMonth.value) return "This month";
+  const [y, m] = mk.split("-").map(Number);
+  return new Date(y!, (m ?? 1) - 1, 1).toLocaleDateString([], { month: "long", year: "numeric" });
 }
 
 function fmtHm(s: number | null | undefined): string {
@@ -415,6 +541,43 @@ const calendarActivities = computed(() => activities.value);
       <button v-for="t in typeChips" :key="t.key" class="chip" :class="{ on: typeFilter === t.key }" @click="typeFilter = t.key">{{ t.label }}</button>
     </div>
 
+    <p v-if="summaryFailed" class="stale-note">Couldn't refresh the period totals{{ stats || records ? " — showing the last ones loaded" : "" }}.</p>
+    <section v-if="stats && feed.length" class="period" aria-label="Period totals">
+      <span class="eyebrow">{{ stats.period_label }}</span>
+      <div class="period-grid">
+        <NeonStat :value="stats.n_activities.toLocaleString()" :label="stats.n_activities === 1 ? 'session' : 'sessions'" />
+        <NeonStat :value="stats.n_with_distance === 0 ? '—' : fmtDistance(stats.total_distance_m, 0)" label="distance" />
+        <NeonStat :value="fmtHm(stats.total_duration_s)" label="time" />
+        <NeonStat :value="stats.n_with_elevation === 0 ? '—' : fmtElevation(stats.total_elevation_m)" label="climbed" />
+        <NeonStat :value="stats.n_with_kcal === 0 ? '—' : Math.round(stats.total_kcal).toLocaleString()" label="kcal" />
+      </div>
+    </section>
+
+    <section v-if="records && typeFilter !== 'strength' && feed.length" class="card recs" aria-label="Personal records">
+      <span class="eyebrow">Personal records · {{ stats?.period_label ?? "selected range" }}</span>
+      <p v-if="!shownRecords.length" class="muted">No records in this range yet.</p>
+      <div v-else class="rec-grid">
+        <RouterLink v-for="r in shownRecords" :key="r.key" class="rec"
+                    :to="`/activity/${r.activity!.source}/${r.activity!.source_id}`">
+          <NeonStat :value="fmtRecord(r)" :label="r.label" accent="#28e6ff" />
+          <span class="rec-name">{{ r.activity!.name || fmtActivityType(r.activity!.type) }}</span>
+          <span class="rec-meta">{{ recordDay(r.activity!.date) }}</span>
+        </RouterLink>
+      </div>
+    </section>
+
+    <div v-if="feed.length" class="chips view-bar" role="group" aria-label="Sort and layout">
+      <button v-for="o in SORTS" :key="o.key" class="chip" :class="{ on: sortKey === o.key }" @click="sortKey = o.key">{{ o.label }}</button>
+      <span class="sep" />
+      <template v-if="sortKey === 'newest'">
+        <button class="chip" :class="{ on: groupBy === 'week' }" @click="groupBy = 'week'">By week</button>
+        <button class="chip" :class="{ on: groupBy === 'month' }" @click="groupBy = 'month'">By month</button>
+        <span class="sep" />
+      </template>
+      <button class="chip" :class="{ on: viewMode === 'list' }" aria-label="List view" @click="viewMode = 'list'">List</button>
+      <button class="chip" :class="{ on: viewMode === 'grid' }" aria-label="Grid view" @click="viewMode = 'grid'">Grid</button>
+    </div>
+
     <p v-if="!feed.length && loading" class="muted">Loading activities…</p>
     <!-- A failed load with nothing cached is not "no activities yet". -->
     <template v-else-if="!feed.length && error" />
@@ -422,17 +585,18 @@ const calendarActivities = computed(() => activities.value);
     <p v-else-if="!filtered.length" class="card quiet">No activities match these filters.</p>
 
     <template v-else>
-      <section v-for="g in groups" :key="g.week">
-        <div class="week-h">
-          <span>{{ weekLabel(g.week) }}</span>
-          <span v-if="weekTotals[g.week]">
-            {{ weekTotals[g.week].sessions }} session{{ weekTotals[g.week].sessions === 1 ? "" : "s" }} · {{ fmtHm(weekTotals[g.week].duration_s) }}
+      <section v-for="g in groups" :key="g.key">
+        <div v-if="g.label" class="week-h">
+          <span>{{ g.label }}</span>
+          <span v-if="g.total">
+            {{ g.total.sessions }} session{{ g.total.sessions === 1 ? "" : "s" }} · {{ fmtHm(g.total.duration_s) }}
           </span>
         </div>
+        <div :class="viewMode === 'grid' ? 'feed-grid' : 'feed-list'">
         <RouterLink v-for="it in g.items" :key="it.key" class="row"
                     :to="it.kind === 'activity' ? `/activity/${it.a.source}/${it.a.source_id}` : `/workout/strength/day/${it.w.date}`">
           <template v-if="it.kind === 'activity'">
-            <PolylineThumbnail v-if="it.a.polyline" class="thumb" :polyline="it.a.polyline" :activity-type="it.a.type" :size="44" :stroke="tint(it)" />
+            <PolylineThumbnail v-if="it.a.polyline" class="thumb" :polyline="it.a.polyline" :activity-type="it.a.type" :size="viewMode === 'grid' ? 72 : 44" :stroke="tint(it)" />
             <span v-else class="ic" :style="{ color: tint(it), background: tint(it) + '24' }"><ActivityIcon :type="it.a.type" :size="20" /></span>
             <span class="body">
               <span class="title">{{ it.a.name || fmtActivityType(it.a.type) }}</span>
@@ -452,8 +616,9 @@ const calendarActivities = computed(() => activities.value);
             </span>
           </template>
         </RouterLink>
+        </div>
       </section>
-      <div v-if="filtered.length > shown" class="more">
+      <div v-if="sorted.length > shown" class="more">
         <button class="pill cyan" @click="shown += 40">Show {{ Math.min(40, filtered.length - shown) }} more</button>
       </div>
     </template>
@@ -533,4 +698,25 @@ const calendarActivities = computed(() => activities.value);
 .status.amber { color: var(--rn-amber); }
 .status.muted { color: var(--rn-mut); text-transform: capitalize; }
 .more { display: flex; justify-content: center; margin: 8px 0 16px; }
+
+/* UI-F2 */
+.stale-note { color: var(--rn-amber); font-size: 12px; margin: 4px 0 8px; }
+.period { margin: 8px 0 12px; }
+.period .eyebrow { display: block; margin-bottom: 8px; }
+.period-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 560px) { .period-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.recs .eyebrow { display: block; margin-bottom: 10px; }
+.rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.rec { display: flex; flex-direction: column; gap: 4px; color: inherit; text-decoration: none; border-radius: 18px; }
+.rec:hover :deep(.neon-stat) { border-color: rgba(40, 230, 255, .45); }
+.rec:focus-visible { outline: 2px solid var(--rn-cyan); outline-offset: 2px; }
+.rec-name, .rec-meta { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; }
+.rec-name { color: var(--rn-ink, #ececf5); font-size: 12px; }
+.rec-meta { color: var(--rn-mut); margin-top: -4px; }
+.view-bar { align-items: center; }
+.sep { flex: 0 0 1px; align-self: stretch; background: var(--rn-line); margin: 6px 2px; }
+.feed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.feed-grid .row { margin-bottom: 0; flex-wrap: wrap; align-items: flex-start; }
+.feed-grid .row .body { flex: 1 1 100%; order: 3; }
+.feed-grid .row .primary, .feed-grid .row .primary-col { margin-left: auto; }
 </style>

@@ -213,7 +213,9 @@ def test_both_surfaces_can_record_a_set_type():
 
     root = pathlib.Path(__file__).resolve().parents[2]
     web = (root / "frontend" / "src" / "views" / "workout" / "StrengthToday.vue").read_text()
-    assert 'class="settype-cell"' in web, "the web still cannot record a warm-up"
+    # UI-2: the picker moved into the NOW hero (and the correction row).
+    assert 'v-model="heroEntry.setType"' in web, "the web still cannot record a warm-up"
+    assert 'v-model="entry(c.wex, n).setType"' in web
 
 
 # --------------------------------------------------------------------------

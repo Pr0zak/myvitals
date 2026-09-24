@@ -431,6 +431,9 @@ export interface StrengthWorkoutDetail {
   exercises: StrengthWorkoutExercise[];
   /** UI-1 — the slot the Train hero's button names. */
   next_up?: StrengthNextUp | null;
+  /** UI-2 — TD-4 session summary (tonnage, working sets, net duration),
+   *  server-computed; null until the session is completed. */
+  session_summary?: SessionSummary | null;
 }
 
 /** One tile from GET /summary/tiles. The verdict (`status`) is decided

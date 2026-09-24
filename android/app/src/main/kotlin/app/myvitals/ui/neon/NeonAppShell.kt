@@ -226,6 +226,7 @@ fun NeonAppShell(
                         onOpenCoach = { nav.navigate("coach") },
                         onOpenDay = { date -> nav.navigate("workout/day/$date") },
                         onOpenCharts = { nav.navigate("workout/charts") },
+                        onBack = { nav.popBackStack() },
                     )
                 }
                 composable("workout/history") {

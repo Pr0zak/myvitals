@@ -203,7 +203,8 @@ class TestItDoesNotOwnTheScreen:
     def test_the_web_puts_it_after_the_exercises_too(self):
         web = (REPO / "frontend" / "src" / "views" / "workout"
                / "StrengthToday.vue").read_text()
-        assert web.index('v-for="(wex, idx) in workout.exercises"') < web.index(
+        # UI-2: the exercise loop is now the hero/up-next/done `cards` list.
+        assert web.index('<template v-for="c in cards"') < web.index(
             'class="projected-map"')
 
     def test_its_width_is_capped_on_both_surfaces(self):

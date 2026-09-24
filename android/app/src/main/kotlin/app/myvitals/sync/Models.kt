@@ -397,6 +397,10 @@ data class StrengthWorkoutDetail(
     /** UI-1 — the slot the Train hero's button names. Null when nothing is
      *  left, on a finished session, or from an older backend. */
     @Json(name = "next_up") val nextUp: StrengthNextUp? = null,
+    /** UI-2 — TD-4's finished-session summary, which WorkoutOut has always
+     *  carried; the completed hero renders its tonnage / sets / duration.
+     *  Null until the session is completed. */
+    @Json(name = "session_summary") val sessionSummary: SessionSummary? = null,
 )
 
 @JsonClass(generateAdapter = true)

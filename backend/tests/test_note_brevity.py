@@ -52,9 +52,26 @@ from myvitals.analytics.strength import (
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 WEB = REPO / "frontend" / "src" / "views" / "workout" / "StrengthToday.vue"
-PHONE = (
+_STRENGTH = (
     REPO / "android" / "app" / "src" / "main" / "kotlin" / "app" / "myvitals"
-    / "ui" / "strength" / "StrengthTodayScreen.kt"
+    / "ui" / "strength"
+)
+
+
+class _Surface:
+    """UI-2 split the phone screen across three files; read them as one."""
+
+    def __init__(self, *paths: pathlib.Path) -> None:
+        self.paths = paths
+
+    def read_text(self) -> str:
+        return "\n".join(p.read_text() for p in self.paths)
+
+
+PHONE = _Surface(
+    _STRENGTH / "StrengthTodayScreen.kt",
+    _STRENGTH / "NowHero.kt",
+    _STRENGTH / "WorkoutSlots.kt",
 )
 
 DUMBBELL = {
@@ -168,12 +185,12 @@ class TestBothSurfacesRenderRowsNotAParagraph:
 
     def test_the_phone_iterates_the_notes(self):
         src = PHONE.read_text()
-        block = src[src.index('"Why this plan"'):][:2500]
+        block = src[src.index('"why" -> {'):][:1200]
         assert "for (line in lines)" in block
 
     def test_neither_reason_is_italic_any_more(self):
         assert "font-style: italic" not in WEB.read_text()[
-            WEB.read_text().index(".why-target {"):][:300]
+            WEB.read_text().index(".why-target, .last-hint {"):][:300]
         block = PHONE.read_text()
         i = block.index("wex.notes?.takeIf")
         assert "Italic" not in block[i:i + 600]
@@ -186,17 +203,22 @@ class TestTheCardioDayIsNotDoubleRendered:
         same string appeared twice on one screen — once as the session's
         content and once as an explanation of it."""
         src = WEB.read_text()
-        assert 'v-if="planNotes.length && workout?.exercises?.length"' in src
+        # UI-2: the gate now lives in `whyVisible`, which the chip reads.
+        i = src.index("const whyVisible = computed(")
+        assert "planNotes.value.length > 0 && (workout.value?.exercises.length ?? 0) > 0" \
+            in src[i:i + 200]
 
     def test_the_phone_already_required_it(self):
         assert "plan.exercises.isNotEmpty() && !plan.notes.isNullOrBlank()" \
             in PHONE.read_text()
+        # ...and a notes-only day renders its prescription as the hero.
+        assert "plan.exercises.isEmpty() -> PrescriptionHero(" in PHONE.read_text()
 
 
 class TestTheNeonShellGetsMutedText:
     def test_the_disclosure_classes_have_a_neon_rule(self):
         """They set no colour, so under the neon shell they inherited
         --rn-ink and read brighter than the exercise names above them."""
+        # UI-2: the page is neon-only now; the list is muted directly.
         src = WEB.read_text()
-        assert 'html[data-theme="neon"] .pn-item' in src
-        assert "--rn-mut" in src[src.index('html[data-theme="neon"] .pn-item'):][:200]
+        assert "--rn-mut" in src[src.index(".pn-list {"):][:120]

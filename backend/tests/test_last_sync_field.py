@@ -73,7 +73,11 @@ class TestTodayWiresItUp:
         route `last_sync` through the sync-freshness resolver, not hand
         back the bare HR-table max under that name."""
         src = inspect.getsource(summary.today)
-        assert "_resolve_last_sync(hb, last_hr_sample_at)" in src
+        # UI-3 moved the lookup into `_sync_signals` so `/summary/tiles`
+        # shares it; the resolver call now lives there.
+        assert "_sync_signals(db)" in src
+        assert "_resolve_last_sync(hb, last_hr_sample_at)" in inspect.getsource(
+            summary._sync_signals)
         assert "last_sync = last_sync_result.scalar()" not in src
 
     def test_the_hr_sample_instant_is_kept_under_its_own_name(self):

@@ -10,11 +10,29 @@
  *
  * Data still comes from `/summary/tiles`; only the presentation changed.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api/client";
-import type { VitalTile } from "@/api/types";
+import type { VitalTile, VitalTilesResponse } from "@/api/types";
 import MetricCard from "./MetricCard.vue";
+
+const props = withDefaults(defineProps<{
+  /** UI-3 — a parent that already holds `/summary/tiles` (Body, for its
+   *  recovery hero) passes it here so the same response is not fetched
+   *  twice. Omitted, the component fetches for itself as before. */
+  data?: VitalTilesResponse | null;
+  /** Null drops the "Key metrics" heading — Body is nothing BUT key
+   *  metrics, so it read "Body / Key metrics" twice over. */
+  title?: string | null;
+  /** Tiles shown elsewhere on the page (Body's recovery hero). */
+  exclude?: string[];
+  /** Two tiers: `cadence === "daily"` tiles stay 2-up chart cards,
+   *  `"intermittent"` ones become full-width compact rows with a 14-day
+   *  reading strip. The cadence is the server's; a tile without one stays
+   *  a card. Off = the home grid, unchanged. */
+  tiered?: boolean;
+  chartHeight?: number;
+}>(), { data: undefined, title: "Key metrics", exclude: () => [], tiered: false, chartHeight: 40 });
 
 const router = useRouter();
 const tiles = ref<VitalTile[]>([]);
@@ -61,9 +79,17 @@ async function load() {
   // vocabulary. This component used to read `extra` and map the names
   // itself with a private table that was missing skin_temp entirely, so a
   // saved order silently pushed skin temp to the end of the grid.
-  const [t, p] = await Promise.allSettled([api.summaryTiles(), api.getTilePrefs()]);
-  tiles.value = t.status === "fulfilled" ? (t.value.tiles ?? []) : [];
-  if (t.status === "fulfilled") groupOrder.value = t.value.group_order ?? [];
+  const own = props.data === undefined;
+  const [t, p] = await Promise.allSettled([
+    own ? api.summaryTiles() : Promise.resolve(props.data ?? null),
+    api.getTilePrefs(),
+  ]);
+  if (own) {
+    tiles.value = t.status === "fulfilled" ? (t.value?.tiles ?? []) : [];
+    if (t.status === "fulfilled") groupOrder.value = t.value?.group_order ?? [];
+  } else {
+    applyData(props.data ?? null);
+  }
   if (p.status === "fulfilled") {
     order.value = p.value.order;
     hidden.value = p.value.hidden;
@@ -71,6 +97,46 @@ async function load() {
   loaded.value = true;
 }
 onMounted(load);
+
+function applyData(d: VitalTilesResponse | null) {
+  tiles.value = d?.tiles ?? [];
+  groupOrder.value = d?.group_order ?? [];
+}
+// A parent-supplied response can refresh (retry, SWR swap) after mount.
+watch(() => props.data, (d) => { if (d !== undefined) applyData(d ?? null); });
+
+/** Split a group into the 2-up cards and the compact rows. */
+function tier(ts: VitalTile[]): { cards: VitalTile[]; rows: VitalTile[] } {
+  if (!props.tiered) return { cards: ts, rows: [] };
+  return {
+    cards: ts.filter((t) => t.cadence !== "intermittent"),
+    rows: ts.filter((t) => t.cadence === "intermittent"),
+  };
+}
+
+const STRIP_DAYS = 14;
+/** One flag per day, oldest first, padded on the left so today anchors the
+ *  right end. Presence only — the reading heights belong on the detail. */
+function strip(t: VitalTile): boolean[] {
+  const pts = (t.series ?? []).slice(-STRIP_DAYS).map((p) => p.value != null);
+  return [...Array(Math.max(0, STRIP_DAYS - pts.length)).fill(false), ...pts];
+}
+
+/** "as of Sep 20 · 12.2 lb to lose" — on these metrics the date is half the
+ *  information. The goal note is the server's sentence (OG3-A4). */
+function rowQualifier(t: VitalTile): string {
+  if (t.value == null) return `No readings in the last ${STRIP_DAYS} days`;
+  let when = "Today";
+  if (t.stale_days != null && t.stale_days > 0 && t.as_of) {
+    const d = new Date(t.as_of + "T00:00:00");
+    if (!Number.isNaN(d.getTime())) {
+      when = "as of " + d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    }
+  }
+  return t.goal_note ? `${when} · ${t.goal_note}` : when;
+}
+
+const CHIP_TONE: Record<string, string> = { good: "#5dff3b", typical: "#9b9bb0", watch: "#ffb52e" };
 
 /** Sentence-case chip text per metric, the way the reference words it —
  *  "Goal not met" on a goal metric reads better than "Out of range". */
@@ -155,7 +221,7 @@ const grouped = computed(() => {
 });
 
 const shown = computed(() => {
-  const hide = new Set(hidden.value);
+  const hide = new Set([...hidden.value, ...props.exclude]);
   const visible = tiles.value.filter((t) => !hide.has(t.key));
   if (!order.value.length) return visible;
   const rank = new Map(order.value.map((k, i) => [k, i] as const));
@@ -170,15 +236,15 @@ const shown = computed(() => {
 
 <template>
   <section v-if="loaded && shown.length" class="km">
-    <div class="sechead">
-      <h2 class="sect">Key metrics</h2>
+    <div v-if="title" class="sechead">
+      <h2 class="sect">{{ title }}</h2>
       <button class="edit" @click="router.push('/settings?tab=display')">Edit</button>
     </div>
 
     <div v-for="g in grouped" :key="g.name" class="group">
       <h3 class="ghead">{{ g.name }}</h3>
       <div class="grid">
-      <button v-for="t in g.tiles" :key="t.key" class="cell"
+      <button v-for="t in tier(g.tiles).cards" :key="t.key" class="cell"
               @click="ROUTE[t.key] && router.push(ROUTE[t.key])">
         <MetricCard
           :name="t.label"
@@ -196,9 +262,32 @@ const shown = computed(() => {
           :accent="ACCENT[t.key] ?? '#28e6ff'"
           :delta="t.delta"
           :higher-is-better="t.higher_is_better"
+          :chart-height="chartHeight"
         />
       </button>
       </div>
+      <!-- UI-3: metrics taken by hand. As 2-up chart cards these were
+           mostly an empty axis; what matters is the last reading, its date,
+           and how often one is taken — the dot strip. -->
+      <button v-for="t in tier(g.tiles).rows" :key="t.key" class="irow"
+              :style="{ '--acc': ACCENT[t.key] ?? '#28e6ff' }"
+              @click="ROUTE[t.key] && router.push(ROUTE[t.key])">
+        <div class="ir-top">
+          <div class="ir-main">
+            <div class="ir-name">{{ t.label }}</div>
+            <div class="ir-val" :class="{ nodata: t.value == null }">
+              {{ displayValue(t) ?? "No data" }}<small v-if="t.value != null && t.unit">{{ t.unit }}</small>
+            </div>
+          </div>
+          <span v-if="chipLabel(t)" class="ir-chip"
+                :style="{ color: CHIP_TONE[t.status ?? ''] ?? '#9b9bb0' }">{{ chipLabel(t) }}</span>
+        </div>
+        <div class="ir-qual">{{ rowQualifier(t) }}</div>
+        <div class="ir-strip" aria-hidden="true">
+          <i v-for="(on, i) in strip(t)" :key="i"
+             :class="{ on, today: i === STRIP_DAYS - 1 }"></i>
+        </div>
+      </button>
     </div>
   </section>
 </template>
@@ -211,15 +300,35 @@ const shown = computed(() => {
 }
 .edit {
   background: none; border: 0; cursor: pointer;
-  color: #8ab4f8; font-size: .82rem; padding: 4px 2px;
+  color: #28e6ff; font-size: .82rem; padding: 4px 2px;
 }
+.irow {
+  display: block; width: 100%; text-align: left; cursor: pointer; color: inherit;
+  background: #181b27; border: 1px solid color-mix(in srgb, var(--acc) 16%, transparent);
+  border-radius: 18px; padding: 12px 14px; margin-top: 10px; font: inherit;
+}
+.ir-top { display: flex; align-items: center; gap: 10px; }
+.ir-main { flex: 1; min-width: 0; }
+.ir-name { font-size: .75rem; color: #9b9bb0; }
+.ir-val { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 1.5rem;
+  letter-spacing: -0.02em; color: #ececf5; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ir-val small { font-family: inherit; font-size: .75rem; font-weight: 400; color: #9b9bb0; margin-left: 4px; }
+.ir-val.nodata { font-size: 1.05rem; font-weight: 500; color: #9b9bb0; }
+.ir-chip { font-size: .66rem; font-weight: 500; padding: 3px 9px; border-radius: 999px;
+  background: color-mix(in srgb, currentColor 13%, transparent); white-space: nowrap; }
+.ir-qual { font-size: .7rem; color: #9b9bb0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ir-strip { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+.ir-strip i { width: 8px; height: 8px; border-radius: 50%; background: #272a3b; display: block; }
+.ir-strip i.on { background: var(--acc); }
+.ir-strip i.today { width: 9px; height: 9px; }
+.ir-strip i.today:not(.on) { box-shadow: inset 0 0 0 1px rgba(155, 155, 176, .6); }
 .group { margin-bottom: 14px; }
 .ghead {
-  font-size: 1rem; font-weight: 500; color: #e9edf2;
+  font-size: 1rem; font-weight: 500; color: #ececf5;
   margin: 18px 0 10px; letter-spacing: 0;
 }
 .sect {
-  font-size: 1.35rem; font-weight: 400; color: #e9edf2;
+  font-size: 1.35rem; font-weight: 400; color: #ececf5;
   margin: 0 0 12px; letter-spacing: -0.2px;
 }
 /* Exactly two columns, matching the phone and the reference. `auto-fill`

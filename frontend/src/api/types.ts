@@ -462,6 +462,9 @@ export interface VitalTile {
   as_of: string | null;
   stale_days: number | null;
   series: VitalTilePoint[];
+  /** UI-3 — "daily" | "intermittent", decided server-side (TILE_CADENCE)
+   *  so Body picks its chart card vs compact row without a client list. */
+  cadence?: "daily" | "intermittent" | null;
 }
 export interface VitalTilesRollup {
   judged: number;
@@ -480,6 +483,8 @@ export interface VitalTilesResponse {
   group_order?: string[];
   /** Per-focus-area "N tracked" counts. */
   focus_areas?: Record<string, { tracked: number; total: number }>;
+  /** UI-3 — the same sync-freshness timestamp /summary/today reports. */
+  last_sync?: string | null;
 }
 
 /** One card from GET /summary/events. Wording and nap-vs-night

@@ -1,34 +1,37 @@
 <script setup lang="ts">
 /**
- * You — personal & system hub for the "Vitality Neon" redesign.
+ * You — the personal hub. Phone twin: `YouScreen.kt`.
  *
- * Top: two habit cards (Fasting cyan ring + Sober magenta flame), then a
- * Goals card driven by aiGoals(), then a settings list of tappable pills that
- * drill into Journal / Settings tabs.
+ *   title   "You", with the profile summary as a subtitle
+ *   hero    habits: the active fast as a ring (elapsed of target, stage,
+ *           when it ends) beside the sober count
+ *   goals   up to three small rings, coloured by the SERVER's state_tone
+ *   grid    Journal · Coach · Meals · Sober · Fasting · Settings
  *
- * Mirrors the Rings.vue conventions: <script setup lang="ts">, onMounted load,
- * Promise.all with per-call .catch fallbacks, defensive null handling, and a
- * fully scoped neon stylesheet keyed off the `.you-view` wrapper.
+ * Failure is not absence (UX-F2). Every request is settled separately and
+ * a section only makes a claim about the user — "Not fasting", "No active
+ * goals yet", "Start counting" — when its own request succeeded. When all
+ * of them fail the page says so, with a retry, and shows nothing else but
+ * the navigation.
  */
-import { onMounted, ref, computed } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { api } from "@/api/client";
-import { goalTone, goalMovedAway, goalDeltaLabel } from "@/goalState";
-// OG3-M4 — lucide rather than emoji for the nav pills. An emoji is rendered
-// by the platform's own font, so the same glyph is a different drawing on
-// every phone and browser, which is the thing a hand-picked icon set exists
-// to prevent. These five sat in the neon chrome as the last holdouts.
-import { ClipboardList, Link2, Package, PencilLine, Salad, User, UtensilsCrossed } from "lucide-vue-next";
+import { api, type FastingSessionOut } from "@/api/client";
+import { goalTone, goalStateNote } from "@/goalState";
+import NeonPage from "@/components/neon/NeonPage.vue";
+import NeonHero from "@/components/neon/NeonHero.vue";
+import NeonRing from "@/components/neon/NeonRing.vue";
+import NeonEyebrow from "@/components/neon/NeonEyebrow.vue";
+import {
+  Brain, ChefHat, Hourglass, Package, PencilLine, Salad, Settings, Timer, UtensilsCrossed,
+} from "lucide-vue-next";
 
 const router = useRouter();
 const loading = ref(true);
+const error = ref<string | null>(null);
 
-const fastH = ref<number | null>(null);
-const fastTarget = ref<number | null>(null);
-const fastActive = ref<boolean>(false);
-
-const soberDays = ref<number | null>(null);
-const soberLongest = ref<number | null>(null);
+type Sober = Awaited<ReturnType<typeof api.soberCurrent>>;
+type Profile = Awaited<ReturnType<typeof api.getProfile>>;
 
 interface GoalProjection {
   per_day: number | null;
@@ -47,407 +50,310 @@ interface GoalRow {
   title: string;
   target_value: number | null;
   target_unit: string | null;
-  /** Real progress from the server. This screen used to fabricate it. */
   current_value?: number | null;
+  /** Server progress, rendered verbatim. Null = no reading, never 0. */
   progress_pct?: number | null;
   /** GOAL-STATE: "achieved" | "advancing" | "at_start" | "moved_away" |
-   *  "no_data". A 0% bar cannot tell the last three apart. */
+   *  "no_data". A 0% ring cannot tell the last three apart. */
   progress_state?: string | null;
   /** Server-owned tone. Never derived here — see `goalState.ts`. */
   state_tone?: string | null;
   /** Signed, in the goal's own unit; exactly current - baseline. */
   delta_value?: number | null;
   baseline_value?: number | null;
-
   projection?: GoalProjection | null;
 }
-const goals = ref<GoalRow[]>([]);
 
-const today = computed(() =>
-  new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }),
-);
+// Each section: undefined = never answered; null (fasting) = answered "none".
+const fasting = ref<FastingSessionOut | null | undefined>(undefined);
+const sober = ref<Sober | undefined>(undefined);
+const goals = ref<GoalRow[] | undefined>(undefined);
+const profile = ref<Profile | undefined>(undefined);
 
-// ── Fasting derived state ───────────────────────────────────────────────
-const fastTargetVal = computed<number>(() => fastTarget.value ?? 16);
-const fastComplete = computed<boolean>(
-  () => fastH.value != null && fastH.value >= fastTargetVal.value,
-);
-const fastPct = computed<number>(() => {
-  if (fastH.value == null) return 0;
-  return Math.max(0, Math.min(100, (fastH.value / fastTargetVal.value) * 100));
-});
-// ring geometry (r = 31 → C ≈ 194.8)
-const RC = 2 * Math.PI * 31;
-const fastDash = computed<string>(() => {
-  const filled = (fastPct.value / 100) * RC;
-  return `${filled.toFixed(1)} ${RC.toFixed(1)}`;
-});
-// The template's v-else-if guarantees fastH is set, but the checker cannot
-// narrow through it — so resolve the label here rather than with a `?? 0` in
-// the template, which would read as a real zero-hour fast to the next reader.
-const fastProgressLabel = computed<string>(() =>
-  fastH.value == null
-    ? "—"
-    : `${Math.floor(fastH.value)} / ${Math.round(fastTargetVal.value)}h`,
-);
-
-const fastBig = computed<string>(() => {
-  if (fastH.value == null) return "—";
-  return `${Math.floor(fastH.value)}:${Math.round(fastTargetVal.value)}`;
-});
-
-// ── Goals bar helpers ───────────────────────────────────────────────────
-const GOAL_GRADIENTS: string[] = [
-  "linear-gradient(90deg,#28e6ff,#5dff3b)",
-  "linear-gradient(90deg,#ff3ad8,#28e6ff)",
-  "linear-gradient(90deg,#5dff3b,#28e6ff)",
-];
-const GOAL_GLOWS: string[] = [
-  "0 0 8px rgba(40,230,255,.6)",
-  "0 0 8px rgba(255,58,216,.5)",
-  "0 0 8px rgba(93,255,59,.5)",
-];
-const topGoals = computed<GoalRow[]>(() => goals.value.slice(0, 3));
-
-// GOAL-1: real progress from the server.
-//
-// This function used to return `55 + (seed % 40)` — a number derived from
-// the goal's id and target — and render it as a progress bar. The comment
-// above it claimed that was preferable to "fabricating progress numbers",
-// but a bar filled to 73% because of an arithmetic trick on a row id is
-// exactly a fabricated progress number, and it was indistinguishable from
-// a real one on screen.
-//
-// /ai/goals has returned a genuine `progress_pct` since GOALS-3; the phone
-// was already reading it. Only this screen was inventing one.
-function goalPct(g: GoalRow): number {
-  if (g.progress_pct == null) return 0;
-  return Math.max(0, Math.min(100, g.progress_pct));
-}
-
-/** True when we have no real progress figure, so the bar renders as an
- *  empty track rather than pretending to be at zero percent. */
-function goalUnknown(g: GoalRow): boolean {
-  return g.progress_pct == null;
-}
-
-/** One line under the bar: the rate, and the date — or the reason there
- *  isn't one. The reason is the point; a projection that silently
- *  disappears reads as a loading bug. */
-function goalEta(g: GoalRow): string | null {
-  const p = g.projection;
-  if (!p) return null;
-  if (p.is_fallback) return p.fallback_reason;
-  const rate = p.per_week != null
-    ? `${p.per_week > 0 ? "+" : ""}${Math.abs(p.per_week) < 10 ? p.per_week.toFixed(2) : Math.round(p.per_week)}/wk`
-    : null;
-  if (p.eta_date) {
-    const conf = p.confidence === "low" ? " (rough)" : "";
-    return rate ? `${rate} · on track for ${p.eta_date}${conf}` : `On track for ${p.eta_date}${conf}`;
-  }
-  return rate;
-}
-function goalGradient(i: number): string {
-  return GOAL_GRADIENTS[i % GOAL_GRADIENTS.length] ?? GOAL_GRADIENTS[0]!;
-}
-function goalGlow(i: number): string {
-  return GOAL_GLOWS[i % GOAL_GLOWS.length] ?? GOAL_GLOWS[0]!;
-}
-function goalValue(g: GoalRow): string {
-  if (g.target_value == null) return "Active";
-  const unit = g.target_unit ?? "";
-  return `${Math.round(g.target_value)}${unit ? " " + unit : ""}`;
-}
+const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 
 async function load(): Promise<void> {
   loading.value = true;
-  const [fast, sober, gs] = await Promise.all([
-    api.fastingCurrent().catch(() => null),
-    api.soberStats().catch(() => null),
-    api.aiGoals(true).catch(() => []),
+  const [f, s, g, p] = await Promise.allSettled([
+    api.fastingCurrent(), api.soberCurrent(), api.aiGoals(true), api.getProfile(),
   ]);
-
-  if (fast) {
-    fastActive.value = fast.is_active ?? false;
-    fastH.value = fast.elapsed_h ?? null;
-    fastTarget.value = fast.target_hours ?? null;
-  }
-  if (sober) {
-    soberDays.value = sober.current_days ?? null;
-    soberLongest.value = sober.longest_days ?? null;
-  }
-  goals.value = (gs ?? []) as GoalRow[];
-
+  if (f.status === "fulfilled") fasting.value = f.value;
+  if (s.status === "fulfilled") sober.value = s.value;
+  if (g.status === "fulfilled") goals.value = (g.value ?? []) as GoalRow[];
+  if (p.status === "fulfilled") profile.value = p.value;
+  const allFailed = [f, s, g, p].every((r) => r.status === "rejected");
+  error.value = allFailed ? "Couldn't reach the backend." : null;
   loading.value = false;
 }
 onMounted(load);
 
+const nothingKnown = computed(() =>
+  fasting.value === undefined && sober.value === undefined
+  && goals.value === undefined && profile.value === undefined,
+);
+
+// ── Profile subtitle ────────────────────────────────────────────────────
+const profileLine = computed<string | null>(() => {
+  const p = profile.value;
+  if (!p) return null;
+  const parts: string[] = [];
+  if (p.derived?.age != null) parts.push(`${p.derived.age} yrs`);
+  if (p.sex) parts.push(p.sex[0].toUpperCase() + p.sex.slice(1));
+  if (p.height_cm != null) {
+    const inches = Math.round(p.height_cm / 2.54);
+    parts.push(`${Math.floor(inches / 12)}'${inches % 12}"`);
+  }
+  if (p.activity_level) parts.push(p.activity_level.replace(/_/g, " "));
+  return parts.length ? parts.join(" · ") : "Add your details in Settings";
+});
+
+// ── Fasting ─────────────────────────────────────────────────────────────
+const STAGE_LABELS: Record<string, string> = {
+  fed: "Fed state", gut_rest: "Gut rest", glycogen_depleting: "Glycogen depleting",
+  ketosis: "Ketosis", autophagy: "Autophagy", deep_autophagy: "Deep autophagy",
+  extended_36: "36h territory", extended_48: "48h territory", extended_72: "72h+ territory",
+};
+const activeFast = computed(() => (fasting.value?.is_active ? fasting.value : null));
+/** elapsed / target, both from /fasting/current. No target, no fraction —
+ *  the ring stays empty rather than assume 16h. */
+const fastFrac = computed(() => {
+  const f = activeFast.value;
+  return f && f.target_hours ? f.elapsed_h / f.target_hours : 0;
+});
+function trim(v: number): string {
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+}
+const fastEnds = computed<string | null>(() => {
+  const f = activeFast.value;
+  if (!f || f.target_hours == null) return null;
+  const end = new Date(Date.parse(f.started_at) + f.target_hours * 3600_000);
+  if (Number.isNaN(end.getTime())) return null;
+  const clock = end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return f.elapsed_h >= f.target_hours ? `target reached ${clock}` : `ends ${clock}`;
+});
+const stageLabel = computed(() => {
+  const s = activeFast.value?.current_stage ?? "";
+  return STAGE_LABELS[s] ?? s.replace(/_/g, " ");
+});
+
+// ── Sober ───────────────────────────────────────────────────────────────
+const soberDays = computed<number | null>(() => {
+  const s = sober.value;
+  if (!s?.active) return null;
+  return s.days ?? Math.floor(s.active.days);
+});
+const soberSince = computed<string | null>(() => {
+  const iso = sober.value?.active?.start_at;
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return "since " + d.toLocaleDateString(undefined,
+    sameYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
+});
+
+// ── Goals as rings ──────────────────────────────────────────────────────
+const topGoals = computed(() => (goals.value ?? []).slice(0, 3));
+/**
+ * Colour from the server's `state_tone`, NEVER from list position — the
+ * old bars cycled cyan/magenta/lime by index, so a regressing goal could
+ * wear an achievement colour by sorting first. Fill is `progress_pct`
+ * verbatim; null is an empty ring that says so. No current/target
+ * fallback: for a weight goal approached from above that ratio exceeds 1
+ * and painted a FULL bar on the goal doing worst (GOAL-STATE).
+ */
+function ringColor(g: GoalRow): string {
+  if (g.progress_pct == null) return "#272a3b";
+  switch (goalTone(g)) {
+    case "positive": return "#5dff3b";
+    case "caution": return "#ffb52e";
+    case "unknown": return "#272a3b";
+    default: return "#9b9bb0";
+  }
+}
+function ringNote(g: GoalRow): string | null {
+  return g.progress_pct == null ? "no reading yet" : goalStateNote(g);
+}
+
+// ── Navigation ──────────────────────────────────────────────────────────
+const TILES = [
+  { label: "Journal", icon: PencilLine, tint: "#ff3ad8", to: "/journal" },
+  { label: "Coach", icon: Brain, tint: "#6f7bff", to: "/coach" },
+  { label: "Meals", icon: UtensilsCrossed, tint: "#5dff3b", to: "/meals" },
+  { label: "Sober", icon: Timer, tint: "#ff3ad8", to: "/sober" },
+  { label: "Fasting", icon: Hourglass, tint: "#28e6ff", to: "/fasting" },
+  { label: "Settings", icon: Settings, tint: "#ffb52e", to: "/settings" },
+];
+/* SA-R3/SA-R4: these three meal pages are reachable from no other neon
+   page (the Meals landing does not link them), so they stay here as small
+   chips under the grid rather than disappear with the old pill list. */
+const MEAL_LINKS = [
+  { label: "Pantry", icon: Package, to: "/meals/pantry" },
+  { label: "Cook from pantry", icon: Salad, to: "/meals/can-make" },
+  { label: "Weekend prep", icon: ChefHat, to: "/meals/prep" },
+];
 function go(path: string): void {
   router.push(path);
 }
 </script>
 
 <template>
-  <div class="you-view">
-    <header class="head">
-      <h1>You</h1>
-      <span class="date">{{ today }}</span>
-    </header>
+  <NeonPage title="You">
+    <template #trailing><span class="date">{{ today }}</span></template>
+    <p v-if="profileLine" class="sub">{{ profileLine }}</p>
 
-    <!-- ── Habits ───────────────────────────────────────────── -->
-    <div class="cap">Habits</div>
-    <div class="habits">
-      <!-- Fasting -->
-      <button class="habit" @click="go('/fasting')" aria-label="Fasting detail">
-        <div class="lab cyan">Fasting</div>
-        <div class="rh">
-          <svg width="74" height="74" viewBox="0 0 74 74">
-            <circle cx="37" cy="37" r="31" fill="none" stroke="var(--rn-track)" stroke-width="8" />
-            <circle
-              class="ring-glow"
-              cx="37"
-              cy="37"
-              r="31"
-              fill="none"
-              stroke="var(--rn-cyan)"
-              stroke-width="8"
-              stroke-linecap="round"
-              :stroke-dasharray="fastDash"
-              transform="rotate(-90 37 37)"
-            />
-          </svg>
-          <div class="ctr">
-            <div class="big cyan">{{ fastBig }}</div>
-            <div class="sub">hours</div>
-          </div>
-        </div>
-        <div v-if="fastComplete" class="tag bg-cyan cyan">Complete ✓</div>
-        <div v-else-if="fastActive" class="tag bg-cyan cyan">
-          {{ fastProgressLabel }}
-        </div>
-        <div v-else class="tag bg-cyan cyan">Not fasting</div>
+    <template v-if="nothingKnown">
+      <div v-if="loading" class="skel" aria-busy="true">
+        <div class="sk-row"><div class="sk tall"><span>Fasting</span></div><div class="sk tall mag"><span>Sober</span></div></div>
+        <div class="sk-row three"><div class="sk lime"><span>Goals</span></div><div class="sk lime"></div><div class="sk lime"></div></div>
+      </div>
+      <!-- UX-F2: say it failed — no "Not fasting", no "No active goals". -->
+      <button v-else-if="error" class="errbar" @click="load">
+        <b>Couldn't load</b><span>{{ error }}</span><em>Tap to retry</em>
       </button>
+    </template>
 
-      <!-- Sober -->
-      <button class="habit" @click="go('/sober')" aria-label="Sober detail">
-        <div class="lab mag">Sober</div>
-        <div class="flame">🔥</div>
-        <div class="stat">
-          <b class="mag">{{ soberDays != null ? Math.floor(soberDays) : "—" }}</b>
-          <span>days</span>
+    <template v-else>
+      <NeonHero accent="#28e6ff">
+        <div class="habits">
+          <button class="half" aria-label="Fasting detail" @click="go('/fasting')">
+            <span class="eyebrow cyan">Fasting</span>
+            <NeonRing :fraction="fastFrac" color="#28e6ff" :size="112" :stroke="9">
+              <template v-if="activeFast">
+                <!-- "14.3h" over "OF 16H" — never "14:16", which reads as a clock. -->
+                <div class="rv">{{ activeFast.elapsed_h.toFixed(1) }}h</div>
+                <div class="rc">{{ activeFast.target_hours != null ? `of ${trim(activeFast.target_hours)}h` : "no target" }}</div>
+              </template>
+              <div v-else class="rv mut">—</div>
+            </NeonRing>
+            <template v-if="activeFast">
+              <span class="stage">{{ stageLabel }}</span>
+              <span v-if="fastEnds" class="small">{{ fastEnds }}</span>
+            </template>
+            <!-- Only a SUCCESSFUL "no active fast" may say this. -->
+            <span v-else-if="fasting === null || (fasting && !fasting.is_active)" class="cta cyan">Not fasting · Start</span>
+            <span v-else class="small">Couldn't load</span>
+          </button>
+          <div class="divider"></div>
+          <button class="half" aria-label="Sober detail" @click="go('/sober')">
+            <span class="eyebrow mag">Sober</span>
+            <template v-if="soberDays != null">
+              <!-- Magenta always: the count is never a warning colour, and a
+                   reset is never one either. -->
+              <b class="big mag">{{ soberDays }}</b>
+              <span class="small">{{ soberDays === 1 ? "day" : "days" }}</span>
+              <span v-if="soberSince" class="small since">{{ soberSince }}</span>
+            </template>
+            <template v-else-if="sober">
+              <b class="big mut">—</b>
+              <span class="cta">Start counting</span>
+            </template>
+            <template v-else>
+              <b class="big mut">—</b>
+              <span class="small">Couldn't load</span>
+            </template>
+          </button>
         </div>
-        <div class="tag bg-mag mag">
-          {{ soberLongest != null ? "longest " + Math.floor(soberLongest) + "d" : "Longest streak" }}
-        </div>
-      </button>
-    </div>
+      </NeonHero>
 
-    <!-- ── Goals ────────────────────────────────────────────── -->
-    <div class="card goals">
       <div class="ghead">
-        <div class="gh">Goals</div>
+        <NeonEyebrow>Goals</NeonEyebrow>
         <button class="gall" @click="go('/goals')">All ›</button>
       </div>
-      <div class="gspace"></div>
-
-      <template v-if="topGoals.length">
-        <div v-for="(g, i) in topGoals" :key="g.id" class="grow">
-          <template v-if="g.target_value != null">
-            <div class="gtop">
-              <div class="gname">{{ g.title }}</div>
-              <div class="gval cyan">{{ goalValue(g) }}</div>
+      <p v-if="goals === undefined" class="note">Couldn't load goals</p>
+      <p v-else-if="!goals.length" class="note">No active goals yet</p>
+      <div v-else class="goals">
+        <div v-for="g in topGoals" :key="g.id" class="goal">
+          <NeonRing :fraction="(g.progress_pct ?? 0) / 100" :color="ringColor(g)" :size="72" :stroke="7">
+            <div class="gp" :class="{ mut: g.progress_pct == null }">
+              {{ g.progress_pct != null ? Math.round(g.progress_pct) + "%" : "—" }}
             </div>
-            <div class="bar" :class="{ unknown: goalUnknown(g), away: goalMovedAway(g) }">
-              <!-- The neon gradients read as achievement. A goal that has
-                   gone backwards gets the amber track instead, rather than
-                   a sliver of celebratory green. -->
-              <i v-if="!goalUnknown(g) && !goalMovedAway(g)"
-                 :style="{ width: goalPct(g) + '%', background: goalGradient(i), boxShadow: goalGlow(i) }"></i>
-            </div>
-            <div v-if="goalUnknown(g)" class="geta mut">No reading yet</div>
-            <div v-else-if="goalMovedAway(g)" class="geta away-txt">
-              {{ goalDeltaLabel(g) }}
-            </div>
-            <div v-else-if="goalEta(g)" class="geta"
-                 :class="{ mut: g.projection?.is_fallback }">{{ goalEta(g) }}</div>
-          </template>
-          <div v-else class="gsimple">
-            <div class="gname">{{ g.title }}</div>
-            <div class="gval mut">Active</div>
-          </div>
+          </NeonRing>
+          <div class="gt">{{ g.title }}</div>
+          <div v-if="ringNote(g)" class="gn"
+               :class="{ away: goalTone(g) === 'caution' && g.progress_pct != null }">{{ ringNote(g) }}</div>
         </div>
-      </template>
-      <div v-else class="gempty">No active goals yet</div>
+      </div>
+    </template>
+
+    <NeonEyebrow>More</NeonEyebrow>
+    <div class="tiles">
+      <button v-for="t in TILES" :key="t.to" class="tile" @click="go(t.to)">
+        <span class="ti" :style="{ color: t.tint, background: `color-mix(in srgb, ${t.tint} 14%, transparent)` }">
+          <component :is="t.icon" :size="19" />
+        </span>
+        <span>{{ t.label }}</span>
+      </button>
     </div>
-
-    <!-- ── Personal & system ────────────────────────────────── -->
-    <div class="cap">Personal &amp; system</div>
-
-    <!-- SA-R3/SA-R4 — a single "Meals" pill used to be the ONLY neon-shell
-         door into meals, pointing at /meals/can-make while its subtitle
-         promised "pantry · log" — two screens that page cannot reach.
-         Rather than patch the wording, four pills now each name what they
-         actually open: Meals (-> /meals -> Today.vue, Direction A's daily
-         log, previously unreachable on web at all -- "log" is what the
-         old subtitle promised), Pantry (49 real rows, previously
-         reachable from no neon page), Cook from pantry (the can-make
-         check + its "meal ideas" footer link -- the page the old pill
-         actually landed on), and Weekend prep (unchanged, already
-         reachable). Named to match SideNav.vue's own labels for the same
-         four routes so the two shells describe one feature consistently. -->
-    <button class="pill" @click="go('/meals')">
-      <span class="pi bg-lime lime"><ClipboardList :size="17" /></span>
-      <span class="pn">Meals<small>Today's log · plan · shopping</small></span>
-      <span class="chev">›</span>
-    </button>
-
-    <button class="pill" @click="go('/meals/pantry')">
-      <span class="pi bg-cyan cyan"><Package :size="17" /></span>
-      <span class="pn">Pantry<small>What's in the house</small></span>
-      <span class="chev">›</span>
-    </button>
-
-    <button class="pill" @click="go('/meals/can-make')">
-      <span class="pi bg-mag mag"><Salad :size="17" /></span>
-      <span class="pn">Cook from pantry<small>What can I make · meal ideas</small></span>
-      <span class="chev">›</span>
-    </button>
-
-    <button class="pill" @click="go('/meals/prep')">
-      <span class="pi bg-amber amber"><UtensilsCrossed :size="17" /></span>
-      <span class="pn">Weekend prep<small>Cook once, eat all week</small></span>
-      <span class="chev">›</span>
-    </button>
-
-    <button class="pill" @click="go('/journal')">
-      <span class="pi bg-mag mag"><PencilLine :size="17" /></span>
-      <span class="pn">Journal<small>Notes & reflections</small></span>
-      <span class="chev">›</span>
-    </button>
-
-    <button class="pill" @click="go('/settings?tab=profile')">
-      <span class="pi bg-cyan cyan"><User :size="17" /></span>
-      <span class="pn">Profile &amp; body<small>Age, height, metrics</small></span>
-      <span class="chev">›</span>
-    </button>
-
-    <button class="pill" @click="go('/settings?tab=strava')">
-      <span class="pi bg-lime lime"><Link2 :size="17" /></span>
-      <span class="pn">Integrations<small>Strava · Health Connect</small></span>
-      <span class="chev">›</span>
-    </button>
-
-    <button class="pill" @click="go('/settings?tab=display')">
-      <span class="pi bg-amber amber">◑</span>
-      <span class="pn">Display &amp; theme<small>Vitality Neon · dark</small></span>
-      <span class="chev">›</span>
-    </button>
-
-    <button class="pill" @click="go('/settings?tab=updates')">
-      <span class="pi bg-cyan cyan">ⓘ</span>
-      <span class="pn">About &amp; updates<small>Version · release notes</small></span>
-      <span class="chev">›</span>
-    </button>
-  </div>
+    <div class="mlinks">
+      <button v-for="m in MEAL_LINKS" :key="m.to" class="mlink" @click="go(m.to)">
+        <component :is="m.icon" :size="14" /> {{ m.label }}
+      </button>
+    </div>
+  </NeonPage>
 </template>
 
 <style scoped>
-/* No neon gradient on a goal that has gone the wrong way: the palette on
-   this shell reads as achievement, and a bright sliver on a regression is
-   the same lie the empty bar was telling, in a louder voice. */
-.bar.away { background: rgba(255, 181, 46, 0.18); }
-.geta.away-txt { color: #ffb52e; }
-.you-view {
-  --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
-  --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-cyan: #28e6ff; --rn-amber: #ffb52e;
-  --rn-track: #272a3b;
-  min-height: 100vh; margin: calc(-1 * var(--main-pt, 1.25rem)) calc(-1 * var(--main-px, 1.5rem)) 0;
-  /* OG3-M1: the bar's own height is reserved at the shell now.
-     This view used to carry 32px of its own, which is how the
-     three neon views ended up disagreeing about it. */
-  padding: 54px 22px 12px;
-  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
-  color: var(--rn-ink); font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
-}
+.date { color: #9b9bb0; font-weight: 600; font-size: 14px; }
+.sub { margin: -12px 0 14px; font-size: 12px; color: #9b9bb0; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.cyan { color: #28e6ff; } .mag { color: #ff3ad8; } .mut { color: #9b9bb0; }
 
-.head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; }
-.head h1 { font-size: 30px; font-weight: 800; margin: 0; letter-spacing: -0.5px; }
-.head .date { color: var(--rn-mut); font-weight: 600; font-size: 14px; }
+.habits { display: flex; align-items: stretch; }
+.half { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: none; border: 0; padding: 0; cursor: pointer; color: inherit; font: inherit; text-align: center; }
+.divider { width: 1px; background: #23263a; margin: 6px 12px; }
+.eyebrow { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 11px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; margin-bottom: 2px; }
+.rv { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 22px; color: #ececf5; }
+.rc { font-size: 9px; font-weight: 700; letter-spacing: .12em; color: #9b9bb0; text-transform: uppercase; }
+.stage { font-size: 13px; font-weight: 700; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.small { font-size: 11px; color: #9b9bb0; }
+.since { margin-top: 6px; }
+.cta { font-size: 12px; font-weight: 600; }
+.big { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 44px; line-height: 1;
+  margin-top: 14px; font-variant-numeric: tabular-nums; }
 
-.cap {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 11px; font-weight: 700;
-  letter-spacing: 0.12em; color: var(--rn-mut); text-transform: uppercase; margin: 2px 0 8px;
-}
+.ghead { display: flex; align-items: baseline; justify-content: space-between; }
+.gall { font-size: 11px; font-weight: 700; color: #28e6ff; background: none; border: 0; padding: 0; cursor: pointer; }
+.note { color: #9b9bb0; font-size: 13px; margin: 0 0 4px; }
+.goals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.goal { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px;
+  background: #181b27; border: 1px solid #23263a; border-radius: 18px; padding: 12px 8px; }
+.gp { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 16px; }
+.gt { font-size: 12px; font-weight: 700; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; }
+.gn { font-size: 10.5px; color: #9b9bb0; line-height: 1.25; }
+.gn.away { color: #ffb52e; }
 
-/* colour helpers */
-.mag { color: var(--rn-mag); } .lime { color: var(--rn-lime); }
-.cyan { color: var(--rn-cyan); } .amber { color: var(--rn-amber); }
-.mut { color: var(--rn-mut); }
-.bg-mag { background: rgba(255, 58, 216, 0.14); }
-.bg-lime { background: rgba(93, 255, 59, 0.14); }
-.bg-cyan { background: rgba(40, 230, 255, 0.14); }
-.bg-amber { background: rgba(255, 181, 46, 0.14); }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.tile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 4px;
+  background: #181b27; border: 1px solid #23263a; border-radius: 18px; cursor: pointer; color: #ececf5;
+  font: inherit; font-size: 13px; font-weight: 600; }
+.tile:active { transform: scale(.97); }
+.ti { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.mlinks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.mlink { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 12px; color: #9b9bb0;
+  background: #181b27; border: 1px solid #23263a; border-radius: 999px; padding: 6px 12px; cursor: pointer; }
 
-/* ── Habit cards ── */
-.habits { display: flex; gap: 12px; margin-bottom: 11px; }
-.habit {
-  flex: 1; background: var(--rn-card); border: 0; border-radius: 20px;
-  padding: 13px 14px 14px; display: flex; flex-direction: column; align-items: center;
-  text-align: center; position: relative; overflow: hidden; cursor: pointer; color: inherit;
-  transition: transform 0.12s ease;
-}
-.habit:active { transform: scale(0.97); }
-.habit .lab {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 11px; font-weight: 700;
-  letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 2px;
-}
-.habit .rh { position: relative; width: 74px; height: 74px; margin: 1px 0 7px; }
-.habit .rh svg { display: block; }
-.ring-glow { filter: drop-shadow(0 0 6px rgba(40, 230, 255, 0.7)); }
-.habit .ctr { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.habit .ctr .big { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 19px; line-height: 1; }
-.habit .ctr .sub { font-size: 10px; color: var(--rn-mut); font-weight: 600; margin-top: 3px; }
-.habit .flame { font-size: 34px; line-height: 1; margin: 4px 0 2px; filter: drop-shadow(0 0 10px rgba(255, 58, 216, 0.6)); }
-.habit .stat { display: flex; align-items: baseline; gap: 4px; margin-top: 2px; }
-.habit .stat b { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 24px; line-height: 1; }
-.habit .stat span { font-size: 12px; color: var(--rn-mut); font-weight: 600; }
-.habit .tag { margin-top: 6px; font-size: 11px; font-weight: 700; padding: 3px 11px; border-radius: 20px; }
+.errbar { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; cursor: pointer;
+  background: rgba(255, 93, 122, .10); border: 1px solid rgba(255, 93, 122, .28); border-radius: 14px;
+  padding: 12px 14px; margin-bottom: 12px; color: inherit; font: inherit; }
+.errbar b { color: #ff5d7a; font-size: 13px; }
+.errbar span { color: #9b9bb0; font-size: 12px; }
+.errbar em { color: #28e6ff; font-size: 12px; font-style: normal; font-weight: 600; }
 
-/* ── Goals card ── */
-.card { background: var(--rn-card); border-radius: 20px; padding: 16px 18px; margin-bottom: 12px; }
-.goals { margin-bottom: 10px; padding: 13px 16px; }
-.gspace { height: 5px; }
-.ghead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
-.ghead .gh {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 11px; font-weight: 700;
-  letter-spacing: 0.12em; color: var(--rn-mut); text-transform: uppercase;
-}
-.ghead .gall { font-size: 11px; font-weight: 700; color: var(--rn-cyan); background: none; border: 0; padding: 0; cursor: pointer; }
-.goals .grow { margin-bottom: 10px; }
-.goals .grow:last-child { margin-bottom: 1px; }
-.goals .gtop { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
-.goals .gname { font-weight: 700; font-size: 14px; }
-.goals .gval { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 13px; }
-.gsimple { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 0; }
-.gempty { color: var(--rn-mut); font-size: 13px; font-weight: 600; padding: 4px 0 2px; }
-.bar { height: 7px; border-radius: 7px; background: var(--rn-track); overflow: hidden; }
-.bar i { display: block; height: 100%; border-radius: 7px; }
-
-/* ── Settings pills ── */
-.pill {
-  display: flex; align-items: center; gap: 14px; background: var(--rn-card); border: 0;
-  border-radius: 20px; padding: 10px 14px; margin-bottom: 8px; cursor: pointer; color: inherit;
-  text-align: left; width: 100%; transition: transform 0.12s ease;
-}
-.pill:active { transform: scale(0.985); }
-.pill .pi {
-  width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center;
-  justify-content: center; flex: 0 0 auto; font-size: 16px;
-}
-.pill .pn { flex: 1; font-weight: 700; font-size: 15px; }
-.pill .pn small { display: block; color: var(--rn-mut); font-weight: 500; font-size: 11.5px; margin-top: 2px; }
-.pill .chev { color: var(--rn-mut); font-size: 18px; font-weight: 700; opacity: 0.7; }
-.bar.unknown { opacity: 0.35; }
-.geta { font-size: 0.7rem; margin-top: 0.25rem; color: var(--good, #4ade80); }
-.geta.mut { color: var(--muted-2, #64748b); }
+.skel { display: flex; flex-direction: column; gap: 10px; }
+.sk-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sk-row.three { grid-template-columns: repeat(3, 1fr); }
+.sk { height: 140px; border-radius: 20px; position: relative; overflow: hidden;
+  --c: rgba(40, 230, 255, .12);
+  background: linear-gradient(90deg, rgba(31,41,55,.5), var(--c), rgba(31,41,55,.5));
+  background-size: 300% 100%; animation: sweep 1.4s linear infinite; }
+.sk.tall { height: 200px; }
+.sk.mag { --c: rgba(255, 58, 216, .12); }
+.sk.lime { --c: rgba(93, 255, 59, .12); }
+.sk span { position: absolute; top: 14px; left: 14px; font-size: 12px; color: #9b9bb0; }
+@keyframes sweep { from { background-position: 100% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
 </style>

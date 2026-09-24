@@ -63,6 +63,35 @@ def _resolve_last_sync(
     return last_hr_sample_at
 
 
+async def current_last_sync(db: AsyncSession) -> datetime | None:
+    return (await _sync_signals(db))[0]
+
+
+async def _sync_signals(
+    db: AsyncSession,
+) -> tuple[datetime | None, datetime | None]:
+    """`(last_sync, last_hr_sample_at)`.
+
+    `last_sync` is the one "synced Xm ago" timestamp, shared by
+    `/summary/today` and `/summary/tiles` (UI-3) so the two can never
+    disagree.
+
+    Filtered through the same predicate as `/query/last-sync` (UX-D9):
+    without it the local debug build's heartbeat could supply the home
+    screen's "last sync" — the SA-O2 ghost, on a path that fix missed.
+    """
+    last_hr_sample_at = (await db.execute(
+        select(func.max(models.HeartRate.time))
+    )).scalar()
+    hb = (await db.execute(
+        select(models.SyncHeartbeat)
+        .where(models.real_install_heartbeat_filter())
+        .order_by(models.SyncHeartbeat.attempt_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    return _resolve_last_sync(hb, last_hr_sample_at), last_hr_sample_at
+
+
 def resolve_day(requested: date | None = None) -> tuple[date, Any, bool]:
     """Resolve a day-facing request to ``(day, tzinfo, is_today)``.
 
@@ -321,18 +350,7 @@ async def today(db: AsyncSession = Depends(get_session)) -> TodaySummary:
     # phone kept syncing fine every 15 minutes rendered as "amber, synced
     # 58h ago" on both home screens — the exact "phone stopped vs upstream
     # stopped" confusion HEALTH-1 exists to prevent (SA-L6).
-    last_hr_sample_result = await db.execute(select(func.max(models.HeartRate.time)))
-    last_hr_sample_at = last_hr_sample_result.scalar()
-    # Filtered through the same predicate as `/query/last-sync` (UX-D9):
-    # without it the local debug build's heartbeat could supply the home
-    # screen's "last sync" — the SA-O2 ghost, on a path that fix missed.
-    hb = (await db.execute(
-        select(models.SyncHeartbeat)
-        .where(models.real_install_heartbeat_filter())
-        .order_by(models.SyncHeartbeat.attempt_at.desc())
-        .limit(1)
-    )).scalar_one_or_none()
-    last_sync = _resolve_last_sync(hb, last_hr_sample_at)
+    last_sync, last_hr_sample_at = await _sync_signals(db)
 
     # Today's row may exist (e.g., backfill ran mid-day) but be sparse —
     # the Pixel Watch hasn't yet synced today's RHR/HRV/sleep. Pull the
@@ -596,10 +614,16 @@ async def summary_tiles(
         "pct": round(week_done / week_goal * 100, 1) if week_goal else 0.0,
     }
 
+    # UI-3 — Body's hero says "synced Xm ago" beside the in-range count.
+    # The same resolver /summary/today uses, so the home and Body cannot
+    # name two different sync times.
+    last_sync = await current_last_sync(db)
+
     return {
         "date": day.isoformat(),
         "tiles": tiles,
         "week": week,
+        "last_sync": last_sync.isoformat() if last_sync else None,
         "group_order": GROUP_ORDER,
         "focus_areas": focus,
         "summary": {

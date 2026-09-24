@@ -83,6 +83,26 @@ TILE_GROUPS: dict[str, str] = {
 }
 GROUP_ORDER = ["Sleep & recovery", "Activity & body"]
 
+# UI-3 — how often each metric is MEASURED, so Body can render the two kinds
+# differently without a client-side list. Daily metrics arrive every night
+# from the watch and read well as a 7-day chart; intermittent ones are taken
+# by hand (a scale, a cuff) or depend on a sensor that often reports nothing
+# (skin temp — see the PW3/PW4 permissions bug in CLAUDE.md), so their story
+# is "when was the last reading and how often do I take one", which a dot
+# strip tells better than a mostly-empty line. Lives beside TILE_GROUPS for
+# the same reason: two clients each keeping their own set is how the phone
+# and the web came to disagree about skin temp once already.
+TILE_CADENCE: dict[str, str] = {
+    "hrv": "daily",
+    "resting_hr": "daily",
+    "recovery": "daily",
+    "sleep_duration": "daily",
+    "steps": "daily",
+    "skin_temp": "intermittent",
+    "weight": "intermittent",
+    "blood_pressure": "intermittent",
+}
+
 # ── TILE-1: the ordering preference ──────────────────────────────────
 #
 # `user_profile.extra.vitals_order` / `.vitals_hidden` had four readers
@@ -470,6 +490,7 @@ async def tile_stats(
 
     def add(**kw):
         kw.setdefault("group", TILE_GROUPS.get(kw.get("key", ""), "Other"))
+        kw.setdefault("cadence", TILE_CADENCE.get(kw.get("key", ""), "daily"))
         # Explicit band bounds so no client has to know the rule.
         bl = kw.get("baseline")
         if bl is not None and kw.get("band_low") is None:

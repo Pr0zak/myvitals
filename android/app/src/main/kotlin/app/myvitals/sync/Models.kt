@@ -1133,6 +1133,10 @@ data class VitalTile(
     /** ...and its age, so a stale value is never shown as if it were today's. */
     @Json(name = "stale_days") val staleDays: Int? = null,
     val series: List<VitalTilePoint> = emptyList(),
+    /** UI-3 — "daily" | "intermittent", from analytics/tiles.py TILE_CADENCE.
+     *  Body draws daily metrics as chart cards and intermittent ones as
+     *  compact "as of" rows; the split is the server's, not a client list. */
+    val cadence: String? = null,
 ) {
     /** Moshi parses JSON numbers as Double, so an int-valued metric would
      *  otherwise render as "5.0 steps". */
@@ -1181,6 +1185,8 @@ data class VitalTilesResponse(
     @Json(name = "group_order") val groupOrder: List<String> = emptyList(),
     /** Per-focus-area "N tracked" counts. */
     @Json(name = "focus_areas") val focusAreas: Map<String, FocusCount> = emptyMap(),
+    /** UI-3 — the same sync-freshness timestamp /summary/today reports. */
+    @Json(name = "last_sync") val lastSync: String? = null,
 )
 
 // ── Narrative event cards (/summary/events) ──────────────────────

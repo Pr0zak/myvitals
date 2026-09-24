@@ -55,12 +55,16 @@ const props = withDefaults(defineProps<{
   /** How many trailing points to plot. Intermittent metrics pass 14. */
   span?: number;
   accent?: string;
+  /** UI-3 — spark height in px. Body's daily cards use 56; the home grid
+   *  keeps the 40 it was laid out around. */
+  chartHeight?: number;
 }>(), {
   unit: "", qualifier: "Today", status: null, statusLabel: null,
   series: () => [], bandLow: null, bandHigh: null, target: null, chart: "line",
   delta: null, higherIsBetter: null,
   span: 7,
   accent: "#28e6ff",
+  chartHeight: 40,
 });
 
 const WEEK = 7;
@@ -87,7 +91,7 @@ const CHIP: Record<string, { fg: string; bg: string; text: string }> = {
   watch: { fg: "#ffb52e", bg: "rgba(255,181,46,.14)", text: "Out of range" },
 };
 
-const NO_DATA_CHIP = { fg: "#8d949d", bg: "rgba(141,148,157,.12)", text: "No data" };
+const NO_DATA_CHIP = { fg: "#9b9bb0", bg: "rgba(155,155,176,.12)", text: "No data" };
 
 /** Every card carries a chip. The reference does this — an empty metric
  *  shows "No data" rather than nothing — and it is also what keeps the two
@@ -272,11 +276,11 @@ const valueSize = computed(() => {
          of a real chart plus a row of weekday letters under it — on Weight,
          BP and Skin temp that is most of the card saying nothing. Say why
          instead. -->
-    <div v-if="!plottable" class="chartwrap empty">
+    <div v-if="!plottable" class="chartwrap empty" :style="{ minHeight: chartHeight + 6 + 'px' }">
       <span class="emptynote">{{ emptyNote }}</span>
     </div>
     <div v-else class="chartwrap">
-      <svg class="spark" :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none">
+      <svg class="spark" :style="{ height: chartHeight + 'px' }" :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none">
         <rect
           v-if="band && plottable" x="0" :y="band.y" :width="W" :height="band.h"
           :fill="accent" opacity="0.10"
@@ -343,7 +347,7 @@ const valueSize = computed(() => {
   display: flex; align-items: center; justify-content: center;
   min-height: 46px;
 }
-.emptynote { font-size: .72rem; color: var(--muted, #8d949d); text-align: center; }
+.emptynote { font-size: .72rem; color: #9b9bb0; text-align: center; }
 
 .mc {
   background: var(--mc-surface, #181b27);
@@ -359,7 +363,7 @@ const valueSize = computed(() => {
 }
 .name {
   font-size: .78rem;
-  color: #9aa1a9;
+  color: #9b9bb0;
   line-height: 1.25;
   margin-bottom: 6px;
 }
@@ -388,8 +392,8 @@ const valueSize = computed(() => {
    2.5rem filled a 2-up card and the ellipsis ate the unit. */
 .value.v6 { font-size: 2rem; }
 .value.v7 { font-size: 1.75rem; }
-.unit { font-size: .85rem; font-weight: 400; color: #b9bec6; margin-left: 4px; }
-.qual { font-size: .7rem; color: #8d949d; margin-top: 2px; }
+.unit { font-size: .85rem; font-weight: 400; color: #9b9bb0; margin-left: 4px; }
+.qual { font-size: .7rem; color: #9b9bb0; margin-top: 2px; }
 
 .chartwrap { margin-top: 10px; }
 .spark { width: 100%; height: 40px; display: block; }
@@ -397,12 +401,12 @@ const valueSize = computed(() => {
   display: flex;
   justify-content: space-between;
   font-size: .58rem;
-  color: #6f767f;
+  color: rgba(155, 155, 176, 0.7);
   margin-top: 3px;
 }
 .days .today {
-  color: #0d0f12;
-  background: #b9bec6;
+  color: #0f1118;
+  background: #9b9bb0;
   border-radius: 999px;
   padding: 0 4px;
   font-weight: 600;

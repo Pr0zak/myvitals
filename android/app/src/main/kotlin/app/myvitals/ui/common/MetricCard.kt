@@ -82,6 +82,9 @@ fun MetricCard(
     span: Int = WEEK,
     accent: Color = NeonMV.Cyan,
     onClick: (() -> Unit)? = null,
+    /** UI-3 — Body gives its daily cards a taller spark (56dp); every
+     *  other caller keeps the 40dp the home grid was laid out around. */
+    chartHeight: androidx.compose.ui.unit.Dp = 40.dp,
 ) {
     val hasData = value != null
     val chip = chipFor(hasData, status, statusLabel)
@@ -133,7 +136,7 @@ fun MetricCard(
             if (hasData && unit.isNotBlank()) {
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    unit, color = Color(0xFFB9BEC6), fontSize = 13.sp,
+                    unit, color = NeonMV.Muted, fontSize = 13.sp,
                     // A unit is one word; it never wraps.
                     maxLines = 1, softWrap = false,
                     modifier = Modifier.padding(bottom = 3.dp),
@@ -142,7 +145,7 @@ fun MetricCard(
         }
 
         if (qualifier.isNotBlank()) {
-            Text(qualifier, color = Color(0xFF8D949D), fontSize = 11.sp,
+            Text(qualifier, color = NeonMV.Muted, fontSize = 11.sp,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         if (delta != null && hasData && kotlin.math.abs(delta) >= 0.05) {
@@ -180,13 +183,13 @@ fun MetricCard(
             // of weekday letters — on Weight, BP and Skin temp that is most of
             // the card saying nothing at all. Say why instead.
             Box(
-                Modifier.fillMaxWidth().height(46.dp),
+                Modifier.fillMaxWidth().height(chartHeight + 6.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     if (span == 0) "No readings yet"
                     else "No readings in the last $span days",
-                    color = Color(0xFF8D949D), fontSize = 11.sp,
+                    color = NeonMV.Muted, fontSize = 11.sp,
                 )
             }
         } else {
@@ -197,7 +200,7 @@ fun MetricCard(
                 bandHigh = bandHigh,
                 target = target,
                 bars = bars,
-                modifier = Modifier.fillMaxWidth().height(40.dp),
+                modifier = Modifier.fillMaxWidth().height(chartHeight),
             )
             Spacer(Modifier.height(3.dp))
             WeekAxis(dayLetters.takeLast(span))
@@ -227,7 +230,7 @@ private data class Chip(val fg: Color, val bg: Color, val text: String)
  *  nothing, matching the reference. */
 private fun chipFor(hasData: Boolean, status: String?, label: String?): Chip? {
     if (!hasData) {
-        return Chip(Color(0xFF8D949D), Color(0x1F8D949D), "No data")
+        return Chip(NeonMV.Muted, NeonMV.Muted.copy(alpha = 0.12f), "No data")
     }
     return when (status) {
         // Semantic — a verdict, not a domain — but on the shell's own ramp so
@@ -256,14 +259,14 @@ private fun WeekAxis(days: List<String>) {
                 Modifier
                     .then(
                         if (today) Modifier.background(
-                            Color(0xFFB9BEC6), RoundedCornerShape(999.dp),
+                            NeonMV.Muted, RoundedCornerShape(999.dp),
                         ) else Modifier,
                     )
                     .padding(horizontal = 4.dp),
             ) {
                 Text(
                     label,
-                    color = if (today) Color(0xFF0D0F12) else Color(0xFF6F767F),
+                    color = if (today) NeonMV.Bg else NeonMV.Muted.copy(alpha = 0.7f),
                     fontSize = 9.sp,
                     fontWeight = if (today) FontWeight.SemiBold else FontWeight.Normal,
                 )

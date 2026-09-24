@@ -51,6 +51,7 @@ object SampleDataWorkout {
         logged: List<StrengthSetRow> = emptyList(), superset: String? = null,
         skipped: Boolean = false, timed: Boolean = false, rest: Int = 90,
         last: List<LastSet> = emptyList(), notes: String? = null, loadHint: String? = null,
+        ladder: List<Double>? = null,
     ) = StrengthWorkoutExerciseRow(
         id = id, workoutId = 7, exerciseId = exerciseId, orderIndex = order,
         supersetId = superset, targetSets = sets, targetRepsLow = low, targetRepsHigh = high,
@@ -58,6 +59,7 @@ object SampleDataWorkout {
         lastSets = last, notes = notes, loadHint = loadHint,
         plannedSets = (1..sets).map { planned(it, w, low) },
         sets = logged,
+        loadLadderLb = ladder,
     )
 
     private val exercises = listOf(
@@ -68,7 +70,9 @@ object SampleDataWorkout {
             logged = listOf(logged(4, 72, 1, 32.5, 10, 4)),
             last = listOf(LastSet(1, 30.0, 10), LastSet(2, 30.0, 9), LastSet(3, 30.0, 8)),
             notes = "Up 2.5 lb: every set hit 10 last time.",
-            loadHint = "30 lb DB + 2.5 lb wrist"),
+            loadHint = "30 lb DB + 2.5 lb wrist",
+            // UI-F4: invented rack — the steppers walk these, not ±2.5.
+            ladder = listOf(30.0, 31.0, 31.5, 32.5, 33.0, 34.0, 35.0)),
         slot(73, "incline_fly", 2, 3, 10, 12, 20.0),
         slot(74, "lateral_raise", 3, 3, 12, 15, 15.0, superset = "A", rest = 60),
         slot(75, "oh_tri_ext", 4, 3, 10, 12, 25.0, superset = "A", rest = 60),

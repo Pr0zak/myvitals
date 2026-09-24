@@ -720,6 +720,46 @@ def next_loadable_above(
     return None
 
 
+LOAD_LADDER_STEPS = 10
+
+
+def load_ladder(
+    target_lb: float | None,
+    pairs_lb: list[float],
+    wrist_weights_lb: list[float],
+    steps: int = LOAD_LADDER_STEPS,
+) -> list[float] | None:
+    """UI-F4: the loadable weights around a prescribed target, ascending —
+    what a +/- stepper on the logger walks instead of a fixed 2.5 lb.
+
+    A fixed step lands on weights the rack cannot make: 2.5 lb above a plain
+    30 lb pair is 32.5, which needs micro-loaders the user may not own, and
+    without them the honest next step is the 35s. This is a WINDOW onto
+    `valid_dumbbell_loads` — the same set `round_weight` snaps a
+    prescription onto — so the stepper and the prescription can never
+    disagree about what is loadable. It is not a second rounder.
+
+    At most `steps` loads either side of the target's position. The target
+    is included when it is loadable (every rounder output is); a stored
+    target the current equipment can no longer make is NOT inserted — the
+    ladder lists only what can be loaded, and the window is centred where
+    that target would sit. Returns None when there is no weight to step
+    (no target, or no dumbbells owned).
+    """
+    if target_lb is None:
+        return None
+    valid = valid_dumbbell_loads(pairs_lb, wrist_weights_lb)
+    if not valid:
+        return None
+    t = float(target_lb)
+    # Index of the first load >= target (within tolerance).
+    idx = next((i for i, w in enumerate(valid) if w >= t - 0.01), len(valid))
+    on_ladder = idx < len(valid) and abs(valid[idx] - t) < 0.01
+    lo = max(0, idx - steps)
+    hi = min(len(valid), idx + steps + (1 if on_ladder else 0))
+    return [round(w, 2) for w in valid[lo:hi]]
+
+
 def _fmt_lb(x: float) -> str:
     """Trim trailing .0 — 30.0 -> '30', 2.5 -> '2.5'."""
     return f"{round(float(x), 2):g}"

@@ -392,6 +392,11 @@ export interface StrengthWorkoutExercise {
   // used to seed the inputs differently for the same workout.
   planned_sets?: PlannedSet[];
   sets: StrengthSet[];
+  // UI-F4: loadable per-dumbbell weights around the target, ascending, from
+  // the server's micro-loader rounder. The hero's weight stepper walks it.
+  // Null for bodyweight / timed slots; absent on an older server (fall back
+  // to a fixed 2.5 lb).
+  load_ladder_lb?: number[] | null;
 }
 
 export interface StrengthWorkoutDetail {

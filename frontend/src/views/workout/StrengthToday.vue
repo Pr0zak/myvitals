@@ -1539,14 +1539,44 @@ function setHeading(wex: StrengthWorkoutExercise, n: number): string {
   return `${sideWord}Set ${n} of ${wex.target_sets}`;
 }
 
-// Steppers. The micro-loader rounder lives on the server and no per-slot
-// step is exposed, so the weight steps a fixed 2.5 lb (reps by 1); the
-// server's prefill already landed on a loadable weight.
+// Steppers. UI-F4: the weight walks the server's load ladder — the weights
+// the user's gear can actually make, from the same micro-loader rounder that
+// set the prescription — so a tap can never land on an unloadable weight.
+// With no ladder (an older server) it falls back to a fixed 2.5 lb. Reps
+// step by 1. Typing any weight stays possible via the readout.
 const heroEditing = ref(false);
-function stepWeight(d: number) {
+const heroLadder = computed<number[] | null>(() => {
+  const l = heroWex.value?.load_ladder_lb;
+  return l && l.length ? l : null;
+});
+const heroTargetW = computed<number | null>(() => {
+  const w = heroWex.value;
+  if (!w) return null;
+  const n = heroSet.value;
+  return (n != null ? plannedSet(w, n)?.target_weight_lb : null) ?? w.target_weight_lb ?? null;
+});
+/** Bodyweight slot (no target, no ladder): no weight stepper. */
+const showWeightStepper = computed(() => heroLadder.value != null || heroTargetW.value != null);
+/** The weight one tap moves to, or null when the ladder has no rung that way. */
+function nextWeight(up: boolean): number | null {
   const e = heroEntry.value;
-  if (!e) return;
-  e.weight = fmtLb(Math.max(0, (parseFloat(e.weight) || 0) + d));
+  if (!e) return null;
+  const typed = parseFloat(e.weight);
+  const base = Number.isFinite(typed) ? typed : heroTargetW.value;
+  const ladder = heroLadder.value;
+  if (!ladder) return Math.max(0, (base ?? 0) + (up ? 2.5 : -2.5));
+  if (base == null) return up ? ladder[0] : null;
+  if (up) return ladder.find((w) => w > base + 0.01) ?? null;
+  for (let i = ladder.length - 1; i >= 0; i--) if (ladder[i] < base - 0.01) return ladder[i];
+  return null;
+}
+const weightDown = computed(() => nextWeight(false));
+const weightUp = computed(() => nextWeight(true));
+function stepWeight(up: boolean) {
+  const e = heroEntry.value;
+  const w = up ? weightUp.value : weightDown.value;
+  if (!e || w == null) return;
+  e.weight = fmtLb(w);
 }
 function stepReps(d: number) {
   const e = heroEntry.value;
@@ -1960,11 +1990,19 @@ useVisibilityRefresh(loadAll);
               <span v-if="plannedSet(heroWex, heroSet)?.is_amrap" class="amrap-tag">AMRAP</span>
             </button>
             <div class="steppers">
-              <div class="stp">
-                <button type="button" aria-label="Minus 2.5 lb" @click="stepWeight(-2.5)"><Minus :size="16" /></button>
-                <span>2.5 lb</span>
-                <button type="button" aria-label="Plus 2.5 lb" @click="stepWeight(2.5)"><Plus :size="16" /></button>
+              <div v-if="showWeightStepper" class="stp">
+                <button type="button" :disabled="weightDown == null"
+                        :aria-label="weightDown == null ? 'No lighter load' : `Lighter: ${fmtLb(weightDown)} lb`"
+                        @click="stepWeight(false)"><Minus :size="16" /></button>
+                <span v-if="!heroLadder">2.5 lb</span>
+                <span v-else :title="'Loads your dumbbells and wrist weights can make'">
+                  {{ weightDown == null ? '—' : fmtLb(weightDown) }} · {{ weightUp == null ? '—' : fmtLb(weightUp) }}
+                </span>
+                <button type="button" :disabled="weightUp == null"
+                        :aria-label="weightUp == null ? 'No heavier load' : `Heavier: ${fmtLb(weightUp)} lb`"
+                        @click="stepWeight(true)"><Plus :size="16" /></button>
               </div>
+              <div v-else />
               <div class="stp">
                 <button type="button" aria-label="One rep fewer" @click="stepReps(-1)"><Minus :size="16" /></button>
                 <span>1 rep</span>
@@ -2581,6 +2619,7 @@ useVisibilityRefresh(loadAll);
 .stp button { width: 40px; height: 40px; border: 0; background: transparent; color: var(--rn-cyan);
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; }
 .stp button:active { background: rgba(40, 230, 255, .12); border-radius: 12px; }
+.stp button:disabled { color: var(--rn-mut); opacity: .45; cursor: default; }
 
 .ratings { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
 .rate { min-height: 40px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);

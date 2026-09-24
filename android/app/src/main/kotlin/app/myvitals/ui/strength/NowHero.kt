@@ -278,13 +278,24 @@ private fun NowHero(
             TargetReadout(input.weight, input.reps, onTap = { editOpen = true })
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StepPill("−2.5", "Decrease weight by 2.5 pounds") {
-                        st.setInputs[key] = input.copy(weight = stepWeight(input.weight, targetW, -2.5))
+                val ladder = wex.loadLadderLb?.takeIf { it.isNotEmpty() }
+                // Bodyweight slot (no target, no ladder): no weight stepper —
+                // the readout still takes a typed weight for a loaded variant.
+                if (ladder != null || targetW != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val down = nextWeight(input.weight, targetW, ladder, up = false)
+                        val up = nextWeight(input.weight, targetW, ladder, up = true)
+                        StepPill(
+                            if (ladder == null) "−2.5" else down?.let { "↓${fmtLbPlain(it)}" } ?: "↓—",
+                            down?.let { "Lighter: ${fmtLbPlain(it)} pounds" } ?: "No lighter load",
+                        ) { if (down != null) st.setInputs[key] = input.copy(weight = fmtLbPlain(down)) }
+                        StepPill(
+                            if (ladder == null) "+2.5" else up?.let { "↑${fmtLbPlain(it)}" } ?: "↑—",
+                            up?.let { "Heavier: ${fmtLbPlain(it)} pounds" } ?: "No heavier load",
+                        ) { if (up != null) st.setInputs[key] = input.copy(weight = fmtLbPlain(up)) }
                     }
-                    StepPill("+2.5", "Increase weight by 2.5 pounds") {
-                        st.setInputs[key] = input.copy(weight = stepWeight(input.weight, targetW, 2.5))
-                    }
+                } else {
+                    Spacer(Modifier.width(1.dp))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StepPill("−1", "One fewer rep") {
@@ -361,12 +372,19 @@ private fun SetTypePill(value: String, onChange: (String) -> Unit) {
     }
 }
 
-/** ±step from the typed value, or from the target when the field is blank.
- *  Fixed 2.5 lb: the micro-loader rounder is server-side and no per-slot
- *  ladder is exposed, so the stepper cannot know the next loadable weight. */
-internal fun stepWeight(current: String, target: Double?, delta: Double): String {
-    val base = current.toDoubleOrNull() ?: target ?: 0.0
-    return fmtLbPlain((base + delta).coerceAtLeast(0.0))
+/** The weight one stepper tap moves to, from the typed value (or the target
+ *  when the field is blank). UI-F4: walks the server's [ladder] of loads the
+ *  user's gear can actually make — the next rung strictly above / below —
+ *  and returns null when there is none in that direction. With no ladder (an
+ *  older server) it falls back to a fixed 2.5 lb step, floored at zero. */
+internal fun nextWeight(current: String, target: Double?, ladder: List<Double>?, up: Boolean): Double? {
+    val base = current.toDoubleOrNull() ?: target
+    if (ladder.isNullOrEmpty()) {
+        return ((base ?: 0.0) + if (up) 2.5 else -2.5).coerceAtLeast(0.0)
+    }
+    if (base == null) return if (up) ladder.first() else null
+    return if (up) ladder.firstOrNull { it > base + 0.01 }
+    else ladder.lastOrNull { it < base - 0.01 }
 }
 
 /** "47.5 lb × 8" — tap to type. */

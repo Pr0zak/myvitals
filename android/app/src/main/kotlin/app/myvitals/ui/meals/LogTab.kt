@@ -463,8 +463,11 @@ internal fun LogEntryDialog(
     recipes: List<RecipeOut>,
     onDismiss: () -> Unit,
     onSave: (LogEntryIn) -> Unit,
+    /** Pre-selected slot — the Today tab's empty "+ Log lunch" card opens
+     *  the dialog already on lunch. */
+    initialSlot: String = "dinner",
 ) {
-    var slot by remember { mutableStateOf("dinner") }
+    var slot by remember { mutableStateOf(initialSlot) }
     var food by remember { mutableStateOf<FoodOut?>(null) }
     var recipeId by remember { mutableStateOf<Long?>(null) }
     var qty by remember { mutableStateOf("") }

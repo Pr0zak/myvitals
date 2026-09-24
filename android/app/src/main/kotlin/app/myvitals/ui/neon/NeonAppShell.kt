@@ -214,7 +214,7 @@ fun NeonAppShell(
                     app.myvitals.ui.JournalScreen(settings = settings, onBack = { nav.popBackStack() })
                 }
                 composable("meals") {
-                    app.myvitals.ui.meals.MealsScreen(settings = settings)
+                    app.myvitals.ui.meals.MealsScreen(settings = settings, onBack = { nav.popBackStack() })
                 }
                 composable("workout/today") {
                     app.myvitals.ui.strength.StrengthTodayScreen(

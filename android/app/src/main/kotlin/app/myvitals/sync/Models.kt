@@ -128,6 +128,13 @@ data class SoberCurrentResponse(
     val days: Int? = null,
     val hours: Int? = null,
     val minutes: Int? = null,
+    // UI-6 — milestones are server-owned; the phone draws, never derives.
+    val milestones: List<Int> = emptyList(),
+    @Json(name = "milestones_reached") val milestonesReached: Int = 0,
+    @Json(name = "next_milestone_days") val nextMilestoneDays: Int? = null,
+    @Json(name = "next_milestone_at") val nextMilestoneAt: String? = null,
+    @Json(name = "next_milestone_in_seconds") val nextMilestoneInSeconds: Long? = null,
+    @Json(name = "milestone_progress") val milestoneProgress: Double? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -928,6 +935,14 @@ data class FastingSession(
     @Json(name = "current_stage") val currentStage: String,
     @Json(name = "next_stage_at_h") val nextStageAtH: Double?,
     @Json(name = "is_active") val isActive: Boolean,
+    // UI-6 — stage labels, next stage and the target end are server-owned.
+    @Json(name = "current_stage_label") val currentStageLabel: String? = null,
+    @Json(name = "next_stage") val nextStage: String? = null,
+    @Json(name = "next_stage_label") val nextStageLabel: String? = null,
+    @Json(name = "hours_to_next_stage") val hoursToNextStage: Double? = null,
+    @Json(name = "target_end_at") val targetEndAt: String? = null,
+    @Json(name = "reached_target") val reachedTarget: Boolean? = null,
+    val stages: List<FastingStage> = emptyList(),
 )
 
 @JsonClass(generateAdapter = true)
@@ -2795,4 +2810,13 @@ data class PrepLogResult(
     val logged: Int = 0,
     val day: String = "",
     val slot: String = "",
+)
+
+// ── UI-6 ──────────────────────────────────────────────────────────
+/** One fasting stage threshold, served with every session (ring ticks). */
+@JsonClass(generateAdapter = true)
+data class FastingStage(
+    val key: String,
+    val label: String,
+    @Json(name = "at_h") val atH: Double,
 )

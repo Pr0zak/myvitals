@@ -138,14 +138,14 @@ private enum class MealsTab(val label: String) {
  * not a rewrite of what each one does.
  */
 @Composable
-fun MealsScreen(settings: SettingsRepository) {
+fun MealsScreen(settings: SettingsRepository, onBack: (() -> Unit)? = null) {
     var open by remember { mutableStateOf<MealsTab?>(null) }
     var showMore by remember { mutableStateOf(false) }
 
     val here = open
     if (here == null && !showMore) {
         Column(Modifier.fillMaxSize().background(NeonMV.Bg)) {
-            TodayTab(settings) { showMore = true }
+            TodayTab(settings, onOpenMore = { showMore = true }, onBack = onBack)
         }
         return
     }

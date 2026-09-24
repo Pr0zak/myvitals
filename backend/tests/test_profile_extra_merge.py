@@ -81,16 +81,20 @@ class TestClearingStillWorks:
 
         An absent key and a "full object minus one key" are
         indistinguishable on the wire, so under a merge the delete would
-        silently stop clearing. The web now sends null.
+        silently stop clearing. The web now sends null. (SETTINGS-B1: the
+        goals moved to views/settings/SettingsYou.vue.)
         """
         from pathlib import Path
         settings_vue = (
             Path(__file__).resolve().parents[2]
-            / "frontend" / "src" / "views" / "Settings.vue"
+            / "frontend" / "src" / "views" / "settings" / "SettingsYou.vue"
         ).read_text()
         assert "delete extra.steps_goal" not in settings_vue
         assert "delete extra.sleep_goal_h" not in settings_vue
         assert "extra.steps_goal =" in settings_vue
+        assert "extra.sleep_goal_h =" in settings_vue
+        # A cleared goal is an explicit null, not an omitted key.
+        assert ": null;" in settings_vue
 
     def test_goal_sync_reads_a_null_as_cleared(self):
         """`_profile_set_target_for_kind` and the AiGoal sync read these

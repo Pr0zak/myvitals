@@ -238,7 +238,7 @@ const shown = computed(() => {
   <section v-if="loaded && shown.length" class="km">
     <div v-if="title" class="sechead">
       <h2 class="sect">{{ title }}</h2>
-      <button class="edit" @click="router.push('/settings?tab=display')">Edit</button>
+      <button class="edit" @click="router.push('/settings/display')">Edit</button>
     </div>
 
     <div v-for="g in grouped" :key="g.name" class="group">

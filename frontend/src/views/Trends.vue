@@ -595,7 +595,7 @@ function preset(p: "recovery" | "training" | "sleep" | "all") {
             </template>
             <span v-else class="muted">No weight goal set.</span>
             <RouterLink to="/goals" class="muted" style="margin-left: 0.6rem;">Edit goal</RouterLink>
-            <RouterLink v-if="!heightCm" to="/settings?tab=profile" class="muted" style="margin-left: 0.6rem;">Add height for BMI bands</RouterLink>
+            <RouterLink v-if="!heightCm" to="/settings/you" class="muted" style="margin-left: 0.6rem;">Add height for BMI bands</RouterLink>
           </div>
           <div class="chart"><VChart :option="weightOption" autoresize/></div>
         </template>

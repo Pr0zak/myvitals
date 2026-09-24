@@ -275,7 +275,7 @@ const explorerErr = ref<string | null>(null);
 
 async function fetchData() {
   if (!queryToken.value) {
-    explorerErr.value = "Set QUERY_TOKEN in Settings first.";
+    explorerErr.value = "Add your access key in Settings → Connection first.";
     return;
   }
   explorerErr.value = null;

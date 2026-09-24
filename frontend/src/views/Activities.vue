@@ -475,7 +475,7 @@ const calendarActivities = computed(() => activities.value);
     <div v-if="cookieNeedsReconnect" class="stale">
       <strong>Strava sync is disconnected</strong>
       <span>{{ cookieError ?? "Reconnect Strava in Settings to resume pulling activities." }}</span>
-      <RouterLink to="/settings" class="stale-link">Reconnect →</RouterLink>
+      <RouterLink to="/settings/integrations/strava" class="stale-link">Reconnect →</RouterLink>
     </div>
     <p v-if="syncToast" class="toast">{{ syncToast }}</p>
 

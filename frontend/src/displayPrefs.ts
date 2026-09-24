@@ -18,7 +18,7 @@
  * wholesale, so saving a preference through it would erase any it did not
  * carry forward.
  */
-import { watch } from "vue";
+import { ref, watch } from "vue";
 import { api } from "@/api/client";
 import { units } from "@/units";
 import { timeFormat } from "@/format";
@@ -65,16 +65,48 @@ export async function hydrateDisplayPrefs(): Promise<void> {
   }
 }
 
+/**
+ * SETTINGS-B1 — whether the last change reached the server.
+ *
+ * The push below was completely silent: a failed sync left the choice
+ * applied in this browser and simply never told anyone it had not been
+ * saved, so the phone kept the old units with no explanation. Settings →
+ * Units & display renders this so an autosave is VISIBLE — "Saved", or an
+ * amber "not saved to your account" with a retry.
+ */
+export const displaySync = ref<{
+  state: "idle" | "saving" | "saved" | "failed";
+  error: string | null;
+  at: number;
+}>({ state: "idle", error: null, at: 0 });
+let pending: Partial<DisplayPrefs> = {};
+
 /** Push a single changed preference. Partial by design — the endpoint
  *  merges, so this cannot clobber a preference set on the phone. */
 async function push(patch: Partial<DisplayPrefs>): Promise<void> {
   if (hydrating) return;
+  // Accumulate, so a retry after two failed changes sends both.
+  pending = { ...pending, ...patch };
+  const sending = pending;
+  displaySync.value = { state: "saving", error: null, at: Date.now() };
   try {
-    await api.putDisplayPrefs(patch);
-  } catch {
+    await api.putDisplayPrefs(sending);
+    if (pending === sending) pending = {};
+    displaySync.value = { state: "saved", error: null, at: Date.now() };
+  } catch (e) {
     // The local value already applied; a failed sync must not revert what
-    // the user just chose in front of them.
+    // the user just chose in front of them. It is reported instead.
+    displaySync.value = {
+      state: "failed",
+      error: e instanceof Error ? e.message : String(e),
+      at: Date.now(),
+    };
   }
+}
+
+/** Re-send whatever the last failed push was carrying. */
+export function retryDisplaySync(): Promise<void> {
+  return push({});
 }
 
 /** Call once at app start, after the token is known. */

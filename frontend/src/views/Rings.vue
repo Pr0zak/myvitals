@@ -71,8 +71,8 @@ function go(path: string) {
   <div v-if="emptyReason" class="setup">
     <template v-if="emptyReason === 'unconfigured'">
       <h2>Nothing to show yet</h2>
-      <p>Paste your <code>QUERY_TOKEN</code> so the dashboard can read your data.</p>
-      <button class="primary" @click="router.push('/settings?tab=access')">
+      <p>Add your server's access key so the dashboard can read your data.</p>
+      <button class="primary" @click="router.push('/settings/connection')">
         Open Settings
       </button>
     </template>

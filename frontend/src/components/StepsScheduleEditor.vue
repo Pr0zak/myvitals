@@ -7,106 +7,74 @@
  * six, and it is why every input here starts empty rather than
  * pre-filled with the base — a pre-filled field would silently write six
  * overrides the user never asked for.
+ *
+ * SETTINGS-B1: now a CONTROLLED editor with no Save button of its own. It
+ * used to sit under Display with its own button, while the base goal it
+ * falls back to was on Profile behind a different one — two screens and
+ * two saves for one idea. It now sits directly under the base goal on
+ * Settings → You and is saved by that page's single Save.
  */
-import { computed, onMounted, ref } from "vue";
-import { api } from "@/api/client";
-import type { StepsSchedule } from "@/api/types";
+import { computed } from "vue";
 
-const data = ref<StepsSchedule | null>(null);
-const draft = ref<Record<string, string>>({});
-const loading = ref(true);
-const saving = ref(false);
-const saved = ref(false);
-const error = ref<string | null>(null);
+const props = defineProps<{
+  /** Draft text per weekday key; "" = use the base goal. */
+  modelValue: Record<string, string>;
+  weekdays: string[];
+  /** The base goal as currently entered (unsaved edits included), so the
+   *  placeholder always shows what a blank day would fall back to. */
+  base: number | null;
+  /** Server-resolved goal for today, as last saved. */
+  effectiveToday?: number | null;
+}>();
+const emit = defineEmits<{ (e: "update:modelValue", v: Record<string, string>): void }>();
 
 const LABELS: Record<string, string> = {
   mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu",
   fri: "Fri", sat: "Sat", sun: "Sun",
 };
-
-async function load() {
-  loading.value = true;
-  try {
-    const d = await api.getStepsSchedule();
-    data.value = d;
-    draft.value = Object.fromEntries(
-      d.weekdays.map((k) => [k, d.schedule[k] != null ? String(d.schedule[k]) : ""]),
-    );
-  } catch {
-    error.value = "Couldn't load the step schedule.";
-  } finally {
-    loading.value = false;
-  }
-}
-onMounted(load);
+const FULL: Record<string, string> = {
+  mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday",
+  fri: "Friday", sat: "Saturday", sun: "Sunday",
+};
 
 const anyOverride = computed(() =>
-  Object.values(draft.value).some((v) => v.trim() !== ""),
+  Object.values(props.modelValue).some((v) => (v ?? "").trim() !== ""),
 );
 
-async function save() {
-  saving.value = true;
-  saved.value = false;
-  error.value = null;
-  try {
-    const payload: Record<string, number | null> = {};
-    for (const [k, v] of Object.entries(draft.value)) {
-      const t = v.trim();
-      payload[k] = t === "" ? null : Number(t);
-    }
-    data.value = await api.putStepsSchedule(payload);
-    saved.value = true;
-  } catch {
-    error.value = "Couldn't save.";
-  } finally {
-    saving.value = false;
-  }
+function set(k: string, v: string) {
+  emit("update:modelValue", { ...props.modelValue, [k]: v });
 }
 </script>
 
 <template>
-  <div class="sched">
-    <p class="lede">
-      Leave a day blank to use your usual goal
-      <strong v-if="data">({{ data.base.toLocaleString() }})</strong>.
+  <fieldset class="sched">
+    <legend class="sf-label">Different goal on some days</legend>
+    <p class="sf-help">
+      Leave a day blank to use your usual goal<template v-if="base != null">
+        ({{ base.toLocaleString() }})</template>.
     </p>
-
-    <div v-if="loading" class="muted">Loading…</div>
-    <template v-else-if="data">
-      <div class="grid">
-        <label v-for="k in data.weekdays" :key="k">
-          <span>{{ LABELS[k] ?? k }}</span>
-          <input type="number" min="1" step="500"
-                 :placeholder="String(data.base)"
-                 v-model="draft[k]"/>
-        </label>
-      </div>
-      <div class="actions">
-        <button class="primary" :disabled="saving" @click="save">
-          {{ saving ? "Saving…" : "Save schedule" }}
-        </button>
-        <span class="muted">Today: {{ data.effective_today.toLocaleString() }}</span>
-        <span v-if="saved" class="ok">Saved</span>
-        <span v-if="error" class="err">{{ error }}</span>
-        <span v-if="!anyOverride" class="muted">No overrides — every day uses the base goal.</span>
-      </div>
-    </template>
-  </div>
+    <div class="grid">
+      <label v-for="k in weekdays" :key="k" class="day">
+        <span aria-hidden="true">{{ LABELS[k] ?? k }}</span>
+        <input class="sf-input" type="number" min="1" step="500" inputmode="numeric"
+               :aria-label="`${FULL[k] ?? k} step goal`"
+               :placeholder="base != null ? String(base) : ''"
+               :value="modelValue[k] ?? ''"
+               @input="set(k, ($event.target as HTMLInputElement).value)"/>
+      </label>
+    </div>
+    <p class="sf-help foot">
+      <span v-if="effectiveToday != null">Today's goal: {{ effectiveToday.toLocaleString() }}. </span>
+      <span v-if="!anyOverride">No overrides — every day uses the base goal.</span>
+    </p>
+  </fieldset>
 </template>
 
 <style scoped>
-.sched { margin-top: 0.5rem; }
-.lede { color: #94a3b8; font-size: 0.85rem; margin: 0 0 0.7rem; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: 0.5rem; }
-.grid label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; color: #94a3b8; margin: 0; }
-.grid input {
-  background: transparent; color: #e2e8f0;
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: 6px; padding: 0.3rem 0.4rem; width: 100%;
-  font-variant-numeric: tabular-nums;
-}
-.actions { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.8rem; flex-wrap: wrap; }
-.ok { color: #4ade80; font-size: 0.8rem; }
-.err { color: #f87171; font-size: 0.8rem; }
-.muted { color: #64748b; font-size: 0.8rem; }
+.sched { border: 0; padding: 0; margin: 12px 0 0; min-width: 0; }
+.sched legend { padding: 0; margin-bottom: 4px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 8px; margin-top: 8px; }
+.day { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #9b9bb0; margin: 0; }
+.day .sf-input { padding: 8px; text-align: center; }
+.foot { margin: 8px 0 0; }
 </style>

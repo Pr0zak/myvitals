@@ -310,29 +310,24 @@ const groups = computed<Group[]>(() => {
     { id: "goals",  to: "/goals",  icon: Target,         label: "Goals" },
     { id: "logs",    to: "/logs",    icon: Terminal,      label: "Debug logs" },
     {
-      // Group, not a leaf — children mirror Settings.vue's sections so
-      // the user can jump straight to "Strava" or "Updates" from the
-      // rail without first landing on /settings and hunting for it.
-      // Token-gated children fall away when queryToken is empty so
-      // a fresh install isn't taunted by tabs it can't open.
+      // Group, not a leaf — children are the Settings sections
+      // (SETTINGS-B1), in the same order as the Settings home and the
+      // phone. Token-gated children fall away when queryToken is empty so
+      // a fresh install isn't taunted by sections it can't open.
       id: "settings", icon: Settings, label: "Settings",
       children: [
-        { to: "/settings?tab=updates",  icon: Download,    label: "Updates" },
-        { to: "/settings?tab=access",   icon: Key,         label: "Backend access" },
-        { to: "/settings?tab=display",  icon: Monitor,     label: "Display" },
+        { to: "/settings",              icon: Settings,    label: "Overview" },
         ...(queryToken.value ? [
-          { to: "/settings?tab=profile",  icon: User,        label: "Profile" },
-          { to: "/settings?tab=ai",       icon: Sparkles,    label: "AI summaries" },
-          { to: "/settings?tab=trails",   icon: Mountain,    label: "Trail status" },
+          { to: "/settings/you",          icon: User,        label: "You & goals" },
         ] : []),
-        { to: "/settings?tab=strava",   icon: Activity,    label: "Strava" },
-        { to: "/settings?tab=concept2", icon: Ship,        label: "Concept2" },
-        { to: "/settings?tab=fasting",  icon: Hourglass,   label: "Fasting" },
-        { to: "/settings?tab=ha",       icon: Home,        label: "Home Assistant" },
+        { to: "/settings/display",      icon: Monitor,     label: "Units & display" },
+        { to: "/settings/connection",   icon: Key,         label: "Connection & sync" },
         ...(queryToken.value ? [
-          { to: "/settings?tab=imports",  icon: FileUp,      label: "Historical imports" },
-          { to: "/settings?tab=tools",    icon: Wrench,      label: "Tools & exports" },
+          { to: "/settings/integrations", icon: Activity,    label: "Integrations" },
+          { to: "/settings/ai",           icon: Sparkles,    label: "AI" },
+          { to: "/settings/data",         icon: FileUp,      label: "Data & imports" },
         ] : []),
+        { to: "/settings/about",        icon: Download,    label: "About & updates" },
       ],
     },
   ];
@@ -346,7 +341,11 @@ function isActive(to: string): boolean {
   // ignored — we want /trends#skin-temp to count as "on the trends
   // route" for sidebar-highlighting purposes.
   const [path, query] = to.split("?");
-  if (route.path !== path) return false;
+  // SETTINGS-B1: /settings/integrations/strava keeps "Integrations" lit.
+  // Scoped to settings sub-sections so "/settings" (Overview) itself
+  // stays an exact match.
+  const nested = path.startsWith("/settings/") && route.path.startsWith(path + "/");
+  if (route.path !== path && !nested) return false;
   if (!query) return true;
   const params = new URLSearchParams(query);
   for (const [k, v] of params) {

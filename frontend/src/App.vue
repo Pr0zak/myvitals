@@ -93,12 +93,11 @@ onMounted(async () => {
     <NeonNav v-else />
 
     <div class="main-col">
-      <!-- Deep-linked to the Access pane. This used to point at plain
-           /settings, which opens on whichever section is the default —
-           so the banner that exists to say "paste your token" dropped the
-           user on a page that does not contain the token field. -->
-      <RouterLink v-if="!isConfigured()" to="/settings?tab=access" class="banner">
-        ⚠ No query token set — open Settings to paste your QUERY_TOKEN.
+      <!-- Deep-linked to Settings → Connection, the page with the key
+           field. (SETTINGS-B1: plain words — "QUERY_TOKEN" named an
+           environment variable, which means nothing to a user.) -->
+      <RouterLink v-if="!isConfigured()" to="/settings/connection" class="banner">
+        ⚠ Not connected to your server — open Settings to add your access key.
       </RouterLink>
       <div v-else-if="permsLost" class="banner banner-perms">
         ⚠ Health Connect is denying reads on the phone. Sync attempts are firing but every record type is rejected.

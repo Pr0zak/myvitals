@@ -330,7 +330,7 @@ def test_the_token_is_masked_never_returned_whole():
 
 def test_the_settings_field_has_its_own_save_and_clear():
     root = pathlib.Path(__file__).resolve().parents[2]
-    ui = (root / "frontend" / "src" / "views" / "Settings.vue").read_text()
+    ui = (root / "frontend" / "src" / "views" / "settings" / "SettingsAi.vue").read_text()
     assert "aiSaveCliToken" in ui
     assert "Save token" in ui
     assert "Clear token" in ui
@@ -340,7 +340,7 @@ def test_saving_the_provider_no_longer_smuggles_the_token():
     """Riding along with the provider save is what made the field appear
     to do nothing unless the dropdown was also touched."""
     root = pathlib.Path(__file__).resolve().parents[2]
-    ui = (root / "frontend" / "src" / "views" / "Settings.vue").read_text()
+    ui = (root / "frontend" / "src" / "views" / "settings" / "SettingsAi.vue").read_text()
     fn = ui[ui.index("async function aiSaveProvider("):]
     fn = fn[: fn.index("async function", 10)] if "async function" in fn[10:] else fn[:900]
     assert "cli_oauth_token" not in fn
@@ -399,7 +399,7 @@ def test_provider_dirty_check_uses_a_snapshot_not_the_live_config():
     setting instead.
     """
     root = pathlib.Path(__file__).resolve().parents[2]
-    ui = (root / "frontend" / "src" / "views" / "Settings.vue").read_text()
+    ui = (root / "frontend" / "src" / "views" / "settings" / "SettingsAi.vue").read_text()
     fn = ui[ui.index("const aiProviderDirty = computed("):]
     fn = fn[: fn.index(");") + 2]
     assert "aiProviderLoaded" in fn
@@ -412,7 +412,9 @@ def test_the_snapshot_is_taken_before_the_dirty_check_is_read():
     """Order is the whole fix: reading the check after updating the
     snapshot would make it always-clean instead of always-dirty."""
     root = pathlib.Path(__file__).resolve().parents[2]
-    ui = (root / "frontend" / "src" / "views" / "Settings.vue").read_text()
+    ui = (root / "frontend" / "src" / "views" / "settings" / "SettingsAi.vue").read_text()
+    # SETTINGS-B1/B2: the AI pane moved out of Settings.vue into
+    # SettingsAi.vue, where the snapshot flag is `wasProviderDirty`.
     fn = ui[ui.index("async function loadAiCfg("):]
-    fn = fn[: fn.index("async function aiSaveKey")]
-    assert fn.index("const wasDirty") < fn.index("aiProviderLoaded.value = {")
+    fn = fn[: fn.index("async function", 10)]
+    assert fn.index("const wasProviderDirty") < fn.index("aiProviderLoaded.value = {")

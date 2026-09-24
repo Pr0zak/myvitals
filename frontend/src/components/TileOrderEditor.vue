@@ -3,44 +3,88 @@
  * TILE-1 — editor for the Key-metrics tile order and visibility.
  *
  * The preference this writes (`user_profile.extra.vitals_order` /
- * `.vitals_hidden`) has been read by KeyMetrics.vue and the phone for a
- * long time; nothing could set it. The "Edit" button on the Key metrics
- * header already routed here, to a Display pane that had no editor.
+ * `.vitals_hidden`) is read by KeyMetrics.vue and the phone.
  *
  * Reordering uses explicit move buttons rather than HTML5 drag-and-drop.
- * Drag events do not fire on touch without a polyfill, and this pane is
- * opened from a phone-sized viewport as often as a desktop one — a
- * control that silently does nothing on half the devices is worse than a
- * plainer one that always works. The buttons are also keyboard-operable
- * for free.
+ * Drag events do not fire on touch without a polyfill, and this is opened
+ * from a phone-sized viewport as often as a desktop one — a control that
+ * silently does nothing on half the devices is worse than a plainer one
+ * that always works. The buttons are also keyboard-operable for free.
+ *
+ * SETTINGS-B1: AUTOSAVES, visibly. Every move or hide is sent after a
+ * short pause (so five taps to move a tile down five places are one
+ * request), the result is announced ("Saved" / an amber failure), and a
+ * failed save PUTS THE LIST BACK to the last order the server accepted.
+ * Leaving the edited order on screen after a failure would show an
+ * arrangement the home screen is not using, which is the silent-autosave
+ * failure the settings audit found.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { api } from "@/api/client";
 import type { TilePrefOption } from "@/api/types";
 
 const rows = ref<TilePrefOption[]>([]);
+/** The last list the server confirmed — what a failure reverts to. */
+let confirmed: TilePrefOption[] = [];
 const loading = ref(true);
-const saving = ref(false);
-const error = ref<string | null>(null);
-const savedAt = ref<number | null>(null);
+const loadError = ref<string | null>(null);
+const state = ref<"idle" | "pending" | "saving" | "saved" | "failed">("idle");
+const saveError = ref<string | null>(null);
+let timer: ReturnType<typeof setTimeout> | null = null;
 
 const emit = defineEmits<{ (e: "saved"): void }>();
 
 async function load() {
   loading.value = true;
-  error.value = null;
+  loadError.value = null;
   try {
     const prefs = await api.getTilePrefs();
     rows.value = prefs.available;
+    confirmed = prefs.available;
   } catch {
-    error.value = "Couldn't load tile settings.";
+    loadError.value = "Couldn't load your Key-metrics settings.";
   } finally {
     loading.value = false;
   }
 }
 onMounted(load);
+onBeforeUnmount(() => {
+  // A change still waiting on its debounce is sent rather than dropped.
+  if (timer) { clearTimeout(timer); void persist(); }
+});
 
 const visibleCount = computed(() => rows.value.filter((r) => !r.hidden).length);
+
+function schedule() {
+  state.value = "pending";
+  saveError.value = null;
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => { timer = null; void persist(); }, 600);
+}
+
+async function persist(reset = false) {
+  state.value = "saving";
+  const sent = rows.value;
+  try {
+    const prefs = reset
+      ? await api.putTilePrefs([], [])
+      : await api.putTilePrefs(
+        sent.map((r) => r.key),
+        sent.filter((r) => r.hidden).map((r) => r.key),
+      );
+    confirmed = prefs.available;
+    // Only adopt the server's list if nothing changed while in flight.
+    if (rows.value === sent || reset) rows.value = prefs.available;
+    state.value = timer ? "pending" : "saved";
+    emit("saved");
+  } catch (e) {
+    if (timer) { clearTimeout(timer); timer = null; }
+    rows.value = confirmed;
+    state.value = "failed";
+    saveError.value = `Couldn't save, so the list is back to how it was${
+      e instanceof Error && e.message ? ` (${e.message})` : ""}.`;
+  }
+}
 
 function move(i: number, delta: number) {
   const j = i + delta;
@@ -48,6 +92,7 @@ function move(i: number, delta: number) {
   const next = [...rows.value];
   [next[i], next[j]] = [next[j], next[i]];
   rows.value = next;
+  schedule();
 }
 
 function toggle(i: number) {
@@ -58,115 +103,87 @@ function toggle(i: number) {
   const next = [...rows.value];
   next[i] = { ...next[i], hidden: !next[i].hidden };
   rows.value = next;
+  schedule();
 }
 
-async function save() {
-  saving.value = true;
-  error.value = null;
-  try {
-    const prefs = await api.putTilePrefs(
-      rows.value.map((r) => r.key),
-      rows.value.filter((r) => r.hidden).map((r) => r.key),
-    );
-    rows.value = prefs.available;
-    savedAt.value = Date.now();
-    emit("saved");
-  } catch {
-    error.value = "Couldn't save. Your changes are still here — try again.";
-  } finally {
-    saving.value = false;
-  }
-}
-
-async function reset() {
+function reset() {
   // An empty order means "no preference"; the server reconciles that back
   // to the default sequence, so this needs no separate default list here.
-  saving.value = true;
-  try {
-    const prefs = await api.putTilePrefs([], []);
-    rows.value = prefs.available;
-    savedAt.value = Date.now();
-    emit("saved");
-  } catch {
-    error.value = "Couldn't reset.";
-  } finally {
-    saving.value = false;
-  }
+  if (timer) { clearTimeout(timer); timer = null; }
+  void persist(true);
 }
+
+const STATUS: Record<string, string> = {
+  idle: "", pending: "Saving…", saving: "Saving…", saved: "Saved", failed: "",
+};
 </script>
 
 <template>
   <div class="tile-editor">
-    <p class="lede">
+    <p class="sf-lede">
       Which metrics appear in Key metrics on the home screen, and in what
-      order. Applies to the phone app too.
+      order. Changes save as you make them and apply to the phone app too.
     </p>
 
-    <div v-if="loading" class="muted">Loading…</div>
-    <div v-else-if="error && !rows.length" class="err">{{ error }}</div>
+    <div v-if="loading" class="sf-mut">Loading…</div>
+    <div v-else-if="loadError" class="sf-err" role="alert">
+      {{ loadError }}
+      <button type="button" class="sf-btn" @click="load">Retry</button>
+    </div>
 
     <ul v-else class="tlist">
       <li v-for="(r, i) in rows" :key="r.key" :class="{ off: r.hidden }">
         <span class="grp">{{ r.group }}</span>
-        <span class="name">{{ r.label }}</span>
+        <span class="name">{{ r.label }}<span v-if="r.hidden" class="hid"> · hidden</span></span>
         <div class="ctl">
           <button
-            class="ico" :disabled="i === 0" title="Move up"
+            type="button" class="sf-btn icon" :disabled="i === 0"
             :aria-label="`Move ${r.label} up`" @click="move(i, -1)">↑</button>
           <button
-            class="ico" :disabled="i === rows.length - 1" title="Move down"
+            type="button" class="sf-btn icon" :disabled="i === rows.length - 1"
             :aria-label="`Move ${r.label} down`" @click="move(i, 1)">↓</button>
           <button
-            class="ico eye"
+            type="button" class="sf-btn icon"
             :disabled="!r.hidden && visibleCount <= 1"
-            :title="r.hidden ? 'Show' : visibleCount <= 1 ? 'At least one metric must stay visible' : 'Hide'"
+            :title="!r.hidden && visibleCount <= 1 ? 'At least one metric must stay visible' : undefined"
             :aria-label="`${r.hidden ? 'Show' : 'Hide'} ${r.label}`"
+            :aria-pressed="!r.hidden"
             @click="toggle(i)">{{ r.hidden ? "○" : "●" }}</button>
         </div>
       </li>
     </ul>
 
-    <div class="actions">
-      <button class="primary" :disabled="saving || loading" @click="save">
-        {{ saving ? "Saving…" : "Save order" }}
+    <div class="sf-actions">
+      <button type="button" class="sf-btn" :disabled="loading || state === 'saving'" @click="reset">
+        Reset to default
       </button>
-      <button :disabled="saving || loading" @click="reset">Reset to default</button>
-      <span v-if="savedAt" class="ok">Saved</span>
-      <span v-if="error && rows.length" class="err">{{ error }}</span>
+      <span aria-live="polite" class="status">
+        <span v-if="state === 'saved'" class="sf-ok">Saved</span>
+        <span v-else-if="STATUS[state]" class="sf-mut">{{ STATUS[state] }}</span>
+        <span v-if="state === 'failed'" class="sf-err" role="alert">{{ saveError }}</span>
+      </span>
     </div>
   </div>
 </template>
 
 <style scoped>
-.tile-editor { margin-top: 0.5rem; }
-.lede { color: #94a3b8; font-size: 0.85rem; margin: 0 0 0.8rem; }
 .tlist { list-style: none; padding: 0; margin: 0; }
 .tlist li {
   display: grid;
   grid-template-columns: 1fr auto;
   grid-template-areas: "name ctl" "grp ctl";
   align-items: center;
-  gap: 0 0.5rem;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid rgba(148, 163, 184, 0.15);
-  border-radius: 8px;
-  margin-bottom: 0.4rem;
-  background: rgba(148, 163, 184, 0.04);
+  gap: 0 8px;
+  padding: 8px 10px;
+  border: 1px solid #23263a;
+  border-radius: 14px;
+  margin-bottom: 6px;
+  background: #1e2230;
 }
-.tlist li.off { opacity: 0.45; }
-.name { grid-area: name; font-size: 0.9rem; color: #e2e8f0; }
-.grp { grid-area: grp; font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
-.ctl { grid-area: ctl; display: flex; gap: 0.25rem; }
-.ico {
-  width: 2rem; height: 2rem; border-radius: 6px;
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  background: transparent; color: #cbd5e1; cursor: pointer; font-size: 0.9rem;
-}
-.ico:disabled { opacity: 0.3; cursor: not-allowed; }
-.ico:hover:not(:disabled) { background: rgba(148, 163, 184, 0.12); }
-.ico:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
-.actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.9rem; flex-wrap: wrap; }
-.ok { color: #4ade80; font-size: 0.8rem; }
-.err { color: #f87171; font-size: 0.8rem; }
-.muted { color: #64748b; font-size: 0.85rem; }
+.tlist li.off { opacity: .55; }
+.name { grid-area: name; font-size: 14px; color: #ececf5; }
+.hid { color: #9b9bb0; font-size: 12px; }
+.grp { grid-area: grp; font-size: 11px; color: #9b9bb0; text-transform: uppercase; letter-spacing: .06em; }
+.ctl { grid-area: ctl; display: flex; gap: 4px; }
+.status { display: inline-flex; flex-wrap: wrap; gap: 8px; }
 </style>

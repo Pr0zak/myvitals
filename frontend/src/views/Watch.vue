@@ -271,14 +271,13 @@ const activityOption = computed(() => {
 
       <p v-else-if="!error && !loading" class="muted small">
         No samples in this window — the HA consumer may not be running yet.
-        See Settings → Home Assistant.
+        See Settings → Integrations → Home Assistant.
       </p>
     </section>
 
     <p class="cfg-hint">
-      Configure HA URL + token in
-      <RouterLink to="/settings">Settings</RouterLink>
-      under "Home Assistant (watch status)".
+      Set up the Home Assistant connection in
+      <RouterLink to="/settings/integrations/homeassistant">Settings → Integrations → Home Assistant</RouterLink>.
     </p>
   </div>
 </template>

@@ -807,6 +807,9 @@ export interface DataHealth {
   /** Server-computed. Do not re-derive — the two clients would drift. */
   problem_keys: string[];
   ok: boolean;
+  /** SETTINGS-B1 — the Settings home status hero, built server-side from
+   *  the same `problem_keys` verdict. Tone is never derived client-side. */
+  overview?: DataHealthOverview;
 }
 
 // ── DOW-1: per-weekday step goals ────────────────────────────────────
@@ -1009,4 +1012,15 @@ export interface ActivityRecords {
   records: ActivityRecord[];
   since: string | null;
   until: string | null;
+}
+
+// ── SETTINGS-B1 ──────────────────────────────────────────────────────
+export interface DataHealthOverview {
+  /** "positive" | "caution" — never a crisis tone. */
+  tone: "positive" | "caution";
+  headline: string;
+  problem_count: number;
+  integrations_ok: number;
+  integrations_total: number;
+  last_phone_sync_at: string | null;
 }

@@ -7,6 +7,23 @@ import "./theme";    // side-effect: applies theme on startup
 import { isNeon } from "./theme";
 import App from "./App.vue";
 
+/** SETTINGS-B1: old `/settings?tab=X` → the section that now holds pane X. */
+const LEGACY_SETTINGS_TABS: Record<string, string> = {
+  updates: "/settings/about",
+  access: "/settings/connection",
+  display: "/settings/display",
+  profile: "/settings/you",
+  fasting: "/settings/you",
+  ai: "/settings/ai",
+  trails: "/settings/integrations/trails",
+  strava: "/settings/integrations/strava",
+  google: "/settings/integrations/google",
+  concept2: "/settings/integrations/concept2",
+  ha: "/settings/integrations/homeassistant",
+  imports: "/settings/data",
+  tools: "/settings/data",
+};
+
 const router = createRouter({
   history: createWebHistory(),
   scrollBehavior(to, _from, savedPosition) {
@@ -79,7 +96,34 @@ const router = createRouter({
     { path: "/workout/strength/charts", name: "workout-strength-charts", component: () => import("./views/workout/StrengthCharts.vue") },
     { path: "/workout/strength/day/:date", name: "workout-strength-day", component: () => import("./views/workout/StrengthDayView.vue") },
     { path: "/logs", name: "logs", component: () => import("./views/Logs.vue") },
-    { path: "/settings", name: "settings", component: () => import("./views/Settings.vue") },
+    // SETTINGS-B1: a home plus one route per section, in the phone's order.
+    // The old single page chose one of thirteen panes by `?tab=`; those
+    // links still exist in bookmarks, notification deep links and the
+    // phone's "open on the web" hints, so they redirect to the new home of
+    // each pane instead of silently landing on the Settings home.
+    {
+      path: "/settings", name: "settings",
+      component: () => import("./views/settings/SettingsHome.vue"),
+      beforeEnter: (to) => {
+        const raw = Array.isArray(to.query.tab) ? to.query.tab[0] : to.query.tab;
+        if (typeof raw !== "string") return true;
+        const target = LEGACY_SETTINGS_TABS[raw];
+        return target ? { path: target, replace: true } : { path: "/settings", query: {}, replace: true };
+      },
+    },
+    { path: "/settings/you", name: "settings-you", component: () => import("./views/settings/SettingsYou.vue") },
+    { path: "/settings/display", name: "settings-display", component: () => import("./views/settings/SettingsDisplay.vue") },
+    { path: "/settings/connection", name: "settings-connection", component: () => import("./views/settings/SettingsConnection.vue") },
+    { path: "/settings/integrations", name: "settings-integrations", component: () => import("./views/settings/SettingsIntegrations.vue") },
+    // The page reads `useRoute().params.key` itself — not `props: true`,
+    // since Vue swallows a prop named `key`.
+    {
+      path: "/settings/integrations/:key", name: "settings-integration",
+      component: () => import("./views/settings/integrations/Integration.vue"),
+    },
+    { path: "/settings/ai", name: "settings-ai", component: () => import("./views/settings/SettingsAi.vue") },
+    { path: "/settings/data", name: "settings-data", component: () => import("./views/settings/SettingsData.vue") },
+    { path: "/settings/about", name: "settings-about", component: () => import("./views/settings/SettingsAbout.vue") },
     // Catch-all: unknown paths (incl. a stale bundle that predates a new route)
     // redirect home instead of rendering a blank page.
     { path: "/:pathMatch(.*)*", redirect: "/" },

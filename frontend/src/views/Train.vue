@@ -621,7 +621,7 @@ const recent = computed<FeedRow[]>(() =>
   --rn-amber: #ffb52e;
   --rn-track: #272a3b;
   min-height: 100vh;
-  margin: -1.25rem -1.5rem;
+  margin: calc(-1 * var(--main-pt, 1.25rem)) calc(-1 * var(--main-px, 1.5rem)) 0;
   /* OG3-M1: the bar's own height is reserved at the shell now. This view
      used to carry 32px of its own — less than the bar is tall, so the
      last feed row sat under it. */

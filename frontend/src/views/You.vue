@@ -361,7 +361,7 @@ function go(path: string): void {
   --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
   --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-cyan: #28e6ff; --rn-amber: #ffb52e;
   --rn-track: #272a3b;
-  min-height: 100vh; margin: -1.25rem -1.5rem;
+  min-height: 100vh; margin: calc(-1 * var(--main-pt, 1.25rem)) calc(-1 * var(--main-px, 1.5rem)) 0;
   /* OG3-M1: the bar's own height is reserved at the shell now.
      This view used to carry 32px of its own, which is how the
      three neon views ended up disagreeing about it. */

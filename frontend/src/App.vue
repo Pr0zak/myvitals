@@ -342,7 +342,12 @@ body { margin: 0; }
   flex-direction: column;
 }
 main {
-  padding: 1.25rem 1.5rem;
+  /* The page's own inset, as variables so a full-bleed view can cancel it
+     exactly (UX-W1). Views used to hard-code `margin: -1.25rem -1.5rem`,
+     which over-cancelled the 0.9rem phone inset and scrolled sideways. */
+  --main-pt: 1.25rem;
+  --main-px: 1.5rem;
+  padding: var(--main-pt) var(--main-px);
   flex: 1;
   position: relative;
 }
@@ -389,7 +394,7 @@ main {
 @media (max-width: 700px) {
   .mobile-toggle { display: flex; }
   .scrim { display: block; }
-  main { padding: 3.2rem 0.9rem 1rem; }
+  main { --main-pt: 3.2rem; --main-px: 0.9rem; padding: var(--main-pt) var(--main-px) 1rem; }
 }
 
 /* Banner */

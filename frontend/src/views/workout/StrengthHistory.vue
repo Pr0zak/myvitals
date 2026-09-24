@@ -413,7 +413,7 @@ html[data-theme="neon"] .strength-history {
   --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
   --rn-cyan: #28e6ff; --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-amber: #ffb52e;
   --rn-red: #ff5d7a; --rn-peri: #6f7bff; --rn-track: #272a3b;
-  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 1.25rem 1.5rem;
+  min-height: 100vh; margin: calc(-1 * var(--main-pt, 1.25rem)) calc(-1 * var(--main-px, 1.5rem)) 0; padding: 1.25rem 1.5rem;
   background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
   font-family: 'Plus Jakarta Sans', 'Geist', system-ui; color: var(--rn-ink);
 }

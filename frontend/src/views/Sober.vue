@@ -536,7 +536,7 @@ h1 { margin: 0 0 0.4rem; }
    ────────────────────────────────────────────────────────────── */
 html[data-theme="neon"] .sober {
   --rn-mag: #ff3ad8; --rn-track: #272a3b; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
-  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 54px 22px 12px;  /* OG3-M1: bar height reserved at the shell */
+  min-height: 100vh; margin: calc(-1 * var(--main-pt, 1.25rem)) calc(-1 * var(--main-px, 1.5rem)) 0; padding: 54px 22px 12px;  /* OG3-M1: bar height reserved at the shell */
   background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
   font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
 }

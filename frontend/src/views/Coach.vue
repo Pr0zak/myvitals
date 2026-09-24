@@ -481,7 +481,8 @@ h1 { margin: 0 0 0.4rem; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 0.8rem; overflow: hidden; }
 .card.tone-good { border-left: 3px solid #22c55e; }
 .card.tone-warn { border-left: 3px solid #f59e0b; }
-.card.tone-bad  { border-left: 3px solid #ef4444; }
+/* Amber, not rose: rose is reserved for crisis surfaces (see CoachScreen.kt). */
+.card.tone-bad  { border-left: 3px solid #ffb52e; }
 
 .head {
   width: 100%; display: flex; align-items: center; gap: 0.6rem;

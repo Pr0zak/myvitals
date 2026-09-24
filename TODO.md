@@ -23,6 +23,26 @@ acting on it.
 
 ## Active — actionable now
 
+## #UI — UI refresh, all screens (2026-09-23)
+
+Design page: `https://claude.ai/artifact/VwA1kyr1UcLAdHmuxxVBn2` (current vs option
+mockups for every screen). Themes: one look everywhere, every screen gets a
+hero, pictures over sentences. Shared kit landed first — phone `ui/neon/NeonKit.kt`
+(NeonHeroCard, NeonRing, NeonEyebrow, NeonStatTile) + `NeonScreen(onBack=)`,
+web `components/neon/` (NeonPage, NeonHero, NeonRing, NeonEyebrow, NeonStat).
+Use these; do not re-draw rings per screen.
+
+| ID | Task | Surface | Status |
+|---|---|---|---|
+| UI-0 | Shared kit + `--main-pt/--main-px` inset vars (fixes UX-W1 on 18 views) + Coach "bad" tone amber | both | done |
+| UI-1 | Train tab: session hero, weekly volume chart (server field), muscle range bars, tile grid, failure state | both | todo |
+| UI-2 | Active workout: "Now" hero with steppers + rest ring, segmented progress, chips for banners, collapsed done | both | todo |
+| UI-3 | You + Body: habits hero, goal rings by state_tone, recovery hero, two-tier metrics | both | todo |
+| UI-4 | Detail screens (Steps/HR/Sleep/Weight): neon scaffold, hero chart, server stats block, token colours | both | todo |
+| UI-5 | Activities + Activity detail + Trails: map-first, zone bands, status hero, rose→amber, units | both | todo |
+| UI-6 | Meals Today + Prep, Fasting, Sober: energy ring + per-meal fat, stage ring, calm reset, milestones server-side | both | todo |
+
+
 ## #UX — user-experience scan (2026-09-22)
 
 Four read-only lenses over the code as it stands after v0.43.0: web

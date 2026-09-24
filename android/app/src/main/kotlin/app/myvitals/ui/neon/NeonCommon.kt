@@ -12,6 +12,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -55,6 +57,11 @@ fun NeonScreen(
      *  killing the app. */
     refreshing: Boolean? = null,
     onRefresh: (() -> Unit)? = null,
+    /** A screen reached from another one (detail screens, Meals, Fasting,
+     *  Sober) passes this to get a back arrow beside the same big title,
+     *  instead of the flat back-arrow header those screens used to build
+     *  for themselves (UI refresh, "one look everywhere"). */
+    onBack: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val body: @Composable () -> Unit = {
@@ -65,7 +72,7 @@ fun NeonScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp),
         ) {
-            NeonTitle(title, trailing = headerTrailing)
+            NeonTitle(title, trailing = headerTrailing, onBack = onBack)
             content()
         }
     }
@@ -87,7 +94,11 @@ fun NeonScreen(
 }
 
 @Composable
-fun NeonTitle(title: String, trailing: @Composable (() -> Unit)? = null) {
+fun NeonTitle(
+    title: String,
+    trailing: @Composable (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
+) {
     androidx.compose.foundation.layout.Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -95,13 +106,31 @@ fun NeonTitle(title: String, trailing: @Composable (() -> Unit)? = null) {
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
     ) {
-        Text(
-            text = title,
-            color = NeonMV.Ink,
-            fontSize = 30.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = (-0.5).sp,
-        )
+        androidx.compose.foundation.layout.Row(
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            modifier = Modifier.weight(1f),
+        ) {
+            if (onBack != null) {
+                androidx.compose.material3.IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.padding(end = 2.dp),
+                ) {
+                    androidx.compose.material3.Icon(
+                        Icons.AutoMirrored.Outlined.ArrowBack,
+                        contentDescription = "Back", tint = NeonMV.Ink,
+                    )
+                }
+            }
+            Text(
+                text = title,
+                color = NeonMV.Ink,
+                fontSize = if (onBack != null) 26.sp else 30.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = (-0.5).sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
         trailing?.invoke()
     }
 }

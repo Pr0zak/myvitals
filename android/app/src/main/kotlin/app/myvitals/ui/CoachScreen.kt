@@ -646,10 +646,14 @@ private fun CoachCardBlock(
     // The card icon carries the per-kind neon accent; classic keeps ink.
     val iconTint = if (neon) accent else MV.OnSurface
     val toneColor = when ((card?.analysis?.get("tone") as? String)) {
-        // Severity semantics: good=Lime, warn=Amber, bad=Bad under neon.
+        // Severity semantics: good=Lime, warn=soft Amber, bad=full Amber.
+        // "bad" used to be the rose `NeonMV.Bad`, which this app reserves for
+        // crisis surfaces. A coach saying last week's sleep was poor is a
+        // caution, not an alarm; spending rose on it is how rose comes to
+        // mean nothing on the day it matters.
         "good" -> if (neon) NeonMV.Lime else Color(0xFF22C55E)
-        "warn" -> if (neon) NeonMV.Amber else Color(0xFFF59E0B)
-        "bad" -> if (neon) NeonMV.Bad else Color(0xFFEF4444)
+        "warn" -> if (neon) NeonMV.Amber.copy(alpha = 0.7f) else Color(0xFFF59E0B)
+        "bad" -> if (neon) NeonMV.Amber else Color(0xFFF59E0B)
         // Neutral tone falls back to the per-kind accent under neon.
         else -> if (neon) accent else MV.OutlineVariant
     }

@@ -1129,7 +1129,7 @@ dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
 html[data-theme="neon"] .detail {
   --rn-cyan: #28e6ff; --rn-amber: #ffb52e; --rn-ink: #ececf5;
   --rn-mut: #9b9bb0; --rn-track: #272a3b;
-  min-height: 100vh; margin: -1.25rem -1.5rem; padding: 18px 22px 32px;
+  min-height: 100vh; margin: calc(-1 * var(--main-pt, 1.25rem)) calc(-1 * var(--main-px, 1.5rem)) 0; padding: 18px 22px 32px;
   background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
   color: var(--rn-ink);
   font-family: 'Plus Jakarta Sans', 'Geist', system-ui;

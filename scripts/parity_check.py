@@ -265,10 +265,10 @@ PAIRS: list[tuple[str, str, str]] = [
      "android/app/src/main/kotlin/app/myvitals/ui/DayScreen.kt",
      "Unified day view"),
     # DOW-1: per-weekday step goals. The web has a standalone component;
-    # the phone renders it inline in Settings, so this pairs the component
-    # against the screen that owns the phone half.
+    # the phone renders it inline under the base steps goal on You & goals
+    # (SETTINGS-C), so this pairs the component against that screen.
     ("frontend/src/components/StepsScheduleEditor.vue",
-     "android/app/src/main/kotlin/app/myvitals/ui/SettingsScreen.kt",
+     "android/app/src/main/kotlin/app/myvitals/ui/settings/YouGoalsScreen.kt",
      "Per-weekday step goal editor"),
     # TILE-1: the Key-metrics order editor. Both surfaces write the same
     # scoped endpoint, so a change to one side's control set almost always
@@ -276,16 +276,35 @@ PAIRS: list[tuple[str, str, str]] = [
     ("frontend/src/components/TileOrderEditor.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/TileOrderScreen.kt",
      "Key-metrics tile order editor"),
-    # TD-7 moved Settings out of WEB_ONLY_OK. The pairing is STRUCTURAL, not
-    # line-for-line: the phone owns Health Connect permissions and APK
-    # install, the web owns historical imports, AI configuration and the
-    # Strava cookie paste, and neither of those belongs on the other surface.
-    # What must stay in step is the set of things a user can reach and
-    # change at all -- the gate was blind to this pair while eight of the
-    # web's twelve panes were unreachable by any click.
-    ("frontend/src/views/Settings.vue",
-     "android/app/src/main/kotlin/app/myvitals/ui/SettingsScreen.kt",
-     "Settings (structural pair — surface-specific panes are expected)"),
+    # SETTINGS-C replaced the single Settings.vue / SettingsScreen.kt pair
+    # (TD-7's structural pair) with a home and seven pages on each surface,
+    # same names, same order. Each page pairs with its twin; what one side
+    # deliberately lacks is declared in DECLARED_ASYMMETRIES below rather
+    # than left for a reviewer to rediscover.
+    ("frontend/src/views/settings/SettingsHome.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/settings/SettingsHomeScreen.kt",
+     "Settings home — status hero + seven rows with live summaries"),
+    ("frontend/src/views/settings/SettingsYou.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/settings/YouGoalsScreen.kt",
+     "Settings — You & goals (profile, goals, fasting prefs)"),
+    ("frontend/src/views/settings/SettingsDisplay.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/settings/DisplaySettingsScreen.kt",
+     "Settings — Units & display"),
+    ("frontend/src/views/settings/SettingsConnection.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/settings/ConnectionSyncScreen.kt",
+     "Settings — Connection & sync"),
+    ("frontend/src/views/settings/SettingsIntegrations.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/settings/IntegrationsScreen.kt",
+     "Settings — Integrations status + sync"),
+    ("frontend/src/views/settings/SettingsAi.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/settings/AiSettingsScreen.kt",
+     "Settings — AI"),
+    ("frontend/src/views/settings/SettingsData.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/settings/DataImportsScreen.kt",
+     "Settings — Data & imports (read-only on the phone)"),
+    ("frontend/src/views/settings/SettingsAbout.vue",
+     "android/app/src/main/kotlin/app/myvitals/ui/settings/AboutScreen.kt",
+     "Settings — About & updates"),
     ("frontend/src/views/Journal.vue",
      "android/app/src/main/kotlin/app/myvitals/ui/JournalScreen.kt",
      "Journal / annotation entry surface (#LOG family)"),
@@ -300,7 +319,7 @@ PAIRS: list[tuple[str, str, str]] = [
     # and lives inside Settings on the phone. Both render one response from
     # `/query/data-health`, so a field added to it has to reach both.
     ("frontend/src/components/DataHealthCard.vue",
-     "android/app/src/main/kotlin/app/myvitals/ui/SettingsScreen.kt",
+     "android/app/src/main/kotlin/app/myvitals/ui/settings/ConnectionSyncScreen.kt",
      "Per-stream freshness + integration status (HEALTH-1, OG3-D1)"),
 ]
 
@@ -333,9 +352,56 @@ WEB_ONLY_OK = {
     "frontend/src/views/Analytics.vue",
     "frontend/src/views/CoachHub.vue",
     "frontend/src/views/Watch.vue",      # phone surfaces watch via Today.vue tile
+    # SETTINGS-C: per-integration SETUP pages. Connecting, reconnecting and
+    # entering credentials go through OAuth sign-in pages and pasted
+    # cookies/keys, which are web-only by declaration; the phone's
+    # IntegrationsScreen shows status and "Sync now" for all of them, and
+    # that half is paired through SettingsIntegrations.vue above.
+    "frontend/src/views/settings/integrations/Integration.vue",
+    "frontend/src/views/settings/integrations/IntegrationHero.vue",
+    "frontend/src/views/settings/integrations/Strava.vue",
+    "frontend/src/views/settings/integrations/GoogleHealth.vue",
+    "frontend/src/views/settings/integrations/Concept2.vue",
+    "frontend/src/views/settings/integrations/HomeAssistant.vue",
+    "frontend/src/views/settings/integrations/Trails.vue",
     # Coach.vue now paired with android/.../CoachScreen.kt — moved out
     # of WEB_ONLY_OK; the pair is registered above.
 }
+
+
+# SETTINGS-C — capabilities one surface deliberately lacks, per paired page.
+# Not a file-level opt-out (both files exist and are paired above): a list of
+# things a reviewer should NOT flag as a parity gap when one of these pairs
+# moves, printed beside the pair in the confirm list. Each entry: (the web
+# page of the pair, which surface has it, what, why).
+DECLARED_ASYMMETRIES: list[tuple[str, str, str, str]] = [
+    ("frontend/src/views/settings/SettingsYou.vue", "phone-only",
+     "Workout reminder toggle + hour",
+     "a phone notification; the web has nothing to schedule"),
+    ("frontend/src/views/settings/SettingsYou.vue", "web-only",
+     "Fasting religious calendar, home location, fasting target hours",
+     "rarely changed; the phone preserves them untouched on save"),
+    ("frontend/src/views/settings/SettingsDisplay.vue", "web-only",
+     "Colour theme",
+     "the phone always renders Vitality Neon"),
+    ("frontend/src/views/settings/SettingsAi.vue", "web-only",
+     "API key / subscription token entry, provider, standing instructions, payload preview",
+     "secrets and a JSON preview belong in a browser, not a phone keyboard"),
+    ("frontend/src/views/settings/SettingsData.vue", "web-only",
+     "Imports, exports and maintenance tools",
+     "multi-gigabyte uploads/downloads; the phone shows recent jobs read-only"),
+    ("frontend/src/views/settings/SettingsIntegrations.vue", "web-only",
+     "Connecting / reconnecting an integration and entering its credentials",
+     "OAuth sign-in and pasted cookies; the phone shows status and Sync now"),
+    ("frontend/src/views/settings/SettingsConnection.vue", "phone-only",
+     "Health Connect grant, Sync now, backfill, on-device logs, sync buffer",
+     "these act on the phone itself"),
+]
+
+
+def declared_asymmetries_for(web_path: str) -> list[str]:
+    return [f"{side}: {what} ({why})"
+            for page, side, what, why in DECLARED_ASYMMETRIES if page == web_path]
 
 
 def changed_files(since: str) -> set[str]:
@@ -550,6 +616,8 @@ def main() -> int:
         for note, web_path, phone_path in matched_pairs:
             w, p = counts.get(web_path, 0), counts.get(phone_path, 0)
             line = f"  {note}\n     {web_path} ({w} lines) <-> {phone_path} ({p} lines)"
+            for declared in declared_asymmetries_for(web_path):
+                line += f"\n     declared {declared}"
             if asymmetric(w, p):
                 line += (
                     "\n     ⚠ change sizes are wildly different -- look closer before "

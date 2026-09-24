@@ -338,7 +338,7 @@ object Notifier {
         val asset = release.assets.firstOrNull { it.name.endsWith(".apk") } ?: return
 
         // Route through MainActivity → Settings tab with extras the
-        // SettingsScreen reads to auto-start the inline download.
+        // MainActivity reads to auto-start the inline download.
         // Avoids the dedicated full-screen UpdateInstallerActivity
         // (deleted in this release) in favour of a panel embedded
         // in the regular Updates section.

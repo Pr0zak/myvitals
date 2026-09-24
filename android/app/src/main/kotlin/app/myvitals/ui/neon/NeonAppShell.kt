@@ -55,6 +55,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.myvitals.data.SettingsRepository
 import app.myvitals.health.HealthConnectGateway
+import app.myvitals.ui.settings.SettingsRoutes
 
 /**
  * Vitality Neon shell — the phone mirror of the web 6-tab redesign. Renders
@@ -98,8 +99,8 @@ private val NEON_TABS = listOf(
         it == NeonRoutes.TRAILS || it?.startsWith("trails/") == true
     },
     NeonTab(NeonRoutes.YOU, "You", NeonMV.Cyan, Icons.Outlined.Person) {
-        it == NeonRoutes.YOU ||
-            it in setOf("settings", "sober", "fasting", "journal", "coach", "meals")
+        it == NeonRoutes.YOU || it?.startsWith("settings") == true ||
+            it in setOf("sober", "fasting", "journal", "coach", "meals")
     },
 )
 
@@ -142,6 +143,18 @@ fun NeonAppShell(
     ) { inner ->
         Column(modifier = Modifier.fillMaxSize().padding(inner)) {
             app.myvitals.ui.common.ConnectionBanner()
+            // UX-P9: the Health Connect permissions banner lives in the
+            // shell now, above Today, instead of only inside Settings.
+            val currentRoute = nav.currentBackStackEntryAsState().value?.destination?.route
+            if (currentRoute == NeonRoutes.TODAY) {
+                app.myvitals.ui.settings.HealthConnectShellBanner(
+                    settings = settings,
+                    isHealthConnectAvailable = isHealthConnectAvailable,
+                    hasPermissions = hasPermissions,
+                    onRequestPermissions = onRequestPermissions,
+                    onSyncNow = onSyncNow,
+                )
+            }
             val open: (String) -> Unit = { route -> nav.navigate(route) }
             val pad = PaddingValues(0.dp)
             // Shared detail screens (Sleep, Heart rate, BP, Weight, Steps,
@@ -299,20 +312,19 @@ fun NeonAppShell(
                         onBack = { nav.popBackStack() },
                     )
                 }
-                composable("settings") {
-                    app.myvitals.ui.SettingsScreen(
-                        settings = settings,
-                        isHealthConnectAvailable = isHealthConnectAvailable,
-                        hasPermissions = hasPermissions,
-                        onRequestPermissions = onRequestPermissions,
-                        onSyncNow = onSyncNow,
-                        onSyncLogs = onSyncLogs,
-                        onBackfill = onBackfill,
-                        onOpenLogs = onOpenLogs,
-                        onClearBuffer = onClearBuffer,
-                        onOpenTileOrder = { nav.navigate("settings/tile-order") },
-                    )
-                }
+                // ---- Settings (SETTINGS-C): a home and seven pages ----
+                settingsGraph(
+                    nav = nav,
+                    settings = settings,
+                    isHealthConnectAvailable = isHealthConnectAvailable,
+                    hasPermissions = hasPermissions,
+                    onRequestPermissions = onRequestPermissions,
+                    onSyncNow = onSyncNow,
+                    onSyncLogs = onSyncLogs,
+                    onBackfill = onBackfill,
+                    onOpenLogs = onOpenLogs,
+                    onClearBuffer = onClearBuffer,
+                )
                 // DAY-1: the date is a route argument so a particular day
                 // survives process death and back-stack restore.
                 composable(
@@ -327,12 +339,6 @@ fun NeonAppShell(
                         onBack = { nav.popBackStack() },
                         onOpenActivity = { src, id -> nav.navigate("activity/$src/$id") },
                         onOpenWorkout = { nav.navigate("workout/today") },
-                    )
-                }
-                composable("settings/tile-order") {
-                    app.myvitals.ui.TileOrderScreen(
-                        settings = settings,
-                        onBack = { nav.popBackStack() },
                     )
                 }
             }
@@ -467,5 +473,53 @@ private fun NavHostController.navigateTopTab(route: String) {
         // tap the same, predictable result.
         popUpTo(graph.findStartDestination().id) { inclusive = true }
         launchSingleTop = true
+    }
+}
+
+/** SETTINGS-C — the Settings home and its pages. Every page gets onBack. */
+private fun androidx.navigation.NavGraphBuilder.settingsGraph(
+    nav: NavHostController,
+    settings: SettingsRepository,
+    isHealthConnectAvailable: Boolean,
+    hasPermissions: suspend () -> Boolean,
+    onRequestPermissions: () -> Unit,
+    onSyncNow: () -> Unit,
+    onSyncLogs: () -> Unit,
+    onBackfill: (Int) -> Unit,
+    onOpenLogs: () -> Unit,
+    onClearBuffer: () -> Unit,
+) {
+    val back: () -> Unit = { nav.popBackStack() }
+    composable(SettingsRoutes.HOME) {
+        app.myvitals.ui.settings.SettingsHomeScreen(
+            settings = settings, onBack = back, onOpen = { nav.navigate(it) { launchSingleTop = true } },
+        )
+    }
+    composable(SettingsRoutes.YOU) { app.myvitals.ui.settings.YouGoalsScreen(settings, back) }
+    composable(SettingsRoutes.DISPLAY) {
+        app.myvitals.ui.settings.DisplaySettingsScreen(
+            settings, back, onOpenTileOrder = { nav.navigate(SettingsRoutes.TILE_ORDER) },
+        )
+    }
+    composable(SettingsRoutes.CONNECTION) {
+        app.myvitals.ui.settings.ConnectionSyncScreen(
+            settings = settings,
+            isHealthConnectAvailable = isHealthConnectAvailable,
+            hasPermissions = hasPermissions,
+            onRequestPermissions = onRequestPermissions,
+            onSyncNow = onSyncNow,
+            onSyncLogs = onSyncLogs,
+            onBackfill = onBackfill,
+            onOpenLogs = onOpenLogs,
+            onClearBuffer = onClearBuffer,
+            onBack = back,
+        )
+    }
+    composable(SettingsRoutes.INTEGRATIONS) { app.myvitals.ui.settings.IntegrationsScreen(settings, back) }
+    composable(SettingsRoutes.AI) { app.myvitals.ui.settings.AiSettingsScreen(settings, back) }
+    composable(SettingsRoutes.DATA) { app.myvitals.ui.settings.DataImportsScreen(settings, back) }
+    composable(SettingsRoutes.ABOUT) { app.myvitals.ui.settings.AboutScreen(settings, back) }
+    composable(SettingsRoutes.TILE_ORDER) {
+        app.myvitals.ui.TileOrderScreen(settings = settings, onBack = back)
     }
 }

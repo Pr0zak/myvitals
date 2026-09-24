@@ -1546,6 +1546,10 @@ data class ProfileExtra(
     @Json(name = "vitals_hidden") val vitalsHidden: List<String>? = null,
     @Json(name = "workout_reminder_enabled") val workoutReminderEnabled: Boolean? = null,
     @Json(name = "workout_reminder_hour") val workoutReminderHour: Int? = null,
+    // SETTINGS-C: fasting preferences (the same dict the web writes).
+    // Kept as a raw map so a key this build does not model — the religious
+    // calendar, say — is echoed back untouched on save.
+    @Json(name = "fasting_prefs") val fastingPrefs: Map<String, Any?>? = null,
 )
 
 // ── TILE-1: Key-metrics tile order ───────────────────────────────────
@@ -1676,6 +1680,9 @@ data class DataHealth(
     /** Server-computed. Do not re-derive — the two clients would drift. */
     @Json(name = "problem_keys") val problemKeys: List<String> = emptyList(),
     val ok: Boolean = true,
+    // SETTINGS-C: the Settings home hero's verdict, decided server-side.
+    val overview: DataHealthOverview? = null,
+    val phone: DataHealthPhone? = null,
 )
 
 // ── DOW-1: per-weekday step goals ────────────────────────────────────
@@ -3173,4 +3180,98 @@ data class ActivityRecordsOut(
     val category: String = "all",
     @Json(name = "n_considered") val nConsidered: Int = 0,
     val records: List<ActivityRecord> = emptyList(),
+)
+
+// ── SETTINGS-C: the phone Settings redesign ──────────────────────────
+/** `/query/data-health` `overview` — tone + headline for the Settings
+ *  home hero. The TONE is the server's (positive | caution, never rose);
+ *  the client renders it and never re-derives it. */
+@JsonClass(generateAdapter = true)
+data class DataHealthOverview(
+    val tone: String = "positive",
+    val headline: String = "",
+    @Json(name = "problem_count") val problemCount: Int = 0,
+    @Json(name = "integrations_ok") val integrationsOk: Int = 0,
+    @Json(name = "integrations_total") val integrationsTotal: Int = 0,
+    @Json(name = "last_phone_sync_at") val lastPhoneSyncAt: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class DataHealthPhone(
+    @Json(name = "last_attempt") val lastAttempt: String? = null,
+    @Json(name = "last_success") val lastSuccess: String? = null,
+    @Json(name = "permissions_lost") val permissionsLost: Boolean = false,
+    @Json(name = "perms_granted") val permsGranted: Int? = null,
+    @Json(name = "perms_required") val permsRequired: Int? = null,
+    @Json(name = "error_summary") val errorSummary: String? = null,
+    @Json(name = "app_version") val appVersion: String? = null,
+)
+
+/** GET /version. */
+@JsonClass(generateAdapter = true)
+data class ServerVersion(
+    val version: String = "",
+    @Json(name = "git_sha") val gitSha: String? = null,
+    @Json(name = "build_time") val buildTime: String? = null,
+)
+
+/** GET /update/status — the host auto-update cron's log. */
+@JsonClass(generateAdapter = true)
+data class UpdateCronStatus(
+    @Json(name = "log_present") val logPresent: Boolean = false,
+    @Json(name = "log_modified_at") val logModifiedAt: String? = null,
+    @Json(name = "stale_seconds") val staleSeconds: Long? = null,
+    @Json(name = "cron_healthy") val cronHealthy: Boolean = false,
+    val tail: List<String> = emptyList(),
+    @Json(name = "trigger_pending") val triggerPending: Boolean = false,
+)
+
+/** GET /ai/config. The key itself never leaves the server — only whether
+ *  one is set and a masked hint. */
+@JsonClass(generateAdapter = true)
+data class AiConfigOut(
+    val enabled: Boolean = false,
+    @Json(name = "api_key_set") val apiKeySet: Boolean = false,
+    @Json(name = "api_key_masked") val apiKeyMasked: String? = null,
+    val model: String = "",
+    @Json(name = "daily_call_limit") val dailyCallLimit: Int = 30,
+    @Json(name = "calls_today") val callsToday: Int = 0,
+    @Json(name = "weekly_digest_enabled") val weeklyDigestEnabled: Boolean = false,
+    val tone: String = "supportive",
+    val provider: String = "anthropic",
+    @Json(name = "cli_token_set") val cliTokenSet: Boolean = false,
+)
+
+/** POST /ai/config — partial: null leaves a field alone. Moshi omits
+ *  nulls, so only what the user changed is sent. Key entry is web-only. */
+@JsonClass(generateAdapter = true)
+data class AiConfigIn(
+    val enabled: Boolean? = null,
+    val model: String? = null,
+    @Json(name = "daily_call_limit") val dailyCallLimit: Int? = null,
+    @Json(name = "weekly_digest_enabled") val weeklyDigestEnabled: Boolean? = null,
+    val tone: String? = null,
+)
+
+/** GET /query/import-jobs — same shape as the web's /import/jobs. */
+@JsonClass(generateAdapter = true)
+data class ImportJob(
+    val id: Long = 0,
+    val kind: String = "",
+    val filename: String? = null,
+    @Json(name = "size_bytes") val sizeBytes: Long? = null,
+    val status: String = "",
+    @Json(name = "started_at") val startedAt: String? = null,
+    @Json(name = "finished_at") val finishedAt: String? = null,
+    @Json(name = "elapsed_s") val elapsedS: Double? = null,
+    val counts: Map<String, Int> = emptyMap(),
+    @Json(name = "total_rows") val totalRows: Int = 0,
+    val error: String? = null,
+)
+
+/** POST /integrations/concept2/sync. */
+@JsonClass(generateAdapter = true)
+data class Concept2SyncOut(
+    val upserted: Int = 0,
+    @Json(name = "last_sync_at") val lastSyncAt: String? = null,
 )

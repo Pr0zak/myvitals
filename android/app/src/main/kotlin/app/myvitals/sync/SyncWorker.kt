@@ -23,6 +23,7 @@ import app.myvitals.health.HealthConnectGateway
 import app.myvitals.health.RouteRead
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import java.time.Duration
@@ -62,7 +63,15 @@ class SyncWorker(
     private val batchAdapter = moshi.adapter(IngestBatch::class.java)
     private val state = AttemptState()
 
-    override suspend fun doWork(): Result {
+    // UX-P8: the manual "Sync now" and the 15-minute periodic sync are two
+    // separate unique-work chains, so WorkManager alone cannot stop them
+    // running at once — and both end by writing the checkpoint, so an
+    // overlap could move it past data neither of them delivered. One lock
+    // per process serialises them: the second simply waits its turn and
+    // then reads from wherever the first left the checkpoint.
+    override suspend fun doWork(): Result = RUN_LOCK.withLock { doWorkLocked() }
+
+    private suspend fun doWorkLocked(): Result {
         Timber.d("SyncWorker.doWork()")
         val attemptAt = Instant.now()
         return try {
@@ -740,6 +749,15 @@ class SyncWorker(
 
     companion object {
         const val UNIQUE_NAME = "myvitals_periodic_sync"
+
+        /** UX-P8 — the one-shot chain behind "Sync now", backfill and the
+         *  post-grant sync. Enqueued with KEEP (Sync now: a second tap
+         *  while one is queued or running is a no-op, not a second run) or
+         *  APPEND_OR_REPLACE (backfill: must run AFTER any sync in flight,
+         *  never be dropped). Settings observes this name for live state. */
+        const val MANUAL_UNIQUE_NAME = "myvitals_manual_sync"
+
+        private val RUN_LOCK = kotlinx.coroutines.sync.Mutex()
         private const val MAX_PER_TYPE = 4000
         private const val MAX_BUFFER_ATTEMPTS = 3
 

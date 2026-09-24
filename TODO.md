@@ -112,8 +112,8 @@ time, on the next `/summary/range` loads.
 | UX-P5 | Hard-coded unit labels beside converted values (`WeightDetailScreen:228` "lb", `ActivityYtd:143` "mi", `PrepTab:342` "kg a week"); weekly-volume card summed on device | S | phone | todo |
 | UX-P6 | Steps widget falls back to `0` not "—"; widgets `runBlocking` up to 4 s in `onUpdate` | S | phone | todo |
 | UX-P7 | Six 15-min periodic workers; TrailAlert/AiAlert redundant with SyncWorker's post-sync trigger; widget refresh scheduled with no widgets placed | M | phone | todo |
-| UX-P8 | "Sync now" is not unique work — can overlap the periodic sync on the checkpoint write | S | phone | todo |
-| UX-P9 | HC permissions-lost banner is Settings-only on phone; web shows it on every page | S | phone | todo |
+| UX-P8 | "Sync now" is not unique work — can overlap the periodic sync on the checkpoint write | S | phone | done — unreleased (SETTINGS-C: unique manual chain, KEEP; backfill APPEND_OR_REPLACE; per-process run lock in SyncWorker; Settings shows live WorkInfo state) |
+| UX-P9 | HC permissions-lost banner is Settings-only on phone; web shows it on every page | S | phone | done — unreleased (SETTINGS-C: shell banner above Today, missing + denying states) |
 | UX-P10 | Catalog favourite/avoid/disable icons: no contentDescription, no toggle state, 36 dp | S | phone | todo |
 | UX-P11 | Widgets all route to Body tab; in-app `open()` lacks `launchSingleTop` | S | phone | todo |
 

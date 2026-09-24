@@ -183,7 +183,7 @@ class HealthConnectGateway(private val context: Context) {
     /**
      * Suspending permission check — the correct one for any coroutine/UI
      * caller. Talks to Health Connect over a binder; must NOT run on the main
-     * thread. SettingsScreen resolves it via produceState; SyncWorker awaits it
+     * thread. Settings (ConnectionSyncScreen, the shell HC banner) resolve it via produceState; SyncWorker awaits it
      * directly. See [hasAllPermissions] for the legacy blocking variant.
      */
     suspend fun hasAllPermissionsAsync(): Boolean {

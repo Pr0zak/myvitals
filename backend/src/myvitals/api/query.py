@@ -806,3 +806,23 @@ async def get_last_sync(db: AsyncSession = Depends(get_session)) -> dict[str, An
         "error_summary": hb.error_summary if hb else None,
         "app_version": hb.app_version if hb else None,
     }
+
+
+# ── SETTINGS-C: recent import jobs, readable by the phone ─────────────
+# `/import/jobs` sits behind `require_query` with the rest of the import
+# router, and the phone only holds the ingest token — so the phone's Data &
+# imports page could not show whether a Takeout started on the web last
+# night had finished. STARTING an import stays web-only (it uploads a
+# multi-gigabyte archive); READING a job's status is not privileged, so it
+# gets a `require_any` twin here. It reuses the import router's serialiser,
+# so the two lists cannot describe one job differently.
+@router.get("/import-jobs")
+async def recent_import_jobs(
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    from .imports import _job_dict
+    rows = (await db.execute(
+        select(models.ImportJob).order_by(models.ImportJob.started_at.desc()).limit(limit)
+    )).scalars().all()
+    return [_job_dict(j) for j in rows]

@@ -789,9 +789,47 @@ interface BackendApi {
         @retrofit2.http.Query("include_strength") includeStrength: Boolean = true,
         @retrofit2.http.Query("days") days: Int? = null,
     ): ActivityStatsOut
+
+    // ── SETTINGS-C: phone Settings redesign ──
+    @GET("version")
+    suspend fun serverVersion(): ServerVersion
+
+    @GET("update/status")
+    suspend fun updateCronStatus(): UpdateCronStatus
+
+    @GET("ai/config")
+    suspend fun aiConfig(): AiConfigOut
+
+    @POST("ai/config")
+    suspend fun aiUpdateConfig(@Body body: AiConfigIn): AiConfigOut
+
+    @GET("query/import-jobs")
+    suspend fun importJobs(@Query("limit") limit: Int = 10): List<ImportJob>
+
+    @POST("integrations/concept2/sync")
+    suspend fun concept2Sync(): Concept2SyncOut
+
+    /** PUT /profile with a hand-built body carrying ONLY the changed
+     *  fields, explicit nulls included. The server applies only what was
+     *  sent (d22c3dd); ProfilePutBody cannot express "clear this field"
+     *  because Moshi drops nulls. Build it with [BackendClient.jsonBody]. */
+    @PUT("profile")
+    suspend fun putProfilePartial(@Body body: okhttp3.RequestBody): ProfileResponse
 }
 
 object BackendClient {
+    /** SETTINGS-C — serialise a partial update WITH its explicit nulls
+     *  (Moshi's default writer drops them, which would turn "clear the
+     *  weight goal" into "leave it alone"). */
+    fun jsonBody(fields: Map<String, Any?>): okhttp3.RequestBody {
+        val type = com.squareup.moshi.Types.newParameterizedType(
+            Map::class.java, String::class.java, Any::class.java,
+        )
+        val json = moshi.adapter<Map<String, Any?>>(type).serializeNulls().toJson(fields)
+        val media = with(okhttp3.MediaType.Companion) { "application/json; charset=utf-8".toMediaType() }
+        return with(okhttp3.RequestBody.Companion) { json.toRequestBody(media) }
+    }
+
     private val moshi = Moshi.Builder().build()
 
     // Track backend reachability so the app-level banner can tell the

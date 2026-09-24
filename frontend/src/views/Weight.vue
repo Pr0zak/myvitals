@@ -1,563 +1,292 @@
 <script setup lang="ts">
-import { useDateRange } from "@/useDateRange";
-import { weightDeltaClass, weightDeltaTone } from "@/weightDirection";
+/**
+ * Weight detail (UI-4). Phone twin: `WeightDetailScreen.kt`.
+ *
+ * The hero is the latest weigh-in, the change over the window coloured by
+ * the SERVER's tone, the goal distance, and the trend (daily readings, the
+ * server's 7-day mean, the server-fitted trend line and the goal line).
+ * Every figure — min/avg/max, the 7- and 30-day changes, the recomposition
+ * read, and whether a change counts as progress — is `/query/weight`'s
+ * `stats` block (analytics/detail_stats.py), in kilograms, shown in the
+ * user's unit.
+ *
+ * Removed with the move: the client-side KPI math, the rolling average,
+ * the recomposition verdict (which painted "Fat gain" in the crisis rose),
+ * and the distribution histogram, which had no server block and is deferred.
+ */
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
-import Card from "@/components/Card.vue";
-import PageHeader from "@/components/PageHeader.vue";
+import { Scale } from "lucide-vue-next";
 import RangeTabs from "@/components/RangeTabs.vue";
-import EmptyState from "@/components/EmptyState.vue";
-import LoadState from "@/components/LoadState.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
+import NeonPage from "@/components/neon/NeonPage.vue";
+import NeonHero from "@/components/neon/NeonHero.vue";
+import NeonStat from "@/components/neon/NeonStat.vue";
+import StatusChip from "@/components/detail/StatusChip.vue";
+import DetailCard from "@/components/detail/DetailCard.vue";
+import DetailSkeleton from "@/components/detail/DetailSkeleton.vue";
+import DetailError from "@/components/detail/DetailError.vue";
+import "@/components/detail/detail.css";
 import { api } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
-import { chartTheme, isNeon } from "@/theme";
+import type { VitalTile, WeightDelta, WeightStats, WeightTone } from "@/api/types";
+import { chartTheme } from "@/theme";
+import { useDateRange } from "@/useDateRange";
 import { windowExtent, noDataSpans, coverageNote } from "@/components/charts/chartHelpers";
 import { weightVal, weightUnit, fmtWeight, isImperial } from "@/units";
 
-// RANGE-1: one vocabulary, and the range in the URL.
+const AMBER = "#ffb52e";
+const TRACK = "#272a3b";
+
 const { range, options: RANGES, since: rangeSince } =
   useDateRange(["30d", "90d", "1y", "all"], "90d");
+const cur = computed(() => RANGES.find((r) => r.key === range.value)!);
 const yoy = ref(false);
 
 type Point = {
   time: string; weight_kg: number | null; body_fat_pct: number | null;
   bmi: number | null; lean_mass_kg: number | null; source: string;
 };
-const series = ref<Point[]>([]);
-const loading = ref(false);
+const points = ref<Point[]>([]);
+const stats = ref<WeightStats | null>(null);
+const tile = ref<VitalTile | null>(null);
+const loaded = ref(false);
+const loading = ref(true);
+const error = ref<string | null>(null);
 
-// Profile (height for BMI bands + goal for progress)
-const heightCm = ref<number>(178);
-const goalKg = ref<number | null>(null);
-
-async function loadProfile() {
-  try {
-    const p = await api.getProfile();
-    if (p.height_cm) heightCm.value = p.height_cm;
-    if (p.weight_goal_kg) goalKg.value = p.weight_goal_kg;
-  } catch { /* not configured yet */ }
+function errText(e: unknown): string {
+  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof d === "string" ? d : "Couldn't reach the backend.";
 }
 
 async function load() {
   loading.value = true;
   try {
-    // YoY needs the full history regardless of range picker.
-    const days = yoy.value ? null : RANGES.find((r) => r.key === range.value)!.days;
-    const since = days == null
-      ? new Date("2010-01-01")
-      : (() => { const d = new Date(); d.setDate(d.getDate() - days); return d; })();
-    const r = await api.weight({ since });
-    series.value = r.points;
-  } finally { loading.value = false; }
+    const days = yoy.value ? null : cur.value.days;
+    const since = days == null ? new Date("2010-01-01") : (rangeSince.value ?? new Date("2010-01-01"));
+    const [r, tiles] = await Promise.all([api.weight({ since }), api.summaryTiles().catch(() => null)]);
+    points.value = r.points;
+    stats.value = r.stats ?? null;
+    tile.value = tiles?.tiles.find((t) => t.key === "weight") ?? null;
+    loaded.value = true;
+    error.value = null;
+  } catch (e) {
+    // Kept beside whatever is already drawn, never instead of it.
+    error.value = errText(e);
+  } finally {
+    loading.value = false;
+  }
 }
-watch(yoy, load);
-onMounted(() => { loadProfile(); load(); });
-useVisibilityRefresh(() => { load(); });
-watch(range, load);
+onMounted(load);
+useVisibilityRefresh(load);
+watch([range, yoy], load);
 
-// === Sorted, filtered series ===
 const sorted = computed(() =>
-  [...series.value]
-    .filter((p) => p.weight_kg != null)
-    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
-);
+  points.value.filter((p) => p.weight_kg != null)
+    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()));
 
-// === Body recomposition direction (last 30d) ===
-const recomp = computed(() => {
-  const cutoff = Date.now() - 30 * 86400_000;
-  const recent = sorted.value.filter((p) => new Date(p.time).getTime() >= cutoff && p.body_fat_pct != null);
-  if (recent.length < 5) return null;
-  const first = recent[0];
-  const last = recent[recent.length - 1];
-  const fatA = (first.weight_kg as number) * ((first.body_fat_pct as number) / 100);
-  const leanA = (first.weight_kg as number) - fatA;
-  const fatB = (last.weight_kg as number) * ((last.body_fat_pct as number) / 100);
-  const leanB = (last.weight_kg as number) - fatB;
-  const fatΔ = fatB - fatA;       // negative = good
-  const leanΔ = leanB - leanA;    // positive = good
-  let label: string;
-  let cls: string;
-  if (fatΔ < -0.3 && leanΔ > -0.2) { label = "Body recomp ↗"; cls = "good"; }
-  else if (fatΔ < 0 && leanΔ < 0) { label = "Cutting"; cls = ""; }
-  else if (fatΔ > 0 && leanΔ > 0) { label = "Bulking"; cls = ""; }
-  else if (fatΔ > 0.3) { label = "Fat gain"; cls = "bad"; }
-  else { label = "Stable"; cls = ""; }
-  return { label, cls, fatΔ, leanΔ };
+const TONE_COLOR: Record<WeightTone, string> = { positive: "#5dff3b", caution: AMBER, neutral: "#ececf5" };
+function signed(kg: number | null | undefined): string {
+  const v = weightVal(kg ?? null);
+  return v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}`;
+}
+const deltaText = computed(() => {
+  const d = stats.value?.delta_kg;
+  if (d == null) return null;
+  const arrow = d > 0.02 ? "↑" : d < -0.02 ? "↓" : "→";
+  return `${arrow} ${signed(d)} ${weightUnit.value} over ${cur.value.label}`;
+});
+/** Distance to the goal as a magnitude and a direction word; the server
+ *  gives the signed gap, this only converts the unit. It takes no tone. */
+const goalText = computed(() => {
+  const s = stats.value;
+  if (s?.goal_kg == null) return null;
+  const gap = s.goal_gap_kg;
+  let word = "";
+  if (gap != null) {
+    const v = weightVal(Math.abs(gap)) ?? 0;
+    word = v < 0.05 ? " · at goal" : ` · ${v.toFixed(1)} ${weightUnit.value} to ${gap > 0 ? "lose" : "gain"}`;
+  }
+  return `Goal ${fmtWeight(s.goal_kg)}${word}`;
+});
+const deltaTile = (d: WeightDelta | undefined) => ({
+  value: signed(d?.delta_kg),
+  accent: d?.delta_kg != null ? TONE_COLOR[d.tone] : undefined,
 });
 
-// === KPIs ===
-const stats = computed(() => {
-  if (sorted.value.length === 0) return null;
-  const vals = sorted.value.map((p) => p.weight_kg as number);
-  const latest = vals[vals.length - 1];
-  const first = vals[0];
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-  const since7 = Date.now() - 7 * 86400_000;
-  const since30 = Date.now() - 30 * 86400_000;
-  const w7 = sorted.value.find((p) => new Date(p.time).getTime() >= since7);
-  const w30 = sorted.value.find((p) => new Date(p.time).getTime() >= since30);
-  return {
-    latest, first, min, max, avg,
-    delta_period: latest - first,
-    delta_7d: w7 ? latest - (w7.weight_kg as number) : null,
-    delta_30d: w30 ? latest - (w30.weight_kg as number) : null,
-    n_readings: vals.length,
-    days_at_min: sorted.value.filter((p) => Math.abs((p.weight_kg as number) - min) < 0.05).length,
-  };
-});
-
-/**
- * What the window actually holds, when that is less than what was asked for.
- * Null when the data fills the range, so the line only appears when it has
- * something to say.
- */
 const coverage = computed(() => coverageNote(
-  sorted.value
-    .filter((p) => p.weight_kg != null)
-    .map((p) => [new Date(p.time).getTime(), p.weight_kg as number] as [number, number]),
+  sorted.value.map((p) => [new Date(p.time).getTime(), p.weight_kg as number] as [number, number]),
   rangeSince.value?.getTime() ?? null,
 ));
 
-// === 7-day rolling moving average ===
-function rolling7Avg(pts: { t: number; v: number }[]): { t: number; v: number }[] {
-  if (!pts.length) return [];
-  const W = 7 * 86400_000;
-  const out: { t: number; v: number }[] = [];
-  let i0 = 0;
-  for (let i = 0; i < pts.length; i++) {
-    while (pts[i].t - pts[i0].t > W) i0++;
-    let s = 0; let n = 0;
-    for (let j = i0; j <= i; j++) { s += pts[j].v; n++; }
-    out.push({ t: pts[i].t, v: s / n });
-  }
-  return out;
-}
+const axis = computed(() => chartTheme.value.axisLabel);
+const split = { lineStyle: { color: TRACK } };
 
-// === Main chart ===
-function bmiBands(): unknown[] {
-  const heightM = (heightCm.value || 178) / 100;
-  const toUnit = (kg: number) => weightVal(kg) ?? kg;
-  const u = toUnit(18.5 * heightM * heightM);
-  const n = toUnit(25 * heightM * heightM);
-  const o = toUnit(30 * heightM * heightM);
-  return [
-    [{ yAxis: 0,    itemStyle: { color: "rgba(56, 189, 248, 0.07)" } }, { yAxis: u }],
-    [{ yAxis: u,    itemStyle: { color: "rgba(34, 197, 94, 0.07)" } }, { yAxis: n }],
-    [{ yAxis: n,    itemStyle: { color: "rgba(234, 179, 8, 0.07)" } }, { yAxis: o }],
-    [{ yAxis: o,    itemStyle: { color: "rgba(239, 68, 68, 0.10)" } }, { yAxis: 9999 }],
-  ];
+function goalAwareExtent(): { min?: number; max?: number } {
+  const vals = sorted.value.map((p) => weightVal(p.weight_kg)).filter((v): v is number => v != null);
+  if (!vals.length) return {};
+  const gv = stats.value?.goal_kg != null ? weightVal(stats.value.goal_kg) : null;
+  const lo = Math.min(...vals, gv ?? Infinity);
+  const hi = Math.max(...vals, gv ?? -Infinity);
+  const pad = Math.max((hi - lo) * 0.08, isImperial.value ? 1 : 0.5);
+  const step = isImperial.value ? 5 : 2;
+  return { min: Math.floor((lo - pad) / step) * step, max: Math.ceil((hi + pad) / step) * step };
 }
 
 const mainOption = computed(() => {
-  void chartTheme.value; void weightUnit.value; void isNeon.value;
-  const t = chartTheme.value;
-  // Year-over-year overlay: split series into per-year curves aligned by
-  // day-of-year so seasonal patterns become obvious.
+  void weightUnit.value;
   if (yoy.value) {
-    // One series per calendar year. Each point is anchored to a fixed
-    // reference year (2000) so the x-axis spans Jan 1 → Dec 31 and
-    // every year's curve overlaps. Time axis (not category) — category
-    // mode treats unique strings as positional buckets in insertion
-    // order, which scrambled the axis when years had different sample
-    // sets.
     const byYear: Record<string, [number, number][]> = {};
     for (const p of sorted.value) {
       const d = new Date(p.time);
-      const y = d.getUTCFullYear();
       const v = weightVal(p.weight_kg);
       if (v == null) continue;
-      // UTC millis at the same MM-DD in year 2000 (leap year — covers Feb 29).
-      const ts = Date.UTC(2000, d.getUTCMonth(), d.getUTCDate());
-      (byYear[String(y)] ??= []).push([ts, v]);
+      (byYear[String(d.getUTCFullYear())] ??= []).push([Date.UTC(2000, d.getUTCMonth(), d.getUTCDate()), v]);
     }
     const yrs = Object.keys(byYear).sort();
-    const palette = isNeon.value
-      ? ["#9b9bb0", "#6f7bff", "#ff3ad8", "#5dff3b", "#ffb52e", "#ff5d7a", "#28e6ff", "#9b9bb0", "#6f7bff"]
-      : ["#94a3b8", "#64748b", "#a78bfa", "#22c55e", "#eab308", "#f97316", "#ef4444", "#38bdf8", "#0ea5e9"];
-    const series = yrs.map((y, i) => ({
-      name: y, type: "line", smooth: true, symbol: "none",
-      data: byYear[y].sort((a, b) => a[0] - b[0]),
-      lineStyle: {
-        width: i === yrs.length - 1 ? 2.5 : 1.2,
-        color: palette[i % palette.length],
-        opacity: i === yrs.length - 1 ? 1 : 0.55,
-      },
-    }));
-    const monthLabel = (ms: number) => {
-      const d = new Date(ms);
-      return `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-    };
+    const palette = ["#9b9bb0", "#6f7bff", "#ff3ad8", "#5dff3b", "#28e6ff"];
+    const md = (ms: number) => { const d = new Date(ms); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`; };
     return {
-      grid: { left: 50, right: 12, top: 36, bottom: 28 },
-      legend: { textStyle: t.axisLabel, top: 4 },
-      tooltip: { trigger: "axis", ...t.tooltip,
-        formatter: (params: any[]) =>
-          monthLabel(params[0].value[0]) + "<br/>"
-          + params.map((p) => `${p.marker}${p.seriesName}: <b>${p.value[1]?.toFixed(1)}</b>`).join("<br/>"),
-      },
-      xAxis: {
-        type: "time",
-        min: Date.UTC(2000, 0, 1),
-        max: Date.UTC(2000, 11, 31),
-        axisLabel: { color: t.axisLabel.color, formatter: monthLabel },
-        splitLine: t.splitLine,
-      },
-      yAxis: { type: "value", name: weightUnit.value, scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
-      series,
-      dataZoom: [{ type: "inside" }],
+      legend: { textStyle: axis.value, top: 0 },
+      grid: { left: 40, right: 8, top: 28, bottom: 24 },
+      tooltip: { trigger: "axis", ...chartTheme.value.tooltip },
+      xAxis: { type: "time", min: Date.UTC(2000, 0, 1), max: Date.UTC(2000, 11, 31),
+               axisLabel: { ...axis.value, formatter: md }, splitLine: { show: false } },
+      yAxis: { type: "value", scale: true, axisLabel: axis.value, splitLine: split },
+      series: yrs.map((y, i) => ({
+        name: y, type: "line", smooth: true, symbol: "none", data: byYear[y].sort((a, b) => a[0] - b[0]),
+        lineStyle: { width: i === yrs.length - 1 ? 2.5 : 1.2,
+                     color: i === yrs.length - 1 ? AMBER : palette[i % palette.length],
+                     opacity: i === yrs.length - 1 ? 1 : 0.55 },
+      })),
     };
   }
-
-  // Neon: weight = amber, body fat = cyan, goal line = magenta.
-  // Classic: unchanged (sky accent / yellow annotation / violet recovery).
-  const weightColor = isNeon.value ? "#ffb52e" : t.palette.accent;
-  const fatColor = isNeon.value ? "#28e6ff" : t.palette.annotation;
-  const goalColor = isNeon.value ? "#ff3ad8" : t.palette.recovery;
-
-  const raw = sorted.value.map((p) => ({ t: new Date(p.time).getTime(), v: weightVal(p.weight_kg) as number }));
-  const pts = raw.map((p) => [p.t, p.v]);
-  const ma = rolling7Avg(raw).map((p) => [p.t, p.v]);
-  const fatPts = sorted.value
-    .filter((p) => p.body_fat_pct != null)
-    .map((p) => [new Date(p.time).getTime(), p.body_fat_pct]);
-
-  const series: Array<Record<string, unknown>> = [];
-  if (pts.length) series.push({
-    name: `Daily ${weightUnit.value}`, type: "line", data: pts,
-    symbol: "circle", symbolSize: 3, connectNulls: false,
-    lineStyle: { width: 1, color: weightColor, opacity: 0.4 },
-    itemStyle: { color: weightColor }, yAxisIndex: 0,
-    markArea: { silent: true, data: bmiBands() },
+  const pts = sorted.value.map((p) => [new Date(p.time).getTime(), weightVal(p.weight_kg)] as [number, number]);
+  if (pts.length < 2) return null;
+  const s = stats.value;
+  const series: any[] = [
+    { name: `Daily ${weightUnit.value}`, type: "line", data: pts, symbol: "circle", symbolSize: 3,
+      lineStyle: { width: 1, color: AMBER, opacity: 0.4 }, itemStyle: { color: AMBER } },
+    { name: "7-day avg", type: "line", smooth: true, symbol: "none",
+      data: (s?.rolling_7d ?? []).map((r) => [new Date(r.time).getTime(), weightVal(r.kg)]),
+      lineStyle: { width: 2.5, color: AMBER, shadowColor: "rgba(255, 181, 46, 0.55)", shadowBlur: 8 } },
+  ];
+  if (s?.trend) series.push({
+    name: "Trend", type: "line", symbol: "none", silent: true,
+    data: [[new Date(s.trend.start_time).getTime(), weightVal(s.trend.start_kg)],
+           [new Date(s.trend.end_time).getTime(), weightVal(s.trend.end_kg)]],
+    lineStyle: { width: 1.2, color: AMBER, type: "dashed" as const, opacity: 0.55 },
   });
-  if (ma.length) series.push({
-    name: "7-day avg", type: "line", data: ma, smooth: true,
-    symbol: "none",
-    lineStyle: { width: 2.5, color: weightColor,
-      ...(isNeon.value ? { shadowColor: "rgba(255, 181, 46, 0.55)", shadowBlur: 8 } : {}) },
-    yAxisIndex: 0,
-  });
-  if (goalKg.value != null) {
-    const gv = weightVal(goalKg.value);
-    if (gv != null) series.push({
-      name: "Goal", type: "line", data: [],
-      yAxisIndex: 0, markLine: {
-        silent: true, symbol: "none", lineStyle: { color: goalColor, type: "dashed" as const, width: 1.5 },
-        data: [{ yAxis: gv, label: { formatter: `Goal ${gv.toFixed(1)} ${weightUnit.value}`, color: goalColor } }],
-      },
-    });
-  }
-  if (fatPts.length) series.push({
-    name: "Body fat %", type: "line", data: fatPts, smooth: true,
-    symbol: "circle", symbolSize: 4, connectNulls: true,
-    lineStyle: { width: 1.5, color: fatColor, type: "dashed" as const },
-    itemStyle: { color: fatColor }, yAxisIndex: 1,
-  });
-
-  // Drawn last so it sits under the real series, and only where the window
-  // genuinely has nothing. Excluded from `stats` and from rolling7Avg above.
-  series.push(...noDataSpans(
-    pts as Array<[number, number]>, rangeSince.value?.getTime() ?? null,
-    Date.now(), weightColor,
-  ));
-
-  return {
-    grid: { left: 50, right: 50, top: 36, bottom: 28 },
-    legend: { textStyle: t.axisLabel, top: 4 },
-    tooltip: { trigger: "axis", ...t.tooltip },
-    xAxis: {
-      type: "time", axisLabel: t.axisLabel, splitLine: t.splitLine,
-      // Pin to the SELECTED window, not to the data. Three readings from
-      // the last two days used to draw a two-day chart no matter whether
-      // 30d, 90d or 1y was picked.
-      ...windowExtent(rangeSince.value?.getTime() ?? null),
+  const gv = s?.goal_kg != null ? weightVal(s.goal_kg) : null;
+  if (gv != null) series.push({
+    name: "Goal", type: "line", data: [], markLine: {
+      silent: true, symbol: "none", lineStyle: { color: "#ececf5", type: "dashed" as const, width: 1.2, opacity: 0.6 },
+      data: [{ yAxis: gv, label: { formatter: `goal ${gv.toFixed(0)}`, color: "#9b9bb0", fontSize: 9, position: "insideEndTop" } }],
     },
-    yAxis: [
-      // `scale: true` fits the DATA, and ECharts does not widen an axis to
-      // contain a markLine — so a goal below (or above) the plotted range
-      // drew no goal line at all, silently. Same class of bug as the clipped
-      // normal band on the heart-rate chart. Phone twin: `niceDomain`'s
-      // includeLo/includeHi.
-      {
-        type: "value", name: weightUnit.value, scale: true,
-        axisLabel: t.axisLabel, splitLine: t.splitLine,
-        ...goalAwareExtent(),
-      },
-      { type: "value", name: "%", scale: true, axisLabel: t.axisLabel, splitLine: { show: false } },
-    ],
+  });
+  series.push(...noDataSpans(pts, rangeSince.value?.getTime() ?? null, Date.now(), AMBER));
+  return {
+    grid: { left: 40, right: 8, top: 14, bottom: 24 },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip },
+    xAxis: { type: "time", axisLabel: axis.value, splitLine: { show: false },
+             ...windowExtent(rangeSince.value?.getTime() ?? null) },
+    yAxis: { type: "value", scale: true, axisLabel: axis.value, splitLine: split, ...goalAwareExtent() },
     series,
-    dataZoom: [{ type: "inside" }],
   };
 });
 
-/** Weight y-extent wide enough to contain the goal line, rounded outward. */
-function goalAwareExtent(): { min?: number; max?: number } {
-  const vals = sorted.value
-    .map((p) => weightVal(p.weight_kg))
-    .filter((v): v is number => v != null);
-  if (!vals.length) return {};
-  const gv = goalKg.value != null ? weightVal(goalKg.value) : null;
-  const lo = Math.min(...vals, gv ?? Infinity);
-  const hi = Math.max(...vals, gv ?? -Infinity);
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return {};
-  const pad = Math.max((hi - lo) * 0.08, isImperial.value ? 1 : 0.5);
-  const step = isImperial.value ? 5 : 2;
-  return {
-    min: Math.floor((lo - pad) / step) * step,
-    max: Math.ceil((hi + pad) / step) * step,
-  };
-}
-
-// === Distribution histogram ===
-const histogramOption = computed(() => {
-  void chartTheme.value; void weightUnit.value; void isNeon.value;
-  const t = chartTheme.value;
-  const barColor = isNeon.value ? "#ffb52e" : t.palette.accent;
-  if (sorted.value.length === 0) return null;
-  const vals = sorted.value.map((p) => weightVal(p.weight_kg) as number);
-  const min = Math.floor(Math.min(...vals));
-  const max = Math.ceil(Math.max(...vals));
-  const binSize = isImperial.value ? 1 : 0.5;
-  const bins: Record<string, number> = {};
-  for (let v = min; v <= max; v += binSize) bins[v.toFixed(1)] = 0;
-  for (const v of vals) {
-    const bucket = (Math.floor(v / binSize) * binSize).toFixed(1);
-    bins[bucket] = (bins[bucket] ?? 0) + 1;
-  }
-  const cats = Object.keys(bins).sort((a, b) => parseFloat(a) - parseFloat(b));
-  return {
-    grid: { left: 40, right: 12, top: 16, bottom: 36 },
-    tooltip: { trigger: "axis", ...t.tooltip },
-    xAxis: { type: "category", data: cats, name: weightUnit.value, axisLabel: t.axisLabel },
-    yAxis: { type: "value", name: "days", axisLabel: t.axisLabel, splitLine: t.splitLine },
-    series: [{ type: "bar", data: cats.map((c) => bins[c]),
-               itemStyle: { color: barColor } }],
-  };
-});
-
-// === History table ===
 const sortDesc = ref(true);
-const tableRows = computed(() => {
-  const arr = [...sorted.value];
-  if (sortDesc.value) arr.reverse();
-  return arr;
-});
-
-function fmtDate(s: string): string {
-  return new Date(s).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
-}
-/** Distance to the goal as a magnitude plus a direction word (UX-D6).
- *  This was a signed delta — `latest - goal` here and `goal - latest` on
- *  the phone — so the same weigh-in read "+53.9 to go" on one surface and
- *  "−53.9 to go" on the other. A word cannot be read backwards. */
-const gapToGoal = computed(() => {
-  if (stats.value?.latest == null || goalKg.value == null) return "";
-  const gap = goalKg.value - stats.value.latest;
-  // Inside a tenth of the display unit reads as "at goal", matching the
-  // one-decimal precision the number is shown at.
-  if (Math.abs(weightVal(gap) ?? 0) < 0.05) return "at goal";
-  return `${fmtWeight(Math.abs(gap))} to ${gap < 0 ? "lose" : "gain"}`;
-});
-
-function fmtDelta(kg: number | null): string {
-  if (kg == null) return "—";
-  const v = weightVal(kg) as number;
-  return `${v >= 0 ? "+" : ""}${v.toFixed(1)} ${weightUnit.value}`;
-}
-// OG2-A5: which way is good is the GOAL's answer, not this component's.
-// `deltaCls` used to default `lowerIsBetter = true` and every trend figure
-// called it bare, so a user gaining toward a goal read their progress in
-// red. `analytics/compare.py` already classes bodyweight as
-// better="context" — the app does not get to assume — and with no goal set
-// the honest render is a plain number.
-function deltaCls(kg: number | null): string {
-  return weightDeltaClass(weightDeltaTone(kg, stats.value?.latest, goalKg.value));
-}
+const tableRows = computed(() => (sortDesc.value ? [...sorted.value].reverse() : sorted.value));
+const fmtDate = (s: string) => new Date(s).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
 </script>
 
 <template>
-  <div class="weight">
-    <PageHeader>
-      <template #title>
-        Weight
-        <span v-if="recomp" class="recomp" :class="recomp.cls">· {{ recomp.label }}</span>
-      </template>
-      <RangeTabs v-model="range" :options="RANGES" :disabled="yoy"
-                 aria-label="Weight time range">
-        <template #before>
-          <PatternsLink metric="weight_kg" label="weight"/>
-        </template>
+  <NeonPage title="Weight" :back="true">
+    <template #trailing><span class="dicon" style="--a: #ffb52e"><Scale :size="20" /></span></template>
+    <div class="dtabs">
+      <RangeTabs v-model="range" :options="RANGES" :disabled="yoy" aria-label="Weight time range">
+        <template #before><PatternsLink metric="weight_kg" label="weight"/></template>
         <template #after>
-          <label class="yoy-tog">
-            <input type="checkbox" v-model="yoy"/> Year-over-year
-          </label>
+          <label class="yoy"><input v-model="yoy" type="checkbox"/> Year-over-year</label>
         </template>
       </RangeTabs>
-    </PageHeader>
+    </div>
 
-    <LoadState v-if="loading" />
-    <EmptyState v-else-if="!stats">
-      No weight data yet. Import a Fitbit/Garmin ZIP from Settings, or pair a smart scale with Health Connect.
-    </EmptyState>
+    <template v-if="!loaded">
+      <DetailSkeleton v-if="loading" :accent="AMBER" label="Weight" />
+      <DetailError v-else-if="error" :error="error" @retry="load" />
+    </template>
 
     <template v-else>
-      <!-- KPI banner -->
-      <div class="kpis">
-        <div class="kpi">
-          <div class="kpi-label">Latest</div>
-          <div class="kpi-val">{{ fmtWeight(stats.latest) }}</div>
-          <div v-if="goalKg" class="kpi-sub">
-            Goal: <strong>{{ fmtWeight(goalKg) }}</strong>
-            <!-- The remaining gap is a distance, not progress: it does not
-                 improve or worsen, so it takes no tone. It was previously
-                 coloured green whenever the user was ABOVE their goal. -->
-            <span>({{ gapToGoal }})</span>
+      <DetailError v-if="error" :error="error" cached @retry="load" />
+      <p v-if="!sorted.length" class="dnote">
+        No weight data in this window. Import a Fitbit/Garmin ZIP from Settings, or pair a smart scale with Health Connect.
+      </p>
+      <template v-else>
+        <NeonHero :accent="AMBER">
+          <span class="deb">Latest</span>
+          <span class="dbig" :style="{ color: AMBER }">
+            {{ weightVal(stats?.latest_kg ?? null)?.toFixed(1) ?? "—" }}<small>{{ weightUnit }}</small>
+          </span>
+          <span v-if="deltaText" class="dsubline" :style="{ color: TONE_COLOR[stats!.tone], fontWeight: 600 }">{{ deltaText }}</span>
+          <div class="chips">
+            <StatusChip v-if="tile?.status_reason" :text="tile.status_reason" />
+            <StatusChip :text="goalText" />
+            <StatusChip v-if="stats?.recomp" :status="stats.recomp.tone" :text="stats.recomp.label" />
           </div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">7-day Δ</div>
-          <div class="kpi-val" :class="deltaCls(stats.delta_7d)">{{ fmtDelta(stats.delta_7d) }}</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">30-day Δ</div>
-          <div class="kpi-val" :class="deltaCls(stats.delta_30d)">{{ fmtDelta(stats.delta_30d) }}</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Range Δ</div>
-          <div class="kpi-val" :class="deltaCls(stats.delta_period)">{{ fmtDelta(stats.delta_period) }}</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Min · Max</div>
-          <div class="kpi-val small">{{ fmtWeight(stats.min) }} – {{ fmtWeight(stats.max) }}</div>
-          <div class="kpi-sub">avg {{ fmtWeight(stats.avg) }}</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Readings</div>
-          <div class="kpi-val">{{ stats.n_readings }}</div>
-          <div class="kpi-sub">{{ stats.days_at_min }} day(s) at min</div>
-        </div>
-      </div>
+          <div v-if="mainOption" class="dchart tall"><VChart :option="mainOption" autoresize/></div>
+          <p v-else class="dnote">Need at least 2 weigh-ins in this window to draw a trend.</p>
+        </NeonHero>
 
-      <p v-if="coverage" class="coverage-note">{{ coverage }}</p>
-
-      <Card title="Trend">
-        <div class="chart"><VChart :option="mainOption" autoresize/></div>
-      </Card>
-
-      <Card title="Distribution (days at each weight)">
-        <div class="chart small"><VChart v-if="histogramOption" :option="histogramOption" autoresize/></div>
-      </Card>
-
-      <Card :title="`History (${tableRows.length} readings)`">
-        <table class="hist">
-          <thead>
-            <tr>
-              <th @click="sortDesc = !sortDesc" class="sortable">
-                Date {{ sortDesc ? "↓" : "↑" }}
-              </th>
-              <th>Weight</th>
-              <th>Body fat %</th>
-              <th>Lean</th>
-              <th>BMI</th>
-              <th>Source</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(r, i) in tableRows.slice(0, 200)" :key="`${r.time}-${i}`">
-              <td class="m">{{ fmtDate(r.time) }}</td>
-              <td><strong>{{ fmtWeight(r.weight_kg) }}</strong></td>
-              <td>{{ r.body_fat_pct != null ? r.body_fat_pct.toFixed(1) + " %" : "—" }}</td>
-              <td>{{ fmtWeight(r.lean_mass_kg) }}</td>
-              <td>{{ r.bmi != null ? r.bmi.toFixed(1) : "—" }}</td>
-              <td class="m">{{ r.source }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-if="tableRows.length > 200" class="muted">
-          Showing first 200 of {{ tableRows.length }}. Narrow the range to see different windows.
+        <div class="dstats">
+          <NeonStat v-bind="deltaTile(stats?.delta_7d)" :label="`7-day Δ ${weightUnit}`" />
+          <NeonStat v-bind="deltaTile(stats?.delta_30d)" :label="`30-day Δ ${weightUnit}`" />
+          <NeonStat :value="String(stats?.count ?? 0)" label="Readings" />
         </div>
-      </Card>
+        <div class="dstats">
+          <NeonStat :value="weightVal(stats?.min_kg ?? null)?.toFixed(1) ?? '—'" :label="`Min ${weightUnit}`" />
+          <NeonStat :value="weightVal(stats?.avg_kg ?? null)?.toFixed(1) ?? '—'" :label="`Avg ${weightUnit}`" />
+          <NeonStat :value="weightVal(stats?.max_kg ?? null)?.toFixed(1) ?? '—'" :label="`Max ${weightUnit}`" />
+        </div>
+        <p v-if="coverage" class="dnote">{{ coverage }}</p>
+
+        <DetailCard :title="`History · ${tableRows.length} readings`">
+          <div class="hist-wrap">
+            <table class="hist">
+              <thead>
+                <tr>
+                  <th class="sortable" @click="sortDesc = !sortDesc">Date {{ sortDesc ? "↓" : "↑" }}</th>
+                  <th>Weight</th><th>Body fat</th><th>Lean</th><th>BMI</th><th>Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(r, i) in tableRows.slice(0, 200)" :key="`${r.time}-${i}`">
+                  <td class="m">{{ fmtDate(r.time) }}</td>
+                  <td><strong>{{ fmtWeight(r.weight_kg) }}</strong></td>
+                  <td>{{ r.body_fat_pct != null ? r.body_fat_pct.toFixed(1) + " %" : "—" }}</td>
+                  <td>{{ fmtWeight(r.lean_mass_kg) }}</td>
+                  <td>{{ r.bmi != null ? r.bmi.toFixed(1) : "—" }}</td>
+                  <td class="m">{{ r.source }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-if="tableRows.length > 200" class="dnote">Showing the first 200 of {{ tableRows.length }}.</p>
+        </DetailCard>
+      </template>
     </template>
-  </div>
+  </NeonPage>
 </template>
 
 <style scoped>
-.weight { max-width: 1200px; }
-.yoy-tog { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 0.6rem; font-size: 0.85rem; color: var(--muted); cursor: pointer; }
-.recomp { font-size: 0.7em; color: var(--muted); margin-left: 0.5rem; font-weight: 400; }
-.recomp.good { color: #22c55e; }
-.recomp.bad { color: #ef4444; }
-
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.6rem; margin-bottom: 1rem; }
-.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem; }
-.kpi-label { color: var(--muted-2); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.kpi-val { font-size: 1.6rem; font-weight: 600; margin: 0.2rem 0 0.1rem; font-family: ui-monospace, monospace; }
-.kpi-val.small { font-size: 1rem; }
-.kpi-sub { color: var(--muted); font-size: 0.8rem; }
-.coverage-note { color: var(--muted); font-size: 0.8rem; margin: -0.25rem 0 0.75rem; }
-.delta-good { color: #22c55e; }
-/* Amber, not rose. A weight change away from a goal is worth noticing and
-   is not a crisis; rose is reserved for the crisis surfaces (GOAL-STATE). */
-.delta-warn { color: #d97706; }
-
-.chart { width: 100%; height: 380px; }
-.chart.small { height: 220px; }
-.chart > * { width: 100%; height: 100%; }
-
-.hist { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-.hist th { text-align: left; color: var(--muted-2); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.yoy { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: #9b9bb0; cursor: pointer; }
+.hist-wrap { overflow-x: auto; }
+.hist { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.hist th { text-align: left; color: #9b9bb0; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+  padding: 6px 8px; border-bottom: 1px solid #23263a; white-space: nowrap; }
 .hist th.sortable { cursor: pointer; user-select: none; }
-.hist td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--surface-2); }
-.hist .m { color: var(--muted); font-size: 0.85rem; }
-.muted { color: var(--muted); font-size: 0.85rem; padding: 0.6rem; }
-
-/* ===== Vitality Neon — scoped, neon-theme-only overrides ===== */
-html[data-theme="neon"] .weight {
-  --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
-  --rn-amber: #ffb52e; --rn-lime: #5dff3b; --rn-red: #ff5d7a;
-  --rn-cyan: #28e6ff; --rn-track: #272a3b;
-  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
-  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
-}
-
-/* Recomp + delta status text → neon good/bad */
-html[data-theme="neon"] .recomp.good,
-html[data-theme="neon"] .delta-good { color: var(--rn-lime); }
-html[data-theme="neon"] .recomp.bad,
-html[data-theme="neon"] .delta-warn { color: var(--rn-amber); }
-
-/* KPI cards → neon surface + glanceable monospace numerics */
-html[data-theme="neon"] .kpi {
-  background: var(--rn-card);
-  border: 1px solid #21243450;
-  border-radius: 18px;
-}
-html[data-theme="neon"] .kpi-label {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  letter-spacing: 0.11em; color: var(--rn-mut);
-}
-html[data-theme="neon"] .kpi-val {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  letter-spacing: -0.5px; color: var(--rn-ink);
-}
-/* First KPI card = "Latest" weight — give the headline an amber glow */
-html[data-theme="neon"] .kpi:first-child .kpi-val {
-  color: var(--rn-amber);
-  text-shadow: 0 0 10px rgba(255, 181, 46, 0.45);
-}
-html[data-theme="neon"] .kpi-sub { color: var(--rn-mut); }
-html[data-theme="neon"] .kpi-sub strong { color: var(--rn-ink); }
-
-/* YoY toggle label */
-html[data-theme="neon"] .yoy-tog { color: var(--rn-mut); }
-
-/* History table chrome on neon */
-html[data-theme="neon"] .hist th { color: var(--rn-mut); border-bottom-color: #21243480; }
-html[data-theme="neon"] .hist td { border-bottom-color: #1d2030; }
-html[data-theme="neon"] .hist td strong { color: var(--rn-amber); }
-html[data-theme="neon"] .hist .m,
-html[data-theme="neon"] .muted { color: var(--rn-mut); }
-
+.hist td { padding: 6px 8px; border-bottom: 1px solid #1d2030; white-space: nowrap; }
+.hist td strong { color: #ffb52e; }
+.hist .m { color: #9b9bb0; }
 </style>

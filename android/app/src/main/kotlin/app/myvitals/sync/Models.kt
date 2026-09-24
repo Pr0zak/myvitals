@@ -394,6 +394,9 @@ data class StrengthWorkoutDetail(
     @Json(name = "sets_done") val setsDone: Int = 0,
     @Json(name = "sets_total") val setsTotal: Int = 0,
     val exercises: List<StrengthWorkoutExerciseRow> = emptyList(),
+    /** UI-1 — the slot the Train hero's button names. Null when nothing is
+     *  left, on a finished session, or from an older backend. */
+    @Json(name = "next_up") val nextUp: StrengthNextUp? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -552,6 +555,9 @@ data class StrengthStats(
     /** CONS-1. Streaks and frequency over full history, so these do NOT
      *  change when `days` does. Null from a backend older than v0.10.1. */
     val consistency: TrainingConsistency? = null,
+    /** UI-1 — trailing 7 local days vs the 7 before, totals, change and
+     *  its direction. Render verbatim; never re-sum [daily]. */
+    val week: StrengthWeekVolume? = null,
 )
 
 /**
@@ -795,6 +801,9 @@ data class MuscleVolumeRow(
     @Json(name = "available_primary") val availablePrimary: Int? = null,
     @Json(name = "available_any") val availableAny: Int? = null,
     @Json(name = "pool_below_mev") val poolBelowMev: Boolean = false,
+    /** UI-1 — the sets today's plan adds to this muscle (projected rows
+     *  only). The Train hero's chips are the muscles where this is > 0. */
+    @Json(name = "sets_planned") val setsPlanned: Double? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -1745,6 +1754,11 @@ data class TimeSeries(
     // mean. Server computes these from the unbucketed table.
     @Json(name = "min_bpm") val minBpm: Double? = null,
     @Json(name = "max_bpm") val maxBpm: Double? = null,
+    /** UI-4 — HR only: zones, time-in-zone and the band histogram for a
+     *  one-day trace, computed server-side. */
+    val stats: HrZoneStats? = null,
+    /** UI-4 — steps only: 24 LOCAL-hour buckets for a one-day window. */
+    val hourly: List<Int>? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -2880,4 +2894,173 @@ data class ActivityYtd(
     @Json(name = "cumulative_distance_m") val cumulative: YtdCumulative = YtdCumulative(),
     @Json(name = "this_week") val thisWeek: YtdWeek? = null,
     val weeks: List<YtdWeek> = emptyList(),
+)
+
+// ── UI-4: metric detail screens — server-computed stat blocks ─────────────
+// Rendered verbatim. The screens used to derive every one of these in
+// Compose, and the web derived its own; see analytics/detail_stats.py.
+
+@JsonClass(generateAdapter = true)
+data class WeekdayMean(
+    val dow: String,
+    val mean: Double? = null,
+    val n: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class DatedValue(
+    val date: String,
+    val value: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class StepsRangeStats(
+    val avg: Int? = null,
+    val min: Int? = null,
+    val max: Int? = null,
+    val total: Int? = null,
+    @Json(name = "days_with_data") val daysWithData: Int = 0,
+    @Json(name = "goal_days") val goalDays: Int = 0,
+    @Json(name = "window_days") val windowDays: Int = 0,
+    @Json(name = "weekday_means") val weekdayMeans: List<WeekdayMean> = emptyList(),
+    @Json(name = "rolling_7d") val rolling7d: List<DatedValue> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class RestingHrRangeStats(
+    val avg: Double? = null,
+    val min: Double? = null,
+    val max: Double? = null,
+    val latest: Double? = null,
+    @Json(name = "latest_vs_avg") val latestVsAvg: Double? = null,
+    @Json(name = "days_with_data") val daysWithData: Int = 0,
+    @Json(name = "weekday_means") val weekdayMeans: List<WeekdayMean> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class SleepRangeStats(
+    @Json(name = "avg_s") val avgS: Int? = null,
+    @Json(name = "min_s") val minS: Int? = null,
+    @Json(name = "max_s") val maxS: Int? = null,
+    val nights: Int = 0,
+    val naps: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class RangeStats(
+    val since: String = "",
+    val until: String = "",
+    val steps: StepsRangeStats? = null,
+    @Json(name = "resting_hr") val restingHr: RestingHrRangeStats? = null,
+    val sleep: SleepRangeStats? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class HrZoneTime(
+    val zone: String,
+    val label: String = "",
+    @Json(name = "lo_bpm") val loBpm: Int = 0,
+    @Json(name = "hi_bpm") val hiBpm: Int? = null,
+    val seconds: Int = 0,
+    val pct: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class HrHistBin(
+    val lo: Int,
+    val hi: Int,
+    val minutes: Double = 0.0,
+)
+
+@JsonClass(generateAdapter = true)
+data class HrZoneStats(
+    @Json(name = "time_in_zone") val timeInZone: List<HrZoneTime> = emptyList(),
+    @Json(name = "tracked_s") val trackedS: Int = 0,
+    val histogram: List<HrHistBin> = emptyList(),
+    @Json(name = "max_hr") val maxHr: Int? = null,
+    @Json(name = "max_hr_source") val maxHrSource: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightPointOut(
+    val time: String,
+    @Json(name = "weight_kg") val weightKg: Double? = null,
+    @Json(name = "body_fat_pct") val bodyFatPct: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightDelta(
+    @Json(name = "delta_kg") val deltaKg: Double? = null,
+    /** positive | caution | neutral — decided server-side (GOAL-STATE band). */
+    val tone: String = "neutral",
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightTrend(
+    @Json(name = "start_time") val startTime: String,
+    @Json(name = "start_kg") val startKg: Double,
+    @Json(name = "end_time") val endTime: String,
+    @Json(name = "end_kg") val endKg: Double,
+    @Json(name = "per_week_kg") val perWeekKg: Double? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightStats(
+    val count: Int = 0,
+    @Json(name = "first_kg") val firstKg: Double? = null,
+    @Json(name = "latest_kg") val latestKg: Double? = null,
+    @Json(name = "delta_kg") val deltaKg: Double? = null,
+    @Json(name = "min_kg") val minKg: Double? = null,
+    @Json(name = "max_kg") val maxKg: Double? = null,
+    @Json(name = "avg_kg") val avgKg: Double? = null,
+    @Json(name = "goal_kg") val goalKg: Double? = null,
+    @Json(name = "goal_gap_kg") val goalGapKg: Double? = null,
+    val tone: String = "neutral",
+    val trend: WeightTrend? = null,
+    @Json(name = "delta_7d") val delta7d: WeightDelta? = null,
+    @Json(name = "delta_30d") val delta30d: WeightDelta? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightSeriesOut(
+    val points: List<WeightPointOut> = emptyList(),
+    val stats: WeightStats? = null,
+)
+
+// ── UI-1 ── Train tab: week-vs-last-week volume and the hero's next slot.
+
+/** One column of the Train week chart: a LOCAL day and the same weekday a
+ *  week earlier. A day with nothing logged is a real 0 lb. */
+@JsonClass(generateAdapter = true)
+data class StrengthWeekDay(
+    val date: String,
+    @Json(name = "volume_lb") val volumeLb: Double = 0.0,
+    val sets: Int = 0,
+    @Json(name = "prev_date") val prevDate: String = "",
+    @Json(name = "prev_volume_lb") val prevVolumeLb: Double = 0.0,
+)
+
+/** `/workout/strength/stats` → `week`. [direction] is decided server-side
+ *  (improved / worse / flat, null = no previous week to compare against). */
+@JsonClass(generateAdapter = true)
+data class StrengthWeekVolume(
+    val start: String = "",
+    val end: String = "",
+    val days: List<StrengthWeekDay> = emptyList(),
+    @Json(name = "total_lb") val totalLb: Double = 0.0,
+    @Json(name = "prev_total_lb") val prevTotalLb: Double = 0.0,
+    @Json(name = "delta_pct") val deltaPct: Double? = null,
+    val better: String = "higher",
+    val direction: String? = null,
+    @Json(name = "unweighted_sets") val unweightedSets: Int = 0,
+)
+
+/** `WorkoutOut.next_up` — which slot and set the user would log next. */
+@JsonClass(generateAdapter = true)
+data class StrengthNextUp(
+    @Json(name = "exercise_id") val exerciseId: String,
+    val name: String,
+    @Json(name = "set_number") val setNumber: Int = 1,
+    @Json(name = "target_sets") val targetSets: Int = 0,
+    val started: Boolean = false,
 )

@@ -1,386 +1,384 @@
 package app.myvitals.ui.vitals
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.myvitals.data.SettingsRepository
 import app.myvitals.data.JsonCache
+import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.DailySummary
-import app.myvitals.sync.TimePoint
-import app.myvitals.ui.MV
-import app.myvitals.ui.common.PullableMetricBox
+import app.myvitals.sync.RangeStats
+import app.myvitals.sync.StepsRangeStats
+import app.myvitals.sync.VitalTile
+import app.myvitals.ui.neon.NeonErrorBanner
+import app.myvitals.ui.neon.NeonEyebrow
+import app.myvitals.ui.neon.NeonHeroCard
+import app.myvitals.ui.neon.NeonMV
+import app.myvitals.ui.neon.NeonNumber
+import app.myvitals.ui.neon.NeonRing
+import app.myvitals.ui.neon.NeonRingCaption
+import app.myvitals.ui.neon.NeonScreen
 import com.squareup.moshi.Types
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
-import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import app.myvitals.ui.LocalAppTokens
 
+/**
+ * Steps detail (UI-4). Neon scaffold; the hero is the selected day's count,
+ * the server's verdict chip, a goal ring against THAT day's own target and
+ * the day's hourly bars. Below: the window's stats (server
+ * `/summary/range/stats`, rendered verbatim), the daily bars and the
+ * weekday pattern.
+ *
+ * Nothing here adds, averages or buckets. The hourly bins, the totals, the
+ * average and the goal-day count used to be computed in this file and,
+ * separately, in Steps.vue — two formulas for the same number.
+ */
 @Composable
 fun StepsDetailScreen(
     settings: SettingsRepository,
     onBack: () -> Unit,
 ) {
-    val tok = LocalAppTokens.current
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     var rows by remember { mutableStateOf<List<DailySummary>>(emptyList()) }
-    var goal by remember { mutableStateOf(10_000) }
-    var hourly by remember { mutableStateOf<IntArray?>(null) }
+    var stats by remember { mutableStateOf<RangeStats?>(null) }
+    var tile by remember { mutableStateOf<VitalTile?>(null) }
+    var hourly by remember { mutableStateOf<List<Int>?>(null) }
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    // Day selector — scrolls the hourly chart + hero through past days
-    // without losing the day-of layout. Default = today.
     var selectedDay by remember { mutableStateOf(LocalDate.now()) }
 
     val rowsType = Types.newParameterizedType(List::class.java, DailySummary::class.java)
-    val hourlyType = IntArray::class.java
+    val hourlyType = Types.newParameterizedType(List::class.java, Integer::class.java)
 
     suspend fun loadHourly(day: LocalDate) {
-        // Per-day hourly fetch: window = local 00:00 → 23:59 of `day`.
-        // Cache keyed by date so revisiting a past day is instant.
-        val cacheKey = "steps_detail_hourly_$day"
-        JsonCache.read<IntArray>(context, cacheKey, hourlyType)?.let { hourly = it.value }
+        val cacheKey = "steps_detail_hourly_v2_$day"
+        hourly = JsonCache.read<List<Int>>(context, cacheKey, hourlyType)?.value
         if (!settings.isConfigured()) return
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-            val zone = java.time.ZoneId.systemDefault()
+            val zone = ZoneId.systemDefault()
             val start = day.atStartOfDay(zone).toInstant().toString()
             val end = day.plusDays(1).atStartOfDay(zone).toInstant().toString()
-            val series = withContext(Dispatchers.IO) {
-                runCatching { api.stepsSeries(since = start, until = end) }.getOrNull()
-            }
-            if (series != null) {
-                val h = bucketByHour(series.points, day)
-                hourly = h
-                JsonCache.write(context, cacheKey, hourlyType, h)
-            }
+            val series = withContext(Dispatchers.IO) { api.stepsSeries(since = start, until = end) }
+            hourly = series.hourly
+            series.hourly?.let { JsonCache.write(context, cacheKey, hourlyType, it) }
         } catch (e: Exception) {
             Timber.w(e, "steps hourly load failed for %s", day)
         }
     }
 
-    suspend fun load(force: Boolean) {
+    suspend fun load() {
         if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-            runCatching { api.profile() }.getOrNull()?.let { goal = it.stepsGoal() }
-            val since = LocalDate.now().minusDays(29).toString()
-            val freshRows = withContext(Dispatchers.IO) { api.summaryRange(since = since) }
-            rows = freshRows
-            JsonCache.write(context, "steps_detail_rows", rowsType, freshRows)
+            val today = LocalDate.now()
+            val since = today.minusDays(29).toString()
+            coroutineScope {
+                val rowsD = async(Dispatchers.IO) { api.summaryRange(since = since) }
+                val statsD = async(Dispatchers.IO) {
+                    runCatching { api.summaryRangeStats(since = since, until = today.toString()) }
+                        .getOrNull()
+                }
+                val tileD = async(Dispatchers.IO) {
+                    runCatching { api.summaryTiles().tiles.firstOrNull { it.key == "steps" } }
+                        .getOrNull()
+                }
+                rows = rowsD.await()
+                JsonCache.write(context, "steps_detail_rows", rowsType, rows)
+                statsD.await()?.let {
+                    stats = it
+                    JsonCache.write(context, "steps_detail_stats", RangeStats::class.java, it)
+                }
+                tile = tileD.await()
+            }
             loadHourly(selectedDay)
             error = null
-            Timber.i("steps detail: %d rows day=%s (force=%s)", rows.size, selectedDay, force)
         } catch (e: Exception) {
             Timber.w(e, "steps detail load failed")
-            error = e.message?.take(160)
+            error = e.message?.take(160) ?: "Couldn't reach the backend."
         } finally { loading = false }
     }
 
     LaunchedEffect(Unit) {
-        // 1. Read cache → render immediately (no spinner if there's anything)
         JsonCache.read<List<DailySummary>>(context, "steps_detail_rows", rowsType)
             ?.let { rows = it.value; loading = false }
-        // 2. Always fetch fresh in parallel — render swaps when it lands.
-        load(force = false)
+        JsonCache.read<RangeStats>(context, "steps_detail_stats", RangeStats::class.java)
+            ?.let { stats = it.value }
+        load()
     }
-    // Reload hourly whenever the selected day changes.
-    LaunchedEffect(selectedDay) {
-        if (rows.isNotEmpty()) loadHourly(selectedDay)
-    }
+    LaunchedEffect(selectedDay) { if (rows.isNotEmpty()) loadHourly(selectedDay) }
 
-    val color = Vital.STEPS.accent
-    Column(Modifier.fillMaxSize().background(tok.bg)) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = tok.onSurface)
-            }
-            Text("Steps", color = tok.onSurface, fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        }
-        app.myvitals.ui.common.DayNav(
-            selected = selectedDay,
-            onSelectedChange = { selectedDay = it },
-        )
-        when {
-            loading -> Text("Loading…", color = tok.onSurfaceVariant,
-                modifier = Modifier.padding(16.dp))
-            error != null && rows.isEmpty() -> Text(error!!, color = tok.red,
-                modifier = Modifier.padding(16.dp))
-            else -> PullableMetricBox(
-                refreshing = refreshing,
-                onRefresh = {
-                    refreshing = true
-                    try { load(force = true) } finally { refreshing = false }
-                },
-            ) {
-                LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    item {
-                        // No fallback to rows.lastOrNull(): a day with no
-                        // summary row (outside the fetched window, or simply
-                        // empty) silently rendered the MOST RECENT day's step
-                        // count under the selected day's heading.
-                        val dayRow = rows.firstOrNull { it.date == selectedDay.toString() }
-                        TodayHero(dayRow, dayRow?.stepsGoal ?: goal, color, selectedDay)
-                    }
-                    hourly?.let { hr ->
-                        if (hr.sum() > 0) item {
-                            HourlyColumns(
-                                hr, color,
-                                isToday = selectedDay == LocalDate.now(),
-                            )
-                        }
-                    }
-                    item { DailyColumns(rows, goal, color) }
-                    item { StepsStats(rows, goal) }
-                }
-            }
-        }
-    }
+    StepsDetailContent(
+        rows = rows, stats = stats?.steps, tile = tile, hourly = hourly,
+        selectedDay = selectedDay, today = LocalDate.now(),
+        loading = loading, refreshing = refreshing, error = error,
+        onBack = onBack,
+        onRefresh = {
+            scope.launch { refreshing = true; try { load() } finally { refreshing = false } }
+        },
+        dayNav = {
+            app.myvitals.ui.common.DayNav(
+                selected = selectedDay, onSelectedChange = { selectedDay = it },
+            )
+        },
+    )
 }
 
+/**
+ * Stateless Steps detail. [rows] empty with [loading] = cold load (skeleton);
+ * an [error] with nothing cached is a banner, with something cached it is a
+ * banner ABOVE the cached content, never instead of it.
+ */
 @Composable
-private fun TodayHero(
-    today: DailySummary?,
-    goal: Int,
-    color: Color,
-    day: LocalDate = LocalDate.now(),
+fun StepsDetailContent(
+    rows: List<DailySummary>,
+    stats: StepsRangeStats?,
+    tile: VitalTile?,
+    hourly: List<Int>?,
+    selectedDay: LocalDate,
+    today: LocalDate,
+    loading: Boolean,
+    refreshing: Boolean,
+    error: String?,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    dayNav: @Composable () -> Unit = {},
+    contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
-    val tok = LocalAppTokens.current
-    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
-        Column(Modifier.padding(14.dp)) {
-            // DayNav scrolls back through history, so a literal "TODAY" was
-            // wrong on every day but today — and it sat directly above the
-            // hourly chart, which DOES retitle itself, so the two cards
-            // contradicted each other on the same screen.
-            Text(
-                if (day == LocalDate.now()) "TODAY"
-                else "${day.dayOfWeek.name.take(3)} ${day.monthValue}/${day.dayOfMonth}",
-                color = tok.onSurfaceVariant,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            if (today == null) {
-                Text("—", color = tok.onSurface,
-                    fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-                Text("No step data for this day",
-                    color = tok.onSurfaceDim, fontSize = 11.sp)
-                return@Column
-            }
-            val n = today.stepsTotal ?: 0
-            Text("%,d".format(n), color = tok.onSurface,
-                fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-            val raw = if (goal > 0) n.toFloat() / goal.toFloat() else 0f
-            val pct = raw.coerceAtLeast(0f)
-            Box(Modifier.fillMaxWidth().height(8.dp)
-                .background(color.copy(alpha = 0.15f))) {
-                Box(Modifier.fillMaxWidth(fraction = pct.coerceAtMost(1f)).height(8.dp)
-                    .background(color))
-            }
-            Spacer(Modifier.height(4.dp))
-            // The bar caps at 100%, the number does not — it used to clamp at
-            // 200%, so a genuine 3x day read as "200% of goal".
-            Text("${(pct * 100).toInt()}% of ${"%,d".format(goal)} goal",
-                color = tok.onSurfaceDim, fontSize = 11.sp)
+    val accent = Vital.STEPS.accent
+    NeonScreen(
+        title = "Steps",
+        contentPadding = contentPadding,
+        onBack = onBack,
+        refreshing = refreshing,
+        onRefresh = onRefresh,
+        headerTrailing = { DetailTitleIcon(Vital.STEPS) },
+    ) {
+        dayNav()
+        Spacer(Modifier.height(6.dp))
+        val hasContent = rows.isNotEmpty() || stats != null
+        if (!hasContent) {
+            if (error != null && !loading) NeonErrorBanner(error, title = "Couldn't load steps") { onRefresh() }
+            else DetailSkeleton(accent)
+            Spacer(Modifier.height(24.dp))
+            return@NeonScreen
         }
-    }
-}
+        if (error != null) {
+            NeonErrorBanner("Showing your last saved copy. $error", title = "Couldn't refresh") { onRefresh() }
+        }
 
-/** Sum the per-minute series into 24 hour-of-day bins (local TZ),
- *  scoped to the given calendar day so the chart shows "when did I
- *  step on this day". Returns an IntArray of length 24. */
-private fun bucketByHour(points: List<TimePoint>, day: LocalDate): IntArray {
-    val out = IntArray(24)
-    val zone = ZoneId.systemDefault()
-    for (p in points) {
-        val ldt = runCatching {
-            Instant.parse(p.time).atZone(zone).toLocalDateTime()
-        }.getOrNull() ?: continue
-        if (ldt.toLocalDate() != day) continue
-        out[ldt.hour] += p.value.toInt()
+        // No fallback to the most recent row: a day with no summary is shown
+        // as a day with no data, not as some other day's count.
+        val dayRow = rows.firstOrNull { it.date == selectedDay.toString() }
+        val isToday = selectedDay == today
+        val goal = dayRow?.stepsGoal ?: tile?.target?.toInt()
+        StepsHero(dayRow, goal, if (isToday) tile else null, hourly, selectedDay, isToday, accent)
+
+        DetailStatRow(
+            listOf(
+                stats?.avg?.let { "%,d".format(it) } to "Daily avg",
+                stats?.let { "${it.goalDays}/${it.daysWithData}" } to "Days ≥ goal",
+                stats?.total?.let { compactCount(it) } to "Total",
+            ),
+            accentFirst = accent,
+        )
+
+        DetailCard(if (rows.size == 1) "Last day" else "Last ${rows.size} days") {
+            DailyStepsBars(rows, accent)
+        }
+        stats?.weekdayMeans?.takeIf { w -> w.any { it.mean != null } }?.let { wm ->
+            DetailCard("Weekday pattern", subtitle = "Average steps on each weekday in this window") {
+                WeekdayBars(wm.map { it.dow to it.mean }, accent, format = { compactCount(it.toInt()) })
+            }
+        }
+        Spacer(Modifier.height(28.dp))
     }
-    return out
 }
 
 @Composable
-private fun HourlyColumns(hourly: IntArray, color: Color, isToday: Boolean) {
-    val measurer = rememberTextMeasurer()
-    val tok = LocalAppTokens.current
-    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
-        Column(Modifier.padding(14.dp)) {
-            Text(if (isToday) "TODAY BY HOUR" else "BY HOUR",
-                color = tok.onSurfaceVariant,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            Spacer(Modifier.height(8.dp))
-            Canvas(Modifier.fillMaxWidth().height(150.dp)) {
-                // Zero-anchored: for a count, the bar length IS the quantity,
-                // so the axis has to start at zero or the bars lie about
-                // ratios. (Physiology charts do the opposite — see niceDomain.)
-                val domain = niceDomain(
-                    lo = 0f, hi = hourly.max().coerceAtLeast(1).toFloat(),
-                    zeroAnchored = true, targetTicks = 3, minStep = 1f,
+private fun StepsHero(
+    row: DailySummary?,
+    goal: Int?,
+    todayTile: VitalTile?,
+    hourly: List<Int>?,
+    day: LocalDate,
+    isToday: Boolean,
+    accent: Color,
+) {
+    NeonHeroCard(accent) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                NeonEyebrow(
+                    if (isToday) "Today"
+                    else day.format(DateTimeFormatter.ofPattern("EEE MMM d")),
+                    Modifier.padding(top = 0.dp),
                 )
-                val g = chartGeom(domain, ChartInsets(
-                    left = 30.dp.toPx(), top = 6.dp.toPx(),
-                    right = 4.dp.toPx(), bottom = 16.dp.toPx(),
-                ))
-                drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 3) {
-                    if (it >= 1000f) "%.0fk".format(it / 1000f) else "%.0f".format(it)
-                }
-                val barW = g.slot(24) * 0.7f
-                for (h in 0 until 24) {
-                    val v = hourly[h].toFloat()
-                    if (v <= 0f) continue
-                    drawBar(g, g.xBar(h, 24), barW, g.y(v), color)
-                }
-                drawXLabels(g, measurer, tok.onSurfaceDim, listOf(
-                    (0.5f / 24f) to "12a", (6.5f / 24f) to "6a",
-                    (12.5f / 24f) to "12p", (18.5f / 24f) to "6p",
-                    (23.5f / 24f) to "11p",
-                ))
-            }
-        }
-    }
-}
-
-@Composable
-private fun DailyColumns(rows: List<DailySummary>, goal: Int, color: Color) {
-    val measurer = rememberTextMeasurer()
-    val tok = LocalAppTokens.current
-    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
-        Column(Modifier.padding(14.dp)) {
-            // Title counts the rows actually rendered. It was hard-coded
-            // "LAST 30 DAYS" no matter what the window held, so a short
-            // history advertised days it never drew.
-            Text(
-                if (rows.size == 1) "LAST DAY" else "LAST ${rows.size} DAYS",
-                color = tok.onSurfaceVariant,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            Spacer(Modifier.height(8.dp))
-            if (rows.isEmpty()) {
-                Text("No data.", color = tok.onSurfaceVariant, fontSize = 12.sp); return@Card
-            }
-            Canvas(Modifier.fillMaxWidth().height(170.dp)) {
-                val domain = niceDomain(
-                    lo = 0f,
-                    hi = (rows.maxOfOrNull { it.stepsTotal ?: 0 } ?: 0)
-                        .coerceAtLeast(rows.lastOrNull()?.stepsGoal ?: goal).toFloat(),
-                    zeroAnchored = true, targetTicks = 4, minStep = 1f,
+                val n = row?.stepsTotal
+                NeonNumber(n?.let { "%,d".format(it) } ?: "—", color = accent, size = 52)
+                Text(
+                    when {
+                        n == null -> "No step data for this day"
+                        goal != null -> "of ${"%,d".format(goal)} goal"
+                        else -> "steps"
+                    },
+                    color = NeonMV.Muted, fontSize = 12.sp,
                 )
-                val g = chartGeom(domain, ChartInsets(
-                    left = 30.dp.toPx(), top = 6.dp.toPx(),
-                    right = 4.dp.toPx(), bottom = 16.dp.toPx(),
-                ))
-                drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface, maxLabels = 4) {
-                    if (it >= 1000f) "%.0fk".format(it / 1000f) else "%.0f".format(it)
-                }
-                val barW = (g.slot(rows.size) * 0.72f).coerceAtLeast(1f)
-                for ((i, r) in rows.withIndex()) {
-                    val v = (r.stepsTotal ?: 0).toFloat()
-                    if (v <= 0f) continue
-                    drawBar(
-                        g, g.xBar(i, rows.size), barW, g.y(v),
-                        if (v >= (r.stepsGoal ?: goal)) color else color.copy(alpha = 0.45f),
-                    )
-                }
-                // Today's target on the line; each bar above is judged
-                // against its own day's target (UX-D10).
-                val lineGoal = rows.lastOrNull()?.stepsGoal ?: goal
-                drawReferenceLine(g, lineGoal.toFloat(), color, measurer,
-                    "goal ${"%,d".format(lineGoal)}")
-                drawXLabels(g, measurer, tok.onSurfaceDim, buildList {
-                    rows.firstOrNull()?.date?.let { add(0f to shortDay(it)) }
-                    if (rows.size >= 5) rows[rows.size / 2].date
-                        ?.let { add(0.5f to shortDay(it)) }
-                    rows.lastOrNull()?.date?.let { add(1f to shortDay(it)) }
-                })
+                Spacer(Modifier.height(8.dp))
+                // The server's own words for today's count; a past day has no
+                // verdict endpoint, so it has no chip rather than a local one.
+                DetailStatusChip(todayTile?.status, todayTile?.statusReason)
             }
+            if (goal != null && goal > 0) {
+                NeonRing(
+                    // Geometry only — how far round to draw. The figure the
+                    // user reads is the server's status_reason above.
+                    fraction = ((row?.stepsTotal ?: 0).toFloat() / goal).coerceIn(0f, 1f),
+                    color = accent, size = 96.dp, stroke = 9.dp,
+                ) {
+                    NeonNumber(compactCount(goal), size = 16)
+                    NeonRingCaption("goal")
+                }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        NeonEyebrow(if (isToday) "Today by hour" else "By hour", Modifier.padding(top = 0.dp))
+        if (hourly == null || hourly.all { it == 0 }) {
+            DetailNote(if (row?.stepsTotal == null) "Nothing recorded." else "No hourly detail synced for this day.")
+        } else {
+            HourlyStepBars(hourly, accent)
         }
     }
 }
 
 @Composable
-private fun StepsStats(rows: List<DailySummary>, goal: Int) {
-    val tok = LocalAppTokens.current
-    val totals = rows.mapNotNull { it.stepsTotal }
-    val total = totals.sum()
-    val avg = if (totals.isNotEmpty()) totals.average() else 0.0
-    // Each day against its own target, out of days that have a reading —
-    // the same rule as the web. This used `rows.size`, so a day the watch
-    // was off counted as a missed goal here and not on the web (UX-D10).
-    val withData = rows.filter { it.stepsTotal != null }
-    val daysHit = withData.count { it.stepsTotal!! >= (it.stepsGoal ?: goal) }
-    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
-        Column(Modifier.padding(14.dp)) {
-            Text("STATS", color = tok.onSurfaceVariant,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                StatPair("Total", "%,d".format(total))
-                StatPair("Daily avg", "%,.0f".format(avg))
-                StatPair("Days ≥ goal", "$daysHit/${withData.size}")
-            }
+private fun HourlyStepBars(hourly: List<Int>, color: Color) {
+    val measurer = rememberTextMeasurer()
+    Canvas(Modifier.fillMaxWidth().height(130.dp)) {
+        // Zero-anchored: for a count the bar length IS the quantity.
+        val domain = niceDomain(
+            lo = 0f, hi = (hourly.maxOrNull() ?: 1).coerceAtLeast(1).toFloat(),
+            zeroAnchored = true, targetTicks = 3, minStep = 1f,
+        )
+        val g = chartGeom(domain, ChartInsets(
+            left = 30.dp.toPx(), top = 6.dp.toPx(), right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+        ))
+        drawGrid(g, measurer, NeonMV.Muted, NeonMV.Track, maxLabels = 3) { compactCount(it.toInt()) }
+        val barW = g.slot(24) * 0.7f
+        for (h in 0 until minOf(24, hourly.size)) {
+            val v = hourly[h].toFloat()
+            if (v <= 0f) continue
+            drawBar(g, g.xBar(h, 24), barW, g.y(v), color)
         }
+        drawXLabels(g, measurer, NeonMV.Muted, listOf(
+            (0.5f / 24f) to "12a", (6.5f / 24f) to "6a", (12.5f / 24f) to "12p",
+            (18.5f / 24f) to "6p", (23.5f / 24f) to "11p",
+        ))
     }
 }
 
 @Composable
-private fun StatPair(label: String, value: String) {
-    val tok = LocalAppTokens.current
-    Column {
-        Text(label, color = tok.onSurfaceDim, fontSize = 10.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(value, color = tok.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+private fun DailyStepsBars(rows: List<DailySummary>, color: Color) {
+    val measurer = rememberTextMeasurer()
+    if (rows.isEmpty()) { DetailNote("No data."); return }
+    val lineGoal = rows.lastOrNull()?.stepsGoal
+    Canvas(Modifier.fillMaxWidth().height(170.dp)) {
+        val domain = niceDomain(
+            lo = 0f,
+            hi = (rows.maxOfOrNull { it.stepsTotal ?: 0 } ?: 0).coerceAtLeast(lineGoal ?: 1).toFloat(),
+            zeroAnchored = true, targetTicks = 4, minStep = 1f,
+        )
+        val g = chartGeom(domain, ChartInsets(
+            left = 30.dp.toPx(), top = 6.dp.toPx(), right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+        ))
+        drawGrid(g, measurer, NeonMV.Muted, NeonMV.Track, maxLabels = 4) { compactCount(it.toInt()) }
+        val barW = (g.slot(rows.size) * 0.72f).coerceAtLeast(1f)
+        for ((i, r) in rows.withIndex()) {
+            val v = (r.stepsTotal ?: 0).toFloat()
+            if (v <= 0f) continue
+            // Each bar against its OWN day's target (UX-D10). Under-goal days
+            // sit in the Track colour rather than a faded accent, so a met
+            // day is the only thing lit.
+            val hit = r.stepsGoal != null && v >= r.stepsGoal
+            drawBar(g, g.xBar(i, rows.size), barW, g.y(v), if (hit) color else NeonMV.Track)
+        }
+        lineGoal?.let {
+            drawReferenceLine(g, it.toFloat(), NeonMV.Ink, measurer, "goal ${"%,d".format(it)}")
+        }
+        drawXLabels(g, measurer, NeonMV.Muted, buildList {
+            rows.firstOrNull()?.date?.let { add(0f to detailMd(it)) }
+            if (rows.size >= 5) rows[rows.size / 2].date.let { add(0.5f to detailMd(it)) }
+            rows.lastOrNull()?.date?.let { add(1f to detailMd(it)) }
+        })
+    }
+    Spacer(Modifier.height(8.dp))
+    DetailLegend(listOf(color to "goal met", NeonMV.Track to "under goal"))
+}
+
+/** Seven server-computed weekday means as bars; a null mean is a gap. */
+@Composable
+internal fun WeekdayBars(
+    means: List<Pair<String, Double?>>,
+    color: Color,
+    zeroAnchored: Boolean = true,
+    format: (Double) -> String,
+) {
+    val measurer = rememberTextMeasurer()
+    val vals = means.mapNotNull { it.second }
+    if (vals.isEmpty()) return
+    Canvas(Modifier.fillMaxWidth().height(140.dp)) {
+        val domain = niceDomain(
+            lo = if (zeroAnchored) 0f else vals.min().toFloat(), hi = vals.max().toFloat(),
+            zeroAnchored = zeroAnchored, targetTicks = 3,
+            padFraction = if (zeroAnchored) 0.12f else 0.30f, minStep = 1f,
+        )
+        val g = chartGeom(domain, ChartInsets(
+            left = 30.dp.toPx(), top = 14.dp.toPx(), right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+        ))
+        drawGrid(g, measurer, NeonMV.Muted, NeonMV.Track, maxLabels = 3) { format(it.toDouble()) }
+        val barW = g.slot(7) * 0.58f
+        for ((i, p) in means.withIndex()) {
+            val v = p.second ?: continue
+            drawBar(g, g.xBar(i, 7), barW, g.y(v.toFloat()), color.copy(alpha = 0.85f))
+        }
+        drawXLabels(g, measurer, NeonMV.Muted, means.indices.map { (it + 0.5f) / 7f to means[it].first })
     }
 }
 
-private fun shortDay(iso: String): String =
-    runCatching {
-        val d = LocalDate.parse(iso)
-        DateTimeFormatter.ofPattern("M/d").format(d)
-    }.getOrDefault(iso)
+/** 12,345 → "12.3k"; small numbers stay whole. */
+internal fun compactCount(n: Int): String = when {
+    n >= 100_000 -> "%.0fk".format(n / 1000.0)
+    n >= 1000 -> "%.1fk".format(n / 1000.0).replace(".0k", "k")
+    else -> n.toString()
+}
+
+internal fun detailMd(iso: String): String =
+    runCatching { DateTimeFormatter.ofPattern("M/d").format(LocalDate.parse(iso)) }.getOrDefault(iso)

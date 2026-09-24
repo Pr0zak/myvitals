@@ -8,6 +8,8 @@ export interface HeartRateSeries {
   avg: number | null;
   min_bpm: number | null;
   max_bpm: number | null;
+  /** UI-4 — zones / time-in-zone / histogram for a one-day trace. */
+  stats?: HrZoneStats | null;
 }
 
 export interface HrvSeries {
@@ -18,6 +20,8 @@ export interface HrvSeries {
 export interface StepsSeries {
   points: TimePoint[];
   total: number;
+  /** UI-4 — 24 LOCAL-hour buckets, for a window of at most one day. */
+  hourly?: number[] | null;
 }
 
 export interface SleepStageBucket {
@@ -429,6 +433,8 @@ export interface StrengthWorkoutDetail {
     sets_planned?: number; sets_projected?: number; status_projected?: string;
   }>;
   exercises: StrengthWorkoutExercise[];
+  /** UI-1 — the slot the Train hero's button names. */
+  next_up?: StrengthNextUp | null;
 }
 
 /** One tile from GET /summary/tiles. The verdict (`status`) is decided
@@ -839,4 +845,86 @@ export interface TrailStatusCounts {
   delayed: number;
   closed: number;
   other: number;
+}
+
+// ── UI-4: metric detail screens — server-computed stat blocks ─────────
+// Rendered verbatim; see backend analytics/detail_stats.py.
+export interface WeekdayMean { dow: string; mean: number | null; n: number }
+export interface StepsRangeStats {
+  avg: number | null; min: number | null; max: number | null; total: number | null;
+  days_with_data: number; goal_days: number; window_days: number;
+  weekday_means: WeekdayMean[];
+  rolling_7d: Array<{ date: string; value: number | null }>;
+}
+export interface RestingHrRangeStats {
+  avg: number | null; min: number | null; max: number | null;
+  latest: number | null; latest_vs_avg: number | null;
+  days_with_data: number; weekday_means: WeekdayMean[];
+}
+export interface SleepRangeStats {
+  avg_s: number | null; min_s: number | null; max_s: number | null;
+  nights: number; naps: number;
+}
+export interface RangeStats {
+  since: string; until: string;
+  steps: StepsRangeStats; resting_hr: RestingHrRangeStats; sleep: SleepRangeStats;
+}
+export interface HrZoneTime {
+  zone: string; label: string; lo_bpm: number; hi_bpm: number | null;
+  seconds: number; pct: number | null;
+}
+export interface HrZoneStats {
+  time_in_zone: HrZoneTime[];
+  tracked_s: number;
+  histogram: Array<{ lo: number; hi: number; minutes: number }>;
+  max_hr?: number | null;
+  max_hr_source?: string | null;
+}
+export type WeightTone = "positive" | "caution" | "neutral";
+export interface WeightDelta { delta_kg: number | null; tone: WeightTone }
+export interface WeightStats {
+  count: number;
+  first_kg: number | null; latest_kg: number | null; delta_kg: number | null;
+  min_kg: number | null; max_kg: number | null; avg_kg: number | null;
+  goal_kg: number | null; goal_gap_kg: number | null;
+  tone: WeightTone;
+  trend: { start_time: string; start_kg: number; end_time: string; end_kg: number; per_week_kg: number | null } | null;
+  rolling_7d: Array<{ time: string; kg: number }>;
+  delta_7d: WeightDelta; delta_30d: WeightDelta;
+  recomp: { label: string; tone: WeightTone; fat_delta_kg: number; lean_delta_kg: number } | null;
+}
+
+// ── UI-1 ── Train tab: week-vs-last-week volume and the hero's next slot.
+
+/** One column of the Train week chart: a LOCAL day and the same weekday a
+ *  week earlier. A day with nothing logged is a real 0 lb. */
+export interface StrengthWeekDay {
+  date: string;
+  volume_lb: number;
+  sets: number;
+  prev_date: string;
+  prev_volume_lb: number;
+}
+
+/** `/workout/strength/stats` → `week`. `direction` is decided server-side;
+ *  null means there was no previous week to compare against. */
+export interface StrengthWeekVolume {
+  start: string;
+  end: string;
+  days: StrengthWeekDay[];
+  total_lb: number;
+  prev_total_lb: number;
+  delta_pct: number | null;
+  better: "higher" | "lower" | "context";
+  direction: "improved" | "worse" | "flat" | null;
+  unweighted_sets: number;
+}
+
+/** `WorkoutOut.next_up` — which slot and set the user would log next. */
+export interface StrengthNextUp {
+  exercise_id: string;
+  name: string;
+  set_number: number;
+  target_sets: number;
+  started: boolean;
 }

@@ -263,7 +263,7 @@ fun RingsContent(
         // that would otherwise claim the user has no data.
         val nothingYet = summary == null && vitalTiles.isEmpty()
         if (nothingYet && error != null) {
-            NeonErrorBanner(error) { onRefresh() }
+            NeonErrorBanner(error, title = "Couldn't load today") { onRefresh() }
             app.myvitals.ui.common.FocusAreas(onOpen, counts = focusCounts)
             Spacer(Modifier.height(24.dp))
             return@NeonScreen
@@ -309,7 +309,7 @@ fun RingsContent(
             hidden = tilePrefs?.hidden?.toSet() ?: emptySet(),
             groupOrder = groupOrder,
         )
-        error?.let { NeonErrorBanner(it) { onRefresh() } }
+        error?.let { NeonErrorBanner(it, title = "Couldn't load today") { onRefresh() } }
 
         // Narrative cards — what actually happened today, in plain words.
         app.myvitals.ui.common.NarrativeCards(

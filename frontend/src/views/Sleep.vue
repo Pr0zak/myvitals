@@ -1,219 +1,184 @@
 <script setup lang="ts">
-import { toLocalISO } from "@/dates";
-import { zeroAxisIncluding } from "@/chartAxis";
+/**
+ * Sleep detail (UI-4). Phone twin: `SleepDetailScreen.kt`.
+ *
+ *   hero     the latest night: duration, the server's verdict chip, and the
+ *            hypnogram with its legend inline
+ *   stats    avg / shortest / longest night — the server's sleep block from
+ *            `/summary/range/stats` (naps excluded THERE, not here)
+ *   below    recent nights, per-night stage stack, bedtime consistency
+ *
+ * Stage colours are tokens: deep = periwinkle, light/core = periwinkle 60%,
+ * REM = magenta, awake = amber. Deep used to be navy on a near-black card —
+ * the stage that matters most was the one you could not see.
+ */
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
-import Card from "@/components/Card.vue";
-import PageHeader from "@/components/PageHeader.vue";
+import { Moon } from "lucide-vue-next";
 import RangeTabs from "@/components/RangeTabs.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
-import Skeleton from "@/components/Skeleton.vue";
-import { api } from "@/api/client";
+import NeonPage from "@/components/neon/NeonPage.vue";
+import NeonHero from "@/components/neon/NeonHero.vue";
+import NeonStat from "@/components/neon/NeonStat.vue";
+import StatusChip from "@/components/detail/StatusChip.vue";
+import DetailCard from "@/components/detail/DetailCard.vue";
+import DetailSkeleton from "@/components/detail/DetailSkeleton.vue";
+import DetailError from "@/components/detail/DetailError.vue";
+import "@/components/detail/detail.css";
+import { api, summaryRangeStats } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
-import type { SleepNight } from "@/api/types";
-import { chartTheme, isNeon } from "@/theme";
-import { fmtTime, fmtDateTime } from "@/format";
+import type { RangeStats, SleepNight, VitalTile } from "@/api/types";
+import { chartTheme } from "@/theme";
+import { toLocalISO } from "@/dates";
+import { zeroAxisIncluding } from "@/chartAxis";
+import { fmtTime } from "@/format";
 
-// Classic stage palette (byte-for-byte unchanged for non-neon themes).
-// Both of Fitbit's vocabularies reach the client: "stages"
-// (light/deep/rem/wake) and the classic "levels" (asleep/restless/awake).
-// Without entries here the classic levels fell through to the fallback grey,
-// so a night recorded that way charted as a featureless slab.
-const STAGE_COLORS_CLASSIC: Record<string, string> = {
-  awake: "#f97316",
-  rem: "#a78bfa",
-  light: "#60a5fa",
-  deep: "#1e40af",
-  asleep: "#3b82f6",
-  restless: "#93c5fd",
-  out_of_bed: "#94a3b8",
-  unmeasurable: "#64748b",
-  unknown: "#64748b",
-};
-// Vitality Neon sleep-stage palette.
-const STAGE_COLORS_NEON: Record<string, string> = {
+const MAG = "#ff3ad8";
+const TRACK = "#272a3b";
+const STAGE_COLORS: Record<string, string> = {
+  deep: "#6f7bff",
+  light: "rgba(111, 123, 255, 0.6)",
+  core: "rgba(111, 123, 255, 0.6)",
+  rem: "#ff3ad8",
   awake: "#ffb52e",
-  rem: "#28e6ff",
-  light: "#6f7bff",
-  deep: "#ff3ad8",
-  asleep: "#4b8bff",
-  restless: "#9fc6ff",
+  wake: "#ffb52e",
+  asleep: "rgba(111, 123, 255, 0.8)",
+  restless: "rgba(255, 181, 46, 0.55)",
   out_of_bed: "#9b9bb0",
-  unmeasurable: "#9b9bb0",
-  unknown: "#9b9bb0",
+  unmeasurable: "rgba(155, 155, 176, 0.6)",
+  unknown: "rgba(155, 155, 176, 0.6)",
 };
-const stageColors = computed<Record<string, string>>(() =>
-  isNeon.value ? STAGE_COLORS_NEON : STAGE_COLORS_CLASSIC,
-);
+const stageColor = (s: string) => STAGE_COLORS[s] ?? "#9b9bb0";
+/** Shallowest first; the hypnogram draws only the stages present. */
+const HYPNO_ORDER = ["awake", "wake", "restless", "rem", "light", "core", "asleep", "deep"];
+const STACK_ORDER = ["deep", "asleep", "light", "core", "rem", "restless", "awake", "wake"];
 
-// Order top-to-bottom in the hypnogram (REM is shallowest after awake)
-// Shallowest-first; unrecognised stages are appended, not dropped.
-const STAGE_ORDER = ["awake", "restless", "rem", "light", "asleep", "deep"];
-
+type Raw = { time: string; stage: string; duration_s: number };
 const nights = ref<SleepNight[]>([]);
-const lastNightRaw = ref<{ time: string; stage: string; duration_s: number }[]>([]);
+const raw = ref<Raw[]>([]);
+const stats = ref<RangeStats | null>(null);
+const tile = ref<VitalTile | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
-const range = ref<7 | 30 | 90>(30);
-const SLEEP_RANGES: ReadonlyArray<{ key: 7 | 30 | 90; label: string }> = [
-  { key: 7, label: "7 days" },
-  { key: 30, label: "30 days" },
-  { key: 90, label: "90 days" },
+const range = ref<7 | 14 | 30 | 90>(14);
+const RANGES: ReadonlyArray<{ key: 7 | 14 | 30 | 90; label: string }> = [
+  { key: 7, label: "7 nights" }, { key: 14, label: "14" }, { key: 30, label: "30" }, { key: 90, label: "90" },
 ];
-watch(range, load);
-// Sleep target from profile (GOALS-2). Drives the markLine on the
-// stacked-nights chart so the user can see at a glance which nights
-// hit their goal.
-const sleepTargetH = ref<number | null>(null);
+
+function errText(e: unknown): string {
+  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof d === "string" ? d : "Couldn't reach the backend.";
+}
 
 async function load() {
   loading.value = true;
-  error.value = null;
   try {
-    const since = new Date();
-    since.setDate(since.getDate() - range.value);
-    const [n, raw, prof] = await Promise.all([
-      api.sleepRange(since),
+    const today = new Date();
+    const first = new Date(); first.setDate(first.getDate() - (range.value - 1));
+    // The same local window the stats endpoint uses — a night belongs to
+    // the day it ends, so start 18:00 the evening before the first day.
+    const nightsSince = new Date(first); nightsSince.setDate(nightsSince.getDate() - 1);
+    nightsSince.setHours(18, 0, 0, 0);
+    const [n, r, s, tiles] = await Promise.all([
+      api.sleepRange(nightsSince),
       api.sleepRaw(new Date(Date.now() - 36 * 3600 * 1000)),
-      api.getProfile().catch(() => null),
+      summaryRangeStats(toLocalISO(first), toLocalISO(today)),
+      api.summaryTiles().catch(() => null),
     ]);
     nights.value = n;
-    lastNightRaw.value = raw;
-    sleepTargetH.value = (prof as { sleep_target_h?: number | null } | null)
-      ?.sleep_target_h ?? null;
+    raw.value = r;
+    stats.value = s;
+    tile.value = tiles?.tiles.find((t) => t.key === "sleep_duration") ?? null;
+    error.value = null;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "Failed to load";
+    error.value = errText(e);
   } finally {
     loading.value = false;
   }
 }
-
 onMounted(load);
+useVisibilityRefresh(load);
+watch(range, load);
 
-const lastNight = computed(() => nights.value[nights.value.length - 1] ?? null);
-
-function fmtDur(s: number): string {
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
+const hasContent = computed(() => nights.value.length > 0 || stats.value != null);
+const lastNight = computed(() => {
+  const real = nights.value.filter((n) => n.kind !== "nap");
+  return real[real.length - 1] ?? null;
+});
+const ss = computed(() => stats.value?.sleep ?? null);
+function fmtDur(s: number | null | undefined): string {
+  if (s == null) return "—";
+  const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60);
   return h ? `${h}h ${m}m` : `${m}m`;
 }
+const axis = computed(() => chartTheme.value.axisLabel);
+const split = { lineStyle: { color: TRACK } };
 
-
-function relativeTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const m = Math.round(ms / 60000);
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  if (h < 48) return `${h}h ago`;
-  return `${Math.round(h / 24)} days ago`;
-}
-
-// === Hypnogram of the most recent night ===
-// Real hypnogram: time on X, stage on categorical Y (deep at bottom, awake top).
-// Use a step line that jumps between stages, plus markArea bands colored per
-// segment so the eye reads it like a Fitbit/Garmin sleep chart.
-const STAGE_Y_INDEX: Record<string, number> = {
-  deep: 0, light: 1, rem: 2, awake: 3, out_of_bed: 3, unknown: 1,
-};
-const Y_LABELS = ["Deep", "Light", "REM", "Awake"];
-
-const hypnogramOption = computed(() => {
-  void chartTheme.value;
-  void isNeon.value;
-  const t = chartTheme.value;
-  const STAGE_COLORS = stageColors.value;
-  if (lastNightRaw.value.length === 0) return null;
-
-  // Group raw rows into the most recent contiguous session (gap > 2h splits).
-  const sorted = [...lastNightRaw.value].sort(
-    (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
-  );
-  const sessions: typeof sorted[] = [];
-  let cur: typeof sorted = [];
+/** The most recent contiguous session in the raw rows (a 2h gap splits). */
+const session = computed<Raw[]>(() => {
+  const sorted = [...raw.value].sort((a, b) => a.time.localeCompare(b.time));
+  let cur: Raw[] = [];
+  const out: Raw[][] = [];
   for (const row of sorted) {
-    if (cur.length > 0) {
-      const last = cur[cur.length - 1];
-      const gap = new Date(row.time).getTime() - new Date(last.time).getTime();
-      if (gap > 2 * 3600 * 1000) {
-        sessions.push(cur);
-        cur = [];
-      }
+    const last = cur[cur.length - 1];
+    if (last && new Date(row.time).getTime() - new Date(last.time).getTime() > 2 * 3600 * 1000) {
+      out.push(cur); cur = [];
     }
     cur.push(row);
   }
-  if (cur.length > 0) sessions.push(cur);
-  const session = sessions[sessions.length - 1];
-  if (!session || session.length === 0) return null;
+  if (cur.length) out.push(cur);
+  return out[out.length - 1] ?? [];
+});
+const presentStages = computed(() => {
+  const set = new Set(session.value.map((r) => r.stage.toLowerCase()));
+  return HYPNO_ORDER.filter((s) => set.has(s));
+});
 
-  // Step line: for each stage row, emit two points (start and end) at its Y.
-  const linePts: [number, number][] = [];
-  // markArea: one rect per stage row, full-height vertical band colored by stage.
-  const areas: any[] = [];
-  for (const row of session) {
-    const start = new Date(row.time).getTime();
-    const end = start + row.duration_s * 1000;
-    const y = STAGE_Y_INDEX[row.stage] ?? 1;
-    linePts.push([start, y]);
-    linePts.push([end, y]);
-    areas.push([
-      { xAxis: row.time, itemStyle: { color: (STAGE_COLORS[row.stage] ?? "#64748b") + "30" } },
-      { xAxis: new Date(end).toISOString() },
-    ]);
-  }
-
+const hypnogramOption = computed(() => {
+  const rows = presentStages.value;
+  if (!session.value.length || !rows.length) return null;
+  // One custom bar per segment, on its stage's row.
+  const data = session.value.map((r) => {
+    const st = r.stage.toLowerCase();
+    const s0 = new Date(r.time).getTime();
+    return { value: [rows.indexOf(st), s0, s0 + r.duration_s * 1000], itemStyle: { color: stageColor(st) } };
+  }).filter((d) => d.value[0] >= 0);
   return {
-    grid: { left: 60, right: 12, top: 16, bottom: 30 },
-    xAxis: {
-      type: "time",
-      axisLabel: { ...t.axisLabel, formatter: (v: number) => fmtTime(v) },
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: "category",
-      data: Y_LABELS,
-      axisLabel: t.axisLabel,
-      splitLine: t.splitLine,
-    },
-    tooltip: {
-      trigger: "axis",
-      ...t.tooltip,
-      formatter: (params: any[]) => {
-        const p = params[0];
-        if (!p) return "";
-        const t = new Date(p.value[0]);
-        return `${fmtTime(t)}<br/><b>${Y_LABELS[p.value[1]]}</b>`;
-      },
-    },
+    grid: { left: 58, right: 8, top: 6, bottom: 22 },
+    xAxis: { type: "time", axisLabel: { ...axis.value, formatter: (v: number) => fmtTime(v) }, splitLine: { show: false } },
+    yAxis: { type: "category", data: rows, inverse: true, axisLabel: axis.value, axisTick: { show: false },
+             splitLine: { show: true, lineStyle: { color: TRACK } } },
+    tooltip: { ...chartTheme.value.tooltip,
+               formatter: (p: any) => `${rows[p.value[0]]}<br/>${fmtTime(p.value[1])} → ${fmtTime(p.value[2])}` },
     series: [{
-      type: "line",
-      step: "end" as const,
-      showSymbol: false,
-      lineStyle: { color: isNeon.value ? "#ff3ad8" : t.palette.violet, width: 2 },
-      data: linePts,
-      markArea: { silent: true, data: areas },
+      type: "custom",
+      renderItem: (_: unknown, api: any) => {
+        const y = api.value(0);
+        const start = api.coord([api.value(1), y]);
+        const end = api.coord([api.value(2), y]);
+        const h = api.size([0, 1])[1] * 0.66;
+        return { type: "rect", shape: { x: start[0], y: start[1] - h / 2, width: Math.max(1, end[0] - start[0]), height: h, r: 2 },
+                 style: api.style() };
+      },
+      encode: { x: [1, 2], y: 0 },
+      data,
     }],
   };
 });
 
-// === Last N nights stacked bar ===
-/**
- * Expand the sparse night list onto a CONTINUOUS day axis — one slot per
- * calendar day from first to last, null where nothing was recorded.
- *
- * A category axis built from only the nights present closes the gaps up, so
- * two nights either side of a missing week render as neighbours and the chart
- * implies continuity it does not have. Phone twin: `onDayAxis` in
- * SleepDetailScreen.kt.
- */
+const lastStageMinutes = computed<Record<string, number>>(() => {
+  const out: Record<string, number> = {};
+  for (const s of lastNight.value?.stages ?? []) out[s.stage.toLowerCase()] = Math.round(s.duration_s / 60);
+  return out;
+});
+
+/** Nights on a continuous day axis, null where none was recorded. */
 function onDayAxis(list: SleepNight[]): Array<{ date: string; night: SleepNight | null }> {
-  if (list.length === 0) return [];
+  if (!list.length) return [];
   const byDate = new Map(list.map((n) => [n.date, n]));
-  const times = list.map((n) => new Date(n.date + "T00:00:00").getTime())
-    .filter((t) => Number.isFinite(t));
-  if (times.length === 0) return list.map((n) => ({ date: n.date, night: n }));
+  const times = list.map((n) => new Date(n.date + "T00:00:00").getTime()).filter(Number.isFinite);
   const first = Math.min(...times);
   const days = Math.round((Math.max(...times) - first) / 86_400_000);
-  // Guard against a pathological range building a huge array.
   if (days < 0 || days > 400) return list.map((n) => ({ date: n.date, night: n }));
   return Array.from({ length: days + 1 }, (_, i) => {
     const d = toLocalISO(new Date(first + i * 86_400_000));
@@ -221,369 +186,160 @@ function onDayAxis(list: SleepNight[]): Array<{ date: string; night: SleepNight 
   });
 }
 
-const stackedNightsOption = computed(() => {
-  void chartTheme.value;
-  void isNeon.value;
-  const t = chartTheme.value;
-  const STAGE_COLORS = stageColors.value;
+const stackedOption = computed(() => {
   const slots = onDayAxis(nights.value);
-  const dates = slots.map((s) => s.date);
-  const allStages = Array.from(new Set(nights.value.flatMap((n) => n.stages.map((s) => s.stage))));
-  const orderedStages = [...STAGE_ORDER, ...allStages.filter((s) => !STAGE_ORDER.includes(s))];
-
-  const series: any[] = orderedStages.filter((s) => allStages.includes(s)).map((stage) => ({
-    name: stage,
-    type: "bar",
-    stack: "sleep",
-    // null, not 0, for a day with no night: an unrecorded night is not a
-    // night of zero sleep, and a zero-height stack reads as one.
+  if (!slots.length) return null;
+  const present = new Set(nights.value.flatMap((n) => n.stages.map((s) => s.stage.toLowerCase())));
+  const order = [...STACK_ORDER.filter((s) => present.has(s)), ...[...present].filter((s) => !STACK_ORDER.includes(s))];
+  const series: any[] = order.map((stage) => ({
+    name: stage, type: "bar", stack: "sleep", barWidth: "70%",
+    // null, not 0, for a day with no night — an unrecorded night is not
+    // a night of zero sleep.
     data: slots.map(({ night }) => {
       if (!night) return null;
-      const s = night.stages.find((x) => x.stage === stage);
-      return s ? +(s.duration_s / 60).toFixed(0) : 0;
+      const s = night.stages.filter((x) => x.stage.toLowerCase() === stage).reduce((a, x) => a + x.duration_s, 0);
+      return Math.round(s / 60);
     }),
-    itemStyle: { color: STAGE_COLORS[stage] ?? "#64748b" },
+    itemStyle: { color: stageColor(stage) },
   }));
-
-  // Sleep target markLine (GOALS-2). Attached to the first series so
-  // it renders once across the full chart width. Skipped when no
-  // target is configured.
-  if (sleepTargetH.value != null && series.length > 0) {
-    const targetMin = sleepTargetH.value * 60;
-    const targetColor = isNeon.value ? "#5dff3b" : t.palette.recovery;
-    series[0] = {
-      ...series[0],
-      markLine: {
-        silent: true,
-        symbol: ["none", "none"],
-        data: [{
-          yAxis: targetMin,
-          lineStyle: { color: targetColor, type: "dashed" as const, width: 1.5, opacity: 0.7 },
-          label: {
-            formatter: `Target ${sleepTargetH.value!.toFixed(1)}h`,
-            color: targetColor,
-            fontSize: 10,
-            position: "insideEndTop",
-          },
-        }],
-      },
-    };
+  const target = tile.value?.target ?? null;
+  if (target != null && series.length) {
+    series[0].markLine = { silent: true, symbol: ["none", "none"], data: [{
+      yAxis: target * 60, lineStyle: { color: "#ececf5", type: "dashed" as const, opacity: 0.55 },
+      label: { formatter: `target ${target.toFixed(1)}h`, color: "#9b9bb0", fontSize: 9, position: "insideEndTop" },
+    }] };
   }
-
   return {
-    grid: { left: 50, right: 12, top: 30, bottom: 28 },
-    legend: { textStyle: t.axisLabel, top: 4 },
-    xAxis: { type: "category", data: dates, axisLabel: t.axisLabel },
-    // Same markLine trap as Steps: the axis is sized from the stacked totals,
-    // so a target above every night's actual sleep drew nothing at all — the
-    // chronically-short case where the target matters most.
-    yAxis: {
-      type: "value", name: "minutes", axisLabel: t.axisLabel,
-      splitLine: t.splitLine, nameTextStyle: t.axisLabel,
-      // Bound by each night's STACKED total (what actually sizes the axis)
-      // together with the target line.
-      ...zeroAxisIncluding(
-        nights.value.map((n) =>
-          n.stages.reduce((a, x) => a + x.duration_s / 60, 0)),
-        sleepTargetH.value != null ? sleepTargetH.value * 60 : null,
-      ),
-    },
-    tooltip: { trigger: "axis", ...t.tooltip },
+    grid: { left: 40, right: 8, top: 14, bottom: 24 },
+    xAxis: { type: "category", data: slots.map((s) => s.date.slice(5)), axisLabel: axis.value },
+    yAxis: { type: "value", axisLabel: { ...axis.value, formatter: (v: number) => `${Math.round(v / 60)}h` }, splitLine: split,
+             ...zeroAxisIncluding(nights.value.map((n) => n.stages.reduce((a, x) => a + x.duration_s / 60, 0)),
+                                  target != null ? target * 60 : null) },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip },
     series,
-    dataZoom: [{ type: "inside" }],
   };
 });
+const stackLegend = computed(() => {
+  const present = new Set(nights.value.flatMap((n) => n.stages.map((s) => s.stage.toLowerCase())));
+  return STACK_ORDER.filter((s) => present.has(s));
+});
 
-// === Bedtime / wake time consistency scatter ===
 const consistencyOption = computed(() => {
-  void chartTheme.value;
-  void isNeon.value;
-  const t = chartTheme.value;
-  const bedColor = isNeon.value ? "#ff3ad8" : t.palette.violet;
-  const wakeColor = isNeon.value ? "#28e6ff" : t.palette.steps;
-  // Map each night to (date, fractional hour of bedtime) and (date, fractional hour of wake).
-  // Bedtime can wrap past midnight; encode hours since 18:00 to keep them positive.
-  const bedData: [string, number][] = [];
-  const wakeData: [string, number][] = [];
+  if (!nights.value.length) return null;
+  const bed: [string, number][] = [];
+  const wake: [string, number][] = [];
   for (const n of nights.value) {
-    const start = new Date(n.start);
-    const end = new Date(n.end);
-    const bedH = ((start.getHours() + start.getMinutes() / 60) - 18 + 24) % 24;
-    const wakeH = (end.getHours() + end.getMinutes() / 60);
-    bedData.push([n.date, +bedH.toFixed(2)]);
-    wakeData.push([n.date, +wakeH.toFixed(2)]);
+    const s = new Date(n.start); const e = new Date(n.end);
+    bed.push([n.date, +((((s.getHours() + s.getMinutes() / 60) - 18 + 24) % 24).toFixed(2))]);
+    wake.push([n.date, +((e.getHours() + e.getMinutes() / 60).toFixed(2))]);
   }
   return {
-    grid: { left: 50, right: 50, top: 30, bottom: 28 },
-    legend: { textStyle: t.axisLabel, top: 4 },
-    xAxis: { type: "category", data: nights.value.map((n) => n.date), axisLabel: t.axisLabel },
+    legend: { textStyle: axis.value, top: 0 },
+    grid: { left: 40, right: 40, top: 28, bottom: 24 },
+    xAxis: { type: "category", data: nights.value.map((n) => n.date.slice(5)), axisLabel: axis.value },
     yAxis: [
-      { type: "value", name: "bedtime (h after 6pm)", axisLabel: t.axisLabel, splitLine: t.splitLine, nameTextStyle: { color: bedColor, fontSize: 9 } },
-      { type: "value", name: "wake hour", axisLabel: t.axisLabel, splitLine: { show: false }, position: "right", nameTextStyle: { color: wakeColor, fontSize: 9 } },
+      { type: "value", name: "bed (h after 6pm)", axisLabel: axis.value, splitLine: split, nameTextStyle: { color: MAG, fontSize: 9 } },
+      { type: "value", name: "wake hour", axisLabel: axis.value, splitLine: { show: false }, nameTextStyle: { color: "#28e6ff", fontSize: 9 } },
     ],
-    tooltip: { trigger: "axis", ...t.tooltip },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip },
     series: [
-      { name: "Bedtime", type: "scatter", yAxisIndex: 0, symbolSize: 8, data: bedData, itemStyle: { color: bedColor } },
-      { name: "Wake", type: "scatter", yAxisIndex: 1, symbolSize: 8, data: wakeData, itemStyle: { color: wakeColor } },
+      { name: "Bedtime", type: "scatter", yAxisIndex: 0, symbolSize: 8, data: bed, itemStyle: { color: MAG } },
+      { name: "Wake", type: "scatter", yAxisIndex: 1, symbolSize: 8, data: wake, itemStyle: { color: "#28e6ff" } },
     ],
   };
 });
 
-const stats = computed(() => {
-  // Naps are sleep sessions but they are not nights. Averaging a 45-minute
-  // doze in with eight-hour nights pulled the headline average down and made
-  // "Min" the length of the nap rather than of your shortest night.
-  const actualNights = nights.value.filter((n) => n.kind !== "nap");
-  if (actualNights.length === 0) return null;
-  const totals = actualNights.map((n) => n.total_s);
-  const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
-  const min = Math.min(...totals);
-  const max = Math.max(...totals);
-  return { avg, min, max, count: actualNights.length,
-           naps: nights.value.length - actualNights.length };
+const expanded = ref(false);
+const recent = computed(() => {
+  const all = [...nights.value].sort((a, b) => b.start.localeCompare(a.start));
+  return expanded.value ? all : all.slice(0, 7);
 });
-
-// Most-recent-first, capped at the visible window (default 7 nights;
-// expandable up to whatever the range pull returned).
-const expandedRecent = ref(false);
-const allRecentNights = computed(() =>
-  [...nights.value].sort((a, b) => b.start.localeCompare(a.start)),
-);
-const recentNights = computed(() =>
-  expandedRecent.value
-    ? allRecentNights.value
-    : allRecentNights.value.slice(0, 7),
-);
-
-function fmtNightDate(n: SleepNight): string {
-  // Show the *evening* the night belongs to (i.e. the day before
-  // the wake-up date) if the start is past midnight.
-  const startD = new Date(n.start);
-  const opts = { weekday: "short", month: "short", day: "numeric" } as const;
-  return startD.toLocaleDateString(undefined, opts);
-}
+const recentMax = computed(() => Math.max(1, ...recent.value.map((n) => n.total_s)));
 </script>
 
 <template>
-  <div class="sleep">
-    <PageHeader title="Sleep">
-      <RangeTabs v-model="range" :options="SLEEP_RANGES" aria-label="Sleep time range">
-        <template #before>
-          <PatternsLink metric="sleep_score" label="sleep"/>
-        </template>
+  <NeonPage title="Sleep" :back="true">
+    <template #trailing><span class="dicon" style="--a: #ff3ad8"><Moon :size="20" /></span></template>
+    <div class="dtabs">
+      <RangeTabs v-model="range" :options="RANGES" aria-label="Sleep time range">
+        <template #before><PatternsLink metric="sleep_score" label="sleep"/></template>
       </RangeTabs>
-    </PageHeader>
-
-    <div v-if="error" class="err">{{ error }}</div>
-    <div v-if="loading" class="sleep-skel">
-      <Skeleton width="100%" height="180px" radius="12px"/>
-      <Skeleton width="100%" height="60px" radius="12px"/>
-      <Skeleton width="100%" height="60px" radius="12px"/>
-    </div>
-    <div v-else-if="nights.length === 0" class="empty">
-      No sleep sessions in this range. Make sure your watch is logging sleep + Fitbit is sharing it with Health Connect.
     </div>
 
-    <div v-if="lastNight" class="last-banner">
-      <span class="dot" :style="{ background: 'var(--violet)' }"></span>
-      Last sleep logged: <strong>{{ fmtDateTime(lastNight.end) }}</strong>
-      <span class="rel">({{ relativeTime(lastNight.end) }})</span>
-    </div>
+    <template v-if="!hasContent">
+      <DetailSkeleton v-if="loading" :accent="MAG" label="Sleep" />
+      <DetailError v-else-if="error" :error="error" @retry="load" />
+      <p v-else class="dnote">
+        No sleep sessions in this range. Make sure your watch is logging sleep and sharing it with Health Connect.
+      </p>
+    </template>
 
-    <div v-if="!loading && nights.length > 0" class="grid">
-      <Card v-if="lastNight" title="Last night — hypnogram"
-            :subtitle="`${fmtTime(new Date(lastNight.start))} → ${fmtTime(new Date(lastNight.end))}  ·  ${fmtDur(lastNight.total_s)}`">
-        <div class="chart hypno"><VChart v-if="hypnogramOption" :option="hypnogramOption" autoresize/></div>
-        <div class="legend">
-          <span v-for="s in lastNight.stages" :key="s.stage" class="lg-item">
-            <span class="dot" :style="{ background: stageColors[s.stage] ?? '#64748b' }"></span>
-            {{ s.stage }} {{ Math.round(s.duration_s / 60) }} min
+    <template v-else>
+      <DetailError v-if="error" :error="error" cached @retry="load" />
+      <NeonHero :accent="MAG">
+        <span class="deb">Last night</span>
+        <span class="dbig" :style="{ color: MAG }">{{ fmtDur(lastNight?.total_s) }}</span>
+        <span class="dsubline">
+          {{ lastNight ? `${fmtTime(new Date(lastNight.start))} → ${fmtTime(new Date(lastNight.end))}` : "No night recorded" }}
+        </span>
+        <StatusChip :status="tile?.status" :text="tile?.status_reason" />
+        <div v-if="hypnogramOption" class="dchart" :style="{ height: `${Math.max(96, presentStages.length * 28 + 30)}px` }">
+          <VChart :option="hypnogramOption" autoresize/>
+        </div>
+        <p v-else class="dnote">No stage detail synced for this night yet.</p>
+        <div v-if="presentStages.length" class="dlegend">
+          <span v-for="s in presentStages" :key="s">
+            <i :style="{ background: stageColor(s) }"></i>{{ s }}<template v-if="lastStageMinutes[s] != null"> {{ lastStageMinutes[s] }}m</template>
           </span>
         </div>
-      </Card>
+      </NeonHero>
 
-      <Card title="Recent nights"
-            :subtitle="`${expandedRecent ? allRecentNights.length : Math.min(7, allRecentNights.length)} of ${allRecentNights.length} · bed → wake → total`">
-        <!-- Range stats — moved into this card per the redesign -->
-        <div v-if="stats" class="rn-stats">
-          <div class="rn-stat">
-            <span class="rn-stat-label">Avg</span>
-            <span class="rn-stat-val mono">{{ fmtDur(stats.avg) }}</span>
-          </div>
-          <div class="rn-stat">
-            <span class="rn-stat-label">Min</span>
-            <span class="rn-stat-val mono">{{ fmtDur(stats.min) }}</span>
-          </div>
-          <div class="rn-stat">
-            <span class="rn-stat-label">Max</span>
-            <span class="rn-stat-val mono">{{ fmtDur(stats.max) }}</span>
-          </div>
-          <div class="rn-stat">
-            <span class="rn-stat-label">Nights</span>
-            <span class="rn-stat-val mono">{{ stats.count }}</span>
-          </div>
-        </div>
+      <div class="dstats">
+        <NeonStat :value="fmtDur(ss?.avg_s)" label="Avg night" :accent="MAG" />
+        <NeonStat :value="fmtDur(ss?.min_s)" label="Shortest" />
+        <NeonStat :value="fmtDur(ss?.max_s)" label="Longest" />
+      </div>
+      <p v-if="ss" class="dnote">
+        {{ ss.nights }} night{{ ss.nights === 1 ? "" : "s" }} in this window<template v-if="ss.naps"> · {{ ss.naps }} nap{{ ss.naps === 1 ? "" : "s" }} not counted</template>
+      </p>
 
-        <ul class="recent-nights">
-          <li v-for="n in recentNights" :key="`${n.date}-${n.start}`">
-            <span class="rn-date">
-              {{ fmtNightDate(n) }}
-              <!-- The stats beside this list count nights only, so an
-                   unlabelled nap made the two disagree about the same data. -->
-              <span v-if="n.kind === 'nap'" class="rn-nap">nap</span>
-            </span>
-            <span class="rn-window mono">
-              {{ fmtTime(new Date(n.start)) }}
-              <span class="dim">→</span>
-              {{ fmtTime(new Date(n.end)) }}
-            </span>
-            <span class="rn-bar" :style="{ width: `${(n.total_s / Math.max(...recentNights.map(x => x.total_s))) * 100}%` }"></span>
-            <span class="rn-total mono">{{ fmtDur(n.total_s) }}</span>
+      <DetailCard v-if="stackedOption" title="Stage breakdown">
+        <div class="dchart tall"><VChart :option="stackedOption" autoresize/></div>
+        <div class="dlegend"><span v-for="s in stackLegend" :key="s"><i :style="{ background: stageColor(s) }"></i>{{ s }}</span></div>
+      </DetailCard>
+
+      <DetailCard title="Recent nights" subtitle="bed → wake · total">
+        <ul class="rn">
+          <li v-for="n in recent" :key="`${n.date}-${n.start}`">
+            <span class="rd">{{ new Date(n.start).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) }}
+              <em v-if="n.kind === 'nap'">nap</em></span>
+            <span class="rw">{{ fmtTime(new Date(n.start)) }} → {{ fmtTime(new Date(n.end)) }}</span>
+            <span class="rb" :style="{ width: `${(n.total_s / recentMax) * 100}%` }"></span>
+            <b>{{ fmtDur(n.total_s) }}</b>
           </li>
         </ul>
-
-        <button v-if="allRecentNights.length > 7"
-                class="rn-toggle"
-                @click="expandedRecent = !expandedRecent">
-          {{ expandedRecent
-              ? `Show last 7 only`
-              : `Show all ${allRecentNights.length} sessions →` }}
+        <button v-if="nights.length > 7" class="rt" @click="expanded = !expanded">
+          {{ expanded ? "Show last 7 only" : `Show all ${nights.length} sessions →` }}
         </button>
-      </Card>
+      </DetailCard>
 
-      <Card title="Per-night stage breakdown">
-        <div class="chart"><VChart :option="stackedNightsOption" autoresize/></div>
-      </Card>
-
-      <Card title="Bedtime / wake-time consistency">
-        <div class="chart"><VChart :option="consistencyOption" autoresize/></div>
-      </Card>
-    </div>
-  </div>
+      <DetailCard v-if="consistencyOption" title="Bedtime / wake consistency">
+        <div class="dchart tall"><VChart :option="consistencyOption" autoresize/></div>
+      </DetailCard>
+    </template>
+  </NeonPage>
 </template>
 
 <style scoped>
-
-.grid { display: grid; gap: 1rem; margin-top: 1rem; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
-.chart { width: 100%; height: 280px; }
-.chart.small { height: 100px; }
-.chart.hypno { height: 200px; }
-.chart > * { width: 100%; height: 100%; }
-
-.legend { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted); }
-.lg-item { display: inline-flex; align-items: center; gap: 0.3rem; }
-.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
-
-.kv { display: flex; gap: 2rem; margin-top: 0.5rem; }
-.kv > div { display: flex; flex-direction: column; }
-.kv dt { color: var(--muted-2); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.kv dd { margin: 0.2rem 0 0; color: var(--text); font-weight: 500; font-size: 1.4rem; }
-
-.empty { color: var(--muted-2); padding: 2rem 0; text-align: center; }
-.sleep-skel { display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
-
-.rn-stats {
-  display: flex; gap: 1.4rem;
-  padding: 0 0.4rem 0.85rem;
-  margin-bottom: 0.85rem;
-  border-bottom: 1px solid var(--line);
-  flex-wrap: wrap;
-}
-.rn-stat { display: flex; flex-direction: column; gap: 0.15rem; }
-.rn-stat-label {
-  font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--muted); font-weight: 600;
-}
-.rn-stat-val {
-  color: var(--text); font-size: 1.15rem; font-weight: 500;
-  font-feature-settings: "tnum";
-}
-.rn-toggle {
-  margin-top: 0.7rem; align-self: flex-start;
-  background: transparent; border: none; cursor: pointer;
-  color: var(--accent, #ef4444); font-size: 0.82rem;
-  padding: 0.3rem 0; font-family: inherit;
-}
-.rn-toggle:hover { text-decoration: underline; }
-
-.rn-nap { font-size: 0.66rem; text-transform: uppercase; letter-spacing: .06em;
-          color: var(--muted); border: 1px solid currentColor; border-radius: 999px;
-          padding: 0 .35em; margin-left: .4em; vertical-align: middle; }
-.recent-nights {
-  list-style: none; padding: 0; margin: 0;
-  display: flex; flex-direction: column; gap: 0.4rem;
-}
-.recent-nights li {
-  display: grid;
-  grid-template-columns: minmax(80px, auto) minmax(140px, auto) 1fr auto;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.4rem 0.6rem;
-  background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 0.85rem;
-}
-.rn-date { color: var(--text); font-weight: 500; white-space: nowrap; }
-.rn-window {
-  color: var(--text); font-size: 0.78rem; white-space: nowrap;
-  font-feature-settings: "tnum";
-}
-.rn-window .dim { color: var(--muted); margin: 0 4px; }
-.rn-bar {
-  display: block; height: 6px; max-width: 200px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(167,139,250,0.3), rgba(167,139,250,0.7));
-  justify-self: stretch;
-}
-.rn-total {
-  color: var(--text); font-weight: 600; font-size: 0.88rem;
-  font-feature-settings: "tnum"; white-space: nowrap;
-}
-.err { color: var(--bad); padding: 0.6rem 0.8rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--bad); margin: 0.6rem 0; }
-
-.last-banner {
-  display: flex; align-items: center; gap: 0.5rem;
-  padding: 0.6rem 0.9rem; background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px; margin: 0.5rem 0 1rem; font-size: 0.9rem; color: var(--muted);
-}
-.last-banner strong { color: var(--text); }
-.last-banner .rel { color: var(--muted-2); font-size: 0.85rem; margin-left: auto; }
-
-/* ===== Vitality Neon — scoped overrides (neon theme only) ===== */
-html[data-theme="neon"] .sleep {
-  --rn-mag: #ff3ad8; --rn-cyan: #28e6ff; --rn-lime: #5dff3b;
-  --rn-amber: #ffb52e; --rn-track: #272a3b; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
-  min-height: 100vh; margin: calc(-1 * var(--main-pt, 1.25rem)) calc(-1 * var(--main-px, 1.5rem)) 0; padding: 1.25rem 1.5rem 2rem;
-  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
-  color: var(--rn-ink);
-}
-
-/* Big numeric readouts → Space Grotesk monospace */
-html[data-theme="neon"] .sleep .rn-stat-val,
-html[data-theme="neon"] .sleep .rn-total,
-html[data-theme="neon"] .sleep .rn-window {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-}
-html[data-theme="neon"] .sleep .rn-stat-val { color: var(--rn-ink); }
-html[data-theme="neon"] .sleep .rn-stat-label { color: var(--rn-mut); }
-
-/* Recent-night duration bar → neon sleep magenta gradient + glow */
-html[data-theme="neon"] .sleep .rn-bar {
-  background: linear-gradient(90deg, rgba(255, 58, 216, 0.28), rgba(255, 58, 216, 0.85));
-  box-shadow: 0 0 6px rgba(255, 58, 216, 0.45);
-}
-
-/* Last-sleep banner dot → magenta glow */
-html[data-theme="neon"] .sleep .last-banner .dot {
-  background: var(--rn-mag) !important;
-  box-shadow: 0 0 7px rgba(255, 58, 216, 0.7);
-}
-
-/* Toggle accent → cyan */
-html[data-theme="neon"] .sleep .rn-toggle { color: var(--rn-cyan); }
-
-/* Per-night row chrome reads slightly brighter against the obsidian bg */
-html[data-theme="neon"] .sleep .recent-nights li {
-  border-color: #2a2e42;
-}
+.rn { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rn li { display: grid; grid-template-columns: minmax(90px, auto) minmax(120px, auto) 1fr auto; gap: 10px;
+  align-items: center; font-size: 12.5px; }
+.rd { color: #ececf5; white-space: nowrap; }
+.rd em { font-style: normal; font-size: 10px; color: #9b9bb0; border: 1px solid currentColor; border-radius: 999px;
+  padding: 0 5px; margin-left: 4px; }
+.rw { color: #9b9bb0; font-family: 'Space Grotesk', 'Geist Mono', monospace; white-space: nowrap; }
+.rb { height: 6px; border-radius: 999px; background: linear-gradient(90deg, rgba(255, 58, 216, .3), rgba(255, 58, 216, .85)); }
+.rn b { font-family: 'Space Grotesk', 'Geist Mono', monospace; }
+.rt { margin-top: 8px; background: none; border: 0; color: #28e6ff; cursor: pointer; font: inherit; font-size: 12.5px; padding: 0; }
+@media (max-width: 520px) { .rn li { grid-template-columns: 1fr auto; } .rw, .rb { display: none; } }
 </style>

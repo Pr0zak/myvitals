@@ -14,6 +14,10 @@ class HeartRateSeries(BaseModel):
     avg: float | None = None
     min_bpm: float | None = None
     max_bpm: float | None = None
+    # UI-4 — zone bounds, time-in-zone and the minutes-per-band histogram
+    # for a single-day trace, from analytics/detail_stats.hr_zone_stats.
+    # None for multi-day windows, where the points are coarse means.
+    stats: dict[str, Any] | None = None
 
 
 class HrvSeries(BaseModel):
@@ -24,6 +28,9 @@ class HrvSeries(BaseModel):
 class StepsSeries(BaseModel):
     points: list[TimePoint]
     total: int
+    # UI-4 — 24 LOCAL-hour buckets, for a window of at most one day. Both
+    # clients used to bucket the minute series themselves.
+    hourly: list[int] | None = None
 
 
 class SleepStageBucket(BaseModel):

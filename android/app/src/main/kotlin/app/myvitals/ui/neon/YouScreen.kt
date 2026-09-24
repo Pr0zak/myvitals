@@ -225,7 +225,7 @@ fun YouContent(
             if (error != null && !loading) {
                 // UX-F3: say it failed. No "Not fasting", no "No active
                 // goals yet" — those would be claims the app cannot make.
-                NeonErrorBanner(error) { onRefresh() }
+                NeonErrorBanner(error, title = "Couldn't load your habits and goals") { onRefresh() }
             } else {
                 YouSkeleton()
             }
@@ -234,7 +234,7 @@ fun YouContent(
             return@NeonScreen
         }
         if (error != null) {
-            NeonErrorBanner("Showing your last saved copy. $error") { onRefresh() }
+            NeonErrorBanner("Showing your last saved copy. $error", title = "Couldn't refresh") { onRefresh() }
         }
 
         HabitsHero(data, zone, onOpen)

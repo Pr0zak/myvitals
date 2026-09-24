@@ -756,6 +756,20 @@ interface BackendApi {
         @Query("since") since: String? = null,
         @Query("polyline") polyline: String = "none",
     ): List<ActivityRow>
+
+    // ── UI-4: metric detail screens ──
+    /** Steps / resting-HR / sleep stats over a window of LOCAL days. */
+    @GET("summary/range/stats")
+    suspend fun summaryRangeStats(
+        @retrofit2.http.Query("since") since: String,
+        @retrofit2.http.Query("until") until: String? = null,
+    ): RangeStats
+
+    /** Weight series + the server's window stats, trend and tone. */
+    @GET("query/weight")
+    suspend fun weightSeriesStats(
+        @retrofit2.http.Query("since") since: String? = null,
+    ): WeightSeriesOut
 }
 
 object BackendClient {

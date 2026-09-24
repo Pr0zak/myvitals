@@ -1,35 +1,21 @@
 package app.myvitals.ui.vitals
 
-import app.myvitals.data.Units
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,405 +23,280 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.myvitals.data.JsonCache
 import app.myvitals.data.SettingsRepository
+import app.myvitals.data.Units
 import app.myvitals.sync.BackendClient
-import app.myvitals.ui.MV
+import app.myvitals.sync.VitalTile
+import app.myvitals.sync.WeightDelta
+import app.myvitals.sync.WeightSeriesOut
+import app.myvitals.ui.neon.NeonErrorBanner
+import app.myvitals.ui.neon.NeonEyebrow
+import app.myvitals.ui.neon.NeonHeroCard
+import app.myvitals.ui.neon.NeonMV
+import app.myvitals.ui.neon.NeonNumber
+import app.myvitals.ui.neon.NeonScreen
+import app.myvitals.ui.neon.NeonStatTile
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import app.myvitals.ui.LocalAppTokens
-
-// internal (not private) + @JsonClass: this crosses JsonCache's Moshi
-// boundary (SWR cache read/write), and Moshi codegen's generated adapter
-// lives in a separate generated file — it cannot see a file-private class.
-@com.squareup.moshi.JsonClass(generateAdapter = true)
-internal data class WPoint(val ms: Long, val kg: Double)
 
 /**
- * Which way is "good" for a body-weight change — the Kotlin mirror of
- * `frontend/src/weightDirection.ts` (OG2-A5 / OG2-D4).
+ * Weight detail (UI-4). The hero is the latest weigh-in, the change over the
+ * window coloured by the SERVER's tone, the goal distance, and the trend
+ * line with the goal line. Every figure — min/avg/max, the 7- and 30-day
+ * changes, the fitted trend, and whether a change counts as progress — comes
+ * from `/query/weight`'s `stats` block (analytics/detail_stats.py). The
+ * phone's own `weightDeltaTone` and its index-based regression are gone:
+ * the colour of a weight change is GOAL-STATE's decision, made once.
  *
- * A body-weight delta has no intrinsic sign meaning, which is why
- * `analytics/compare.py` classes bodyweight `better="context"` and says
- * outright that the app does not get to assume. This screen used to paint a
- * gain amber and a loss blue — softer than the web's red, but amber is this
- * app's caution colour, so it was still a verdict, and it was reached without
- * knowing which way the user was trying to move.
- *
- * Only the user's own goal can settle it. With no goal there is no direction
- * and the figure renders plain, the same refusal `analytics/projection.py`
- * makes rather than projecting a trend it cannot support.
+ * All values arrive in kilograms and are shown in the user's unit.
  */
-private enum class WeightTone { POSITIVE, CAUTION, NEUTRAL }
-
-/** Mirrors WEIGHT_NOISE_BAND_KG in `api/ai.py`, converted once, here.
- *
- *  GOAL-STATE measured the band and recorded why: a card that fires on water
- *  weight is wrong most weeks, and one that is wrong most weeks is one you
- *  stopped reading by the week it mattered. Everything on this screen is in
- *  POUNDS, so the band is too — the unit question the GOAL-STATE note closes
- *  by insisting on. */
-private const val WEIGHT_NOISE_BAND_LB = 2.2046226
-
-private fun weightDeltaTone(
-    deltaLb: Double?, currentLb: Double?, goalLb: Double?,
-): WeightTone {
-    if (deltaLb == null || currentLb == null || goalLb == null) return WeightTone.NEUTRAL
-    if (kotlin.math.abs(deltaLb) < WEIGHT_NOISE_BAND_LB) return WeightTone.NEUTRAL
-    val gap = goalLb - currentLb
-    // Sitting on the target is not a direction — there is nowhere good left
-    // to move, so neither sign is rewarded.
-    if (kotlin.math.abs(gap) < WEIGHT_NOISE_BAND_LB) return WeightTone.NEUTRAL
-    val towardGoal = if (gap < 0) deltaLb < 0 else deltaLb > 0
-    return if (towardGoal) WeightTone.POSITIVE else WeightTone.CAUTION
-}
-
 @Composable
 fun WeightDetailScreen(settings: SettingsRepository, onBack: () -> Unit) {
-    val tok = LocalAppTokens.current
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     var range by remember { mutableStateOf(VitalRange.MONTH) }
-    var pts by remember { mutableStateOf<List<WPoint>>(emptyList()) }
+    var data by remember { mutableStateOf<WeightSeriesOut?>(null) }
+    var tile by remember { mutableStateOf<VitalTile?>(null) }
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    // OG2-D4: the target, in kg, or null when unset. The web has drawn this
-    // since the goal line shipped; the phone — the device you stand next to
-    // the scale with — did not, and had no way to say which direction was
-    // progress either. Null is a real state and stays one: no goal means no
-    // line and no verdict, never a guessed direction.
-    var goalKg by remember { mutableStateOf<Double?>(null) }
-
-    val ptsType = remember {
-        app.myvitals.data.JsonCache.listType(WPoint::class.java)
-    }
 
     suspend fun load() {
-        val cacheKey = "weight_detail_${range.name.lowercase()}"
-        app.myvitals.data.JsonCache.read<List<WPoint>>(
-            context, cacheKey, ptsType,
-        )?.let { pts = it.value; loading = false }
+        val cacheKey = "weight_detail_v2_${range.name.lowercase()}"
         if (!settings.isConfigured()) { error = "Backend not configured."; loading = false; return }
-        if (pts.isEmpty()) loading = true
-        error = null
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val since = LocalDate.now().minusDays(range.days.toLong() - 1).toString()
-            val raw = withContext(Dispatchers.IO) { api.weightSeries(since = since).string() }
-            val obj = JSONObject(raw)
-            val arr = obj.optJSONArray("points") ?: org.json.JSONArray()
-            val out = mutableListOf<WPoint>()
-            for (i in 0 until arr.length()) {
-                val p = arr.getJSONObject(i)
-                val w = p.optDouble("weight_kg", Double.NaN)
-                val t = p.optString("time").takeIf { it.isNotBlank() } ?: continue
-                if (w.isNaN()) continue
-                runCatching { out += WPoint(Instant.parse(t).toEpochMilli(), w) }
+            coroutineScope {
+                val dD = async(Dispatchers.IO) { api.weightSeriesStats(since = since) }
+                val tD = async(Dispatchers.IO) {
+                    runCatching { api.summaryTiles().tiles.firstOrNull { it.key == "weight" } }.getOrNull()
+                }
+                data = dD.await()
+                data?.let { JsonCache.write(context, cacheKey, WeightSeriesOut::class.java, it) }
+                tile = tD.await()
             }
-            pts = out
-            // Fails soft and separately from the series: a profile that will
-            // not load should cost the goal line, not the chart.
-            runCatching { goalKg = withContext(Dispatchers.IO) { api.profile() }.weightGoalKg }
-                .onFailure { Timber.w(it, "weight goal fetch failed") }
-            if (pts.isNotEmpty()) {
-                app.myvitals.data.JsonCache.write(context, cacheKey, ptsType, pts)
-            }
-            Timber.i("weight detail: range=%s points=%d", range, pts.size)
+            error = null
         } catch (e: Exception) {
             Timber.w(e, "weight detail load failed")
-            if (pts.isEmpty()) error = e.message?.take(160)
+            // Kept alongside any cached series, never instead of it.
+            error = e.message?.take(160) ?: "Couldn't reach the backend."
         } finally { loading = false }
     }
-    LaunchedEffect(range) { load() }
-
-    Column(Modifier.fillMaxSize().background(tok.bg)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = tok.onSurface)
-            }
-            Icon(Vital.WEIGHT.icon, contentDescription = null, tint = Vital.WEIGHT.accent,
-                modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Weight", color = tok.onSurface, fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        }
-        app.myvitals.ui.common.VitalRangeGroup(
-            selected = range,
-            accent = Vital.WEIGHT.accent,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-        ) { r ->
-                        range = r
-        }
-        when {
-            loading -> Text("Loading…", color = tok.onSurfaceVariant,
-                modifier = Modifier.padding(16.dp))
-            error != null -> Text(error!!, color = tok.red, modifier = Modifier.padding(16.dp))
-            pts.size < 2 -> Text("Need at least 2 weight readings in this window.",
-                color = tok.onSurfaceVariant, modifier = Modifier.padding(16.dp))
-            else -> app.myvitals.ui.common.PullableMetricBox(
-                refreshing = refreshing,
-                onRefresh = {
-                    refreshing = true
-                    try { load() } finally { refreshing = false }
-                },
-            ) {
-                LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    item { WeightHero(pts, goalKg) }
-                    // The window the user asked for, not the span the data
-                    // happens to cover — the chart draws the former.
-                    val winStart = LocalDate.now()
-                        .minusDays(range.days.toLong() - 1)
-                        .atStartOfDay(ZoneId.systemDefault())
-                        .toInstant().toEpochMilli()
-                    val winEnd = System.currentTimeMillis()
-                    item { WeightChart(pts, Vital.WEIGHT.accent, winStart, winEnd, goalKg) }
-                    item { WeightStats(pts, winStart, winEnd) }
-                }
-            }
-        }
+    LaunchedEffect(range) {
+        data = JsonCache.read<WeightSeriesOut>(
+            context, "weight_detail_v2_${range.name.lowercase()}", WeightSeriesOut::class.java,
+        )?.value
+        loading = data == null
+        load()
     }
+
+    val winEnd = System.currentTimeMillis()
+    val winStart = LocalDate.now().minusDays(range.days.toLong() - 1)
+        .atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    WeightDetailContent(
+        range = range, data = data, tile = tile, winStart = winStart, winEnd = winEnd,
+        loading = loading, refreshing = refreshing, error = error,
+        onBack = onBack, onRange = { range = it },
+        onRefresh = { scope.launch { refreshing = true; try { load() } finally { refreshing = false } } },
+    )
+}
+
+private fun toneColor(tone: String?): Color = when (tone) {
+    "positive" -> NeonMV.Lime
+    // Amber, never rose: drifting from a weight goal is worth noticing, not
+    // a crisis (GOAL-STATE).
+    "caution" -> NeonMV.Amber
+    else -> NeonMV.Ink
+}
+
+private fun signedWeight(kg: Double?): String? {
+    val v = Units.weight(kg) ?: return null
+    return "%+.1f".format(v)
 }
 
 @Composable
-private fun WeightHero(pts: List<WPoint>, goalKg: Double?) {
-    val tok = LocalAppTokens.current
-    val latestLb = Units.weight(pts.last().kg) ?: 0.0
-    val firstLb = Units.weight(pts.first().kg) ?: 0.0
-    val delta = latestLb - firstLb
-    val goalLb = goalKg?.let { Units.weight(it) }
-    val tone = weightDeltaTone(delta, latestLb, goalLb)
-    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
-        Column(Modifier.padding(14.dp)) {
-            Text("LATEST", color = tok.onSurfaceVariant,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text("%.1f".format(latestLb), color = tok.onSurface,
-                    fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.width(6.dp))
-                Text(Units.weightUnit, color = tok.onSurfaceDim, fontSize = 12.sp,
-                    modifier = Modifier.padding(bottom = 6.dp))
-            }
-            val arrow = if (delta > 0.05) "↑" else if (delta < -0.05) "↓" else "→"
-            // The arrow still says which way it moved — that is a fact. The
-            // COLOUR says whether that is good, which needs the goal.
-            val color = when (tone) {
-                WeightTone.POSITIVE -> tok.good
-                WeightTone.CAUTION -> tok.caution
-                WeightTone.NEUTRAL -> tok.onSurfaceDim
-            }
-            Text("$arrow %+.1f ${Units.weightUnit} in window".format(delta),
-                color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-            goalLb?.let {
-                // A magnitude plus a direction word (UX-D6). This was a
-                // signed `goal - latest` while the web showed `latest -
-                // goal`, so one weigh-in read "+53.9 to go" on the web and
-                // "−53.9 to go" here. The unit label was also hard-coded
-                // "lb" beside a value already converted to the user's unit.
-                val gap = it - latestLb
-                val u = Units.weightUnit
-                val gapText = if (kotlin.math.abs(gap) < 0.05) "at goal"
-                    else "%.1f %s to %s".format(kotlin.math.abs(gap), u, if (gap < 0) "lose" else "gain")
-                Text(
-                    "goal %.1f %s · %s".format(it, u, gapText),
-                    color = tok.onSurfaceVariant, fontSize = 11.sp,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun WeightChart(
-    pts: List<WPoint>, color: Color, winStart: Long, winEnd: Long,
-    goalKg: Double? = null,
+fun WeightDetailContent(
+    range: VitalRange,
+    data: WeightSeriesOut?,
+    tile: VitalTile?,
+    winStart: Long,
+    winEnd: Long,
+    loading: Boolean,
+    refreshing: Boolean,
+    error: String?,
+    onBack: () -> Unit,
+    onRange: (VitalRange) -> Unit,
+    onRefresh: () -> Unit,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
-    val tok = LocalAppTokens.current
-    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
-        Column(Modifier.padding(14.dp)) {
-            Text("TREND", color = tok.onSurfaceVariant,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+    val accent = Vital.WEIGHT.accent
+    val u = Units.weightUnit
+    NeonScreen(
+        title = "Weight",
+        contentPadding = contentPadding,
+        onBack = onBack,
+        refreshing = refreshing,
+        onRefresh = onRefresh,
+        headerTrailing = { DetailTitleIcon(Vital.WEIGHT) },
+    ) {
+        app.myvitals.ui.common.VitalRangeGroup(
+            selected = range, accent = accent, modifier = Modifier.padding(bottom = 10.dp),
+        ) { onRange(it) }
+
+        if (data == null) {
+            if (error != null && !loading) NeonErrorBanner(error, title = "Couldn't load weight") { onRefresh() }
+            else DetailSkeleton(accent)
+            Spacer(Modifier.height(24.dp))
+            return@NeonScreen
+        }
+        // Above the cached chart, never replacing it.
+        if (error != null) NeonErrorBanner("Showing your last saved copy. $error", title = "Couldn't refresh") { onRefresh() }
+
+        val s = data.stats
+        NeonHeroCard(accent) {
+            NeonEyebrow("Latest", Modifier.padding(top = 0.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                NeonNumber(Units.weight(s?.latestKg)?.let { "%.1f".format(it) } ?: "—", color = accent, size = 52)
+                Spacer(Modifier.width(6.dp))
+                Text(u, color = NeonMV.Muted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 10.dp))
+            }
+            s?.deltaKg?.let { d ->
+                val arrow = if (d > 0.02) "↑" else if (d < -0.02) "↓" else "→"
+                // The arrow is a fact; the colour is the server's verdict,
+                // which needs a goal and says nothing without one.
+                Text("$arrow ${signedWeight(d)} $u over ${range.label}",
+                    color = toneColor(s.tone), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
             Spacer(Modifier.height(8.dp))
-            val lbs = pts.map { Units.weight(it.kg) ?: 0.0 }
-            val minV = lbs.min()
-            val maxV = lbs.max()
-            val span = (maxV - minV).coerceAtLeast(0.5)
-            // Linear regression a + b*x for trend overlay
-            val n = pts.size
-            val xs = pts.indices.map { it.toDouble() }
-            val sumX = xs.sum(); val sumY = lbs.sum()
-            val sumXY = xs.zip(lbs).sumOf { it.first * it.second }
-            val sumX2 = xs.sumOf { it * it }
-            val b = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
-            val a = (sumY - b * sumX) / n
-            Canvas(Modifier.fillMaxWidth().height(190.dp)) {
-                // OG2-D4: fold the goal into the domain BEFORE padding.
-                // Web hit this and left a note: a goal outside the plotted
-                // range simply does not widen the axis, so the line vanishes
-                // silently — and it vanishes exactly when the user is
-                // furthest from the target, which is when they most want to
-                // see the gap. `niceDomain` has taken includeLo/includeHi
-                // since it was written; nothing had passed them.
-                val goalLbF = goalKg?.let { Units.weight(it) }?.toFloat()
-                val domain = niceDomain(
-                    minV.toFloat(), maxV.toFloat(),
-                    includeLo = goalLbF, includeHi = goalLbF,
-                    targetTicks = 4, minStep = 1f,
-                )
-                val g = chartGeom(domain, ChartInsets(
-                    left = 34.dp.toPx(), top = 6.dp.toPx(),
-                    right = 4.dp.toPx(), bottom = 16.dp.toPx(),
-                ))
-                // The labels used to be a separate SpaceBetween Column laid
-                // over the Canvas, so they spread across the whole box while
-                // the gridlines sat inside the padded plot — the numbers never
-                // lined up with the lines they labelled. Drawn together now.
-                drawGrid(g, measurer, tok.onSurfaceDim, tok.onSurface) {
-                    "%.0f".format(it)
+            val goalText = s?.goalKg?.let { g ->
+                val gap = s.goalGapKg
+                val gapWord = when {
+                    gap == null -> null
+                    kotlin.math.abs(Units.weight(gap) ?: 0.0) < 0.05 -> "at goal"
+                    gap > 0 -> "%.1f %s to lose".format(Units.weight(gap), u)
+                    else -> "%.1f %s to gain".format(Units.weight(-gap), u)
                 }
-                // The goal line, dashed and labelled, drawn under the series
-                // so a reading never disappears behind it.
-                goalLbF?.let { gv: Float ->
-                    val gy = g.y(gv)
-                    drawLine(
-                        color = tok.onSurfaceVariant,
-                        start = Offset(g.left, gy), end = Offset(g.right, gy),
-                        strokeWidth = 1.2.dp.toPx(),
-                        pathEffect = PathEffect.dashPathEffect(
-                            floatArrayOf(6.dp.toPx(), 4.dp.toPx())
-                        ),
-                    )
-                    val lbl = measurer.measure(
-                        "goal %.0f".format(gv),
-                        style = androidx.compose.ui.text.TextStyle(
-                            color = tok.onSurfaceVariant, fontSize = 9.sp,
-                        ),
-                    )
-                    drawText(
-                        lbl,
-                        topLeft = Offset(
-                            g.right - lbl.size.width - 2.dp.toPx(),
-                            gy - lbl.size.height - 1.dp.toPx(),
-                        ),
-                    )
-                }
-                // Regression trend
-                drawLine(
-                    color = color.copy(alpha = 0.55f),
-                    start = Offset(g.left, g.y(a.toFloat())),
-                    end = Offset(g.right, g.y((a + b * (n - 1)).toFloat())),
+                "Goal %.1f %s".format(Units.weight(g), u) + (gapWord?.let { " · $it" } ?: "")
+            }
+            // A distance to the goal takes no tone; a stale reading says so.
+            DetailStatusChip(null, tile?.statusReason ?: goalText)
+            if (tile?.statusReason != null && goalText != null) {
+                Spacer(Modifier.height(6.dp))
+                DetailStatusChip(null, goalText)
+            }
+            Spacer(Modifier.height(12.dp))
+            if (data.points.count { it.weightKg != null } < 2) {
+                DetailNote("Need at least 2 weigh-ins in this window to draw a trend.")
+            } else {
+                WeightTrendChart(data, accent, winStart, winEnd)
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for ((v, label) in listOf(
+                Units.weight(s?.minKg)?.let { "%.1f".format(it) } to "Min $u",
+                Units.weight(s?.avgKg)?.let { "%.1f".format(it) } to "Avg $u",
+                Units.weight(s?.maxKg)?.let { "%.1f".format(it) } to "Max $u",
+            )) NeonStatTile(v ?: "—", label, Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DeltaTile(s?.delta7d, "7-day Δ $u", Modifier.weight(1f))
+            DeltaTile(s?.delta30d, "30-day Δ $u", Modifier.weight(1f))
+            NeonStatTile("${s?.count ?: 0}", "Readings", Modifier.weight(1f))
+        }
+        val times = data.points.filter { it.weightKg != null }
+            .mapNotNull { runCatching { Instant.parse(it.time).toEpochMilli() }.getOrNull() }
+        coverageNote(times, winStart, winEnd) { mdOf(it) }?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, color = NeonMV.Muted, fontSize = 11.sp)
+        }
+        Spacer(Modifier.height(28.dp))
+    }
+}
+
+@Composable
+private fun DeltaTile(d: WeightDelta?, label: String, modifier: Modifier) {
+    NeonStatTile(
+        value = signedWeight(d?.deltaKg) ?: "—", label = label, modifier = modifier,
+        accent = d?.takeIf { it.deltaKg != null }?.let { toneColor(it.tone) },
+    )
+}
+
+@Composable
+private fun WeightTrendChart(data: WeightSeriesOut, color: Color, winStart: Long, winEnd: Long) {
+    val measurer = rememberTextMeasurer()
+    val pts = remember(data) {
+        data.points.mapNotNull { p ->
+            val kg = p.weightKg ?: return@mapNotNull null
+            runCatching { Instant.parse(p.time).toEpochMilli() }.getOrNull()?.let { it to kg }
+        }.sortedBy { it.first }
+    }
+    if (pts.size < 2) return
+    val goal = Units.weight(data.stats?.goalKg)?.toFloat()
+    val trend = data.stats?.trend
+    Canvas(Modifier.fillMaxWidth().height(180.dp)) {
+        val vals = pts.map { (Units.weight(it.second) ?: 0.0).toFloat() }
+        // The goal is folded into the domain so its line is never silently
+        // off-canvas — it would vanish exactly when furthest away.
+        val domain = niceDomain(vals.min(), vals.max(), includeLo = goal, includeHi = goal,
+            targetTicks = 4, minStep = 1f)
+        val g = chartGeom(domain, ChartInsets(
+            left = 34.dp.toPx(), top = 6.dp.toPx(), right = 4.dp.toPx(), bottom = 16.dp.toPx(),
+        ))
+        drawGrid(g, measurer, NeonMV.Muted, NeonMV.Track) { "%.0f".format(it) }
+        goal?.let { drawReferenceLine(g, it, NeonMV.Ink, measurer, "goal %.0f".format(it)) }
+        // Server-fitted trend, positioned by its timestamps.
+        trend?.let { t ->
+            val s = runCatching { Instant.parse(t.startTime).toEpochMilli() }.getOrNull()
+            val e = runCatching { Instant.parse(t.endTime).toEpochMilli() }.getOrNull()
+            val sv = Units.weight(t.startKg)?.toFloat()
+            val ev = Units.weight(t.endKg)?.toFloat()
+            if (s != null && e != null && sv != null && ev != null) {
+                drawLine(color.copy(alpha = 0.55f),
+                    Offset(g.xAt(s, winStart, winEnd), g.y(sv)), Offset(g.xAt(e, winStart, winEnd), g.y(ev)),
                     strokeWidth = 1.2.dp.toPx(),
-                    pathEffect = PathEffect.dashPathEffect(
-                        floatArrayOf(5.dp.toPx(), 4.dp.toPx())
-                    ),
-                )
-                val path = androidx.compose.ui.graphics.Path()
-                val area = androidx.compose.ui.graphics.Path()
-                // Positioned by TIMESTAMP across the window. Spreading the
-                // points evenly (g.x) drew three readings from two days edge
-                // to edge, so 7d, 30d and 90d were the same picture.
-                val firstX = g.xAt(pts.first().ms, winStart, winEnd)
-                val lastX = g.xAt(pts.last().ms, winStart, winEnd)
-                for ((i, w) in lbs.withIndex()) {
-                    val x = g.xAt(pts[i].ms, winStart, winEnd); val py = g.y(w.toFloat())
-                    if (i == 0) {
-                        path.moveTo(x, py); area.moveTo(x, g.bottom); area.lineTo(x, py)
-                    } else { path.lineTo(x, py); area.lineTo(x, py) }
-                    // De-smear: skip per-point dots once the window is dense.
-                    if (n <= 31) drawCircle(color = color, radius = 2.5.dp.toPx(),
-                        center = Offset(x, py))
-                }
-                area.lineTo(lastX, g.bottom); area.close()
-                drawPath(area, brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                    listOf(color.copy(alpha = 0.22f), color.copy(alpha = 0f)),
-                    startY = g.top, endY = g.bottom,
-                ))
-                drawPath(path = path, color = color, style = Stroke(
-                    width = 2.dp.toPx(),
-                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                    join = androidx.compose.ui.graphics.StrokeJoin.Round,
-                ))
-                // The stretches of the window with nothing in them, dashed and
-                // flat at the nearest real reading. Drawn after the series so
-                // it is visible, but it carries no value of its own and feeds
-                // neither the stats card nor the regression above.
-                val minGap = GAP_MIN_FRACTION * (winEnd - winStart)
-                if (pts.first().ms - winStart > minGap) {
-                    drawNoDataSpan(g.left, firstX, g.y(lbs.first().toFloat()), color)
-                }
-                if (winEnd - pts.last().ms > minGap) {
-                    drawNoDataSpan(lastX, g.right, g.y(lbs.last().toFloat()), color)
-                }
-                drawLatestMarker(
-                    Offset(lastX, g.y(lbs.last().toFloat())),
-                    color, tok.surfaceContainer,
-                )
-                // Labels mark the WINDOW now, not the first and last reading —
-                // the axis is the range that was asked for.
-                drawXLabels(g, measurer, tok.onSurfaceDim, buildList {
-                    add(0f to shortMdOf(winStart))
-                    add(0.5f to shortMdOf(winStart + (winEnd - winStart) / 2))
-                    add(1f to shortMdOf(winEnd))
-                })
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx())))
             }
         }
-    }
-}
-
-@Composable
-private fun WeightStats(pts: List<WPoint>, winStart: Long, winEnd: Long) {
-    val tok = LocalAppTokens.current
-    val lbs = pts.map { Units.weight(it.kg) ?: 0.0 }
-    Card(colors = CardDefaults.cardColors(containerColor = tok.surfaceContainer)) {
-        Column(Modifier.padding(14.dp)) {
-            Text("STATS", color = tok.onSurfaceVariant,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                Stat("Min", "%.1f lb".format(lbs.min()))
-                Stat("Avg", "%.1f lb".format(lbs.average()))
-                Stat("Max", "%.1f lb".format(lbs.max()))
-                Stat("Readings", "${pts.size}")
-            }
-            // Says what the window actually holds when that is less than what
-            // was asked for. Absent when the data fills the range, so the line
-            // only appears when it is telling the user something.
-            coverageNote(pts.map { it.ms }, winStart, winEnd) { shortMdOf(it) }
-                ?.let {
-                    Spacer(Modifier.height(6.dp))
-                    Text(it, color = tok.onSurfaceDim, fontSize = 11.sp)
-                }
+        val path = androidx.compose.ui.graphics.Path()
+        val area = androidx.compose.ui.graphics.Path()
+        val firstX = g.xAt(pts.first().first, winStart, winEnd)
+        val lastX = g.xAt(pts.last().first, winStart, winEnd)
+        for ((i, p) in pts.withIndex()) {
+            val x = g.xAt(p.first, winStart, winEnd); val y = g.y(vals[i])
+            if (i == 0) { path.moveTo(x, y); area.moveTo(x, g.bottom); area.lineTo(x, y) }
+            else { path.lineTo(x, y); area.lineTo(x, y) }
+            if (pts.size <= 31) drawCircle(color, radius = 2.4.dp.toPx(), center = Offset(x, y))
         }
+        area.lineTo(lastX, g.bottom); area.close()
+        drawPath(area, brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+            listOf(color.copy(alpha = 0.22f), color.copy(alpha = 0f)), startY = g.top, endY = g.bottom))
+        drawPath(path, color, style = Stroke(width = 2.dp.toPx(),
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        val minGap = GAP_MIN_FRACTION * (winEnd - winStart)
+        if (pts.first().first - winStart > minGap) drawNoDataSpan(g.left, firstX, g.y(vals.first()), color)
+        if (winEnd - pts.last().first > minGap) drawNoDataSpan(lastX, g.right, g.y(vals.last()), color)
+        drawLatestMarker(Offset(lastX, g.y(vals.last())), color, NeonMV.CardHigh)
+        drawXLabels(g, measurer, NeonMV.Muted, listOf(
+            0f to mdOf(winStart), 0.5f to mdOf(winStart + (winEnd - winStart) / 2), 1f to mdOf(winEnd),
+        ))
     }
 }
 
-@Composable
-private fun Stat(label: String, value: String) {
-    val tok = LocalAppTokens.current
-    Column {
-        Text(label, color = tok.onSurfaceDim, fontSize = 10.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(value, color = tok.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-
-/** "M/d" for an epoch-ms x-axis tick. */
-private fun shortMdOf(ms: Long): String {
-    val d = java.time.Instant.ofEpochMilli(ms)
-        .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+private fun mdOf(ms: Long): String {
+    val d = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
     return "${d.monthValue}/${d.dayOfMonth}"
 }

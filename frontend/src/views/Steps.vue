@@ -1,365 +1,228 @@
 <script setup lang="ts">
-import { useDateRange } from "@/useDateRange";
-import { zeroAxisIncluding } from "@/chartAxis";
 /**
- * Steps detail view (VITALS-1). Three panels:
- *   1. 24h live trace (the StepsSeries already powering the LiveVitals chip)
- *   2. Last-N-day bars + goal markLine + 7-day moving average
- *   3. Day-of-week histogram
+ * Steps detail (UI-4). Phone twin: `StepsDetailScreen.kt`.
  *
- * Goal value pulls from `profile.extra.steps_goal` (synced bidirectionally
- * with AiGoal kind=steps by GOALS-1).
+ *   hero     today's count, the server's verdict chip, a goal ring against
+ *            today's own target, and today's hourly bars
+ *   stats    the window's avg / goal days / total / best — server
+ *            `/summary/range/stats`, rendered verbatim
+ *   daily    bars per day (met = lime, under = track) with the goal line and
+ *            the server's trailing 7-day mean
+ *   weekday  the server's per-weekday means
+ *
+ * This view used to bucket the minute series into hours, sum, average,
+ * count goal days and build a moving average itself — each a second copy of
+ * a number the phone also computed. All of that is the server's now.
  */
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
-import Card from "@/components/Card.vue";
-import PageHeader from "@/components/PageHeader.vue";
+import { Footprints } from "lucide-vue-next";
 import RangeTabs from "@/components/RangeTabs.vue";
-import { api } from "@/api/client";
-import type { StepsSeries, TodaySummary } from "@/api/types";
-import { chartTheme, isNeon } from "@/theme";
-import { windowExtent, noDataSpans, daysToPoints } from "@/components/charts/chartHelpers";
-import { timeAxisFormatter } from "@/components/charts/chartHelpers";
 import PatternsLink from "@/components/PatternsLink.vue";
+import NeonPage from "@/components/neon/NeonPage.vue";
+import NeonHero from "@/components/neon/NeonHero.vue";
+import NeonRing from "@/components/neon/NeonRing.vue";
+import NeonStat from "@/components/neon/NeonStat.vue";
+import StatusChip from "@/components/detail/StatusChip.vue";
+import DetailCard from "@/components/detail/DetailCard.vue";
+import DetailSkeleton from "@/components/detail/DetailSkeleton.vue";
+import DetailError from "@/components/detail/DetailError.vue";
+import "@/components/detail/detail.css";
+import { api, summaryRangeStats } from "@/api/client";
+import type { RangeStats, TodaySummary, VitalTile } from "@/api/types";
+import { useDateRange } from "@/useDateRange";
+import { zeroAxisIncluding } from "@/chartAxis";
+import { windowExtent, timeAxisFormatter } from "@/components/charts/chartHelpers";
+import { toLocalISO } from "@/dates";
+import { chartTheme } from "@/theme";
 
-// RANGE-1: one vocabulary, and the range in the URL. This view used
-// to declare its own key type and option list; ten views did, and
-// they disagreed — seven spelled a year "1y" and three "365d".
-const { range, options: RANGES, since: rangeSince, days: rangeDays } =
+const LIME = "#5dff3b";
+const TRACK = "#272a3b";
+const PERI = "#6f7bff";
+
+const { range, options: RANGES, since: rangeSince } =
   useDateRange(["7d", "30d", "90d", "1y"], "30d");
 const cur = computed(() => RANGES.find((r) => r.key === range.value)!);
 
-const live = ref<StepsSeries | null>(null);
-const dailyRows = ref<TodaySummary[]>([]);
-const stepsGoal = ref<number>(10_000);
+const rows = ref<TodaySummary[]>([]);
+const stats = ref<RangeStats | null>(null);
+const tile = ref<VitalTile | null>(null);
+const hourly = ref<number[] | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
-async function loadLive() {
-  try {
-    const since = new Date(Date.now() - 24 * 3600 * 1000);
-    live.value = await api.steps({ since });
-  } catch { /* trace is non-critical */ }
+function errText(e: unknown): string {
+  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof d === "string" ? d : "Couldn't reach the backend.";
 }
 
-async function loadHistory() {
+async function load() {
   loading.value = true;
-  error.value = null;
   try {
-    // RANGE-1: the window start comes from the shared resolver, which
-    // anchors on LOCAL midnight. The old form started at whatever
-    // wall-clock time the page happened to be opened, so a "7d" window
-    // silently dropped part of its first day and moved on every reload.
     const since = rangeSince.value ?? new Date(0);
-    const [rows, profile] = await Promise.all([
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    const [r, s, tiles, series] = await Promise.all([
       api.summaryRange(since),
-      api.getProfile().catch(() => null),
+      summaryRangeStats(since, toLocalISO(new Date())),
+      api.summaryTiles().catch(() => null),
+      api.steps({ since: midnight, until: new Date() }).catch(() => null),
     ]);
-    dailyRows.value = rows;
-    const extra = profile?.extra as { steps_goal?: number } | undefined;
-    if (extra?.steps_goal != null) stepsGoal.value = Math.round(extra.steps_goal);
+    rows.value = r;
+    stats.value = s;
+    tile.value = tiles?.tiles.find((t) => t.key === "steps") ?? null;
+    hourly.value = series?.hourly ?? null;
+    error.value = null;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "Failed to load";
+    error.value = errText(e);
   } finally {
     loading.value = false;
   }
 }
+onMounted(load);
+watch(range, load);
 
-onMounted(() => { loadLive(); loadHistory(); });
-watch(range, loadHistory);
+const hasContent = computed(() => rows.value.length > 0 || stats.value != null);
+const todayRow = computed(() => rows.value.find((r) => r.date === toLocalISO(new Date())) ?? null);
+const todaySteps = computed<number | null>(() => todayRow.value?.steps_total ?? null);
+const todayGoal = computed<number | null>(() =>
+  todayRow.value?.steps_goal ?? (tile.value?.target != null ? Math.round(tile.value.target) : null));
+const s = computed(() => stats.value?.steps ?? null);
 
-// Steps bar/line color: neon lime under the Vitality Neon theme, else the
-// theme palette's sky blue byte-for-byte. Reading isNeon.value here also makes
-// every chart option recompute (and re-render) when the theme flips.
-const stepsColor = computed(() => (isNeon.value ? "#5dff3b" : chartTheme.value.palette.steps));
-// 7d-avg overlay: neon uses the palette's secondary stroke (#6f7bff) so it
-// reads as a distinct steps-derived line — NOT magenta, which is reserved for
-// sleep/sober. Classic keeps the violet token byte-for-byte.
-const stepsAvgColor = computed(() => (isNeon.value ? "#6f7bff" : chartTheme.value.palette.violet));
-const goalLineColor = computed(() => (isNeon.value ? "#28e6ff" : chartTheme.value.palette.recovery));
+function compact(n: number): string {
+  if (n >= 100_000) return `${Math.round(n / 1000)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  return String(n);
+}
+const fmtN = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleString());
 
-// ── Hourly bar chart (today only) ──
-// Buckets the live per-minute series into hour-of-day bins (local TZ)
-// scoped to TODAY so the chart shows when steps actually accumulated
-// during the current day, not a rolling 24h window. Mirrors the
-// hour-by-hour view a user gets from the ASCII-bar diagnostic query.
+const axis = computed(() => chartTheme.value.axisLabel);
+const split = { lineStyle: { color: TRACK } };
+
 const hourlyOption = computed(() => {
-  void chartTheme.value;
-  const t = chartTheme.value;
-  if (!live.value || live.value.points.length === 0) return null;
-  const buckets = new Array<number>(24).fill(0);
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  let totalToday = 0;
-  for (const p of live.value.points) {
-    const d = new Date(p.time);
-    if (d < todayStart) continue;
-    buckets[d.getHours()] += p.value;
-    totalToday += p.value;
-  }
-  if (totalToday === 0) return null;
-  const labels = Array.from({ length: 24 }, (_, h) =>
-    `${h.toString().padStart(2, "0")}:00`,
-  );
+  const h = hourly.value;
+  if (!h || h.every((v) => v === 0)) return null;
   return {
-    grid: { left: 48, right: 12, top: 24, bottom: 32 },
-    xAxis: { type: "category", data: labels, axisLabel: { ...t.axisLabel, interval: 1 } },
-    yAxis: { type: "value", axisLabel: t.axisLabel, splitLine: t.splitLine },
-    tooltip: { trigger: "axis", ...t.tooltip,
-      formatter: (p: any) => {
-        const x = Array.isArray(p) ? p[0] : p;
-        return `${x.name}: ${Math.round(x.value).toLocaleString()} steps`;
-      },
-    },
-    series: [{
-      type: "bar", name: "Steps",
-      itemStyle: { color: stepsColor.value },
-      data: buckets.map((v) => Math.round(v)),
-    }],
+    grid: { left: 36, right: 6, top: 10, bottom: 22 },
+    xAxis: { type: "category", data: h.map((_, i) => (i === 0 ? "12a" : i < 12 ? `${i}a` : i === 12 ? "12p" : `${i - 12}p`)),
+             axisLabel: { ...axis.value, interval: 5 }, axisTick: { show: false } },
+    yAxis: { type: "value", axisLabel: { ...axis.value, formatter: (v: number) => compact(v) }, splitLine: split },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip },
+    series: [{ type: "bar", data: h, itemStyle: { color: LIME, borderRadius: [3, 3, 0, 0] }, barWidth: "70%" }],
   };
 });
-
-// ── 24h trace option ──
-const traceOption = computed(() => {
-  void chartTheme.value;
-  const t = chartTheme.value;
-  if (!live.value || live.value.points.length === 0) return null;
-  return {
-    grid: { left: 40, right: 12, top: 12, bottom: 28 },
-    xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter }, splitLine: { show: false } },
-    yAxis: { type: "value", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
-    tooltip: { trigger: "axis", ...t.tooltip },
-    series: [{
-      type: "line", smooth: true, showSymbol: false,
-      lineStyle: { color: stepsColor.value, width: 2 },
-      areaStyle: { color: `${stepsColor.value}22` },
-      data: live.value.points.map((p) => [p.time, p.value]),
-    }],
-  };
-});
-
-// ── Daily-bar option ──
-/** Today's target, weekday schedule included — the server resolves it per
- *  row; the flat profile goal is only the fallback for an older backend. */
-const todayGoal = computed<number>(() =>
-  dailyRows.value[dailyRows.value.length - 1]?.steps_goal ?? stepsGoal.value);
 
 const dailyOption = computed(() => {
-  void chartTheme.value;
-  const t = chartTheme.value;
-  const data = dailyRows.value
-    .filter((r) => r.steps_total != null)
-    .map((r) => [r.date, r.steps_total]);
-  if (data.length === 0) return null;
-  // 7-day moving average as a smoothed overlay.
-  const series7 = dailyRows.value.map((r, i) => {
-    const window = dailyRows.value
-      .slice(Math.max(0, i - 6), i + 1)
-      .map((x) => x.steps_total).filter((v): v is number => v != null);
-    if (window.length === 0) return [r.date, null] as [string, number | null];
-    const avg = window.reduce((a, b) => a + b, 0) / window.length;
-    return [r.date, Math.round(avg)] as [string, number];
-  });
+  if (!rows.value.some((r) => r.steps_total != null)) return null;
+  const goalLine = todayGoal.value;
   return {
-    grid: { left: 48, right: 12, top: 24, bottom: 28 },
-    xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
-             splitLine: t.splitLine,
-             // Axis spans the SELECTED window, not just the days with data.
-             ...windowExtent(rangeSince.value?.getTime() ?? null), },
-    // ECharts will not widen an axis to contain a markLine, so on any window
-    // where every day fell short of the goal the goal line was simply absent —
-    // exactly the window where you most want to see how far short you were.
+    grid: { left: 40, right: 8, top: 16, bottom: 24 },
+    xAxis: { type: "time", axisLabel: { ...axis.value, formatter: timeAxisFormatter }, splitLine: { show: false },
+             ...windowExtent(rangeSince.value?.getTime() ?? null) },
     yAxis: {
-      type: "value", scale: false, axisLabel: t.axisLabel, splitLine: t.splitLine,
-      ...zeroAxisIncluding(
-        data.map((d) => (typeof d[1] === "number" ? d[1] : null)),
-        todayGoal.value || null,
-      ),
+      type: "value", axisLabel: { ...axis.value, formatter: (v: number) => compact(v) }, splitLine: split,
+      ...zeroAxisIncluding(rows.value.map((r) => r.steps_total), goalLine),
     },
-    tooltip: { trigger: "axis", ...t.tooltip },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip },
     series: [
-      // The window's empty head and tail, dashed. gapBridge-style dashes for
-      // the holes BETWEEN readings are the bar/line series' own business.
-      ...noDataSpans(daysToPoints(data as Array<[string, number | null]>),
-                     rangeSince.value?.getTime() ?? null, Date.now(), stepsColor.value),
       {
         type: "bar", name: "Steps",
-        itemStyle: { color: stepsColor.value },
-        data,
-        markLine: todayGoal.value > 0 ? {
+        // Each day against its OWN target (UX-D10). Under-goal days sit in
+        // the track colour so a met day is the only thing lit.
+        data: rows.value.filter((r) => r.steps_total != null).map((r) => ({
+          value: [r.date, r.steps_total],
+          itemStyle: { color: r.steps_goal != null && (r.steps_total as number) >= r.steps_goal ? LIME : TRACK,
+                       borderRadius: [3, 3, 0, 0] },
+        })),
+        markLine: goalLine ? {
           symbol: ["none", "none"], silent: true,
-          lineStyle: { color: goalLineColor.value, type: "dashed" as const, opacity: 0.7 },
-          // Default position is the right end, where the grid's 12px right
-          // margin clips it to a single letter.
-          label: { show: true, position: "insideStartTop" as const,
-                   formatter: `goal ${todayGoal.value.toLocaleString()}`,
-                   color: t.axisLabel.color, fontSize: 9 },
-          data: [{ yAxis: todayGoal.value }],
+          lineStyle: { color: "#ececf5", type: "dashed" as const, opacity: 0.55 },
+          label: { show: true, position: "insideStartTop" as const, formatter: `goal ${goalLine.toLocaleString()}`,
+                   color: "#9b9bb0", fontSize: 9 },
+          data: [{ yAxis: goalLine }],
         } : undefined,
       },
       {
-        type: "line", name: "7d avg", smooth: true, showSymbol: false,
-        lineStyle: { color: stepsAvgColor.value, width: 2 },
-        data: series7,
+        type: "line", name: "7-day avg", smooth: true, showSymbol: false,
+        lineStyle: { color: PERI, width: 2 },
+        data: (s.value?.rolling_7d ?? []).map((p) => [p.date, p.value]),
       },
     ],
   };
 });
 
-// ── Day-of-week histogram ──
-const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const weekdayOption = computed(() => {
-  void chartTheme.value;
-  const t = chartTheme.value;
-  const buckets: Array<{ sum: number; count: number }> = Array.from({ length: 7 }, () => ({ sum: 0, count: 0 }));
-  for (const r of dailyRows.value) {
-    if (r.steps_total == null) continue;
-    const d = new Date(r.date + "T00:00:00");
-    const idx = d.getDay();
-    buckets[idx].sum += r.steps_total;
-    buckets[idx].count += 1;
-  }
-  // null, not 0: a weekday with no readings is unknown, not a day you walked
-  // zero steps. Rendering it as a zero bar dragged the visible average down
-  // and made a gap in the data look like a rest day.
-  const data = buckets.map((b) => b.count > 0 ? Math.round(b.sum / b.count) : null);
-  if (data.every((v) => v == null)) return null;
+  const wm = s.value?.weekday_means ?? [];
+  if (!wm.some((w) => w.mean != null)) return null;
   return {
-    grid: { left: 48, right: 12, top: 24, bottom: 28 },
-    xAxis: { type: "category", data: DOW, axisLabel: t.axisLabel },
-    yAxis: { type: "value", axisLabel: t.axisLabel, splitLine: t.splitLine },
-    tooltip: { trigger: "axis", ...t.tooltip,
-      formatter: (p: any) => {
-        const x = Array.isArray(p) ? p[0] : p;
-        return `${x.name}: ${x.value.toLocaleString()}`;
-      },
-    },
-    series: [{
-      type: "bar", name: "Avg steps",
-      itemStyle: { color: stepsColor.value },
-      data,
-    }],
-  };
-});
-
-// ── Headline stats ──
-const stats = computed(() => {
-  if (dailyRows.value.length === 0) return null;
-  const withData = dailyRows.value.filter((r) => r.steps_total != null);
-  const vals = withData.map((r) => r.steps_total as number);
-  if (vals.length === 0) return null;
-  return {
-    todayCount: dailyRows.value[dailyRows.value.length - 1]?.steps_total ?? 0,
-    avg: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length),
-    max: Math.max(...vals),
-    // Each day against ITS OWN target (UX-D10) — a weekday override is a
-    // different goal, and judging a lighter Sunday against Tuesday's number
-    // counted it as missed. Out of days that have a reading: a day the watch
-    // was off is not a day the goal was missed.
-    goalDays: withData.filter((r) => (r.steps_total as number) >= (r.steps_goal ?? stepsGoal.value)).length,
-    totalDays: withData.length,
+    grid: { left: 40, right: 8, top: 16, bottom: 24 },
+    xAxis: { type: "category", data: wm.map((w) => w.dow), axisLabel: axis.value },
+    yAxis: { type: "value", axisLabel: { ...axis.value, formatter: (v: number) => compact(v) }, splitLine: split },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip },
+    series: [{ type: "bar", data: wm.map((w) => w.mean), barWidth: "55%",
+               itemStyle: { color: LIME, opacity: 0.85, borderRadius: [3, 3, 0, 0] } }],
   };
 });
 </script>
 
 <template>
-  <div class="steps-view">
-    <PageHeader title="Steps">
+  <NeonPage title="Steps" :back="true">
+    <template #trailing><span class="dicon" style="--a: #5dff3b"><Footprints :size="20" /></span></template>
+    <div class="dtabs">
       <RangeTabs v-model="range" :options="RANGES" aria-label="Steps time range">
-        <template #before>
-          <PatternsLink metric="steps_total" label="steps"/>
-        </template>
+        <template #before><PatternsLink metric="steps_total" label="steps"/></template>
       </RangeTabs>
-    </PageHeader>
+    </div>
 
-    <p v-if="error" class="err">{{ error }}</p>
+    <template v-if="!hasContent">
+      <DetailSkeleton v-if="loading" :accent="LIME" label="Steps" />
+      <DetailError v-else-if="error" :error="error" @retry="load" />
+    </template>
 
-    <Card v-if="stats">
-      <div class="stats-row">
-        <div class="stat">
-          <span class="lbl">Today</span>
-          <span class="val">{{ stats.todayCount.toLocaleString() }}</span>
+    <template v-else>
+      <DetailError v-if="error" :error="error" cached @retry="load" />
+
+      <NeonHero :accent="LIME">
+        <div class="dhero-top">
+          <div class="dhero-main">
+            <span class="deb">Today</span>
+            <span class="dbig" :style="{ color: LIME }">{{ fmtN(todaySteps) }}</span>
+            <span class="dsubline">
+              {{ todaySteps == null ? "No step data yet today" : todayGoal ? `of ${todayGoal.toLocaleString()} goal` : "steps" }}
+            </span>
+            <StatusChip :status="tile?.status" :text="tile?.status_reason" />
+          </div>
+          <NeonRing v-if="todayGoal" :fraction="(todaySteps ?? 0) / todayGoal" :color="LIME" :size="96" :stroke="9">
+            <b class="rg">{{ compact(todayGoal) }}</b><span class="rc">GOAL</span>
+          </NeonRing>
         </div>
-        <div class="stat">
-          <span class="lbl">{{ cur.label }} avg</span>
-          <span class="val">{{ stats.avg.toLocaleString() }}</span>
-        </div>
-        <div class="stat">
-          <span class="lbl">{{ cur.label }} max</span>
-          <span class="val">{{ stats.max.toLocaleString() }}</span>
-        </div>
-        <div class="stat">
-          <span class="lbl">Goal hit</span>
-          <span class="val">{{ stats.goalDays }} / {{ stats.totalDays }}</span>
-        </div>
+        <div class="deb" style="margin-top: 14px">Today by hour</div>
+        <div v-if="hourlyOption" class="dchart"><VChart :option="hourlyOption" autoresize/></div>
+        <p v-else class="dnote">No hourly detail synced yet today.</p>
+      </NeonHero>
+
+      <div class="dstats">
+        <NeonStat :value="s?.avg != null ? s.avg.toLocaleString() : '—'" :label="`${cur.label} daily avg`" :accent="LIME" />
+        <NeonStat :value="s ? `${s.goal_days}/${s.days_with_data}` : '—'" label="Days ≥ goal" />
+        <NeonStat :value="s?.total != null ? compact(s.total) : '—'" label="Total" />
       </div>
-    </Card>
 
-    <Card v-if="hourlyOption" title="Today by hour">
-      <div class="chart"><VChart :option="hourlyOption" autoresize/></div>
-    </Card>
+      <DetailCard v-if="dailyOption" :title="`Daily — ${cur.label}`">
+        <div class="dchart tall"><VChart :option="dailyOption" autoresize/></div>
+        <div class="dlegend">
+          <span><i :style="{ background: LIME }"></i>goal met</span>
+          <span><i :style="{ background: TRACK }"></i>under goal</span>
+          <span><i :style="{ background: PERI }"></i>7-day avg</span>
+        </div>
+      </DetailCard>
 
-    <Card v-if="traceOption" title="Last 24h">
-      <div class="chart"><VChart :option="traceOption" autoresize/></div>
-    </Card>
-
-    <Card v-if="dailyOption" :title="`Daily — ${cur.label}`">
-      <div class="chart"><VChart :option="dailyOption" autoresize/></div>
-    </Card>
-
-    <Card v-if="weekdayOption" title="Weekday pattern">
-      <div class="chart"><VChart :option="weekdayOption" autoresize/></div>
-    </Card>
-
-    <p v-if="loading" class="dim">Loading…</p>
-  </div>
+      <DetailCard v-if="weekdayOption" title="Weekday pattern" subtitle="Average steps on each weekday in this window">
+        <div class="dchart"><VChart :option="weekdayOption" autoresize/></div>
+      </DetailCard>
+    </template>
+  </NeonPage>
 </template>
 
 <style scoped>
-.steps-view { max-width: 1080px; margin: 0 auto; padding: 1rem 1.25rem 2rem; }
-.err { color: #ef4444; }
-.dim { color: var(--muted); font-size: 0.85rem; }
-
-.stats-row {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
-}
-@media (max-width: 720px) {
-  .stats-row { grid-template-columns: repeat(2, 1fr); }
-}
-.stat { display: flex; flex-direction: column; }
-.stat .lbl {
-  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--on-surface-2);
-}
-.stat .val { font-size: 1.25rem; font-weight: 600; color: var(--on-surface); }
-
-.chart { height: 220px; }
-
-/* ── Vitality Neon — scoped to data-theme="neon" only; classic themes unchanged ── */
-html[data-theme="neon"] .steps-view {
-  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
-  min-height: 100vh;
-  margin: -1rem -1.25rem 0;
-  padding: 1.25rem 1.25rem 2rem;
-  max-width: none;
-}
-html[data-theme="neon"] .steps-view > * {
-  max-width: 1080px;
-  margin-left: auto;
-  margin-right: auto;
-}
-html[data-theme="neon"] .stat .lbl {
-  letter-spacing: 0.11em;
-  color: #9b9bb0;
-}
-html[data-theme="neon"] .stat .val {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  color: #ececf5;
-}
-html[data-theme="neon"] .stat:first-child .val {
-  color: #5dff3b;
-  text-shadow: 0 0 12px rgba(93, 255, 59, 0.45);
-}
+.rg { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 16px; color: #ececf5; }
+.rc { font-size: 9px; font-weight: 700; letter-spacing: .12em; color: #9b9bb0; }
 </style>

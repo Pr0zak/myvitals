@@ -1,6 +1,7 @@
 package app.myvitals.ui.neon
 
 import app.myvitals.data.Units
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -8,11 +9,13 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,55 +28,79 @@ import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.outlined.BarChart
-import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.FitnessCenter
-import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Handyman
-import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Pool
 import androidx.compose.material.icons.outlined.Terrain
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.ActivityRow
+import app.myvitals.sync.ActivityStatsOut
 import app.myvitals.sync.BackendClient
+import app.myvitals.sync.MuscleVolumeResponse
+import app.myvitals.sync.MuscleVolumeRow
+import app.myvitals.sync.StrengthStats
+import app.myvitals.sync.StrengthWeekVolume
 import app.myvitals.sync.StrengthWorkoutDetail
+import app.myvitals.sync.StrengthWorkoutSummary
 import app.myvitals.sync.UpcomingDay
 import app.myvitals.ui.MV
+import app.myvitals.ui.common.ShimmerBlock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import timber.log.Timber
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 
 /**
- * Train — neon training hub. Mirrors web `Train.vue`: today's generated
- * strength plan summary (split focus + completed/total exercise ring) from
- * [BackendClient.strengthToday], a visual Strength/Cardio segment toggle, and
- * a bounded recent-activities feed from [BackendClient.activities] (limit 8).
- * Drills into the full workout + activity screens via [onOpen].
+ * Train — neon training hub (UI-1). Mirrors web `Train.vue`.
+ *
+ *   1. Session hero: sets ring (outer arc = exercises), split, muscle chips,
+ *      a full-width Continue button naming the next slot, and a Mon–Sun dot
+ *      timeline.
+ *   2. This week's volume as seven columns with last week's same weekday
+ *      ghosted behind — totals, change and its direction from `/stats.week`.
+ *   3. Working sets per muscle against its MEV–MAV band (`/muscle-volume`).
+ *   4. This year, the activity calendar, the recent feed and a tile grid.
+ *
+ * Split into [TrainHubScreen] (fetching) and the stateless [TrainHubContent]
+ * so the screen can be rendered from fixed data in a screenshot test.
  *
  * onOpen routes: "workout/today", "workout/history", "workout/charts",
- * "workout/catalog", "activities", "activity/{source}/{sourceId}".
- *
- * Color intent mirrors the web tokens: strength/move = Lime, cardio/heart =
- * Cyan, trails/elevation = Amber.
+ * "workout/catalog", "workout/training-prefs", "workout/equipment",
+ * "workout/day/{date}", "activities", "activity/{source}/{sourceId}".
  */
+
 /** The Recent feed shows a WEEK. The fetch behind it spans a year for the
  *  calendar and YTD stats, so this window has to be applied explicitly. */
 private const val RECENT_DAYS = 7L
@@ -82,22 +109,10 @@ private const val RECENT_DAYS = 7L
  *  strength session. They come from different endpoints and have to be
  *  interleaved by time, not concatenated. */
 private data class FeedEntry(
-    val at: java.time.Instant,
-    val activity: app.myvitals.sync.ActivityRow?,
-    val workout: app.myvitals.sync.StrengthWorkoutSummary?,
+    val at: Instant,
+    val activity: ActivityRow?,
+    val workout: StrengthWorkoutSummary?,
 )
-
-/** "Today" / "Yesterday" / "3d ago" for a feed row. */
-private fun relDay(at: java.time.Instant): String {
-    val d = at.atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-    val today = java.time.LocalDate.now()
-    val days = java.time.temporal.ChronoUnit.DAYS.between(d, today)
-    return when {
-        days <= 0L -> "Today"
-        days == 1L -> "Yesterday"
-        else -> "${days}d ago"
-    }
-}
 
 @Composable
 fun TrainHubScreen(
@@ -105,47 +120,41 @@ fun TrainHubScreen(
     contentPadding: PaddingValues,
     onOpen: (String) -> Unit,
 ) {
-    val neon = settings.neonShellEnabled
-
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var activities by remember { mutableStateOf<List<ActivityRow>>(emptyList()) }
     var upcoming by remember { mutableStateOf<List<UpcomingDay>>(emptyList()) }
-    var yearWorkouts by remember {
-        mutableStateOf<List<app.myvitals.sync.StrengthWorkoutSummary>>(emptyList())
-    }
-    // 30-day strength stats — feeds the weekly dashboard + PR/streak cards.
-    var stats by remember { mutableStateOf<app.myvitals.sync.StrengthStats?>(null) }
-    // CONS-1: server-computed streak + frequency for the activity feed.
-    var activityStats by remember {
-        mutableStateOf<app.myvitals.sync.ActivityStatsOut?>(null)
-    }
+    var yearWorkouts by remember { mutableStateOf<List<StrengthWorkoutSummary>>(emptyList()) }
+    var stats by remember { mutableStateOf<StrengthStats?>(null) }
+    var muscles by remember { mutableStateOf<MuscleVolumeResponse?>(null) }
+    var activityStats by remember { mutableStateOf<ActivityStatsOut?>(null) }
     var loading by remember { mutableStateOf(true) }
-    // Selected activity filter — `null` = All. Client-side substring match on
-    // ActivityRow.type against the already-loaded list (the screen now loads a
-    // wide range). Mirrors the web Activities filter chips for parity.
-    var filter by remember { mutableStateOf<ActivityFilter?>(null) }
+    var refreshing by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var reloadKey by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(reloadKey) {
         if (!settings.isConfigured()) {
-            loading = false
+            loading = false; refreshing = false
             return@LaunchedEffect
         }
+        // UX-F1: every call reports whether it FAILED, separately from what
+        // it returned. A failed `/today` used to fall through to null, which
+        // this screen renders as "Rest Day" — a dead backend read as a day
+        // off. A failure now raises the banner and suppresses every empty
+        // state that would otherwise speak for it.
+        val failures = mutableListOf<String>()
         runCatching {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             coroutineScope {
                 val workoutD = async(Dispatchers.IO) {
                     runCatching {
                         val r = api.strengthToday()
-                        if (r.isSuccessful) r.body() else null
-                    }.getOrNull()
+                        if (!r.isSuccessful) error("HTTP ${r.code()}")
+                        r.body()
+                    }
                 }
                 val actsD = async(Dispatchers.IO) {
-                    // Wide enough for the filter chips AND the year calendar +
-                    // YTD pair: Jan 1 of LAST year, so the year-over-year
-                    // comparison has a prior-year bucket to compare against.
-                    runCatching {
-                        api.activities(limit = 2000, since = ytdSinceIso())
-                    }.getOrDefault(emptyList())
+                    runCatching { api.activities(limit = 2000, since = ytdSinceIso()) }
                 }
                 val yearWkD = async(Dispatchers.IO) {
                     runCatching {
@@ -160,218 +169,190 @@ fun TrainHubScreen(
                                 !(it.splitFocus == "cardio" &&
                                     it.completedByActivitySource != null)
                             }
-                    }.getOrDefault(emptyList())
+                    }
                 }
-                // Read-only schedule forecast → "Next session" card.
                 val upcomingD = async(Dispatchers.IO) {
-                    runCatching { api.upcomingWorkouts().upcoming }.getOrDefault(emptyList())
+                    runCatching { api.upcomingWorkouts().upcoming }
                 }
                 val statsD = async(Dispatchers.IO) {
-                    runCatching { api.strengthStats(days = 30) }.getOrNull()
+                    runCatching { api.strengthStats(days = 30) }
                 }
-                // Non-fatal: a backend without CONS-1 leaves the week pill
-                // at 0 rather than failing the screen.
+                val musclesD = async(Dispatchers.IO) {
+                    runCatching { api.strengthMuscleVolume(days = 7) }
+                }
                 val actStatsD = async(Dispatchers.IO) {
-                    runCatching { api.activitiesStats(days = 30) }.getOrNull()
+                    runCatching { api.activitiesStats(days = 30) }
                 }
-                workout = workoutD.await()
-                activities = actsD.await()
-                upcoming = upcomingD.await()
-                stats = statsD.await()
-                activityStats = actStatsD.await()
-                yearWorkouts = yearWkD.await()
+                workoutD.await().onSuccess { workout = it }.onFailure { failures += "today's plan" }
+                actsD.await().onSuccess { activities = it }.onFailure { failures += "activities" }
+                yearWkD.await().onSuccess { yearWorkouts = it }.onFailure { failures += "workouts" }
+                upcomingD.await().onSuccess { upcoming = it }
+                statsD.await().onSuccess { stats = it }.onFailure { failures += "volume" }
+                musclesD.await().onSuccess { muscles = it }
+                actStatsD.await().onSuccess { activityStats = it }
             }
-        }.onFailure { Timber.w(it, "train hub load failed") }
-        loading = false
-    }
-
-    // ── Derived plan summary (mirrors the web computeds) ──────────────────
-    // SKIP-1 — server-computed. This ring used to count accounted sets itself,
-    // which disagreed with the workout screen's own tally (and ignored slots
-    // the user had declined outright).
-    val totalExercises: Int? = workout?.exercisesTotal
-    val doneExercises: Int = workout?.exercisesDone ?: 0
-    val splitLabel = workout?.splitFocus?.let { titleCase(it) } ?: "Rest Day"
-    val isRest = workout == null || workout!!.splitFocus.contains("rest", ignoreCase = true)
-
-    /** OG3-A1 — the call to action reads the session's own status, not only
-     *  its focus.
-     *
-     *  It was `if (isRest) "View" else "Continue"`, computed from
-     *  `splitFocus` alone, while `status` sat unread on the same object.
-     *  Every one of the completed and skipped workouts in the history
-     *  therefore presented as an outstanding task on the most prominent card
-     *  of this tab. Four labels off one enum; the same mapping is mirrored in
-     *  `Train.vue`, so keep the two in step. */
-    val ctaLabel = when {
-        workout == null || isRest -> "View"
-        workout!!.status == "completed" -> "Done"
-        workout!!.status == "skipped" -> "View"
-        workout!!.status == "in_progress" || workout!!.status == "paused" -> "Resume"
-        else -> "Start"
-    }
-    val ringPct: Float = totalExercises?.takeIf { it > 0 }
-        ?.let { (doneExercises.toFloat() / it).coerceIn(0f, 1f) } ?: 0f
-    val ringLabel = if (totalExercises == null) "—" else "$doneExercises/$totalExercises"
-
-    // This-week pill.
-    //
-    // CONS-1: the count is the server's. Deriving it here counted only the
-    // activities this screen happened to have loaded, and compared a UTC
-    // `startAt` string against a LOCAL date string — so an evening session
-    // landed on either side of the boundary depending on the hour, and a
-    // truncated list silently undercounted.
-    val weekCount = activityStats?.consistency?.sessionsLast7d ?: 0
-
-    // Which filter chips actually have matches in the loaded list — never show
-    // a chip that would yield an empty feed. "All" is always present.
-    val availableFilters = remember(activities) {
-        val cutoff = java.time.Instant.now().minus(java.time.Duration.ofDays(RECENT_DAYS))
-        val inWindow = activities.filter { a ->
-            runCatching { java.time.Instant.parse(a.startAt) }
-                .getOrNull()?.isAfter(cutoff) ?: false
+        }.onFailure {
+            Timber.w(it, "train hub load failed")
+            failures += "backend"
         }
-        // Offer a chip only if it would yield something in the visible
-        // window — a "Row" chip that filters to nothing is a dead control.
+        error = if (failures.isEmpty()) null
+            else "Couldn't load ${failures.distinct().joinToString(", ")}."
+        loading = false
+        refreshing = false
+    }
+
+    TrainHubContent(
+        workout = workout,
+        upcoming = upcoming,
+        stats = stats,
+        muscles = muscles,
+        activities = activities,
+        yearWorkouts = yearWorkouts,
+        activityStats = activityStats,
+        loading = loading,
+        refreshing = refreshing,
+        error = error,
+        contentPadding = contentPadding,
+        neon = settings.neonShellEnabled,
+        onOpen = onOpen,
+        onRefresh = { refreshing = true; reloadKey++ },
+    )
+}
+
+/**
+ * The Train tab rendered from data. [today] / [zone] / [now] are parameters
+ * so a screenshot test renders a fixed day; the phone passes the defaults.
+ */
+@Composable
+fun TrainHubContent(
+    workout: StrengthWorkoutDetail?,
+    upcoming: List<UpcomingDay>,
+    stats: StrengthStats?,
+    muscles: MuscleVolumeResponse?,
+    activities: List<ActivityRow>,
+    yearWorkouts: List<StrengthWorkoutSummary>,
+    activityStats: ActivityStatsOut?,
+    loading: Boolean,
+    refreshing: Boolean,
+    error: String?,
+    contentPadding: PaddingValues,
+    onOpen: (String) -> Unit,
+    onRefresh: () -> Unit,
+    neon: Boolean = true,
+    zone: ZoneId = ZoneId.systemDefault(),
+    now: Instant = Instant.now(),
+) {
+    val today = now.atZone(zone).toLocalDate()
+    var filter by remember { mutableStateOf<ActivityFilter?>(null) }
+
+    // CONS-1: the count is the server's (local-day, full history).
+    val weekCount = activityStats?.consistency?.sessionsLast7d
+
+    val cutoff = now.minus(java.time.Duration.ofDays(RECENT_DAYS))
+    val inWindow = remember(activities, now) {
+        activities.filter { a -> parseInstant(a.startAt)?.isAfter(cutoff) ?: false }
+    }
+    // Offer a chip only if it would yield something in the visible window.
+    val availableFilters = remember(inWindow) {
         ActivityFilter.entries.filter { f -> inWindow.any { f.matches(it.type) } }
     }
-    // The visible feed is the LAST WEEK, not the last N rows. The fetch is
-    // deliberately wide (the calendar and the YTD pair need a year), and
-    // capping by count alone meant "Recent" listed activities months old
-    // whenever the week was quiet — a 25-row cap on a year of data is not a
-    // recency filter. The count cap stays as a backstop for a heavy week.
-    val shown = remember(activities, filter) {
-        val cutoff = java.time.Instant.now().minus(java.time.Duration.ofDays(RECENT_DAYS))
+    val feed = remember(inWindow, yearWorkouts, filter, today) {
         val f = filter
-        activities
-            .filter { a ->
-                runCatching { java.time.Instant.parse(a.startAt) }
-                    .getOrNull()?.isAfter(cutoff) ?: false
-            }
-            .filter { f == null || f.matches(it.type) }
-            .take(25)
-    }
-
-    // Completed STRENGTH sessions belong in "Recent" too. The screen already
-    // fetches them — but only fed them to the activity calendar, so a
-    // workout you just finished never appeared in the list right below it.
-    // They are a separate entity from `activities` (which is cardio /
-    // Strava / Health Connect), so the feed is a merge, not one query.
-    val recentWorkouts = remember(yearWorkouts, filter) {
-        if (filter != null) emptyList()   // the chips filter activity types
-        else {
-            val cutoffDay = java.time.LocalDate.now().minusDays(RECENT_DAYS)
+        val acts = inWindow.filter { f == null || f.matches(it.type) }.take(25)
+        // Completed STRENGTH sessions belong in Recent too; the chips filter
+        // activity types, so a chip hides them.
+        val wks = if (f != null) emptyList() else {
+            val cutoffDay = today.minusDays(RECENT_DAYS)
             yearWorkouts.filter { w ->
                 w.status == "completed" &&
-                    runCatching { java.time.LocalDate.parse(w.date) }
-                        .getOrNull()?.isAfter(cutoffDay) == true
+                    runCatching { LocalDate.parse(w.date) }.getOrNull()?.isAfter(cutoffDay) == true
             }
         }
-    }
-
-    // One list, newest first. Sorting the two separately would put every
-    // workout above every ride regardless of when they happened.
-    val feed = remember(shown, recentWorkouts) {
-        val items = shown.map { a ->
-            FeedEntry(
-                at = runCatching { java.time.Instant.parse(a.startAt) }
-                    .getOrNull() ?: java.time.Instant.EPOCH,
-                activity = a, workout = null,
-            )
-        } + recentWorkouts.map { w ->
-            FeedEntry(
-                at = runCatching { java.time.Instant.parse(w.completedAt ?: "") }
-                    .getOrNull()
-                    ?: runCatching {
-                        java.time.LocalDate.parse(w.date)
-                            .atTime(12, 0).atZone(java.time.ZoneId.systemDefault())
-                            .toInstant()
-                    }.getOrNull() ?: java.time.Instant.EPOCH,
-                activity = null, workout = w,
-            )
-        }
-        items.sortedByDescending { it.at }.take(25)
+        (acts.map { FeedEntry(parseInstant(it.startAt) ?: Instant.EPOCH, it, null) } +
+            wks.map { w ->
+                FeedEntry(
+                    at = parseInstant(w.completedAt)
+                        ?: runCatching {
+                            LocalDate.parse(w.date).atTime(12, 0).atZone(zone).toInstant()
+                        }.getOrNull() ?: Instant.EPOCH,
+                    activity = null, workout = w,
+                )
+            })
+            .sortedByDescending { it.at }.take(25)
     }
 
     NeonScreen(
         title = "Train",
         contentPadding = contentPadding,
         headerTrailing = {
-            WeekChip(weekCount) { onOpen("activities") }
+            if (weekCount != null) WeekChip(weekCount) { onOpen("activities") }
         },
+        refreshing = refreshing,
+        onRefresh = onRefresh,
     ) {
-        // ── Today hero card (with the next sessions as a week-timeline strip) ──
-        Caption("Today")
-        Spacer(Modifier.height(11.dp))
-        val nextSessions = remember(upcoming) { upcoming.filter { !it.isToday }.take(3) }
-        TodayHero(
-            ringPct = ringPct,
-            ringLabel = ringLabel,
-            tag = if (isRest) "Today" else "${splitLabel} Day".takeIf {
-                !splitLabel.endsWith("Day", ignoreCase = true)
-            } ?: splitLabel,
-            title = splitLabel,
-            exerciseCount = totalExercises,
-            ctaLabel = ctaLabel,
-            ctaDone = workout?.status == "completed",
-            loading = loading && workout == null,
-            upcoming = nextSessions,
-            onClick = { onOpen("workout/today") },
-        )
-
-        // ── Weekly training dashboard + PR/streak (PROTOTYPE) ─────────────
-        stats?.let { s ->
-            Spacer(Modifier.height(16.dp))
-            WeeklyDashboardCard(s) { onOpen("workout/charts") }
+        if (error != null) {
+            NeonErrorBanner(error, title = "Couldn't load training", onRetry = onRefresh)
         }
 
-        // ── Recent activities feed ───────────────────────────────────────
-        Spacer(Modifier.height(20.dp))
-        // ── This year + activity calendar ──
-        // Ported from the Refined Train screen (v0.7.361/362) so consolidating
-        // onto this shell doesn't lose them. Both read the SAME shared helpers
-        // the Activities screen uses, so the numbers and the palette can't
-        // drift between surfaces.
-        val ytd = remember(activities, yearWorkouts) {
-            app.myvitals.ui.common.computeYtdComparison(activities, yearWorkouts)
-        }
-        val calYear = remember { java.time.LocalDate.now().year }
-        val calIndex = remember(activities, yearWorkouts, calYear) {
-            app.myvitals.ui.common.buildActivityCalendarIndex(
-                activities, yearWorkouts, calYear,
+        // ── 1. Session hero ────────────────────────────────────────────
+        when {
+            loading && workout == null -> HeroSkeleton()
+            // A failed `/today` names no split and no rest day: the banner
+            // above is the whole statement (UX-F1).
+            error != null && workout == null -> Unit
+            else -> SessionHero(
+                workout = workout,
+                timeline = weekTimeline(today, upcoming, yearWorkouts, activities, zone),
+                onClick = { onOpen("workout/today") },
             )
         }
+
+        // ── 2. Weekly volume chart ─────────────────────────────────────
+        stats?.week?.let { w ->
+            NeonEyebrow("This week's volume")
+            WeekVolumeCard(w, sessions = stats.consistency?.sessionsLast7d, zone = zone) {
+                onOpen("workout/charts")
+            }
+        }
+
+        // ── 3. Muscle volume vs range ──────────────────────────────────
+        muscles?.let { mv ->
+            if (mv.muscles.isNotEmpty()) {
+                NeonEyebrow("Sets per muscle · last ${mv.windowDays} days")
+                MuscleRangeCard(mv.muscles) { onOpen("workout/history") }
+            }
+        }
+
+        // ── 4. This year + activity calendar ───────────────────────────
+        val ytd = remember(activities, yearWorkouts, today) {
+            app.myvitals.ui.common.computeYtdComparison(activities, yearWorkouts, today)
+        }
+        val calIndex = remember(activities, yearWorkouts, today.year) {
+            app.myvitals.ui.common.buildActivityCalendarIndex(activities, yearWorkouts, today.year)
+        }
         if (activities.isNotEmpty() || yearWorkouts.isNotEmpty()) {
-            CaptionRow("This year") {}
-            Spacer(Modifier.height(11.dp))
+            NeonEyebrow("This year")
             app.myvitals.ui.common.YtdStatPair(
                 cmp = ytd, neon = true, onClick = { onOpen("activities") },
             )
-            Spacer(Modifier.height(18.dp))
         }
         if (calIndex.isNotEmpty()) {
-            CaptionRow("Activity calendar") {}
-            Spacer(Modifier.height(11.dp))
+            NeonEyebrow("Activity calendar")
             app.myvitals.ui.common.ActivityCalendarCard(
                 rows = activities, workouts = yearWorkouts,
-                neon = true, year = calYear, title = null,
+                neon = true, year = today.year, title = null,
             )
-            Spacer(Modifier.height(18.dp))
         }
 
-        CaptionRow("Recent · last 7 days") {
-            // Cheap "See all" affordance — only worth showing once there's a
-            // feed to open into. Routes to the same full activity list as the
-            // footer "All activities" link.
-            if (activities.isNotEmpty()) {
-                SeeAll { onOpen("activities") }
-            }
+        // ── 5. Recent feed ─────────────────────────────────────────────
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            NeonEyebrow("Recent · last 7 days")
+            SeeAll { onOpen("activities") }
         }
-        Spacer(Modifier.height(11.dp))
-
-        // ── Filter bar — theme-aware chip row (web parity) ───────────────
-        // Only render once there's a feed to filter and at least one non-All
-        // category present. Selected chip: neon → Cyan, classic → BrandRed.
         if (availableFilters.size > 1) {
             FilterBar(
                 available = availableFilters,
@@ -381,94 +362,603 @@ fun TrainHubScreen(
             )
             Spacer(Modifier.height(11.dp))
         }
-
-        if (activities.isEmpty()) {
-            ActivityPill(
-                icon = Icons.AutoMirrored.Outlined.DirectionsRun,
-                tone = NeonMV.Cyan,
-                title = if (loading) "Loading…"
-                    else "No activity in the last ${RECENT_DAYS.toInt()} days",
-                sub = "Tap to open your feed",
-                value = null,
-                onClick = { onOpen("activities") },
-            )
-        } else if (feed.isEmpty()) {
-            // Two different empty states. `activities` holds the full fetched
-            // YEAR, so the branch above almost never fires — falling through
-            // to the filter message meant a quiet week read "No matching
-            // activities" with no filter set, blaming a control the user
-            // never touched.
-            ActivityPill(
-                icon = Icons.AutoMirrored.Outlined.FormatListBulleted,
-                tone = NeonMV.Muted,
-                title = filter?.let { "No ${it.label} activities this week" }
-                    ?: "No activity in the last ${RECENT_DAYS.toInt()} days",
-                sub = "Tap to see your full history",
-                value = null,
-                onClick = { onOpen("activities") },
-            )
-        } else {
-            feed.forEach { entry ->
-                val w = entry.workout
-                if (w != null) {
-                    ActivityPill(
-                        icon = Icons.Outlined.FitnessCenter,
-                        tone = NeonMV.Magenta,
-                        title = titleCase(w.splitFocus) + " workout",
-                        sub = relDay(entry.at),
-                        value = null,
-                        onClick = { onOpen("workout/day/${w.date}") },
-                    )
-                    return@forEach
+        // Rows are spaced by the column, not by a Spacer each branch has to
+        // remember: the strength branch used to `return@forEach` before its
+        // spacer, so workout pills sat flush against the next row.
+        Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            when {
+                loading && activities.isEmpty() && yearWorkouts.isEmpty() -> {
+                    ShimmerBlock(Modifier.fillMaxWidth(), height = 68.dp,
+                        cornerRadius = 22.dp, accent = NeonMV.Cyan)
+                    ShimmerBlock(Modifier.fillMaxWidth(), height = 68.dp,
+                        cornerRadius = 22.dp, accent = NeonMV.Cyan)
                 }
-                val a = entry.activity ?: return@forEach
-                val cls = classify(a.type)
-                ActivityPill(
-                    icon = cls.icon,
-                    tone = cls.tone,
-                    title = a.name?.trim()?.takeIf { it.isNotEmpty() } ?: titleCase(a.type),
-                    sub = activitySub(a),
-                    value = activityValue(a, cls),
-                    onClick = { onOpen("activity/${a.source}/${a.sourceId}") },
+                // A failed fetch is not a quiet week (UX-F1).
+                error != null && feed.isEmpty() -> Unit
+                feed.isEmpty() -> ActivityPill(
+                    icon = Icons.AutoMirrored.Outlined.FormatListBulleted,
+                    tone = NeonMV.Muted,
+                    title = filter?.let { "No ${it.label} activities this week" }
+                        ?: "No activity in the last ${RECENT_DAYS.toInt()} days",
+                    sub = "Tap to see your full history",
+                    value = null,
+                    onClick = { onOpen("activities") },
                 )
-                Spacer(Modifier.height(11.dp))
+                else -> feed.forEach { entry ->
+                    val w = entry.workout
+                    val a = entry.activity
+                    if (w != null) {
+                        ActivityPill(
+                            icon = Icons.Outlined.FitnessCenter,
+                            tone = NeonMV.Magenta,
+                            title = titleCase(w.splitFocus) + " workout",
+                            sub = relDay(entry.at, today, zone),
+                            value = null,
+                            onClick = { onOpen("workout/day/${w.date}") },
+                        )
+                    } else if (a != null) {
+                        val cls = classify(a.type)
+                        ActivityPill(
+                            icon = cls.icon,
+                            tone = cls.tone,
+                            title = a.name?.trim()?.takeIf { it.isNotEmpty() } ?: titleCase(a.type),
+                            sub = activitySub(a, today, zone),
+                            value = activityValue(a, cls),
+                            onClick = { onOpen("activity/${a.source}/${a.sourceId}") },
+                        )
+                    }
+                }
             }
         }
 
-        // ── Footer links: all activities + history + charts + catalog ────
-        // "All activities" is the FIRST link — the full activity feed used to
-        // be reachable only via the disguised "This week · N" header chip,
-        // which read as a stat, not a button. An explicit list LinkRow makes
-        // the whole feed discoverable (web-dashboard parity).
-        Spacer(Modifier.height(6.dp))
-        LinkRow("All activities", Icons.AutoMirrored.Outlined.FormatListBulleted) { onOpen("activities") }
-        Spacer(Modifier.height(11.dp))
-        LinkRow("Workout history", Icons.Outlined.History) { onOpen("workout/history") }
-        Spacer(Modifier.height(11.dp))
-        LinkRow("Workout charts", Icons.Outlined.BarChart) { onOpen("workout/charts") }
-        Spacer(Modifier.height(11.dp))
-        LinkRow("Exercise catalog", Icons.Outlined.FitnessCenter) { onOpen("workout/catalog") }
-        Spacer(Modifier.height(11.dp))
-        // Promoted out of StrengthTodayScreen's ⋮, which was the only
-        // app-wide door to either. Apple's own argument against overflow is
-        // that it makes content "hard to reach AND hard to notice" — and
-        // these are navigation, not actions. The genuinely contextual items
-        // (Regenerate / Discard / Skip / Custom / Share) stay in the menu.
-        LinkRow("Training preferences", Icons.Outlined.Tune) {
-            onOpen("workout/training-prefs")
-        }
-        Spacer(Modifier.height(11.dp))
-        LinkRow("Equipment", Icons.Outlined.Handyman) { onOpen("workout/equipment") }
-
+        // ── 6. Tile grid ───────────────────────────────────────────────
+        NeonEyebrow("More")
+        TileGrid(
+            listOf(
+                Tile("Activities", Icons.AutoMirrored.Outlined.FormatListBulleted, NeonMV.Cyan, "activities"),
+                Tile("History", Icons.Outlined.History, NeonMV.Lime, "workout/history"),
+                Tile("Charts", Icons.Outlined.BarChart, NeonMV.Lime, "workout/charts"),
+                Tile("Catalog", Icons.Outlined.FitnessCenter, NeonMV.Periwinkle, "workout/catalog"),
+                Tile("Preferences", Icons.Outlined.Tune, NeonMV.Periwinkle, "workout/training-prefs"),
+                Tile("Equipment", Icons.Outlined.Handyman, NeonMV.Amber, "workout/equipment"),
+            ),
+            onOpen = onOpen,
+        )
         Spacer(Modifier.height(24.dp))
     }
 }
 
-// ── Header week chip ──────────────────────────────────────────────────────
+// ── Session hero ─────────────────────────────────────────────────────────
+
+/** One dot of the hero's Mon–Sun timeline. */
+private enum class DotState { Done, Today, TodayDone, Planned, Empty }
+
+private data class TimelineDot(val date: LocalDate, val state: DotState)
+
+/**
+ * This local Mon–Sun week as dots. Past and today read "done" from completed
+ * sessions and logged activities; future days read "planned" from the
+ * generator-authoritative `/upcoming` forecast, which omits rest days, so an
+ * absent day is simply empty. Nothing here is a number — it is which days
+ * something happened, from rows the server already dated.
+ */
+private fun weekTimeline(
+    today: LocalDate,
+    upcoming: List<UpcomingDay>,
+    workouts: List<StrengthWorkoutSummary>,
+    activities: List<ActivityRow>,
+    zone: ZoneId,
+): List<TimelineDot> {
+    val monday = today.minusDays((today.dayOfWeek.value - 1).toLong())
+    val done = buildSet {
+        workouts.filter { it.status == "completed" }.forEach { add(it.date) }
+        activities.forEach { a ->
+            parseInstant(a.startAt)?.atZone(zone)?.toLocalDate()?.let { add(it.toString()) }
+        }
+    }
+    val planned = upcoming.filter { !it.splitFocus.contains("rest", true) }.map { it.date }.toSet()
+    return (0 until 7).map { i ->
+        val d = monday.plusDays(i.toLong())
+        val iso = d.toString()
+        val state = when {
+            d == today && iso in done -> DotState.TodayDone
+            d == today -> DotState.Today
+            d.isBefore(today) && iso in done -> DotState.Done
+            d.isAfter(today) && iso in planned -> DotState.Planned
+            else -> DotState.Empty
+        }
+        TimelineDot(d, state)
+    }
+}
+
+/** The hero's button: label, whether it is the muted "finished" form. */
+private data class HeroCta(
+    val label: String,
+    val muted: Boolean,
+    /** The next exercise, rendered between `label` and `suffix`. */
+    val name: String? = null,
+    val suffix: String? = null,
+)
+
+/**
+ * OG3-A1 — the button reads the session's own `status`, never only its
+ * focus: a completed or skipped workout must not present as an outstanding
+ * task on the most prominent card of the tab. The next slot and whether the
+ * session has started come from the server's `next_up`, which is decided by
+ * the same predicates as the progress counters.
+ */
+private fun heroCta(w: StrengthWorkoutDetail?): HeroCta {
+    if (w == null) return HeroCta("View", muted = true)
+    if (w.status == "completed") return HeroCta("Done · see review", muted = true)
+    if (w.status == "skipped") return HeroCta("Skipped · view", muted = true)
+    if (w.splitFocus.contains("rest", true)) return HeroCta("View", muted = true)
+    val n = w.nextUp
+    return when {
+        n != null && n.started -> HeroCta("Continue", muted = false,
+            name = n.name, suffix = ", set ${n.setNumber}")
+        n != null -> HeroCta("Start", muted = false)
+        w.status == "in_progress" || w.status == "paused" -> HeroCta("Resume", muted = false)
+        else -> HeroCta("Start", muted = false)
+    }
+}
+
+/** Per-muscle accent, shared by the hero chips and the range rows. Never
+ *  rose: rose is the crisis colour, and chest is not a crisis. */
+private fun muscleColor(m: String): Color = when (m.lowercase()) {
+    "chest" -> NeonMV.Magenta
+    "back", "lats", "middle back", "lower back", "traps" -> NeonMV.Cyan
+    "shoulders" -> NeonMV.Amber
+    "biceps", "forearms" -> NeonMV.Magenta
+    "triceps" -> NeonMV.Periwinkle
+    "quadriceps", "quads", "hamstrings", "calves", "glutes", "adductors", "abductors" -> NeonMV.Lime
+    "abdominals", "abs", "core" -> NeonMV.Amber
+    else -> NeonMV.Muted
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun SessionHero(
+    workout: StrengthWorkoutDetail?,
+    timeline: List<TimelineDot>,
+    onClick: () -> Unit,
+) {
+    val cta = heroCta(workout)
+    val isRest = workout == null || workout.splitFocus.contains("rest", true)
+    val completed = workout?.status == "completed"
+    // SKIP-1: both counters are the server's, rendered verbatim.
+    val setsDone = workout?.setsDone ?: 0
+    val setsTotal = workout?.setsTotal ?: 0
+    val exDone = workout?.exercisesDone ?: 0
+    val exTotal = workout?.exercisesTotal ?: 0
+    // The plan's muscles: rows of the projection that today's plan adds to.
+    val chips = workout?.projectedMuscleVolume
+        ?.filter { (it.value.setsPlanned ?: 0.0) > 0.0 }
+        ?.entries?.sortedByDescending { it.value.setsPlanned ?: 0.0 }
+        ?.map { it.key }?.take(5).orEmpty()
+
+    NeonHeroCard(accent = NeonMV.Lime) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            NeonRing(
+                fraction = if (setsTotal > 0) setsDone.toFloat() / setsTotal else 0f,
+                color = NeonMV.Lime,
+                size = 120.dp,
+                stroke = 10.dp,
+                outerFraction = if (exTotal > 0) exDone.toFloat() / exTotal else 0f,
+                outerColor = NeonMV.Cyan,
+            ) {
+                if (setsTotal > 0) {
+                    NeonNumber("$setsDone/$setsTotal", color = NeonMV.Lime, size = 22)
+                    NeonRingCaption("sets")
+                    Text("$exDone/$exTotal ex", color = NeonMV.Cyan, fontSize = 10.sp,
+                        fontFamily = NeonNumberFamily, fontWeight = FontWeight.Bold)
+                } else {
+                    NeonNumber("—", color = NeonMV.Muted, size = 22)
+                    NeonRingCaption(if (isRest) "rest" else "no sets")
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    when {
+                        completed -> "TODAY · DONE"
+                        workout?.status == "skipped" -> "TODAY · SKIPPED"
+                        exTotal == 1 -> "TODAY · 1 EXERCISE"
+                        exTotal > 1 -> "TODAY · $exTotal EXERCISES"
+                        else -> "TODAY"
+                    },
+                    color = if (completed) NeonMV.Muted else NeonMV.Lime,
+                    fontFamily = NeonNumberFamily,
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (isRest) "Rest day" else titleCase(workout!!.splitFocus),
+                    color = NeonMV.Ink, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.5).sp, maxLines = 2, lineHeight = 28.sp,
+                )
+                if (chips.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) { chips.forEach { MuscleChip(it) } }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(if (cta.muted) NeonMV.Card else NeonMV.Lime)
+                .border(1.dp, if (cta.muted) NeonMV.Track else NeonMV.Lime, RoundedCornerShape(14.dp))
+                .clickable(onClick = onClick)
+                .semantics { role = Role.Button }
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            // Only the exercise NAME may ellipsize: a long name used to push
+            // "set 3" — the part that says where you are — off the button.
+            val ink = if (cta.muted) NeonMV.Muted else NeonMV.OnAccent
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(cta.label, color = ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                if (cta.name != null) {
+                    Text(" · ", color = ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(cta.name, color = ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false))
+                    Text(cta.suffix.orEmpty(), color = ink, fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+        WeekDots(timeline)
+    }
+}
+
+@Composable
+private fun MuscleChip(muscle: String) {
+    val c = muscleColor(muscle)
+    Text(
+        titleCase(muscle),
+        color = c, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(c.copy(alpha = 0.14f))
+            .border(1.dp, c.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    )
+}
+
+@Composable
+private fun WeekDots(dots: List<TimelineDot>) {
+    val desc = dots.joinToString(", ") { d ->
+        val day = d.date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())
+        day + " " + when (d.state) {
+            DotState.Done, DotState.TodayDone -> "done"
+            DotState.Today -> "today"
+            DotState.Planned -> "planned"
+            DotState.Empty -> "nothing"
+        }
+    }
+    Row(
+        Modifier.fillMaxWidth().semantics { contentDescription = "This week: $desc" },
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        dots.forEach { d ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(32.dp)) {
+                Canvas(Modifier.size(14.dp)) {
+                    val r = size.minDimension / 2
+                    when (d.state) {
+                        DotState.Done, DotState.TodayDone -> drawCircle(NeonMV.Lime, r)
+                        DotState.Today -> {
+                            drawCircle(NeonMV.Lime.copy(alpha = 0.18f), r)
+                            drawCircle(NeonMV.Lime, r - 1.dp.toPx(), style = Stroke(2.dp.toPx()))
+                        }
+                        DotState.Planned -> drawCircle(NeonMV.Periwinkle, r * 0.72f)
+                        DotState.Empty -> drawCircle(NeonMV.Track, r * 0.72f)
+                    }
+                    if (d.state == DotState.TodayDone) {
+                        drawCircle(NeonMV.Ink, r + 2.dp.toPx() - 1.dp.toPx(),
+                            style = Stroke(1.5.dp.toPx()))
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                val isToday = d.state == DotState.Today || d.state == DotState.TodayDone
+                Text(
+                    d.date.dayOfWeek.getDisplayName(java.time.format.TextStyle.NARROW, java.util.Locale.getDefault()),
+                    color = if (isToday) NeonMV.Lime else NeonMV.Muted,
+                    fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    fontFamily = NeonNumberFamily,
+                )
+            }
+        }
+    }
+}
+
+/** Loading shape of the hero, so the page does not jump when it lands. */
+@Composable
+private fun HeroSkeleton() {
+    NeonHeroCard(accent = NeonMV.Lime) {
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ShimmerBlock(width = 120.dp, height = 120.dp, cornerRadius = 60.dp, accent = NeonMV.Lime)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ShimmerBlock(width = 110.dp, height = 11.dp, accent = NeonMV.Lime)
+                ShimmerBlock(Modifier.fillMaxWidth(0.8f), height = 26.dp, accent = NeonMV.Lime)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ShimmerBlock(width = 54.dp, height = 18.dp, cornerRadius = 10.dp, accent = NeonMV.Lime)
+                    ShimmerBlock(width = 64.dp, height = 18.dp, cornerRadius = 10.dp, accent = NeonMV.Lime)
+                }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        ShimmerBlock(Modifier.fillMaxWidth(), height = 48.dp, cornerRadius = 14.dp, accent = NeonMV.Lime)
+        Spacer(Modifier.height(14.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            repeat(7) { ShimmerBlock(width = 14.dp, height = 14.dp, cornerRadius = 7.dp, accent = NeonMV.Lime) }
+        }
+    }
+}
+
+// ── Weekly volume chart ──────────────────────────────────────────────────
+
+@Composable
+private fun WeekVolumeCard(
+    w: StrengthWeekVolume,
+    sessions: Int?,
+    zone: ZoneId,
+    onClick: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(NeonCardShape)
+            .background(NeonMV.Card)
+            .border(1.dp, NeonMV.Line, NeonCardShape)
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            NeonNumber("%,.0f".format(w.totalLb), size = 26)
+            Spacer(Modifier.width(4.dp))
+            Text("lb", color = NeonMV.Muted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+            Spacer(Modifier.weight(1f))
+            DeltaChip(w)
+        }
+        Text(
+            buildString {
+                append("vs %,.0f lb the week before".format(w.prevTotalLb))
+                if (sessions != null) append(" · $sessions session${if (sessions == 1) "" else "s"}")
+            },
+            color = NeonMV.Muted, fontSize = 12.sp,
+        )
+        Spacer(Modifier.height(12.dp))
+        val maxV = w.days.maxOfOrNull { maxOf(it.volumeLb, it.prevVolumeLb) }?.takeIf { it > 0 } ?: 1.0
+        val desc = w.days.joinToString("; ") { d ->
+            "${dayLabel(d.date, java.time.format.TextStyle.FULL)} %,.0f lb, last week %,.0f".format(d.volumeLb, d.prevVolumeLb)
+        }
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .height(96.dp)
+                .semantics { contentDescription = "Daily volume this week against last week: $desc" },
+        ) {
+            val n = w.days.size.coerceAtLeast(1)
+            val slot = size.width / n
+            val ghostW = slot * 0.62f
+            val barW = slot * 0.36f
+            val cr = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+            // Baseline.
+            drawLine(NeonMV.Line, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
+            w.days.forEachIndexed { i, d ->
+                val cx = slot * i + slot / 2
+                val ph = (d.prevVolumeLb / maxV).toFloat() * size.height
+                if (ph > 0f) drawRoundRect(
+                    NeonMV.Track, Offset(cx - ghostW / 2, size.height - ph), Size(ghostW, ph), cr,
+                )
+                val h = (d.volumeLb / maxV).toFloat() * size.height
+                if (h > 0f) {
+                    drawRoundRect(NeonMV.Lime.copy(alpha = 0.22f),
+                        Offset(cx - barW / 2 - 2.dp.toPx(), size.height - h - 2.dp.toPx()),
+                        Size(barW + 4.dp.toPx(), h + 2.dp.toPx()), cr)
+                    drawRoundRect(NeonMV.Lime, Offset(cx - barW / 2, size.height - h), Size(barW, h), cr)
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth()) {
+            w.days.forEach { d ->
+                Text(
+                    dayLabel(d.date, java.time.format.TextStyle.NARROW),
+                    color = if (d.date == w.end) NeonMV.Lime else NeonMV.Muted,
+                    fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = NeonNumberFamily,
+                    textAlign = TextAlign.Center, modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(NeonMV.Lime))
+            Text(" This week   ", color = NeonMV.Muted, fontSize = 11.sp)
+            Box(Modifier.size(8.dp).clip(CircleShape).background(NeonMV.Track))
+            Text(" Same day last week", color = NeonMV.Muted, fontSize = 11.sp)
+        }
+        // OG2-A3: the pounds figure cannot speak for bodyweight work.
+        if (w.unweightedSets > 0) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "+ ${w.unweightedSets} bodyweight set${if (w.unweightedSets == 1) "" else "s"} not counted in lb",
+                color = NeonMV.Muted, fontSize = 11.sp,
+            )
+        }
+    }
+}
+
+/** Server-decided direction → colour. Never rose: a lighter week is a
+ *  caution at most, and often a planned deload. */
+@Composable
+private fun DeltaChip(w: StrengthWeekVolume) {
+    val pct = w.deltaPct
+    val (text, color) = when {
+        pct == null -> "no lifting last week" to NeonMV.Muted
+        w.direction == "improved" -> "▲ %.0f%%".format(kotlin.math.abs(pct)) to NeonMV.Lime
+        w.direction == "worse" -> "▼ %.0f%%".format(kotlin.math.abs(pct)) to NeonMV.Amber
+        else -> "≈ same" to NeonMV.Muted
+    }
+    Text(
+        text, color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+        fontFamily = NeonNumberFamily,
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(color.copy(alpha = 0.12f))
+            .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    )
+}
+
+private fun dayLabel(iso: String, style: java.time.format.TextStyle): String =
+    runCatching {
+        LocalDate.parse(iso).dayOfWeek.getDisplayName(style, java.util.Locale.getDefault())
+    }.getOrDefault("")
+
+// ── Muscle volume vs MEV–MAV ─────────────────────────────────────────────
+
+/** Status → dot colour. `status` is the server's `volume_status`; this only
+ *  maps it. Over MAV is amber, not rose. */
+private fun statusColor(status: String): Color = when (status) {
+    "in_range" -> NeonMV.Lime
+    "under" -> NeonMV.Periwinkle
+    "over" -> NeonMV.Amber
+    else -> NeonMV.Muted
+}
+
+@Composable
+private fun MuscleRangeCard(rows: Map<String, MuscleVolumeRow>, onClick: () -> Unit) {
+    val trained = rows.entries.filter { it.value.sets > 0 }.sortedByDescending { it.value.sets }
+    val untrained = rows.entries.filter { it.value.sets <= 0 }.map { it.key }
+    // One shared scale so bands are comparable row to row.
+    val scale = (rows.values.maxOfOrNull { maxOf(it.mav, it.sets) } ?: 1).coerceAtLeast(1) * 1.1f
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(NeonCardShape)
+            .background(NeonMV.Card)
+            .border(1.dp, NeonMV.Line, NeonCardShape)
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        if (trained.isEmpty()) {
+            Text("No working sets logged in this window.", color = NeonMV.Muted, fontSize = 12.sp)
+        }
+        trained.forEach { (m, r) ->
+            val c = statusColor(r.status)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.semantics(mergeDescendants = true) {
+                    contentDescription = "${titleCase(m)}: ${r.sets} sets, range ${r.mev} to ${r.mav}, " +
+                        r.status.replace('_', ' ')
+                },
+            ) {
+                Text(titleCase(m), color = NeonMV.Ink, fontSize = 12.sp, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, modifier = Modifier.width(86.dp))
+                Canvas(Modifier.weight(1f).height(14.dp)) {
+                    val y = size.height / 2
+                    val th = 6.dp.toPx()
+                    drawRoundRect(NeonMV.Track, Offset(0f, y - th / 2), Size(size.width, th),
+                        CornerRadius(th / 2, th / 2))
+                    val x0 = (r.mev / scale) * size.width
+                    val x1 = (r.mav / scale) * size.width
+                    drawRoundRect(NeonMV.Lime.copy(alpha = 0.28f), Offset(x0, y - th / 2),
+                        Size((x1 - x0).coerceAtLeast(1f), th), CornerRadius(th / 2, th / 2))
+                    val xv = (r.sets / scale).coerceIn(0f, 1f) * size.width
+                    drawCircle(c.copy(alpha = 0.3f), 7.dp.toPx(), Offset(xv, y))
+                    drawCircle(c, 4.5.dp.toPx(), Offset(xv, y))
+                }
+                Spacer(Modifier.width(8.dp))
+                NeonNumber("${r.sets}", color = c, size = 13, modifier = Modifier.width(22.dp))
+                Text("/${r.mev}–${r.mav}", color = NeonMV.Muted, fontSize = 10.sp,
+                    fontFamily = NeonNumberFamily, modifier = Modifier.width(40.dp))
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            LegendDot(NeonMV.Periwinkle, "under")
+            LegendDot(NeonMV.Lime, "in range")
+            LegendDot(NeonMV.Amber, "over")
+            Box(Modifier.width(14.dp).height(6.dp).clip(RoundedCornerShape(3.dp))
+                .background(NeonMV.Lime.copy(alpha = 0.28f)))
+            Text("MEV–MAV", color = NeonMV.Muted, fontSize = 10.sp)
+        }
+        if (untrained.isNotEmpty()) {
+            Text(
+                "Not trained: " + untrained.joinToString(", ") { titleCase(it) },
+                color = NeonMV.Muted, fontSize = 11.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LegendDot(c: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(c))
+        Text(" $label", color = NeonMV.Muted, fontSize = 10.sp)
+    }
+}
+
+// ── Tile grid ────────────────────────────────────────────────────────────
+
+private data class Tile(val label: String, val icon: ImageVector, val tone: Color, val route: String)
+
+@Composable
+private fun TileGrid(tiles: List<Tile>, onOpen: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        tiles.chunked(3).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { t ->
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .heightIn(min = 76.dp)
+                            .clip(NeonCardShape)
+                            .background(NeonMV.Card)
+                            .border(1.dp, NeonMV.Line, NeonCardShape)
+                            .clickable { onOpen(t.route) }
+                            .semantics(mergeDescendants = true) {
+                                role = Role.Button
+                                contentDescription = "Open ${t.label}"
+                            }
+                            .padding(vertical = 12.dp, horizontal = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Box(
+                            Modifier.size(34.dp).clip(CircleShape).background(t.tone.copy(alpha = 0.14f)),
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(t.icon, contentDescription = null, tint = t.tone, modifier = Modifier.size(18.dp)) }
+                        Spacer(Modifier.height(6.dp))
+                        Text(t.label, color = NeonMV.Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Header week chip ─────────────────────────────────────────────────────
 /** Jan 1 of LAST year — the YTD pair compares against the same span a year
  *  ago, so the fetch has to reach back that far. */
 private fun ytdSinceIso(): String =
-    java.time.LocalDate.of(java.time.LocalDate.now().year - 1, 1, 1)
+    LocalDate.of(LocalDate.now().year - 1, 1, 1)
         .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toString()
 
 @Composable
@@ -482,45 +972,8 @@ private fun WeekChip(count: Int, onClick: () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            "This week · ",
-            color = NeonMV.Lime,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        Text("This week · ", color = NeonMV.Lime, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         NeonNumber("$count", color = NeonMV.Lime, size = 13, weight = FontWeight.Bold)
-    }
-}
-
-// ── Caption eyebrow (web `.cap`) ──────────────────────────────────────────
-@Composable
-private fun Caption(text: String) {
-    // Sentence case at the shared section size. The uppercase mono eyebrow
-    // was a leftover vocabulary: every other section on every other screen
-    // now uses this, and a screen that shouts its headings while its
-    // neighbours speak reads as a different app.
-    Text(
-        text,
-        color = Color(0xFFE9EDF2),
-        fontSize = 21.sp,
-        fontWeight = FontWeight.Normal,
-    )
-}
-
-/**
- * Caption eyebrow with an optional trailing action (e.g. a "See all" link)
- * pushed to the right edge. Used for the "Recent" header so the full activity
- * feed has a clear inline affordance, not just the footer link.
- */
-@Composable
-private fun CaptionRow(text: String, trailing: @Composable () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Caption(text)
-        trailing()
     }
 }
 
@@ -535,26 +988,14 @@ private fun SeeAll(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Text(
-            "See all",
-            color = NeonMV.Cyan,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.6.sp,
-        )
-        Icon(
-            Icons.AutoMirrored.Outlined.ArrowForwardIos,
-            contentDescription = null,
-            tint = NeonMV.Cyan,
-            modifier = Modifier.size(9.dp),
-        )
+        Text("See all", color = NeonMV.Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+            letterSpacing = 0.6.sp)
+        Icon(Icons.AutoMirrored.Outlined.ArrowForwardIos, contentDescription = null,
+            tint = NeonMV.Cyan, modifier = Modifier.size(9.dp))
     }
 }
 
-// ── Activity filter categories (web Activities parity) ────────────────────
-// Each chip matches ActivityRow.type by case-insensitive substring. Keep the
-// keyword sets aligned with the web ActivityIcon classifier + the planner's
-// manual_cardio / elliptical generic-cardio bucket.
+// ── Activity filter categories (web Activities parity) ───────────────────
 private enum class ActivityFilter(val label: String, val keywords: List<String>) {
     Ride("Ride", listOf("ride", "cycl", "bike", "vr")),
     Run("Run", listOf("run")),
@@ -571,7 +1012,6 @@ private enum class ActivityFilter(val label: String, val keywords: List<String>)
     }
 }
 
-// ── Theme-aware filter chip row ───────────────────────────────────────────
 @Composable
 private fun FilterBar(
     available: List<ActivityFilter>,
@@ -579,21 +1019,15 @@ private fun FilterBar(
     neon: Boolean,
     onSelect: (ActivityFilter?) -> Unit,
 ) {
-    // Selected-chip accent: neon shell → Cyan, classic shell → brand red. The
-    // chip bar is a NEW control so it's fine in both shells; only the accent
-    // colour flips so it reads native to whichever theme is active.
     val accent = if (neon) NeonMV.Cyan else MV.BrandRed
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FilterChip(label = "All", active = selected == null, accent = accent) { onSelect(null) }
         available.forEach { f ->
             FilterChip(label = f.label, active = selected == f, accent = accent) {
-                // Tapping the active chip again clears back to All.
                 onSelect(if (selected == f) null else f)
             }
         }
@@ -601,12 +1035,7 @@ private fun FilterBar(
 }
 
 @Composable
-private fun FilterChip(
-    label: String,
-    active: Boolean,
-    accent: Color,
-    onClick: () -> Unit,
-) {
+private fun FilterChip(label: String, active: Boolean, accent: Color, onClick: () -> Unit) {
     val bg = if (active) accent.copy(alpha = 0.16f) else NeonMV.Card
     val border = if (active) accent.copy(alpha = 0.5f) else NeonMV.Line
     val ink = if (active) accent else NeonMV.Muted
@@ -619,301 +1048,12 @@ private fun FilterChip(
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            label,
-            color = ink,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.3.sp,
-            maxLines = 1,
-        )
+        Text(label, color = ink, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            letterSpacing = 0.3.sp, maxLines = 1)
     }
 }
 
-/** "SAT" / "TMRW" / "9D" — compact day label for the timeline strip. */
-private fun shortDay(iso: String): String = try {
-    val d = java.time.LocalDate.parse(iso)
-    val days = java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.now(), d)
-    when {
-        days == 1L -> "TMRW"
-        days in 0..6 -> d.dayOfWeek.getDisplayName(
-            java.time.format.TextStyle.SHORT, java.util.Locale.getDefault()).uppercase()
-        else -> "${days}D"
-    }
-} catch (e: Exception) { "SOON" }
-
-// ── Today hero card ───────────────────────────────────────────────────────
-@Composable
-private fun TodayHero(
-    ringPct: Float,
-    ringLabel: String,
-    tag: String,
-    title: String,
-    exerciseCount: Int?,
-    ctaLabel: String,
-    /** OG3-A1 — a finished session shows a muted outline pill rather than the
-     *  lime fill, so "Done" does not read as an outstanding action. */
-    ctaDone: Boolean,
-    loading: Boolean,
-    upcoming: List<UpcomingDay>,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(NeonMV.CardHigh)
-            .border(1.dp, NeonMV.Lime.copy(alpha = 0.18f), RoundedCornerShape(24.dp))
-            .clickable(onClick = onClick)
-            .padding(18.dp),
-    ) {
-        // ── Today ──
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            ProgressRing(pct = ringPct, label = ringLabel, color = NeonMV.Lime)
-            Column(Modifier.weight(1f)) {
-                Text(
-                    tag.uppercase(),
-                    color = NeonMV.Lime,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.4.sp,
-                    maxLines = 1,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    title,
-                    color = NeonMV.Ink,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = (-0.3).sp,
-                    maxLines = 1,
-                )
-                Spacer(Modifier.height(5.dp))
-                Text(
-                    when {
-                        loading -> "Loading plan…"
-                        exerciseCount == null -> "No plan today"
-                        exerciseCount == 0 -> "Rest"
-                        exerciseCount == 1 -> "1 exercise"
-                        else -> "$exerciseCount exercises"
-                    },
-                    color = NeonMV.Muted,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(12.dp))
-                // CTA pill — neon lime fill with glow border, mirroring web `.cont`.
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (ctaDone) NeonMV.Card else NeonMV.Lime)
-                        .border(
-                            1.dp,
-                            if (ctaDone) NeonMV.Track else NeonMV.Lime.copy(alpha = 0.5f),
-                            RoundedCornerShape(14.dp),
-                        )
-                        .padding(horizontal = 16.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        ctaLabel,
-                        color = if (ctaDone) NeonMV.Muted else NeonMV.OnAccent,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                    )
-                }
-            }
-        }
-
-        // ── Week-timeline strip: the next sessions, inside the same bubble ──
-        if (upcoming.isNotEmpty()) {
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                upcoming.forEach { s ->
-                    val lead = s === upcoming.first()
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(NeonMV.Card)
-                            .border(
-                                1.dp,
-                                if (lead) NeonMV.Lime.copy(alpha = 0.30f) else NeonMV.Track,
-                                RoundedCornerShape(14.dp),
-                            )
-                            .padding(horizontal = 11.dp, vertical = 10.dp),
-                    ) {
-                        Text(
-                            shortDay(s.date),
-                            color = if (lead) NeonMV.Lime else NeonMV.Periwinkle,
-                            fontFamily = NeonNumberFamily,
-                            fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.8.sp, maxLines = 1,
-                        )
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            titleCase(s.splitFocus),
-                            color = NeonMV.Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                        if (s.exerciseCount > 0) {
-                            Spacer(Modifier.height(2.dp))
-                            Text("${s.exerciseCount} ex", color = NeonMV.Muted, fontSize = 11.sp)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── Weekly training dashboard (PROTOTYPE) ──────────────────────────────────
-private fun muscleColorNeon(m: String): Color = when (m.lowercase()) {
-    "chest" -> NeonMV.Bad
-    "back", "lats" -> NeonMV.Cyan
-    "shoulders" -> NeonMV.Amber
-    "biceps" -> NeonMV.Magenta
-    "triceps" -> NeonMV.Periwinkle
-    "quadriceps", "quads", "hamstrings", "calves", "glutes" -> NeonMV.Lime
-    "abdominals", "abs", "core" -> NeonMV.Amber
-    else -> NeonMV.Muted
-}
-
-@Composable
-private fun WeeklyDashboardCard(s: app.myvitals.sync.StrengthStats, onClick: () -> Unit) {
-    val today = java.time.LocalDate.now()
-    fun agoDays(d: String): Long? = runCatching {
-        java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.parse(d), today)
-    }.getOrNull()
-    val thisWeek = s.daily.filter { (agoDays(it.date) ?: 99) in 0..6 }
-    val prevWeek = s.daily.filter { (agoDays(it.date) ?: 99) in 7..13 }
-    val weekTonnage = thisWeek.sumOf { it.volumeLb }
-    val prevTonnage = prevWeek.sumOf { it.volumeLb }
-    val weekSessions = thisWeek.count { it.volumeLb > 0 || it.sets > 0 }
-    val deltaPct = if (prevTonnage > 0)
-        ((weekTonnage - prevTonnage) / prevTonnage * 100).toInt() else null
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(NeonMV.CardHigh)
-            .border(1.dp, NeonMV.Lime.copy(alpha = 0.18f), RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
-            .padding(16.dp),
-    ) {
-        Text(
-            "THIS WEEK", color = NeonMV.Lime.copy(alpha = 0.85f),
-            fontFamily = NeonNumberFamily, fontSize = 10.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
-        )
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-            Column {
-                Text("VOLUME", color = NeonMV.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                Row(verticalAlignment = Alignment.Bottom) {
-                    NeonNumber("%,.0f".format(weekTonnage), color = NeonMV.Ink, size = 22)
-                    Spacer(Modifier.width(3.dp))
-                    Text("lb", color = NeonMV.Muted, fontSize = 11.sp,
-                        modifier = Modifier.padding(bottom = 2.dp))
-                }
-                if (deltaPct != null) {
-                    val up = deltaPct >= 0
-                    Text(
-                        "${if (up) "▲" else "▼"} ${kotlin.math.abs(deltaPct)}% vs last wk",
-                        color = if (up) NeonMV.Lime else NeonMV.Amber,
-                        fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                    )
-                }
-            }
-            Column {
-                Text("SESSIONS", color = NeonMV.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                NeonNumber("$weekSessions", color = NeonMV.Lime, size = 22)
-            }
-        }
-        if (s.perMuscle.isNotEmpty()) {
-            Spacer(Modifier.height(14.dp))
-            Text(
-                "VOLUME BY MUSCLE · 30d", color = NeonMV.Muted,
-                fontFamily = NeonNumberFamily, fontSize = 9.sp,
-                fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
-            )
-            Spacer(Modifier.height(7.dp))
-            val maxV = s.perMuscle.maxOf { it.volumeLb }.coerceAtLeast(1.0)
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                for (m in s.perMuscle.sortedByDescending { it.volumeLb }.take(5)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            titleCase(m.muscle), color = NeonMV.Ink, fontSize = 11.sp,
-                            maxLines = 1, modifier = Modifier.width(86.dp),
-                        )
-                        Box(
-                            Modifier.weight(1f).height(7.dp)
-                                .clip(RoundedCornerShape(4.dp)).background(NeonMV.Track),
-                        ) {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth((m.volumeLb / maxV).toFloat().coerceIn(0.02f, 1f))
-                                    .height(7.dp)
-                                    .background(muscleColorNeon(m.muscle)),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── Hero progress ring ────────────────────────────────────────────────────
-@Composable
-private fun ProgressRing(pct: Float, label: String, color: Color) {
-    Box(
-        modifier = Modifier.size(84.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        androidx.compose.foundation.Canvas(Modifier.size(84.dp)) {
-            val stroke = 8.dp.toPx()
-            val inset = stroke / 2f
-            val arcSize = androidx.compose.ui.geometry.Size(
-                size.width - stroke, size.height - stroke,
-            )
-            val topLeft = androidx.compose.ui.geometry.Offset(inset, inset)
-            drawArc(
-                color = NeonMV.Track,
-                startAngle = -90f, sweepAngle = 360f, useCenter = false,
-                topLeft = topLeft, size = arcSize,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
-            )
-            if (pct > 0f) {
-                drawArc(
-                    color = color,
-                    startAngle = -90f, sweepAngle = 360f * pct, useCenter = false,
-                    topLeft = topLeft, size = arcSize,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(
-                        width = stroke,
-                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                    ),
-                )
-            }
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            NeonNumber(label, color = color, size = 20, weight = FontWeight.Bold)
-            Text(
-                "DONE",
-                color = NeonMV.Muted,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp,
-            )
-        }
-    }
-}
-
-// ── Recent-activity pill row ──────────────────────────────────────────────
+// ── Recent-activity pill row ─────────────────────────────────────────────
 @Composable
 private fun ActivityPill(
     icon: ImageVector,
@@ -934,75 +1074,27 @@ private fun ActivityPill(
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(tone.copy(alpha = 0.14f)),
+            modifier = Modifier.size(40.dp).clip(CircleShape).background(tone.copy(alpha = 0.14f)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = null, tint = tone, modifier = Modifier.size(20.dp))
         }
         Column(Modifier.weight(1f)) {
-            Text(
-                title,
-                color = NeonMV.Ink,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
+            Text(title, color = NeonMV.Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(2.dp))
-            Text(
-                sub,
-                color = NeonMV.Muted,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-            )
+            Text(sub, color = NeonMV.Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
         }
         if (value != null) {
             NeonNumber(value, color = tone, size = 14, weight = FontWeight.Bold)
             Spacer(Modifier.width(4.dp))
         }
-        Icon(
-            Icons.AutoMirrored.Outlined.ArrowForwardIos,
-            contentDescription = null,
-            tint = NeonMV.Muted,
-            modifier = Modifier.size(12.dp),
-        )
+        Icon(Icons.AutoMirrored.Outlined.ArrowForwardIos, contentDescription = null,
+            tint = NeonMV.Muted, modifier = Modifier.size(12.dp))
     }
 }
 
-// ── Footer navigation link row ────────────────────────────────────────────
-@Composable
-private fun LinkRow(label: String, icon: ImageVector, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .border(1.dp, NeonMV.Line, RoundedCornerShape(18.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(icon, contentDescription = null, tint = NeonMV.Muted, modifier = Modifier.size(18.dp))
-        Text(
-            label,
-            color = NeonMV.Muted,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f),
-        )
-        Icon(
-            Icons.AutoMirrored.Outlined.ArrowForwardIos,
-            contentDescription = null,
-            tint = NeonMV.Muted,
-            modifier = Modifier.size(12.dp),
-        )
-    }
-}
-
-// ── Activity classification (mirrors web `classifyType`) ──────────────────
+// ── Activity classification (mirrors web `classifyType`) ─────────────────
 private data class ActivityClass(val icon: ImageVector, val tone: Color, val isTrail: Boolean)
 
 private fun classify(type: String?): ActivityClass {
@@ -1019,19 +1111,18 @@ private fun classify(type: String?): ActivityClass {
     }
 }
 
-// ── Sub-line: relative day · distance (or type) ───────────────────────────
-private fun activitySub(a: ActivityRow): String {
-    val parts = mutableListOf(relDay(a.startAt))
+private fun activitySub(a: ActivityRow, today: LocalDate, zone: ZoneId): String {
+    val at = parseInstant(a.startAt)
+    val parts = mutableListOf(if (at != null) relDay(at, today, zone) else "—")
     val mi = milesOrNull(a.distanceM)
     if (mi != null) parts.add(mi) else parts.add(titleCase(a.type))
     return parts.filter { it.isNotBlank() }.joinToString(" · ")
 }
 
-// ── Primary value: elevation (ft) for trail rows, else duration (h:mm) ────
 private fun activityValue(a: ActivityRow, cls: ActivityClass): String {
     if (cls.isTrail) {
-        val ft = a.elevationGainM?.takeIf { it > 0 }?.let { (it * 3.28084).toInt() }
-        if (ft != null) return "%,d ft".format(ft)
+        val m = a.elevationGainM?.takeIf { it > 0 }
+        if (m != null) return Units.fmtElevation(m)
     }
     return hms(a.durationS)
 }
@@ -1045,26 +1136,35 @@ private fun hms(durationS: Int?): String {
     if (durationS == null || durationS <= 0) return "—"
     val h = durationS / 3600
     val m = (durationS % 3600) / 60
-    return if (h > 0) "%d:%02d".format(h, m)
-    else "%d:%02d".format(m, durationS % 60)
+    return if (h > 0) "%d:%02d".format(h, m) else "%d:%02d".format(m, durationS % 60)
 }
 
-private fun relDay(iso: String?): String {
-    if (iso.isNullOrBlank()) return "—"
-    return runCatching {
-        val date = LocalDate.parse(iso.substring(0, 10))
-        val today = LocalDate.now()
-        val diff = today.toEpochDay() - date.toEpochDay()
-        when {
-            diff <= 0L -> "Today"
-            diff == 1L -> "Yesterday"
-            diff < 7L -> date.dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)
-            else -> "%s %d".format(
-                date.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3),
-                date.dayOfMonth,
-            )
-        }
-    }.getOrDefault("—")
+/** A server timestamp as an instant. A string with no offset is UTC, which
+ *  is how every timestamp column in this schema is written. */
+private fun parseInstant(iso: String?): Instant? {
+    if (iso.isNullOrBlank()) return null
+    return runCatching { Instant.parse(iso) }.getOrNull()
+        ?: runCatching { java.time.OffsetDateTime.parse(iso).toInstant() }.getOrNull()
+        ?: runCatching {
+            java.time.LocalDateTime.parse(iso).atZone(java.time.ZoneOffset.UTC).toInstant()
+        }.getOrNull()
+}
+
+/** "Today" / "Yesterday" / "Tue" / "Sep 3" for an instant, on the user's
+ *  LOCAL calendar. The old version took the first ten characters of the UTC
+ *  timestamp, so an evening ride in Central was dated tomorrow. */
+private fun relDay(at: Instant, today: LocalDate, zone: ZoneId): String {
+    val date = at.atZone(zone).toLocalDate()
+    val diff = today.toEpochDay() - date.toEpochDay()
+    return when {
+        diff <= 0L -> "Today"
+        diff == 1L -> "Yesterday"
+        diff < 7L -> date.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())
+        else -> "%s %d".format(
+            date.month.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault()),
+            date.dayOfMonth,
+        )
+    }
 }
 
 private fun titleCase(s: String): String =

@@ -165,11 +165,27 @@ async def get_heartrate(
         if agg and agg[0] is not None:
             stats_min, stats_max, stats_avg = float(agg[0]), float(agg[1]), float(agg[2])
 
+    # UI-4 — zones and the band histogram, server-side, for a trace of at
+    # most ~a day. Both clients bucketed the points into zones themselves,
+    # against a max HR the phone guessed at 187 when the profile was thin,
+    # while the Activities screen used cardio.resolve_max_hr — so the same
+    # minute could be Z3 on one screen and Z4 on the other.
+    zone_stats = None
+    if (end - start).total_seconds() <= 26 * 3600:
+        from ..analytics.cardio import resolve_max_hr
+        from ..analytics.detail_stats import hr_zone_stats
+        max_hr, max_src, _age = await resolve_max_hr(db)
+        zone_stats = hr_zone_stats(
+            [(p.time, p.value) for p in points], max_hr, bucket_seconds)
+        zone_stats["max_hr"] = round(max_hr)
+        zone_stats["max_hr_source"] = max_src
+
     return HeartRateSeries(
         points=points,
         avg=stats_avg,
         min_bpm=stats_min,
         max_bpm=stats_max,
+        stats=zone_stats,
     )
 
 
@@ -229,7 +245,18 @@ async def get_steps(
     rows = result.all()
     points = [TimePoint(time=t, value=float(c)) for t, c in rows]
     total = sum(int(p.value) for p in points)
-    return StepsSeries(points=points, total=total)
+    # UI-4 — hour-of-day buckets in the user's LOCAL time, only for a window
+    # that fits in one day (summing Mondays and Tuesdays into one 9am bar
+    # would be a different question).
+    hourly = None
+    if (end - start).total_seconds() <= 25 * 3600:
+        from ..localtime import local_tz
+        tz = local_tz()
+        hourly = [0] * 24
+        for p in points:
+            t = p.time if p.time.tzinfo else p.time.replace(tzinfo=timezone.utc)
+            hourly[t.astimezone(tz).hour] += int(p.value)
+    return StepsSeries(points=points, total=total, hourly=hourly)
 
 
 @router.get("/sleep/last", response_model=SleepNight | None)
@@ -489,12 +516,27 @@ async def get_weight(
         for t, w, bf, b, lm, src in rows
     ]
     weights = [r[1] for r in rows if r[1] is not None]
+    # UI-4 — window stats, the trend line and the COLOUR of the change,
+    # decided here. The phone judged the tone with a private copy of the
+    # GOAL-STATE noise band (`weightDeltaTone`) and fitted its own regression
+    # against list indices; the web did its own. All in kilograms — clients
+    # only convert units.
+    from ..analytics.detail_stats import weight_stats
+    goal_kg = (await db.execute(
+        select(models.UserProfile.weight_goal_kg).limit(1)
+    )).scalar_one_or_none()
+    stats = weight_stats(
+        [(r[0], r[1]) for r in rows],
+        float(goal_kg) if goal_kg else None,
+        body_fat=[(r[0], r[1], r[2]) for r in rows if r[1] is not None],
+    )
     return {
         "points": points,
         "latest_kg": weights[-1] if weights else None,
         "min_kg": min(weights) if weights else None,
         "max_kg": max(weights) if weights else None,
         "avg_kg": sum(weights) / len(weights) if weights else None,
+        "stats": stats,
     }
 
 

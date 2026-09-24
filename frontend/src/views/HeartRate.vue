@@ -1,838 +1,416 @@
 <script setup lang="ts">
 /**
- * Heart Rate detail view — live 24h trace + history + zones +
- * comparison + four extra surfaces (distribution histogram, weekday
- * pattern, activity-HR correlation, year-over-year overlay).
+ * Heart rate detail (UI-4). Phone twin: `HrDetailScreen.kt`.
  *
- * Performance rule: live HR samples only ever come back for the most
- * recent 24h. Longer ranges (7d / 30d / 90d / 1y) lean on daily
- * aggregates from /summary/range, which is small no matter the span.
+ * 24h: the hero is the chosen day's trace over the SERVER's zone bands
+ * (analytics/cardio.py — the same bounds the Activities screen uses), with
+ * workouts, the sleep window, sober resets and journal markers laid over
+ * it; below, the server's min/avg/max, time-in-zone and band histogram.
+ *
+ * 7d and longer: the hero is resting HR over the window with the normal
+ * band and baseline from /summary/tiles; below, the server's window stats
+ * and weekday means, then the plain daily HRV and year-over-year plots.
+ *
+ * Removed with the move to server stats: the zone bucketing (it used a max
+ * HR of 187 when the profile was thin, so a minute could be Z3 here and Z4
+ * on Activities), the histogram, the weekday means, the prior-window deltas
+ * and the per-activity-type HR averages — each a client-side copy of a
+ * number. The last two have no server block yet and are deferred.
  */
-import { useDateRange } from "@/useDateRange";
 import { computed, onMounted, ref, watch } from "vue";
 import VChart from "@/echarts";
-import Card from "@/components/Card.vue";
-import PageHeader from "@/components/PageHeader.vue";
+import { HeartPulse } from "lucide-vue-next";
 import RangeTabs from "@/components/RangeTabs.vue";
 import DayNav from "@/components/DayNav.vue";
-import StatCard from "@/components/StatCard.vue";
-import LoadState from "@/components/LoadState.vue";
 import PatternsLink from "@/components/PatternsLink.vue";
-import { api } from "@/api/client";
+import NeonPage from "@/components/neon/NeonPage.vue";
+import NeonHero from "@/components/neon/NeonHero.vue";
+import NeonStat from "@/components/neon/NeonStat.vue";
+import StatusChip from "@/components/detail/StatusChip.vue";
+import DetailCard from "@/components/detail/DetailCard.vue";
+import DetailSkeleton from "@/components/detail/DetailSkeleton.vue";
+import DetailError from "@/components/detail/DetailError.vue";
+import "@/components/detail/detail.css";
+import { api, summaryRangeStats } from "@/api/client";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import type {
-  Activity, Annotation, HeartRateSeries, HrvSeries, TodaySummary,
+  Activity, Annotation, HeartRateSeries, RangeStats, SleepNight, TodaySummary, VitalTile,
 } from "@/api/types";
-import { chartTheme, isNeon } from "@/theme";
-import { windowExtent, noDataSpans, daysToPoints } from "@/components/charts/chartHelpers";
+import { chartTheme } from "@/theme";
+import { useDateRange } from "@/useDateRange";
+import { toLocalISO } from "@/dates";
 import {
-  annotationMarkPoint, meanMarkLine, sleepMarkArea,
-  soberResetMarkLine, timeAxisFormatter, workoutMarkArea,
+  annotationMarkPoint, daysToPoints, meanMarkLine, noDataSpans, normalBandMarkArea,
+  sleepMarkArea, soberResetMarkLine, timeAxisFormatter, windowExtent, workoutMarkArea,
 } from "@/components/charts/chartHelpers";
-import type { SleepNight } from "@/api/types";
-import { normalBandMarkArea } from "@/components/charts/chartHelpers";
 
-// RANGE-1: one vocabulary, and the range in the URL. This view used
-// to declare its own key type and option list; ten views did, and
-// they disagreed — seven spelled a year "1y" and three "365d".
-const { range, options: RANGES, since: rangeSince, days: rangeDays } =
-  useDateRange(["24h", "7d", "30d", "90d", "1y"], "7d");
+const CYAN = "#28e6ff";
+const TRACK = "#272a3b";
+/** Z1..Z5 — Periwinkle → Cyan → Lime → Amber → Bad (Z5 only). */
+const ZONE_COLORS = ["#6f7bff", "#28e6ff", "#5dff3b", "#ffb52e", "#ff5d7a"];
+
+const { range, options: RANGES, since: rangeSince } =
+  useDateRange(["24h", "7d", "30d", "90d", "1y"], "24h");
 const cur = computed(() => RANGES.find((r) => r.key === range.value)!);
+const isDay = computed(() => range.value === "24h");
 
-// TD-3 — the 24h trace is anchored to a chosen day rather than always to the
-// last 24 hours. The phone's HrDetailScreen has worked this way since it was
-// written; the web had no way to look at yesterday's heart rate at all.
-function todayLocalISO(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-const selectedDay = ref<string>(todayLocalISO());
-const dayIsToday = computed(() => selectedDay.value === todayLocalISO());
-/** Local midnight of the selected day, and the end of its window — now when
- *  it is today, next midnight otherwise. Built from local getters, never
- *  from an ISO slice, so the window does not slide a day west of UTC. */
+const selectedDay = ref<string>(toLocalISO(new Date()));
+const dayIsToday = computed(() => selectedDay.value === toLocalISO(new Date()));
 const dayWindow = computed(() => {
   const [y, m, d] = selectedDay.value.split("-").map(Number);
   const start = new Date(y, m - 1, d, 0, 0, 0, 0);
-  const end = dayIsToday.value
-    ? new Date()
-    : new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+  const end = dayIsToday.value ? new Date() : new Date(y, m - 1, d + 1, 0, 0, 0, 0);
   return { start, end };
 });
 
-const hr24 = ref<HeartRateSeries | null>(null);
-const hrv24 = ref<HrvSeries | null>(null);
-// Journal annotations in the 24h window (LOG-4). Surfaced as emoji
-// markpoints on the HR trace so caffeine / alcohol / mood / food /
-// meds events line up against the HR curve they actually affected.
-const annotations24 = ref<Annotation[]>([]);
-const dailyRows = ref<TodaySummary[]>([]);
-const priorRows = ref<TodaySummary[]>([]);
-const yearAgoRows = ref<TodaySummary[]>([]);
-const activities = ref<Activity[]>([]);
-// 24h overlays: activities (cardio + strength), sober resets, last sleep
-const activities24 = ref<Activity[]>([]);
-const soberResets24 = ref<Array<{ start_at: string }>>([]);
+const hr = ref<HeartRateSeries | null>(null);
+const annotations = ref<Annotation[]>([]);
+const dayActivities = ref<Activity[]>([]);
+const soberResets = ref<Array<{ start_at: string }>>([]);
 const lastSleep = ref<SleepNight | null>(null);
-const profile = ref<{
-  max_hr_estimated?: number | null;
-  resting_hr_baseline?: number | null;
-} | null>(null);
+const rows = ref<TodaySummary[]>([]);
+const yearAgoRows = ref<TodaySummary[]>([]);
+const stats = ref<RangeStats | null>(null);
+const tiles = ref<Record<string, VitalTile>>({});
 const loading = ref(true);
-const traceLoaded = ref(false);  // 24h trace only loads once
 const error = ref<string | null>(null);
 
-async function loadTrace() {
-  if (traceLoaded.value) return;
+function errText(e: unknown): string {
+  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof d === "string" ? d : "Couldn't reach the backend.";
+}
+
+async function loadTiles() {
   try {
-    const { start: since, end: until } = dayWindow.value;
-    const sinceMs = since.getTime();
-    const untilMs = until.getTime();
-    const [liveHr, liveHrv, acts, sleep, swo, sbHist, anns] = await Promise.all([
-      api.heartRate({ since, until }),
-      api.hrv({ since, until }),
-      api.activities({ since, limit: 30 }),
-      api.lastSleep().catch(() => null),
-      api.strengthWorkouts({ limit: 5 }).catch(() => ({ count: 0, workouts: [] })),
-      api.soberHistory(50).catch(() => []),
-      api.listAnnotations({ since, until, limit: 50 }).catch(() => [] as Annotation[]),
-    ]);
-    hr24.value = liveHr;
-    hrv24.value = liveHrv;
-    annotations24.value = anns;
+    const r = await api.summaryTiles();
+    tiles.value = Object.fromEntries(r.tiles.map((t) => [t.key, t]));
+  } catch { /* a chart without its band is still a chart */ }
+}
 
-    // Merge strength workouts that overlap the 24h window into the
-    // activity list as Activity-shaped rows, so workoutMarkArea can
-    // render them as bands alongside cardio activities.
-    const strengthAsActivity: Activity[] = (swo.workouts ?? [])
-      .filter((w) => w.started_at && w.completed_at)
-      .map((w) => {
-        const start = new Date(w.started_at!).getTime();
-        const end = new Date(w.completed_at!).getTime();
-        return {
-          source: "strength", source_id: String(w.id),
-          type: "strength",
-          name: `${w.split_focus.replace(/_/g, " ")} workout`,
-          start_at: w.started_at!,
-          duration_s: Math.max(0, Math.round((end - start) / 1000)),
-          distance_m: null, elevation_gain_m: null,
-          avg_hr: w.avg_hr ?? null, max_hr: w.max_hr ?? null,
-          avg_power_w: null, max_power_w: null, kcal: null,
-          suffer_score: null, polyline: null,
-        } as Activity;
-      })
-      .filter((a) => {
-        const t = new Date(a.start_at).getTime();
-        return t >= sinceMs && t <= untilMs;
-      });
-    activities24.value = [...acts, ...strengthAsActivity]
-      .filter((a) => {
-        const t = new Date(a.start_at).getTime();
-        return t >= sinceMs && t <= untilMs;
-      });
-
-    // Sober resets in window — same 1st-row drop convention as Today.vue
-    // (the chronological first row is the start-of-tracking, not a reset).
-    if (Array.isArray(sbHist) && sbHist.length > 0) {
-      const sortedAsc = [...sbHist].sort(
-        (a, b) => a.start_at.localeCompare(b.start_at),
-      );
-      soberResets24.value = sortedAsc.slice(1)
-        .filter((r) => new Date(r.start_at).getTime() >= sinceMs)
-        .map((r) => ({ start_at: r.start_at }));
-    } else {
-      soberResets24.value = [];
-    }
-
-    lastSleep.value = sleep;
-    traceLoaded.value = true;
-  } catch {
-    /* trace is non-critical; aggregates still render */
-  }
+async function loadDay() {
+  const { start: since, end: until } = dayWindow.value;
+  const [series, acts, sleep, swo, sb, anns] = await Promise.all([
+    api.heartRate({ since, until }),
+    api.activities({ since, limit: 30 }).catch(() => [] as Activity[]),
+    api.lastSleep().catch(() => null),
+    api.strengthWorkouts({ limit: 5 }).catch(() => ({ count: 0, workouts: [] })),
+    api.soberHistory(50).catch(() => []),
+    api.listAnnotations({ since, until, limit: 50 }).catch(() => [] as Annotation[]),
+  ]);
+  hr.value = series;
+  annotations.value = anns;
+  lastSleep.value = sleep;
+  const s0 = since.getTime(); const e0 = until.getTime();
+  const inWin = (a: { start_at: string }) => {
+    const t = new Date(a.start_at).getTime();
+    return t >= s0 && t <= e0;
+  };
+  const strength: Activity[] = (swo.workouts ?? [])
+    .filter((w) => w.started_at && w.completed_at)
+    .map((w) => ({
+      source: "strength", source_id: String(w.id), type: "strength",
+      name: `${w.split_focus.replace(/_/g, " ")} workout`, start_at: w.started_at!,
+      duration_s: Math.max(0, Math.round((new Date(w.completed_at!).getTime() - new Date(w.started_at!).getTime()) / 1000)),
+      distance_m: null, elevation_gain_m: null, avg_hr: w.avg_hr ?? null, max_hr: w.max_hr ?? null,
+      avg_power_w: null, max_power_w: null, kcal: null, suffer_score: null, polyline: null,
+    }) as Activity);
+  dayActivities.value = [...acts, ...strength].filter(inWin);
+  // The chronological first row is the start of tracking, not a reset.
+  const sorted = Array.isArray(sb) ? [...sb].sort((a, b) => a.start_at.localeCompare(b.start_at)) : [];
+  soberResets.value = sorted.slice(1).filter((r) => new Date(r.start_at).getTime() >= s0)
+    .map((r) => ({ start_at: r.start_at }));
 }
 
 async function loadHistory() {
+  const since = rangeSince.value ?? new Date(0);
+  const yaSince = new Date(since); yaSince.setFullYear(yaSince.getFullYear() - 1);
+  const yaUntil = new Date(); yaUntil.setFullYear(yaUntil.getFullYear() - 1);
+  const [r, s, ya] = await Promise.all([
+    api.summaryRange(since),
+    summaryRangeStats(since, toLocalISO(new Date())),
+    api.summaryRange(yaSince, yaUntil).catch(() => [] as TodaySummary[]),
+  ]);
+  rows.value = r;
+  stats.value = s;
+  yearAgoRows.value = ya;
+}
+
+async function load() {
   loading.value = true;
-  error.value = null;
   try {
-    // RANGE-1: shared resolver, anchored on local midnight.
-    const dailySince = rangeSince.value ?? new Date(0);
-
-    // The prior window is the same length immediately before this one.
-    // Derived from the two dates rather than from a day count, so it stays
-    // correct for any range the resolver can produce.
-    const spanDays = Math.max(
-      1,
-      Math.round((Date.now() - dailySince.getTime()) / 86_400_000),
-    );
-    const priorSince = new Date(dailySince);
-    priorSince.setDate(priorSince.getDate() - spanDays);
-    const priorUntil = new Date(dailySince);
-
-    const yearAgoSince = new Date(dailySince);
-    yearAgoSince.setFullYear(yearAgoSince.getFullYear() - 1);
-    const yearAgoUntil = new Date();
-    yearAgoUntil.setFullYear(yearAgoUntil.getFullYear() - 1);
-
-    const [daily, prior, yearAgo, acts, p] = await Promise.all([
-      api.summaryRange(dailySince),
-      api.summaryRange(priorSince, priorUntil),
-      api.summaryRange(yearAgoSince, yearAgoUntil),
-      api.activities({ since: dailySince, limit: 200 }),
-      api.getProfile().catch(() => null),
-    ]);
-    dailyRows.value = daily;
-    priorRows.value = prior;
-    yearAgoRows.value = yearAgo;
-    activities.value = acts;
-    profile.value = p ? {
-      max_hr_estimated: p.derived?.max_hr_estimated ?? null,
-      resting_hr_baseline: p.resting_hr_baseline ?? null,
-    } : null;
-  } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : "Failed to load";
+    await Promise.all([isDay.value ? loadDay() : loadHistory(), loadTiles()]);
+    error.value = null;
+  } catch (e) {
+    error.value = errText(e);
   } finally {
     loading.value = false;
   }
 }
-
-onMounted(() => {
-  loadHistory();
-  loadTrace();
-});
-useVisibilityRefresh(() => { loadHistory(); loadTrace(); });
+onMounted(load);
+useVisibilityRefresh(load);
 watch(range, (r) => {
-  loadHistory();
-  // Leaving the day view resets the anchor. Coming back to 24h and silently
-  // still being on last Tuesday is the confusion the tint exists to prevent;
-  // better not to create it in the first place.
-  if (r !== "24h" && !dayIsToday.value) selectedDay.value = todayLocalISO();
+  if (r !== "24h" && !dayIsToday.value) selectedDay.value = toLocalISO(new Date());
+  load();
 });
-watch(selectedDay, () => {
-  traceLoaded.value = false;
-  loadTrace();
+watch(selectedDay, () => { if (isDay.value) { hr.value = null; load(); } });
+
+const hasContent = computed(() => (isDay.value ? hr.value != null : rows.value.length > 0 || stats.value != null));
+const rest = computed(() => tiles.value.resting_hr ?? null);
+const restChip = computed(() => {
+  const t = rest.value;
+  if (!t || typeof t.value !== "number") return null;
+  return `Resting ${Math.round(t.value)}${t.status_reason ? ` · ${t.status_reason}` : ""}`;
 });
+const rs = computed(() => stats.value?.resting_hr ?? null);
+const zs = computed(() => hr.value?.stats ?? null);
+const r0 = (v: number | null | undefined) => (v == null ? "—" : String(Math.round(v)));
 
-const xWindow24 = computed(() => ({
-  min: dayWindow.value.start.getTime(),
-  max: dayWindow.value.end.getTime(),
-}));
+const axis = computed(() => chartTheme.value.axisLabel);
+const split = { lineStyle: { color: TRACK } };
 
-// Under the Vitality Neon skin the HR line/zones move to the neon cyan
-// palette; every other theme keeps the chartTheme red/zone colors
-// byte-for-byte. Charts that read these already trip on chartTheme.value
-// in their computed bodies, so adding isNeon to the same `void` line makes
-// them re-render when the theme flips.
-const hrLineColor = computed(() => (isNeon.value ? "#28e6ff" : chartTheme.value.palette.hr));
-// HR zones z1..z5 under neon (else the original tailwind-ish stops).
-const NEON_ZONE_COLORS = ["#6f7bff", "#28e6ff", "#5dff3b", "#ffb52e", "#ff5d7a"];
-
-// ── Headline cards ──
-function avg(xs: number[]): number | null {
-  if (!xs.length) return null;
-  return xs.reduce((s, v) => s + v, 0) / xs.length;
+function fmtDur(s: number): string {
+  const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
 }
-const periodAvgRhr = computed(() =>
-  avg(dailyRows.value.map((r) => r.resting_hr).filter((v): v is number => v != null)),
-);
-const priorAvgRhr = computed(() =>
-  avg(priorRows.value.map((r) => r.resting_hr).filter((v): v is number => v != null)),
-);
-const rhrDelta = computed(() => {
-  if (periodAvgRhr.value == null || priorAvgRhr.value == null) return null;
-  return periodAvgRhr.value - priorAvgRhr.value;
-});
-const periodAvgHrv = computed(() =>
-  avg(dailyRows.value.map((r) => r.hrv_avg).filter((v): v is number => v != null)),
-);
-const priorAvgHrv = computed(() =>
-  avg(priorRows.value.map((r) => r.hrv_avg).filter((v): v is number => v != null)),
-);
-const hrvDelta = computed(() => {
-  if (periodAvgHrv.value == null || priorAvgHrv.value == null) return null;
-  return periodAvgHrv.value - priorAvgHrv.value;
-});
+function maxHrWord(src?: string | null): string {
+  return src === "profile" ? "from your profile" : src === "estimated" ? "estimated from age"
+    : "a default — add your birth date for a better one";
+}
 
-// ── Live 24h trace ──
+// ── 24h trace over the server's zone bands ──
 const traceOption = computed(() => {
-  void chartTheme.value; void isNeon.value;
-  const t = chartTheme.value;
-  const hrColor = hrLineColor.value;
-  if (!hr24.value || hr24.value.points.length === 0) return null;
-
-  // Stack the mean line + sober-reset verticals into a single markLine
-  // (ECharts allows only one markLine per series). Workout bands and
-  // sleep band are separate markAreas — we use one host series each
-  // since markArea is also one-per-series.
+  const h = hr.value;
+  if (!h || h.points.length < 2) return null;
+  const zones = h.stats?.time_in_zone ?? [];
   const markLineData: any[] = [];
-  let markLineConfig: any = null;
-  if (hr24.value.avg != null) {
-    markLineData.push({
-      yAxis: hr24.value.avg,
-      lineStyle: { color: t.palette.steps, type: "dashed" as const, opacity: 0.6 },
-      label: { show: true, formatter: `avg ${hr24.value.avg.toFixed(0)}`,
-               color: t.axisLabel.color, fontSize: 9 },
-    });
-    markLineConfig = { silent: true, symbol: "none" };
-  }
-  const resetLine = soberResetMarkLine(soberResets24.value);
-  if (resetLine) {
-    for (const d of (resetLine.data as any[])) markLineData.push(d);
-    markLineConfig = markLineConfig ?? { symbol: ["none", "none"] };
-  }
-
-  // Park annotation markers slightly above the HR series' max value
-  // so the emoji icons don't collide with the HR line itself.
-  const hrMax = hr24.value.points.reduce(
-    (m, p) => Math.max(m, p.value ?? 0), 0,
-  );
-  const annoYValue = hrMax > 0 ? hrMax + 8 : 100;
-
+  if (h.avg != null) markLineData.push({
+    yAxis: h.avg, lineStyle: { color: "#ececf5", type: "dashed" as const, opacity: 0.45 },
+    label: { show: true, formatter: `avg ${Math.round(h.avg)}`, color: "#9b9bb0", fontSize: 9 },
+  });
+  const reset = soberResetMarkLine(soberResets.value);
+  if (reset) for (const d of (reset.data as any[])) markLineData.push(d);
+  const hi = h.points.reduce((m, p) => Math.max(m, p.value ?? 0), 0);
   const series: any[] = [
     {
       type: "line", name: "HR", showSymbol: false, smooth: true,
-      lineStyle: { color: hrColor, width: 1.5 },
-      areaStyle: { color: `${hrColor}22` },
-      data: hr24.value.points.map((p) => [p.time, p.value]),
-      ...(markLineConfig
-        ? { markLine: { ...markLineConfig, data: markLineData } } : {}),
-      ...(activities24.value.length > 0
-        ? { markArea: workoutMarkArea(activities24.value) } : {}),
-      ...(annotations24.value.length > 0
-        ? { markPoint: annotationMarkPoint(annotations24.value, annoYValue) }
-        : {}),
+      lineStyle: { color: CYAN, width: 1.6 }, areaStyle: { color: `${CYAN}18` },
+      data: h.points.map((p) => [p.time, p.value]),
+      ...(markLineData.length ? { markLine: { silent: true, symbol: ["none", "none"], data: markLineData } } : {}),
+      ...(dayActivities.value.length ? { markArea: workoutMarkArea(dayActivities.value) } : {}),
+      ...(annotations.value.length ? { markPoint: annotationMarkPoint(annotations.value, hi > 0 ? hi + 8 : 100) } : {}),
+    },
+    {
+      // Zone bands, one host series (markArea is one-per-series).
+      type: "line", name: "zones", data: [], silent: true,
+      markArea: { silent: true, data: zones.map((z, i) => [
+        { yAxis: z.lo_bpm, itemStyle: { color: ZONE_COLORS[Math.min(i, 4)], opacity: 0.09 } },
+        { yAxis: z.hi_bpm ?? 250 },
+      ]) },
     },
   ];
-
-  // Off-wrist mark-area removed in v0.7.272 — wear-state timing from
-  // HA was unreliable enough that bands often covered actual on-wrist
-  // periods. The helper still exists in chartHelpers.ts in case we
-  // want to revive it with a better signal.
-
-  // Second host series for the sleep band (markArea is one-per-series).
-  const sleepArea = sleepMarkArea(
-    lastSleep.value, xWindow24.value.min, xWindow24.value.max,
-  );
-  if (sleepArea) {
-    series.push({
-      type: "line", name: "Sleep window",
-      data: [], showSymbol: false, silent: true,
-      markArea: sleepArea,
-    });
-  }
-
+  const sleepArea = sleepMarkArea(lastSleep.value, dayWindow.value.start.getTime(), dayWindow.value.end.getTime());
+  if (sleepArea) series.push({ type: "line", name: "Sleep", data: [], silent: true, markArea: sleepArea });
   return {
-    grid: { left: 40, right: 12, top: 12, bottom: 28 },
-    xAxis: {
-      type: "time",
-      min: xWindow24.value.min,
-      max: xWindow24.value.max,
-      axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: "value", scale: true,
-      axisLabel: t.axisLabel, splitLine: t.splitLine,
-    },
-    tooltip: { trigger: "axis", ...t.tooltip },
+    grid: { left: 36, right: 8, top: 12, bottom: 24 },
+    xAxis: { type: "time", min: dayWindow.value.start.getTime(), max: dayWindow.value.end.getTime(),
+             axisLabel: { ...axis.value, formatter: timeAxisFormatter }, splitLine: { show: false } },
+    yAxis: { type: "value", scale: true, axisLabel: axis.value, splitLine: split },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip },
     series,
   };
 });
 
-// ── Daily resting HR over the selected range ──
-function dailyLineOption(rows: TodaySummary[], color: string) {
-  void chartTheme.value; void isNeon.value;
-  const t = chartTheme.value;
-  // Keep the null days IN the series. Filtering them out let ECharts draw a
-  // straight segment from the day before to the day after, which invents a
-  // reading for a day the watch never recorded. Nulls break the line instead,
-  // and `gapBridge` dashes across the break so it reads as "no data here"
-  // rather than as a broken chart. Matches HrDetailScreen.kt.
-  const data = rows.map((r) => [r.date, r.resting_hr] as [string, number | null]);
-  if (!data.some((d) => d[1] != null)) return null;
+const histogramOption = computed(() => {
+  const bins = zs.value?.histogram ?? [];
+  if (!bins.length) return null;
   return {
-    grid: { left: 44, right: 16, top: 24, bottom: 28 },
-    xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
-             splitLine: t.splitLine,
-             // Axis spans the SELECTED window, not just the days with data.
-             ...windowExtent(rangeSince.value?.getTime() ?? null), },
-    // The band has to be inside the axis extent or ECharts clips it — a band
-    // clipped at the top edge reads as "every reading is abnormal" when the
-    // truth is the opposite. `scale: true` alone fits the DATA, not the band.
-    yAxis: {
-      type: "value", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine,
-      // The baseline markLine shares this axis, so it must be inside the
-      // extent too — otherwise the one reference you compare against is the
-      // one that silently isn't drawn.
-      ...bandAwareExtent(
-        [
-          ...data.map((d) => d[1]).filter((v): v is number => v != null),
-          ...(profile.value?.resting_hr_baseline != null
-            ? [profile.value.resting_hr_baseline] : []),
-        ],
-        bands.value.resting_hr?.low, bands.value.resting_hr?.high,
-      ),
-    },
-    tooltip: { ...t.tooltip, trigger: "axis" },
-    series: [{
-      type: "line", name: "Resting HR",
-      showSymbol: data.length < 90, smooth: true,
-      connectNulls: false,
-      lineStyle: { color, width: 1.8 },
-      itemStyle: { color },
-      areaStyle: { color: `${color}1f` },
-      data,
-      // Resting HR's own normal band. markArea is free on this series —
-      // the time-based bands live on the 24h trace, not here.
-      markArea: normalBandMarkArea(
-        bands.value.resting_hr?.low, bands.value.resting_hr?.high,
-      ),
-      markLine: profile.value?.resting_hr_baseline
-        ? meanMarkLine(profile.value.resting_hr_baseline, "baseline")
-        : undefined,
-    }, gapBridgeSeries(data, color),
-      // gapBridgeSeries dashes the holes BETWEEN readings; these dash the
-      // window's empty head and tail, which it cannot see.
-      ...noDataSpans(daysToPoints(data), rangeSince.value?.getTime() ?? null,
-                     Date.now(), color)],
+    grid: { left: 40, right: 8, top: 10, bottom: 30 },
+    xAxis: { type: "category", data: bins.map((b) => String(b.lo)), axisLabel: axis.value,
+             name: "bpm", nameLocation: "middle", nameGap: 20, nameTextStyle: axis.value },
+    yAxis: { type: "value", axisLabel: { ...axis.value, formatter: (v: number) => (v >= 60 ? `${Math.round(v / 60)}h` : `${v}m`) },
+             splitLine: split },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip,
+               formatter: (p: any) => `${p[0].name}–${Number(p[0].name) + 5} bpm: ${p[0].value} min` },
+    series: [{ type: "bar", data: bins.map((b) => b.minutes), barWidth: "85%",
+               itemStyle: { color: CYAN, borderRadius: [3, 3, 0, 0] } }],
   };
-}
+});
 
-/**
- * y-axis min/max wide enough to contain both the data and the normal band,
- * rounded outward to a multiple of 5 so the ticks stay readable.
- */
-function bandAwareExtent(
-  values: number[], low?: number | null, high?: number | null,
-): { min?: number; max?: number } {
+// ── Resting HR over the window ──
+function bandAwareExtent(values: number[], low?: number | null, high?: number | null) {
   if (!values.length) return {};
   const lo = Math.min(...values, low ?? Infinity);
   const hi = Math.max(...values, high ?? -Infinity);
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return {};
   const pad = Math.max((hi - lo) * 0.12, 1);
-  return {
-    min: Math.floor((lo - pad) / 5) * 5,
-    max: Math.ceil((hi + pad) / 5) * 5,
-  };
+  return { min: Math.floor((lo - pad) / 5) * 5, max: Math.ceil((hi + pad) / 5) * 5 };
 }
-
-/**
- * A dashed line spanning each run of missing days, so a gap reads as a gap
- * instead of as two disconnected fragments. Phone twin: `drawGapBridge`.
- */
-function gapBridgeSeries(data: [string, number | null][], color: string) {
-  const segs: [string, number][][] = [];
-  let prev: [string, number] | null = null;
-  let gapped = false;
-  for (const [d, v] of data) {
-    if (v == null) { gapped = true; continue; }
-    if (prev && gapped) segs.push([prev, [d, v]]);
-    prev = [d, v];
-    gapped = false;
-  }
-  return {
-    type: "line", name: "gap", silent: true, showSymbol: false,
-    tooltip: { show: false },
-    lineStyle: { color, width: 1.4, type: "dashed", opacity: 0.5 },
-    itemStyle: { color },
-    // One flat array with a null between segments breaks the line between
-    // them, so every bridge is drawn by a single cheap series.
-    data: segs.flatMap((s, i) => (i ? [[null, null], ...s] : s)),
-  };
-}
-const restingOption = computed(() =>
-  dailyLineOption(dailyRows.value, hrLineColor.value),
-);
-
-// ── Daily HRV ──
-/** Server-derived normal bands for the two metrics on this page. Fetched
- *  once — client.ts coalesces concurrent /summary/tiles callers — and never
- *  recomputed here; the ±rule is a health judgement in analytics/tiles.py. */
-const bands = ref<Record<string, { low: number | null; high: number | null }>>({});
-onMounted(async () => {
-  try {
-    const r = await api.summaryTiles();
-    for (const t of r.tiles ?? []) {
-      bands.value[t.key] = { low: t.band_low, high: t.band_high };
-    }
-  } catch { /* a chart without its band is still a chart */ }
-});
-
-const hrvOption = computed(() => {
-  void chartTheme.value; void isNeon.value;
-  const t = chartTheme.value;
-  // HRV is a heart-family metric → neon cyan; every other theme keeps the
-  // chartTheme green byte-for-byte.
-  const hrvColor = isNeon.value ? "#28e6ff" : t.palette.hrv;
-  // Keep null days as holes, same as the resting-HR chart above. Filtering
-  // them let ECharts join the days either side of a gap with a solid segment,
-  // inventing an HRV reading for a night the watch did not record.
-  const data = dailyRows.value
-    .map((r) => [r.date, r.hrv_avg] as [string, number | null]);
+const restingOption = computed(() => {
+  const data = rows.value.map((r) => [r.date, r.resting_hr] as [string, number | null]);
   if (!data.some((d) => d[1] != null)) return null;
+  const t = rest.value;
   return {
-    grid: { left: 44, right: 16, top: 24, bottom: 28 },
-    xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
-             splitLine: t.splitLine,
-             // Axis spans the SELECTED window, not just the days with data.
-             ...windowExtent(rangeSince.value?.getTime() ?? null), },
-    yAxis: {
-      type: "value", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine,
-      ...bandAwareExtent(
-        data.map((d) => d[1]).filter((v): v is number => v != null),
-        bands.value.hrv?.low, bands.value.hrv?.high,
-      ),
-    },
-    tooltip: { ...t.tooltip, trigger: "axis" },
-    series: [{
-      type: "line", name: "HRV (ms)", showSymbol: data.length < 90, smooth: true,
-      connectNulls: false,
-      lineStyle: { color: hrvColor, width: 1.8 },
-      itemStyle: { color: hrvColor },
-      areaStyle: { color: `${hrvColor}1f` }, data,
-      // markArea slot is free on this series — no time bands here.
-      markArea: normalBandMarkArea(
-        bands.value.hrv?.low, bands.value.hrv?.high, hrvColor,
-      ),
-    }, gapBridgeSeries(data, hrvColor),
-      ...noDataSpans(daysToPoints(data), rangeSince.value?.getTime() ?? null,
-                     Date.now(), hrvColor)],
-  };
-});
-
-// ── Time in zone (from 24h trace) ──
-const ZONE_DEFS = [
-  { name: "Z1 · easy",      min: 0.50, color: "#38bdf8" },
-  { name: "Z2 · aerobic",   min: 0.60, color: "#22c55e" },
-  { name: "Z3 · tempo",     min: 0.70, color: "#eab308" },
-  { name: "Z4 · threshold", min: 0.80, color: "#f97316" },
-  { name: "Z5 · max",       min: 0.90, color: "#ef4444" },
-];
-const zonesOption = computed(() => {
-  void chartTheme.value; void isNeon.value;
-  const t = chartTheme.value;
-  const zoneColor = (i: number) => (isNeon.value ? NEON_ZONE_COLORS[i] : ZONE_DEFS[i].color);
-  if (!hr24.value || hr24.value.points.length === 0) return null;
-  const maxHr = profile.value?.max_hr_estimated ?? 187;
-  const buckets = ZONE_DEFS.map(() => 0);
-  const pts = hr24.value.points;
-  for (let i = 1; i < pts.length; i++) {
-    const dt = (new Date(pts[i].time).getTime() - new Date(pts[i - 1].time).getTime()) / 1000;
-    if (dt <= 0 || dt > 600) continue;
-    const v = pts[i].value;
-    const pct = v / maxHr;
-    let z = 0;
-    for (let k = ZONE_DEFS.length - 1; k >= 0; k--) {
-      if (pct >= ZONE_DEFS[k].min) { z = k; break; }
-    }
-    buckets[z] += dt;
-  }
-  const total = buckets.reduce((s, v) => s + v, 0);
-  if (total === 0) return null;
-  const data = buckets.map((s, i) => ({
-    value: +(s / 60).toFixed(0),
-    itemStyle: { color: zoneColor(i) },
-  }));
-  return {
-    grid: { left: 90, right: 30, top: 12, bottom: 28 },
-    xAxis: { type: "value", axisLabel: { ...t.axisLabel, formatter: "{value} min" },
-             splitLine: t.splitLine },
-    yAxis: { type: "category", data: ZONE_DEFS.map((z) => z.name),
-             axisLabel: { ...t.axisLabel, fontSize: 11 } },
-    tooltip: { ...t.tooltip, trigger: "axis", axisPointer: { type: "shadow" },
-               formatter: (p: any) => `${p[0].name}: ${p[0].value} min` },
-    series: [{
-      type: "bar", data, barWidth: 16,
-      label: { show: true, position: "right", color: t.axisLabel.color, fontSize: 10,
-               formatter: (p: any) => total > 0
-                 ? `${((p.data.value * 60 / total) * 100).toFixed(0)}%` : "" },
-    }],
-  };
-});
-
-// ── HR distribution histogram (5-bpm bins, from 24h trace) ──
-const histogramOption = computed(() => {
-  void chartTheme.value; void isNeon.value;
-  const t = chartTheme.value;
-  const hrColor = hrLineColor.value;
-  if (!hr24.value || hr24.value.points.length === 0) return null;
-  const BIN = 5;
-  const counts = new Map<number, number>();
-  let lo = Infinity, hi = -Infinity;
-  for (const p of hr24.value.points) {
-    const bin = Math.floor(p.value / BIN) * BIN;
-    counts.set(bin, (counts.get(bin) ?? 0) + 1);
-    lo = Math.min(lo, bin); hi = Math.max(hi, bin);
-  }
-  if (!isFinite(lo) || !isFinite(hi)) return null;
-  const bins: number[] = [];
-  for (let b = lo; b <= hi; b += BIN) bins.push(b);
-  return {
-    grid: { left: 40, right: 16, top: 12, bottom: 36 },
-    xAxis: {
-      type: "category",
-      data: bins.map((b) => `${b}`),
-      name: "bpm", nameLocation: "middle", nameGap: 22,
-      nameTextStyle: t.axisLabel,
-      axisLabel: t.axisLabel,
-    },
-    yAxis: { type: "value", axisLabel: t.axisLabel, splitLine: t.splitLine },
-    tooltip: { ...t.tooltip, trigger: "axis", axisPointer: { type: "shadow" } },
-    series: [{
-      type: "bar",
-      data: bins.map((b) => counts.get(b) ?? 0),
-      itemStyle: { color: hrColor },
-      barWidth: "85%",
-    }],
-  };
-});
-
-// ── Weekday-of-week pattern (avg resting HR by DOW from selected range) ──
-const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const weekdayOption = computed(() => {
-  void chartTheme.value; void isNeon.value;
-  const t = chartTheme.value;
-  const hrColor = hrLineColor.value;
-  const sums = Array(7).fill(0);
-  const cnts = Array(7).fill(0);
-  for (const r of dailyRows.value) {
-    if (r.resting_hr == null) continue;
-    const d = new Date(r.date + "T00:00:00").getDay();
-    sums[d] += r.resting_hr;
-    cnts[d] += 1;
-  }
-  const data = sums.map((s, i) => cnts[i] > 0 ? +(s / cnts[i]).toFixed(1) : null);
-  if (data.every((v) => v == null)) return null;
-  return {
-    grid: { left: 40, right: 16, top: 12, bottom: 28 },
-    xAxis: { type: "category", data: DOW, axisLabel: t.axisLabel },
-    yAxis: { type: "value", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
-    tooltip: { ...t.tooltip, trigger: "axis", axisPointer: { type: "shadow" },
-               formatter: (p: any) => `${p[0].name}: ${p[0].value ?? "—"} bpm` },
-    series: [{
-      type: "bar",
-      data: data.map((v) => ({ value: v, itemStyle: { color: hrColor } })),
-      barWidth: "55%",
-      label: { show: true, position: "top", color: t.axisLabel.color, fontSize: 10,
-               formatter: (p: any) => p.value != null ? `${Math.round(p.value)}` : "" },
-    }],
-  };
-});
-
-// ── Exercise (activity-type) HR correlation ──
-const activityHrOption = computed(() => {
-  void chartTheme.value; void isNeon.value;
-  const t = chartTheme.value;
-  const hrColor = hrLineColor.value;
-  const grouped = new Map<string, number[]>();
-  for (const a of activities.value) {
-    if (a.avg_hr == null) continue;
-    const arr = grouped.get(a.type) ?? [];
-    arr.push(a.avg_hr);
-    grouped.set(a.type, arr);
-  }
-  if (grouped.size === 0) return null;
-  const types = Array.from(grouped.keys()).sort();
-  const avgs = types.map((tp) => {
-    const arr = grouped.get(tp)!;
-    return +(arr.reduce((s, v) => s + v, 0) / arr.length).toFixed(0);
-  });
-  const counts = types.map((tp) => grouped.get(tp)!.length);
-  return {
-    grid: { left: 110, right: 30, top: 12, bottom: 28 },
-    xAxis: { type: "value", axisLabel: { ...t.axisLabel, formatter: "{value} bpm" },
-             splitLine: t.splitLine },
-    yAxis: { type: "category", data: types, axisLabel: { ...t.axisLabel, fontSize: 11 } },
-    tooltip: { ...t.tooltip, trigger: "axis", axisPointer: { type: "shadow" },
-               formatter: (p: any) => {
-                 const i = types.indexOf(p[0].name);
-                 return `${p[0].name}: ${p[0].value} bpm avg<br/>${counts[i]} session(s)`;
-               } },
-    series: [{
-      type: "bar",
-      data: avgs.map((v, i) => ({
-        value: v,
-        itemStyle: {
-          color: types[i] === "strength" ? t.palette.workout
-                : types[i] === "rower" ? t.palette.violet
-                : hrColor,
-        },
-      })),
-      barWidth: 14,
-      label: { show: true, position: "right", color: t.axisLabel.color, fontSize: 10,
-               formatter: (p: any) => {
-                 const i = types.indexOf(p.name);
-                 return `${p.value} · n=${counts[i]}`;
-               } },
-    }],
-  };
-});
-
-// ── Year-over-year overlay ──
-const yoyOption = computed(() => {
-  void chartTheme.value; void isNeon.value;
-  const t = chartTheme.value;
-  const hrColor = hrLineColor.value;
-  // Keep the null days on BOTH series, same as every other chart on this page.
-  // Filtering them let ECharts join the readings either side of a gap with a
-  // smooth segment — and on the year-ago line, which is a year of history,
-  // that could span weeks of missing data as one confident curve to compare
-  // yourself against.
-  const cur = dailyRows.value
-    .map((r) => [new Date(r.date + "T00:00:00").getTime(), r.resting_hr] as
-      [number, number | null]);
-  // Year-ago series gets shifted forward by 1 year so both lines share an x-axis.
-  const yoy = yearAgoRows.value.map((r) => {
-    const d = new Date(r.date + "T00:00:00");
-    d.setFullYear(d.getFullYear() + 1);
-    return [d.getTime(), r.resting_hr] as [number, number | null];
-  });
-  if (!cur.some((d) => d[1] != null) && !yoy.some((d) => d[1] != null)) return null;
-  return {
-    legend: { textStyle: t.axisLabel, top: 0 },
-    grid: { left: 40, right: 16, top: 30, bottom: 28 },
-    xAxis: { type: "time", axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
-             splitLine: t.splitLine },
-    yAxis: { type: "value", scale: true, axisLabel: t.axisLabel, splitLine: t.splitLine },
-    tooltip: { ...t.tooltip, trigger: "axis" },
+    grid: { left: 36, right: 8, top: 14, bottom: 24 },
+    xAxis: { type: "time", axisLabel: { ...axis.value, formatter: timeAxisFormatter }, splitLine: { show: false },
+             ...windowExtent(rangeSince.value?.getTime() ?? null) },
+    yAxis: { type: "value", scale: true, axisLabel: axis.value, splitLine: split,
+             ...bandAwareExtent([...data.map((d) => d[1]).filter((v): v is number => v != null),
+                                 ...(t?.baseline != null ? [t.baseline] : [])], t?.band_low, t?.band_high) },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip },
     series: [
-      {
-        type: "line", name: "This period", smooth: true, showSymbol: cur.length < 90,
-        connectNulls: false,
-        lineStyle: { color: hrColor, width: 1.8 },
-        itemStyle: { color: hrColor },
-        data: cur,
-      },
-      {
-        type: "line", name: "Same period last year", smooth: true, showSymbol: false,
-        connectNulls: false,
-        lineStyle: { color: t.palette.steps, width: 1.4, type: "dashed" },
-        itemStyle: { color: t.palette.steps },
-        data: yoy,
-      },
+      { type: "line", name: "Resting HR", smooth: true, connectNulls: false, showSymbol: data.length < 90,
+        lineStyle: { color: CYAN, width: 2 }, itemStyle: { color: CYAN }, areaStyle: { color: `${CYAN}1f` }, data,
+        markArea: normalBandMarkArea(t?.band_low, t?.band_high),
+        markLine: t?.baseline != null ? meanMarkLine(t.baseline, "baseline") : undefined },
+      ...noDataSpans(daysToPoints(data), rangeSince.value?.getTime() ?? null, Date.now(), CYAN),
     ],
   };
 });
 
-const maxHrInWindow = computed(() => hr24.value?.max_bpm ?? null);
-const minHrInWindow = computed(() => hr24.value?.min_bpm ?? null);
+const weekdayOption = computed(() => {
+  const wm = rs.value?.weekday_means ?? [];
+  if (!wm.some((w) => w.mean != null)) return null;
+  return {
+    grid: { left: 36, right: 8, top: 18, bottom: 24 },
+    xAxis: { type: "category", data: wm.map((w) => w.dow), axisLabel: axis.value },
+    yAxis: { type: "value", scale: true, axisLabel: axis.value, splitLine: split },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip },
+    series: [{ type: "bar", data: wm.map((w) => w.mean), barWidth: "55%",
+               itemStyle: { color: CYAN, opacity: 0.85, borderRadius: [3, 3, 0, 0] },
+               label: { show: true, position: "top", color: "#9b9bb0", fontSize: 10,
+                        formatter: (p: any) => (p.value != null ? `${Math.round(p.value)}` : "") } }],
+  };
+});
+
+const hrvOption = computed(() => {
+  const data = rows.value.map((r) => [r.date, r.hrv_avg] as [string, number | null]);
+  if (!data.some((d) => d[1] != null)) return null;
+  const t = tiles.value.hrv;
+  return {
+    grid: { left: 36, right: 8, top: 14, bottom: 24 },
+    xAxis: { type: "time", axisLabel: { ...axis.value, formatter: timeAxisFormatter }, splitLine: { show: false },
+             ...windowExtent(rangeSince.value?.getTime() ?? null) },
+    yAxis: { type: "value", scale: true, axisLabel: axis.value, splitLine: split },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip },
+    series: [{ type: "line", name: "HRV (ms)", smooth: true, connectNulls: false, showSymbol: data.length < 90,
+               lineStyle: { color: "#6f7bff", width: 1.8 }, itemStyle: { color: "#6f7bff" }, data,
+               markArea: normalBandMarkArea(t?.band_low, t?.band_high, "#6f7bff") }],
+  };
+});
+
+const yoyOption = computed(() => {
+  const now = rows.value.map((r) => [new Date(r.date + "T00:00:00").getTime(), r.resting_hr] as [number, number | null]);
+  const ya = yearAgoRows.value.map((r) => {
+    const d = new Date(r.date + "T00:00:00"); d.setFullYear(d.getFullYear() + 1);
+    return [d.getTime(), r.resting_hr] as [number, number | null];
+  });
+  if (!ya.some((d) => d[1] != null)) return null;
+  return {
+    legend: { textStyle: axis.value, top: 0 },
+    grid: { left: 36, right: 8, top: 28, bottom: 24 },
+    xAxis: { type: "time", axisLabel: { ...axis.value, formatter: timeAxisFormatter }, splitLine: { show: false } },
+    yAxis: { type: "value", scale: true, axisLabel: axis.value, splitLine: split },
+    tooltip: { trigger: "axis", ...chartTheme.value.tooltip },
+    series: [
+      { type: "line", name: "This period", smooth: true, connectNulls: false, showSymbol: false,
+        lineStyle: { color: CYAN, width: 1.8 }, itemStyle: { color: CYAN }, data: now },
+      { type: "line", name: "Same period last year", smooth: true, connectNulls: false, showSymbol: false,
+        lineStyle: { color: "#9b9bb0", width: 1.4, type: "dashed" }, itemStyle: { color: "#9b9bb0" }, data: ya },
+    ],
+  };
+});
 </script>
 
 <template>
-  <section class="hr">
-    <PageHeader title="Heart rate">
+  <NeonPage title="Heart rate" :back="true">
+    <template #trailing><span class="dicon" style="--a: #28e6ff"><HeartPulse :size="20" /></span></template>
+    <div class="dtabs">
       <RangeTabs v-model="range" :options="RANGES" aria-label="Heart-rate time range">
-        <template #before>
-          <PatternsLink metric="resting_hr" label="resting HR"/>
-        </template>
-        <template #after>
-          <DayNav v-if="range === '24h'" v-model="selectedDay"/>
-        </template>
+        <template #before><PatternsLink metric="resting_hr" label="resting HR"/></template>
+        <template #after><DayNav v-if="isDay" v-model="selectedDay"/></template>
       </RangeTabs>
-    </PageHeader>
-
-    <p v-if="error" class="err">{{ error }}</p>
-
-    <!-- Headline cards always render once history is loaded -->
-    <div v-if="!loading" class="cards">
-      <StatCard title="Resting HR"
-                :value="periodAvgRhr != null ? Math.round(periodAvgRhr) : '—'"
-                unit="bpm" :delta="rhrDelta" delta-good-when="down" />
-
-      <StatCard title="HRV (RMSSD)"
-                :value="periodAvgHrv != null ? Math.round(periodAvgHrv) : '—'"
-                unit="ms" :delta="hrvDelta" delta-good-when="up" />
-
-      <StatCard title="Max HR (24h)"
-                :value="maxHrInWindow != null ? Math.round(maxHrInWindow) : '—'"
-                unit="bpm">
-        <span v-if="profile?.max_hr_estimated" class="muted">
-          est max {{ profile.max_hr_estimated }}
-        </span>
-      </StatCard>
-
-      <StatCard title="Min HR (24h)"
-                :value="minHrInWindow != null ? Math.round(minHrInWindow) : '—'"
-                unit="bpm" />
     </div>
 
-    <LoadState v-if="loading" />
-
-    <template v-if="!loading">
-      <!-- 24h trace -->
-      <Card v-if="traceOption" title="HR trace · last 24h" :flat="true">
-        <div class="chart"><VChart :option="traceOption" autoresize/></div>
-      </Card>
-
-      <!-- Time in zone (24h) -->
-      <Card v-if="zonesOption" title="Time in zone · last 24h" :flat="true">
-        <div class="chart-sm"><VChart :option="zonesOption" autoresize/></div>
-        <p class="hint" v-if="profile?.max_hr_estimated">Max HR: {{ profile.max_hr_estimated }} bpm.</p>
-      </Card>
-
-      <!-- HR distribution histogram (24h) -->
-      <Card v-if="histogramOption" title="HR distribution · last 24h" :flat="true">
-        <div class="chart-sm"><VChart :option="histogramOption" autoresize/></div>
-        <p class="hint">5-bpm bins. Sample count per bin.</p>
-      </Card>
-
-      <!-- Daily resting HR history -->
-      <Card v-if="restingOption" :title="`Daily resting HR · ${cur.label}`" :flat="true">
-        <div class="chart"><VChart :option="restingOption" autoresize/></div>
-      </Card>
-
-      <!-- YoY overlay -->
-      <Card v-if="yoyOption" :title="`Year-over-year resting HR · ${cur.label}`" :flat="true">
-        <div class="chart"><VChart :option="yoyOption" autoresize/></div>
-      </Card>
-
-      <!-- Weekday pattern -->
-      <Card v-if="weekdayOption" :title="`Resting HR by weekday · ${cur.label}`" :flat="true">
-        <div class="chart-sm"><VChart :option="weekdayOption" autoresize/></div>
-      </Card>
-
-      <!-- Activity HR correlation -->
-      <Card v-if="activityHrOption" :title="`Avg HR by activity type · ${cur.label}`" :flat="true">
-        <div class="chart-sm"><VChart :option="activityHrOption" autoresize/></div>
-        <p class="hint">Average HR per session, grouped by activity type.</p>
-      </Card>
-
-      <!-- Daily HRV -->
-      <Card v-if="hrvOption" :title="`Daily HRV · ${cur.label}`" :flat="true">
-        <div class="chart"><VChart :option="hrvOption" autoresize/></div>
-      </Card>
+    <template v-if="!hasContent">
+      <DetailSkeleton v-if="loading" :accent="CYAN" label="Heart rate" />
+      <DetailError v-else-if="error" :error="error" @retry="load" />
     </template>
-  </section>
+
+    <template v-else-if="isDay && hr">
+      <DetailError v-if="error" :error="error" cached @retry="load" />
+      <NeonHero :accent="CYAN">
+        <span class="deb">{{ dayIsToday ? "Today" : selectedDay }}</span>
+        <span class="dbig" :style="{ color: CYAN }">{{ r0(hr.avg) }}<small>avg bpm</small></span>
+        <StatusChip v-if="dayIsToday" :status="rest?.status" :text="restChip" />
+        <div v-if="traceOption" class="dchart tall"><VChart :option="traceOption" autoresize/></div>
+        <p v-else class="dnote">{{ dayIsToday ? "No HR samples yet today." : "No HR samples on this day." }}</p>
+        <div v-if="zs" class="dlegend">
+          <span v-for="(z, i) in zs.time_in_zone" :key="z.zone"><i :style="{ background: ZONE_COLORS[Math.min(i, 4)] }"></i>{{ z.zone }}</span>
+        </div>
+      </NeonHero>
+      <div class="dstats">
+        <NeonStat :value="r0(hr.min_bpm)" label="Min bpm" />
+        <NeonStat :value="r0(hr.avg)" label="Avg bpm" :accent="CYAN" />
+        <NeonStat :value="r0(hr.max_bpm)" label="Max bpm" />
+      </div>
+      <p class="dnote">The line is a 2-minute average; min and max are from every reading.</p>
+
+      <DetailCard v-if="zs && zs.tracked_s > 0" title="Time in zone"
+                  :subtitle="zs.max_hr ? `Zones from a max HR of ${zs.max_hr} bpm (${maxHrWord(zs.max_hr_source)})` : null">
+        <div class="zbar">
+          <span v-for="(z, i) in zs.time_in_zone" :key="z.zone" v-show="z.seconds > 0"
+                :style="{ flex: z.seconds, background: ZONE_COLORS[Math.min(i, 4)] }"></span>
+        </div>
+        <div v-for="(z, i) in zs.time_in_zone" :key="'r' + z.zone" class="zrow">
+          <i :style="{ background: ZONE_COLORS[Math.min(i, 4)] }"></i>
+          <span class="zl">{{ z.zone }} · {{ z.label }}</span>
+          <span class="zb">{{ z.hi_bpm != null ? `${z.lo_bpm}–${z.hi_bpm}` : `${z.lo_bpm}+` }}</span>
+          <b>{{ fmtDur(z.seconds) }}</b>
+          <span class="zp">{{ z.pct != null ? `${Math.round(z.pct)}%` : "—" }}</span>
+        </div>
+      </DetailCard>
+
+      <DetailCard v-if="histogramOption" title="HR distribution" subtitle="5-bpm bins · time spent in each">
+        <div class="dchart"><VChart :option="histogramOption" autoresize/></div>
+      </DetailCard>
+    </template>
+
+    <template v-else>
+      <DetailError v-if="error" :error="error" cached @retry="load" />
+      <NeonHero :accent="CYAN">
+        <span class="deb">Resting HR · {{ cur.label }}</span>
+        <span class="dbig" :style="{ color: CYAN }">{{ r0(rs?.latest) }}<small>bpm latest</small></span>
+        <span v-if="rs?.latest_vs_avg != null" class="dsubline">
+          {{ Math.abs(rs.latest_vs_avg) < 0.5 ? `at your ${cur.label} average`
+             : `${rs.latest_vs_avg > 0 ? "+" : ""}${Math.round(rs.latest_vs_avg)} vs ${cur.label} average` }}
+        </span>
+        <StatusChip :status="rest?.status" :text="restChip" />
+        <div v-if="restingOption" class="dchart tall"><VChart :option="restingOption" autoresize/></div>
+        <p v-else class="dnote">No resting HR data in this window.</p>
+      </NeonHero>
+      <div class="dstats">
+        <NeonStat :value="r0(rs?.min)" label="Min" />
+        <NeonStat :value="r0(rs?.avg)" label="Avg" :accent="CYAN" />
+        <NeonStat :value="r0(rs?.max)" label="Max" />
+      </div>
+      <DetailCard v-if="weekdayOption" title="Resting HR by weekday" subtitle="Average on each weekday in this window">
+        <div class="dchart"><VChart :option="weekdayOption" autoresize/></div>
+      </DetailCard>
+      <DetailCard v-if="hrvOption" :title="`Daily HRV · ${cur.label}`">
+        <div class="dchart"><VChart :option="hrvOption" autoresize/></div>
+      </DetailCard>
+      <DetailCard v-if="yoyOption" :title="`Year over year · ${cur.label}`">
+        <div class="dchart"><VChart :option="yoyOption" autoresize/></div>
+      </DetailCard>
+    </template>
+  </NeonPage>
 </template>
 
 <style scoped>
-.hr { max-width: 1100px; margin: 0 auto; padding: 1rem; }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-         gap: 0.6rem; margin-bottom: 0.8rem; }
-
-.chart    { width: 100%; height: 260px; }
-.chart-sm { width: 100%; height: 220px; }
-.chart > *, .chart-sm > * { width: 100%; height: 100%; }
-
-.muted { color: var(--muted); }
-.err { color: #ef4444; }
-.hint { color: var(--muted); font-size: 0.78rem; margin-top: 0.4rem; }
-
-/* ── Vitality Neon skin (data-theme="neon" only) ──
-   Neon-scoped selectors leave every classic theme byte-for-byte. */
-html[data-theme="neon"] .hr {
-  min-height: 100vh;
-  margin: -1rem;
-  padding: 1.5rem 1rem 2rem;
-  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
-}
-/* Big bpm / ms readouts in the headline StatCards go Space Grotesk +
-   a faint cyan glow to match the Body.vue numeric idiom. */
-html[data-theme="neon"] .cards :deep(.stat-big) {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  letter-spacing: -0.5px;
-  color: #ececf5;
-  text-shadow: 0 0 14px rgba(40, 230, 255, 0.28);
-}
+.zbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin-bottom: 10px; background: #272a3b; }
+.zrow { display: grid; grid-template-columns: 9px 1fr 64px 60px 36px; gap: 8px; align-items: center;
+  font-size: 12px; padding: 2px 0; }
+.zrow i { width: 9px; height: 9px; border-radius: 2px; }
+.zl { color: #ececf5; }
+.zb, .zp { color: #9b9bb0; font-size: 11px; }
+.zrow b { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 600; }
 </style>

@@ -1,55 +1,50 @@
 <script setup lang="ts">
 /**
- * Fasting view — protocol picker, start/end controls, live progress
- * ring, current stage label, history list, streak / stats card.
+ * Fasting (UI-6) — stage ring, history bars, 90-day stats, protocol carousel.
  *
- * Backend ownership: all stage thresholds + computed elapsed_h come
- * from /fasting/* — phone + web render identical labels because the
- * server is the source of truth (FASTING_STAGES in api/fasting.py).
+ * Backend ownership: elapsed_h, the stage and its label, the next stage,
+ * every stage threshold (ring ticks), the target end instant and whether a
+ * past fast reached its target all come from /fasting/* (FASTING_STAGES in
+ * api/fasting.py). The only local arithmetic is the live ticker from the
+ * server's start instant. Times print in the user's LOCAL clock.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, type FastingSessionOut, type FastingStatsOut } from "@/api/client";
-import { Check, Play, Square, History } from "lucide-vue-next";
+import NeonPage from "@/components/neon/NeonPage.vue";
+import NeonHero from "@/components/neon/NeonHero.vue";
+import NeonRing from "@/components/neon/NeonRing.vue";
+import NeonEyebrow from "@/components/neon/NeonEyebrow.vue";
+import NeonStat from "@/components/neon/NeonStat.vue";
 
+const CYAN = "#28e6ff";
 const PROTOCOLS: Array<{ slug: string; label: string; target_h: number; eating_h?: number }> = [
   { slug: "16:8", label: "16:8", target_h: 16, eating_h: 8 },
   { slug: "18:6", label: "18:6", target_h: 18, eating_h: 6 },
   { slug: "20:4", label: "20:4", target_h: 20, eating_h: 4 },
-  { slug: "omad", label: "OMAD (23:1)", target_h: 23, eating_h: 1 },
-  { slug: "extended_24", label: "24h fast", target_h: 24 },
-  { slug: "extended_36", label: "36h fast", target_h: 36 },
-  { slug: "extended_48", label: "48h fast", target_h: 48 },
-  { slug: "extended_72", label: "72h fast", target_h: 72 },
+  { slug: "omad", label: "OMAD", target_h: 23, eating_h: 1 },
+  { slug: "extended_24", label: "24h", target_h: 24 },
+  { slug: "extended_36", label: "36h", target_h: 36 },
+  { slug: "extended_48", label: "48h", target_h: 48 },
+  { slug: "extended_72", label: "72h", target_h: 72 },
 ];
 
-const STAGE_LABELS: Record<string, string> = {
-  fed: "Fed state",
-  gut_rest: "Gut rest",
-  glycogen_depleting: "Glycogen depleting",
-  ketosis: "Ketosis",
-  autophagy: "Autophagy",
-  deep_autophagy: "Deep autophagy",
-  extended_36: "36h territory",
-  extended_48: "48h territory",
-  extended_72: "72h+ territory",
-};
-
 const current = ref<FastingSessionOut | null>(null);
+// Whether we KNOW if a fast is running. A failed /current must never fall
+// through to the picker, which reads as "not fasting".
+const currentKnown = ref(false);
 const history = ref<FastingSessionOut[]>([]);
 const stats = ref<FastingStatsOut | null>(null);
 const loading = ref(true);
 const busy = ref(false);
 const error = ref<string | null>(null);
+const actionError = ref<string | null>(null);
 const selectedProtocol = ref("16:8");
 const now = ref(Date.now());
 let tickTimer: number | null = null;
 
-const selectedSpec = computed(() =>
-  PROTOCOLS.find((p) => p.slug === selectedProtocol.value) ?? PROTOCOLS[0],
-);
+const selectedSpec = computed(() => PROTOCOLS.find((p) => p.slug === selectedProtocol.value) ?? PROTOCOLS[0]);
 
-// In-fast logging — surfaces in active-fast view once elapsed > 12h
-// or for any extended_* protocol. Inputs map to /fasting/logs.
+// In-fast logging.
 const logHunger = ref<number>(5);
 const logMood = ref<number>(5);
 const logHydration = ref<number | null>(null);
@@ -77,57 +72,62 @@ async function submitLog() {
   }
 }
 
-// Recompute elapsed locally from started_at so the ring ticks every
-// second; current_stage / next_stage_at_h come from the backend.
 const liveElapsedH = computed<number>(() => {
   if (!current.value) return 0;
-  const startMs = new Date(current.value.started_at).getTime();
-  return Math.max(0, (now.value - startMs) / 3_600_000);
+  return Math.max(0, (now.value - new Date(current.value.started_at).getTime()) / 3_600_000);
 });
-const targetH = computed<number>(() => current.value?.target_hours ?? 16);
-const progressPct = computed<number>(() => {
-  if (!current.value) return 0;
-  const t = targetH.value;
-  if (t <= 0) return 0;
-  return Math.min(100, (liveElapsedH.value / t) * 100);
+// Ring scale: the target, else the next stage threshold, else the last.
+const ringScale = computed<number>(() => {
+  const c = current.value;
+  if (!c) return 16;
+  const stages = c.stages ?? [];
+  return c.target_hours
+    ?? stages.find((s) => s.at_h > liveElapsedH.value)?.at_h
+    ?? stages[stages.length - 1]?.at_h
+    ?? 72;
 });
-const stageLabel = computed<string>(() => {
-  const s = current.value?.current_stage ?? "fed";
-  return STAGE_LABELS[s] ?? s;
+const ticks = computed(() =>
+  (current.value?.stages ?? []).filter((s) => s.at_h > 0 && s.at_h < ringScale.value).map((s) => s.at_h / ringScale.value),
+);
+const elapsedClock = computed(() => {
+  const h = Math.floor(liveElapsedH.value);
+  const m = Math.floor((liveElapsedH.value - h) * 60);
+  return `${h}:${String(m).padStart(2, "0")}`;
 });
-const ringDash = computed<number>(() => {
-  // Ring stroke circumference = 2 * PI * r. We use r=84 → 527.79.
-  const c = 527.79;
-  return c * (1 - progressPct.value / 100);
-});
-
-function fmtHours(h: number): string {
-  const wh = Math.floor(h);
-  const m = Math.floor((h - wh) * 60);
-  return `${wh}h ${m.toString().padStart(2, "0")}m`;
+function localTime(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
-function fmtDateTime(iso: string | null): string {
+function localStart(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
-  return d.toLocaleDateString(undefined, {
-    month: "short", day: "numeric",
-  }) + " " + d.toLocaleTimeString(undefined, {
-    hour: "2-digit", minute: "2-digit",
-  });
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })
+    + ", " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
+const heroLine = computed(() => {
+  const c = current.value;
+  if (!c) return "";
+  const parts: string[] = [];
+  const end = localTime(c.target_end_at);
+  if (end) parts.push(`Ends ${end}`);
+  if (c.next_stage_at_h != null && c.next_stage_label) {
+    parts.push(`${c.next_stage_label} in ${Math.max(0, c.next_stage_at_h - liveElapsedH.value).toFixed(1)}h`);
+  }
+  return parts.join(" · ");
+});
+
+// History bars — oldest left; heights scaled to the tallest bar or target.
+const bars = computed(() => [...history.value].slice(0, 20).reverse());
+const barMax = computed(() => Math.max(1, ...bars.value.map((r) => Math.max(r.elapsed_h, r.target_hours ?? 0))));
 
 async function loadAll() {
-  loading.value = true;
-  error.value = null;
   try {
-    const [c, h, s] = await Promise.all([
-      api.fastingCurrent(),
-      api.fastingHistory(20),
-      api.fastingStats(90),
-    ]);
+    const [c, h, s] = await Promise.all([api.fastingCurrent(), api.fastingHistory(20), api.fastingStats(90)]);
     current.value = c;
+    currentKnown.value = true;
     history.value = h;
     stats.value = s;
+    error.value = null;
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -138,17 +138,13 @@ async function loadAll() {
 async function start() {
   if (busy.value) return;
   busy.value = true;
-  error.value = null;
+  actionError.value = null;
   try {
     const spec = selectedSpec.value;
-    current.value = await api.fastingStart({
-      protocol: spec.slug,
-      target_hours: spec.target_h,
-      target_eating_window_h: spec.eating_h,
-    });
+    current.value = await api.fastingStart({ protocol: spec.slug, target_hours: spec.target_h, target_eating_window_h: spec.eating_h });
     await loadAll();
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e);
+    actionError.value = "Couldn't start: " + (e instanceof Error ? e.message : String(e));
   } finally {
     busy.value = false;
   }
@@ -158,12 +154,12 @@ async function end() {
   if (busy.value) return;
   if (!confirm("End the current fast?")) return;
   busy.value = true;
-  error.value = null;
+  actionError.value = null;
   try {
     await api.fastingEnd();
     await loadAll();
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e);
+    actionError.value = "Couldn't end: " + (e instanceof Error ? e.message : String(e));
   } finally {
     busy.value = false;
   }
@@ -173,321 +169,159 @@ onMounted(() => {
   loadAll();
   tickTimer = window.setInterval(() => { now.value = Date.now(); }, 1_000);
 });
-onBeforeUnmount(() => {
-  if (tickTimer !== null) window.clearInterval(tickTimer);
-});
+onBeforeUnmount(() => { if (tickTimer !== null) window.clearInterval(tickTimer); });
 </script>
 
 <template>
-  <div class="fasting">
-    <header class="hdr">
-      <h1>Fasting</h1>
-      <div v-if="stats" class="streak">
-        <span class="streak-n">{{ stats.current_streak_days }}</span>
-        <span class="streak-l">day streak</span>
-      </div>
-    </header>
+  <NeonPage title="Fasting" back="/you">
+    <template #trailing>
+      <span v-if="stats" class="pill">{{ stats.current_streak_days }}d streak</span>
+    </template>
 
-    <p v-if="error" class="err">{{ error }}</p>
+    <p v-if="error && currentKnown" class="stale">Showing what we last loaded — refresh failed.</p>
 
-    <!-- Active fast hero -->
-    <section v-if="current && current.is_active" class="active">
-      <div class="ring-wrap">
-        <svg viewBox="0 0 200 200" class="ring">
-          <circle cx="100" cy="100" r="84" class="track"/>
-          <circle cx="100" cy="100" r="84" class="fill"
-                  :stroke-dashoffset="ringDash"/>
-        </svg>
-        <div class="ring-center">
-          <div class="elapsed">{{ fmtHours(liveElapsedH) }}</div>
-          <div class="stage">{{ stageLabel }}</div>
-          <div class="target">of {{ targetH.toFixed(0) }}h target</div>
+    <button v-if="!currentKnown && error" class="fail" type="button" @click="loadAll">
+      <strong>Couldn't load your fast</strong>
+      <span>{{ error }}</span>
+      <em>Tap to retry</em>
+    </button>
+
+    <NeonHero v-else-if="!currentKnown" :accent="CYAN">
+      <div class="hero"><NeonRing :fraction="0" :color="CYAN" :size="260" :stroke="12"><span class="muted">Loading your fast…</span></NeonRing></div>
+    </NeonHero>
+
+    <template v-else-if="current && current.is_active">
+      <NeonHero :accent="CYAN">
+        <div class="hero">
+          <NeonRing :fraction="liveElapsedH / ringScale" :color="CYAN" :size="260" :stroke="12" :ticks="ticks">
+            <span class="elapsed">{{ elapsedClock }}</span>
+            <span class="cap">{{ current.target_hours ? `of ${current.target_hours.toFixed(0)}h · ${current.protocol}` : current.protocol }}</span>
+          </NeonRing>
+          <span class="pill">{{ current.current_stage_label ?? current.current_stage }}</span>
+          <span v-if="heroLine" class="line">{{ heroLine }}</span>
+          <span class="since">started {{ localStart(current.started_at) }}</span>
         </div>
-      </div>
+      </NeonHero>
 
-      <div class="meta">
-        <div><span class="muted">Protocol</span> {{ current.protocol }}</div>
-        <div><span class="muted">Started</span> {{ fmtDateTime(current.started_at) }}</div>
-        <div v-if="current.next_stage_at_h !== null">
-          <span class="muted">Next milestone</span>
-          {{ (current.next_stage_at_h - liveElapsedH).toFixed(1) }}h
-          → {{ STAGE_LABELS[
-            // Pick the next stage label by inspecting FASTING_STAGES locally.
-            // Mirrors the server thresholds.
-            (() => {
-              const stages: Array<[number, string]> = [
-                [0, "fed"], [4, "gut_rest"], [12, "glycogen_depleting"],
-                [16, "ketosis"], [18, "autophagy"], [24, "deep_autophagy"],
-                [36, "extended_36"], [48, "extended_48"], [72, "extended_72"],
-              ];
-              const next = stages.find(([h]) => h === current!.next_stage_at_h);
-              return next ? next[1] : "";
-            })()
-          ] ?? "" }}
+      <template v-if="current.protocol.startsWith('extended_') || liveElapsedH >= 12">
+        <NeonEyebrow>How are you feeling?</NeonEyebrow>
+        <div class="card log-card">
+          <label class="slider"><span>Hunger</span><input v-model.number="logHunger" type="range" min="0" max="10" /><span class="val">{{ logHunger }}</span></label>
+          <label class="slider"><span>Mood</span><input v-model.number="logMood" type="range" min="0" max="10" /><span class="val">{{ logMood }}</span></label>
+          <label class="field"><span>Hydration today (ml)</span><input v-model.number="logHydration" type="number" min="0" step="50" placeholder="optional" /></label>
+          <label class="field"><span>Notes</span><textarea v-model="logNotes" rows="2" placeholder="brief — what symptoms, what's working" /></label>
+          <button class="outline" :disabled="logSaving" @click="submitLog">{{ logSaving ? "Saving…" : "Log entry" }}</button>
+          <span v-if="logMsg" class="muted small">{{ logMsg }}</span>
         </div>
-      </div>
+      </template>
 
-      <!-- Symptoms / hydration logging card. Surfaces for any
-           extended_* protocol or once a 16:8-style fast has crossed
-           12h — the early hunger phase is where notes start mattering. -->
-      <div v-if="current.protocol.startsWith('extended_') || liveElapsedH >= 12" class="log-card">
-        <h4>How are you feeling?</h4>
-        <label class="slider">
-          <span>Hunger</span>
-          <input type="range" min="0" max="10" v-model.number="logHunger"/>
-          <span class="val">{{ logHunger }}</span>
-        </label>
-        <label class="slider">
-          <span>Mood</span>
-          <input type="range" min="0" max="10" v-model.number="logMood"/>
-          <span class="val">{{ logMood }}</span>
-        </label>
-        <label class="numfield">
-          <span>Hydration today (ml)</span>
-          <input type="number" min="0" step="50" v-model.number="logHydration" placeholder="optional"/>
-        </label>
-        <label class="numfield">
-          <span>Notes</span>
-          <textarea v-model="logNotes" rows="2" placeholder="brief — what symptoms, what's working"/>
-        </label>
-        <button class="ghost" :disabled="logSaving" @click="submitLog">
-          {{ logSaving ? "Saving…" : "Log entry" }}
-        </button>
-        <span v-if="logMsg" class="log-msg">{{ logMsg }}</span>
-      </div>
+      <button class="outline big" :disabled="busy" @click="end">{{ busy ? "Ending…" : "End fast" }}</button>
+    </template>
 
-      <div class="actions">
-        <button class="end" :disabled="busy" @click="end">
-          <Square :size="14"/> End fast
-        </button>
-      </div>
-    </section>
-
-    <!-- Idle state — protocol picker + start -->
-    <section v-else class="idle">
-      <h3>Start a new fast</h3>
-      <div class="protocols">
-        <button v-for="p in PROTOCOLS" :key="p.slug"
-                class="proto"
-                :class="{ on: selectedProtocol === p.slug }"
-                @click="selectedProtocol = p.slug">
+    <template v-else>
+      <NeonEyebrow>Start a fast</NeonEyebrow>
+      <div class="carousel">
+        <button v-for="p in PROTOCOLS" :key="p.slug" class="proto" :class="{ on: selectedProtocol === p.slug }"
+                type="button" @click="selectedProtocol = p.slug">
           <span class="proto-label">{{ p.label }}</span>
-          <span class="proto-sub">{{ p.target_h }}h fast<span v-if="p.eating_h">, {{ p.eating_h }}h eating</span></span>
+          <span class="muted small">{{ p.target_h }}h fast</span>
+          <span class="win"><i class="fast" :style="{ flexGrow: 24 - (p.eating_h ?? 0) }" /><i v-if="p.eating_h" class="eat" :style="{ flexGrow: p.eating_h }" /></span>
+          <span class="muted tiny">{{ p.eating_h ? `${p.eating_h}h eating` : "no eating window" }}</span>
         </button>
       </div>
-      <div class="actions">
-        <button class="primary" :disabled="busy" @click="start">
-          <Play :size="14"/> {{ busy ? "Starting…" : `Start ${selectedSpec.label}` }}
-        </button>
-      </div>
-    </section>
+      <button class="primary" :disabled="busy" @click="start">{{ busy ? "Starting…" : `Start ${selectedSpec.label}` }}</button>
+    </template>
 
-    <!-- Stats -->
-    <section v-if="stats && stats.sessions_count > 0" class="stats">
-      <h3><History :size="14"/> Last 90 days</h3>
-      <div class="kpi">
-        <div><span class="muted">Completed</span><span>{{ stats.completed_count }} / {{ stats.sessions_count }}</span></div>
-        <div v-if="stats.avg_duration_h !== null"><span class="muted">Avg</span><span>{{ stats.avg_duration_h.toFixed(1) }}h</span></div>
-        <div v-if="stats.median_duration_h !== null"><span class="muted">Median</span><span>{{ stats.median_duration_h.toFixed(1) }}h</span></div>
-        <div v-if="stats.longest_h !== null"><span class="muted">Longest</span><span>{{ stats.longest_h.toFixed(1) }}h</span></div>
-      </div>
-    </section>
+    <p v-if="actionError" class="action-err">{{ actionError }}</p>
 
-    <!-- History -->
-    <section v-if="history.length > 0" class="history">
-      <h3>Recent</h3>
-      <ul>
-        <li v-for="row in history" :key="row.id">
-          <div class="row">
-            <span class="proto-tag">{{ row.protocol }}</span>
-            <span class="duration">{{ row.elapsed_h.toFixed(1) }}h</span>
-            <span class="when muted">{{ fmtDateTime(row.started_at) }}</span>
-            <Check v-if="row.target_hours && row.elapsed_h >= row.target_hours" :size="14" class="done"/>
-          </div>
+    <template v-if="bars.length">
+      <NeonEyebrow>Last {{ bars.length }} fasts</NeonEyebrow>
+      <div class="card chart">
+        <div v-for="r in bars" :key="r.id" class="col" :title="`${r.protocol} · ${r.elapsed_h.toFixed(1)}h · ${localStart(r.started_at)}`">
+          <div class="bar" :class="r.reached_target === true ? 'done' : r.reached_target === false ? 'short' : 'open'"
+               :style="{ height: Math.max(2, (r.elapsed_h / barMax) * 100) + '%' }" />
+          <div v-if="r.target_hours" class="tgt" :style="{ bottom: (r.target_hours / barMax) * 100 + '%' }" />
+        </div>
+      </div>
+      <div class="legend"><i class="sw done" />reached target <i class="sw short" />short <span>— target</span></div>
+      <ul class="recent">
+        <li v-for="r in history.slice(0, 5)" :key="r.id">
+          <span class="muted">{{ localStart(r.started_at) }}</span>
+          <span class="muted">{{ r.protocol }}</span>
+          <span class="num" :class="{ ok: r.reached_target === true }">{{ r.elapsed_h.toFixed(1) }}h</span>
         </li>
       </ul>
-    </section>
+    </template>
 
-    <p v-if="loading" class="hint">Loading…</p>
-  </div>
+    <template v-if="stats && stats.sessions_count > 0">
+      <NeonEyebrow>Last 90 days</NeonEyebrow>
+      <div class="grid2">
+        <NeonStat :value="`${stats.completed_count} / ${stats.sessions_count}`" label="completed" />
+        <NeonStat :value="stats.avg_duration_h != null ? `${stats.avg_duration_h.toFixed(1)}h` : '—'" label="average" />
+        <NeonStat :value="stats.median_duration_h != null ? `${stats.median_duration_h.toFixed(1)}h` : '—'" label="median" />
+        <NeonStat :value="stats.longest_h != null ? `${stats.longest_h.toFixed(1)}h` : '—'" label="longest" :accent="CYAN" />
+      </div>
+    </template>
+  </NeonPage>
 </template>
 
 <style scoped>
-.fasting { max-width: 720px; margin: 0 auto; padding: 1rem; }
-.hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-h1 { margin: 0; }
-.streak { display: flex; align-items: baseline; gap: 0.4rem; color: var(--text); }
-.streak-n { font-size: 1.6rem; font-weight: 700; color: #38bdf8; }
-.streak-l { color: var(--muted); font-size: 0.85rem; }
-.err { color: #ef4444; background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; padding: 0.6rem 0.8rem; margin: 0.5rem 0; }
-.hint { color: var(--muted); }
-
-section { margin: 1rem 0 1.5rem; padding: 1.2rem; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
-section h3 { margin: 0 0 0.8rem; font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 0.4rem; }
-
-/* Active hero */
-.active { display: grid; grid-template-columns: 1fr; gap: 1rem; }
-.ring-wrap { position: relative; width: 200px; height: 200px; margin: 0 auto; }
-.ring { width: 100%; height: 100%; transform: rotate(-90deg); }
-.ring .track { fill: none; stroke: var(--border); stroke-width: 10; }
-.ring .fill {
-  fill: none; stroke: #38bdf8; stroke-width: 10;
-  stroke-dasharray: 527.79; stroke-linecap: round;
-  transition: stroke-dashoffset 1s linear;
-}
-.ring-center {
-  position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 0.2rem;
-}
-.elapsed { font-size: 1.8rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
-.stage { font-size: 0.78rem; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
-.target { font-size: 0.8rem; color: var(--muted); }
-
-.meta { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.9rem; }
-.meta .muted { color: var(--muted); margin-right: 0.4rem; }
-
-/* Idle */
-.protocols { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.5rem; margin-bottom: 1rem; }
-.proto {
-  display: flex; flex-direction: column; gap: 0.25rem; padding: 0.65rem;
-  background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
-  border-radius: 8px; cursor: pointer; text-align: left;
-}
-.proto.on { background: rgba(56, 189, 248, 0.12); border-color: #38bdf8; }
-.proto-label { font-weight: 600; font-size: 0.95rem; }
-.proto-sub { color: var(--muted); font-size: 0.78rem; }
-
-.actions { display: flex; gap: 0.5rem; }
-button { font-family: inherit; cursor: pointer; border-radius: 8px; padding: 0.65rem 1.2rem; border: 1px solid transparent; font-weight: 500; display: inline-flex; align-items: center; gap: 0.4rem; }
-.primary { background: #38bdf8; color: #0f172a; flex: 1; justify-content: center; }
-.primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.end { background: transparent; color: #ef4444; border-color: #ef4444; }
-
-.log-card { margin-top: 1rem; padding: 0.9rem; background: var(--surface-2); border-radius: 8px; border: 1px solid var(--border); }
-.log-card h4 { margin: 0 0 0.6rem; font-size: 0.85rem; color: var(--text); }
-.log-card .slider { display: grid; grid-template-columns: 80px 1fr 32px; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--muted); }
-.log-card .slider .val { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
-.log-card .numfield { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.5rem; font-size: 0.78rem; color: var(--muted); }
-.log-card .numfield input,
-.log-card .numfield textarea { background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 0.5rem; font-family: inherit; }
-.log-card .ghost { background: transparent; color: var(--text); border: 1px solid var(--border); padding: 0.45rem 0.9rem; }
-.log-msg { margin-left: 0.5rem; color: var(--muted); font-size: 0.78rem; }
-
-/* Stats */
-.kpi { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.4rem; }
-.kpi > div { display: flex; justify-content: space-between; padding: 0.2rem 0; font-size: 0.9rem; }
-.kpi .muted { color: var(--muted); }
-
-/* History */
-.history ul { list-style: none; padding: 0; margin: 0; }
-.history li { padding: 0.4rem 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1); }
-.history li:last-child { border-bottom: none; }
-.row { display: flex; align-items: center; gap: 0.8rem; font-size: 0.9rem; }
-.proto-tag { font-weight: 600; min-width: 4rem; }
-.duration { color: var(--text); font-variant-numeric: tabular-nums; }
-.when { margin-left: auto; }
-.done { color: #22c55e; }
-
-/* ============================================================
-   Vitality Neon overrides — scoped to html[data-theme="neon"]
-   so classic / light / dark themes are byte-for-byte unchanged.
-   Magenta primary (sober/streak family) for the ring + stage,
-   cyan for protocol/start, lime for "completed", amber caution.
-   ============================================================ */
-html[data-theme="neon"] .fasting {
-  --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
-  --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-cyan: #28e6ff; --rn-amber: #ffb52e;
-  --rn-track: #272a3b; --rn-red: #ff5d7a;
-  min-height: 100vh; margin: calc(-1 * var(--main-pt, 1.25rem)) calc(-1 * var(--main-px, 1.5rem)) 0; padding: 54px 22px 12px;  /* OG3-M1: bar height reserved at the shell */
-  max-width: none;
-  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
-  color: var(--rn-ink); font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
-}
-html[data-theme="neon"] .fasting :is(.hdr) { max-width: 720px; margin: 0 auto 1rem; }
-html[data-theme="neon"] .fasting h1 {
-  font-size: 30px; font-weight: 800; letter-spacing: -0.5px; color: var(--rn-ink);
-}
-html[data-theme="neon"] .fasting .streak { color: var(--rn-ink); }
-html[data-theme="neon"] .fasting .streak-n {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  color: var(--rn-mag); text-shadow: 0 0 14px rgba(255, 58, 216, 0.55);
-}
-html[data-theme="neon"] .fasting .streak-l { color: var(--rn-mut); }
-
-html[data-theme="neon"] .fasting section {
-  max-width: 720px; margin-left: auto; margin-right: auto;
-  background: var(--rn-card); border: 1px solid #21243450; border-radius: 18px;
-}
-html[data-theme="neon"] .fasting section h3 { color: var(--rn-mut); }
-
-html[data-theme="neon"] .fasting .err {
-  color: var(--rn-red); background: rgba(255, 93, 122, 0.10);
-  border-left-color: var(--rn-red);
-  max-width: 720px; margin-left: auto; margin-right: auto;
-}
-html[data-theme="neon"] .fasting .hint { color: var(--rn-mut); }
-
-/* Progress ring — track dim, fill magenta with glow */
-html[data-theme="neon"] .fasting .ring .track { stroke: var(--rn-track); }
-html[data-theme="neon"] .fasting .ring .fill {
-  stroke: var(--rn-mag);
-  filter: drop-shadow(0 0 6px rgba(255, 58, 216, 0.6));
-}
-html[data-theme="neon"] .fasting .elapsed {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-ink);
-}
-html[data-theme="neon"] .fasting .stage {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  color: var(--rn-mag); text-shadow: 0 0 10px rgba(255, 58, 216, 0.5);
-}
-html[data-theme="neon"] .fasting .target { color: var(--rn-mut); }
-html[data-theme="neon"] .fasting .meta .muted { color: var(--rn-mut); }
-
-/* Protocol picker — cyan selection accent */
-html[data-theme="neon"] .fasting .proto {
-  background: #1f2233; color: var(--rn-ink); border-color: #2a2d40;
-}
-html[data-theme="neon"] .fasting .proto.on {
-  background: rgba(40, 230, 255, 0.12); border-color: var(--rn-cyan);
-  box-shadow: 0 0 0 1px rgba(40, 230, 255, 0.25), 0 0 14px rgba(40, 230, 255, 0.18);
-}
-html[data-theme="neon"] .fasting .proto-sub { color: var(--rn-mut); }
-
-/* Buttons */
-html[data-theme="neon"] .fasting .primary {
-  background: var(--rn-cyan); color: #0f1118;
-  box-shadow: 0 0 16px rgba(40, 230, 255, 0.35);
-}
-html[data-theme="neon"] .fasting .end {
-  background: transparent; color: var(--rn-red); border-color: var(--rn-red);
-}
-
-/* In-fast logging card */
-html[data-theme="neon"] .fasting .log-card {
-  background: #1f2233; border-color: #2a2d40;
-}
-html[data-theme="neon"] .fasting .log-card h4 { color: var(--rn-ink); }
-html[data-theme="neon"] .fasting .log-card .slider { color: var(--rn-mut); }
-html[data-theme="neon"] .fasting .log-card .slider .val {
-  color: var(--rn-ink); font-family: 'Space Grotesk', 'Geist Mono', monospace;
-}
-html[data-theme="neon"] .fasting .log-card .numfield { color: var(--rn-mut); }
-html[data-theme="neon"] .fasting .log-card .numfield input,
-html[data-theme="neon"] .fasting .log-card .numfield textarea {
-  background: #14172180; color: var(--rn-ink); border-color: #2a2d40;
-}
-html[data-theme="neon"] .fasting .log-card .ghost {
-  color: var(--rn-ink); border-color: #2a2d40;
-}
-html[data-theme="neon"] .fasting .log-msg { color: var(--rn-mut); }
-
-/* Stats / history */
-html[data-theme="neon"] .fasting .kpi .muted { color: var(--rn-mut); }
-html[data-theme="neon"] .fasting .duration {
-  color: var(--rn-ink); font-family: 'Space Grotesk', 'Geist Mono', monospace;
-}
-html[data-theme="neon"] .fasting .history li { border-bottom-color: #ffffff10; }
-html[data-theme="neon"] .fasting .done {
-  color: var(--rn-lime); filter: drop-shadow(0 0 4px rgba(93, 255, 59, 0.5));
-}
+.hero { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.elapsed { font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 48px; color: var(--rn-ink); letter-spacing: -1px; line-height: 1; }
+.cap { font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--rn-mut); margin-top: 4px; }
+.pill { font-size: 12px; font-weight: 600; color: #28e6ff; padding: 6px 12px; border-radius: 22px; white-space: nowrap;
+  background: rgba(40, 230, 255, .12); border: 1px solid rgba(40, 230, 255, .35); }
+.line { font-size: 13px; color: var(--rn-mut); text-align: center; }
+.since { font-size: 11px; color: var(--rn-mut); }
+.muted { color: var(--rn-mut); }
+.small { font-size: 12px; }
+.tiny { font-size: 10px; }
+.stale { font-size: 11px; color: var(--rn-mut); margin: 0 0 8px; }
+.fail { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; cursor: pointer;
+  background: rgba(255, 181, 46, .08); border: 1px solid rgba(255, 181, 46, .3); border-radius: 14px; padding: 12px 14px;
+  color: var(--rn-mut); font: inherit; font-size: 12px; margin-bottom: 12px; }
+.fail strong { color: #ffb52e; font-size: 13px; }
+.fail em { font-style: normal; color: #28e6ff; font-weight: 600; }
+.action-err { color: #ffb52e; font-size: 12px; }
+.card { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px; padding: 14px; }
+.log-card { display: flex; flex-direction: column; gap: 8px; }
+.slider { display: grid; grid-template-columns: 70px 1fr 28px; align-items: center; gap: 8px; font-size: 12px; color: var(--rn-mut); }
+.slider input { accent-color: #28e6ff; }
+.val { color: var(--rn-ink); text-align: right; }
+.field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--rn-mut); }
+.field input, .field textarea { background: var(--rn-bg); color: var(--rn-ink); border: 1px solid var(--rn-line); border-radius: 8px; padding: 8px; font: inherit; font-size: 14px; }
+.outline { min-height: 44px; border-radius: 16px; border: 1px solid var(--rn-line); background: transparent; color: var(--rn-ink);
+  font: inherit; font-weight: 600; cursor: pointer; }
+.outline.big { width: 100%; height: 52px; margin-top: 12px; font-size: 15px; }
+.outline:disabled, .primary:disabled { opacity: .6; cursor: default; }
+.primary { width: 100%; height: 52px; margin-top: 12px; border-radius: 16px; border: 0; background: #28e6ff; color: var(--rn-onacc);
+  font: inherit; font-weight: 700; font-size: 15px; cursor: pointer; }
+.carousel { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x mandatory; }
+.proto { flex: 0 0 118px; scroll-snap-align: start; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
+  background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px; padding: 12px; cursor: pointer; font: inherit; color: var(--rn-ink); }
+.proto.on { background: var(--rn-high); border: 1.5px solid #28e6ff; }
+.proto-label { font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 20px; }
+.proto.on .proto-label { color: #28e6ff; }
+.win { display: flex; width: 100%; height: 6px; border-radius: 3px; overflow: hidden; background: var(--rn-track); margin: 8px 0 2px; }
+.win .fast { background: rgba(40, 230, 255, .55); }
+.win .eat { background: #5dff3b; }
+.chart { display: flex; align-items: flex-end; gap: 4px; height: 148px; }
+.col { position: relative; flex: 1; height: 120px; display: flex; align-items: flex-end; justify-content: center; }
+.bar { width: 62%; max-width: 18px; border-radius: 3px 3px 0 0; }
+.bar.done { background: #28e6ff; }
+.bar.short { background: rgba(155, 155, 176, .55); }
+.bar.open { background: rgba(111, 123, 255, .7); }
+.tgt { position: absolute; left: 12%; right: 12%; height: 2px; background: rgba(236, 236, 245, .75); }
+.legend { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--rn-mut); margin: 6px 0 4px; }
+.legend .sw { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-left: 8px; }
+.legend .sw:first-child { margin-left: 0; }
+.legend .sw.done { background: #28e6ff; }
+.legend .sw.short { background: rgba(155, 155, 176, .55); }
+.legend span { margin-left: 10px; }
+.recent { list-style: none; margin: 4px 0 0; padding: 0; }
+.recent li { display: flex; gap: 10px; padding: 5px 0; font-size: 12px; }
+.recent li .muted:first-child { flex: 1; }
+.num { font-family: 'Space Grotesk', monospace; font-weight: 700; color: var(--rn-ink); }
+.num.ok { color: #28e6ff; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 </style>

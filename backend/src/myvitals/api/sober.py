@@ -1,7 +1,7 @@
 """Sober-time tracking — current streak, history, reset, import."""
 import csv
 import io
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -40,6 +40,56 @@ def _to_out(s: models.SoberStreak, now: datetime) -> SoberStreakOut:
     )
 
 
+# Milestones the ring marks (UI-6). Owned here so the phone and the web draw
+# the same dots and name the same "next" one — both used to carry their own
+# copy of this list and derive the next milestone from a locally ticked day
+# count. Past the last fixed step, one milestone per further year.
+BASE_MILESTONES_DAYS: list[int] = [7, 14, 30, 60, 90, 180, 365]
+
+
+def milestones_for(elapsed_days: float) -> list[int]:
+    """The milestone ladder for a streak of `elapsed_days`: the fixed steps,
+    then yearly ones, always ending with one still ahead so there is always
+    a next milestone to name."""
+    out = list(BASE_MILESTONES_DAYS)
+    while out[-1] <= elapsed_days:
+        out.append(out[-1] + 365 if out[-1] >= 365 else 365)
+    return out
+
+
+def milestone_fields(start_at: datetime | None, now: datetime) -> dict[str, Any]:
+    """Milestone facts for the hero ring.
+
+    `milestone_progress` is the ring fill on a ladder where each milestone
+    sits at an equal step (milestone k of n at k/n), interpolated linearly
+    between the two it falls between — so the fill reaches a dot exactly when
+    that milestone is passed. With no active streak everything is zero/null.
+    """
+    if start_at is None:
+        ms = list(BASE_MILESTONES_DAYS)
+        return {
+            "milestones": ms, "milestones_reached": 0,
+            "next_milestone_days": None, "next_milestone_at": None,
+            "next_milestone_in_seconds": None, "milestone_progress": 0.0,
+        }
+    elapsed_days = max(0.0, (now - start_at).total_seconds() / 86400.0)
+    ms = milestones_for(elapsed_days)
+    reached = sum(1 for m in ms if m <= elapsed_days)
+    nxt = ms[reached]  # milestones_for guarantees one is ahead
+    prev = ms[reached - 1] if reached > 0 else 0
+    within = (elapsed_days - prev) / (nxt - prev)
+    progress = (reached + within) / len(ms)
+    next_at = start_at + timedelta(days=nxt)
+    return {
+        "milestones": ms,
+        "milestones_reached": reached,
+        "next_milestone_days": nxt,
+        "next_milestone_at": next_at,
+        "next_milestone_in_seconds": max(0, int((next_at - now).total_seconds())),
+        "milestone_progress": round(min(1.0, max(0.0, progress)), 4),
+    }
+
+
 @router.get("/current")
 async def get_current(
     addiction: str = "alcohol",
@@ -55,7 +105,7 @@ async def get_current(
     )
     s = (await db.execute(stmt)).scalar_one_or_none()
     if s is None:
-        return {"active": None, "addiction": addiction}
+        return {"active": None, "addiction": addiction, **milestone_fields(None, now)}
     seconds = (now - s.start_at).total_seconds()
     days = int(seconds // 86400)
     hours = int((seconds % 86400) // 3600)
@@ -68,6 +118,7 @@ async def get_current(
         "days": days,
         "hours": hours,
         "minutes": minutes,
+        **milestone_fields(s.start_at, now),
     }
 
 

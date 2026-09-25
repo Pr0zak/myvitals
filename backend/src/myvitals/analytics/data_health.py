@@ -80,6 +80,10 @@ class StreamSpec:
     stale_after_h: float = 24.0
     #: What writes it, so the card can point somewhere useful.
     source: str = ""
+    #: The integration this stream arrives through when it has NO other
+    #: path. While that integration is failing, the stream's staleness is a
+    #: symptom of that failure, not a second problem — see `downstream_of`.
+    via_integration: str | None = None
 
 
 #: Order is display order — most-continuous first, so the streams that
@@ -100,8 +104,14 @@ STREAMS: tuple[StreamSpec, ...] = (
                "nightly", 48.0, "Watch, overnight"),
     StreamSpec("sleep", "Sleep", "sleep_stages", "time",
                "nightly", 48.0, "Watch, overnight"),
+    # Blood oxygen reaches this server ONLY through the Google Health
+    # integration: the phone does not read OxygenSaturationRecord (SPO2 in
+    # TODO.md). When that grant died on 2026-09-06, SpO2 went stale with it,
+    # and the settings card led with "Blood oxygen not updated for 422h"
+    # instead of the cause the user can act on. Skin temperature is NOT
+    # marked: it also arrives via Health Connect, and kept arriving.
     StreamSpec("spo2", "Blood oxygen", "vitals_spo2", "time",
-               "nightly", 48.0, "Google Health"),
+               "nightly", 48.0, "Google Health", via_integration="google_health"),
     StreamSpec("skin_temp", "Skin temperature", "vitals_skin_temp", "time",
                "nightly", 48.0, "Google Health"),
     StreamSpec("activities", "Activities", "activities", "start_at",
@@ -258,6 +268,7 @@ async def stream_health(db: AsyncSession, *, use_cache: bool = True) -> list[dic
         out.append({
             "key": spec.key,
             "label": spec.label,
+            "via_integration": spec.via_integration,
             "kind": spec.kind,
             "source": spec.source,
             # True when this row is judged on one writer among several,
@@ -482,7 +493,8 @@ def overview(
         if len(problems) > 1:
             headline += f" (+{len(problems) - 1} more)"
     elif broken:
-        headline = f"{broken[0]['label']} needs attention"
+        verb = {"auth": "needs reconnecting", "config": "needs its settings checked"}
+        headline = f"{broken[0]['label']} {verb.get(broken[0].get('last_error_kind'), 'needs attention')}"
         if len(broken) > 1:
             headline += f" (+{len(broken) - 1} more)"
     else:
@@ -497,4 +509,23 @@ def overview(
         "integrations_ok": len(ok),
         "integrations_total": len(configured),
         "last_phone_sync_at": phone.get("last_success"),
+    }
+
+
+def downstream_of(
+    streams: list[dict[str, Any]], integrations: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Stale streams whose only source is an integration that is itself
+    failing: `{stream_key: integration_key}`.
+
+    Such a stream is still reported — its row stays stale with its real age,
+    because the data genuinely is old — but it is not counted as a separate
+    problem. Two problems for one cause send the user after the symptom;
+    the integration's own row carries the action that fixes both.
+    """
+    failing = {i["key"] for i in integrations if i.get("status") in ("error", "stale")}
+    return {
+        s["key"]: s["via_integration"]
+        for s in streams
+        if s.get("status") == "stale" and s.get("via_integration") in failing
     }

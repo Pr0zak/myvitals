@@ -735,7 +735,11 @@ async def data_health(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
         .limit(1)
     )).scalar_one_or_none()
 
-    problems = [s["key"] for s in streams if s["status"] == "stale"]
+    # A stream whose only source is a failing integration is that
+    # integration's symptom, not a second problem (data_health.downstream_of).
+    blocked = data_health_mod.downstream_of(streams, integrations)
+    streams = [dict(s, blocked_by=blocked.get(s["key"])) for s in streams]
+    problems = [s["key"] for s in streams if s["status"] == "stale" and s["key"] not in blocked]
     problems += [i["key"] for i in integrations if i["status"] in ("error", "stale")]
 
     phone = {

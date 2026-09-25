@@ -134,3 +134,28 @@ def test_health_connect_denial_outranks_everything():
     o = overview([_s("hr", "Heart rate", "stale", 26)], [], {"permissions_lost": True}, ["hr"])
     assert o["headline"].startswith("Health Connect")
     assert o["problem_count"] == 2
+
+
+# ── a stream fed only by a failing integration is its symptom ─────────────
+
+from myvitals.analytics.data_health import downstream_of  # noqa: E402
+
+
+def test_spo2_behind_a_dead_google_grant_is_not_a_second_problem():
+    streams = [dict(_s("spo2", "Blood oxygen", "stale", 428), via_integration="google_health"),
+               dict(_s("hr", "Heart rate", "ok", 1), via_integration=None)]
+    integ = [{"key": "google_health", "label": "Google Health", "configured": True,
+              "status": "error", "last_error_kind": "auth"}]
+    blocked = downstream_of(streams, integ)
+    assert blocked == {"spo2": "google_health"}
+    problems = [s["key"] for s in streams if s["status"] == "stale" and s["key"] not in blocked]
+    problems += ["google_health"]
+    o = overview(streams, integ, {"permissions_lost": False}, problems)
+    assert o["headline"] == "Google Health needs reconnecting"
+    assert o["problem_count"] == 1
+
+
+def test_a_stale_stream_whose_integration_is_fine_is_still_a_problem():
+    streams = [dict(_s("spo2", "Blood oxygen", "stale", 60), via_integration="google_health")]
+    integ = [{"key": "google_health", "label": "Google Health", "configured": True, "status": "ok"}]
+    assert downstream_of(streams, integ) == {}

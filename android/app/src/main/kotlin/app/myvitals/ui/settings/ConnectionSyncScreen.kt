@@ -1,6 +1,8 @@
 package app.myvitals.ui.settings
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -10,11 +12,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Route
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,6 +35,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -37,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import app.myvitals.data.SettingsRepository
+import app.myvitals.share.TrailmapHandoff
 import app.myvitals.sync.DataHealth
 import app.myvitals.sync.SyncWorker
 import app.myvitals.ui.neon.NeonErrorBanner
@@ -78,6 +87,9 @@ data class PhoneSyncFacts(
  *   connection   "Server address" and "Access key" in plain words, the key
  *                masked with a reveal toggle (it used to sit on screen in
  *                plain text)
+ *   other apps   "Send to trailmap", only while trailmap is installed: the
+ *                SAVED address and key, only to trailmap's signed release
+ *                build (share/TrailmapHandoff.kt)
  *   phone        Health Connect status + grant, the last sync, Sync now
  *                with LIVE state from WorkManager instead of a blind
  *                "Sync queued" toast, and backfill — the ten-year one asks
@@ -108,9 +120,19 @@ fun ConnectionSyncScreen(
     var healthError by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     var tick by remember { mutableIntStateOf(0) }
+    var trailmapResult by remember { mutableStateOf<TrailmapHandoff.Result?>(null) }
+    // Resumes since trailmapResult was last set; "Sent" lasts one return trip.
+    var trailmapResultResumes by remember { mutableIntStateOf(0) }
 
-    app.myvitals.ui.common.LifecycleResumeEffect(staleAfterMs = 0L) { tick++ }
+    app.myvitals.ui.common.LifecycleResumeEffect(staleAfterMs = 0L) {
+        tick++
+        // trailmap may have been updated or reinstalled while we were away.
+        trailmapResultResumes++
+        trailmapResult = TrailmapHandoff.resultAfterResume(trailmapResult, trailmapResultResumes)
+    }
     val permsGranted by produceState(false, isHealthConnectAvailable, tick) { value = hasPermissions() }
+    // Re-checked on every resume, so installing trailmap and coming back shows the card.
+    val trailmapInstalled = remember(tick) { TrailmapHandoff.isInstalled(context.packageManager) }
     val infos by remember(context) {
         WorkManager.getInstance(context).getWorkInfosForUniqueWorkFlow(SyncWorker.MANUAL_UNIQUE_NAME)
     }.collectAsState(initial = emptyList())
@@ -149,8 +171,8 @@ fun ConnectionSyncScreen(
         url = url, token = token,
         connDirty = url.trim() != settings.backendUrl || token.trim() != settings.bearerToken,
         savedNote = savedNote,
-        onUrl = { url = it; savedNote = null },
-        onToken = { token = it; savedNote = null },
+        onUrl = { url = it; savedNote = null; trailmapResult = null },
+        onToken = { token = it; savedNote = null; trailmapResult = null },
         onSaveConnection = {
             settings.backendUrl = url.trim()
             settings.bearerToken = token.trim()
@@ -184,6 +206,14 @@ fun ConnectionSyncScreen(
         refreshing = refreshing,
         onRefresh = { scope.launch { refreshing = true; tick++; try { loadHealth() } finally { refreshing = false } } },
         onBack = onBack,
+        trailmapInstalled = trailmapInstalled,
+        trailmapResult = trailmapResult,
+        // The SAVED connection, never the text fields: the button is off
+        // while there are unsaved edits, so what goes is what this phone uses.
+        onSendToTrailmap = {
+            trailmapResult = TrailmapHandoff.send(context, settings.backendUrl, settings.bearerToken)
+            trailmapResultResumes = 0
+        },
     )
 }
 
@@ -215,6 +245,10 @@ fun ConnectionSyncContent(
     onRefresh: () -> Unit,
     onBack: () -> Unit,
     contentPadding: PaddingValues = PaddingValues(0.dp),
+    /** Shows the "Send to trailmap" card; false hides it entirely. */
+    trailmapInstalled: Boolean = false,
+    trailmapResult: TrailmapHandoff.Result? = null,
+    onSendToTrailmap: () -> Unit = {},
 ) {
     var confirmBackfill by remember { mutableStateOf<Int?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -271,6 +305,15 @@ fun ConnectionSyncContent(
                 )
                 NeonButton("Save", onSaveConnection, enabled = connDirty)
             }
+        }
+
+        if (trailmapInstalled) {
+            NeonEyebrow("Other apps")
+            TrailmapCard(
+                blocked = TrailmapHandoff.blockedReason(configured, unsavedEdits = connDirty),
+                result = trailmapResult,
+                onSend = onSendToTrailmap,
+            )
         }
 
         NeonEyebrow("This phone")
@@ -368,6 +411,75 @@ fun ConnectionSyncContent(
                 "Discard writes waiting to be sent — asks first", onClick = { confirmClear = true })
         }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * "Send to trailmap": says what trailmap does with the connection and,
+ * plainly, what the key it receives can do. [blocked] is why the button is
+ * off (unsaved edits, no server); [result] is what the last tap did.
+ */
+@Composable
+private fun TrailmapCard(blocked: String?, result: TrailmapHandoff.Result?, onSend: () -> Unit) {
+    SettingsCard {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(38.dp).clip(RoundedCornerShape(12.dp))
+                    .background(NeonMV.Cyan.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Outlined.Route, contentDescription = null, tint = NeonMV.Cyan,
+                    modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("trailmap", color = NeonMV.Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("Installed on this phone", color = NeonMV.Muted, fontSize = 12.sp)
+            }
+        }
+        SettingsNote(
+            "Send your connection to trailmap and it can show which trails you've ridden, " +
+                "your pace and trail conditions.",
+            color = NeonMV.Ink,
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(Icons.Outlined.Lock, contentDescription = null, tint = NeonMV.Muted,
+                modifier = Modifier.size(16.dp).padding(top = 1.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "trailmap gets your access key. That key can read and write your myvitals " +
+                    "data; trailmap only reads with it.",
+                color = NeonMV.Muted, fontSize = 12.sp, lineHeight = 17.sp,
+            )
+        }
+        SettingsDivider()
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                blocked ?: "Sends the address and key saved above.",
+                color = if (blocked != null) NeonMV.Amber else NeonMV.Muted, fontSize = 12.sp,
+                lineHeight = 16.sp, modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(12.dp))
+            // Outlined, like "Manage": optional, never the page's main action.
+            NeonButton("Send to trailmap", onSend, enabled = blocked == null,
+                filled = false, accent = NeonMV.Cyan)
+        }
+        if (result != null && blocked == null) {
+            SettingsNote(
+                result.message,
+                modifier = Modifier.padding(bottom = 6.dp),
+                color = if (result.ok) NeonMV.Lime else NeonMV.Amber,
+            )
+        }
     }
 }
 

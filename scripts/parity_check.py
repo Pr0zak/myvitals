@@ -394,7 +394,8 @@ DECLARED_ASYMMETRIES: list[tuple[str, str, str, str]] = [
      "Connecting / reconnecting an integration and entering its credentials",
      "OAuth sign-in and pasted cookies; the phone shows status and Sync now"),
     ("frontend/src/views/settings/SettingsConnection.vue", "phone-only",
-     "Health Connect grant, Sync now, backfill, on-device logs, sync buffer",
+     "Health Connect grant, Sync now, backfill, on-device logs, sync buffer, "
+     "Send to trailmap",
      "these act on the phone itself"),
 ]
 

@@ -72,6 +72,11 @@
     <!-- Required to detect the Health Connect provider on devices < Android 14 -->
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
+        <!-- Android 11+ hides other apps unless declared here. Settings →
+             Connection & sync shows "Send to trailmap" only when it is
+             installed, and checks its signing certificate before sending
+             (share/TrailmapHandoff.kt). -->
+        <package android:name="com.trailmap" />
         <intent>
             <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
         </intent>

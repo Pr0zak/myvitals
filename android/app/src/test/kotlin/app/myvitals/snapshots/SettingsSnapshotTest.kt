@@ -1,6 +1,7 @@
 package app.myvitals.snapshots
 
 import app.myvitals.snapshots.SampleDataSettings as S
+import app.myvitals.share.TrailmapHandoff
 import app.myvitals.ui.settings.AboutContent
 import app.myvitals.ui.settings.ConnectionSyncContent
 import app.myvitals.ui.settings.SettingsHomeContent
@@ -70,11 +71,17 @@ class SettingsSnapshotTest {
     /** Edited: the sticky Save / Discard bar over the page. */
     @Test fun youDirty() = you(0, dirty = true)
 
-    private fun connection(scroll: Int, lost: Boolean) = paparazzi.snapshot {
+    private fun connection(
+        scroll: Int,
+        lost: Boolean,
+        trailmap: Boolean = false,
+        trailmapResult: TrailmapHandoff.Result? = null,
+        dirty: Boolean = false,
+    ) = paparazzi.snapshot {
         NeonFrame(scroll) {
             ConnectionSyncContent(
                 url = "https://vitals.example.com", token = "example-ingest-token-0000",
-                connDirty = false, savedNote = null, onUrl = {}, onToken = {}, onSaveConnection = {},
+                connDirty = dirty, savedNote = null, onUrl = {}, onToken = {}, onSaveConnection = {},
                 facts = if (lost) S.facts.copy(permissionsLost = true) else S.facts,
                 phase = if (lost) SyncPhase.IDLE else SyncPhase.RUNNING,
                 configured = true,
@@ -83,6 +90,7 @@ class SettingsSnapshotTest {
                 healthLoading = false, healthError = null,
                 onOpenLogs = {}, onUploadLogs = {}, onClearBuffer = {},
                 now = S.NOW, refreshing = false, onRefresh = {}, onBack = {},
+                trailmapInstalled = trailmap, trailmapResult = trailmapResult,
             )
         }
     }
@@ -90,6 +98,26 @@ class SettingsSnapshotTest {
     @Test fun connection_1() = connection(0, lost = false)
     @Test fun connection_2() = connection(VIEWPORT_DP - 60, lost = false)
     @Test fun connectionPermsLost() = connection(0, lost = true)
+
+    /** trailmap installed, connection saved: the card with the button on. */
+    @Test fun connectionTrailmap() = connection(TRAILMAP_SCROLL, lost = false, trailmap = true)
+
+    /** The signature check failed: nothing sent, and the card says why. */
+    @Test fun connectionTrailmapRefused() = connection(
+        TRAILMAP_SCROLL, lost = false, trailmap = true,
+        trailmapResult = TrailmapHandoff.Result.Untrusted,
+    )
+
+    /** Sent: the note fits trailmap's "Connect" and its "Use this" alike. */
+    @Test fun connectionTrailmapSent() = connection(
+        TRAILMAP_SCROLL, lost = false, trailmap = true,
+        trailmapResult = TrailmapHandoff.Result.Sent,
+    )
+
+    /** An unsaved edit turns the button off with a reason. */
+    @Test fun connectionTrailmapUnsaved() = connection(
+        TRAILMAP_SCROLL, lost = false, trailmap = true, dirty = true,
+    )
 
     @Test fun about() = paparazzi.snapshot {
         NeonFrame {
@@ -108,6 +136,10 @@ class SettingsSnapshotTest {
         }
     }
 }
+
+/** Scrolls past the header so the server card's foot and the whole
+ *  trailmap card share one viewport. */
+private const val TRAILMAP_SCROLL = 300
 
 @androidx.compose.runtime.Composable
 private fun ViewportOr(viewport: Boolean, scroll: Int, content: @androidx.compose.runtime.Composable () -> Unit) {

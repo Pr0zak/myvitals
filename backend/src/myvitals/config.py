@@ -13,6 +13,17 @@ class Settings(BaseSettings):
     ingest_token: str
     query_token: str
 
+    # Read-only tokens for other self-hosted apps (a dashboard, a timeline
+    # aggregator). Comma-separated `name:token` pairs:
+    #
+    #   SCOPED_READ_TOKENS=aggregator:<long random>,dashboard:<another>
+    #
+    # Each one reaches only the GET routes in `auth.SCOPED_READ_EXACT` /
+    # `SCOPED_READ_PREFIXES`, and its responses are redacted (see
+    # scoped_access.py). Empty → no scoped tokens. The name only labels the
+    # caller in logs; it grants nothing by itself.
+    scoped_read_tokens: str = ""
+
     log_level: str = "INFO"
     tz: str = "UTC"
 

@@ -37,6 +37,8 @@ services:
       POSTGRES_PORT: 5432
       INGEST_TOKEN: ${INGEST_TOKEN}
       QUERY_TOKEN: ${QUERY_TOKEN}
+      # Optional read-only tokens for other apps; see .env.example.
+      SCOPED_READ_TOKENS: ${SCOPED_READ_TOKENS:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       TZ: ${TZ:-UTC}
       # AI-CLI: bound how long a headless call may run and how many may

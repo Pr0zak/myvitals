@@ -4,7 +4,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import polyline as _polyline_lib
 
 from ..analytics import cardio, consistency, geo
-from ..auth import require_any, require_query
+from ..auth import require_any, require_query, scoped_token_of
 from ..config import settings
 from ..db import models
 from ..db.session import get_session
@@ -1017,8 +1017,14 @@ async def list_activities(
     #            computed on the fly (never written back here) when missing
     #   none   — no route at all; the phone feed draws no thumbnail
     polyline: str = Query("full", pattern="^(full|simple|none)$"),
+    request: Request = None,  # type: ignore[assignment]  # injected by FastAPI
     db: AsyncSession = Depends(get_session),
 ) -> list[ActivityOut]:
+    # A scoped read token never gets route geometry, whatever it asks for:
+    # routes start and end at home. Forcing `none` here also means the
+    # columns are never loaded; scoped_access.redact strips the key as well.
+    if scoped_token_of(request) is not None:
+        polyline = "none"
     stmt = (
         select(models.Activity)
         .order_by(models.Activity.start_at.desc())

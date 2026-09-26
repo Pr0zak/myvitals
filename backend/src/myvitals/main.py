@@ -41,6 +41,7 @@ from .api import errors as api_errors
 from .api.workout import strength as workout_strength
 from .config import settings
 from .logging_config import configure_logging
+from .scoped_access import ScopedReadMiddleware
 
 # Before anything else: without this every log.info in the app is discarded,
 # because `fastapi run` configures only the uvicorn loggers and leaves root
@@ -242,6 +243,9 @@ async def _weekly_ai_digest() -> None:
 
 app = FastAPI(title="myvitals", version=version_mod.__version__, lifespan=lifespan)
 api_errors.install(app)
+# Route allow-list + response redaction for SCOPED_READ_TOKENS. A no-op for
+# every request that does not carry one of those tokens.
+app.add_middleware(ScopedReadMiddleware)
 
 app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
 app.include_router(query.router, prefix="/query", tags=["query"])

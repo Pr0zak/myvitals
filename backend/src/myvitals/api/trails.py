@@ -17,11 +17,11 @@ or on a stale feed — not raw-snapshot percentages.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import polyline as polyline_lib
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -227,6 +227,30 @@ async def list_trails(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
         "count": len(out), "trails": out, "dnis_url": dnis_url,
         **status_summary(out),
     }
+
+
+@router.get("/daily")
+async def trails_daily(
+    since: date = Query(...),
+    until: date | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    """Per local day: trails open at 07:00, and closures / reopenings that day.
+
+    One row per day in [since, until] (until defaults to, and is clamped to,
+    today; at most 400 days per call): `{date, in_progress, open_at_0700,
+    delayed_at_0700, known_at_0700, total, closures, reopenings}` — all
+    counts of trails. `unknown` / `pending` are excluded from `known_at_0700`
+    (unknown is not closed). See analytics/trail_days.py for the rules.
+    """
+    from ..analytics import trail_days
+    from ..localtime import bounded_day_range, local_today, local_tz
+
+    try:
+        since, end = bounded_day_range(since, until, trail_days.MAX_RANGE_DAYS)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return await trail_days.trail_days(db, since, end, local_tz(), local_today())
 
 
 def status_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:

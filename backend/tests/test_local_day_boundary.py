@@ -35,9 +35,10 @@ ANALYTICS = SRC / "analytics"
 # showed tomorrow's weekday target, and the fasting streak read zero until
 # the day's fast ended. ai.py's instance was the two-line shape described
 # in `_utc_today_calls`, which is why it was not caught sooner.
+# trails.py joined with /trails/daily, whose rows are local calendar days.
 DAY_FACING_MODULES = [
     "analytics.py", "summary.py", "strava.py", "workout/strength.py", "meals.py",
-    "ai.py", "profile.py", "fasting.py",
+    "ai.py", "profile.py", "fasting.py", "trails.py",
 ]
 
 # OG2-C1 widened the FIRST guard to the analytics layer, because the bug
@@ -64,7 +65,9 @@ DAY_FACING_MODULES = [
 # Central wrote a daily_summary row for TOMORROW. The row is empty because
 # the day has not happened, and an empty row is not the same as no row: the
 # readers in front of it show the day as real and stepless.
-DAY_FACING_ANALYTICS = ["strength.py", "jobs.py"]
+# coverage.py and trail_days.py (the per-day /summary/coverage and
+# /trails/daily reports) were written against this guard from the start.
+DAY_FACING_ANALYTICS = ["strength.py", "jobs.py", "coverage.py", "trail_days.py"]
 
 
 def _utc_today_calls(tree: ast.AST) -> list[int]:

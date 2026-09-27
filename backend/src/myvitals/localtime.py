@@ -46,3 +46,22 @@ def local_date(ts: datetime) -> date:
 def local_midnight(day: date) -> datetime:
     """The instant the user's day begins, as an aware datetime."""
     return datetime.combine(day, datetime.min.time(), tzinfo=local_tz())
+
+
+def bounded_day_range(
+    since: date, until: date | None, max_days: int,
+) -> tuple[date, date]:
+    """Resolve a `since`/`until` pair of the user's days for a per-day report.
+
+    `until` defaults to today and is clamped to it: a day that has not
+    happened yet has no data, and reporting it as zero is exactly the
+    absent-read-as-zero mistake these reports exist to prevent. Raises
+    ValueError for an empty or over-long range; callers answer 422.
+    """
+    today = local_today()
+    end = min(until or today, today)
+    if since > end:
+        raise ValueError("since must be on or before until (and not in the future)")
+    if (end - since).days + 1 > max_days:
+        raise ValueError(f"range is limited to {max_days} days per request")
+    return since, end

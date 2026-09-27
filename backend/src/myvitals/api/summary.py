@@ -847,6 +847,36 @@ async def summary_range(
     ]
 
 
+@router.get("/coverage")
+async def summary_coverage(
+    since: date = Query(...),
+    until: date | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    """Per local day: was it measured, or only carried? (see analytics/coverage.py)
+
+    One row per day in [since, until] (until defaults to, and is clamped to,
+    today; at most 400 days per call):
+    `{date, in_progress, hr_samples, hr_wear_min, main_session, hrv_samples,
+    carried}`. `hr_wear_min` is minutes, `main_session.hours` is hours,
+    `main_session.start`/`end` are ISO timestamps with the local offset.
+
+    Read-only. Unlike `/summary/range` this never recomputes a
+    `daily_summary` row — it reports what is stored, which is the point
+    when the question is whether a stored value was really measured.
+    """
+    from ..analytics import coverage
+    from ..localtime import bounded_day_range
+
+    try:
+        since, end = bounded_day_range(since, until, coverage.MAX_RANGE_DAYS)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    today, local_tz, _is_today = resolve_day()
+    tzname = settings.tz if local_tz is not timezone.utc else "UTC"
+    return await coverage.day_coverage(db, since, end, local_tz, tzname, today)
+
+
 @router.get("/range/stats")
 async def summary_range_stats(
     since: date = Query(...),

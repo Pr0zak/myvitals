@@ -98,6 +98,7 @@
 - `INGEST_TOKEN` — phone uses this to POST `/ingest/*` and `/debug/logs`. High write blast radius.
 - `QUERY_TOKEN` — frontend uses this to GET `/query/*`, `/summary/*`, `/log`, `/debug/logs`, `/ai/*`, etc.
 - `/sober/*` accepts EITHER token (the phone's home counter + reset and the dashboard need the same endpoints).
+- `SCOPED_READ_TOKENS` (optional, `name:token,name:token`) — read-only tokens for other apps. GET only, on a fixed allow-list (`auth.SCOPED_READ_EXACT` / `SCOPED_READ_PREFIXES`): `/health`, `/version`, `/summary/{today,range,day,tiles,readiness,events,training-load,compare,coverage}`, `/query/{sleep/last,sleep/range,hrv,data-health,last-sync}`, `/activities`, `/activities/stats`, `/workout/strength/*`, `/trails/*` (not `/trails/resolve-link`), `/ai/alerts`. Anything else — including `/sober`, `/fasting`, `/query/blood-pressure`, `/export`, `/mcp`, `/ai/coach`, `/journal` and every write — is 403. `ScopedReadMiddleware` (`scoped_access.py`) enforces the list before routing and redacts responses: route geometry, blood-pressure, fasting, sobriety and journal fields are removed wherever they appear. INGEST/QUERY behave exactly as before.
 - No users table. If a second user is ever needed, add a `users` table and per-user tokens.
 
 The frontend reads `QUERY_TOKEN` from `localStorage` at runtime (set in `/settings`), so deployments don't need to be rebuilt to rotate it.

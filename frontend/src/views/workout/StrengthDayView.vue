@@ -1,20 +1,30 @@
 <script setup lang="ts">
 /**
  * Read-only view of a specific day's strength workout. Reached via the
- * clickable week strip on /workout/strength/today. Past dates render
- * the persisted workout (with logged sets/RPE); future dates render
- * the planner's preview as a "Preview" card.
+ * clickable week strip on /workout/strength/today. Past dates render the
+ * persisted workout (logged sets with their WP-16 rating); future dates
+ * render the planner's preview. The Android day view mirrors this layout.
+ *
+ * Every number is the server's: session_summary for the tiles, the
+ * SKIP-1 counters for the done/total line. Nothing is derived here.
  */
 import { computed, onMounted, ref, watch } from "vue";
-import { useRoute, useRouter, RouterLink } from "vue-router";
-import Card from "@/components/Card.vue";
+import { useRoute } from "vue-router";
+import NeonPage from "@/components/neon/NeonPage.vue";
+import NeonStat from "@/components/neon/NeonStat.vue";
 import { api } from "@/api/client";
-import type { StrengthWorkoutDetail } from "@/api/types";
+import { apiBase } from "@/config";
+import { ratingColor, ratingLabel } from "@/strength/rating";
+import type {
+  StrengthExercise, StrengthSet, StrengthWorkoutDetail, StrengthWorkoutExercise,
+} from "@/api/types";
+
+const LIME = "#5dff3b";
 
 const route = useRoute();
-const router = useRouter();
 
 const workout = ref<StrengthWorkoutDetail | null>(null);
+const catalogById = ref<Record<string, StrengthExercise>>({});
 const notFound = ref(false);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -24,8 +34,12 @@ async function load() {
   if (!date) { error.value = "no date in route"; loading.value = false; return; }
   loading.value = true; error.value = null; notFound.value = false;
   try {
-    const w = await api.strengthWorkoutByDate(date);
-    if (w === null) { notFound.value = true; }
+    const [w, cat] = await Promise.all([
+      api.strengthWorkoutByDate(date),
+      api.strengthExercises().catch(() => ({ count: 0, exercises: [] as StrengthExercise[] })),
+    ]);
+    catalogById.value = Object.fromEntries(cat.exercises.map((e) => [e.id, e]));
+    if (w === null) { notFound.value = true; workout.value = null; }
     else { workout.value = w; }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -38,6 +52,15 @@ const isPreview = computed(() => {
   const w = workout.value;
   return !!w && (w.id < 0 || w.status === "preview");
 });
+/** No sets can exist yet: show the prescription with "Planned". */
+const isPlanned = computed(() => isPreview.value || workout.value?.status === "planned");
+
+function titleCase(s: string): string {
+  const t = s.replace(/_/g, " ");
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+const pageTitle = computed(() =>
+  workout.value ? `${titleCase(workout.value.split_focus)} day` : "Workout");
 
 function muscleGroupsFor(focus: string): string {
   const m: Record<string, string> = {
@@ -55,186 +78,237 @@ function muscleGroupsFor(focus: string): string {
 function fmtDate(iso: string): string {
   try {
     const d = new Date(iso + "T00:00:00");
-    return d.toLocaleDateString(undefined, {
-      weekday: "long", month: "long", day: "numeric", year: "numeric",
-    });
+    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
   } catch { return iso; }
 }
+const subtitle = computed(() => {
+  const w = workout.value;
+  const d = w ? w.date : String(route.params.date ?? "");
+  return w ? `${fmtDate(d)} · ${muscleGroupsFor(w.split_focus)}` : fmtDate(d);
+});
+
+const status = computed<{ label: string; tone: string }>(() => {
+  const w = workout.value;
+  if (!w || isPreview.value) return { label: "Preview", tone: "muted" };
+  switch (w.status) {
+    case "completed": return { label: "Complete", tone: "lime" };
+    case "in_progress":
+    case "paused": return { label: "In progress", tone: "cyan" };
+    case "skipped": return { label: "Skipped", tone: "amber" };
+    case "planned": return { label: "Planned", tone: "muted" };
+    default: return { label: titleCase(w.status), tone: "muted" };
+  }
+});
+
+// Session tiles — same fields and formatting as StrengthToday's completed hero.
+const summary = computed(() => workout.value?.session_summary ?? null);
+const tonnageText = computed(() => {
+  const s = summary.value;
+  if (!s) return "—";
+  if (s.total_volume_lb === 0 && s.working_sets > 0) return "BW";
+  return `${Math.round(s.total_volume_lb).toLocaleString()} lb`;
+});
+const tonnageLabel = computed(() => (tonnageText.value === "BW" ? "Bodyweight" : "Tonnage"));
+const durationText = computed(() => {
+  const s = summary.value?.net_duration_s;
+  return s == null ? "—" : `${Math.round(s / 60)} min`;
+});
+const countsLine = computed(() => {
+  const w = workout.value;
+  if (!w || w.sets_total == null || w.exercises_total == null) return "";
+  return `${w.sets_done ?? 0}/${w.sets_total} sets · ${w.exercises_done ?? 0}/${w.exercises_total} exercises`;
+});
+
+const exercises = computed(() =>
+  [...(workout.value?.exercises ?? [])].sort((a, b) => a.order_index - b.order_index));
+
+function ex(slug: string): StrengthExercise | undefined { return catalogById.value[slug]; }
+function exName(slug: string): string { return ex(slug)?.name ?? slug.replace(/_/g, " "); }
+function imageUrl(slug: string): string | null {
+  const path = ex(slug)?.image_front;
+  if (!path) return null;
+  const base = (apiBase.value || "/api").replace(/\/$/, "");
+  return `${base}${path}`;
+}
+function isPhoto(slug: string): boolean {
+  const u = imageUrl(slug);
+  return !!u && /\.jpe?g($|\?)/i.test(u);
+}
+
+/** Same rule as StrengthToday.isTimedExercise. */
+function isTimed(wex: StrengthWorkoutExercise): boolean {
+  if (wex.is_timed === true) return true;
+  const c = ex(wex.exercise_id);
+  if (c?.movement_pattern === "mobility") return c.is_timed !== false;
+  return wex.target_weight_lb == null
+    && wex.target_reps_low === wex.target_reps_high
+    && wex.target_reps_low >= 20;
+}
+
+function fmtLb(w: number | null | undefined): string {
+  if (w == null || Number.isNaN(w)) return "—";
+  return Number.isInteger(w) ? String(w) : String(Math.round(w * 100) / 100);
+}
+function repsRange(wex: StrengthWorkoutExercise): string {
+  return wex.target_reps_low === wex.target_reps_high
+    ? String(wex.target_reps_low)
+    : `${wex.target_reps_low}–${wex.target_reps_high}`;
+}
+function sideLabel(wex: StrengthWorkoutExercise): string | null {
+  return wex.planned_sets?.find((p) => p.per_side)?.side_label ?? null;
+}
+/** StrengthToday's prescription line: "4×8 per side @ 25 lb · 45s rest". */
+function prescriptionLine(wex: StrengthWorkoutExercise): string {
+  const unit = isTimed(wex) ? "s" : "";
+  const side = sideLabel(wex);
+  const w = wex.target_weight_lb ? ` @ ${fmtLb(wex.target_weight_lb)} lb` : "";
+  return `${wex.target_sets}×${repsRange(wex)}${unit}${side ? ` ${side}` : ""}${w} · ${wex.target_rest_s}s rest`;
+}
+
+/** Logged or individually skipped sets, in order. */
+function rows(wex: StrengthWorkoutExercise): StrengthSet[] {
+  return wex.sets
+    .filter((s) => s.actual_reps != null || s.skipped)
+    .sort((a, b) => a.set_number - b.set_number);
+}
+function weightCell(wex: StrengthWorkoutExercise, s: StrengthSet): string {
+  if (isTimed(wex)) return "—";
+  return s.actual_weight_lb == null ? "BW" : fmtLb(s.actual_weight_lb);
+}
+function repsCell(wex: StrengthWorkoutExercise, s: StrengthSet): string {
+  return isTimed(wex) ? `${s.actual_reps}s` : String(s.actual_reps);
+}
+function pillLabel(r: number): string { return r === 1 ? "Fail" : ratingLabel(r); }
 </script>
 
 <template>
-  <section class="day-view">
-    <header class="page-head">
-      <RouterLink class="back" :to="{ name: 'workout-strength-today' }">
-        ← Today
-      </RouterLink>
-      <h1>{{ workout ? fmtDate(workout.date) : (route.params.date as string) }}</h1>
-      <span v-if="isPreview" class="preview-pip">Preview</span>
-    </header>
+  <NeonPage :title="pageTitle" back="/workout/strength/today" class="day-view">
+    <div class="sub-row">
+      <span class="subtitle">{{ subtitle }}</span>
+      <span v-if="workout" class="pill" :class="status.tone">{{ status.label }}</span>
+    </div>
 
     <p v-if="loading" class="muted">Loading…</p>
     <p v-else-if="error" class="err">{{ error }}</p>
 
-    <Card v-else-if="notFound" class="not-found" :flat="true">
-      No workout recorded for this day.
-    </Card>
+    <div v-else-if="notFound" class="card muted-card">No workout recorded for this day.</div>
 
     <template v-else-if="workout">
-      <Card :flat="true" class="hero">
-        <div class="split">
-          {{ workout.split_focus.charAt(0).toUpperCase() + workout.split_focus.slice(1) }}
-          {{ isPreview ? "" : "day" }}
+      <template v-if="summary">
+        <div class="tiles">
+          <NeonStat :value="tonnageText" :label="tonnageLabel" :accent="LIME" />
+          <NeonStat :value="String(summary.working_sets)" label="Sets" />
+          <NeonStat :value="durationText" label="Duration" />
         </div>
-        <div class="muscles">{{ muscleGroupsFor(workout.split_focus) }}</div>
-        <div v-if="!isPreview" class="status-row">
-          <span class="status-pip" :class="workout.status">
-            {{ workout.status === "completed" ? "Complete"
-               : workout.status === "in_progress" ? "In progress"
-               : workout.status === "skipped" ? "Skipped"
-               : workout.status === "planned" ? "Planned"
-               : workout.status }}
-          </span>
-        </div>
-      </Card>
+        <p v-if="countsLine" class="counts">{{ countsLine }}</p>
+      </template>
 
       <!-- SKIP-1: a declined slot is muted so history doesn't read it as an
            untouched prescription the user might still get to. -->
-      <Card v-for="wex in workout.exercises" :key="wex.id"
-            class="ex-card" :class="{ skipped: wex.skipped }" :flat="true">
-        <div class="ex-name">{{ wex.exercise_id.replace(/_/g, " ") }}</div>
-        <div class="ex-target">
-          {{ wex.target_sets }}×{{
-            wex.target_reps_low === wex.target_reps_high
-              ? wex.target_reps_low
-              : `${wex.target_reps_low}-${wex.target_reps_high}`
-          }}{{ wex.target_weight_lb !== null ? ` @ ${wex.target_weight_lb}lb` : "" }}
-        </div>
-        <!-- Stands in for the set lines this slot will never have. Without
-             it a declined exercise is indistinguishable from one that was
-             simply never reached. -->
-        <div v-if="wex.skipped" class="ex-skipped">Skipped</div>
-        <ul v-if="wex.sets.length" class="sets">
-          <li v-for="s in [...wex.sets].sort((a, b) => a.set_number - b.set_number)"
-              :key="s.set_number"
-              v-show="s.actual_reps !== null">
-            <span class="num">{{ s.set_number }}</span>
-            <span class="result">
-              {{ s.actual_weight_lb ?? "—" }} lb × {{ s.actual_reps }}
-            </span>
-            <span v-if="s.rating !== null" class="rpe" :class="`rpe-${s.rating}`">
-              RPE {{ s.rating }}
-            </span>
-          </li>
-        </ul>
-      </Card>
+      <article v-for="wex in exercises" :key="wex.id"
+               class="card ex-card" :class="{ dim: wex.skipped }">
+        <header class="ex-head">
+          <div class="thumb">
+            <img v-if="isPhoto(wex.exercise_id)" :src="imageUrl(wex.exercise_id)!"
+                 :alt="exName(wex.exercise_id)" loading="lazy" />
+            <div v-else-if="imageUrl(wex.exercise_id)" class="thumb-mask"
+                 :style="`-webkit-mask-image: url('${imageUrl(wex.exercise_id)}'); mask-image: url('${imageUrl(wex.exercise_id)}')`" />
+          </div>
+          <div class="ex-title">
+            <h3>{{ exName(wex.exercise_id) }}</h3>
+            <div class="rx">{{ prescriptionLine(wex) }}</div>
+          </div>
+          <span v-if="wex.skipped" class="pill amber">Skipped</span>
+        </header>
+
+        <template v-if="!wex.skipped">
+          <p v-if="isPlanned" class="state">Planned</p>
+          <p v-else-if="!rows(wex).length" class="state">Not logged</p>
+          <table v-else class="sets">
+            <thead>
+              <tr><th>Set</th><th>Lb</th><th>Reps</th><th class="r"><span class="sr">Rating</span></th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="s in rows(wex)" :key="s.set_number" :class="{ skip: s.actual_reps == null }">
+                <td class="n">{{ s.set_number }}</td>
+                <template v-if="s.actual_reps == null">
+                  <td colspan="3" class="skip-cell">skipped</td>
+                </template>
+                <template v-else>
+                  <td>{{ weightCell(wex, s) }}</td>
+                  <td>{{ repsCell(wex, s) }}</td>
+                  <td class="r">
+                    <span v-if="s.rating != null" class="rate" :style="{ '--c': ratingColor(s.rating) }">
+                      {{ pillLabel(s.rating) }}
+                    </span>
+                  </td>
+                </template>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+      </article>
     </template>
-  </section>
+  </NeonPage>
 </template>
 
 <style scoped>
-.day-view { max-width: 720px; margin: 0 auto; padding: 1rem; }
-.page-head { display: flex; align-items: baseline; gap: 0.6rem;
-             margin-bottom: 1rem; flex-wrap: wrap; }
-.page-head h1 { margin: 0; font-size: 1.25rem; }
-.back { color: var(--muted); text-decoration: none; font-size: 0.85rem; }
-.back:hover { color: var(--text); }
-.preview-pip { background: rgba(234, 179, 8, 0.18); color: #eab308;
-               padding: 0.15rem 0.5rem; border-radius: 999px;
-               font-size: 0.7rem; font-weight: 600; letter-spacing: 0.05em;
-               text-transform: uppercase; }
-.muted { color: var(--muted); }
-.err { color: var(--accent, #ef4444); }
-.not-found { padding: 1rem; color: var(--muted); }
-.hero { padding: 1rem; margin-bottom: 0.6rem; }
-.split { font-size: 1.1rem; font-weight: 600; }
-.muscles { color: var(--muted); font-size: 0.85rem; }
-.status-row { margin-top: 0.4rem; }
-.status-pip { font-size: 0.7rem; letter-spacing: 0.05em;
-              text-transform: uppercase; font-weight: 700; }
-.status-pip.completed { color: #22c55e; }
-.status-pip.in_progress { color: #eab308; }
-.status-pip.skipped { color: var(--muted); }
-.status-pip.planned { color: var(--accent, #ef4444); }
-.ex-card { padding: 0.8rem; margin-bottom: 0.5rem; }
-.ex-card.skipped .ex-name { color: var(--muted); font-weight: 500; }
-.ex-skipped {
-  margin-top: 0.3rem; font-size: 0.78rem; font-weight: 600;
-  color: var(--muted);
+.sub-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -10px 0 16px; }
+.subtitle { color: var(--rn-mut); font-size: 13px; min-width: 0; }
+.pill {
+  font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+  color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 32%, transparent);
 }
-.ex-name { font-weight: 600; text-transform: capitalize; }
-.ex-target { color: var(--muted); font-size: 0.85rem;
-             font-family: 'Geist Mono', ui-monospace, monospace; }
-.sets { list-style: none; padding: 0; margin: 0.4rem 0 0; }
-.sets li { display: flex; gap: 0.6rem; padding: 0.15rem 0;
-           font-size: 0.85rem; align-items: center; }
-.sets .num { color: var(--muted); width: 1.4rem; }
-.sets .result { font-family: 'Geist Mono', ui-monospace, monospace; }
-.sets .rpe { font-size: 0.75rem; font-weight: 600; }
-.rpe-1 { color: #ef4444; }
-.rpe-2 { color: #f97316; }
-.rpe-3 { color: #fbbf24; }
-.rpe-4 { color: #84cc16; }
-.rpe-5 { color: #22c55e; }
+.pill.lime { --c: var(--rn-lime); }
+.pill.cyan { --c: var(--rn-cyan); }
+.pill.amber { --c: var(--rn-amber); }
+.pill.muted { --c: var(--rn-mut); }
 
-/* ── Vitality Neon ─────────────────────────────────────────────
-   Neon-only overrides — scoped + gated behind data-theme="neon"
-   so classic light/dark render byte-for-byte unchanged. */
-html[data-theme="neon"] .day-view {
-  --rn-bg: #0f1118; --rn-card: #181b27; --rn-ink: #ececf5; --rn-mut: #9b9bb0;
-  --rn-mag: #ff3ad8; --rn-lime: #5dff3b; --rn-cyan: #28e6ff; --rn-amber: #ffb52e;
-  --rn-red: #ff5d7a; --rn-track: #272a3b;
-  min-height: 100vh; margin: calc(-1 * var(--main-pt, 1.25rem)) calc(-1 * var(--main-px, 1.5rem)) 0; padding: 54px 22px 32px;
-  max-width: none; box-sizing: border-box;
-  background: radial-gradient(120% 55% at 50% -5%, #161a2c, #0f1118 58%);
-  color: var(--rn-ink); font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+.muted { color: var(--rn-mut); }
+.err { color: var(--rn-bad); }
+.card {
+  background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px;
+  padding: 12px 14px; margin-bottom: 10px; min-width: 0;
 }
-html[data-theme="neon"] .day-view .page-head { max-width: 720px; margin: 0 auto 1rem; }
-html[data-theme="neon"] .day-view .page-head h1 {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 800;
-  letter-spacing: -0.5px; color: var(--rn-ink);
-}
-html[data-theme="neon"] .day-view .back { color: var(--rn-mut); }
-html[data-theme="neon"] .day-view .back:hover { color: var(--rn-cyan); }
+.muted-card { color: var(--rn-mut); }
 
-html[data-theme="neon"] .day-view > :not(.page-head) { max-width: 720px; margin-left: auto; margin-right: auto; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tiles :deep(.ns-v) { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.counts { color: var(--rn-mut); font-size: 13px; text-align: center; margin: 8px 0 14px;
+  font-variant-numeric: tabular-nums; }
 
-html[data-theme="neon"] .day-view .preview-pip {
-  background: rgba(255, 181, 46, 0.16); color: var(--rn-amber);
-  border: 1px solid rgba(255, 181, 46, 0.32);
-}
-html[data-theme="neon"] .day-view .muted,
-html[data-theme="neon"] .day-view .not-found { color: var(--rn-mut); }
-html[data-theme="neon"] .day-view .err { color: var(--rn-red); }
+.ex-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.thumb { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 10px; overflow: hidden;
+  background: rgba(255, 58, 216, .10); }
+.thumb img { width: 44px; height: 44px; object-fit: cover; display: block; }
+.thumb-mask { width: 44px; height: 44px; background: var(--rn-mag);
+  -webkit-mask-size: 70%; mask-size: 70%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center; }
+.ex-title { flex: 1; min-width: 0; }
+.ex-title h3 { margin: 0; font-size: 15px; font-weight: 700; color: var(--rn-ink); text-transform: capitalize;
+  overflow-wrap: anywhere; }
+.rx { color: var(--rn-mut); font-size: 12.5px; margin-top: 2px; font-variant-numeric: tabular-nums;
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; overflow-wrap: anywhere; }
+.ex-card.dim { opacity: .55; }
+.ex-card.dim h3 { font-weight: 500; }
 
-html[data-theme="neon"] .day-view .hero,
-html[data-theme="neon"] .day-view .ex-card,
-html[data-theme="neon"] .day-view .not-found {
-  background: var(--rn-card); border: 1px solid #21243450; border-radius: 18px;
-}
-html[data-theme="neon"] .day-view .split {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-ink);
-}
-html[data-theme="neon"] .day-view .muscles { color: var(--rn-mut); }
+.state { color: var(--rn-mut); font-size: 13px; margin: 10px 0 0; }
 
-html[data-theme="neon"] .day-view .status-pip.completed { color: var(--rn-lime); }
-html[data-theme="neon"] .day-view .status-pip.in_progress { color: var(--rn-amber); }
-html[data-theme="neon"] .day-view .status-pip.skipped { color: var(--rn-mut); }
-html[data-theme="neon"] .day-view .status-pip.planned { color: var(--rn-cyan); }
-
-html[data-theme="neon"] .day-view .ex-name { color: var(--rn-ink); }
-html[data-theme="neon"] .day-view .ex-target {
-  color: var(--rn-mut); font-family: 'Space Grotesk', 'Geist Mono', monospace;
-}
-html[data-theme="neon"] .day-view .sets .num { color: var(--rn-mut); }
-html[data-theme="neon"] .day-view .sets .result {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-ink);
-}
-
-html[data-theme="neon"] .day-view .rpe-1 { color: var(--rn-red); }
-html[data-theme="neon"] .day-view .rpe-2 { color: var(--rn-amber); }
-html[data-theme="neon"] .day-view .rpe-3 { color: var(--rn-amber); }
-html[data-theme="neon"] .day-view .rpe-4 { color: var(--rn-lime); }
-html[data-theme="neon"] .day-view .rpe-5 {
-  color: var(--rn-lime); text-shadow: 0 0 6px rgba(93, 255, 59, 0.45);
-}
+.sets { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: fixed;
+  font-variant-numeric: tabular-nums; }
+.sets th { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--rn-mut); text-align: left; padding: 0 0 4px; }
+.sets th:first-child { width: 3rem; }
+.sets th.r, .sets td.r { text-align: right; width: 5.5rem; }
+.sets td { height: 38px; border-top: 1px solid var(--rn-line); color: var(--rn-ink); font-size: 14px;
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; white-space: nowrap; }
+.sets td.n { color: var(--rn-mut); }
+.sets tr.skip td { color: var(--rn-mut); }
+.skip-cell { font-family: inherit; font-style: italic; }
+.rate { display: inline-block; font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  color: var(--c); background: color-mix(in srgb, var(--c) 15%, transparent); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>

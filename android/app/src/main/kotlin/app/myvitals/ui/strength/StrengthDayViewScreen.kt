@@ -37,6 +37,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
+import app.myvitals.strength.StrengthRepository
+import app.myvitals.sync.StrengthExerciseInfo
+import app.myvitals.sync.StrengthWorkoutExerciseRow
+import app.myvitals.ui.neon.NeonNumberFamily
+import app.myvitals.ui.neon.NeonScreen
 import app.myvitals.data.SettingsRepository
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.StrengthWorkoutDetail
@@ -56,7 +64,6 @@ fun StrengthDayViewScreen(
     onBack: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val neon = settings.neonShellEnabled
     var workout by remember { mutableStateOf<StrengthWorkoutDetail?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -94,174 +101,177 @@ fun StrengthDayViewScreen(
         } finally { loading = false }
     }
 
-    val parsed = remember(dateIso) {
-        runCatching { LocalDate.parse(dateIso) }.getOrNull()
+    var catalog by remember { mutableStateOf<Map<String, StrengthExerciseInfo>>(emptyMap()) }
+    LaunchedEffect(Unit) {
+        // Names and photos. Cached by the repository, so this is usually free;
+        // without it the cards fall back to the exercise id, which is legible.
+        catalog = runCatching { StrengthRepository(context, settings).catalog() }
+            .getOrDefault(emptyMap())
     }
-    val titleFmt = DateTimeFormatter.ofPattern("EEE, MMM d")
 
-    val bg = if (neon) NeonMV.Bg else MV.Bg
-    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
-    val ink = if (neon) NeonMV.Ink else MV.OnSurface
-    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
-    val bad = if (neon) NeonMV.Bad else MV.Red
+    StrengthDayViewContent(
+        dateIso = dateIso,
+        workout = workout,
+        loading = loading,
+        error = error,
+        notFound = notFound,
+        catalog = catalog,
+        backendBaseUrl = settings.backendUrl.trimEnd('/'),
+        onBack = onBack,
+    )
+}
 
-    Column(Modifier.fillMaxSize().background(bg)) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
-                    tint = ink)
+/** Stateless day view — the screenshot tests render this directly. */
+@Composable
+internal fun StrengthDayViewContent(
+    dateIso: String,
+    workout: StrengthWorkoutDetail?,
+    loading: Boolean,
+    error: String?,
+    notFound: Boolean,
+    catalog: Map<String, StrengthExerciseInfo>,
+    backendBaseUrl: String,
+    onBack: () -> Unit,
+) {
+    val parsed = remember(dateIso) { runCatching { LocalDate.parse(dateIso) }.getOrNull() }
+    val dateLabel = parsed?.format(DateTimeFormatter.ofPattern("EEE, MMM d")) ?: dateIso
+    val title = workout?.let { "${it.splitFocus.replace('_', ' ').replaceFirstChar(Char::titlecase)} day" }
+        ?: dateLabel
+
+    NeonScreen(title = title, contentPadding = PaddingValues(bottom = 24.dp), onBack = onBack) {
+        when {
+            loading && workout == null -> Text("Loading…", color = NeonMV.Muted, fontSize = 14.sp)
+            error != null && workout == null -> Text(error, color = NeonMV.Bad, fontSize = 14.sp)
+            notFound || workout == null -> DayNote("No workout recorded for this day.")
+            else -> {
+                val w = workout
+                DaySubtitle(w, dateLabel)
+                Spacer(Modifier.height(14.dp))
+                if (w.sessionSummary != null) {
+                    SessionStats(w, w.sessionSummary)
+                    Spacer(Modifier.height(16.dp))
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    for (wex in w.exercises.sortedBy { it.orderIndex }) {
+                        DayExerciseCard(w, wex, catalog[wex.exerciseId], backendBaseUrl)
+                    }
+                }
             }
-            Text(parsed?.format(titleFmt) ?: dateIso,
-                color = ink, fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun DayNote(text: String) {
+    Box(
+        Modifier.fillMaxWidth().clip(NeonCardShape).background(NeonMV.Card)
+            .border(1.dp, NeonMV.Line, NeonCardShape).padding(16.dp),
+    ) { Text(text, color = NeonMV.Muted, fontSize = 14.sp) }
+}
+
+/** "Mon, Sep 28 · Back · Biceps" and the status pill. */
+@Composable
+private fun DaySubtitle(w: StrengthWorkoutDetail, dateLabel: String) {
+    val preview = w.id < 0 || w.status == "preview"
+    val (label, color) = when {
+        preview -> "Preview" to NeonMV.Muted
+        w.status == "completed" -> "Complete" to NeonMV.Lime
+        w.status == "in_progress" -> "In progress" to NeonMV.Cyan
+        w.status == "skipped" -> "Skipped" to NeonMV.Amber
+        w.status == "planned" -> "Planned" to NeonMV.Muted
+        else -> w.status.replaceFirstChar(Char::titlecase) to NeonMV.Muted
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 0.dp)) {
+        Text("$dateLabel · ${muscleGroupsFor(w.splitFocus)}", color = NeonMV.Muted, fontSize = 13.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(8.dp))
+        Pill(label, color)
+    }
+}
+
+@Composable
+private fun Pill(text: String, color: Color) {
+    Text(
+        text, color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(color.copy(alpha = 0.12f))
+            .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    )
+}
+
+@Composable
+private fun DayExerciseCard(
+    w: StrengthWorkoutDetail,
+    wex: StrengthWorkoutExerciseRow,
+    info: StrengthExerciseInfo?,
+    backendBaseUrl: String,
+) {
+    val pal = LocalStrengthPalette.current
+    val name = info?.name ?: wex.exerciseId.replace('_', ' ')
+    val timed = isTimedExercise(wex, info)
+    val done = wex.sets.filter { it.actualReps != null || it.skipped }.sortedBy { it.setNumber }
+    val future = w.id < 0 || w.status == "preview" || w.status == "planned"
+    Column(
+        Modifier.fillMaxWidth().clip(NeonCardShape)
+            .background(if (wex.skipped) NeonMV.Card.copy(alpha = 0.6f) else NeonMV.Card)
+            .border(1.dp, NeonMV.Line, NeonCardShape)
+            .padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ExerciseThumb(wex, info, backendBaseUrl, size = 44.dp, trailingGap = 12.dp) {}
+            Column(Modifier.weight(1f)) {
+                Text(name, color = if (wex.skipped) NeonMV.Muted else NeonMV.Ink,
+                    fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(prescriptionLine(wex, info), color = NeonMV.Muted, fontSize = 12.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (wex.skipped) { Spacer(Modifier.width(8.dp)); Pill("Skipped", NeonMV.Amber) }
         }
         when {
-            loading -> Text("Loading…", color = muted,
-                modifier = Modifier.padding(16.dp))
-            error != null -> Text(error!!, color = bad,
-                modifier = Modifier.padding(16.dp))
-            notFound -> Card(
-                colors = CardDefaults.cardColors(containerColor = card),
-                shape = if (neon) NeonCardShape else CardDefaults.shape,
-                border = if (neon) BorderStroke(1.dp, NeonMV.Line) else null,
-                modifier = Modifier.padding(16.dp).fillMaxWidth(),
-            ) {
-                Text("No workout recorded for this day.",
-                    color = muted,
-                    modifier = Modifier.padding(14.dp), fontSize = 13.sp)
+            wex.skipped -> {}
+            done.isEmpty() -> {
+                Spacer(Modifier.height(8.dp))
+                Text(if (future) "Planned" else "Not logged", color = NeonMV.Muted, fontSize = 12.sp)
             }
-            workout != null -> {
-                val w = workout!!
-                LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    item { DayHeader(w, neon) }
-                    items(w.exercises, key = { it.id }) { wex ->
-                        DayExerciseCard(wex, neon)
-                    }
+            else -> {
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                    DayHead("SET", Modifier.width(40.dp))
+                    DayHead(if (timed) "" else "LB", Modifier.weight(1f))
+                    DayHead(if (timed) "HOLD" else "REPS", Modifier.weight(1f))
+                    DayHead("", Modifier.width(64.dp))
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DayHeader(w: StrengthWorkoutDetail, neon: Boolean) {
-    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
-    val ink = if (neon) NeonMV.Ink else MV.OnSurface
-    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
-    val isPreview = w.id < 0 || w.status == "preview"
-    // Status-tinted border, matching StrengthHistoryScreen's HistoryRow so the
-    // two screens' cards read as one family (completed=Lime, in_progress=Cyan,
-    // skipped=Amber, else=Muted).
-    val statusColor = if (neon) when (w.status) {
-        "completed" -> NeonMV.Lime
-        "in_progress" -> NeonMV.Cyan
-        "skipped" -> NeonMV.Amber
-        else -> NeonMV.Muted
-    } else MV.OnSurfaceVariant
-    Card(
-        colors = CardDefaults.cardColors(containerColor = card),
-        shape = if (neon) NeonCardShape else CardDefaults.shape,
-        border = if (neon) BorderStroke(1.dp, statusColor.copy(alpha = 0.30f)) else null,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(14.dp)) {
-            Text(w.splitFocus.replaceFirstChar { it.titlecase() }
-                + (if (isPreview) " · Preview" else ""),
-                color = ink, fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold)
-            Text(muscleGroupsFor(w.splitFocus),
-                color = muted, fontSize = 12.sp)
-            if (w.status != "preview") {
-                Spacer(Modifier.height(4.dp))
-                val pip = when (w.status) {
-                    "completed" -> "Complete"
-                    "in_progress" -> "In progress"
-                    "skipped" -> "Skipped"
-                    "planned" -> "Planned"
-                    else -> w.status
-                }
-                // Neon: status-semantic color (completed=Lime/open, in_progress=
-                // Cyan/info, skipped=Bad, planned=Muted). Classic: single dim ink.
-                val pipColor = if (neon) when (w.status) {
-                    "completed" -> NeonMV.Lime
-                    "in_progress" -> NeonMV.Cyan
-                    "skipped" -> NeonMV.Bad
-                    "planned" -> NeonMV.Muted
-                    else -> NeonMV.Muted
-                } else MV.OnSurfaceDim
-                Text(pip, color = pipColor, fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun DayExerciseCard(wex: app.myvitals.sync.StrengthWorkoutExerciseRow, neon: Boolean) {
-    val card = if (neon) NeonMV.Card else MV.SurfaceContainer
-    // SKIP-1 — a declined slot is muted so history doesn't read it as an
-    // untouched prescription the user might still get to.
-    val cardLow = if (neon) NeonMV.Card else MV.SurfaceContainerLow
-    val ink = if (neon) NeonMV.Ink else MV.OnSurface
-    val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
-    val setInk = if (neon) NeonMV.Muted else MV.OnSurfaceDim
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (wex.skipped) cardLow else card,
-        ),
-        shape = if (neon) NeonCardShape else CardDefaults.shape,
-        border = if (neon) BorderStroke(1.dp, NeonMV.Line) else null,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(14.dp)) {
-            Text(wex.exerciseId.replace('_', ' '),
-                color = if (wex.skipped) muted else ink, fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold)
-            val rep = if (wex.targetRepsLow == wex.targetRepsHigh)
-                "${wex.targetRepsLow}" else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
-            val w = wex.targetWeightLb?.let { " @ ${it}lb" } ?: ""
-            Text("${wex.targetSets}×$rep$w",
-                color = muted, fontSize = 12.sp)
-            // SKIP-1 — the marker stands in for the set lines this slot will
-            // never have. Without it a declined exercise is indistinguishable
-            // from one that was simply never reached.
-            if (wex.skipped) {
-                Spacer(Modifier.height(2.dp))
-                Text("  Skipped", color = muted, fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold)
-            }
-            // Logged sets (if any)
-            for (s in wex.sets.sortedBy { it.setNumber }) {
-                if (s.actualReps != null) {
-                    Spacer(Modifier.height(2.dp))
-                    if (neon && s.rating != null) {
-                        // Neon: split the rating off so it carries its own
-                        // set-rating semantic color (good/easy=Lime, hard=Amber,
-                        // failed=Bad), while the rest stays muted ink.
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "  set ${s.setNumber}: ${s.actualWeightLb ?: "—"}lb × ${s.actualReps}",
-                                color = setInk, fontSize = 11.sp,
-                            )
-                            Text(
-                                " · RPE ${s.rating}",
-                                color = setRatingColor(s.rating),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                            )
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    for (s in done) {
+                        val skippedSet = s.actualReps == null
+                        Row(
+                            Modifier.fillMaxWidth().heightIn(min = 36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (skippedSet) Color.Transparent else NeonMV.Bg.copy(alpha = 0.55f))
+                                .padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("${s.setNumber}", color = NeonMV.Muted, fontFamily = NeonNumberFamily,
+                                fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(40.dp))
+                            if (skippedSet) {
+                                Text("skipped", color = NeonMV.Muted, fontSize = 13.sp, modifier = Modifier.weight(2f))
+                                Spacer(Modifier.width(64.dp))
+                            } else {
+                                Text(if (timed) "—" else s.actualWeightLb?.let { fmtLbPlain(it) } ?: "BW",
+                                    color = NeonMV.Ink, fontFamily = NeonNumberFamily, fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                Text(if (timed) "${s.actualReps}s" else "${s.actualReps}",
+                                    color = NeonMV.Ink, fontFamily = NeonNumberFamily, fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                Box(Modifier.width(64.dp), contentAlignment = Alignment.CenterEnd) {
+                                    // WP-16 set rating (Fail/Hard/Good/Easy), not RPE —
+                                    // this line used to print "RPE 4" for a Good set and
+                                    // painted a failed set green.
+                                    s.rating?.let { Pill(ratingLabel(it), ratingColor(it, pal)) }
+                                }
+                            }
                         }
-                    } else {
-                        Text(
-                            "  set ${s.setNumber}: ${s.actualWeightLb ?: "—"}lb × ${s.actualReps}"
-                                + (s.rating?.let { " · RPE $it" } ?: ""),
-                            color = setInk, fontSize = 11.sp,
-                        )
                     }
                 }
             }
@@ -269,28 +279,10 @@ private fun DayExerciseCard(wex: app.myvitals.sync.StrengthWorkoutExerciseRow, n
     }
 }
 
-/**
- * Neon set-rating color. The four-button rating ladder is
- * Failed / Hard / Good / Easy; legacy numeric RPE may also flow through.
- * Good/Easy -> Lime, Hard -> Amber (caution), Failed -> Bad. Numeric RPE:
- * high effort (>=9) -> Amber, very high (>=10) -> Bad, else Lime.
- */
-private fun setRatingColor(rating: Any?): androidx.compose.ui.graphics.Color {
-    val label = rating?.toString()?.trim()?.lowercase() ?: return NeonMV.Muted
-    return when (label) {
-        "good", "easy" -> NeonMV.Lime
-        "hard" -> NeonMV.Amber
-        "failed", "fail" -> NeonMV.Bad
-        else -> {
-            val n = label.toDoubleOrNull()
-            when {
-                n == null -> NeonMV.Muted
-                n >= 10.0 -> NeonMV.Bad
-                n >= 9.0 -> NeonMV.Amber
-                else -> NeonMV.Lime
-            }
-        }
-    }
+@Composable
+private fun DayHead(text: String, modifier: Modifier) {
+    Text(text, color = NeonMV.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+        letterSpacing = 1.2.sp, modifier = modifier)
 }
 
 /** Map planner split focus to a human-readable muscle list. */

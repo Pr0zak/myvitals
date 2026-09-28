@@ -807,39 +807,47 @@ private fun CompletedHero(
         }
         HeroTitle(plan.splitFocus.replace('_', ' ').replaceFirstChar(Char::titlecase) + " — see you tomorrow")
         Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Tonnage over bodyweight-only work is zero by arithmetic, not
-            // by effort: say so rather than print a discouraging 0.
-            val bodyweightOnly = s != null && s.totalVolumeLb <= 0.0 && s.workingSets > 0
-            NeonStatTile(
-                value = when {
-                    s == null -> "—"
-                    bodyweightOnly -> "BW"
-                    else -> "%,d".format(Math.round(s.totalVolumeLb))
-                },
-                label = if (bodyweightOnly) "bodyweight" else "lb lifted",
-                accent = NeonMV.Lime,
-                modifier = Modifier.weight(1f),
-            )
-            NeonStatTile(
-                value = s?.workingSets?.toString() ?: "—",
-                label = "working sets",
-                modifier = Modifier.weight(1f),
-            )
-            NeonStatTile(
-                value = s?.netDurationS?.let { "${Math.round(it / 60.0)} min" } ?: "—",
-                label = "duration",
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Spacer(Modifier.height(10.dp))
-        // SKIP-1 — what the session amounted to, straight from the counters.
-        Text(
-            "${plan.setsDone}/${plan.setsTotal} sets · " +
-                "${plan.exercisesDone}/${plan.exercisesTotal} exercises",
-            color = NeonMV.Muted, fontSize = 12.sp,
+        SessionStats(plan, s)
+    }
+}
+
+/** TD-4's three tiles plus the SKIP-1 counters line. Shared by the
+ *  completed hero and the day view so a finished session reads the same
+ *  wherever it is opened. */
+@Composable
+internal fun SessionStats(plan: StrengthWorkoutDetail, s: app.myvitals.sync.SessionSummary?) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Tonnage over bodyweight-only work is zero by arithmetic, not
+        // by effort: say so rather than print a discouraging 0.
+        val bodyweightOnly = s != null && s.totalVolumeLb <= 0.0 && s.workingSets > 0
+        NeonStatTile(
+            value = when {
+                s == null -> "—"
+                bodyweightOnly -> "BW"
+                else -> "%,d".format(Math.round(s.totalVolumeLb))
+            },
+            label = if (bodyweightOnly) "bodyweight" else "lb lifted",
+            accent = NeonMV.Lime,
+            modifier = Modifier.weight(1f),
+        )
+        NeonStatTile(
+            value = s?.workingSets?.toString() ?: "—",
+            label = "working sets",
+            modifier = Modifier.weight(1f),
+        )
+        NeonStatTile(
+            value = s?.netDurationS?.let { "${Math.round(it / 60.0)} min" } ?: "—",
+            label = "duration",
+            modifier = Modifier.weight(1f),
         )
     }
+    Spacer(Modifier.height(10.dp))
+    // SKIP-1 — what the session amounted to, straight from the counters.
+    Text(
+        "${plan.setsDone}/${plan.setsTotal} sets · " +
+            "${plan.exercisesDone}/${plan.exercisesTotal} exercises",
+        color = NeonMV.Muted, fontSize = 12.sp,
+    )
 }
 
 @Composable

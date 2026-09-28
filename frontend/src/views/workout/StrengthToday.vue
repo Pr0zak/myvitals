@@ -19,6 +19,7 @@ import NeonRing from "@/components/neon/NeonRing.vue";
 import NeonEyebrow from "@/components/neon/NeonEyebrow.vue";
 import NeonStat from "@/components/neon/NeonStat.vue";
 import { api } from "@/api/client";
+import { ratingColor, ratingLabel } from "@/strength/rating";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import { useConfirm } from "@/useConfirm";
 import { isNeon } from "@/theme";
@@ -867,10 +868,6 @@ const RATING_CHOICES: { v: number; label: string; title: string }[] = [
   { v: 4, label: "Good", title: "Good — solid, a couple reps left. Adds a rep next time." },
   { v: 5, label: "Easy", title: "Easy — several reps left. Adds weight once you top the rep range." },
 ];
-function ratingLabel(r: number | null): string {
-  if (r == null) return "—";
-  return { 1: "Failed", 2: "Hard", 3: "Good", 4: "Good", 5: "Easy" }[r] ?? `RPE ${r}`;
-}
 
 function entryKey(wexId: number, setNum: number) { return `${wexId}-${setNum}`; }
 
@@ -1581,10 +1578,6 @@ const HERO_RATINGS: { v: number; label: string; color: string; title: string }[]
   { v: 1, label: "Fail", color: "#ff5d7a", title: "Failed — missed reps. Next session's weight drops about 7.5%." },
   ...RATING_CHOICES.map((r) => ({ ...r, color: r.v === 2 ? AMBER : r.v === 4 ? LIME : CYAN })),
 ];
-function ratingColor(r: number | null): string {
-  if (r == null) return "#9b9bb0";
-  return r === 1 ? "#ff5d7a" : r === 2 ? AMBER : r === 5 ? CYAN : LIME;
-}
 const canLogHero = computed(() => {
   const e = heroEntry.value;
   return !!e && e.rating !== null && e.reps.trim() !== ""

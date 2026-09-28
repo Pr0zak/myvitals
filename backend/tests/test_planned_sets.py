@@ -84,11 +84,14 @@ def test_an_edit_on_set_one_carries_forward():
     assert rows[1].prefill_reps == 10
 
 
-def test_last_session_seeds_the_first_set_when_nothing_is_logged_yet():
-    last = [LastSetOut(set_number=1, weight_lb=42.5, reps=9)]
+def test_last_session_does_not_override_todays_target():
+    """The planner already folded last session into today's target. Seeding
+    the entry with last session's 25x7 under a "reach 8" prescription put the
+    old number in the hero's biggest type, where it read as the instruction."""
+    last = [LastSetOut(set_number=1, weight_lb=42.5, reps=7)]
     rows = _planned_sets(_wex(), [], last, None)
-    assert rows[0].prefill_weight_lb == 42.5
-    assert rows[0].prefill_reps == 9
+    assert rows[0].prefill_weight_lb == 40.0
+    assert rows[0].prefill_reps == 8
 
 
 def test_this_session_beats_last_session():

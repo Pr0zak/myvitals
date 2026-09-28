@@ -701,15 +701,19 @@ class PlannedSetOut(BaseModel):
     and invisible to `scripts/parity_check.py` because both files exist and
     both keep changing.
 
-    The prefill is resolved here, through a three-tier cascade borrowed from
+    The prefill is resolved here, through a cascade borrowed from
     SparkyFitness's `resolveAssumedSetValues` (the single most transferable
     idea in that codebase):
 
     1. The most recently logged set of this exercise **in this session**, so
        correcting the weight on set 1 carries forward to sets 2..N.
-    2. The same-index set from the previous session, which is what
-       `last_sets` already carries.
-    3. The slot prescription.
+    2. The slot prescription.
+
+    The borrowed cascade had a middle tier — last session's same-index set —
+    which was removed. The planner has already turned last session into
+    today's target, so that tier re-seeded the entry with the number the
+    prescription was trying to move past (25x7 under "reach 8 reps"), in the
+    largest type on the screen, where it read as the instruction.
 
     Warm-up and working sets are tiered separately, so a light warm-up can
     never seed a working target.
@@ -1102,8 +1106,6 @@ def _planned_sets(
     most_recent = (
         logged_by_number[max(logged_by_number)] if logged_by_number else None
     )
-    # Tier 2: the same-index set from last session.
-    last_by_number = {ls.set_number: ls for ls in (last_sets or [])}
 
     amrap_last = bool((program or {}).get("amrap_last_set")) and \
         (program or {}).get("scheme") == "greyskull"
@@ -1137,10 +1139,12 @@ def _planned_sets(
             # Same tier only. A light warm-up must never seed a working set.
             prefill_weight = most_recent.actual_weight_lb
             prefill_reps = most_recent.actual_reps or wex.target_reps_low
-        elif n in last_by_number:
-            ls = last_by_number[n]
-            prefill_weight = ls.weight_lb if ls.weight_lb is not None else prefill_weight
-            prefill_reps = ls.reps if ls.reps is not None else prefill_reps
+        # No tier for last session's same-index set. The planner already
+        # turned last session into today's target ("hold 25 lb, reach 8"),
+        # so seeding the entry with last session's raw 25x7 undid the
+        # prescription and put the old number in the biggest type on the
+        # screen, where it read as the instruction. Last session is still
+        # shown on the "Last (...)" line, which is where it belongs.
 
         out.append(PlannedSetOut(
             set_number=n,

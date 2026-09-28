@@ -2506,6 +2506,16 @@ private fun SetGrid(
             if (logged != null) {
                 weightText = if (timed) "—" else logged.actualWeightLb?.let { fmtLbPlain(it) } ?: "BW"
                 repsText = if (timed) "${logged.actualReps ?: 0}s" else "${logged.actualReps ?: 0}"
+            } else if (state == GridRowState.Current && !timed) {
+                // The NOW row shows what the hero will log, not the flat
+                // target. The hero seeds from planned_sets' prefill (e.g.
+                // last session's 25x7) while the target is 25x8, so printing
+                // the target here put two rep counts for one set on screen.
+                // Same rule as the web grid, which renders entry() here.
+                val input = inputs[key] ?: seedInput(wex, n)
+                weightText = input.weight.ifBlank { "BW" }
+                repsText = input.reps.ifBlank { "—" } +
+                    if (planned?.isAmrap == true) "+" else ""
             } else {
                 val tw = planned?.targetWeightLb ?: wex.targetWeightLb
                 weightText = if (timed) "—" else tw?.let { fmtLbPlain(it) } ?: "BW"

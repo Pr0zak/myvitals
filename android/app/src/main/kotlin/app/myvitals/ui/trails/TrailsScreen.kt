@@ -832,7 +832,10 @@ private fun TrailRow(
     Column(
         Modifier.fillMaxWidth().clip(NeonCardShape).background(NeonMV.Card)
             .border(1.dp, color.copy(alpha = 0.18f), NeonCardShape)
-            .combinedClickable(onClick = { if (hasLocation) onTap() }, onLongClick = onLongPress),
+            .combinedClickable(
+                // Condensed rows hide the status message, so a tap there must
+                // open the row even for a trail with no pin to map.
+                onClick = { if (hasLocation || dense) onTap() }, onLongClick = onLongPress),
     ) {
         Row(
             Modifier.padding(start = 14.dp, end = 2.dp, top = if (dense) 2.dp else 8.dp,
@@ -874,6 +877,17 @@ private fun TrailRow(
                     contentDescription = if (t.subscribed) "Unsubscribe" else "Subscribe",
                     tint = if (t.subscribed) NeonMV.Amber else NeonMV.Muted,
                 )
+            }
+        }
+        if (dense && expanded) {
+            // What the full row shows and the condensed one drops: the
+            // trail's own open/closed message, then where it is.
+            val place = listOfNotNull(t.city, t.state).joinToString(", ")
+            Column(Modifier.padding(start = 34.dp, end = 14.dp, bottom = 10.dp)) {
+                Text(t.comment?.takeIf { it.isNotBlank() } ?: "No message posted",
+                    color = if (t.comment.isNullOrBlank()) NeonMV.Muted else NeonMV.Ink,
+                    fontSize = 13.sp)
+                if (place.isNotEmpty()) Text(place, color = NeonMV.Muted, fontSize = 12.sp)
             }
         }
         if (expanded && hasLocation) expandedMap(t)

@@ -910,6 +910,7 @@ internal fun StrengthTodayContent(
             actions = actions,
             onFinish = { requestFinish() },
             onCardioLog = { st.showCardioLog = true },
+            backendBaseUrl = backendBaseUrl,
         )
 
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
@@ -2225,8 +2226,6 @@ internal fun ExerciseCard(
     backendBaseUrl: String = "",
 ) {
     val pal = LocalStrengthPalette.current
-    val iconViolet = NeonMV.Magenta
-    val iconVioletBg = NeonMV.Magenta.copy(alpha = 0.12f)
     val name = info?.name ?: wex.exerciseId.replace('_', ' ')
     val supersetColor = wex.supersetId?.let {
         // Stable hash → hue (HSL)
@@ -2280,17 +2279,7 @@ internal fun ExerciseCard(
                     Text("NEEDS KIT YOU NO LONGER HAVE", color = pal.caution, fontSize = 10.sp,
                         fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
                 }
-                val rep = if (wex.targetRepsLow == wex.targetRepsHigh)
-                    "${wex.targetRepsLow}" else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
-                val w = wex.targetWeightLb?.let { " @ ${fmtLbPlain(it)} lb" } ?: ""
-                // OG3-B3: the per-side words are the server's.
-                val side = wex.plannedSets.firstOrNull { it.perSide }
-                    ?.sideLabel?.let { " $it" } ?: ""
-                val unit = if (isTimedExercise(wex, info)) "s" else ""
-                Text(
-                    "${wex.targetSets}×$rep$unit$side$w  ·  ${wex.targetRestS}s rest",
-                    color = pal.muted, fontSize = 13.sp,
-                )
+                Text(prescriptionLine(wex, info), color = pal.muted, fontSize = 13.sp)
                 // PROG-1: program-mode scheme badge on program lifts
                 wex.programScheme?.let {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2315,48 +2304,9 @@ internal fun ExerciseCard(
                     }
                 }
                 // LOG-1: what you did last time (rep-based exercises only)
-                if (!isTimedExercise(wex, info) && wex.lastSets.isNotEmpty()) {
-                    val summary = wex.lastSets.joinToString(" · ") { ls ->
-                        val wv = ls.weightLb?.let { fmtLbPlain(it) }
-                        if (wv != null) "$wv×${ls.reps}" else "${ls.reps}"
-                    }
-                    // OG3-A3 — when, and the WORST rating of that session.
-                    val when_ = lastSetsWhen(wex.lastSets)
-                    val head = if (when_ != null) "Last ($when_)" else "Last"
-                    Text("$head: $summary", color = pal.muted, fontSize = 12.sp)
-                }
+                lastSetsLine(wex, info)?.let { Text(it, color = pal.muted, fontSize = 12.sp) }
             }
-            val thumb: (@Composable () -> Unit)? = when {
-                info?.imageFront != null && backendBaseUrl.isNotEmpty() -> {
-                    {
-                        // Photo (.jpg) as-is; icon (.png) tinted so the
-                        // black-on-transparent silhouette is legible.
-                        val isPhoto = info.imageFront!!
-                            .lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") }
-                        AsyncImage(
-                            model = backendBaseUrl + info.imageFront,
-                            contentDescription = name,
-                            modifier = if (isPhoto) Modifier.size(48.dp) else Modifier.size(38.dp),
-                            colorFilter = if (isPhoto) null else ColorFilter.tint(iconViolet),
-                        )
-                    }
-                }
-                info?.movementPattern == "mobility" &&
-                    app.myvitals.ui.hasYogaPoseIcon(wex.exerciseId) -> {
-                    { app.myvitals.ui.YogaPoseIcon(id = wex.exerciseId, size = 34.dp, tint = iconViolet) }
-                }
-                else -> null
-            }
-            if (thumb != null) {
-                Box(
-                    Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(iconVioletBg)
-                        .clickable { showInfo = true },
-                    contentAlignment = Alignment.Center,
-                ) { thumb() }
-            }
+            ExerciseThumb(wex, info, backendBaseUrl, size = 48.dp) { showInfo = true }
         }
 
         // Actions — Ink labels on 40dp targets (they were 12sp Muted, grey
@@ -2390,8 +2340,80 @@ internal fun ExerciseCard(
     }
 }
 
+/** "4×10 per side @ 25 lb  ·  105s rest" — the slot's prescription, shared
+ *  by the exercise card and the NOW hero so the two cannot word it apart. */
+internal fun prescriptionLine(wex: StrengthWorkoutExerciseRow, info: StrengthExerciseInfo?): String {
+    val rep = if (wex.targetRepsLow == wex.targetRepsHigh)
+        "${wex.targetRepsLow}" else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
+    val w = wex.targetWeightLb?.let { " @ ${fmtLbPlain(it)} lb" } ?: ""
+    // OG3-B3: the per-side words are the server's.
+    val side = wex.plannedSets.firstOrNull { it.perSide }
+        ?.sideLabel?.let { " $it" } ?: ""
+    val unit = if (isTimedExercise(wex, info)) "s" else ""
+    return "${wex.targetSets}×$rep$unit$side$w  ·  ${wex.targetRestS}s rest"
+}
+
+/** LOG-1 "Last (Aug 25 · Easy): 25×9 · 25×9" — rep-based slots only. */
+internal fun lastSetsLine(wex: StrengthWorkoutExerciseRow, info: StrengthExerciseInfo?): String? {
+    if (isTimedExercise(wex, info) || wex.lastSets.isEmpty()) return null
+    val summary = wex.lastSets.joinToString(" · ") { ls ->
+        val wv = ls.weightLb?.let { fmtLbPlain(it) }
+        if (wv != null) "$wv×${ls.reps}" else "${ls.reps}"
+    }
+    // OG3-A3 — when, and the WORST rating of that session.
+    val when_ = lastSetsWhen(wex.lastSets)
+    return "${if (when_ != null) "Last ($when_)" else "Last"}: $summary"
+}
+
+/** The exercise's photo (or tinted icon / yoga pose), tap for the info and
+ *  demo dialog. Draws nothing when the catalog has no image. */
 @Composable
-private fun CardAction(
+internal fun ExerciseThumb(
+    wex: StrengthWorkoutExerciseRow,
+    info: StrengthExerciseInfo?,
+    backendBaseUrl: String,
+    size: androidx.compose.ui.unit.Dp,
+    /** Space after the thumbnail — only when there is one to space from. */
+    trailingGap: androidx.compose.ui.unit.Dp = 0.dp,
+    onClick: () -> Unit,
+) {
+    val iconViolet = NeonMV.Magenta
+    val name = info?.name ?: wex.exerciseId.replace('_', ' ')
+    val thumb: @Composable () -> Unit = when {
+        info?.imageFront != null && backendBaseUrl.isNotEmpty() -> {
+            {
+                // Photo (.jpg) as-is; icon (.png) tinted so the
+                // black-on-transparent silhouette is legible.
+                val isPhoto = info.imageFront!!
+                    .lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") }
+                AsyncImage(
+                    model = backendBaseUrl + info.imageFront,
+                    contentDescription = name,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = if (isPhoto) Modifier.size(size) else Modifier.size(size * 0.8f),
+                    colorFilter = if (isPhoto) null else ColorFilter.tint(iconViolet),
+                )
+            }
+        }
+        info?.movementPattern == "mobility" &&
+            app.myvitals.ui.hasYogaPoseIcon(wex.exerciseId) -> {
+            { app.myvitals.ui.YogaPoseIcon(id = wex.exerciseId, size = size * 0.7f, tint = iconViolet) }
+        }
+        else -> return
+    }
+    Box(
+        Modifier
+            .size(size)
+            .clip(RoundedCornerShape(12.dp))
+            .background(NeonMV.Magenta.copy(alpha = 0.12f))
+            .clickable(onClickLabel = "Show how to do $name", onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { thumb() }
+    if (trailingGap > 0.dp) Spacer(Modifier.width(trailingGap))
+}
+
+@Composable
+internal fun CardAction(
     label: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     enabled: Boolean = true,
@@ -3169,7 +3191,7 @@ internal fun lastSetsWhen(sets: List<app.myvitals.sync.LastSet>): String? {
 }
 
 @Composable
-private fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
+internal fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
     val pal = LocalStrengthPalette.current
     var open by remember { mutableStateOf(false) }
     Box {
@@ -3419,7 +3441,7 @@ internal fun CardioLogDialog(
  *  targets + the catalog's how-to instructions. Opens when the user
  *  taps the small 40dp icon in an ExerciseCard. */
 @Composable
-private fun ExerciseInfoDialog(
+internal fun ExerciseInfoDialog(
     info: StrengthExerciseInfo,
     name: String,
     backendBaseUrl: String,

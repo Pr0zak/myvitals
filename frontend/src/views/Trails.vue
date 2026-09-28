@@ -571,7 +571,7 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
                    :style="{ borderColor: statusColor(t.status) + '2e' }">
             <div class="trail-main">
               <i class="dot glow" :style="{ background: statusColor(t.status), color: statusColor(t.status) }" />
-              <div class="trail-body">
+              <div class="trail-body" :class="{ tappable: dense }" @click="dense && toggleMap(t)">
                 <strong>{{ t.name }}</strong>
                 <template v-if="!dense">
                   <p v-if="t.comment" class="comment">{{ t.comment }}</p>
@@ -587,7 +587,15 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
                     <ChevronRight :size="16" />
                   </RouterLink>
                 </template>
-                <span v-else class="meta">{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
+                <template v-else>
+                  <span class="meta">{{ fmtAge(t.source_ts || t.fetched_at) }}</span>
+                  <!-- Condensed rows hide the status message; a tap on the
+                       name brings it back (and the map, when pinned). -->
+                  <template v-if="expandedMaps.has(t.id)">
+                    <p class="comment" :class="{ 'no-msg': !t.comment }">{{ t.comment || "No message posted" }}</p>
+                    <p v-if="t.city" class="meta">{{ t.city }}{{ t.state ? ', ' + t.state : '' }}</p>
+                  </template>
+                </template>
               </div>
               <button v-if="t.latitude != null" class="act" :class="{ on: expandedMaps.has(t.id) }"
                       :aria-label="expandedMaps.has(t.id) ? 'Hide map' : 'Show map'" @click="toggleMap(t)">
@@ -733,6 +741,8 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
 .trail-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
 .trail-body strong { font-size: 15px; }
 .comment { color: #c4c4d4; font-size: 13px; margin: 0; }
+.comment.no-msg { color: var(--muted, #8a8aa0); }
+.trail-body.tappable { cursor: pointer; }
 .meta { color: var(--rn-mut); font-size: 12px; margin: 0; font-family: 'Space Grotesk', monospace; }
 .nopin { color: var(--rn-amber); }
 .visit-chip { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; margin-top: 6px;

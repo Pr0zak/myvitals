@@ -24,6 +24,9 @@ import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.HourglassBottom
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.OndemandVideo
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Spa
@@ -98,6 +101,7 @@ internal fun NowHeroArea(
     actions: StrengthTodayActions,
     onFinish: () -> Unit,
     onCardioLog: () -> Unit,
+    backendBaseUrl: String = "",
 ) {
     when {
         plan.status == "completed" -> CompletedHero(
@@ -122,7 +126,7 @@ internal fun NowHeroArea(
             onFinish = onFinish,
             onAdd = { st.addSheetOpen = true },
         )
-        else -> NowHero(st, plan, heroWex, info, actions)
+        else -> NowHero(st, plan, heroWex, info, actions, backendBaseUrl)
     }
 }
 
@@ -145,14 +149,15 @@ private fun HeroEyebrow(text: String, color: Color = NeonMV.Muted, trailing: @Co
 }
 
 @Composable
-private fun HeroTitle(text: String) {
+private fun HeroTitle(text: String, maxLines: Int = 1) {
     Text(
         text,
         color = NeonMV.Ink,
         fontSize = 22.sp,
         fontWeight = FontWeight.ExtraBold,
         letterSpacing = (-0.3).sp,
-        maxLines = 1,
+        lineHeight = 26.sp,
+        maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.padding(top = 2.dp),
     )
@@ -195,6 +200,7 @@ private fun NowHero(
     wex: StrengthWorkoutExerciseRow,
     info: StrengthExerciseInfo?,
     actions: StrengthTodayActions,
+    backendBaseUrl: String,
 ) {
     val n = nextSetOf(wex) ?: return
     val key = "${wex.id}-$n"
@@ -214,6 +220,7 @@ private fun NowHero(
     val perSide = planned?.takeIf { it.perSide }?.sideLabel
     val targetW = planned?.targetWeightLb ?: wex.targetWeightLb
     var editOpen by remember(key) { mutableStateOf(false) }
+    var infoOpen by remember(wex.id) { mutableStateOf(false) }
 
     NeonHeroCard(accent = NeonMV.Cyan) {
         HeroEyebrow("Now · exercise $pos of $total", color = NeonMV.Cyan) {
@@ -231,21 +238,19 @@ private fun NowHero(
                 SetTypePill(input.setType) { st.setInputs[key] = input.copy(setType = it) }
             }
         }
-        HeroTitle(name)
-        val setLine = buildString {
-            if (side != null) append(if (side == "R") "Right side · " else "Left side · ")
-            append("Set $n of ${wex.targetSets}")
-            if (timed) {
-                append(" · ${wex.targetRepsLow}s hold")
-            } else {
-                append(" · target ")
-                if (targetW != null) append("${fmtLbPlain(targetW)} lb × ")
-                append(repsTarget)
-                if (perSide != null) append(" $perSide")
+        // Everything about THIS exercise lives here now — photo, plan, which
+        // set, last time, and its actions. The list below used to repeat the
+        // name and reps in a second card, and read as a second instruction.
+        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            ExerciseThumb(wex, info, backendBaseUrl, size = 56.dp, trailingGap = 12.dp) { infoOpen = true }
+            Column(Modifier.weight(1f)) {
+                HeroTitle(name, maxLines = 2)
+                Text(prescriptionLine(wex, info), color = NeonMV.Muted, fontSize = 13.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        Text(setLine, color = NeonMV.Muted, fontSize = 13.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(10.dp))
+        SetPills(wex, n, side)
         Spacer(Modifier.height(10.dp))
 
         val resting = st.restTotal > 0L && st.restRemainingS > 0L
@@ -269,6 +274,7 @@ private fun NowHero(
                     hero = true,
                 )
             }
+            HeroExerciseFooter(st, plan, wex, info, name, actions)
             return@NeonHeroCard
         }
 
@@ -309,6 +315,7 @@ private fun NowHero(
                 }
             }
         }
+        HeroNotes(wex, info)
         Spacer(Modifier.height(10.dp))
         RatingChips(selected = input.rating) { st.setInputs[key] = input.copy(rating = it) }
         Spacer(Modifier.height(10.dp))
@@ -325,8 +332,18 @@ private fun NowHero(
                 st.setInputs.remove(key)
             },
         )
+        HeroExerciseFooter(st, plan, wex, info, name, actions)
     }
 
+    if (infoOpen && info != null) {
+        ExerciseInfoDialog(
+            info = info,
+            name = name,
+            backendBaseUrl = backendBaseUrl,
+            onYouTube = { actions.youTube(wex.exerciseId, name) },
+            onDismiss = { infoOpen = false },
+        )
+    }
     if (editOpen) {
         NumberEntryDialog(
             weight = input.weight,
@@ -337,6 +354,95 @@ private fun NowHero(
                 editOpen = false
             },
         )
+    }
+}
+
+/**
+ * One bar per prescribed set — done Lime, skipped Track, the one being logged
+ * Cyan, the rest Track — then "Set 2 of 4 · set 1: 25×10 Good". Replaces the
+ * "Set n of N · target …" line; the target is in the prescription line above
+ * and in the entry itself.
+ */
+@Composable
+private fun SetPills(wex: StrengthWorkoutExerciseRow, n: Int, side: String?) {
+    val logged = wex.sets.filter { it.actualReps != null && !it.skipped }
+    val last = logged.maxByOrNull { it.setNumber }
+    val label = buildString {
+        if (side != null) append(if (side == "R") "Right side · " else "Left side · ")
+        append("Set $n of ${wex.targetSets}")
+        if (last != null) {
+            append(" · set ${last.setNumber}: ")
+            append(last.actualWeightLb?.let { "${fmtLbPlain(it)}×" } ?: "")
+            append(last.actualReps)
+            last.rating?.let { append(" ${ratingLabel(it)}") }
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.semantics(mergeDescendants = true) {}) {
+        Row(Modifier.width((wex.targetSets * 26).coerceAtMost(150).dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            for (i in 1..wex.targetSets) {
+                val color = when {
+                    logged.any { it.setNumber == i } -> NeonMV.Lime
+                    i == n -> NeonMV.Cyan
+                    else -> NeonMV.Track
+                }
+                Box(Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)).background(color))
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(label, color = NeonMV.Muted, fontSize = 13.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** The server's why-this-weight note, the load hint and last session. */
+@Composable
+private fun HeroNotes(wex: StrengthWorkoutExerciseRow, info: StrengthExerciseInfo?) {
+    val lines = listOfNotNull(
+        wex.notes?.takeIf { it.isNotBlank() },
+        wex.loadHint,
+        lastSetsLine(wex, info),
+    )
+    if (lines.isEmpty()) return
+    Spacer(Modifier.height(8.dp))
+    for (l in lines) Text(l, color = NeonMV.Muted, fontSize = 12.sp, lineHeight = 16.sp)
+}
+
+/** Demo / Swap / Skip / ⋮ — the exercise card's actions, same guards. */
+@Composable
+private fun HeroExerciseFooter(
+    st: StrengthTodayState,
+    plan: StrengthWorkoutDetail,
+    wex: StrengthWorkoutExerciseRow,
+    info: StrengthExerciseInfo?,
+    name: String,
+    actions: StrengthTodayActions,
+) {
+    val sessionOver = plan.status == "completed" || plan.status == "skipped"
+    // SKIP-1 — nothing real logged against this slot AND the session open.
+    val canEditSlot = !sessionOver && wex.sets.none { it.actualReps != null && !it.skipped }
+    Spacer(Modifier.height(10.dp))
+    Row(verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        CardAction("Demo", Icons.Outlined.OndemandVideo) {
+            actions.youTube(wex.exerciseId, name)
+        }
+        if (canEditSlot) {
+            CardAction("Swap", Icons.Filled.SwapHoriz) {
+                st.swapWexId = wex.id
+            }
+            CardAction(
+                if (st.skipBusyWexId == wex.id) "Skipping…" else "Skip",
+                Icons.Filled.SkipNext,
+                enabled = st.skipBusyWexId == null,
+            ) { actions.skipExercise(wex, true) }
+        }
+        Spacer(Modifier.weight(1f))
+        ExercisePrefMenu { pref -> actions.setPref(wex.exerciseId, pref) }
+    }
+    st.skipError?.takeIf { it.first == wex.id }?.second?.let {
+        Text(it, color = NeonMV.Amber, fontSize = 12.sp)
     }
 }
 

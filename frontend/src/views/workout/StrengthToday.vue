@@ -1526,13 +1526,6 @@ function repsRange(wex: StrengthWorkoutExercise): string {
     ? String(wex.target_reps_low)
     : `${wex.target_reps_low}–${wex.target_reps_high}`;
 }
-/** The prescription line for the hero ("47.5 lb × 8"). */
-function heroTarget(wex: StrengthWorkoutExercise, n: number): string {
-  const ps = plannedSet(wex, n);
-  const reps = ps?.is_amrap ? `${wex.target_reps_low}+ (AMRAP)` : repsRange(wex);
-  const w = ps?.target_weight_lb ?? wex.target_weight_lb;
-  return w != null ? `${fmtLb(w)} lb × ${reps}` : `${reps} reps`;
-}
 function setHeading(wex: StrengthWorkoutExercise, n: number): string {
   const side = bilateralSideLabel(wex, n);
   const sideWord = side === "R" ? "Right side · " : side === "L" ? "Left side · " : "";
@@ -1657,6 +1650,15 @@ function toggleExpanded(id: number) {
   if (next.has(id)) next.delete(id); else next.add(id);
   expanded.value = next;
 }
+// Expanding the hero's collapsed row is a per-exercise peek: when the hero
+// moves on, fold the one it left so it lands in "Done" as a summary line.
+watch(() => heroWex.value?.id, (_now, prev) => {
+  if (prev != null && expanded.value.has(prev)) {
+    const next = new Set(expanded.value);
+    next.delete(prev);
+    expanded.value = next;
+  }
+});
 /** Slots other than the hero that are still open — the "up next" lines. */
 const upNext = computed(() =>
   orderedExercises.value.filter((w) => !isSlotClosed(w) && w.id !== heroWex.value?.id));
@@ -1679,14 +1681,62 @@ function prescriptionShort(wex: StrengthWorkoutExercise): string {
   const w = wex.target_weight_lb != null ? ` · ${fmtLb(wex.target_weight_lb)} lb` : "";
   return `${wex.target_sets}×${repsRange(wex)}${unit}${w}`;
 }
+/** The exercise card's prescription line as one string, for the hero's
+ *  title row ("4×10 per side @ 25 lb · 105s rest"). Same server fields the
+ *  card prints: target_sets, the rep range, the per-side label, the slot
+ *  weight and target_rest_s. */
+function prescriptionLine(wex: StrengthWorkoutExercise): string {
+  const unit = isTimedExercise(wex) ? "s" : "";
+  const side = sideLabel(wex);
+  const w = wex.target_weight_lb ? ` @ ${fmtLb(wex.target_weight_lb)} lb` : "";
+  return `${wex.target_sets}×${repsRange(wex)}${unit}${side ? ` ${side}` : ""}${w} · ${wex.target_rest_s}s rest`;
+}
+
+// ── Hero set pills (A + C layout, shared with the phone) ──────────────────
+type PillKind = "logged" | "skipped" | "now" | "pending";
+/** One pill per prescribed set: logged → lime, individually skipped → muted,
+ *  the set the hero is logging → cyan, anything else → track. */
+function setPills(wex: StrengthWorkoutExercise, current: number | null): PillKind[] {
+  const out: PillKind[] = [];
+  for (let n = 1; n <= wex.target_sets; n++) {
+    const s = wex.sets.find((x) => x.set_number === n);
+    if (s && s.actual_reps != null) out.push("logged");
+    else if (s && s.skipped) out.push("skipped");
+    else if (n === current) out.push("now");
+    else out.push("pending");
+  }
+  return out;
+}
+/** " · set k: 25×10 Good" for the most recently logged set of this exercise
+ *  (highest set_number with actuals), or "" when nothing is logged yet. */
+function lastLoggedTail(wex: StrengthWorkoutExercise): string {
+  const logged = wex.sets
+    .filter((s) => s.actual_reps != null)
+    .sort((a, b) => b.set_number - a.set_number);
+  const s = logged[0];
+  if (!s) return "";
+  const k = bilateralSideLabel(wex, s.set_number);
+  const what = isTimedExercise(wex)
+    ? `${s.actual_reps}s`
+    : s.actual_weight_lb != null ? `${fmtLb(s.actual_weight_lb)}×${s.actual_reps}` : `${s.actual_reps}`;
+  const rate = s.rating == null ? "" : ` ${s.rating === 1 ? "Fail" : ratingLabel(s.rating)}`;
+  return ` · set ${k}: ${what}${rate}`;
+}
+
 /** Render list: the hero's exercise as a full card, then the other open
  *  slots as compact "up next" lines, then closed slots as one-line
  *  summaries (a summary expands to its full grid on tap, or while one of
  *  its sets is being corrected). */
-type CardMode = "full" | "next" | "summary";
+type CardMode = "full" | "next" | "summary" | "current";
 const cards = computed<{ wex: StrengthWorkoutExercise; mode: CardMode; head: string | null }[]>(() => {
   const out: { wex: StrengthWorkoutExercise; mode: CardMode; head: string | null }[] = [];
-  if (heroWex.value) out.push({ wex: heroWex.value, mode: "full", head: null });
+  // The hero now carries this exercise's prescription, last session, demo and
+  // Swap/Skip, so its full card collapses to a line by default. Expanding it
+  // (or correcting one of its sets) brings the whole card back.
+  if (heroWex.value) {
+    const w = heroWex.value;
+    out.push({ wex: w, mode: expanded.value.has(w.id) || isEditingExercise(w) ? "full" : "current", head: null });
+  }
   upNext.value.forEach((w, i) => out.push({ wex: w, mode: "next", head: i === 0 ? "Up next" : null }));
   closedSlots.value.forEach((w, i) => out.push({
     wex: w,
@@ -1917,20 +1967,34 @@ useVisibilityRefresh(loadAll);
             <option value="drop">drop</option>
           </select>
         </div>
-        <h2 class="now-name">{{ exName(heroWex.exercise_id) }}</h2>
-        <div class="now-sub">
-          {{ setHeading(heroWex, heroSet) }} · target {{ heroTarget(heroWex, heroSet) }}<span
-            v-if="sideLabel(heroWex)"> {{ sideLabel(heroWex) }}</span>
+        <!-- Title row: thumbnail (opens the demo) + name + prescription. -->
+        <div class="now-title">
+          <a v-if="imageUrl(heroWex.exercise_id, 0)" class="thumb now-thumb"
+             :href="youtubeUrl(heroWex.exercise_id)" target="_blank" rel="noreferrer"
+             :aria-label="`Watch a demo of ${exName(heroWex.exercise_id)}`">
+            <ExerciseDemo v-if="isPhoto(heroWex.exercise_id)"
+                          :front="imageUrl(heroWex.exercise_id, 0)"
+                          :side="imageUrl(heroWex.exercise_id, 1)"
+                          :alt="exName(heroWex.exercise_id)" />
+            <div v-else class="ex-thumb"
+                 :style="`-webkit-mask-image: url('${imageUrl(heroWex.exercise_id, 0)}'); mask-image: url('${imageUrl(heroWex.exercise_id, 0)}')`" />
+          </a>
+          <div class="now-title-text">
+            <h2 class="now-name">{{ exName(heroWex.exercise_id) }}</h2>
+            <div class="now-rx">{{ prescriptionLine(heroWex) }}</div>
+          </div>
+        </div>
+        <!-- Set pills: one bar per prescribed set + where you are in it. -->
+        <div class="now-pills">
+          <div class="pills" aria-hidden="true">
+            <i v-for="(k, i) in setPills(heroWex, heroSet)" :key="i" :class="k" />
+          </div>
+          <span class="pills-txt">{{ setHeading(heroWex, heroSet) }}{{ lastLoggedTail(heroWex) }}</span>
         </div>
         <div v-if="heroWex.superset_id" class="now-ss"
              :style="{ color: supersetColor(heroWex.superset_id) }">
           Superset {{ heroWex.superset_id }} — alternate with
           {{ supersetPartnerName(heroWex.superset_id, heroWex.id) }}
-        </div>
-        <div v-if="heroWex.load_hint" class="now-hint">Load: {{ heroWex.load_hint }}</div>
-        <div v-if="lastSetsSummary(heroWex) && !isTimedExercise(heroWex)" class="now-hint">
-          ↩ last<template v-if="lastSetsWhen(heroWex)"> ({{ lastSetsWhen(heroWex) }})</template>:
-          {{ lastSetsSummary(heroWex) }}
         </div>
 
         <!-- Timed hold: the existing countdown + full-screen overlay. -->
@@ -1948,6 +2012,10 @@ useVisibilityRefresh(loadAll);
           </button>
           <button v-else class="btn-ghost wide" @click="stopTimer(heroWex.id, heroSet)">Cancel</button>
           <p class="hint center">Hold for the configured time — it logs itself at zero.</p>
+          <div v-if="heroWex.notes || heroWex.load_hint" class="now-info">
+            <p v-if="heroWex.notes">{{ heroWex.notes }}</p>
+            <p v-if="heroWex.load_hint">Load: {{ heroWex.load_hint }}</p>
+          </div>
         </template>
 
         <template v-else>
@@ -2011,6 +2079,16 @@ useVisibilityRefresh(loadAll);
             </div>
           </template>
 
+          <!-- The server's note, load hint and last session — all verbatim. -->
+          <div v-if="heroWex.notes || heroWex.load_hint || lastSetsSummary(heroWex)" class="now-info">
+            <p v-if="heroWex.notes">{{ heroWex.notes }}</p>
+            <p v-if="heroWex.load_hint">Load: {{ heroWex.load_hint }}</p>
+            <p v-if="lastSetsSummary(heroWex)">
+              Last<template v-if="lastSetsWhen(heroWex)"> ({{ lastSetsWhen(heroWex) }})</template>:
+              {{ lastSetsSummary(heroWex) }}
+            </p>
+          </div>
+
           <div class="ratings" role="radiogroup" aria-label="How did the set feel?">
             <button v-for="r in HERO_RATINGS" :key="r.v" type="button" class="rate"
                     role="radio" :aria-checked="heroEntry.rating === r.v"
@@ -2024,6 +2102,18 @@ useVisibilityRefresh(loadAll);
             {{ busy === `set-${heroWex.id}-${heroSet}` ? 'Logging…' : `Log set ${heroSet}` }}
           </button>
         </template>
+
+        <!-- Demo / Swap / Skip — the exercise card's actions, same guards. -->
+        <div class="now-actions">
+          <a class="act" :href="youtubeUrl(heroWex.exercise_id)" target="_blank" rel="noreferrer">Demo ↗</a>
+          <template v-if="canSkipOrSwap(heroWex)">
+            <button type="button" class="act" @click="openSwap(heroWex.id)">Swap</button>
+            <button type="button" class="act" :disabled="skipInFlight" @click="setExerciseSkipped(heroWex, true)">
+              {{ busy === `skip-ex-${heroWex.id}` ? 'Skipping…' : 'Skip' }}
+            </button>
+          </template>
+        </div>
+        <p v-if="skipError?.wexId === heroWex.id" class="card-err">{{ skipError.message }}</p>
       </NeonHero>
 
       <NeonHero v-else-if="sessionLive" :accent="LIME" class="hero">
@@ -2127,6 +2217,19 @@ useVisibilityRefresh(loadAll);
           <ChevronRight :size="16" class="nl-chev" />
         </button>
 
+        <!-- The hero's exercise, collapsed: the hero carries its details, so
+             the full card (set table, corrections) is one tap away. -->
+        <div v-else-if="c.mode === 'current'" class="sum-line current"
+             :style="c.wex.superset_id ? { borderLeftColor: supersetColor(c.wex.superset_id) } : {}">
+          <button type="button" class="sum-main" :aria-expanded="false"
+                  :aria-label="`Show all sets of ${exName(c.wex.exercise_id)}`"
+                  @click="toggleExpanded(c.wex.id)">
+            <span class="sum-name">{{ exPos(c.wex) }}. {{ exName(c.wex.exercise_id) }}</span>
+            <span class="sum-sets">{{ accountedSets(c.wex) }}/{{ c.wex.target_sets }} sets</span>
+            <ChevronDown :size="16" class="sum-chev" />
+          </button>
+        </div>
+
         <!-- Closed: a 56px summary line on a surface darker than a card. -->
         <div v-else-if="c.mode === 'summary'" class="sum-line" :class="{ muted: c.wex.skipped || !hasAccountedSets(c.wex) }">
           <button type="button" class="sum-main" :disabled="c.wex.skipped || !hasAccountedSets(c.wex)"
@@ -2189,7 +2292,8 @@ useVisibilityRefresh(loadAll);
           <p v-if="c.wex.load_hint && !isSlotClosed(c.wex) && heroWex?.id !== c.wex.id" class="last-hint">
             Load: {{ c.wex.load_hint }}
           </p>
-          <p v-if="skipError?.wexId === c.wex.id" class="card-err">{{ skipError.message }}</p>
+          <!-- The hero already shows the current exercise's skip error. -->
+          <p v-if="skipError?.wexId === c.wex.id && (heroWex?.id !== c.wex.id || isPaused)" class="card-err">{{ skipError.message }}</p>
 
           <div class="ex-actions">
             <a class="act" :href="youtubeUrl(c.wex.exercise_id)" target="_blank" rel="noreferrer">YouTube ↗</a>
@@ -2201,8 +2305,8 @@ useVisibilityRefresh(loadAll);
             </template>
             <button v-if="c.wex.added_ad_hoc && !isSlotClosed(c.wex) && c.wex.sets.length === 0"
                     class="act" title="Remove this exercise" @click="removeExercise(c.wex.id)">Remove</button>
-            <button v-if="isSlotClosed(c.wex) && !isEditingExercise(c.wex)" class="act"
-                    @click="toggleExpanded(c.wex.id)">Collapse</button>
+            <button v-if="(isSlotClosed(c.wex) || heroWex?.id === c.wex.id) && !isEditingExercise(c.wex)"
+                    class="act" :aria-expanded="true" @click="toggleExpanded(c.wex.id)">Collapse</button>
           </div>
 
           <!-- The set grid: SET | LB | REPS | ✓. Fits 360px (UX-W2). -->
@@ -2591,6 +2695,23 @@ useVisibilityRefresh(loadAll);
   color: var(--rn-ink); overflow-wrap: anywhere; }
 .now-sub { font-size: 13px; color: var(--rn-mut); }
 .now-ss { font-size: 12px; font-weight: 600; margin-top: 3px; }
+.now-title { display: flex; align-items: center; gap: 12px; margin-top: 6px; min-width: 0; }
+.now-title .now-name { margin: 0 0 2px; }
+.now-title-text { flex: 1; min-width: 0; }
+.now-thumb { display: block; height: 56px; }
+.now-rx { font-family: 'Space Grotesk', monospace; font-size: 12.5px; color: var(--rn-mut); overflow-wrap: anywhere; }
+.now-pills { display: flex; align-items: center; gap: 10px; margin-top: 10px; min-width: 0; }
+.pills { display: flex; gap: 5px; flex: 0 1 150px; max-width: 150px; min-width: 40px; }
+.pills i { flex: 1 1 0; min-width: 0; height: 8px; border-radius: 4px; background: var(--rn-track); }
+.pills i.logged { background: var(--rn-lime); box-shadow: 0 0 6px rgba(93, 255, 59, .4); }
+.pills i.skipped { background: rgba(155, 155, 176, .35); }
+.pills i.now { background: var(--rn-cyan); box-shadow: 0 0 6px rgba(40, 230, 255, .4); }
+.pills-txt { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--rn-mut); overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums; }
+.now-info { margin-top: 8px; font-size: 12px; line-height: 1.4; color: var(--rn-mut); overflow-wrap: anywhere; }
+.now-info p { margin: 2px 0 0; }
+.now-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.now-actions .act { flex: 1 1 0; justify-content: center; min-width: 0; }
 .now-hint { font-size: 12px; color: var(--rn-mut); margin-top: 3px; font-family: 'Space Grotesk', monospace; }
 .hero-text { margin: 8px 0; font-size: 14px; line-height: 1.45; color: var(--rn-ink); }
 .type-sel { background: var(--rn-card); color: var(--rn-mut); border: 1px solid var(--rn-line); border-radius: 8px;
@@ -2704,6 +2825,8 @@ useVisibilityRefresh(loadAll);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 48%; }
 .sum-chev { color: var(--rn-mut); flex: 0 0 auto; }
 .sum-line.muted .sum-name { color: var(--rn-mut); }
+.sum-line.current { border-color: rgba(40, 230, 255, .35); background: var(--rn-card); }
+.sum-line.current[style*="border-left-color"] { border-left-width: 3px; }
 .sum-line .card-err { flex-basis: 100%; padding: 0 12px 10px; }
 
 /* Full exercise card */

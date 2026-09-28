@@ -129,7 +129,16 @@ internal fun ExerciseSlot(
         // The session is over and this slot was never touched. Not a skip.
         closed && wex.sets.none { it.actualReps != null || it.skipped } ->
             SlotStrip(label = label, state = "Not logged")
-        isHero -> fullCard()
+        // The hero above carries this exercise's plan, sets and actions, so
+        // its card collapses to one line here — expandable, because the grid
+        // is still where a logged set is corrected or deleted (OG2-A9).
+        isHero -> {
+            val open = st.expandedDone[wex.id] == true
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                DoneSummaryRow(wex, label, open, current = true) { st.expandedDone[wex.id] = !open }
+                if (open) fullCard()
+            }
+        }
         closed -> {
             val open = st.expandedDone[wex.id] == true
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -147,6 +156,7 @@ private fun DoneSummaryRow(
     wex: StrengthWorkoutExerciseRow,
     label: String,
     expanded: Boolean,
+    current: Boolean = false,
     onToggle: () -> Unit,
 ) {
     val complete = isSlotSettled(wex)
@@ -161,7 +171,12 @@ private fun DoneSummaryRow(
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
+        if (current) {
+            // The NOW exercise, not a finished one: a Cyan dot, not a tick.
+            Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(NeonMV.Cyan))
+            }
+        } else Icon(
             Icons.Outlined.CheckCircle, contentDescription = null,
             tint = if (complete) NeonMV.Lime else NeonMV.Muted,
             modifier = Modifier.size(20.dp),

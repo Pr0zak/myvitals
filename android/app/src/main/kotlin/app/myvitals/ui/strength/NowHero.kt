@@ -24,6 +24,7 @@ import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.HourglassBottom
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.OndemandVideo
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SkipNext
@@ -127,6 +128,60 @@ internal fun NowHeroArea(
             onAdd = { st.addSheetOpen = true },
         )
         else -> NowHero(st, plan, heroWex, info, actions, backendBaseUrl)
+    }
+}
+
+/** True when [NowHeroArea] is showing the set-logging hero (not the
+ *  finish / completed / skipped / paused / prescription variants). */
+internal fun heroIsNow(plan: StrengthWorkoutDetail): Boolean =
+    plan.status != "completed" && plan.status != "skipped" &&
+        plan.status != "paused" && plan.exercises.isNotEmpty()
+
+/**
+ * The one-line stand-in for the hero once it has scrolled off: which
+ * exercise, which set, what the entry holds (or the rest countdown). Tap to
+ * scroll back. No Log button — a set needs a rating, and the ratings live in
+ * the hero.
+ */
+@Composable
+internal fun NowMiniBar(
+    st: StrengthTodayState,
+    wex: StrengthWorkoutExerciseRow,
+    info: StrengthExerciseInfo?,
+    onClick: () -> Unit,
+) {
+    val n = nextSetOf(wex) ?: return
+    val name = info?.name ?: wex.exerciseId.replace('_', ' ')
+    val resting = st.restTotal > 0L && st.restRemainingS > 0L
+    val value = when {
+        resting -> "Rest ${mmss(st.restRemainingS)}"
+        isTimedExercise(wex, info) -> "${wex.targetRepsLow}s hold"
+        else -> {
+            val input = st.setInputs["${wex.id}-$n"] ?: seedInput(wex, n)
+            "${input.weight.ifBlank { "BW" }} × ${input.reps.ifBlank { "—" }}"
+        }
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
+            .background(NeonMV.CardHigh)
+            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.35f),
+                RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
+            .clickable(onClickLabel = "Back to current set", onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(NeonMV.Cyan))
+        Spacer(Modifier.width(10.dp))
+        Text(name, color = NeonMV.Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text("  Set $n of ${wex.targetSets}  ", color = NeonMV.Muted, fontSize = 12.sp, maxLines = 1)
+        Text(value, color = if (resting) NeonMV.Cyan else NeonMV.Ink,
+            fontFamily = NeonNumberFamily, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Icon(Icons.Outlined.KeyboardArrowUp, contentDescription = null, tint = NeonMV.Muted,
+            modifier = Modifier.padding(start = 6.dp).size(20.dp))
     }
 }
 

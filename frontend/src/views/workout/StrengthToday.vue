@@ -26,6 +26,7 @@ import { apiBase, queryToken } from "@/config";
 import { useVisibilityRefresh } from "@/composables/useVisibilityRefresh";
 import CoachCard from "@/components/CoachCard.vue";
 import ExerciseDemo from "@/components/ExerciseDemo.vue";
+import StrengthPinBar from "@/components/StrengthPinBar.vue";
 import type { StrengthExercise, StrengthWorkoutDetail, StrengthWorkoutExercise } from "@/api/types";
 
 const router = useRouter();
@@ -1608,6 +1609,41 @@ const restFraction = computed(() =>
     ? Math.max(0, Math.min(1, restRemaining.value / restTotal.value)) : 0,
 );
 
+// ── Pinned mini-bar (PIN-1) ─────────────────────────────────────────────
+// The NOW hero scrolls with the page; once it is fully out of view a slim
+// bar pins to the top with the exercise, set and live entry. Visibility is
+// an IntersectionObserver on the hero element — no scroll arithmetic. The
+// bar reads heroEntry / restRemaining verbatim, never a recomputed value.
+const nowHeroRef = ref<{ $el: Element } | null>(null);
+const heroOffscreen = ref(false);
+let heroObserver: IntersectionObserver | null = null;
+watch(nowHeroRef, (cmp) => {
+  heroObserver?.disconnect();
+  heroObserver = null;
+  heroOffscreen.value = false;
+  const el = cmp?.$el;
+  if (!el || typeof IntersectionObserver === "undefined") return;
+  heroObserver = new IntersectionObserver(([e]) => {
+    // Only "scrolled past" counts: the hero's bottom edge is above the top.
+    heroOffscreen.value = !e.isIntersecting && e.boundingClientRect.bottom <= (e.rootBounds?.top ?? 0);
+  });
+  heroObserver.observe(el);
+}, { flush: "post" });
+onUnmounted(() => heroObserver?.disconnect());
+const pinBarValue = computed(() => {
+  const w = heroWex.value; const e = heroEntry.value;
+  if (!w || !e) return "";
+  if (isTimedExercise(w)) return `${w.target_reps_low}s hold`;
+  return `${e.weight.trim() || "BW"} × ${e.reps.trim() || "—"}`;
+});
+const pinBarRest = computed(() =>
+  resting.value && !restDone.value ? `Rest ${fmtRest(Math.max(0, restRemaining.value ?? 0))}` : null,
+);
+function scrollToHero() {
+  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  nowHeroRef.value?.$el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+}
+
 // One segmented bar: a segment per exercise, filled from what the slot has
 // accounted for. The label is the server's counter, verbatim.
 const segments = computed(() => byOrder.value.map((w) => {
@@ -1896,6 +1932,17 @@ useVisibilityRefresh(loadAll);
       </div>
 
       <!-- ── The hero ─────────────────────────────────────────────── -->
+      <!-- Pinned mini-bar: exists only under the same condition as the NOW
+           hero below (its v-else-if chain, flattened). -->
+      <StrengthPinBar
+        v-if="workout.status !== 'skipped' && workout.status !== 'completed'
+          && workout.exercises.length > 0 && !isPaused && heroWex && heroSet != null && heroEntry"
+        :show="heroOffscreen"
+        :name="exName(heroWex.exercise_id)"
+        :set-label="`Set ${heroSet} of ${heroWex.target_sets}`"
+        :value="pinBarValue"
+        :rest="pinBarRest"
+        @back="scrollToHero" />
       <NeonHero v-if="workout.status === 'skipped'" accent="#9b9bb0" class="hero">
         <div class="eyebrow">Skipped</div>
         <p class="hero-text"><b>Skipped today's workout day.</b></p>
@@ -1957,7 +2004,8 @@ useVisibilityRefresh(loadAll);
         </button>
       </NeonHero>
 
-      <NeonHero v-else-if="heroWex && heroSet != null && heroEntry" :accent="CYAN" class="hero now-hero">
+      <NeonHero v-else-if="heroWex && heroSet != null && heroEntry" ref="nowHeroRef"
+                :accent="CYAN" class="hero now-hero">
         <div class="hero-top">
           <div class="eyebrow cyan">Now · Exercise {{ heroPos }} of {{ heroOf }}</div>
           <select v-if="!isTimedExercise(heroWex)" v-model="heroEntry.setType"
@@ -2716,10 +2764,10 @@ useVisibilityRefresh(loadAll);
 .hero-text { margin: 8px 0; font-size: 14px; line-height: 1.45; color: var(--rn-ink); }
 .type-sel { background: var(--rn-card); color: var(--rn-mut); border: 1px solid var(--rn-line); border-radius: 8px;
   font: inherit; font-size: 12px; padding: 4px 6px; min-height: 32px; }
-@media (min-height: 760px) {
-  /* Pinned under the header on screens tall enough to keep the list in view. */
-  .now-hero { position: sticky; top: 8px; z-index: 5; }
-}
+/* The NOW hero scrolls with the page (it used to be sticky at >=760px tall,
+   which pinned most of the viewport). StrengthPinBar takes over once the
+   hero is out of view. scroll-margin keeps it clear of the bar on return. */
+.now-hero { scroll-margin-top: 8px; }
 
 .readout { display: flex; align-items: baseline; justify-content: center; gap: 6px; width: 100%;
   margin: 12px 0 8px; padding: 4px 0; border: 0; background: transparent; cursor: pointer;

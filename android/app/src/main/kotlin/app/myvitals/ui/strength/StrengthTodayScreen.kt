@@ -901,27 +901,39 @@ internal fun StrengthTodayContent(
             it.id == st.focusWexId && !isSlotClosed(it, plan.status)
         } ?: plan.exercises.firstOrNull { it.id == currentId }
 
-        // Pinned: the hero never scrolls away. Everything below it does.
-        NowHeroArea(
-            st = st,
-            plan = plan,
-            heroWex = heroWex,
-            info = heroWex?.let { catalog[it.exerciseId] },
-            actions = actions,
-            onFinish = { requestFinish() },
-            onCardioLog = { st.showCardioLog = true },
-            backendBaseUrl = backendBaseUrl,
-        )
+        // The hero scrolls with the list. It used to be pinned, but once it
+        // carried the whole exercise (v0.50.0) it left a third of the screen
+        // for everything else. When it scrolls off, NowMiniBar keeps the
+        // current set in view and one tap brings the hero back.
+        val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+        val heroScope = rememberCoroutineScope()
+        val heroOffScreen by remember {
+            androidx.compose.runtime.derivedStateOf { listState.firstVisibleItemIndex > 0 }
+        }
 
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
             isRefreshing = st.refreshing,
             onRefresh = actions.refresh,
             modifier = Modifier.weight(1f),
         ) {
+        Box(Modifier.fillMaxSize()) {
         LazyColumn(
+            state = listState,
             contentPadding = PaddingValues(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            item(key = "hero") {
+                NowHeroArea(
+                    st = st,
+                    plan = plan,
+                    heroWex = heroWex,
+                    info = heroWex?.let { catalog[it.exerciseId] },
+                    actions = actions,
+                    onFinish = { requestFinish() },
+                    onCardioLog = { st.showCardioLog = true },
+                    backendBaseUrl = backendBaseUrl,
+                )
+            }
             // Coach / fasting / deload / paused / why — one strip of chips,
             // each opening its unchanged content in a sheet.
             item(key = "chips") {
@@ -1022,6 +1034,15 @@ internal fun StrengthTodayContent(
                 }
             }
         }
+        if (heroOffScreen && heroWex != null && heroIsNow(plan)) {
+            NowMiniBar(
+                st = st,
+                wex = heroWex,
+                info = catalog[heroWex.exerciseId],
+                onClick = { heroScope.launch { listState.animateScrollToItem(0) } },
+            )
+        }
+        }  // end Box
         }  // end PullToRefreshBox
     }
     }

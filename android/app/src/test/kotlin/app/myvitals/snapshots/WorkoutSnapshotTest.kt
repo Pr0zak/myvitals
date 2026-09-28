@@ -7,6 +7,8 @@ import app.myvitals.ui.strength.CoachCardState
 import app.myvitals.ui.strength.StrengthTodayActions
 import app.myvitals.ui.strength.StrengthTodayContent
 import app.myvitals.ui.strength.StrengthTodayState
+import app.myvitals.ui.strength.NowMiniBar
+import app.myvitals.ui.strength.nextSetOf
 import org.junit.Rule
 import org.junit.Test
 
@@ -61,4 +63,14 @@ class WorkoutSnapshotTest {
     @Test fun failed() = shoot(state(null, loadError = "Failed to connect to the server"))
     /** A timed, bilateral hold is NOW: seconds readout and a Start button. */
     @Test fun timedHold() = shoot(state(SampleDataWorkout.timedHold))
+
+    /** The hero scrolled off: the one-line stand-in pinned at the top. */
+    private fun shootBar(st: StrengthTodayState) = paparazzi.snapshot {
+        NeonFrame {
+            val wex = st.workout!!.exercises.first { nextSetOf(it) != null && !it.skipped }
+            NowMiniBar(st = st, wex = wex, info = st.catalog[wex.exerciseId], onClick = {})
+        }
+    }
+    @Test fun miniBar() = shootBar(state(SampleDataWorkout.workout))
+    @Test fun miniBarResting() = shootBar(state(SampleDataWorkout.workout, restLeftMs = 52_000L))
 }

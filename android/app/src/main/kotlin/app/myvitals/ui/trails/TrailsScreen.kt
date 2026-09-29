@@ -350,21 +350,23 @@ fun TrailsScreen(
                     Text("Currently linked: ${ride.trailName}", color = NeonMV.Muted, fontSize = 12.sp)
                 }
                 Spacer(Modifier.height(6.dp))
-                var suggestions by remember(ride.source, ride.sourceId) {
-                    mutableStateOf<List<app.myvitals.sync.TrailSuggestion>>(emptyList())
+                var suggest by remember(ride.source, ride.sourceId) {
+                    mutableStateOf(app.myvitals.ui.trails.TrailSuggestState())
                 }
                 LaunchedEffect(ride.source, ride.sourceId) {
-                    suggestions = try {
+                    suggest = try {
                         val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
-                        withContext(Dispatchers.IO) {
-                            api.activityTrailSuggestions(ride.source, ride.sourceId)
-                        }.suggestions
+                        app.myvitals.ui.trails.TrailSuggestState(loading = false, response =
+                            withContext(Dispatchers.IO) {
+                                api.activityTrailSuggestions(ride.source, ride.sourceId)
+                            })
                     } catch (e: Exception) {
-                        Timber.w(e, "trail suggestions failed"); emptyList()
+                        Timber.w(e, "trail suggestions failed")
+                        app.myvitals.ui.trails.TrailSuggestState(loading = false, failed = true)
                     }
                 }
                 TrailPickerList(
-                    trails = ui.trails, suggestions = suggestions,
+                    trails = ui.trails, suggest = suggest,
                     currentTrailId = ride.trailId, enabled = !linkSaving,
                     rowColor = NeonMV.Bg,
                     onPick = { id -> scope.launch { setRideTrail(ride, id) } },

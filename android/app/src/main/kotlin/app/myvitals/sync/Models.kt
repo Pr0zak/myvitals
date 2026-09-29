@@ -1474,6 +1474,7 @@ data class ActivityLinkTrailBody(
 @JsonClass(generateAdapter = true)
 data class TrailSuggestionsResponse(
     @Json(name = "has_gps") val hasGps: Boolean = false,
+    @Json(name = "max_km") val maxKm: Double? = null,
     val suggestions: List<TrailSuggestion> = emptyList(),
 )
 

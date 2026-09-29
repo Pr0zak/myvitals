@@ -996,6 +996,7 @@ export const api = {
   /** Trails nearest this activity's route, nearest first — for the top of the link picker. */
   async activityTrailSuggestions(source: string, sourceId: string): Promise<{
     has_gps: boolean;
+    max_km: number;
     suggestions: { trail_id: number; name: string; city: string | null; state: string | null; distance_km: number }[];
   }> {
     const { data } = await http.get(`/activities/${source}/${sourceId}/trail-suggestions`);

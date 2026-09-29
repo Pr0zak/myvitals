@@ -2,7 +2,11 @@ package app.myvitals.ui.trails
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -10,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -19,9 +24,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.Units
 import app.myvitals.sync.Trail
-import app.myvitals.sync.TrailSuggestion
+import app.myvitals.sync.TrailSuggestionsResponse
 import app.myvitals.ui.neon.NeonEyebrow
 import app.myvitals.ui.neon.NeonMV
+
+/** Where the suggestion fetch stands. [response] is null until it lands. */
+data class TrailSuggestState(
+    val loading: Boolean = true,
+    val response: TrailSuggestionsResponse? = null,
+    val failed: Boolean = false,
+)
 
 /**
  * The body of both "Link to trail" sheets: the trails the route passed
@@ -32,20 +44,44 @@ import app.myvitals.ui.neon.NeonMV
 @Composable
 fun TrailPickerList(
     trails: List<Trail>,
-    suggestions: List<TrailSuggestion>,
+    suggest: TrailSuggestState,
     currentTrailId: Long?,
     enabled: Boolean,
     rowColor: Color,
     onPick: (Long) -> Unit,
 ) {
     val pickable = trails.filter { it.latitude != null && it.longitude != null }.sortedBy { it.name }
-    LazyColumn(
-        Modifier.fillMaxWidth().height(360.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
+    val suggestions = suggest.response?.suggestions.orEmpty()
+    // Always say what the suggestion lookup did, so an empty section is
+    // never mistaken for "still loading" or the reverse.
+    val status = when {
+        suggest.loading -> "Finding trails near this route…"
+        suggest.failed -> "Couldn't load suggestions — pick from the list."
+        suggest.response?.hasGps == false -> "No GPS route on this activity — pick from the list."
+        suggestions.isEmpty() -> "No pinned trail within " +
+            Units.fmtDistance((suggest.response?.maxKm ?: 10.0) * 1000.0, digits = 0) +
+            " of this route."
+        else -> null
+    }
+    // Status and suggestions sit ABOVE the scrolling list, not inside it.
+    // As LazyColumn items they arrived after the list had rendered, and a
+    // LazyColumn keeps its first visible item anchored when rows are
+    // inserted before it — so they landed just off the top and the user
+    // had to scroll up to find them (v0.50.4).
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        if (status != null) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                if (suggest.loading) {
+                    CircularProgressIndicator(Modifier.size(14.dp), color = NeonMV.Cyan, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(status, color = NeonMV.Muted, fontSize = 12.sp)
+            }
+        }
         if (suggestions.isNotEmpty()) {
-            item(key = "suggested-header") { NeonEyebrow("Suggested · nearest to this route") }
-            items(suggestions, key = { "s${it.trailId}" }) { s ->
+            NeonEyebrow("Suggested · nearest to this route")
+            suggestions.forEach { s ->
                 PickRow(
                     name = s.name,
                     trailing = Units.fmtDistance(s.distanceKm * 1000.0) + " away",
@@ -54,8 +90,13 @@ fun TrailPickerList(
                     color = NeonMV.Lime.copy(alpha = 0.10f),
                 ) { onPick(s.trailId) }
             }
-            item(key = "all-header") { NeonEyebrow("All trails") }
         }
+        NeonEyebrow("All trails")
+    }
+    LazyColumn(
+        Modifier.fillMaxWidth().height(if (suggestions.isNotEmpty()) 240.dp else 320.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
         items(pickable, key = { it.id }) { t ->
             PickRow(
                 name = t.name,

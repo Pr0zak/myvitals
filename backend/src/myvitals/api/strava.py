@@ -870,7 +870,7 @@ async def activity_trail_suggestions(
     """The trails this activity's route passed nearest, for the top of the
     link picker so the user does not scroll the whole list. `has_gps=false`
     says why the list is empty when there is no route to measure."""
-    from .trails import _activity_track, rank_trails_near_track
+    from .trails import SUGGEST_MAX_KM, _activity_track, rank_trails_near_track
 
     a = (await db.execute(
         select(models.Activity)
@@ -881,12 +881,13 @@ async def activity_trail_suggestions(
         raise HTTPException(404, "activity not found")
     track = _activity_track(a)
     if not track:
-        return {"has_gps": False, "suggestions": []}
+        return {"has_gps": False, "max_km": SUGGEST_MAX_KM, "suggestions": []}
     trails = (await db.execute(
         select(models.Trail).where(models.Trail.latitude.is_not(None))
     )).scalars().all()
     return {
         "has_gps": True,
+        "max_km": SUGGEST_MAX_KM,
         "suggestions": [
             {"trail_id": t.id, "name": t.name, "city": t.city, "state": t.state,
              "distance_km": round(d, 2)}

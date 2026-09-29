@@ -616,6 +616,9 @@ const linkingTrail = ref(false);
 const linkedFlag = ref(false);
 
 const trailSuggestions = ref<Awaited<ReturnType<typeof api.activityTrailSuggestions>>["suggestions"]>([]);
+// Always say what the lookup did, so an empty row is never read as "loading".
+const suggestState = ref<"loading" | "ok" | "none" | "no_gps" | "failed">("loading");
+const suggestMaxKm = ref(10);
 
 async function loadTrails() {
   try {
@@ -625,12 +628,17 @@ async function loadTrails() {
   } catch { trails.value = []; }
   // Nearest-to-this-route trails, one tap each, so the dropdown is the
   // fallback rather than the only way in.
+  if (!activity.value) return;
+  suggestState.value = "loading";
   try {
-    if (activity.value) {
-      trailSuggestions.value = (await api.activityTrailSuggestions(
-        activity.value.source, activity.value.source_id)).suggestions;
-    }
-  } catch { trailSuggestions.value = []; }
+    const r = await api.activityTrailSuggestions(activity.value.source, activity.value.source_id);
+    trailSuggestions.value = r.suggestions;
+    suggestMaxKm.value = r.max_km;
+    suggestState.value = !r.has_gps ? "no_gps" : r.suggestions.length ? "ok" : "none";
+  } catch {
+    trailSuggestions.value = [];
+    suggestState.value = "failed";
+  }
 }
 
 function pickSuggestedTrail(id: number) {
@@ -887,6 +895,10 @@ async function submitEdit() {
         <p class="hint" v-if="activity.trail_name">Linked to <strong>{{ activity.trail_name }}</strong>
           <RouterLink to="/trails" class="link-a">· view trails</RouterLink></p>
         <p class="hint" v-else>Not linked to a trail yet.</p>
+        <p v-if="suggestState === 'loading'" class="hint suggest-status"><span class="spin" aria-hidden="true"></span>Finding trails near this route…</p>
+        <p v-else-if="suggestState === 'failed'" class="hint suggest-status">Couldn't load suggestions — pick from the list.</p>
+        <p v-else-if="suggestState === 'no_gps'" class="hint suggest-status">No GPS route on this activity — pick from the list.</p>
+        <p v-else-if="suggestState === 'none'" class="hint suggest-status">No pinned trail within {{ fmtDistance(suggestMaxKm * 1000, 0) }} of this route.</p>
         <div v-if="trailSuggestions.length" class="trail-suggest">
           <span class="suggest-label">Suggested</span>
           <button v-for="t in trailSuggestions" :key="t.trail_id" class="chip"
@@ -1026,6 +1038,10 @@ async function submitEdit() {
 .trail-meta { margin-left: auto; color: var(--rn-mut); font-size: 11px; }
 .trail-pick { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
 .trail-suggest { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.suggest-status { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--rn-line); border-top-color: var(--rn-cyan);
+  animation: suggest-spin .8s linear infinite; }
+@keyframes suggest-spin { to { transform: rotate(360deg); } }
 .suggest-label { font-size: 11px; color: var(--rn-mut); text-transform: uppercase; letter-spacing: .06em; }
 .chip .dist { color: var(--rn-mut); font-size: 11px; margin-left: 4px; }
 .field-in { background: var(--rn-bg); border: 1px solid var(--rn-line); color: var(--rn-ink); border-radius: 10px;

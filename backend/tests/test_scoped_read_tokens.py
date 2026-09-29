@@ -197,6 +197,8 @@ class TestAllowListAgainstTheRealApp:
             "/trails", "/trails/config", "/trails/daily", "/trails/alerts",
             "/trails/resolve-link", "/trails/{trail_id}/osm-paths",
             "/trails/{trail_id}/visits",
+            # Which OSM state packs are imported + trail counts (0070).
+            "/trails/trailmap/status",
             "/workout/strength/equipment", "/workout/strength/exercises",
             "/workout/strength/exercises/{exercise_id}",
             "/workout/strength/exercises-stats-summary",

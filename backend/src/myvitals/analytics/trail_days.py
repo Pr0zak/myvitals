@@ -151,11 +151,14 @@ def _latest_before(start: datetime, known_only: bool):
 
 
 def seeds_stmt(start: datetime):
+    # Status-board trails only: an OSM trail row (no DNIS, migration 0070)
+    # has no status and would count as a permanently-unknown trail in
+    # every day's total.
     return select(
         models.Trail.id,
         _latest_before(start, known_only=False),
         _latest_before(start, known_only=True),
-    )
+    ).where(models.Trail.dnis.is_not(None))
 
 
 def changes_stmt(start: datetime, end: datetime):

@@ -31,6 +31,19 @@ async def _trails_tick() -> None:
         log.warning("trail poll failed: %s", e)
 
 
+async def _trailmap_tick() -> None:
+    """Refresh OSM trails from the trailmap state packs. Cheap when nothing
+    changed: one index fetch, and a pack only when it is newer."""
+    try:
+        from ..db import session
+        from ..integrations.trailmap import refresh
+        async with session.SessionLocal() as db:
+            report = await refresh(db)
+        log.info("trailmap refresh: %s", report)
+    except Exception as e:  # noqa: BLE001
+        log.warning("trailmap refresh failed: %s", e)
+
+
 async def _fasting_scheduled_tick() -> None:
     """Scheduled-mode fasting auto-start/end.
 
@@ -401,6 +414,17 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=20),
     )
     log.info("Trail status poll scheduled every 15 min")
+
+    # OSM trails from the trailmap project's weekly state packs. Daily is
+    # plenty (packs rebuild weekly) and runs once shortly after startup so
+    # a fresh install has them without waiting a day.
+    scheduler.add_job(
+        _trailmap_tick,
+        trigger="interval", hours=24,
+        id="trailmap_refresh", replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=180),
+    )
+    log.info("trailmap OSM trail refresh scheduled daily")
 
     # Scheduled-mode fasting auto-start/end — every 5 min. No-op
     # unless profile.extra.fasting_prefs.scheduled_mode_enabled is true.

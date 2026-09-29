@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.myvitals.data.Units
+import app.myvitals.sync.OtherTrail
 import app.myvitals.sync.Trail
 import app.myvitals.sync.TrailSuggestionsResponse
 import app.myvitals.ui.neon.NeonEyebrow
@@ -36,21 +37,33 @@ data class TrailSuggestState(
 )
 
 /**
- * The body of both "Link to trail" sheets: the trails the route passed
- * nearest (from the server) first, then every pinned trail A→Z. The
+ * The body of both "Link to trail" sheets: the server's suggestions first
+ * (OSM trails the route ran along, then status-board pins near it), then
+ * every pinned trail and every already-linked OSM trail A→Z. The
  * suggested trails also stay in the full list, so nothing moves out of its
  * alphabetical place for someone who knows where to look.
  */
+/** What a tap links to: an existing trails row, or an OSM trail not yet linked. */
+data class TrailPick(val trailId: Long?, val osmTrailId: Long? = null)
+
+/** A row of the A→Z list — status-board trails and linked OSM trails alike. */
+private data class ListRow(val id: Long, val name: String, val place: String)
+
 @Composable
 fun TrailPickerList(
     trails: List<Trail>,
+    otherTrails: List<OtherTrail>,
     suggest: TrailSuggestState,
     currentTrailId: Long?,
     enabled: Boolean,
     rowColor: Color,
-    onPick: (Long) -> Unit,
+    onPick: (TrailPick) -> Unit,
 ) {
-    val pickable = trails.filter { it.latitude != null && it.longitude != null }.sortedBy { it.name }
+    val pickable = (
+        trails.filter { it.latitude != null && it.longitude != null }
+            .map { ListRow(it.id, it.name, listOfNotNull(it.city, it.state).joinToString(", ")) } +
+        otherTrails.map { ListRow(it.id, it.name, listOfNotNull(it.city, it.state).joinToString(", ")) }
+    ).sortedBy { it.name }
     val suggestions = suggest.response?.suggestions.orEmpty()
     // Always say what the suggestion lookup did, so an empty section is
     // never mistaken for "still loading" or the reverse.
@@ -58,9 +71,9 @@ fun TrailPickerList(
         suggest.loading -> "Finding trails near this route…"
         suggest.failed -> "Couldn't load suggestions — pick from the list."
         suggest.response?.hasGps == false -> "No GPS route on this activity — pick from the list."
-        suggestions.isEmpty() -> "No pinned trail within " +
+        suggestions.isEmpty() -> "No known trail along this route or within " +
             Units.fmtDistance((suggest.response?.maxKm ?: 10.0) * 1000.0, digits = 0) +
-            " of this route."
+            " of it."
         else -> null
     }
     // Status and suggestions sit ABOVE the scrolling list, not inside it.
@@ -84,11 +97,14 @@ fun TrailPickerList(
             suggestions.forEach { s ->
                 PickRow(
                     name = s.name,
-                    trailing = Units.fmtDistance(s.distanceKm * 1000.0) + " away",
-                    current = s.trailId == currentTrailId,
+                    // A trail the route ran along says how much of the ride was
+                    // on it; a status-board pin says how far away it was.
+                    trailing = s.onTrailKm?.let { Units.fmtDistance(it * 1000.0) + " on it" }
+                        ?: (Units.fmtDistance(s.distanceKm * 1000.0) + " away"),
+                    current = s.trailId != null && s.trailId == currentTrailId,
                     enabled = enabled,
                     color = NeonMV.Lime.copy(alpha = 0.10f),
-                ) { onPick(s.trailId) }
+                ) { onPick(TrailPick(s.trailId, s.osmTrailId)) }
             }
         }
         NeonEyebrow("All trails")
@@ -100,11 +116,11 @@ fun TrailPickerList(
         items(pickable, key = { it.id }) { t ->
             PickRow(
                 name = t.name,
-                trailing = listOfNotNull(t.city, t.state).joinToString(", "),
+                trailing = t.place,
                 current = t.id == currentTrailId,
                 enabled = enabled,
                 color = rowColor,
-            ) { onPick(t.id) }
+            ) { onPick(TrailPick(t.id)) }
         }
     }
 }

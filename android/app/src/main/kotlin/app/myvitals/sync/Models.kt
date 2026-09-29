@@ -1396,6 +1396,18 @@ data class TrailsResponse(
     // older backend; the screen then says nothing rather than counting.
     @Json(name = "status_counts") val statusCounts: TrailStatusCounts? = null,
     @Json(name = "synced_at") val syncedAt: String? = null,
+    // OSM trails an activity has been linked to (migration 0070). Not in
+    // `trails` because they have no status.
+    @Json(name = "other_trails") val otherTrails: List<OtherTrail> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class OtherTrail(
+    val id: Long,
+    val name: String,
+    val city: String? = null,
+    val state: String? = null,
+    @Json(name = "visits_total") val visitsTotal: Int = 0,
 )
 
 @JsonClass(generateAdapter = true)
@@ -1468,6 +1480,8 @@ data class ActivityRow(
 @JsonClass(generateAdapter = true)
 data class ActivityLinkTrailBody(
     @Json(name = "trail_id") val trailId: Long?,
+    // An OSM trail from the suggestions that has no trails row yet.
+    @Json(name = "osm_trail_id") val osmTrailId: Long? = null,
 )
 
 /** GET /activities/{source}/{id}/trail-suggestions — nearest first. */
@@ -1480,10 +1494,15 @@ data class TrailSuggestionsResponse(
 
 @JsonClass(generateAdapter = true)
 data class TrailSuggestion(
-    @Json(name = "trail_id") val trailId: Long,
+    /** "osm" = the route ran along it; "board" = a status-board pin nearby. */
+    val source: String = "board",
+    @Json(name = "trail_id") val trailId: Long? = null,
+    @Json(name = "osm_trail_id") val osmTrailId: Long? = null,
     val name: String,
     val city: String? = null,
     val state: String? = null,
+    val surface: String? = null,
+    @Json(name = "on_trail_km") val onTrailKm: Double? = null,
     @Json(name = "distance_km") val distanceKm: Double,
 )
 

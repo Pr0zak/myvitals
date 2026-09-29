@@ -181,12 +181,18 @@ async def save_trail_status_config(
 
 @router.get("")
 async def list_trails(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
-    """Every trail with its most recent snapshot + subscription state."""
+    """Every status-board trail with its most recent snapshot + subscription
+    state, plus `other_trails`: OSM trails an activity has been linked to
+    (migration 0070). Those are kept out of `trails` because they have no
+    status, and every consumer of that list — the board, the status counts,
+    the open/closed filters — reads it as a list of trails WITH one."""
     trails = (await db.execute(
-        select(models.Trail).order_by(models.Trail.name)
+        select(models.Trail).where(models.Trail.dnis.is_not(None))
+        .order_by(models.Trail.name)
     )).scalars().all()
+    other = await _other_trails(db)
     if not trails:
-        return {"count": 0, "trails": [], **status_summary([])}
+        return {"count": 0, "trails": [], "other_trails": other, **status_summary([])}
 
     # DNIS — composes a top-of-page link to RainoutLine's full status
     # board. (Per-trail permalinks are still emitted in case the UI
@@ -271,8 +277,58 @@ async def list_trails(db: AsyncSession = Depends(get_session)) -> dict[str, Any]
         })
     return {
         "count": len(out), "trails": out, "dnis_url": dnis_url,
+        "other_trails": other,
         **status_summary(out),
     }
+
+
+async def _other_trails(db: AsyncSession) -> list[dict[str, Any]]:
+    rows = (await db.execute(
+        select(models.Trail).where(models.Trail.dnis.is_(None))
+        .order_by(models.Trail.name)
+    )).scalars().all()
+    if not rows:
+        return []
+    counts = {
+        tid: (n, last) for tid, n, last in (await db.execute(
+            select(models.Activity.trail_id, func.count(models.Activity.source_id),
+                   func.max(models.Activity.start_at))
+            .where(models.Activity.trail_id.in_([t.id for t in rows]))
+            .group_by(models.Activity.trail_id)
+        )).all()
+    }
+    return [
+        {"id": t.id, "name": t.name, "city": t.city, "state": t.state,
+         "osm_trail_id": t.osm_trail_id,
+         "visits_total": counts.get(t.id, (0, None))[0],
+         "last_visit_at": counts.get(t.id, (0, None))[1]}
+        for t in rows
+    ]
+
+
+@router.post("/trailmap/refresh")
+async def trailmap_refresh(
+    force: bool = False,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Pull OSM trails from the trailmap state packs now (it also runs
+    daily). force=true re-imports packs that are already current."""
+    from ..integrations.trailmap import refresh
+    try:
+        return await refresh(db, force=force)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"trailmap fetch failed: {e}") from e
+
+
+@router.get("/trailmap/status")
+async def trailmap_status(db: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    """Which state packs are imported, how many trails each, and when built."""
+    rows = (await db.execute(
+        select(models.OsmTrail.state, func.count(models.OsmTrail.id),
+               func.max(models.OsmTrail.pack_built))
+        .group_by(models.OsmTrail.state)
+    )).all()
+    return {"states": [{"state": s, "trails": n, "built": b} for s, n, b in rows]}
 
 
 @router.get("/daily")

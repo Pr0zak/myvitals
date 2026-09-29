@@ -155,6 +155,9 @@ class ActivityTypeChoice(BaseModel):
 
 class ActivityLinkTrailIn(BaseModel):
     trail_id: int | None = None
+    # Link to an OSM trail instead (from /trail-suggestions). Its `trails`
+    # row is created on first link. Ignored when trail_id is given.
+    osm_trail_id: int | None = None
 
 
 class ActivityStatsOut(BaseModel):
@@ -831,6 +834,30 @@ async def get_activity_zones(
     return await cardio.activity_zone_detail(db, a, buckets=buckets)
 
 
+async def _trail_for_osm(db: AsyncSession, osm_trail_id: int) -> int:
+    """The `trails` row for an OSM trail, created on first link. No DNIS
+    (it is not a status-board trail) and no pin: a pin would pull a 16-mile
+    greenway into the pin-based auto-linker, which would then attach any
+    ride starting near its midpoint."""
+    existing = (await db.execute(
+        select(models.Trail.id).where(models.Trail.osm_trail_id == osm_trail_id)
+    )).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    o = await db.get(models.OsmTrail, osm_trail_id)
+    if o is None:
+        raise HTTPException(400, f"osm trail {osm_trail_id} not found")
+    from ..integrations.trailmap import state_abbr
+    t = models.Trail(
+        name=o.name, slug=f"osm-{o.id}"[:64], osm_trail_id=o.id,
+        state=state_abbr(o.state),
+        last_seen_at=datetime.now(timezone.utc),
+    )
+    db.add(t)
+    await db.flush()
+    return t.id
+
+
 @router.post("/activities/{source}/{source_id}/link-trail",
              dependencies=[Depends(require_any)])
 async def link_activity_trail(
@@ -848,11 +875,14 @@ async def link_activity_trail(
     )).scalar_one_or_none()
     if a is None:
         raise HTTPException(404, "activity not found")
-    if body.trail_id is not None:
-        t = await db.get(models.Trail, body.trail_id)
+    trail_id = body.trail_id
+    if trail_id is not None:
+        t = await db.get(models.Trail, trail_id)
         if t is None:
-            raise HTTPException(400, f"trail {body.trail_id} not found")
-    a.trail_id = body.trail_id
+            raise HTTPException(400, f"trail {trail_id} not found")
+    elif body.osm_trail_id is not None:
+        trail_id = await _trail_for_osm(db, body.osm_trail_id)
+    a.trail_id = trail_id
     await db.commit()
     return {
         "source": a.source, "source_id": a.source_id,
@@ -867,9 +897,23 @@ async def activity_trail_suggestions(
     source_id: str,
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """The trails this activity's route passed nearest, for the top of the
-    link picker so the user does not scroll the whole list. `has_gps=false`
-    says why the list is empty when there is no route to measure."""
+    """Trails for the top of the link picker, so the user does not scroll
+    the whole list. Two sources, ridden trails first:
+
+    - `source="osm"` — trails from the trailmap OSM packs that the route
+      actually ran along, most-ridden first (`on_trail_km`). This is what
+      finds a greenway like the Gary L. Haller Trail, which is a 16-mile
+      line and not on the status board at all.
+    - `source="board"` — status-board trails whose PIN lies near the route
+      (`distance_km`), as before.
+
+    `trail_id` is set when a `trails` row already exists (always for board
+    trails; for an OSM trail once something has been linked to it), else
+    `osm_trail_id` is what to send to /link-trail. `has_gps=false` says why
+    the list is empty when there is no route to measure.
+    """
+    from ..analytics.trail_match import match_trails
+    from ..integrations.trailmap import state_abbr
     from .trails import SUGGEST_MAX_KM, _activity_track, rank_trails_near_track
 
     a = (await db.execute(
@@ -882,18 +926,49 @@ async def activity_trail_suggestions(
     track = _activity_track(a)
     if not track:
         return {"has_gps": False, "max_km": SUGGEST_MAX_KM, "suggestions": []}
-    trails = (await db.execute(
+
+    out: list[dict[str, Any]] = []
+    lats = [p[0] for p in track]
+    lons = [p[1] for p in track]
+    pad = 0.002  # ~200 m, comfortably past the on-trail threshold
+    osm = (await db.execute(
+        select(models.OsmTrail)
+        .where(models.OsmTrail.max_lat >= min(lats) - pad)
+        .where(models.OsmTrail.min_lat <= max(lats) + pad)
+        .where(models.OsmTrail.max_lon >= min(lons) - pad)
+        .where(models.OsmTrail.min_lon <= max(lons) + pad)
+    )).scalars().all()
+    if osm:
+        by_id = {t.id: t for t in osm}
+        matches = match_trails(track, [
+            (t.id, [_polyline_lib.decode(p) for p in t.paths]) for t in osm
+        ])[:3]
+        linked = {
+            oid: tid for tid, oid in (await db.execute(
+                select(models.Trail.id, models.Trail.osm_trail_id)
+                .where(models.Trail.osm_trail_id.in_([m.key for m in matches] or [-1]))
+            )).all()
+        }
+        for m in matches:
+            t = by_id[m.key]
+            out.append({
+                "source": "osm", "trail_id": linked.get(t.id), "osm_trail_id": t.id,
+                "name": t.name, "city": None, "state": state_abbr(t.state),
+                "surface": t.surface,
+                "on_trail_km": round(m.on_trail_m / 1000, 2),
+                "distance_km": round(m.closest_m / 1000, 2),
+            })
+
+    board = (await db.execute(
         select(models.Trail).where(models.Trail.latitude.is_not(None))
     )).scalars().all()
-    return {
-        "has_gps": True,
-        "max_km": SUGGEST_MAX_KM,
-        "suggestions": [
-            {"trail_id": t.id, "name": t.name, "city": t.city, "state": t.state,
-             "distance_km": round(d, 2)}
-            for t, d in rank_trails_near_track(track, list(trails))
-        ],
-    }
+    for t, d in rank_trails_near_track(track, list(board)):
+        out.append({
+            "source": "board", "trail_id": t.id, "osm_trail_id": None,
+            "name": t.name, "city": t.city, "state": t.state, "surface": None,
+            "on_trail_km": None, "distance_km": round(d, 2),
+        })
+    return {"has_gps": True, "max_km": SUGGEST_MAX_KM, "suggestions": out}
 
 
 @router.get("/activities/type-choices", response_model=list[ActivityTypeChoice],

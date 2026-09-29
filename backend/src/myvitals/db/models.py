@@ -708,10 +708,15 @@ class Trail(Base):
     primary trailhead (parking lot) for one-tap maps navigation."""
     __tablename__ = "trails"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    dnis: Mapped[str] = mapped_column(String(16))
-    extension: Mapped[int] = mapped_column(Integer)
+    # NULL for a trail that came from OSM (osm_trail_id set) rather than the
+    # status board — "has a DNIS" is what makes a trail a status-board one.
+    dnis: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    extension: Mapped[int | None] = mapped_column(Integer, nullable=True)
     name: Mapped[str] = mapped_column(String(255))
     slug: Mapped[str] = mapped_column(String(64))
+    # Set when this row was created by linking an activity to an OSM trail
+    # (migration 0070). Such rows have no pin on purpose.
+    osm_trail_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -724,6 +729,26 @@ class Trail(Base):
     osm_paths_fetched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )
+
+
+class OsmTrail(Base):
+    """One named trail in one state, from the trailmap project's OSM state
+    packs (migration 0070). `paths` is a list of encoded polylines, one per
+    OSM way; the bbox columns are the coarse filter before path matching."""
+    __tablename__ = "osm_trails"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    state: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(255))
+    key: Mapped[str] = mapped_column(String(320))         # name@centroid, unique per state
+    kind: Mapped[str] = mapped_column(String(8))          # "all" | "mtb"
+    surface: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    paths: Mapped[list] = mapped_column(JSON)
+    length_m: Mapped[float] = mapped_column(Float)
+    min_lat: Mapped[float] = mapped_column(Float)
+    max_lat: Mapped[float] = mapped_column(Float)
+    min_lon: Mapped[float] = mapped_column(Float)
+    max_lon: Mapped[float] = mapped_column(Float)
+    pack_built: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class TrailStatusSnapshot(Base):

@@ -114,6 +114,7 @@ fun ActivityDetailScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     var activity by remember { mutableStateOf<ActivityRow?>(null) }
     var trails by remember { mutableStateOf<List<Trail>>(emptyList()) }
+    var otherTrails by remember { mutableStateOf<List<app.myvitals.sync.OtherTrail>>(emptyList()) }
     var hrPoints by remember { mutableStateOf<List<TimePoint>>(emptyList()) }
     var zones by remember { mutableStateOf<ActivityZones?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -177,6 +178,7 @@ fun ActivityDetailScreen(
                 withContext(Dispatchers.IO) { api.activityZones(source, sourceId, buckets = 0) }
             }.getOrNull()
             trails = ts.trails.sortedBy { it.name }
+            otherTrails = ts.otherTrails
             error = null
             hrPoints = try {
                 val start = Instant.parse(a.startAt)
@@ -195,12 +197,12 @@ fun ActivityDetailScreen(
         } finally { loading = false }
     }
 
-    suspend fun setTrail(trailId: Long?) {
+    suspend fun setTrail(trailId: Long?, osmTrailId: Long? = null) {
         saving = true
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val resp = withContext(Dispatchers.IO) {
-                api.linkActivityTrail(source, sourceId, ActivityLinkTrailBody(trailId))
+                api.linkActivityTrail(source, sourceId, ActivityLinkTrailBody(trailId, osmTrailId))
             }
             if (resp.isSuccessful) { showPicker = false; load() }
             else notice = "Couldn't change the trail link (HTTP ${resp.code()})."
@@ -266,10 +268,10 @@ fun ActivityDetailScreen(
                     }
                 }
                 app.myvitals.ui.trails.TrailPickerList(
-                    trails = trails, suggest = suggest,
+                    trails = trails, otherTrails = otherTrails, suggest = suggest,
                     currentTrailId = a.trailId, enabled = !saving,
                     rowColor = NeonMV.BgElevated,
-                    onPick = { id -> scope.launch { setTrail(id) } },
+                    onPick = { p -> scope.launch { setTrail(p.trailId, p.osmTrailId) } },
                 )
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -642,7 +644,9 @@ private fun TrailLinkRow(a: ActivityRow, trails: List<Trail>, onPick: () -> Unit
         Icon(Icons.Outlined.Link, contentDescription = null, tint = NeonMV.Cyan, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(if (linked != null) "LINKED TRAIL" else "NOT LINKED", color = NeonMV.Muted,
+            // a.trailId, not `linked`: an OSM-linked trail is not in the
+            // status-board list, and is still a linked trail.
+            Text(if (a.trailId != null) "LINKED TRAIL" else "NOT LINKED", color = NeonMV.Muted,
                 fontFamily = NeonNumberFamily, fontSize = 10.sp, fontWeight = FontWeight.Bold,
                 letterSpacing = 1.2.sp)
             Text(linked?.name ?: (a.trailName ?: "Tap to link a trail"), color = NeonMV.Ink,

@@ -997,17 +997,25 @@ export const api = {
   async activityTrailSuggestions(source: string, sourceId: string): Promise<{
     has_gps: boolean;
     max_km: number;
-    suggestions: { trail_id: number; name: string; city: string | null; state: string | null; distance_km: number }[];
+    /** source "osm" = the route ran along it (on_trail_km); "board" = a status-board pin nearby. */
+    suggestions: {
+      source: "osm" | "board"; trail_id: number | null; osm_trail_id: number | null;
+      name: string; city: string | null; state: string | null; surface: string | null;
+      on_trail_km: number | null; distance_km: number;
+    }[];
   }> {
     const { data } = await http.get(`/activities/${source}/${sourceId}/trail-suggestions`);
     return data;
   },
 
-  async linkActivityToTrail(source: string, sourceId: string, trailId: number | null): Promise<{
+  async linkActivityToTrail(
+    source: string, sourceId: string, trailId: number | null, osmTrailId: number | null = null,
+  ): Promise<{
     source: string; source_id: string; trail_id: number | null;
   }> {
     const { data } = await http.post(
-      `/activities/${source}/${sourceId}/link-trail`, { trail_id: trailId },
+      `/activities/${source}/${sourceId}/link-trail`,
+      { trail_id: trailId, osm_trail_id: osmTrailId },
     );
     return data;
   },
@@ -1500,6 +1508,11 @@ export const api = {
       rainout_url?: string | null;
     }>;
     dnis_url?: string | null;
+    /** OSM trails an activity has been linked to — no status, so not in `trails`. */
+    other_trails?: Array<{
+      id: number; name: string; city: string | null; state: string | null;
+      osm_trail_id: number | null; visits_total: number; last_visit_at: string | null;
+    }>;
   }> {
     const { data } = await http.get("/trails");
     return data;

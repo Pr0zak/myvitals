@@ -612,6 +612,7 @@ function removeTag(t: string) {
 // Trail linking
 const trails = ref<Awaited<ReturnType<typeof api.trails>>["trails"]>([]);
 const trailSelection = ref<number | "" >("");
+const otherTrails = ref<NonNullable<Awaited<ReturnType<typeof api.trails>>["other_trails"]>>([]);
 const linkingTrail = ref(false);
 const linkedFlag = ref(false);
 
@@ -624,6 +625,7 @@ async function loadTrails() {
   try {
     const r = await api.trails();
     trails.value = r.trails;
+    otherTrails.value = r.other_trails ?? [];
     trailSelection.value = activity.value?.trail_id ?? "";
   } catch { trails.value = []; }
   // Nearest-to-this-route trails, one tap each, so the dropdown is the
@@ -641,9 +643,34 @@ async function loadTrails() {
   }
 }
 
-function pickSuggestedTrail(id: number) {
-  trailSelection.value = id;
-  applyTrailLink();
+async function pickSuggestedTrail(t: (typeof trailSuggestions.value)[number]) {
+  if (t.trail_id != null) {
+    trailSelection.value = t.trail_id;
+    return applyTrailLink();
+  }
+  // An OSM trail nothing has been linked to yet: the server creates its
+  // trail row, so the id comes back from the link call.
+  if (!activity.value || t.osm_trail_id == null) return;
+  linkingTrail.value = true;
+  try {
+    const r = await api.linkActivityToTrail(
+      activity.value.source, activity.value.source_id, null, t.osm_trail_id);
+    activity.value.trail_id = r.trail_id;
+    activity.value.trail_name = t.name;
+    await loadTrails();
+    linkedFlag.value = true;
+    setTimeout(() => { linkedFlag.value = false; }, 2000);
+  } catch (e) {
+    notice.value = `Couldn't change the trail link: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    linkingTrail.value = false;
+  }
+}
+
+function suggestionDist(t: (typeof trailSuggestions.value)[number]): string {
+  return t.on_trail_km != null
+    ? `${fmtDistance(t.on_trail_km * 1000, 1)} on it`
+    : `${fmtDistance(t.distance_km * 1000, 1)} away`;
 }
 
 async function applyTrailLink() {
@@ -657,7 +684,7 @@ async function applyTrailLink() {
     if (activity.value) {
       activity.value.trail_id = tid;
       activity.value.trail_name = tid === null ? null
-        : trails.value.find((x) => x.id === tid)?.name ?? null;
+        : (trails.value.find((x) => x.id === tid) ?? otherTrails.value.find((x) => x.id === tid))?.name ?? null;
     }
     linkedFlag.value = true;
     setTimeout(() => { linkedFlag.value = false; }, 2000);
@@ -898,20 +925,25 @@ async function submitEdit() {
         <p v-if="suggestState === 'loading'" class="hint suggest-status"><span class="spin" aria-hidden="true"></span>Finding trails near this route…</p>
         <p v-else-if="suggestState === 'failed'" class="hint suggest-status">Couldn't load suggestions — pick from the list.</p>
         <p v-else-if="suggestState === 'no_gps'" class="hint suggest-status">No GPS route on this activity — pick from the list.</p>
-        <p v-else-if="suggestState === 'none'" class="hint suggest-status">No pinned trail within {{ fmtDistance(suggestMaxKm * 1000, 0) }} of this route.</p>
+        <p v-else-if="suggestState === 'none'" class="hint suggest-status">No known trail along this route or within {{ fmtDistance(suggestMaxKm * 1000, 0) }} of it.</p>
         <div v-if="trailSuggestions.length" class="trail-suggest">
           <span class="suggest-label">Suggested</span>
-          <button v-for="t in trailSuggestions" :key="t.trail_id" class="chip"
-                  :class="{ on: activity.trail_id === t.trail_id }" :disabled="linkingTrail"
-                  :title="`Nearest point of this route is ${fmtDistance(t.distance_km * 1000)} from the trail pin`"
-                  @click="pickSuggestedTrail(t.trail_id)">
-            {{ t.name }} <span class="dist">{{ fmtDistance(t.distance_km * 1000) }}</span>
+          <button v-for="t in trailSuggestions" :key="`${t.source}-${t.trail_id ?? t.osm_trail_id}`" class="chip"
+                  :class="{ on: t.trail_id != null && activity.trail_id === t.trail_id }" :disabled="linkingTrail"
+                  :title="t.on_trail_km != null
+                    ? `${fmtDistance(t.on_trail_km * 1000, 1)} of this ride ran along this trail`
+                    : `Nearest point of this route is ${fmtDistance(t.distance_km * 1000)} from the trail pin`"
+                  @click="pickSuggestedTrail(t)">
+            {{ t.name }} <span class="dist">{{ suggestionDist(t) }}</span>
           </button>
         </div>
         <div class="trail-pick">
           <select v-model="trailSelection" class="field-in" aria-label="Trail">
             <option value="">— None —</option>
             <option v-for="t in trails" :key="t.id" :value="t.id">{{ t.name }}{{ t.city ? ` (${t.city})` : '' }}</option>
+            <optgroup v-if="otherTrails.length" label="Other trails">
+              <option v-for="t in otherTrails" :key="t.id" :value="t.id">{{ t.name }}{{ t.state ? ` (${t.state})` : '' }}</option>
+            </optgroup>
           </select>
           <button class="primary" :disabled="linkingTrail" @click="applyTrailLink">{{ linkingTrail ? "Saving…" : "Update" }}</button>
           <span v-if="linkedFlag" class="saved">saved</span>

@@ -126,6 +126,7 @@ data class TrailsUi(
     val counts: TrailStatusCounts? = null,
     val syncedAt: String? = null,
     val dnisUrl: String? = null,
+    val otherTrails: List<app.myvitals.sync.OtherTrail> = emptyList(),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -186,14 +187,14 @@ fun TrailsScreen(
                 context, "trails_response", TrailsResponse::class.java,
             )?.let { c ->
                 ui = TrailsUi(c.value.trails.sortedBy { it.name }, c.value.statusCounts,
-                    c.value.syncedAt, c.value.dnisUrl)
+                    c.value.syncedAt, c.value.dnisUrl, c.value.otherTrails)
                 loading = false
             }
         }
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val r = withContext(Dispatchers.IO) { api.trails() }
-            ui = TrailsUi(r.trails.sortedBy { it.name }, r.statusCounts, r.syncedAt, r.dnisUrl)
+            ui = TrailsUi(r.trails.sortedBy { it.name }, r.statusCounts, r.syncedAt, r.dnisUrl, r.otherTrails)
             app.myvitals.data.JsonCache.write(context, "trails_response", TrailsResponse::class.java, r)
             error = null
             Timber.i("trails loaded: %d total, counts=%s", r.trails.size, r.statusCounts)
@@ -239,13 +240,13 @@ fun TrailsScreen(
         }
     }
 
-    suspend fun setRideTrail(ride: ActivityRow, trailId: Long?) {
+    suspend fun setRideTrail(ride: ActivityRow, trailId: Long?, osmTrailId: Long? = null) {
         if (!settings.isConfigured()) return
         linkSaving = true
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val resp = withContext(Dispatchers.IO) {
-                api.linkActivityTrail(ride.source, ride.sourceId, ActivityLinkTrailBody(trailId))
+                api.linkActivityTrail(ride.source, ride.sourceId, ActivityLinkTrailBody(trailId, osmTrailId))
             }
             if (resp.isSuccessful) {
                 linkTarget = null
@@ -366,10 +367,10 @@ fun TrailsScreen(
                     }
                 }
                 TrailPickerList(
-                    trails = ui.trails, suggest = suggest,
+                    trails = ui.trails, otherTrails = ui.otherTrails, suggest = suggest,
                     currentTrailId = ride.trailId, enabled = !linkSaving,
                     rowColor = NeonMV.Bg,
-                    onPick = { id -> scope.launch { setRideTrail(ride, id) } },
+                    onPick = { p -> scope.launch { setRideTrail(ride, p.trailId, p.osmTrailId) } },
                 )
                 Row(
                     Modifier.fillMaxWidth().padding(top = 8.dp),

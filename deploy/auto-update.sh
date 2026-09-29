@@ -149,6 +149,12 @@ check_prune_staleness() {
     [ "$file_age" -gt 604800 ] && {
         echo "$LOG_TAG WARNING: docker-prune job is stale — /var/log/docker-prune.log is $(( file_age / 86400 )) days old"
     }
+    # Explicit: under `set -e` a function whose LAST command is a false
+    # `[ ... ] && {...}` returns 1 and kills the script. That is exactly
+    # what happened whenever the prune log was FRESH — every tick after a
+    # successful Sunday prune exited here, silently, before the image pull,
+    # and the CT sat on v0.48.0 for three days of releases (2026-09-27..29).
+    return 0
 }
 check_prune_staleness
 

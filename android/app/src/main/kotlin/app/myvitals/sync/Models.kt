@@ -1470,6 +1470,22 @@ data class ActivityLinkTrailBody(
     @Json(name = "trail_id") val trailId: Long?,
 )
 
+/** GET /activities/{source}/{id}/trail-suggestions — nearest first. */
+@JsonClass(generateAdapter = true)
+data class TrailSuggestionsResponse(
+    @Json(name = "has_gps") val hasGps: Boolean = false,
+    val suggestions: List<TrailSuggestion> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class TrailSuggestion(
+    @Json(name = "trail_id") val trailId: Long,
+    val name: String,
+    val city: String? = null,
+    val state: String? = null,
+    @Json(name = "distance_km") val distanceKm: Double,
+)
+
 /** GET /activities/type-choices — one entry of the correction picker. */
 @JsonClass(generateAdapter = true)
 data class ActivityTypeChoice(

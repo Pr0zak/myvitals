@@ -466,6 +466,13 @@ interface BackendApi {
         @retrofit2.http.Query("days") days: Int = 3650,
     ): TrailVisitsResponse
 
+    /** Trails nearest this activity's route, for the top of the link picker. */
+    @GET("activities/{source}/{sourceId}/trail-suggestions")
+    suspend fun activityTrailSuggestions(
+        @Path("source") source: String,
+        @Path("sourceId") sourceId: String,
+    ): TrailSuggestionsResponse
+
     @POST("activities/{source}/{sourceId}/link-trail")
     suspend fun linkActivityTrail(
         @Path("source") source: String,

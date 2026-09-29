@@ -27,7 +27,7 @@ import { api } from "@/api/client";
 import { categoryColor, categoryForType } from "@/utils/activityCategory";
 import type { Activity, HeartRateSeries } from "@/api/types";
 import { chartTheme, isNeon } from "@/theme";
-import { fmtElevation, fmtPace, distanceVal, distanceUnit, isImperial } from "@/units";
+import { fmtDistance, fmtElevation, fmtPace, distanceVal, distanceUnit, isImperial } from "@/units";
 import { fmtActivityType, fmtDateTime } from "@/format";
 import { timeAxisFormatter } from "@/components/charts/chartHelpers";
 
@@ -615,12 +615,27 @@ const trailSelection = ref<number | "" >("");
 const linkingTrail = ref(false);
 const linkedFlag = ref(false);
 
+const trailSuggestions = ref<Awaited<ReturnType<typeof api.activityTrailSuggestions>>["suggestions"]>([]);
+
 async function loadTrails() {
   try {
     const r = await api.trails();
     trails.value = r.trails;
     trailSelection.value = activity.value?.trail_id ?? "";
   } catch { trails.value = []; }
+  // Nearest-to-this-route trails, one tap each, so the dropdown is the
+  // fallback rather than the only way in.
+  try {
+    if (activity.value) {
+      trailSuggestions.value = (await api.activityTrailSuggestions(
+        activity.value.source, activity.value.source_id)).suggestions;
+    }
+  } catch { trailSuggestions.value = []; }
+}
+
+function pickSuggestedTrail(id: number) {
+  trailSelection.value = id;
+  applyTrailLink();
 }
 
 async function applyTrailLink() {
@@ -872,6 +887,15 @@ async function submitEdit() {
         <p class="hint" v-if="activity.trail_name">Linked to <strong>{{ activity.trail_name }}</strong>
           <RouterLink to="/trails" class="link-a">· view trails</RouterLink></p>
         <p class="hint" v-else>Not linked to a trail yet.</p>
+        <div v-if="trailSuggestions.length" class="trail-suggest">
+          <span class="suggest-label">Suggested</span>
+          <button v-for="t in trailSuggestions" :key="t.trail_id" class="chip"
+                  :class="{ on: activity.trail_id === t.trail_id }" :disabled="linkingTrail"
+                  :title="`Nearest point of this route is ${fmtDistance(t.distance_km * 1000)} from the trail pin`"
+                  @click="pickSuggestedTrail(t.trail_id)">
+            {{ t.name }} <span class="dist">{{ fmtDistance(t.distance_km * 1000) }}</span>
+          </button>
+        </div>
         <div class="trail-pick">
           <select v-model="trailSelection" class="field-in" aria-label="Trail">
             <option value="">— None —</option>
@@ -1001,6 +1025,9 @@ async function submitEdit() {
 .trail-name { background: none; border: 0; padding: 0; color: var(--rn-cyan); cursor: pointer; font: inherit; text-align: left; }
 .trail-meta { margin-left: auto; color: var(--rn-mut); font-size: 11px; }
 .trail-pick { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.trail-suggest { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.suggest-label { font-size: 11px; color: var(--rn-mut); text-transform: uppercase; letter-spacing: .06em; }
+.chip .dist { color: var(--rn-mut); font-size: 11px; margin-left: 4px; }
 .field-in { background: var(--rn-bg); border: 1px solid var(--rn-line); color: var(--rn-ink); border-radius: 10px;
   padding: 8px 10px; font: inherit; font-size: 14px; }
 select.field-in { flex: 1; min-width: 12rem; }

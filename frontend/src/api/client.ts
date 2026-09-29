@@ -993,6 +993,15 @@ export const api = {
     return data;
   },
 
+  /** Trails nearest this activity's route, nearest first — for the top of the link picker. */
+  async activityTrailSuggestions(source: string, sourceId: string): Promise<{
+    has_gps: boolean;
+    suggestions: { trail_id: number; name: string; city: string | null; state: string | null; distance_km: number }[];
+  }> {
+    const { data } = await http.get(`/activities/${source}/${sourceId}/trail-suggestions`);
+    return data;
+  },
+
   async linkActivityToTrail(source: string, sourceId: string, trailId: number | null): Promise<{
     source: string; source_id: string; trail_id: number | null;
   }> {

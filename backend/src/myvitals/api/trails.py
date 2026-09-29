@@ -59,6 +59,52 @@ def _activity_start_point(act: models.Activity) -> tuple[float, float] | None:
     return pts[0] if pts else None
 
 
+def _activity_track(act: models.Activity) -> list[tuple[float, float]]:
+    """Every decodable point of the activity's route, full polyline first,
+    the simplified one as a fallback. Empty when there is no GPS."""
+    for enc in (act.polyline, act.polyline_simple):
+        if not enc:
+            continue
+        try:
+            pts = polyline_lib.decode(enc)
+        except Exception:  # noqa: BLE001
+            continue
+        if pts:
+            return pts
+    return []
+
+
+# Wider than the 2 km auto-link radius on purpose: a suggestion is only a
+# shortcut in a picker the user still taps, so a ride that parked a little
+# further out should still surface its trail first.
+SUGGEST_MAX_KM = 10.0
+SUGGEST_LIMIT = 3
+
+
+def rank_trails_near_track(
+    track: list[tuple[float, float]], trails: list[models.Trail],
+    max_km: float = SUGGEST_MAX_KM, limit: int = SUGGEST_LIMIT,
+) -> list[tuple[models.Trail, float]]:
+    """Trails whose pin lies within `max_km` of ANY point of the track,
+    nearest first. Closest approach rather than the start point, so a ride
+    that began at home and rode out to the trail still finds it."""
+    if not track:
+        return []
+    # A long ride can be thousands of points; the closest approach to a pin
+    # is not sensitive to every one of them.
+    step = max(1, len(track) // 500)
+    sample = track[::step] + [track[-1]]
+    ranked: list[tuple[models.Trail, float]] = []
+    for t in trails:
+        if t.latitude is None or t.longitude is None:
+            continue
+        d = min(haversine_km(lat, lon, t.latitude, t.longitude) for lat, lon in sample)
+        if d <= max_km:
+            ranked.append((t, d))
+    ranked.sort(key=lambda x: x[1])
+    return ranked[:limit]
+
+
 async def _link_activity_to_trail(
     db: AsyncSession, act: models.Activity, trails_with_coords: list[models.Trail],
     max_km: float = 2.0,

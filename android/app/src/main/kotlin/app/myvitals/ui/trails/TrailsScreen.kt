@@ -350,34 +350,25 @@ fun TrailsScreen(
                     Text("Currently linked: ${ride.trailName}", color = NeonMV.Muted, fontSize = 12.sp)
                 }
                 Spacer(Modifier.height(6.dp))
-                val pickable = remember(ui.trails) {
-                    ui.trails.filter { it.latitude != null && it.longitude != null }.sortedBy { it.name }
+                var suggestions by remember(ride.source, ride.sourceId) {
+                    mutableStateOf<List<app.myvitals.sync.TrailSuggestion>>(emptyList())
                 }
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().height(360.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    items(pickable, key = { it.id }) { t ->
-                        val isCurrent = t.id == ride.trailId
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isCurrent) NeonMV.Cyan.copy(alpha = 0.15f) else NeonMV.Bg,
-                            ),
-                            modifier = Modifier.fillMaxWidth().clickable(enabled = !linkSaving) {
-                                scope.launch { setRideTrail(ride, t.id) }
-                            },
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(t.name, modifier = Modifier.weight(1f), color = NeonMV.Ink, fontSize = 14.sp)
-                                val cityStr = listOfNotNull(t.city, t.state).joinToString(", ")
-                                if (cityStr.isNotEmpty()) Text(cityStr, color = NeonMV.Muted, fontSize = 11.sp)
-                            }
-                        }
+                LaunchedEffect(ride.source, ride.sourceId) {
+                    suggestions = try {
+                        val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
+                        withContext(Dispatchers.IO) {
+                            api.activityTrailSuggestions(ride.source, ride.sourceId)
+                        }.suggestions
+                    } catch (e: Exception) {
+                        Timber.w(e, "trail suggestions failed"); emptyList()
                     }
                 }
+                TrailPickerList(
+                    trails = ui.trails, suggestions = suggestions,
+                    currentTrailId = ride.trailId, enabled = !linkSaving,
+                    rowColor = NeonMV.Bg,
+                    onPick = { id -> scope.launch { setRideTrail(ride, id) } },
+                )
                 Row(
                     Modifier.fillMaxWidth().padding(top = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),

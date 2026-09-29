@@ -860,6 +860,41 @@ async def link_activity_trail(
     }
 
 
+@router.get("/activities/{source}/{source_id}/trail-suggestions",
+            dependencies=[Depends(require_any)])
+async def activity_trail_suggestions(
+    source: str,
+    source_id: str,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """The trails this activity's route passed nearest, for the top of the
+    link picker so the user does not scroll the whole list. `has_gps=false`
+    says why the list is empty when there is no route to measure."""
+    from .trails import _activity_track, rank_trails_near_track
+
+    a = (await db.execute(
+        select(models.Activity)
+        .where(models.Activity.source == source)
+        .where(models.Activity.source_id == source_id)
+    )).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(404, "activity not found")
+    track = _activity_track(a)
+    if not track:
+        return {"has_gps": False, "suggestions": []}
+    trails = (await db.execute(
+        select(models.Trail).where(models.Trail.latitude.is_not(None))
+    )).scalars().all()
+    return {
+        "has_gps": True,
+        "suggestions": [
+            {"trail_id": t.id, "name": t.name, "city": t.city, "state": t.state,
+             "distance_km": round(d, 2)}
+            for t, d in rank_trails_near_track(track, list(trails))
+        ],
+    }
+
+
 @router.get("/activities/type-choices", response_model=list[ActivityTypeChoice],
             dependencies=[Depends(require_any)])
 async def activity_type_choices() -> list[ActivityTypeChoice]:

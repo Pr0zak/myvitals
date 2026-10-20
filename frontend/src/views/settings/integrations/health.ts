@@ -12,6 +12,7 @@ import type { IntegrationHealth } from "@/api/types";
  *  Home Assistant and Trail status are not in `/query/data-health`, so
  *  their pages report their own status instead. */
 export const HEALTH_KEY: Record<string, string | undefined> = {
+  avinox: "avinox",
   strava: "strava",
   google: "google_health",
   concept2: "concept2",
@@ -25,6 +26,7 @@ export interface IntegrationMeta {
 
 /** Plain-language names — "Trail status", not "DNIS". */
 export const INTEGRATIONS: IntegrationMeta[] = [
+  { key: "avinox", name: "Avinox", blurb: "Avonix e-bike rides with motor power, cadence, assist and battery telemetry" },
   { key: "strava", name: "Strava", blurb: "Rides and runs, with GPS maps" },
   { key: "google", name: "Google Health", blurb: "Watch data straight from Google, including SpO2 and skin temperature" },
   { key: "concept2", name: "Concept2", blurb: "Rowing machine sessions" },

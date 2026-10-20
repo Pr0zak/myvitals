@@ -240,6 +240,30 @@ export interface Activity {
   tags?: string[] | null;
   trail_id?: number | null;
   trail_name?: string | null;
+  elevation_loss_m?: number | null;
+  avg_motor_power_w?: number | null;
+  max_motor_power_w?: number | null;
+  avg_cadence?: number | null;
+  battery_start?: number | null;
+  battery_end?: number | null;
+  odometer_end_km?: number | null;
+  assist_seconds?: Record<string, number> | null;
+  moving_time_s?: number | null;
+  raw?: Record<string, any> | null;
+}
+
+export interface AvinoxStatus {
+  connected: boolean;
+  server_url?: string | null;
+  query_token_set?: boolean;
+  webhook_path?: string | null;
+  push_endpoint?: string | null;
+  last_sync_at?: string | null;
+  last_push_at?: string | null;
+  last_error?: string | null;
+  auto_sync_enabled?: boolean;
+  total_rides?: number;
+  newest_ride_at?: string | null;
 }
 
 export interface StrengthEquipment {

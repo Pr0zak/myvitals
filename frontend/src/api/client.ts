@@ -937,6 +937,27 @@ export const api = {
     return data;
   },
 
+  async avinoxStatus(): Promise<import("./types").AvinoxStatus> {
+    const { data } = await http.get<import("./types").AvinoxStatus>("/integrations/avinox/status");
+    return data;
+  },
+
+  async avinoxConfig(cfg: { server_url?: string; query_token?: string; auto_sync_enabled?: boolean }): Promise<import("./types").AvinoxStatus> {
+    const { data } = await http.put<import("./types").AvinoxStatus>("/integrations/avinox/config", cfg);
+    return data;
+  },
+
+  async avinoxSync(opts: { full?: boolean } = {}): Promise<{
+    scanned: number;
+    upserted: number;
+    last_sync_at: string;
+  }> {
+    const params: Record<string, boolean> = {};
+    if (opts.full) params.full = true;
+    const { data } = await http.post("/integrations/avinox/sync", null, { params });
+    return data;
+  },
+
   async activities(opts: { since?: Date | string; type?: string; limit?: number } = {}): Promise<import("./types").Activity[]> {
     const params: Record<string, string | number> = {};
     if (opts.since) params.since = opts.since instanceof Date ? opts.since.toISOString() : opts.since;

@@ -440,8 +440,21 @@ class StravaAppConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class AvinoxConfig(Base):
+    """Single-row table (id=1) holding Avinox integration settings."""
+    __tablename__ = "avinox_config"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    server_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    query_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    webhook_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_push_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    auto_sync_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class Activity(Base):
-    """Workouts pulled from Strava (and later Garmin, etc.)."""
+    """Workouts pulled from Strava, Avinox, Concept2, etc."""
     __tablename__ = "activities"
     source: Mapped[str] = mapped_column(String(32), primary_key=True)
     source_id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -451,10 +464,19 @@ class Activity(Base):
     duration_s: Mapped[int] = mapped_column(Integer)
     distance_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     elevation_gain_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    elevation_loss_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     avg_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
     avg_power_w: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_power_w: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_motor_power_w: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_motor_power_w: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_cadence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    battery_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    battery_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    odometer_end_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    assist_seconds: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    moving_time_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
     kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
     suffer_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     polyline: Mapped[str | None] = mapped_column(Text, nullable=True)

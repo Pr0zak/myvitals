@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # set from the Settings UI, never in code.
     strava_creds_key: str | None = None
 
+    # --- Avinox e-bike integration ---
+    avinox_url: str | None = None
+    avinox_token: str | None = None
+
     @property
     def database_url(self) -> str:
         return (

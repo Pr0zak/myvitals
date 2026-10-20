@@ -1144,7 +1144,7 @@ wheels = [
 
 [[package]]
 name = "myvitals"
-version = "0.48.0"
+version = "0.52.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

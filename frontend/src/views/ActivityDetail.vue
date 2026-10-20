@@ -67,6 +67,7 @@ const TRAIL_STATUS_COLOR = computed<Record<string, string>>(() =>
 const cursorOffsetS = ref<number | null>(null);
 const hrChartRef = ref<any>(null);
 const streamChartRef = ref<any>(null);
+const powerChartRef = ref<any>(null);
 // Re-entry guard: showTip dispatched programmatically also fires
 // updateAxisPointer on the target chart, which would re-emit and
 // loop. Set during programmatic dispatch.
@@ -390,6 +391,14 @@ function onStreamChartAxisPointer(ev: any) {
   cursorOffsetS.value = clampOffset(((idx + 0.5) / N) * activity.value.duration_s);
 }
 
+function onPowerChartAxisPointer(ev: any) {
+  if (dispatching || !activity.value) return;
+  const info = ev.axesInfo?.[0];
+  if (!info || info.value == null) return;
+  const startMs = new Date(activity.value.start_at).getTime();
+  cursorOffsetS.value = clampOffset((Number(info.value) - startMs) / 1000);
+}
+
 // When cursor moves, dispatch showTip on the chart(s) that didn't originate
 // the event so their tooltip + axisPointer line stays in sync. Skip the
 // source chart to avoid re-entrant loops.
@@ -419,6 +428,22 @@ watch(cursorOffsetS, (offsetS) => {
     dispatching = true;
     try {
       streamChartRef.value.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: idx });
+    } finally { dispatching = false; }
+  }
+
+  // Power chart: find nearest sample
+  if (powerChartRef.value && activity.value?.raw?.series?.t?.length) {
+    const targetMs = startMs + offsetS * 1000;
+    const s = activity.value.raw.series;
+    let nearest = 0;
+    let nearestDelta = Infinity;
+    for (let i = 0; i < s.t.length; i++) {
+      const d = Math.abs(s.t[i] * 1000 - targetMs);
+      if (d < nearestDelta) { nearest = i; nearestDelta = d; }
+    }
+    dispatching = true;
+    try {
+      powerChartRef.value.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: nearest });
     } finally { dispatching = false; }
   }
 
@@ -567,16 +592,140 @@ const quiet = computed(() => {
   const topLo = zoneData.value?.zones.at(-1)?.lo_bpm ?? null;
   const out: { label: string; value: string; amber?: boolean }[] = [];
   if (a.elevation_gain_m != null) out.push({ label: "Climb", value: fmtElevation(a.elevation_gain_m) });
+  if (a.elevation_loss_m != null) out.push({ label: "Descent", value: fmtElevation(a.elevation_loss_m) });
   if (!bigLabels.has("Avg HR") && a.avg_hr) out.push({ label: "Avg HR", value: `${Math.round(a.avg_hr)} bpm` });
   // Max HR is not a warning: Ink, or Amber when it reached the top zone.
   if (a.max_hr) out.push({ label: "Max HR", value: `${Math.round(a.max_hr)} bpm`, amber: topLo != null && a.max_hr >= topLo });
   if (!isFoot.value && speedMs.value) {
     out.push({ label: "Speed", value: `${(distanceVal(speedMs.value * 3600) ?? 0).toFixed(1)} ${distanceUnit.value}/h` });
   }
-  if (a.avg_power_w) out.push({ label: "Power", value: `${Math.round(a.avg_power_w)} W` });
+  if (a.avg_power_w) {
+    const max = a.raw?.max_rider_power_w;
+    out.push({ label: "Power", value: max ? `${Math.round(a.avg_power_w)} W (max ${Math.round(max)})` : `${Math.round(a.avg_power_w)} W` });
+  }
+  if (a.avg_motor_power_w) {
+    const max = a.max_motor_power_w ?? a.raw?.max_motor_power_w;
+    out.push({ label: "Motor", value: max ? `${Math.round(a.avg_motor_power_w)} W (max ${Math.round(max)})` : `${Math.round(a.avg_motor_power_w)} W` });
+  }
+  if (a.avg_cadence) out.push({ label: "Cadence", value: `${Math.round(a.avg_cadence)} rpm` });
+  if (a.battery_start != null && a.battery_end != null) {
+    const used = a.battery_start - a.battery_end;
+    out.push({ label: "Battery", value: `${a.battery_start}% → ${a.battery_end}% (-${used}%)` });
+  }
+  if (a.odometer_end_km != null) {
+    const odo = isImperial.value ? a.odometer_end_km * 0.621371 : a.odometer_end_km;
+    out.push({ label: "Odometer", value: `${odo.toFixed(1)} ${distanceUnit.value}` });
+  }
   if (!bigLabels.has("Energy") && a.kcal) out.push({ label: "Energy", value: `${Math.round(a.kcal)} kcal` });
   if (a.suffer_score) out.push({ label: "Suffer", value: String(Math.round(a.suffer_score)) });
-  return out.slice(0, 6);
+  return out;
+});
+
+// Assist levels (DJI Avinox ebike modes 0..5)
+const ASSIST_MODES = computed(() => [
+  { level: 0, name: "Off", color: isNeon.value ? "#9b9bb0" : "#94a3b8" },
+  { level: 1, name: "Eco", color: isNeon.value ? "#5dff3b" : "#22c55e" },
+  { level: 2, name: "Trail", color: isNeon.value ? "#ffb52e" : "#f59e0b" },
+  { level: 3, name: "Turbo", color: isNeon.value ? "#ff8838" : "#f97316" },
+  { level: 4, name: "Auto", color: isNeon.value ? "#28e6ff" : "#38bdf8" },
+  { level: 5, name: "Boost", color: isNeon.value ? "#ff5d7a" : "#ef4444" },
+]);
+
+const assistBreakdown = computed(() => {
+  const a = activity.value;
+  if (!a || !a.assist_seconds) return null;
+  let raw: any = a.assist_seconds;
+  if (typeof raw === "string") {
+    try { raw = JSON.parse(raw); } catch { return null; }
+  }
+  if (!raw || typeof raw !== "object") return null;
+  const total = Object.values(raw).reduce((acc: number, v: any) => acc + (Number(v) || 0), 0);
+  if (total <= 0) return null;
+
+  const modes = ASSIST_MODES.value;
+  const rows = [];
+  for (const m of modes) {
+    const s = Number(raw[String(m.level)] ?? raw[m.level] ?? 0);
+    if (s > 0) {
+      rows.push({
+        level: m.level,
+        name: m.name,
+        color: m.color,
+        seconds: s,
+        pct: (s / total) * 100,
+      });
+    }
+  }
+  return rows.length ? { total, rows } : null;
+});
+
+const powerChartOption = computed(() => {
+  void chartTheme.value;
+  const t = chartTheme.value;
+  const s = activity.value?.raw?.series;
+  if (!s || !s.t || !s.t.length) return null;
+  const hasRider = s.rider_power_w && s.rider_power_w.some((v: any) => v != null && v > 0);
+  const hasMotor = s.motor_power_w && s.motor_power_w.some((v: any) => v != null && v > 0);
+  if (!hasRider && !hasMotor) return null;
+
+  const ts = s.t.map((epoch: number) => epoch * 1000);
+  const seriesList: any[] = [];
+  if (hasRider) {
+    seriesList.push({
+      name: "Rider Power",
+      type: "line",
+      smooth: true,
+      showSymbol: false,
+      lineStyle: { width: 1.5, color: isNeon.value ? "#28e6ff" : "#0284c7" },
+      areaStyle: { color: isNeon.value ? "rgba(40, 230, 255, 0.12)" : "rgba(2, 132, 199, 0.12)" },
+      data: ts.map((time: number, idx: number) => [time, s.rider_power_w?.[idx] ?? 0]),
+    });
+  }
+  if (hasMotor) {
+    seriesList.push({
+      name: "Motor Power",
+      type: "line",
+      smooth: true,
+      showSymbol: false,
+      lineStyle: { width: 1.5, color: isNeon.value ? "#ff8838" : "#ea580c" },
+      areaStyle: { color: isNeon.value ? "rgba(255, 136, 56, 0.15)" : "rgba(234, 88, 12, 0.15)" },
+      data: ts.map((time: number, idx: number) => [time, s.motor_power_w?.[idx] ?? 0]),
+    });
+  }
+
+  return {
+    grid: { left: 40, right: 12, top: 30, bottom: 28 },
+    legend: { textStyle: t.axisLabel, top: 4 },
+    tooltip: {
+      trigger: "axis",
+      ...t.tooltip,
+      formatter: (params: any) => {
+        if (!Array.isArray(params) || !params.length) return "";
+        const dateStr = timeAxisFormatter(params[0].value[0]);
+        let tip = `<div style="font-weight:600;margin-bottom:4px">${dateStr}</div>`;
+        for (const p of params) {
+          tip += `<div style="display:flex;align-items:center;gap:6px;font-size:12px">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color}"></span>
+            <span>${p.seriesName}: <b>${Math.round(p.value[1])} W</b></span>
+          </div>`;
+        }
+        return tip;
+      },
+    },
+    xAxis: {
+      type: "time",
+      axisLabel: { ...t.axisLabel, formatter: timeAxisFormatter },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: "value",
+      name: "Watts",
+      axisLabel: t.axisLabel,
+      splitLine: t.splitLine,
+      scale: true,
+    },
+    series: seriesList,
+  };
 });
 
 async function saveNotes() {
@@ -917,6 +1066,24 @@ async function submitEdit() {
         <div class="chart"><VChart ref="streamChartRef" :option="hrZoneStreamOption" autoresize @updateAxisPointer="onStreamChartAxisPointer" /></div>
       </section>
 
+      <section v-if="powerChartOption" class="card">
+        <NeonEyebrow style="margin-top: 0">Power (Rider vs Motor)</NeonEyebrow>
+        <div class="chart"><VChart ref="powerChartRef" :option="powerChartOption" autoresize @updateAxisPointer="onPowerChartAxisPointer" /></div>
+      </section>
+
+      <section v-if="assistBreakdown" class="card">
+        <NeonEyebrow style="margin-top: 0">Assist levels</NeonEyebrow>
+        <div class="assist-bar" role="img" :aria-label="assistBreakdown.rows.map((r) => `${r.name} ${r.pct.toFixed(0)}%`).join(', ')">
+          <span v-for="r in assistBreakdown.rows" :key="r.level" :style="{ width: r.pct + '%', background: r.color }" :title="`${r.name}: ${r.pct.toFixed(1)}%`" />
+        </div>
+        <div v-for="r in assistBreakdown.rows" :key="r.level" class="assist-row">
+          <i :style="{ background: r.color }" />
+          <span class="assist-name">{{ r.name }}</span>
+          <span class="assist-dur">{{ fmtDur(r.seconds) }}</span>
+          <span class="assist-pct">{{ r.pct.toFixed(0) }}%</span>
+        </div>
+      </section>
+
       <section class="card">
         <NeonEyebrow style="margin-top: 0">Trail</NeonEyebrow>
         <p class="hint" v-if="activity.trail_name">Linked to <strong>{{ activity.trail_name }}</strong>
@@ -1058,8 +1225,15 @@ async function submitEdit() {
 .chart > * { width: 100%; height: 100%; }
 .zbar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--rn-track); margin-bottom: 10px; }
 .zbar span { height: 100%; }
+.assist-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--rn-track); margin-bottom: 10px; }
+.assist-bar span { height: 100%; }
 .zrow { display: grid; grid-template-columns: 10px 1fr auto 56px 42px; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
 .zrow i { width: 10px; height: 10px; border-radius: 3px; }
+.assist-row { display: grid; grid-template-columns: 10px 1fr 56px 42px; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
+.assist-row i { width: 10px; height: 10px; border-radius: 3px; }
+.assist-name { font-weight: 500; }
+.assist-dur, .assist-pct { font-family: 'Space Grotesk', monospace; text-align: right; }
+.assist-pct { color: var(--rn-mut); font-size: 11px; }
 .zr, .zp { color: var(--rn-mut); font-size: 11px; font-family: 'Space Grotesk', monospace; text-align: right; }
 .zt { font-family: 'Space Grotesk', monospace; text-align: right; }
 

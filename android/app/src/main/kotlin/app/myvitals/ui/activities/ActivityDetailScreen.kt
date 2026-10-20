@@ -598,6 +598,7 @@ private fun QuietStats(a: ActivityRow, zones: ActivityZones?) {
     val topLo = zones?.zones?.lastOrNull()?.loBpm
     val items = buildList<Triple<String, String, Color>> {
         a.elevationGainM?.let { add(Triple("Climb", Units.fmtElevation(it), NeonMV.Ink)) }
+        a.elevationLossM?.let { add(Triple("Descent", Units.fmtElevation(it), NeonMV.Ink)) }
         if ("Avg HR" !in bigLabels) a.avgHr?.let { add(Triple("Avg HR", "%.0f bpm".format(it), NeonMV.Ink)) }
         a.maxHr?.let {
             val hot = topLo != null && it >= topLo
@@ -610,6 +611,16 @@ private fun QuietStats(a: ActivityRow, zones: ActivityZones?) {
             }
         }
         a.avgPowerW?.let { add(Triple("Power", "%.0f W".format(it), NeonMV.Ink)) }
+        a.avgMotorPowerW?.let { add(Triple("Motor", "%.0f W".format(it), NeonMV.Ink)) }
+        a.avgCadence?.let { add(Triple("Cadence", "%.0f rpm".format(it), NeonMV.Ink)) }
+        if (a.batteryStart != null && a.batteryEnd != null) {
+            val used = (a.batteryStart - a.batteryEnd).toInt()
+            add(Triple("Battery", "%.0f%% → %.0f%% (-%d%%)".format(a.batteryStart, a.batteryEnd, used), NeonMV.Ink))
+        }
+        a.odometerEndKm?.let { km ->
+            val odo = if (Units.isImperial) km * 0.621371 else km
+            add(Triple("Odometer", "%.1f %s".format(odo, Units.distanceUnit), NeonMV.Ink))
+        }
         if ("Energy" !in bigLabels) a.kcal?.let { add(Triple("Energy", "%.0f kcal".format(it), NeonMV.Ink)) }
     }
     if (items.isEmpty()) return
@@ -620,7 +631,7 @@ private fun QuietStats(a: ActivityRow, zones: ActivityZones?) {
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        items.chunked(3).take(2).forEach { row ->
+        items.chunked(3).forEach { row ->
             Row(Modifier.fillMaxWidth()) {
                 row.forEach { (l, v, c) -> QuietStat(l, v, Modifier.weight(1f), color = c) }
                 repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }

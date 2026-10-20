@@ -17,6 +17,7 @@ import GoogleHealth from "./GoogleHealth.vue";
 import Concept2 from "./Concept2.vue";
 import HomeAssistant from "./HomeAssistant.vue";
 import Trails from "./Trails.vue";
+import Avinox from "./Avinox.vue";
 import { HEALTH_KEY, INTEGRATIONS, errText } from "./health";
 
 const route = useRoute();
@@ -26,7 +27,7 @@ const key = computed(() => {
 });
 const meta = computed(() => INTEGRATIONS.find((i) => i.key === key.value) ?? null);
 
-const CHILD = { strava: Strava, google: GoogleHealth, concept2: Concept2, homeassistant: HomeAssistant, trails: Trails } as const;
+const CHILD = { avinox: Avinox, strava: Strava, google: GoogleHealth, concept2: Concept2, homeassistant: HomeAssistant, trails: Trails } as const;
 const child = computed(() => CHILD[key.value as keyof typeof CHILD] ?? null);
 
 const health = ref<IntegrationHealth | null | undefined>(undefined);

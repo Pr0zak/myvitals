@@ -1475,6 +1475,15 @@ data class ActivityRow(
     val tags: List<String>? = null,
     @Json(name = "trail_id") val trailId: Long? = null,
     @Json(name = "trail_name") val trailName: String? = null,
+    @Json(name = "elevation_loss_m") val elevationLossM: Double? = null,
+    @Json(name = "avg_motor_power_w") val avgMotorPowerW: Double? = null,
+    @Json(name = "max_motor_power_w") val maxMotorPowerW: Double? = null,
+    @Json(name = "avg_cadence") val avgCadence: Double? = null,
+    @Json(name = "battery_start") val batteryStart: Double? = null,
+    @Json(name = "battery_end") val batteryEnd: Double? = null,
+    @Json(name = "odometer_end_km") val odometerEndKm: Double? = null,
+    @Json(name = "assist_seconds") val assistSeconds: Map<String, Int>? = null,
+    @Json(name = "moving_time_s") val movingTimeS: Int? = null,
 )
 
 @JsonClass(generateAdapter = true)

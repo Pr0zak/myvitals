@@ -310,6 +310,7 @@ async def stream_health(db: AsyncSession, *, use_cache: bool = True) -> list[dic
 _ITEM_PROBES: dict[str, tuple[str, str, str | None]] = {
     # key -> (table, time column, optional SQL predicate)
     "strava": ("activities", "start_at", "source = 'strava'"),
+    "avinox": ("activities", "start_at", "source = 'avinox'"),
     "concept2": ("activities", "start_at", "source = 'concept2'"),
     # Google Health feeds daily aggregates rather than the activity feed.
     "google_health": ("google_health_daily", "date", None),
@@ -351,10 +352,11 @@ async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
         key: str, label: str, row: Any, *,
         configured: bool | None = None,
         error_attr: str = "last_error",
+        last_override: datetime | None = None,
         stale_after_h: float = 48.0,
     ) -> dict[str, Any]:
         is_configured = configured if configured is not None else row is not None
-        last = getattr(row, "last_sync_at", None) if row is not None else None
+        last = last_override or (getattr(row, "last_sync_at", None) if row is not None else None)
         err = getattr(row, error_attr, None) if row is not None else None
         kind = getattr(row, "last_error_kind", None) if row is not None else None
         # An error with no classification predates the classifier. Reported
@@ -437,6 +439,7 @@ async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
     gh_creds = await one(models.GoogleHealthCredentials)
     cookie = await one(models.StravaCookieCreds)
     c2 = await one(models.Concept2Credentials)
+    avinox_cfg = await one(models.AvinoxConfig)
 
     out = [
         # Google Health polls on a timer, so a day of silence is a fault.
@@ -449,6 +452,11 @@ async def integration_health(db: AsyncSession) -> list[dict[str, Any]]:
         entry("google_health", "Google Health", gh_creds,
               configured=bool(gh_creds and gh_creds.refresh_token),
               stale_after_h=24.0),
+        # Avinox e-bike push and sync integration.
+        entry("avinox", "Avinox", avinox_cfg,
+              configured=bool(avinox_cfg and (avinox_cfg.server_url or avinox_cfg.last_push_at)),
+              last_override=(getattr(avinox_cfg, "last_push_at", None) or getattr(avinox_cfg, "last_sync_at", None)) if avinox_cfg else None,
+              stale_after_h=24 * 14),
         # Strava is cookie-session and manual: the cookie expires and the
         # sync goes quiet. `last_error` is the signal that matters.
         entry("strava", "Strava", cookie,

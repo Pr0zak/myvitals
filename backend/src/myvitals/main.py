@@ -19,6 +19,7 @@ from .api import (
     ai,
     analytics,
     annotations,
+    avinox,
     concept2,
     debug,
     devices,
@@ -272,6 +273,8 @@ app.include_router(meals.router, tags=["meals"])
 app.include_router(mcp.router, tags=["mcp"])
 app.include_router(concept2.router)
 app.include_router(concept2._webhook_router)
+app.include_router(avinox.router)
+app.include_router(avinox._webhook_router)
 
 # Bundled exercise images (yuhonas/free-exercise-db, public domain).
 # Mounted off the package's data dir so the wheel ships them.

@@ -360,6 +360,7 @@ WEB_ONLY_OK = {
     "frontend/src/views/settings/integrations/Integration.vue",
     "frontend/src/views/settings/integrations/IntegrationHero.vue",
     "frontend/src/views/settings/integrations/Strava.vue",
+    "frontend/src/views/settings/integrations/Avinox.vue",
     "frontend/src/views/settings/integrations/GoogleHealth.vue",
     "frontend/src/views/settings/integrations/Concept2.vue",
     "frontend/src/views/settings/integrations/HomeAssistant.vue",

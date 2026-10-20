@@ -101,6 +101,16 @@ class ActivityOut(BaseModel):
     #: corrected `type`; null when they have not (migration 0069). The
     #: clients show "recorded as <x>" and offer an undo from it.
     recorded_type: str | None = None
+    elevation_loss_m: float | None = None
+    avg_motor_power_w: float | None = None
+    max_motor_power_w: float | None = None
+    avg_cadence: float | None = None
+    battery_start: int | None = None
+    battery_end: int | None = None
+    odometer_end_km: float | None = None
+    assist_seconds: dict[str, int] | None = None
+    moving_time_s: int | None = None
+    raw: dict[str, Any] | None = None
     notes: str | None = None
     tags: list[str] | None = None
     trail_id: int | None = None
@@ -313,12 +323,23 @@ def _route_for(a: models.Activity, route: str) -> str | None:
 def _activity_to_out(
     a: models.Activity, trail_name: str | None = None, route: str = "full",
 ) -> ActivityOut:
+    raw_val = a.__dict__.get("raw") if hasattr(a, "__dict__") else getattr(a, "raw", None)
     return ActivityOut(
         source=a.source, source_id=a.source_id, type=a.type, name=a.name,
         start_at=a.start_at, duration_s=a.duration_s,
         distance_m=a.distance_m, elevation_gain_m=a.elevation_gain_m,
+        elevation_loss_m=getattr(a, "elevation_loss_m", None),
         avg_hr=a.avg_hr, max_hr=a.max_hr,
-        avg_power_w=a.avg_power_w, max_power_w=a.max_power_w,
+        avg_power_w=a.avg_power_w, max_power_w=getattr(a, "max_power_w", None),
+        avg_motor_power_w=getattr(a, "avg_motor_power_w", None),
+        max_motor_power_w=getattr(a, "max_motor_power_w", None),
+        avg_cadence=getattr(a, "avg_cadence", None),
+        battery_start=getattr(a, "battery_start", None),
+        battery_end=getattr(a, "battery_end", None),
+        odometer_end_km=getattr(a, "odometer_end_km", None),
+        assist_seconds=getattr(a, "assist_seconds", None),
+        moving_time_s=getattr(a, "moving_time_s", None),
+        raw=raw_val,
         kcal=a.kcal, suffer_score=a.suffer_score, polyline=_route_for(a, route),
         route_state=a.route_state,
         recorded_type=a.recorded_type,

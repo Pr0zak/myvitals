@@ -92,7 +92,10 @@ log = logging.getLogger(__name__)
 # provider-writable.
 PROVIDER_COLUMNS: tuple[str, ...] = (
     "type", "name", "start_at", "duration_s", "distance_m",
-    "elevation_gain_m", "avg_hr", "max_hr", "avg_power_w", "max_power_w",
+    "elevation_gain_m", "elevation_loss_m", "avg_hr", "max_hr",
+    "avg_power_w", "max_power_w", "avg_motor_power_w", "max_motor_power_w",
+    "avg_cadence", "battery_start", "battery_end", "odometer_end_km",
+    "assist_seconds", "moving_time_s",
     "kcal", "suffer_score", "polyline", "raw",
     "hr_recovery_60s", "hr_recovery_120s",
     # SA-P3. Why there is no polyline, when the provider could say. Listed

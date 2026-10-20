@@ -618,8 +618,7 @@ private fun QuietStats(a: ActivityRow, zones: ActivityZones?) {
             add(Triple("Battery", "%.0f%% → %.0f%% (-%d%%)".format(a.batteryStart, a.batteryEnd, used), NeonMV.Ink))
         }
         a.odometerEndKm?.let { km ->
-            val odo = if (Units.isImperial) km * 0.621371 else km
-            add(Triple("Odometer", "%.1f %s".format(odo, Units.distanceUnit), NeonMV.Ink))
+            add(Triple("Odometer", Units.fmtDistance(km * 1000.0, 1), NeonMV.Ink))
         }
         if ("Energy" !in bigLabels) a.kcal?.let { add(Triple("Energy", "%.0f kcal".format(it), NeonMV.Ink)) }
     }

@@ -292,7 +292,7 @@ class TestBothSurfacesOfferIt:
         src = PHONE.read_text()
         i_state = src.index("var editingSetKey")
         # The real call, not the comment above the state that names it.
-        i_items = src.index("items(orderedExercises, key =")
+        i_items = src.index("items(listed, key =")
         assert i_state < i_items
 
 

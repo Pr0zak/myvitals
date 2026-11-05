@@ -67,7 +67,7 @@ class TestItIsCollapsedByDefault:
     def test_the_phone_header_is_tappable(self):
         src = PHONE.read_text()
         assert ".clickable { onOpen(c.key) }" in src
-        assert 'BannerChip("why", "Why this plan · $n"' in src
+        assert 'BannerChip("why", "Why this plan ($n)"' in src
 
     def test_the_web_header_is_a_button(self):
         assert "@click=\"toggleChip('why')\"" in WEB.read_text()
@@ -94,10 +94,11 @@ class TestTheSummaryIsACountNotAPreview:
         assert "text-overflow" not in web[web.index(".pn-list {"):][:200]
 
     def test_both_label_it_the_same(self):
-        """Both chips read "Why this plan · N"."""
-        assert ('Why this plan<template v-if="planNotes.length"> · '
-                '{{ planNotes.length }}') in WEB.read_text()
-        assert '"Why this plan · $n"' in PHONE.read_text()
+        """Both chips read "Why this plan (N)" (v0.53.0 dropped the
+        middle-dot meta string on both surfaces together)."""
+        assert ('Why this plan<template v-if="planNotes.length"> '
+                '({{ planNotes.length }})') in WEB.read_text()
+        assert '"Why this plan ($n)"' in PHONE.read_text()
 
 
 class TestTheContentIsStillReachable:

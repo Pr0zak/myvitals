@@ -198,7 +198,9 @@ class TestItDoesNotOwnTheScreen:
     def test_it_comes_after_the_exercises(self):
         """Matching the web page's order."""
         src = self._phone()
-        assert src.index("items(orderedExercises") < src.index("BodyMapCard(")
+        # v0.53.0: the list renders `listed` (current, up next, closed),
+        # built from orderExercises.
+        assert src.index("items(listed, key =") < src.index("BodyMapCard(")
 
     def test_the_web_puts_it_after_the_exercises_too(self):
         web = (REPO / "frontend" / "src" / "views" / "workout"
